@@ -21,6 +21,9 @@ export const bcp = {
     groupEmptyHint: "No device groups to scope this plan to yet; you may also not have permission to list them.",
     procedureEmptyHint:
       "No documentation articles to reference yet; you may also not have permission to list articles.",
+    deviceChooseClient: "Choose the client first: its computers are listed here.",
+    groupChooseClient: "Choose the client first: its device groups are listed here.",
+    procedureChooseClient: "Choose the client first: its documentation articles are listed here.",
     noAgent: "no agent",
     agentOnline: "online",
     agentOffline: "offline",

@@ -48,6 +48,7 @@ from app.core.i18n import tr
 from app.core.identity import CONTACT_KIND
 from app.models import Client, Device, Site, User
 from app.models.clients import (
+    CLIENT_ARCHIVED,
     CLIENT_KIND_CUSTOMER,
     CLIENT_KIND_INTERNAL,
     CLIENT_KIND_UNASSIGNED,
@@ -56,7 +57,6 @@ from app.models.clients import (
 from app.services import enrollment as enrollment_svc
 from app.services import install_link as link_svc
 from app.services.client_sites import (
-    CLIENT_ARCHIVED,
     ClientNotFound,
     NotAcceptingNewRows,
     SiteNotFound,

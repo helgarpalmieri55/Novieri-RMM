@@ -162,7 +162,18 @@ async def test_start_refuses_a_password_mailbox(env: OAuthEnv) -> None:
 async def test_start_without_a_console_address_is_503(
     env: OAuthEnv, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(env.api_env.app.state.settings, "public_console_url", None)
+    """The redirect URI comes from ITS_PUBLIC_CONSOLE_URL and nothing else;
+    without it, a 503 naming the setting. The address is taken from the
+    redirect URI's builder only, not from the Settings: since own
+    authentication Task 13 the request is a cookie write, which the CSRF rule
+    refuses outright when no console is configured."""
+    from types import SimpleNamespace
+
+    from app.modules.email_intake import microsoft
+
+    real_redirect = microsoft.redirect_uri
+    unset = SimpleNamespace(public_console_url=None)
+    monkeypatch.setattr(microsoft, "redirect_uri", lambda settings: real_redirect(unset))
 
     response = await env.client.post(
         f"/api/v1/email-intake/mailboxes/{env.mailbox_id}/oauth/start", headers=env.headers

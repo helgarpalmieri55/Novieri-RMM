@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GatesPanel, gateCoverage } from "../GatesPanel";
+import { ApiError } from "../../../lib/api";
 import type { MeClient } from "../../../lib/api";
 
 const mockUseApi = vi.fn();
@@ -83,5 +84,43 @@ describe("change gates", () => {
       applies_to_patches: true,
       applies_to_deployments: true,
     });
+  });
+
+  // Phase 3 last fix round, item 1: the every-device gate is a global row,
+  // removed without `X-Client-Id` (`gatesGlobalWrites.test.ts`); a group's is
+  // its group's client's.
+  it("removes the every-device gate as every client's, and a group's as its client's", async () => {
+    const user = userEvent.setup();
+    const removeChangeGate = vi.fn().mockResolvedValue(undefined);
+    const EVERY = { ...GATE, id: "g0", device_group_id: null, device_group_name: null };
+    mockUseApi.mockReturnValue({
+      listChangeGates: vi.fn().mockResolvedValue([EVERY, GATE]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      removeChangeGate,
+    });
+    renderPanel(true);
+    await screen.findByText("Servers");
+    const [everyRemove, groupRemove] = screen.getAllByRole("button", { name: "Remove" });
+    await user.click(everyRemove as HTMLElement);
+    await waitFor(() => expect(removeChangeGate).toHaveBeenCalledTimes(1));
+    expect(removeChangeGate.mock.calls[0]).toEqual(["g0", { global: true }]);
+    await user.click(groupRemove as HTMLElement);
+    await waitFor(() => expect(removeChangeGate).toHaveBeenCalledTimes(2));
+    expect(removeChangeGate.mock.calls[1]).toEqual(["g1", { global: false }]);
+  });
+
+  it("says why a remove was refused, in the server's words", async () => {
+    const user = userEvent.setup();
+    const refusal = "only a technician with access to every client can do this";
+    mockUseApi.mockReturnValue({
+      listChangeGates: vi.fn().mockResolvedValue([GATE]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      removeChangeGate: vi.fn().mockRejectedValue(new ApiError(403, refusal)),
+    });
+    renderPanel(true);
+    await screen.findByText("Servers");
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+    expect(screen.getByText("Servers")).toBeTruthy();
   });
 });

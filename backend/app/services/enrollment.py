@@ -30,8 +30,9 @@ from app.core.i18n import tr
 from app.core.signing import SigningService
 from app.core.tenancy import org_session
 from app.models import Agent, Client, Device, EnrollmentToken, Site, SuggestedAssetMatch
+from app.models.clients import CLIENT_ARCHIVED
 from app.services import install_link as link_svc
-from app.services.client_sites import CLIENT_ARCHIVED, site_for_new_rows
+from app.services.client_sites import site_for_new_rows
 from app.services.matching import resolve_enrolment_target
 
 

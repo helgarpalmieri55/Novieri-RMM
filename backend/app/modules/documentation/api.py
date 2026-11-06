@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -207,15 +207,37 @@ async def list_articles(
     target_type: str | None = Query(default=None),
     target_id: UUID | None = Query(default=None),
     include_archived: bool = Query(default=False),
+    client_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Only what this client's records may link: its own articles and those for "
+            "every client. It narrows as X-Client-Id does: a client outside your scope "
+            "lists nothing"
+        ),
+    ),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> ArticleListPage:
+    """`client_id` NARROWS AND NEVER WIDENS (phase 3 final review A6: the BCP
+    procedure picker needs one client's articles, not one page of
+    everyone's). The session's scope is narrowed exactly as `X-Client-Id`
+    narrows it, so RLS keeps every other client out -- and the every-client
+    articles too, when the client is outside the caller's scope (the empty
+    scope reads nothing) -- and the query filters on it as well. An article
+    with no client is every client's, so a plan of that client may name it
+    (`bcp.service._validate_procedure_refs`)."""
     async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ctx.org_id,
+        engine=request.app.state.app_engine,
+        clients=ctx.clients.narrow(client_id),
     ) as session:
         query: Select[Any] = select(
             DocArticle, func.count(DocLink.id).label("link_count")
         ).join(DocLink, DocLink.article_id == DocArticle.id, isouter=True)
+        if client_id is not None:
+            query = query.where(
+                or_(DocArticle.client_id == client_id, DocArticle.client_id.is_(None))
+            )
         if not include_archived:
             query = query.where(DocArticle.archived.is_(False))
         if category:

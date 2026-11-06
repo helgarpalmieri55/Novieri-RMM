@@ -1,16 +1,20 @@
 """The user-lifecycle surface: `/api/v1/users`.
 
-Spec `docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2.
+Spec `docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2;
+invitations, factor resets and ended sessions since P2 phase 1
+(`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` §7).
 
     GET    /api/v1/users                              users.read
     GET    /api/v1/users/{id}/effective-permissions   users.read
-    POST   /api/v1/users                              users.manage
+    POST   /api/v1/users/invite                       users.manage
+    POST   /api/v1/users/{id}/invite/resend           users.manage
+    DELETE /api/v1/users/{id}/invite                  users.manage
     POST   /api/v1/users/{id}/roles                   users.manage
     DELETE /api/v1/users/{id}/roles/{assignment_id}   users.manage
     POST   /api/v1/users/{id}/disable                 users.manage
     POST   /api/v1/users/{id}/enable                  users.manage
-    POST   /api/v1/users/{id}/reset-password          users.manage
-    POST   /api/v1/users/{id}/resend-enrolment        users.manage
+    POST   /api/v1/users/{id}/factors/reset           users.manage, and a recent second factor
+    DELETE /api/v1/users/{id}/sessions                users.manage
     DELETE /api/v1/users/{id}                         users.manage
 
 TWO CODES, NOT ONE, and deliberately NOT `orgs.manage`. `users.read` answers
@@ -26,34 +30,45 @@ body can name a target, exactly as `app/api/v1/orgs.py` states for the org
 PATCH. Every body model is `extra="forbid"`, so a caller who sends `org_id` gets
 a 422 rather than a silent no-op that reads like success.
 
-WHY THESE HANDLERS ARE THIN. The ordering of the two halves of a create, the
-rails, the tenant predicates and the audit records are all in `service.py`,
-because none of them is an HTTP concern and all of them are worth testing
-without a client. A handler opens the tenant session, calls one function, and
-translates `UserAdminError` into the status the service chose.
+WHY THESE HANDLERS ARE THIN. The rails, the tenant predicates and the audit
+records are all in `service.py`, because none of them is an HTTP concern and
+all of them are worth testing without a client. A handler opens the tenant
+session, calls one function, and translates `UserAdminError` into the status
+the service chose.
 
-AUDIT (invariant #4). Every write records a `user.*` event through
-`audit_service` in the SAME transaction as the change, so the record and the
-change commit or roll back together. A refused write raises out of
-`org_session`'s transaction, which rolls the audit row back too -- a log saying
-a change happened when it did not is worse than no log.
+AUDIT (invariant #4). Every write records an event through `audit_service` in
+the SAME transaction as the change, so the record and the change commit or
+roll back together. A refused write raises out of `org_session`'s
+transaction, which rolls the audit row back too -- a log saying a change
+happened when it did not is worse than no log.
 
-NO RESPONSE ON THIS SURFACE CARRIES A CREDENTIAL (invariant #3, rule 1).
-Keycloak's error bodies are never forwarded -- only their status -- and
-`tests/test_user_admin_api.py` drives every route here and scans the bodies.
+NO RESPONSE ON THIS SURFACE CARRIES A CREDENTIAL (invariant #3, rule 1) but
+one: an invitation link, in the answer to the invite or the resend, when no
+mail carried it (design §7). `tests/test_user_admin_api.py` drives every route
+here -- with the mail working -- and scans the bodies.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
-from app.core.i18n import N_, tr_marked
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client,
+    require_step_up,
+)
+from app.core.auth import notices
+from app.core.auth.refusals import AuthRefusal
+from app.core.i18n import tr
 from app.core.identity.policy import resolve_console_domain
 from app.core.tenancy import org_session
+from app.models import User
 from app.modules.user_admin import service
-from app.modules.user_admin.kc_client import KeycloakAdminConfig
 from app.modules.user_admin.service import UserAdminError
 
 #: `users.manage` with a scope of EVERY client. Technicians and their grants
@@ -74,55 +89,60 @@ MAX_EMAIL = 320
 MAX_DISPLAY_NAME = 200
 
 
-def keycloak_config(request: Request) -> KeycloakAdminConfig | None:
-    """The provisioning credential, or `None` on a deployment without one.
+def _console_url(request: Request) -> str:
+    """Where an invitation link points: `ITS_PUBLIC_CONSOLE_URL`, never the
+    request's Host header (host-header injection). Checked before anything is
+    written, so a deployment without it creates nobody it cannot invite.
 
-    A DEPENDENCY RATHER THAN A DIRECT CALL so the lifecycle routes can be driven
-    in a test without a live Keycloak, and so "not configured" is answered once,
-    in one place, with one status.
-
-    `None` IS A SUPPORTED DEPLOYMENT STATE (`KeycloakAdminConfig.from_settings`),
-    so `_provisioning` below turns it into a 503 naming the setting -- not a 500.
-    An operator who has not set the provisioning client up needs to be told that,
-    not handed a stack trace. Note that a deployment CONFIGURED with a missing or
-    empty secret raises instead, because that operator believes it is running.
-
-    THIS READS A SECRET OFF DISK, so every route that declares it declares
-    `require_permission` FIRST. FastAPI resolves dependencies in declaration
-    order; with this one ahead of the gate, an anonymous request would open the
-    `manage-users` credential before anything had established who was asking.
-    Nothing reaches the caller either way, which is exactly why the ordering has
-    to be deliberate rather than incidental -- and why
-    `test_authorization_runs_before_the_provisioning_secret_is_read` pins it.
-    """
-    return KeycloakAdminConfig.from_settings(request.app.state.settings)
+    NAMES NO SETTING, as the 503 it replaces did not (`docs/superpowers/specs/
+    2026-08-19-invisible-identity-layer-design.md` §1.3): the variable is
+    documented in `deploy/.env.example`, where whoever sets the deployment up
+    reads it."""
+    url = request.app.state.settings.public_console_url
+    if not url:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            tr(
+                "this installation's console address is not configured, so an invitation link "
+                "cannot be made. That is a server setting, not something this screen can fix."
+            ),
+        )
+    return str(url)
 
 
-#: The 503 for a deployment whose provisioning client was never configured.
-#:
-#: NAMES NEITHER THE VENDOR NOR ITS SETTINGS, and the settings are the part
-#: that is easy to miss: `ITS_KEYCLOAK_ADMIN_URL` and
-#: `ITS_KEYCLOAK_ADMIN_SECRET_PATH` carry the word inside the identifier, so
-#: printing them to a console user fails the buyer test just as squarely as a
-#: sentence would (`docs/superpowers/specs/2026-08-19-invisible-identity-layer-
-#: design.md` §1.3). Those two names are the right ones and stay exactly as
-#: they are -- here, in a comment, where whoever has to set the deployment up
-#: will be reading the source anyway, and in `deploy/.env.example` where they
-#: are documented. `app/api/v1/setup.py`'s `_NOT_CONFIGURED` says the same
-#: thing the same way, for the same reason.
-_NOT_CONFIGURED = N_(
-    "this installation cannot manage accounts yet: its identity provisioning is "
-    "not configured. That is a server setting, not something this screen can fix."
-)
+async def _mailer(session: AsyncSession, request: Request, ctx: AuthContext) -> service.Deliver:
+    """The invitation mail, from the administrator who asked for it, sent in
+    the request's session (Task 3: the relay credential's checkout is audited
+    there, and a failed send is caught inside it, `notices.deliver`)."""
+    inviter = (
+        await session.execute(
+            select(User.display_name, User.email).where(
+                User.id == ctx.user_id, User.org_id == ctx.org_id
+            )
+        )
+    ).one()
+    name = inviter.display_name or inviter.email
 
+    async def deliver(user: service.UserView, link: str) -> bool:
+        subject, text = notices.invitation_mail(link, inviter=name)
+        return await notices.deliver(
+            session,
+            org_id=ctx.org_id,
+            to=user.email,
+            subject=subject,
+            text=text,
+            vault=request.app.state.vault,
+            actor_id=ctx.user_id,
+        )
 
-def _provisioning(config: KeycloakAdminConfig | None) -> KeycloakAdminConfig:
-    if config is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, tr_marked(_NOT_CONFIGURED))
-    return config
+    return deliver
 
 
 def _http(exc: UserAdminError) -> HTTPException:
+    """`{"detail": ...}`, and `"code"` beside it when the refusal carries one
+    the console acts on (`AuthRefusal`, whose handler writes both)."""
+    if exc.code is not None:
+        return AuthRefusal(exc.status_code, code=exc.code, detail=exc.detail)
     return HTTPException(exc.status_code, exc.detail)
 
 
@@ -155,7 +175,7 @@ class UserOut(BaseModel):
     """One user in this organization. Carries no credential of any kind."""
 
     id: UUID = Field(description="The ITMS user id. Address every route here to this.")
-    email: str = Field(description="The address the identity provider asserts.")
+    email: str = Field(description="The address this person signs in with.")
     display_name: str = Field(description="How the console shows this person.")
     status: str = Field(
         description=(
@@ -165,6 +185,18 @@ class UserOut(BaseModel):
         )
     )
     roles: list[RoleAssignmentOut] = Field(description="Every role this user holds.")
+    invite_pending: bool = Field(
+        description=(
+            "True while this person has an invitation they have not accepted -- expired or "
+            "not: resend it or cancel it."
+        )
+    )
+    invite_expires_at: datetime | None = Field(
+        description=(
+            "When that invitation's link expires; null once they have chosen a password, or "
+            "when no invitation is open."
+        )
+    )
 
 
 class UserListOut(BaseModel):
@@ -173,22 +205,26 @@ class UserListOut(BaseModel):
     )
 
 
-class CreatedUserOut(UserOut):
-    """A newly created user, plus what became of the enrolment email.
+class InvitedOut(BaseModel):
+    """An invitation. `invite_link` is the one secret this surface returns:
+    once, and only when no mail carried it (design §7)."""
 
-    The mail outcome is in the RESPONSE rather than an error because the account
-    exists either way, and because the shipped realm has no `smtpServer` (spec
-    §2.3): reporting success while silently sending nothing produces an account
-    nobody can ever sign into. `POST /users/{id}/resend-enrolment` is the fix.
-    """
-
-    enrolment_email_sent: bool = Field(
-        description="Whether the identity provider accepted the enrolment email for delivery."
-    )
-    enrolment_email_error: str | None = Field(
+    user_id: UUID = Field(description="The invited technician's ITMS user id.")
+    invite_link: str | None = Field(
         description=(
-            "Why it did not, when it did not. The identity provider's status only -- "
-            "response bodies are never forwarded."
+            "The one-time link to hand over another way when the mail did not go; null when it "
+            "did. It is in this answer only."
+        )
+    )
+
+
+class InviteLinkOut(BaseModel):
+    """A resent invitation: the new link, under the same rule as the first."""
+
+    invite_link: str | None = Field(
+        description=(
+            "The new one-time link when the mail did not go; null when it did. The previous "
+            "link no longer works."
         )
     )
 
@@ -212,32 +248,27 @@ class EffectivePermissionsOut(BaseModel):
     codes: list[CodeGrantOut]
 
 
-class MailResultOut(BaseModel):
-    """A mail this platform asked Keycloak to send.
-
-    ONE FIELD, AND THE OMISSION IS DELIBERATE. An earlier draft echoed the
-    Keycloak required-action names back (`["UPDATE_PASSWORD"]`), which is
-    informative and harmless -- and which put the literal string "password" in
-    an API response, so the rule-1 sweep in `tests/test_user_admin_api.py` could
-    only stay green by carving out an exemption for it. An exemption is exactly
-    how the next thing slips through. The route path already says which mail was
-    sent, so the field bought nothing and cost the strongest test on the surface.
-    """
-
-    sent: bool = Field(description="Always true; a refusal is a 502, not a false here.")
-
-
 # --------------------------------------------------------------------------- #
 # request models -- all `extra="forbid"`
 # --------------------------------------------------------------------------- #
 
 
-class UserCreate(BaseModel):
+class GrantIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role_id: UUID
+    client_id: UUID | None = Field(
+        default=None,
+        description="Omit for every client; a client to scope the grant to it.",
+    )
+
+
+class UserInvite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str = Field(min_length=3, max_length=MAX_EMAIL)
     display_name: str = Field(default="", max_length=MAX_DISPLAY_NAME)
-    role_ids: list[UUID] = Field(default_factory=list, max_length=MAX_ROLES)
+    grants: list[GrantIn] = Field(default_factory=list, max_length=MAX_ROLES)
 
 
 class RoleAssign(BaseModel):
@@ -264,6 +295,8 @@ def _user_out(view: service.UserView) -> UserOut:
         email=view.email,
         display_name=view.display_name,
         status=view.status,
+        invite_pending=view.invite_expires_at is not None,
+        invite_expires_at=view.invite_expires_at,
         roles=[
             RoleAssignmentOut(
                 assignment_id=r.assignment_id,
@@ -286,10 +319,11 @@ async def list_users(
     request: Request,
     ctx: AuthContext = Depends(require_permission("users.read")),
 ) -> UserListOut:
-    """Everyone in the calling user's organization, with their role assignments.
+    """Everyone in the calling user's organization, with their role assignments
+    and, while an invitation is open, when it expires.
 
-    Needs no Keycloak: this is the ITMS projection, which is what every other
-    surface in the platform joins against.
+    The ITMS rows, which are what every other surface in the platform joins
+    against.
     """
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -327,56 +361,93 @@ async def effective_permissions(
 
 
 # --------------------------------------------------------------------------- #
-# create
+# invite
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/users", response_model=CreatedUserOut, status_code=status.HTTP_201_CREATED)
-async def create_user(
-    body: UserCreate,
+@router.post("/users/invite", response_model=InvitedOut, status_code=status.HTTP_201_CREATED)
+async def invite_user(
+    body: UserInvite,
     request: Request,
-    # ORDER MATTERS, AND IT IS THE SECURITY HALF OF THIS SIGNATURE. FastAPI
-    # resolves dependencies in declaration order, and `keycloak_config` reads
-    # the provisioning client secret off disk -- so the RBAC gate goes first,
-    # and an unauthenticated or unauthorized request is refused before anything
-    # opens the credential. See the note on `keycloak_config`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
-) -> CreatedUserOut:
-    """Create the Keycloak identity, then the ITMS row holding its roles.
+) -> InvitedOut:
+    """Create a technician with their grants and send them a one-time link,
+    valid 72 hours, to choose a password and set up their second factor.
 
-    The email domain is checked against the org's own console email-domain
-    setting, resolved by the same function the three admission doors use, so an
-    address this console will not admit is never given an identity. Resolved
-    inside the tenant session for the same reason the doors resolve it there:
-    the value belongs to the tenant, and the console must be able to change it
-    without a restart.
+    The email domain is checked against the org's console email-domain
+    setting, resolved by the same function the doors use.
     """
-    provisioning = _provisioning(config)
+    console = _console_url(request)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            created = await service.create_user(
+            invited = await service.invite_user(
                 session,
-                provisioning,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
                 email=body.email,
                 display_name=body.display_name,
-                role_ids=body.role_ids,
+                grants=[service.Grant(g.role_id, g.client_id) for g in body.grants],
                 email_domain=await resolve_console_domain(
                     session, ctx.org_id, request.app.state.settings
                 ),
+                console_url=console,
+                deliver=await _mailer(session, request, ctx),
             )
         except UserAdminError as exc:
             raise _http(exc) from exc
-        out = _user_out(created.user)
-        return CreatedUserOut(
-            **out.model_dump(),
-            enrolment_email_sent=created.enrolment_email_sent,
-            enrolment_email_error=created.enrolment_email_error,
-        )
+    return InvitedOut(
+        user_id=invited.user.id, invite_link=None if invited.delivered else invited.link
+    )
+
+
+@router.post("/users/{user_id}/invite/resend", response_model=InviteLinkOut)
+async def resend_invite(
+    user_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(_MANAGE),
+) -> InviteLinkOut:
+    """A new invitation link for somebody who has not accepted yet; the old
+    link stops working. Refused once they have chosen a password."""
+    console = _console_url(request)
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
+        try:
+            invited = await service.resend_invite(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                user_id=user_id,
+                console_url=console,
+                deliver=await _mailer(session, request, ctx),
+            )
+        except UserAdminError as exc:
+            raise _http(exc) from exc
+    return InviteLinkOut(invite_link=None if invited.delivered else invited.link)
+
+
+@router.delete("/users/{user_id}/invite", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_invite(
+    user_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(_MANAGE),
+) -> Response:
+    """Cancel an invitation not accepted yet: the link dies and the account is
+    marked deleted (its row is kept). Refused once they have chosen a password.
+    The address stays taken for good: a deleted account's address cannot be
+    invited again, in this organization, under any name."""
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
+        try:
+            await service.cancel_invite(
+                session, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
+            )
+        except UserAdminError as exc:
+            raise _http(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --------------------------------------------------------------------------- #
@@ -395,11 +466,7 @@ async def assign_role(
     request: Request,
     ctx: AuthContext = Depends(_MANAGE),
 ) -> RoleAssignmentOut:
-    """Grant a role for every client, or for one client (MSP clients spec §2.1).
-
-    No Keycloak involvement -- roles are an ITMS concept -- so this works on a
-    deployment that has not configured provisioning.
-    """
+    """Grant a role for every client, or for one client (MSP clients spec §2.1)."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -461,18 +528,15 @@ async def remove_role(
 async def _set_enabled(
     request: Request,
     ctx: AuthContext,
-    config: KeycloakAdminConfig | None,
     user_id: UUID,
     enabled: bool,
 ) -> UserOut:
-    provisioning = _provisioning(config)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
             view = await service.set_enabled(
                 session,
-                provisioning,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
                 user_id=user_id,
@@ -487,94 +551,82 @@ async def _set_enabled(
 async def disable_user(
     user_id: UUID,
     request: Request,
-    # RBAC BEFORE THE SECRET READ -- see `create_user`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> UserOut:
-    """Stop this account signing in, in Keycloak AND in ITMS.
-
-    Both, because neither alone is enough: Keycloak stops the next token being
-    issued, `users.status` refuses the one already in the browser.
+    """Stop this account signing in, and end its sessions and remembered
+    devices now.
 
     Refused for your OWN account, for the organization's last active
     `org-admin`, and for any holder of `super-admin` -- all three are
     denial-of-service against a recovery path only SQL on production can undo.
     """
-    return await _set_enabled(request, ctx, config, user_id, enabled=False)
+    return await _set_enabled(request, ctx, user_id, enabled=False)
 
 
 @router.post("/users/{user_id}/enable", response_model=UserOut)
 async def enable_user(
     user_id: UUID,
     request: Request,
-    # RBAC BEFORE THE SECRET READ -- see `create_user`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> UserOut:
-    """Undo a disable, in both systems. A deleted user is not re-enabled here --
-    their identity no longer exists, so there is nothing to enable."""
-    return await _set_enabled(request, ctx, config, user_id, enabled=True)
+    """Undo a disable. A deleted user is not re-enabled here."""
+    return await _set_enabled(request, ctx, user_id, enabled=True)
 
 
 # --------------------------------------------------------------------------- #
-# the two mails
+# somebody else's factors and sessions
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/users/{user_id}/reset-password", response_model=MailResultOut)
-async def reset_password(
+@router.post("/users/{user_id}/factors/reset", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_factors(
     user_id: UUID,
     request: Request,
-    # RBAC BEFORE THE SECRET READ -- see `create_user`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
-) -> MailResultOut:
-    """Ask Keycloak to email this user an `UPDATE_PASSWORD` link.
-
-    THAT IS THE ENTIRE IMPLEMENTATION. ITMS does not generate, store, display or
-    return a password, and this response carries no credential -- only which
-    action was requested. A refusal is a 502 rather than `sent: false`, because
-    the mail IS the action and there is no partial success to report.
-    """
-    provisioning = _provisioning(config)
+) -> Response:
+    """Remove this person's passkeys, authenticator app and recovery codes,
+    end their sessions and forget their devices; they set up a new second
+    factor at their next sign-in, and are told by mail. Needs your own second
+    factor confirmed in the last ten minutes. Not for your own account.
+    Refused (409 `reset_needs_recovery`) while their password was set with an
+    emailed reset link and no second factor has been used since: use the
+    server's recovery command then."""
+    # Design §2.5: the administrator's OWN second factor, confirmed in the last
+    # ten minutes (Task 6; plan decision 5). Before anything is read.
+    require_step_up(ctx)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            await service.send_password_reset(
-                session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
+            await service.reset_factors(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                user_id=user_id,
+                vault=request.app.state.vault,
             )
         except UserAdminError as exc:
             raise _http(exc) from exc
-    return MailResultOut(sent=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/users/{user_id}/resend-enrolment", response_model=MailResultOut)
-async def resend_enrolment(
+@router.delete("/users/{user_id}/sessions", status_code=status.HTTP_204_NO_CONTENT)
+async def end_sessions(
     user_id: UUID,
     request: Request,
-    # RBAC BEFORE THE SECRET READ -- see `create_user`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
-) -> MailResultOut:
-    """Send the first-contact mail again.
-
-    Without this route one transient mail failure -- or the missing `smtpServer`
-    the shipped realm has today -- leaves an account nobody can ever sign into,
-    and Keycloak 26 exposes no admin API returning the link for an operator to
-    pass on by hand.
-    """
-    provisioning = _provisioning(config)
+) -> Response:
+    """End every console session of this person now."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            await service.resend_enrolment(
-                session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
+            await service.end_sessions(
+                session, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
             )
         except UserAdminError as exc:
             raise _http(exc) from exc
-    return MailResultOut(sent=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --------------------------------------------------------------------------- #
@@ -586,11 +638,10 @@ async def resend_enrolment(
 async def delete_user(
     user_id: UUID,
     request: Request,
-    # RBAC BEFORE THE SECRET READ -- see `create_user`.
     ctx: AuthContext = Depends(_MANAGE),
-    config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> Response:
-    """Remove the Keycloak identity. The ITMS row is RETAINED, marked `deleted`.
+    """Mark the user deleted and end their sessions, remembered devices and any
+    open invitation. The ITMS row is RETAINED, marked `deleted`.
 
     Retained because 89 foreign-key columns across 21 tables reference
     `users.id`, audit `actor_id` among them: a hard delete either fails on the
@@ -600,13 +651,12 @@ async def delete_user(
     Refused for your own account, for the last active `org-admin`, and for any
     holder of `super-admin`.
     """
-    provisioning = _provisioning(config)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
             await service.delete_user(
-                session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
+                session, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
             )
         except UserAdminError as exc:
             raise _http(exc) from exc

@@ -34,7 +34,9 @@ import type {
 } from "../../lib/api";
 import { translate } from "../../i18n/core";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { loadingUntilClient, requireKnown } from "../../lib/clientSelection";
+import { useEverywherePermissions, useMePermissions } from "../../lib/mePermissions";
 import { everyClientReason, permissionReason } from "./settingsState";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
@@ -51,13 +53,13 @@ import type {
 import type { CategoryOut, QueueOut } from "../service-desk/types";
 import type { SettingsOut as SlaSettingsOut, SettingsUpdate as SlaSettingsUpdate } from "../sla/types";
 import type {
-  CreatedUserOut,
   CurrentOrgOut,
   CurrentOrgUpdate,
   EffectivePermissionsOut,
   EmailSettingsOut,
   EmailSettingsUpdate,
-  MailResultOut,
+  InviteLinkOut,
+  InviteOut,
   MeProfileUpdate,
   PermissionCatalogueOut,
   RoleAssign,
@@ -67,12 +69,16 @@ import type {
   RoleOut,
   RolePermissionsOut,
   RoleUpdate,
+  SessionSettingsOut,
+  SessionSettingsUpdate,
   TestSendIn,
   TestSendOut,
-  UserCreate,
+  UserInvite,
   UserListOut,
   UserOut,
 } from "./types";
+import type { StepUpRun } from "../../components/stepUp";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // A 403 is an answer, not a fault: retrying a permission wall changes nothing
 // and delays the "you do not hold this" message the operator needs.
@@ -88,6 +94,7 @@ export const HEALTH_SETTINGS_KEY = "health-settings";
 export const BUDGET_SETTINGS_KEY = "budget-settings";
 export const EMAIL_SETTINGS_KEY = "email-settings";
 export const MCP_CONNECTIONS_KEY = "mcp-connections";
+export const SESSION_SETTINGS_KEY = "session-settings";
 
 // --------------------------------------------------------------------------
 // Organization profile — GET/PATCH /api/v1/orgs/current
@@ -160,6 +167,19 @@ export function useMe() {
 export function useGlobalWriteReason(code: string): string {
   const me = useMe();
   return (me.data?.permissions ?? []).includes(code) ? everyClientReason(code) : permissionReason(code);
+}
+
+/**
+ * The same every-client sentence, for a screen outside Settings that words
+ * "you lack this" in its own voice (health, SLA): `everyClientReason(code)`
+ * for someone who holds the code on SOME clients and not on all -- for them
+ * "you do not have the permission" is false -- and `null` otherwise, when the
+ * screen keeps its own sentence. `null` while `/me` loads, too.
+ */
+export function useEveryClientReason(code: string): string | null {
+  const mine = useMePermissions();
+  const everywhere = useEverywherePermissions();
+  return mine.has(code) && everywhere.lacks(code) ? everyClientReason(code) : null;
 }
 
 // --------------------------------------------------------------------------
@@ -251,7 +271,8 @@ export function useNotificationChannels(enabled: boolean) {
 export function useCreateChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ChannelOut, ApiError, ChannelCreate>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<ChannelOut, ApiError, ChannelCreate>({
     mutationFn: (body) => api.createNotificationChannel(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY] });
@@ -262,7 +283,8 @@ export function useCreateChannelMutation() {
 export function useUpdateChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ChannelOut, ApiError, { id: string; body: ChannelUpdate }>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<ChannelOut, ApiError, { id: string; body: ChannelUpdate }>({
     mutationFn: ({ id, body }) => api.updateNotificationChannel(id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY] });
@@ -466,7 +488,8 @@ export function useEmailSettings(enabled: boolean) {
 export function useUpdateEmailSettingsMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<EmailSettingsOut, ApiError, EmailSettingsUpdate>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<EmailSettingsOut, ApiError, EmailSettingsUpdate>({
     mutationFn: (body) => api.updateEmailSettings(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [EMAIL_SETTINGS_KEY] });
@@ -485,6 +508,31 @@ export function useTestEmailMutation() {
   const api = useApi();
   return useMutation<TestSendOut, ApiError, TestSendIn>({
     mutationFn: (body) => api.sendTestEmail(body),
+  });
+}
+
+// --------------------------------------------------------------------------
+// Sessions — GET/PUT /settings/sessions (own authentication design §2.4)
+// --------------------------------------------------------------------------
+
+export function useSessionSettings(enabled: boolean) {
+  const api = useApi();
+  return useQuery<SessionSettingsOut, ApiError>({
+    queryKey: [SESSION_SETTINGS_KEY],
+    queryFn: () => api.getSessionSettings(),
+    enabled,
+    ...NO_RETRY,
+  });
+}
+
+export function useUpdateSessionSettingsMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<SessionSettingsOut, ApiError, SessionSettingsUpdate>({
+    mutationFn: (body) => api.putSessionSettings(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SESSION_SETTINGS_KEY] });
+    },
   });
 }
 
@@ -631,17 +679,25 @@ export function useClients(enabled: boolean, params: { include_archived?: boolea
  * own clients, which needs no `clients.read` -- so every technician reads a
  * name, never an id, and no `GET /clients` is made for it.
  *
- * An id `/me` does not list, or none at all, is a row every client shares:
- * "All clients". (`/me` leaves archived clients out, so an archived client's
- * row reads the same; the design does not tell the two apart.) The Unassigned
- * client is named in the person's language, as the top bar names it.
+ * FROM THE TOP BAR'S LIST (`useClientScope`), not from `/me` directly: a
+ * change of client empties the cache, and the list the selector keeps while
+ * `/me` is asked again is the same answer (`LastListed`), so the names stay
+ * on screen instead of every row reading "All clients" for a moment.
+ *
+ * No id at all is a row every client shares: "All clients". An id `/me` does
+ * not list, once it has answered, reads the same (`/me` leaves archived
+ * clients out; the design does not tell the two apart). WHILE `/me` IS
+ * UNKNOWN an id names nothing (`""`): a client's row must not read, even
+ * for a moment, as one every client shares. The Unassigned client is named
+ * in the person's language, as the top bar names it.
  */
 export function useClientName(): (clientId: string | null) => string {
-  const me = useMe();
-  const known = new Map((me.data?.clients ?? []).map((client) => [client.id, client]));
+  const { clients, ready } = useClientScope();
+  const known = new Map(clients.map((client) => [client.id, client]));
   return (clientId) => {
-    const client = clientId === null ? undefined : known.get(clientId);
-    if (client === undefined) return translate("lib.clients.everyClient");
+    if (clientId === null) return translate("lib.clients.everyClient");
+    const client = known.get(clientId);
+    if (client === undefined) return ready ? translate("lib.clients.everyClient") : "";
     return client.kind === "unassigned" ? translate("lib.clients.unassigned") : client.name;
   };
 }
@@ -656,15 +712,25 @@ export function useEffectivePermissions(userId: string | null) {
   });
 }
 
-export function useCreateUserMutation() {
+/**
+ * The invitation (own authentication design §7). Invalidates the directory
+ * (the person is listed, invited) and the roles (their holder counts moved).
+ *
+ * `gcTime: 0`: without mail its answer is the one-time link. The tab moves it
+ * into its own state and resets the mutation, and `reset()` alone only
+ * detaches it -- TanStack would keep it for five minutes (Task 12 review,
+ * Important 1).
+ */
+export function useInviteUserMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<CreatedUserOut, ApiError, UserCreate>({
-    mutationFn: (body) => api.createUser(body),
+  return useMutation<InviteOut, ApiError, UserInvite>({
+    mutationFn: (body) => api.inviteUser(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
     },
+    gcTime: 0,
   });
 }
 
@@ -706,23 +772,48 @@ export function useSetUserEnabledMutation() {
 }
 
 /**
- * The two mails.
- *
- * Neither writes a row this page reads, so neither invalidates anything; the
- * result is ephemeral and is rendered where it was triggered — the same shape
- * `useTestChannelMutation` above uses, for the same reason.
+ * A fresh invitation link, emailed or shown once without mail. Writes no row
+ * this page reads, so it invalidates nothing; its result is rendered where it
+ * was triggered. `gcTime: 0` for the link, as for the invitation.
  */
-export function useResetPasswordMutation() {
+export function useResendInviteMutation() {
   const api = useApi();
-  return useMutation<MailResultOut, ApiError, string>({
-    mutationFn: (userId) => api.resetUserPassword(userId),
+  return useMutation<InviteLinkOut, ApiError, string>({
+    mutationFn: (userId) => api.resendInvite(userId),
+    gcTime: 0,
   });
 }
 
-export function useResendEnrolmentMutation() {
+/** The invitation's link stops working; the directory is read again. */
+export function useCancelInviteMutation() {
   const api = useApi();
-  return useMutation<MailResultOut, ApiError, string>({
-    mutationFn: (userId) => api.resendUserEnrolment(userId),
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (userId) => api.cancelInvite(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
+      void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
+    },
+  });
+}
+
+/**
+ * Reset another person's second factors (design §7), through the caller's
+ * `useStepUp().run`: the server asks for YOUR OWN second factor when it was
+ * not confirmed in the last 10 minutes (§2.5).
+ */
+export function useResetUserFactorsMutation(run: StepUpRun) {
+  const api = useApi();
+  return useMutation<void, Error, string>({
+    mutationFn: (userId) => run(() => api.resetUserFactors(userId)),
+  });
+}
+
+/** End every session the person has open. Nothing this page reads changes. */
+export function useEndUserSessionsMutation() {
+  const api = useApi();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (userId) => api.endUserSessions(userId),
   });
 }
 

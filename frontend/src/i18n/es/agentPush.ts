@@ -130,6 +130,7 @@ export const agentPush: Shape<typeof en> = {
     chooseCredential: "Elige una credencial de tipo “{kind}”",
     cannotView: "Esta cuenta no puede ver las credenciales, así que no se puede ofrecer ninguna.",
     noneSaved: "No hay guardada ninguna credencial de tipo “{kind}”.",
+    noneSavedForClient: "No hay guardada ninguna credencial de tipo “{kind}” para el cliente de estos equipos. La de otro cliente no sirve aquí.",
     addOne: "Añade una en Credenciales",
   },
   subnet: {

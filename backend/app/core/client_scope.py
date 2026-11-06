@@ -93,9 +93,19 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "door 1 (HTTP, MCP and the portal's sign-in): resolves the user and their grants "
         "before the scope exists (spec §2.2)"
     ),
-    "app/core/identity/door.py::read_door_identity": (
-        "doors 2 and 3 (console WebSocket, remote tunnel): the domain rule, users.status and "
-        "users.kind, and the grants the scope is computed from (spec §2.2, §2.6)"
+    "app/core/auth/sessions.py::resolve": (
+        "a session cookie names a row before anybody knows whose: a staff session has no "
+        "client, so it is read and touched under every client, after its_auth_session gave "
+        "the organisation (P2 design §6.2, §6.5)"
+    ),
+    "app/api/deps.py::_admit_session": (
+        "door 1 for a console session (P2 design §6.5): the person's row and grants, read "
+        "before the scope they define exists, as admit reads them for a token"
+    ),
+    "app/core/identity/door.py::read_session_identity": (
+        "doors 2 and 3 (console WebSocket, remote tunnel) for a console session (P2 design "
+        "§6.5): the domain rule, users.status and users.kind, and the grants the scope is "
+        "computed from (spec §2.2, §2.6)"
     ),
     "app/core/identity/door.py::person_scope": (
         "an admitted person's grants for one code (require_permission, the portal's gate, "
@@ -112,6 +122,11 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "scope. Only intersected, never used as a session's scope (the report catalogue, "
         "plan 2026-10-26 Task 14 review)"
     ),
+    "app/core/auth/loopback.py::_live_session": (
+        "the assistant's internal token (autenticación propia design §5.6): the session it "
+        "names and its person, read by id before their scope exists -- the org comes from a "
+        "token this platform signed, and the scope is then computed by admit() as for a cookie"
+    ),
     # -- (d) personal: the caller's own row, which belongs to no client --------
     **_reviewed(
         "app/core/identity/own_profile.py",
@@ -120,8 +135,26 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "person with no grant has the empty scope, which 0231 hides staff rows from "
         "(Task 6b)",
         "read_own_profile",
-        "read_own_locale",
         "update_own_profile",
+    ),
+    # -- (e) the platform's own sign-in (P2 phase 1): a technician's auth rows
+    # (O, `users.client_id` NULL) are global rows only an every-client scope
+    # may write, and they are read before -- or regardless of -- the person's
+    # scope. Each helper opens ONE organization's session over those rows
+    # alone; the organization comes from `its_auth_principal`, the session's
+    # own row or the link, never from a request field naming it.
+    "app/core/auth/flows.py::_identity_session": (
+        "sign-in before the door admits anybody: the password, the second factor, the "
+        "enrolment, the recent confirmation, the reset link -- a technician's own auth rows "
+        "and users row only (P2 phase 1 design §6.2)"
+    ),
+    "app/core/auth/account.py::_own_session": (
+        "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
+        "session the door admitted (P2 phase 1 design §2.4-§2.6)"
+    ),
+    "app/core/auth/recover.py::issue_recovery_link": (
+        "the server's own recovery command, never HTTP: one technician's recovery link, "
+        "issued by whoever holds the server (P2 phase 1 design §7)"
     ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(

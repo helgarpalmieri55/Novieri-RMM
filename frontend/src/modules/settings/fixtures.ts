@@ -24,6 +24,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { CUSTOMER_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { ClientOut, McpAppOut } from "../../lib/api";
 import type { SettingsOut as HealthSettingsOut } from "../health/types";
@@ -34,6 +35,7 @@ import type {
   PermissionOut,
   RoleAssignmentOut,
   RoleOut,
+  SessionSettingsOut,
 } from "./types";
 
 const MINUTE = 60_000;
@@ -204,7 +206,7 @@ const ROLE_SEEDS: RoleSeed[] = [
  * signs in to "org-toeshee") -- one customer, and the unassigned client. The
  * Users tab's grant scope picks from these.
  */
-const CLIENT_LOGISTICS = "cli-logistics";
+const CLIENT_LOGISTICS = CUSTOMER_ID;
 const CLIENTS: ClientOut[] = [
   { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
   { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
@@ -228,6 +230,7 @@ const GRANTS: Map<string, RoleAssignmentOut[]> = new Map([
   ["usr-lf", [{ assignment_id: "ur-6", role_id: "role-service-desk", role_name: "service-desk", client_id: null }]],
   ["usr-ic", [{ assignment_id: "ur-7", role_id: "role-finance", role_name: "finance", client_id: null }]],
   ["usr-rs", [{ assignment_id: "ur-8", role_id: "role-auditor", role_name: "auditor", client_id: null }]],
+  ["usr-invited-seed", [{ assignment_id: "ur-9", role_id: "role-technician", role_name: "technician", client_id: null }]],
 ]);
 
 const roles = new Map<string, RoleSeed>(ROLE_SEEDS.map((seed) => [seed.id, seed]));
@@ -315,25 +318,71 @@ const getUserEffectivePermissions: FixtureMap["getUserEffectivePermissions"] = (
   return { user_id: userId, codes: codes.sort((a, b) => a.code.localeCompare(b.code)) };
 };
 
-let createdUsers = 0;
-const createUser: FixtureMap["createUser"] = (body) => {
+/* -------------------------------------------------------------- invitation */
+
+/**
+ * The invitation (own authentication design §7): its grants are recorded as
+ * the roles panel records them. The link comes back only when no relay is
+ * configured -- the fixtures' relay is, so the answer is "emailed" unless the
+ * Email tab's form was saved empty first.
+ */
+let invited = 0;
+const inviteUser: FixtureMap["inviteUser"] = (body) => {
   if (USERS.some((u) => u.email === body.email)) throw conflict("a user with that email already exists");
-  createdUsers += 1;
-  const id = `usr-new-${createdUsers}`;
-  const grants: RoleAssignmentOut[] = body.role_ids.flatMap((roleId, at) => {
-    const role = roles.get(roleId);
-    return role ? [{ assignment_id: `ur-new-${createdUsers}-${at}`, role_id: role.id, role_name: role.name, client_id: null }] : [];
+  invited += 1;
+  const id = `usr-invited-${invited}`;
+  const grants: RoleAssignmentOut[] = body.grants.flatMap((grant, at) => {
+    const role = roles.get(grant.role_id);
+    return role
+      ? [{ assignment_id: `ur-invited-${invited}-${at}`, role_id: role.id, role_name: role.name, client_id: grant.client_id }]
+      : [];
   });
   GRANTS.set(id, grants);
-  return {
-    id,
-    email: body.email,
-    display_name: body.display_name,
-    status: "active",
-    roles: grants,
-    enrolment_email_sent: email.configured,
-    enrolment_email_error: email.configured ? null : "No mail relay is configured on this server.",
-  };
+  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite#fixture-${invited}` };
+};
+
+const resendInvite: FixtureMap["resendInvite"] = (userId) => {
+  if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
+  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite#fixture-again" };
+};
+
+const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
+  // The server's 409, as for a resend (`service._require_pending_invitation`;
+  // final review D2, Minor 4): it was a 404 here.
+  if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
+  GRANTS.delete(userId);
+  return undefined;
+};
+
+const resetUserFactors: FixtureMap["resetUserFactors"] = (userId) => {
+  userById(userId);
+  return undefined;
+};
+
+const endUserSessions: FixtureMap["endUserSessions"] = (userId) => {
+  userById(userId);
+  return undefined;
+};
+
+/* ---------------------------------------------------------------- sessions */
+
+/** `GET /settings/sessions` at the defaults (design §2.4, §2.6, §3), and the PUT that replaces them. */
+let sessionSettings: SessionSettingsOut = {
+  staff_idle_minutes: 30,
+  staff_max_hours: 12,
+  remember_device_enabled: true,
+  remember_device_days: 15,
+  remembered_max_hours: 168,
+  contact_idle_minutes: 60,
+  contact_max_days: 7,
+  updated_at: ago(3 * 24 * 60),
+};
+
+const getSessionSettings: FixtureMap["getSessionSettings"] = () => sessionSettings;
+
+const putSessionSettings: FixtureMap["putSessionSettings"] = (body) => {
+  sessionSettings = { ...body, updated_at: ago(0) };
+  return sessionSettings;
 };
 
 let assigned = 0;
@@ -357,16 +406,6 @@ const removeUserRole: FixtureMap["removeUserRole"] = (userId, assignmentId) => {
 const setUserEnabled: FixtureMap["setUserEnabled"] = (userId, enabled) => {
   const user = userById(userId);
   return { ...user, status: enabled ? "active" : "disabled", roles: GRANTS.get(userId) ?? [] };
-};
-
-const resetUserPassword: FixtureMap["resetUserPassword"] = (userId) => {
-  userById(userId);
-  return { sent: email.configured };
-};
-
-const resendUserEnrolment: FixtureMap["resendUserEnrolment"] = (userId) => {
-  userById(userId);
-  return { sent: email.configured };
 };
 
 const deleteUser: FixtureMap["deleteUser"] = (userId) => {
@@ -446,12 +485,16 @@ const fixtures: FixtureMap = {
   deleteRole,
   getUserEffectivePermissions,
   listClients,
-  createUser,
+  inviteUser,
+  resendInvite,
+  cancelInvite,
+  resetUserFactors,
+  endUserSessions,
+  getSessionSettings,
+  putSessionSettings,
   assignUserRole,
   removeUserRole,
   setUserEnabled,
-  resetUserPassword,
-  resendUserEnrolment,
   deleteUser,
   updateHealthSettings,
   getMcpConnections,

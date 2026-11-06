@@ -29,7 +29,12 @@ from app.modules.service_desk.models import Ticket, TicketComment
 from app.modules.service_desk.schema import TicketCreate
 from app.modules.service_desk.tickets import create_ticket
 from app.modules.service_desk.transitions import change_status
-from tests.test_email_intake_migration import _seed_category, _seed_credential, _seed_user
+from tests.test_email_intake_migration import (
+    _seed_category,
+    _seed_contact,
+    _seed_credential,
+    _seed_user,
+)
 
 # `_parsed(...)` builds a ParsedMessage directly rather than round-tripping
 # through raw bytes: Task 3 already tests parsing, and constructing the
@@ -1084,10 +1089,13 @@ async def test_a_sender_matching_two_users_is_quarantined(email_env) -> None:
     """Spec §8 row 7. Two users in one org may legitimately share an address;
     the module must NEVER guess which human sent it. Covered at the
     `resolve_sender` level in Task 4 -- this pins that it is reachable
-    through `process_message` and produces a row and no ticket."""
-    await _seed_user(email_env.api_env, email_env.org_id, "alice@acme.test")
+    through `process_message` and produces a row and no ticket. Since
+    migration 0245 the two are a contact and a technician created after it:
+    two technicians of one org never share an address."""
+    await _seed_contact(email_env.api_env, email_env.org_id, "carol@acme.test")
+    await _seed_user(email_env.api_env, email_env.org_id, "carol@acme.test")
 
-    row = await email_env.dispose(body="which of me is this")
+    row = await email_env.dispose(sender="carol@acme.test", body="which of us is this")
 
     assert row.disposition == "quarantined"
     assert "ambiguous" in row.reason.lower()

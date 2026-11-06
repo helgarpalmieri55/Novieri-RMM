@@ -34,12 +34,19 @@ from tests.test_patch_reboot import _FakeJobEngine
 
 register_job_types()
 
-NOW = datetime.now(UTC)
+# NO MODULE-LEVEL CLOCK. Runs take `created_at` from the database's `now()`,
+# and the sweep finds a policy due when its last run is older than `now`
+# minus the interval. A `NOW` read once at collection fell behind the
+# database by however long the suite took to reach this file, and with
+# runs aged by interval + 1 h the tests failed (or, worse, passed on the
+# wrong run) once that was over an hour. The clock is read where it is used:
+# seconds of drift inside one test, against a margin of an hour.
 
 
 async def _setup(
     admin_engine: AsyncEngine, *, window: str | None = None, online: bool = True
 ) -> tuple[Any, UUID]:
+    now = datetime.now(UTC)
     org = await seed_org(admin_engine, "spol")
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         script = Script(
@@ -58,10 +65,10 @@ async def _setup(
                 device_id=org.device_id,
                 cert_fingerprint=uuid4().hex,
                 cert_serial=uuid4().hex[:16],
-                cert_not_after=NOW + timedelta(days=365),
-                enrolled_at=NOW - timedelta(days=30),
+                cert_not_after=now + timedelta(days=365),
+                enrolled_at=now - timedelta(days=30),
                 status="online" if online else "offline",
-                last_seen_at=NOW,
+                last_seen_at=now,
             )
         )
         if window is not None:
@@ -96,10 +103,15 @@ async def _policy(app_engine: AsyncEngine, org: Any, script_id: UUID, **kw: Any)
         return row.id
 
 
-async def _sweep(app_engine: AsyncEngine, org_id: UUID, now: datetime) -> _FakeJobEngine:
+async def _sweep(
+    app_engine: AsyncEngine, org_id: UUID, now: datetime | None = None
+) -> _FakeJobEngine:
+    """``now`` is the clock at this call unless a test pins an instant."""
     engine = _FakeJobEngine()
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
-        await run_policy_sweep(session, engine, org_id=org_id, now=now)
+        await run_policy_sweep(
+            session, engine, org_id=org_id, now=now if now is not None else datetime.now(UTC)
+        )
     return engine
 
 
@@ -153,7 +165,7 @@ async def test_the_sweep_runs_the_signed_script_on_the_group_once_per_interval(
     org, script_id = await _setup(admin_engine)
     policy_id = await _policy(app_engine, org, script_id)
 
-    first = await _sweep(app_engine, org.org_id, NOW)
+    first = await _sweep(app_engine, org.org_id)
     [created] = first.created
     assert created["type"] == "script.run"
     assert created["target_device_id"] == org.device_id
@@ -163,13 +175,13 @@ async def test_the_sweep_runs_the_signed_script_on_the_group_once_per_interval(
     assert run.policy_id == policy_id and run.target_type == "group"
 
     # In flight, then finished but inside the interval: nothing.
-    assert (await _sweep(app_engine, org.org_id, NOW)).created == []
+    assert (await _sweep(app_engine, org.org_id)).created == []
     await _finish(admin_engine, app_engine, run, exit_code=0)
-    assert (await _sweep(app_engine, org.org_id, NOW)).created == []
+    assert (await _sweep(app_engine, org.org_id)).created == []
 
     # A day later it is due again.
     await _age_runs(admin_engine, org.org_id, 25)
-    assert len((await _sweep(app_engine, org.org_id, NOW)).created) == 1
+    assert len((await _sweep(app_engine, org.org_id)).created) == 1
 
     async with AsyncSession(admin_engine) as s:
         actions = (
@@ -194,7 +206,7 @@ async def test_the_window_offline_devices_and_other_platforms_are_respected(
 
     offline, offline_script = await _setup(admin_engine, online=False)
     await _policy(app_engine, offline, offline_script)
-    assert (await _sweep(app_engine, offline.org_id, NOW)).created == []
+    assert (await _sweep(app_engine, offline.org_id)).created == []
 
     mac, mac_script = await _setup(admin_engine)
     async with AsyncSession(admin_engine) as s:
@@ -203,7 +215,7 @@ async def test_the_window_offline_devices_and_other_platforms_are_respected(
         )
         await s.commit()
     await _policy(app_engine, mac, mac_script)
-    assert (await _sweep(app_engine, mac.org_id, NOW)).created == []
+    assert (await _sweep(app_engine, mac.org_id)).created == []
 
 
 async def test_output_is_kept_and_cleared_past_keep_runs(
@@ -212,7 +224,7 @@ async def test_output_is_kept_and_cleared_past_keep_runs(
     org, script_id = await _setup(admin_engine)
     await _policy(app_engine, org, script_id, keep_runs=2, interval_hours=1)
     for _ in range(3):
-        await _sweep(app_engine, org.org_id, NOW)
+        await _sweep(app_engine, org.org_id)
         run = (await _runs(admin_engine, org.org_id))[-1]
         await _finish(admin_engine, app_engine, run, exit_code=0)
         await _age_runs(admin_engine, org.org_id, 2)
@@ -246,7 +258,7 @@ async def test_a_failed_run_raises_an_alert_the_profile_routes_and_success_clear
     )
     await _policy(app_engine, org, script_id, alert_on_failure=True, interval_hours=1)
 
-    await _sweep(app_engine, org.org_id, NOW)
+    await _sweep(app_engine, org.org_id)
     [run] = await _runs(admin_engine, org.org_id)
     await _finish(admin_engine, app_engine, run, exit_code=2)
     async with AsyncSession(admin_engine) as s:
@@ -266,8 +278,12 @@ async def test_a_failed_run_raises_an_alert_the_profile_routes_and_success_clear
     assert "open_ticket" in kinds
 
     await _age_runs(admin_engine, org.org_id, 2)
-    await _sweep(app_engine, org.org_id, NOW)
-    second = (await _runs(admin_engine, org.org_id))[-1]
+    await _sweep(app_engine, org.org_id)
+    # A second run, not the first one again: `[-1]` of a list of one would
+    # finish the failed run a second time, and the recovery below would
+    # clear the alert without the policy ever having run again.
+    first, second = await _runs(admin_engine, org.org_id)
+    assert first.id == run.id
     await _finish(admin_engine, app_engine, second, exit_code=0)
     async with AsyncSession(admin_engine) as s:
         alert = (
@@ -281,7 +297,7 @@ async def test_a_failure_with_no_check_to_route_it_is_recorded(
 ) -> None:
     org, script_id = await _setup(admin_engine)
     policy_id = await _policy(app_engine, org, script_id, alert_on_failure=True)
-    await _sweep(app_engine, org.org_id, NOW)
+    await _sweep(app_engine, org.org_id)
     [run] = await _runs(admin_engine, org.org_id)
     await _finish(admin_engine, app_engine, run, exit_code=1)
     async with AsyncSession(admin_engine) as s:
@@ -381,5 +397,5 @@ async def test_a_group_member_waiting_for_review_is_passed_over(
             update(Device).where(Device.id == org.device_id).values(review_state="pending")
         )
         await s.commit()
-    engine = await _sweep(app_engine, org.org_id, NOW)
+    engine = await _sweep(app_engine, org.org_id)
     assert engine.created == []

@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditEvent, Client, HealthProfileAssignment
+from app.models import AuditEvent, Client, DeviceGroup, HealthProfileAssignment
 from tests.client_scope_support import client_with_site
 from tests.conftest import ApiEnv
 from tests.health_fixtures import seed_profile
@@ -251,3 +251,59 @@ async def test_a_technician_removes_their_client_s_default_and_not_another_s(
     removed = await api_env.client.delete(f"{ASSIGNMENTS}/{ids[x]}", headers=tech)
     assert removed.status_code == 204, removed.text
     assert await _defaults(api_env, org) == {y: profile}
+
+
+async def test_every_assignment_is_audited_in_its_client_on_the_way_in_and_out(
+    api_env: ApiEnv,
+) -> None:
+    """`health.assignment_created` at the device and the group level, and
+    `health.assignment_deleted` at every level, carry the client the trigger
+    filled on the row: the device's, the group's, the client default's own.
+    The global default names none (final review A4, F3T3-1: correct, but
+    only the client level's creation was pinned).
+    FALSIFIER: drop `client_id=` from either `_audit` call in
+    `app/modules/health/profiles.py` (`create_assignment`,
+    `delete_assignment`)."""
+    org = await api_env.create_org("hcd-audit")
+    x, x_site = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    device = await _device(api_env, org, x, x_site)
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
+        group = DeviceGroup(org_id=org, client_id=y, name="g")
+        s.add(group)
+        await s.commit()
+    profile = await seed_profile(api_env, org)
+    admin = await _admin(api_env, org)
+    targets: dict[str, tuple[dict[str, str], UUID | None]] = {
+        "device": ({"device_id": str(device)}, x),
+        "group": ({"device_group_id": str(group.id)}, y),
+        "client": ({"client_id": str(x)}, x),
+        "org": ({}, None),
+    }
+    made: dict[str, str] = {}
+    for level, (target, _client) in targets.items():
+        r = await api_env.client.post(
+            ASSIGNMENTS, headers=admin, json={"profile_id": str(profile), **target}
+        )
+        assert (r.status_code, r.json().get("level")) == (201, level), r.text
+        made[level] = r.json()["id"]
+    for assignment_id in made.values():
+        r = await api_env.client.delete(f"{ASSIGNMENTS}/{assignment_id}", headers=admin)
+        assert r.status_code == 204, r.text
+
+    async with AsyncSession(api_env.admin_engine) as s:
+        rows = (
+            await s.execute(
+                select(AuditEvent.action, AuditEvent.target_id, AuditEvent.client_id).where(
+                    AuditEvent.org_id == org,
+                    AuditEvent.action.in_(
+                        ("health.assignment_created", "health.assignment_deleted")
+                    ),
+                )
+            )
+        ).all()
+    filed = {(action, target): client for action, target, client in rows}
+    assert len(filed) == len(rows) == 2 * len(targets)
+    for level, (_target, client) in targets.items():
+        for action in ("health.assignment_created", "health.assignment_deleted"):
+            assert filed[(action, made[level])] == client, (level, action)

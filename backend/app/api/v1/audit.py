@@ -21,9 +21,9 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 #: fingerprints and people. Holding `audit.read` on ONE client would therefore
 #: be reading every client's records, so both reads need `audit.read` on every
 #: client (`require_permission_on_every_client`). Since phase 2 an event carries
-#: an informative `client_id`, but opening the log to a person with `audit.read`
-#: on some clients is a product decision nobody has taken: the gate stays (plan
-#: 2026-10-26 decision C6) until phase 3 decides it.
+#: an informative `client_id`; phase 3 decided NOT to open the log to a person
+#: with `audit.read` on some clients (design 2026-10-31, Q2): `audit_events`
+#: has no client policy, and filtering it in code would break invariant 5a.
 #: `tests/test_global_writes.py::GLOBAL_READS`.
 _AUDIT_READ = require_permission_on_every_client("audit.read")
 

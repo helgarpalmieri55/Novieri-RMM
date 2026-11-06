@@ -185,7 +185,7 @@ def _is_header_safe(address: str) -> bool:
     pattern), so an org admin can store anything that fits, INCLUDING
     control characters. `email.policy.default` refuses to put a CR or LF in
     a header -- correct, that is header injection -- but it refuses by
-    raising `ValueError` from deep inside `_send_smtp_sync`, which is not
+    raising `ValueError` from deep inside `app.core.mail.send_smtp_sync`, which is not
     among the exceptions `notification/delivery.py::_send_email` classifies.
     It escapes to the worker's blanket `except Exception`, which marks the
     delivery `dead`: TERMINAL, no retry. One bad character in one mailbox
@@ -225,7 +225,7 @@ async def _mint_email_token_committed(
     transaction -- never the caller's (Task 8 review F4).
 
     `reply_to_for_ticket`'s only caller is one step away from an SMTP
-    conversation bounded by `_SMTP_TIMEOUT_S` (30 s), and the mint is a
+    conversation bounded by `app.core.mail.SMTP_TIMEOUT_S` (30 s), and the mint is a
     row-level WRITE on `ticket`. Done inside the delivery transaction it was
     wrong in both directions:
 

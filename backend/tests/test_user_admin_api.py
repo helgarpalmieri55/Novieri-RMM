@@ -1,63 +1,41 @@
 """The user-lifecycle API: `/api/v1/users`.
 
-Spec `docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2.
+Spec `docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2;
+P2 phase 1 design §7 since Task 8.
 
-The five rules this surface exists to keep, and the test that would notice each
-one breaking:
+The rules this surface keeps, and the test that would notice each breaking:
 
-1. **No password ever transits ITMS.** "Reset password" is a call to Keycloak's
-   `execute-actions-email` with `UPDATE_PASSWORD`; nothing here generates,
-   stores, displays or returns a credential.
-   `test_no_route_returns_anything_password_shaped` drives every route on the
-   surface and scans the bodies, so a future route cannot quietly join without
-   being covered.
-2. **Delete removes the Keycloak identity only.** 89 foreign-key columns across
-   21 tables reference `users.id`, audit `actor_id` among them (§0.6), so the
-   ITMS row is marked `deleted` and RETAINED.
-   `test_a_deleted_users_audit_history_is_still_resolvable` is the assertion
-   that matters -- a row that survives but whose history no longer joins would
-   pass a naive "the row is still there" test.
-3. **Creation is Keycloak first, then the ITMS row**, because Keycloak's create
-   returns the id that IS the `sub` claim. Both failure orderings are tested:
-   a refused Keycloak create leaves NO ITMS row, and a failed ITMS write leaves
-   an account with no roles -- the state of any federated user before first
-   login, which `deps.py` already self-heals.
+1. **No password ever transits this surface.** A technician chooses their own
+   through a one-time link; `test_no_route_returns_anything_password_shaped`
+   drives every route and scans the bodies, so a route added later cannot
+   quietly join without being covered.
+2. **Delete keeps the row.** 89 foreign-key columns across 21 tables reference
+   `users.id`, audit `actor_id` among them (§0.6), so the row is marked
+   `deleted` and RETAINED. `test_a_deleted_users_audit_history_is_still_resolvable`
+   is the assertion that matters.
+3. **No identity provider is called** (design §1.3, D5). A fake Keycloak stays
+   installed on `httpx` so that any call would be SEEN: every `kc.seen == []`
+   below holds the rule. An invited technician's `external_subject` is
+   `itms-local:<uuid>`.
 4. **The domain rule is enforced here too.** A console that refuses an address
-   at sign-in but mints it in the create form is not enforcing anything.
-5. **SMTP may be absent.** `deploy/keycloak/realm-it-suite.json` has no
-   `smtpServer`. Creation succeeds, the enrolment mail is ATTEMPTED, and a
-   failure is REPORTED in the response -- plus a resend route, without which one
-   transient mail failure leaves an account nobody can ever sign into.
+   at sign-in but invites it is not enforcing anything.
+5. **The invitation link is shown once, and only when no mail carried it.**
 
 TENANCY. `test_the_route_predicate_scopes_users_without_rls_to_mask_it`,
 `test_another_orgs_user_cannot_be_acted_on` and
-`test_no_keycloak_touching_route_reaches_another_orgs_identity` all repoint the
-app engine at the BYPASSRLS ADMIN engine and drive the REAL routes through it.
-Through a tenant session RLS hides the other org whether or not the application
-predicate is there, so those tests would pass with every predicate deleted --
-which is precisely the bug they exist to catch. The third is the one that
-matters most: the ITMS half of a write is tenant-scoped and the Keycloak half
-cannot be, because `manage-users` is realm-wide, so the subject handed to
-`kc_client` has to come off the tenant-scoped row and nowhere else.
+`test_no_lifecycle_route_reaches_another_orgs_user` repoint the app engine at
+the BYPASSRLS ADMIN engine and drive the REAL routes through it: through a
+tenant session RLS hides the other org whether or not the application
+predicate is there.
 
 THE RAILS ARE TESTED AT EVERY DOOR TO THE SAME END STATE, not at one of them.
-`org-admin` has three (revoke, disable, delete) and so does `super-admin`, which
-is refused at grant time AND at all three undos -- no console surface can grant
-it back, so its removal is irreversible in a way `technician`'s is not.
+`org-admin` has three (revoke, disable, delete) and so does `super-admin`.
 `test_the_super_admin_rail_refuses_that_role_and_not_every_user` is the
-non-vacuity half: a rail that refused those three calls unconditionally would
-satisfy every other assertion and break the surface.
+non-vacuity half.
 
-WHY THE ROUTER IS INCLUDED BY A FIXTURE. This workstream owns
-`app/modules/user_admin/api.py` and not `app/main.py`; the controller wires the
-router in afterwards. `users_env` includes it into the per-test app only if it
-is not already there, so these tests pass both before and after that wiring
-lands, and never register the router twice.
-
-THE KEYCLOAK HALF IS A MOCK TRANSPORT, exactly as `keycloak_events` is, and
-spec §6 already says what that does not prove: nothing here has run against a
-live Keycloak. What it does prove is that the ORDERING, the rails, the audit and
-the tenancy are what this application does.
+WHY THE ROUTER IS INCLUDED BY A FIXTURE. `users_env` includes it into the
+per-test app only if it is not already there, so these tests pass both before
+and after `app/main.py` wires it, and never register it twice.
 """
 
 from typing import Any
@@ -67,16 +45,19 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.config import Settings
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
 from app.models import AuditEvent, Client, Role, User, UserRole
-from app.modules.user_admin.api import keycloak_config
+from app.modules.user_admin import service as user_admin_service
 from app.modules.user_admin.api import router as users_router
 from app.modules.user_admin.kc_client import KeycloakAdminConfig
+from tests.auth_support import CONSOLE, capture_mail, console_ready, signed_in
+from tests.session_support import console_headers
 
 #: Captured at import, before any fixture swaps the name -- see
 #: `tests/test_keycloak_event_client.py` for why a factory that resolved
@@ -152,16 +133,32 @@ def users_env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     if "/api/v1/users" not in paths:
         api_env.app.include_router(users_router, prefix="/api/v1")
 
+    # Rule 3: nothing on this surface calls an identity provider. The fake
+    # stays on `httpx` so a call would be SEEN, and `kc.seen == []` holds it.
     kc = FakeKeycloak()
 
     def factory(**kw: Any) -> httpx.AsyncClient:
         return _REAL_CLIENT(transport=httpx.MockTransport(kc.handler), **kw)
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
-    api_env.app.dependency_overrides[keycloak_config] = lambda: CONFIG
+    console_ready(api_env, monkeypatch)
     api_env.kc = kc
-    yield api_env
-    api_env.app.dependency_overrides.pop(keycloak_config, None)
+    api_env.mail = capture_mail(monkeypatch)
+    return api_env
+
+
+async def _invite(
+    env: Any,
+    headers: dict[str, str],
+    email: str = "ada@toeshee.com",
+    display_name: str = "Ada",
+    grants: list[dict[str, str]] | None = None,
+) -> Any:
+    return await env.client.post(
+        "/api/v1/users/invite",
+        headers=headers,
+        json={"email": email, "display_name": display_name, "grants": grants or []},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -291,16 +288,21 @@ async def _admin(env: Any, org: UUID) -> tuple[str, dict[str, str], UUID]:
 
 
 async def _headers_claiming(env: Any, org: UUID, sub: str, email: str) -> dict[str, str]:
-    """Auth headers whose token asserts a particular email claim.
+    """The console's session for a person whose row holds `email`.
 
     Needed by the domain test and by nothing else: switching
     `console_email_domain` on makes `app/api/deps.py`'s own admission gate
-    (door 1 of 3) refuse the CALLER too if their token's address does not pass.
+    (door 1 of 3) refuse the CALLER too if their address does not pass.
     That is spec §3.3's lockout reproduced in miniature -- and it is why the
     preflight is a required step in `deploy/README.md` rather than a suggestion.
+    Since own authentication phase 1 the gate (and the lockout preflight)
+    read the row's address, which is the one the session carries, so the
+    address is written there before the session is made.
     """
-    slug = await env.org_slug(org)
-    return {"Authorization": f"Bearer {env.idp.token(sub, slug, email=email)}"}
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(update(User).where(User.external_subject == sub).values(email=email))
+        await session.commit()
+    return await env.headers(org, sub)
 
 
 def _listed(body: dict[str, Any], user_id: UUID) -> dict[str, Any] | None:
@@ -327,13 +329,15 @@ def test_every_route_carries_the_intended_permission_gate() -> None:
     assert gates == {
         ("GET", "/api/v1/users"): "users.read",
         ("GET", "/api/v1/users/{user_id}/effective-permissions"): "users.read",
-        ("POST", "/api/v1/users"): "users.manage",
+        ("POST", "/api/v1/users/invite"): "users.manage",
+        ("POST", "/api/v1/users/{user_id}/invite/resend"): "users.manage",
+        ("DELETE", "/api/v1/users/{user_id}/invite"): "users.manage",
         ("POST", "/api/v1/users/{user_id}/roles"): "users.manage",
         ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"): "users.manage",
         ("POST", "/api/v1/users/{user_id}/disable"): "users.manage",
         ("POST", "/api/v1/users/{user_id}/enable"): "users.manage",
-        ("POST", "/api/v1/users/{user_id}/reset-password"): "users.manage",
-        ("POST", "/api/v1/users/{user_id}/resend-enrolment"): "users.manage",
+        ("POST", "/api/v1/users/{user_id}/factors/reset"): "users.manage",
+        ("DELETE", "/api/v1/users/{user_id}/sessions"): "users.manage",
         ("DELETE", "/api/v1/users/{user_id}"): "users.manage",
     }
 
@@ -379,11 +383,11 @@ async def test_writes_require_users_manage(users_env: Any) -> None:
 
     assert (await users_env.client.get("/api/v1/users", headers=headers)).status_code == 200
     refused = [
+        await _invite(users_env, headers, email="x@toeshee.com", display_name="X"),
         await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "x@toeshee.com", "display_name": "X", "role_ids": []},
+            f"/api/v1/users/{victim_id}/invite/resend", headers=headers
         ),
+        await users_env.client.delete(f"/api/v1/users/{victim_id}/invite", headers=headers),
         await users_env.client.post(
             f"/api/v1/users/{victim_id}/roles", headers=headers, json={"role_id": str(role_id)}
         ),
@@ -392,14 +396,12 @@ async def test_writes_require_users_manage(users_env: Any) -> None:
         ),
         await users_env.client.post(f"/api/v1/users/{victim_id}/disable", headers=headers),
         await users_env.client.post(f"/api/v1/users/{victim_id}/enable", headers=headers),
-        await users_env.client.post(f"/api/v1/users/{victim_id}/reset-password", headers=headers),
-        await users_env.client.post(
-            f"/api/v1/users/{victim_id}/resend-enrolment", headers=headers
-        ),
+        await users_env.client.post(f"/api/v1/users/{victim_id}/factors/reset", headers=headers),
+        await users_env.client.delete(f"/api/v1/users/{victim_id}/sessions", headers=headers),
         await users_env.client.delete(f"/api/v1/users/{victim_id}", headers=headers),
     ]
-    assert [r.status_code for r in refused] == [403] * 8
-    # And nothing was attempted against Keycloak on a refused request.
+    assert [r.status_code for r in refused] == [403] * 10
+    # And nothing reached an identity provider.
     assert users_env.kc.seen == []
     # Non-vacuity: the victim really was reachable -- nothing about the target
     # itself refused these, only the missing permission.
@@ -477,31 +479,15 @@ async def test_another_orgs_user_cannot_be_acted_on(users_env: Any) -> None:
     assert users_env.kc.seen == []
 
 
-async def test_no_keycloak_touching_route_reaches_another_orgs_identity(
-    users_env: Any,
-) -> None:
-    """THE CROSS-TENANT DESTRUCTION PATH, and why it needs its own test.
-
-    The ITMS half of every write here is tenant-scoped. The KEYCLOAK half is
-    not, and cannot be: `manage-users` is realm-wide and the admin API has no
-    notion of an ITMS organization at all (spec §2.1). So the only thing
-    standing between org A's administrator and org B's identity is that the
-    subject handed to `kc_client` is read off the TENANT-SCOPED `users` row --
-    never off the id in the request path. A route that resolved the target any
-    other way would delete or disable a real person in another tenant, and the
-    ITMS side of the same request would look like a clean 404.
-
-    Driven on the BYPASSRLS ADMIN ENGINE, so RLS is not what produces the
-    refusal: with the application predicate deleted this test finds org B's row
-    and the assertions below fail. Through a tenant session it would pass either
-    way, which is exactly the mistake it exists to catch.
-
-    Every Keycloak-touching route is here, not a sample -- `disable`, `enable`,
-    `delete`, `reset-password` and `resend-enrolment` -- because a rail on some
-    of them is not a rail.
-    """
-    mine = await users_env.create_org("kc-mine")
-    theirs = await users_env.create_org("kc-theirs")
+async def test_no_lifecycle_route_reaches_another_orgs_user(users_env: Any) -> None:
+    """THE CROSS-TENANT PATH, every write that addresses a user by id: the
+    target is read off the TENANT-SCOPED row and nowhere else, so another
+    org's id is a clean 404 and its row is untouched. Driven on the BYPASSRLS
+    ADMIN ENGINE, so RLS is not what produces the refusal. `factors/reset`
+    is here too: a token has no session to confirm and passes the step-up
+    until Task 13, so it reaches the target read like the rest."""
+    mine = await users_env.create_org("x-mine")
+    theirs = await users_env.create_org("x-theirs")
     _sub, headers, _id = await _admin(users_env, mine)
     stranger = await users_env.create_user(theirs, "technician")
     stranger_id = await _user_id(users_env.admin_engine, stranger)
@@ -518,11 +504,17 @@ async def test_no_keycloak_touching_route_reaches_another_orgs_identity(
             "enable": await users_env.client.post(
                 f"/api/v1/users/{stranger_id}/enable", headers=headers
             ),
-            "reset-password": await users_env.client.post(
-                f"/api/v1/users/{stranger_id}/reset-password", headers=headers
+            "invite/resend": await users_env.client.post(
+                f"/api/v1/users/{stranger_id}/invite/resend", headers=headers
             ),
-            "resend-enrolment": await users_env.client.post(
-                f"/api/v1/users/{stranger_id}/resend-enrolment", headers=headers
+            "invite cancel": await users_env.client.delete(
+                f"/api/v1/users/{stranger_id}/invite", headers=headers
+            ),
+            "factors/reset": await users_env.client.post(
+                f"/api/v1/users/{stranger_id}/factors/reset", headers=headers
+            ),
+            "sessions": await users_env.client.delete(
+                f"/api/v1/users/{stranger_id}/sessions", headers=headers
             ),
             "delete": await users_env.client.delete(
                 f"/api/v1/users/{stranger_id}", headers=headers
@@ -532,24 +524,12 @@ async def test_no_keycloak_touching_route_reaches_another_orgs_identity(
         users_env.app.state.app_engine = users_env.app_engine
 
     assert {name: r.status_code for name, r in attempts.items()} == {
-        "disable": 404,
-        "enable": 404,
-        "reset-password": 404,
-        "resend-enrolment": 404,
-        "delete": 404,
+        name: 404 for name in attempts
     }, {name: r.text for name, r in attempts.items()}
-
-    # NOTHING was said to Keycloak at all -- not about this subject, not about
-    # anything. Asserting the subject specifically as well, because a future
-    # refactor that resolved the target correctly but still issued a call would
-    # be a different bug worth naming.
     assert users_env.kc.seen == []
-    assert not [r for r in users_env.kc.seen if stranger_subject in r.url.path]
-
     # And org B's row is exactly as it was.
     row = await _user_row(users_env.admin_engine, stranger_id)
-    assert row is not None
-    assert row.status == "active"
+    assert row is not None and row.status == "active"
     assert row.external_subject == stranger_subject
 
 
@@ -638,283 +618,191 @@ async def test_a_client_scoped_grant_reports_its_client(users_env: Any) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# POST /users -- rule 3 (ordering) and rule 5 (SMTP)
+# POST /users/invite -- rules 1, 3, 4 and 5
 # --------------------------------------------------------------------------- #
 
 
-async def test_create_makes_the_keycloak_identity_first_then_the_itms_row(
+async def test_an_invite_makes_the_local_row_and_no_identity_anywhere_else(
     users_env: Any,
 ) -> None:
-    """RULE 3. Keycloak's create returns the new user id in `Location`, and that
-    id IS the `sub` claim -- so the ITMS row can be written with the correct
-    `external_subject` immediately rather than waiting for a first login to
-    reconcile. The assertion IS the ordering: a row whose `external_subject`
-    equals the id Keycloak issued could not have been written first."""
-    org = await users_env.create_org("create")
+    """RULE 3 and D5: the row exists, carries a subject no provider issued,
+    and nothing was asked of Keycloak -- which is also why this person cannot
+    reach MCP until phase 3."""
+    org = await users_env.create_org("invite")
     _sub, headers, _id = await _admin(users_env, org)
 
-    response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "ada@toeshee.com", "display_name": "Ada Lovelace", "role_ids": []},
-    )
+    response = await _invite(users_env, headers, display_name="Ada Lovelace")
 
     assert response.status_code == 201, response.text
-    body = response.json()
-    row = await _user_row(users_env.admin_engine, UUID(body["id"]))
+    row = await _user_row(users_env.admin_engine, UUID(response.json()["user_id"]))
     assert row is not None
-    assert row.external_subject == users_env.kc.issued[0]
-    assert row.email == "ada@toeshee.com"
-    assert row.display_name == "Ada Lovelace"
-    assert row.status == "active"
-    assert row.org_id == org
+    assert row.external_subject.startswith("itms-local:")
+    assert (row.email, row.display_name, row.status, row.org_id) == (
+        "ada@toeshee.com", "Ada Lovelace", "active", org,
+    )
+    assert users_env.kc.seen == []
 
 
-async def test_create_assigns_the_requested_roles_and_audits(users_env: Any) -> None:
-    org = await users_env.create_org("create-roles")
+async def test_an_invite_grants_the_requested_roles_per_client_and_audits(
+    users_env: Any,
+) -> None:
+    org = await users_env.create_org("invite-roles")
     _sub, headers, actor_id = await _admin(users_env, org)
-    role_id = await _global_role_id(users_env.admin_engine, "technician")
+    tech = await _global_role_id(users_env.admin_engine, "technician")
+    reader = await _global_role_id(users_env.admin_engine, "read-only")
+    branch = await _client(users_env.admin_engine, org, "branch-office")
 
     body = (
-        await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={
-                "email": "grace@toeshee.com",
-                "display_name": "Grace",
-                "role_ids": [str(role_id)],
-            },
+        await _invite(
+            users_env,
+            headers,
+            email="grace@toeshee.com",
+            grants=[{"role_id": str(tech)}, {"role_id": str(reader), "client_id": str(branch)}],
         )
     ).json()
 
-    new_id = UUID(body["id"])
-    assignments = await _assignments(users_env.admin_engine, new_id)
-    assert [a.role_id for a in assignments] == [role_id]
-    assert body["roles"][0]["role_name"] == "technician"
-    created = [e for e in await _audit(users_env.admin_engine, org) if e.action == "user.created"]
-    assert len(created) == 1
-    assert created[0].actor_id == actor_id
+    new_id = UUID(body["user_id"])
+    held = {(a.role_id, a.client_id) for a in await _assignments(users_env.admin_engine, new_id)}
+    assert held == {(tech, None), (reader, branch)}
+    events = await _audit(users_env.admin_engine, org)
+    created = [e for e in events if e.action == "user.created"]
+    invited = [e for e in events if e.action == "user.invited"]
+    assert len(created) == 1 and created[0].actor_id == actor_id
     assert created[0].target_id == str(new_id)
     assert created[0].meta["email"] == "grace@toeshee.com"
+    assert [e.target_id for e in invited] == [str(new_id)]
 
 
-async def test_create_sends_the_enrolment_email_and_reports_that_it_went(
-    users_env: Any,
-) -> None:
-    import json
-
-    org = await users_env.create_org("create-mail")
+async def test_an_invite_mails_the_link_and_does_not_show_it(users_env: Any) -> None:
+    org = await users_env.create_org("invite-mail")
     _sub, headers, _id = await _admin(users_env, org)
 
-    body = (
-        await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "ada@toeshee.com", "display_name": "Ada", "role_ids": []},
-        )
-    ).json()
+    body = (await _invite(users_env, headers)).json()
 
-    assert body["enrolment_email_sent"] is True
-    assert body["enrolment_email_error"] is None
-    assert len(users_env.kc.mails) == 1
-    actions = json.loads(users_env.kc.mails[0].content)
-    assert "webauthn-register-passwordless" in actions
+    assert body["invite_link"] is None
+    assert [m.to for m in users_env.mail.sent] == ["ada@toeshee.com"]
+    assert "/invite#" in users_env.mail.sent[0].text
 
 
-async def test_a_created_user_whose_enrolment_email_fails_is_still_created_and_says_so(
-    users_env: Any,
-) -> None:
-    """RULE 5, AND THE PATH THIS DEPLOYMENT IS ON TODAY.
-    `deploy/keycloak/realm-it-suite.json` has no `smtpServer`, so this is what
-    the operator's first attempt does. The account must EXIST -- rolling it back
-    would leave a Keycloak identity with no ITMS row on the very failure mode
-    the runbook expects -- and the failure must be VISIBLE, because a "user
-    created" that quietly sent no mail is an account nobody can ever sign into
-    with every status green."""
-    org = await users_env.create_org("create-nosmtp")
+async def test_an_invite_nobody_could_mail_shows_its_link_once(users_env: Any) -> None:
+    """RULE 5 and design §7: without account mail the administrator sees the
+    link -- in this answer and nowhere else -- and the account exists."""
+    org = await users_env.create_org("invite-nomail")
     _sub, headers, _id = await _admin(users_env, org)
-    users_env.kc.mail_status = 500
+    users_env.mail.configured = False
 
-    response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "ada@toeshee.com", "display_name": "Ada", "role_ids": []},
-    )
+    response = await _invite(users_env, headers)
 
     assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["enrolment_email_sent"] is False
-    assert body["enrolment_email_error"]
-    row = await _user_row(users_env.admin_engine, UUID(body["id"]))
+    link = response.json()["invite_link"]
+    assert link and link.startswith(f"{CONSOLE}/invite#")
+    row = await _user_row(users_env.admin_engine, UUID(response.json()["user_id"]))
     assert row is not None and row.status == "active"
 
 
-async def test_a_refused_keycloak_create_leaves_no_itms_row(users_env: Any) -> None:
-    """RULE 3, THE FIRST FAILURE ORDERING. Keycloak answers 409 when the email
-    or username is taken. Writing the ITMS row anyway would point it at an
-    identity somebody else owns."""
-    org = await users_env.create_org("create-409")
+async def test_an_address_already_in_use_is_refused_before_anything_is_written(
+    users_env: Any,
+) -> None:
+    org = await users_env.create_org("invite-409")
     _sub, headers, _id = await _admin(users_env, org)
-    users_env.kc.create_status = 409
+    await _invite(users_env, headers, email="taken@toeshee.com")
+    users_env.mail.sent.clear()
 
-    response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "taken@toeshee.com", "display_name": "Taken", "role_ids": []},
-    )
+    response = await _invite(users_env, headers, email="taken@toeshee.com")
 
-    assert response.status_code == 502, response.text
-    assert await _user_by_email(users_env.admin_engine, "taken@toeshee.com") is None
-    assert users_env.kc.mails == []
+    assert response.status_code == 409, response.text
+    assert users_env.mail.sent == []
 
 
-async def test_a_failed_itms_write_leaves_an_account_with_no_roles(users_env: Any) -> None:
-    """RULE 3, THE SECOND FAILURE ORDERING, and the reason the order is this way
-    round rather than the other.
-
-    The ITMS half is made to fail by pre-seeding a row that already carries the
-    `external_subject` Keycloak is about to issue, which trips
-    `UniqueConstraint(org_id, external_subject)`. What is left behind is a
-    Keycloak account holding no roles -- exactly the state of any federated user
-    before their first login, which `app/api/deps.py` already self-heals. The
-    REVERSE order would strand an ITMS row holding roles that no identity can
-    ever claim, which nothing self-heals.
-    """
-    org = await users_env.create_org("create-dup")
+async def test_a_failed_write_leaves_nothing_behind(users_env: Any) -> None:
+    """The address in another case passes the service's exact-match check and
+    trips `ux_users_org_lower_email_staff` (D2): the IntegrityError is a 409
+    -- PINNED, not `>= 400`: a 500 would be the regression -- and the whole
+    transaction rolls back: no row, no invitation, no mail."""
+    org = await users_env.create_org("invite-dup")
     _sub, headers, _id = await _admin(users_env, org)
-    collide = str(uuid4())
-    users_env.kc.next_id = collide
     async with AsyncSession(users_env.admin_engine) as session:
         session.add(
-            User(org_id=org, external_subject=collide, email="squatter@toeshee.com")
+            User(org_id=org, external_subject=f"sub-{uuid4().hex[:8]}", email="Clash@toeshee.com")
         )
         await session.commit()
 
-    response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "clash@toeshee.com", "display_name": "Clash", "role_ids": []},
-    )
+    response = await _invite(users_env, headers, email="clash@toeshee.com")
 
-    # PINNED, not `>= 400`. The service catches the `IntegrityError` and answers
-    # 409 deliberately -- a row already claims this subject. `>= 400` also passes
-    # on the very regression this test exists to notice: the exception escaping
-    # unhandled and surfacing as a 500, which is the same database failure
-    # reported as a bug in this platform rather than a conflict in the request.
     assert response.status_code == 409, response.text
-    # The Keycloak identity WAS created -- proof the order is Keycloak first.
-    assert users_env.kc.calls("POST", "/users")
-    # And the ITMS half rolled back entirely: no row, therefore no roles.
     assert await _user_by_email(users_env.admin_engine, "clash@toeshee.com") is None
+    assert users_env.mail.sent == []
 
 
-async def test_create_refuses_an_email_outside_the_configured_domain(
+async def test_an_invite_refuses_an_email_outside_the_configured_domain(
     users_env: Any,
 ) -> None:
-    """RULE 4. `app.core.identity.email_domain.is_allowed_domain` is the SAME
-    function the three admission doors use (spec §3.2). A console that refuses
-    an address at sign-in but mints it in the create form is not enforcing
-    anything -- it just moves the lockout to the new colleague's first day."""
-    org = await users_env.create_org("create-domain")
+    """RULE 4, with the SAME helper the doors use (spec §3.2)."""
+    org = await users_env.create_org("invite-domain")
     sub, _headers, _id = await _admin(users_env, org)
-    # The CALLER's own token has to pass the rule too, or `deps.py` refuses this
-    # request at the door and the 403 would look like the create being refused.
+    # The CALLER's own address has to pass the rule too, or `deps.py` refuses this
+    # request at the door and the 403 would look like the invite being refused.
     headers = await _headers_claiming(users_env, org, sub, "admin@toeshee.com")
     users_env.app.state.settings.console_email_domain = "toeshee.com"
     try:
-        refused = await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "mallory@eviltoeshee.com", "display_name": "M", "role_ids": []},
-        )
-        # A SUBDOMAIN IS ALLOWED -- non-vacuity, so a rule that refused
-        # everything would not pass this test.
-        allowed = await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "ada@mail.toeshee.com", "display_name": "Ada", "role_ids": []},
-        )
+        refused = await _invite(users_env, headers, email="mallory@eviltoeshee.com")
+        # A SUBDOMAIN IS ALLOWED -- non-vacuity.
+        allowed = await _invite(users_env, headers, email="ada@mail.toeshee.com")
     finally:
         users_env.app.state.settings.console_email_domain = None
 
     assert refused.status_code == 422, refused.text
     assert allowed.status_code == 201, allowed.text
-    # Refused BEFORE Keycloak: no identity is minted for an address the console
-    # will not admit.
-    assert len(users_env.kc.calls("POST", "/users")) == 1
+    # Refused before anything was written: only the allowed one got a mail.
+    assert [m.to for m in users_env.mail.sent] == ["ada@mail.toeshee.com"]
 
 
 async def test_a_whitespace_only_domain_setting_is_unrestricted_here_too(
     users_env: Any,
 ) -> None:
-    """THE TWO SURFACES MUST READ THE SETTING THE SAME WAY.
-
-    `ITS_CONSOLE_EMAIL_DOMAIN=` in an env file yields `""`, and a value of
-    spaces yields `"   "`. `app.core.identity.domain_refusal` -- the helper all
-    three admission doors call -- reads both as NO RESTRICTION, deliberately:
-    read as a restriction it matches no address at all and locks out the whole
-    deployment including the operator, which is the one failure spec §3.3 exists
-    to prevent.
-
-    A create form that tested the setting for bare truthiness instead would read
-    the same string as a RESTRICTION and refuse every address, so the console
-    would admit a person at sign-in and refuse to create them -- one setting,
-    two answers. This test drives the caller through door 1 with the same
-    setting in place, so the two readings are compared rather than assumed.
-    """
-    org = await users_env.create_org("create-blank-domain")
+    """THE TWO SURFACES MUST READ THE SETTING THE SAME WAY: `domain_refusal`
+    reads "" and "   " as no restriction, at the door and here."""
+    org = await users_env.create_org("invite-blank-domain")
     sub, _headers, _id = await _admin(users_env, org)
     headers = await _headers_claiming(users_env, org, sub, "admin@elsewhere.example")
     users_env.app.state.settings.console_email_domain = "   "
     try:
-        response = await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "ada@elsewhere.example", "display_name": "Ada", "role_ids": []},
-        )
+        response = await _invite(users_env, headers, email="ada@elsewhere.example")
     finally:
         users_env.app.state.settings.console_email_domain = None
 
-    # 201, not 403: door 1 admitted the caller on this setting, so the create
-    # form must too. A 403 here would mean the door disagreed with the form.
+    # 201, not 403: door 1 admitted the caller on this setting, so the invite
+    # must too. A 403 here would mean the door disagreed with the form.
     assert response.status_code == 201, response.text
     assert await _user_by_email(users_env.admin_engine, "ada@elsewhere.example") is not None
 
 
-async def test_create_refuses_super_admin(users_env: Any) -> None:
+async def test_an_invite_refuses_super_admin(users_env: Any) -> None:
     """`super-admin` is cross-org platform administration (spec §1.3). An
     org-scoped surface that could grant it is a tenant-escalation path."""
-    org = await users_env.create_org("create-su")
+    org = await users_env.create_org("invite-su")
     _sub, headers, _id = await _admin(users_env, org)
     su = await _global_role_id(users_env.admin_engine, "super-admin")
 
-    response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "root@toeshee.com", "display_name": "Root", "role_ids": [str(su)]},
+    response = await _invite(
+        users_env, headers, email="root@toeshee.com", grants=[{"role_id": str(su)}]
     )
 
     assert response.status_code == 403, response.text
     assert await _user_by_email(users_env.admin_engine, "root@toeshee.com") is None
-    assert users_env.kc.seen == []
+    assert users_env.kc.seen == [] and users_env.mail.sent == []
 
 
-async def test_create_refuses_another_orgs_role(users_env: Any) -> None:
-    org = await users_env.create_org("create-role-mine")
-    theirs = await users_env.create_org("create-role-theirs")
+async def test_an_invite_refuses_another_orgs_role(users_env: Any) -> None:
+    org = await users_env.create_org("invite-role-mine")
+    theirs = await users_env.create_org("invite-role-theirs")
     _sub, headers, _id = await _admin(users_env, org)
     theirs_role = await _seed_role(users_env.admin_engine, theirs, "not-yours", ["devices.read"])
 
     users_env.app.state.app_engine = users_env.admin_engine
     try:
-        response = await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={
-                "email": "x@toeshee.com",
-                "display_name": "X",
-                "role_ids": [str(theirs_role)],
-            },
+        response = await _invite(
+            users_env, headers, email="x@toeshee.com", grants=[{"role_id": str(theirs_role)}]
         )
     finally:
         users_env.app.state.app_engine = users_env.app_engine
@@ -923,111 +811,73 @@ async def test_create_refuses_another_orgs_role(users_env: Any) -> None:
     assert await _user_by_email(users_env.admin_engine, "x@toeshee.com") is None
 
 
-async def test_lifecycle_routes_refuse_when_keycloak_is_not_configured(
-    users_env: Any,
-) -> None:
-    """`KeycloakAdminConfig.from_settings` returns `None` on a deployment that
-    has not set provisioning up, and that is a SUPPORTED state. What it must not
-    be is a 500: a 503 naming the setting is what tells the operator the gap is
-    configuration rather than a bug."""
+async def test_the_lifecycle_needs_no_identity_provider_configuration(users_env: Any) -> None:
+    """Rule 3, from the deployment's side: with no `ITS_KEYCLOAK_ADMIN_*` at all
+    (the test settings set none) every lifecycle write works, where it used to
+    be a 503."""
+    assert users_env.settings.keycloak_admin_url is None
     org = await users_env.create_org("no-kc")
-    _sub, headers, admin_id = await _admin(users_env, org)
-    users_env.app.dependency_overrides[keycloak_config] = lambda: None
+    _sub, headers, _admin_id = await _admin(users_env, org)
+    await users_env.create_user(org, "org-admin")
     victim = await users_env.create_user(org, "technician")
     victim_id = await _user_id(users_env.admin_engine, victim)
 
     responses = [
-        await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "a@toeshee.com", "display_name": "A", "role_ids": []},
-        ),
+        await _invite(users_env, headers),
         await users_env.client.post(f"/api/v1/users/{victim_id}/disable", headers=headers),
         await users_env.client.post(f"/api/v1/users/{victim_id}/enable", headers=headers),
-        await users_env.client.post(
-            f"/api/v1/users/{victim_id}/reset-password", headers=headers
-        ),
-        await users_env.client.post(
-            f"/api/v1/users/{victim_id}/resend-enrolment", headers=headers
-        ),
+        await users_env.client.delete(f"/api/v1/users/{victim_id}/sessions", headers=headers),
         await users_env.client.delete(f"/api/v1/users/{victim_id}", headers=headers),
     ]
 
-    assert [r.status_code for r in responses] == [503] * 6
-    # Reads and role assignment need no Keycloak at all and must still work.
-    assert (await users_env.client.get("/api/v1/users", headers=headers)).status_code == 200
-    assert admin_id
+    assert [r.status_code for r in responses] == [201, 200, 200, 204, 204]
+    assert users_env.kc.seen == []
 
 
-async def test_authorization_runs_before_the_provisioning_secret_is_read(
-    users_env: Any, tmp_path: Any
-) -> None:
-    """THE ORDER OF THE DEPENDENCIES IS A SECURITY PROPERTY, not a style point.
-
-    `keycloak_config` reads the provisioning client secret OFF DISK. FastAPI
-    resolves a route's dependencies in declaration order, so declaring it ahead
-    of `require_permission` means every unauthenticated request to these six
-    routes opens and reads the `manage-users` credential before anything has
-    established who is asking. Nothing is returned to the caller, but the read
-    happens, and an anonymous request that touches a secret is a filesystem and
-    audit surface nobody asked for.
-
-    Proved by pointing the setting at a path that DOES NOT EXIST:
-    `KeycloakAdminConfig.from_settings` raises `FileNotFoundError` on a
-    configured-but-missing secret, so if the read is reached at all the request
-    cannot answer 401 or 403. The `pytest.raises` at the end is the non-vacuity
-    half -- an authorized caller DOES reach the read and DOES blow up on it,
-    which is what makes the 401s and 403s above evidence of ordering rather than
-    evidence that the setting was ignored.
-    """
+async def test_authorization_runs_before_anything_else(users_env: Any) -> None:
+    """No credential, then the wrong one: 401 and 403 on every write that
+    takes a user id, before the handler reads anything. Non-vacuity: an
+    authorized caller DOES reach the handler, which answers 404 for an id
+    that is nobody."""
     org = await users_env.create_org("dep-order")
-    users_env.app.dependency_overrides.pop(keycloak_config, None)
-    settings = users_env.app.state.settings
-    settings.keycloak_admin_url = "https://keycloak.test"
-    settings.keycloak_admin_secret_path = tmp_path / "absent" / "provisioning.secret"
-
     nobody = await users_env.create_user(org)
     unprivileged = await users_env.headers(org, nobody)
     victim = uuid4()
 
     async def drive(headers: dict[str, str]) -> list[int]:
         return [
+            (await _invite(users_env, headers, email="a@toeshee.com")).status_code,
             (
-                await users_env.client.post(
-                    "/api/v1/users",
-                    headers=headers,
-                    json={"email": "a@toeshee.com", "display_name": "A", "role_ids": []},
-                )
+                await users_env.client.post(f"/api/v1/users/{victim}/disable", headers=headers)
+            ).status_code,
+            (
+                await users_env.client.post(f"/api/v1/users/{victim}/enable", headers=headers)
             ).status_code,
             (
                 await users_env.client.post(
-                    f"/api/v1/users/{victim}/disable", headers=headers
+                    f"/api/v1/users/{victim}/invite/resend", headers=headers
                 )
             ).status_code,
             (
-                await users_env.client.post(
-                    f"/api/v1/users/{victim}/enable", headers=headers
-                )
+                await users_env.client.delete(f"/api/v1/users/{victim}/invite", headers=headers)
             ).status_code,
             (
                 await users_env.client.post(
-                    f"/api/v1/users/{victim}/reset-password", headers=headers
+                    f"/api/v1/users/{victim}/factors/reset", headers=headers
                 )
             ).status_code,
             (
-                await users_env.client.post(
-                    f"/api/v1/users/{victim}/resend-enrolment", headers=headers
-                )
+                await users_env.client.delete(f"/api/v1/users/{victim}/sessions", headers=headers)
             ).status_code,
             (await users_env.client.delete(f"/api/v1/users/{victim}", headers=headers)).status_code,
         ]
 
-    assert await drive({}) == [401] * 6
-    assert await drive(unprivileged) == [403] * 6
-
+    assert await drive({}) == [401] * 8
+    assert await drive(unprivileged) == [403] * 8
+    assert users_env.mail.sent == []
     _sub, headers, _id = await _admin(users_env, org)
-    with pytest.raises(FileNotFoundError):
-        await users_env.client.post(f"/api/v1/users/{victim}/disable", headers=headers)
+    reached = await users_env.client.post(f"/api/v1/users/{victim}/disable", headers=headers)
+    assert reached.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
@@ -1440,35 +1290,32 @@ async def test_a_second_org_admin_makes_the_first_removable(users_env: Any) -> N
 # --------------------------------------------------------------------------- #
 
 
-async def test_disable_writes_the_itms_status_and_turns_the_identity_off(
+async def test_disable_writes_the_status_and_ends_the_persons_sessions(
     users_env: Any,
 ) -> None:
-    """BOTH halves, because neither alone is enough. Keycloak's `enabled: false`
-    stops the NEXT token being issued and does nothing to the one already in the
-    browser; `users.status` is what the three admission doors check, and it is
-    what closes that window (spec §3.2)."""
-    import json
-
+    """`users.status` stops the next admission; the sessions end now (design
+    §2.4) -- the cookie already in the person's browser stops working, and it
+    stays dead after a re-enable, which `users.status` alone would not do."""
     org = await users_env.create_org("disable")
     _sub, headers, actor_id = await _admin(users_env, org)
-    tech = await users_env.create_user(org, "technician")
-    tech_id = await _user_id(users_env.admin_engine, tech)
+    member = await signed_in(users_env, org, "technician")
 
-    response = await users_env.client.post(f"/api/v1/users/{tech_id}/disable", headers=headers)
+    response = await users_env.client.post(
+        f"/api/v1/users/{member.user_id}/disable", headers=headers
+    )
 
     assert response.status_code == 200, response.text
-    row = await _user_row(users_env.admin_engine, tech_id)
+    row = await _user_row(users_env.admin_engine, member.user_id)
     assert row is not None and row.status == "disabled"
-    put = users_env.kc.calls("PUT")
-    assert len(put) == 1
-    assert json.loads(put[0].content) == {"enabled": False}
+    assert (await users_env.client.get("/api/v1/me", headers=member.headers())).status_code == 401
+    await users_env.client.post(f"/api/v1/users/{member.user_id}/enable", headers=headers)
+    assert (await users_env.client.get("/api/v1/me", headers=member.headers())).status_code == 401
     events = [e for e in await _audit(users_env.admin_engine, org) if e.action == "user.disabled"]
     assert len(events) == 1 and events[0].actor_id == actor_id
+    assert users_env.kc.seen == []
 
 
-async def test_enable_restores_both_halves(users_env: Any) -> None:
-    import json
-
+async def test_enable_restores_the_status(users_env: Any) -> None:
     org = await users_env.create_org("enable")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org, "technician")
@@ -1480,23 +1327,27 @@ async def test_enable_restores_both_halves(users_env: Any) -> None:
     assert response.status_code == 200, response.text
     row = await _user_row(users_env.admin_engine, tech_id)
     assert row is not None and row.status == "active"
-    assert json.loads(users_env.kc.calls("PUT")[-1].content) == {"enabled": True}
+    assert users_env.kc.seen == []
 
 
-async def test_a_keycloak_failure_rolls_the_itms_status_back(users_env: Any) -> None:
-    """A half-applied disable is the worst outcome available: the console shows
-    "disabled" and Keycloak keeps issuing tokens, or the reverse. The ITMS write
-    happens inside the transaction and the Keycloak call inside it too, so a
-    raise takes both down."""
+async def test_a_failure_inside_disable_rolls_the_status_back(
+    users_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A half-applied disable -- "disabled" with live sessions, or the reverse
+    -- is the worst outcome: the sessions end inside the same transaction as
+    the status, so a failure there takes both down."""
     org = await users_env.create_org("disable-fail")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org, "technician")
     tech_id = await _user_id(users_env.admin_engine, tech)
-    users_env.kc.update_status = 403
 
-    response = await users_env.client.post(f"/api/v1/users/{tech_id}/disable", headers=headers)
+    async def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("the session store did not answer")
 
-    assert response.status_code == 502, response.text
+    monkeypatch.setattr(user_admin_service, "end_all_for_user", broken)
+    with pytest.raises(RuntimeError):
+        await users_env.client.post(f"/api/v1/users/{tech_id}/disable", headers=headers)
+
     row = await _user_row(users_env.admin_engine, tech_id)
     assert row is not None and row.status == "active"
     events = await _audit(users_env.admin_engine, org)
@@ -1504,87 +1355,66 @@ async def test_a_keycloak_failure_rolls_the_itms_status_back(users_env: Any) -> 
 
 
 # --------------------------------------------------------------------------- #
-# reset-password and resend-enrolment -- rule 1 and rule 5
+# the invitation link again -- rule 5
 # --------------------------------------------------------------------------- #
 
 
-async def test_reset_password_asks_keycloak_to_email_update_password(
-    users_env: Any,
-) -> None:
-    """RULE 1. The entire implementation of "reset this person's password" is
-    one `execute-actions-email` call. ITMS never generates, stores, displays or
-    returns a password, and there is no branch anywhere that could."""
-    import json
-
+async def test_an_administrator_no_longer_resets_a_password_by_mail(users_env: Any) -> None:
+    """Plan decision 2: the person resets their own (design §2.8); the old
+    route is gone, and nothing is audited for it."""
     org = await users_env.create_org("reset")
-    _sub, headers, actor_id = await _admin(users_env, org)
+    _sub, headers, _actor = await _admin(users_env, org)
     tech = await users_env.create_user(org, "technician")
     tech_id = await _user_id(users_env.admin_engine, tech)
 
     response = await users_env.client.post(
         f"/api/v1/users/{tech_id}/reset-password", headers=headers
+    )
+
+    assert response.status_code == 404
+    events = await _audit(users_env.admin_engine, org)
+    assert [e for e in events if e.action == "user.password_reset_requested"] == []
+    assert users_env.kc.seen == [] and users_env.mail.sent == []
+
+
+async def test_a_resend_whose_mail_fails_shows_the_new_link(users_env: Any) -> None:
+    org = await users_env.create_org("resend-fail")
+    _sub, headers, _id = await _admin(users_env, org)
+    created = (await _invite(users_env, headers)).json()
+    users_env.mail.failing = True
+
+    response = await users_env.client.post(
+        f"/api/v1/users/{created['user_id']}/invite/resend", headers=headers
     )
 
     assert response.status_code == 200, response.text
-    assert json.loads(users_env.kc.mails[0].content) == ["UPDATE_PASSWORD"]
-    events = [
-        e
-        for e in await _audit(users_env.admin_engine, org)
-        if e.action == "user.password_reset_requested"
-    ]
-    assert len(events) == 1 and events[0].actor_id == actor_id
+    assert response.json()["invite_link"].startswith(f"{CONSOLE}/invite#")
 
 
-async def test_a_mail_failure_on_reset_is_reported_not_swallowed(users_env: Any) -> None:
-    """Unlike creation, the mail IS the whole action here -- there is no partial
-    success to report -- so it is an error status rather than a flag in a 200
-    body. A 200 would tell the operator a link is on its way when the realm has
-    no SMTP server configured."""
-    org = await users_env.create_org("reset-fail")
-    _sub, headers, _id = await _admin(users_env, org)
-    tech = await users_env.create_user(org, "technician")
-    tech_id = await _user_id(users_env.admin_engine, tech)
-    users_env.kc.mail_status = 500
-
-    response = await users_env.client.post(
-        f"/api/v1/users/{tech_id}/reset-password", headers=headers
-    )
-
-    assert response.status_code == 502, response.text
-
-
-async def test_resend_enrolment_sends_the_enrolment_actions(users_env: Any) -> None:
-    """RULE 5's other half. Without this route, one transient mail failure at
-    creation leaves an account nobody can ever sign into -- Keycloak 26 exposes
-    no admin API that returns the action link for an operator to pass on by
-    hand."""
-    import json
-
+async def test_resend_replaces_the_invitation_link(users_env: Any) -> None:
+    """RULE 5's other half: one transient mail failure must not leave an account
+    nobody can sign into -- and the old link must stop working."""
     org = await users_env.create_org("resend")
     _sub, headers, _id = await _admin(users_env, org)
-    users_env.kc.mail_status = 500
-    created = (
-        await users_env.client.post(
-            "/api/v1/users",
-            headers=headers,
-            json={"email": "ada@toeshee.com", "display_name": "Ada", "role_ids": []},
-        )
-    ).json()
-    assert created["enrolment_email_sent"] is False
-    users_env.kc.mail_status = 204
+    users_env.mail.configured = False
+    created = (await _invite(users_env, headers)).json()
+    first = created["invite_link"]
 
     response = await users_env.client.post(
-        f"/api/v1/users/{created['id']}/resend-enrolment", headers=headers
+        f"/api/v1/users/{created['user_id']}/invite/resend", headers=headers
     )
 
     assert response.status_code == 200, response.text
-    actions = json.loads(users_env.kc.mails[-1].content)
-    assert "UPDATE_PASSWORD" in actions
-    assert "webauthn-register-passwordless" in actions
+    second = response.json()["invite_link"]
+    assert second and second != first
+    old = await users_env.client.post(
+        "/api/v1/auth/invite/details",
+        headers=console_headers(),
+        json={"token": first.split("#", 1)[1]},
+    )
+    assert old.status_code == 410
     assert [
-        e
-        for e in await _audit(users_env.admin_engine, org)
-        if e.action == "user.enrolment_resent"
+        e for e in await _audit(users_env.admin_engine, org) if e.action == "user.invite_resent"
     ]
 
 
@@ -1593,7 +1423,7 @@ async def test_resend_enrolment_sends_the_enrolment_actions(users_env: Any) -> N
 # --------------------------------------------------------------------------- #
 
 
-async def test_delete_removes_the_identity_and_retains_the_itms_row(
+async def test_delete_retains_the_itms_row(
     users_env: Any,
 ) -> None:
     """RULE 2. 89 foreign-key columns across 21 tables reference `users.id`
@@ -1607,9 +1437,9 @@ async def test_delete_removes_the_identity_and_retains_the_itms_row(
     response = await users_env.client.delete(f"/api/v1/users/{tech_id}", headers=headers)
 
     assert response.status_code == 204, response.text
-    assert len(users_env.kc.calls("DELETE")) == 1
+    assert users_env.kc.seen == []
     row = await _user_row(users_env.admin_engine, tech_id)
-    assert row is not None, "the ITMS row must be RETAINED, only the identity goes"
+    assert row is not None, "the ITMS row must be RETAINED"
     assert row.status == "deleted"
     events = [e for e in await _audit(users_env.admin_engine, org) if e.action == "user.deleted"]
     assert len(events) == 1 and events[0].actor_id == actor_id
@@ -1651,21 +1481,23 @@ async def test_a_deleted_users_audit_history_is_still_resolvable(users_env: Any)
     assert resolved[0].email
 
 
-async def test_a_failed_keycloak_delete_does_not_mark_the_row_deleted(
-    users_env: Any,
+async def test_a_failure_inside_delete_does_not_mark_the_row_deleted(
+    users_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A row marked `deleted` whose identity still exists is a user the console
-    says is gone who can still sign in -- and `users.status` would then be the
-    only thing stopping them."""
+    """A row marked `deleted` whose sessions still work is a user the console
+    says is gone who can still act: the session end is inside the transaction."""
     org = await users_env.create_org("delete-fail")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org, "technician")
     tech_id = await _user_id(users_env.admin_engine, tech)
-    users_env.kc.delete_status = 500
 
-    response = await users_env.client.delete(f"/api/v1/users/{tech_id}", headers=headers)
+    async def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("the session store did not answer")
 
-    assert response.status_code == 502, response.text
+    monkeypatch.setattr(user_admin_service, "end_all_for_user", broken)
+    with pytest.raises(RuntimeError):
+        await users_env.client.delete(f"/api/v1/users/{tech_id}", headers=headers)
+
     row = await _user_row(users_env.admin_engine, tech_id)
     assert row is not None and row.status == "active"
 
@@ -1682,23 +1514,23 @@ async def test_no_route_returns_anything_password_shaped(users_env: Any) -> None
     the test fails if the router grows a path this sweep does not exercise.
 
     THE SCAN CARRIES NO EXEMPTIONS, and keeping it that way changed the design:
-    the mail routes originally echoed Keycloak's required-action names back
-    (`["UPDATE_PASSWORD"]`, `["webauthn-register-passwordless", ...]`), which
-    would have forced two carve-outs into this list. Neither name is a
-    credential, but a sweep with exemptions is a sweep that can be widened, so
-    `MailResultOut` dropped the field instead.
+    the old mail routes originally echoed Keycloak's required-action names back
+    (`["UPDATE_PASSWORD"]`, ...), which would have forced carve-outs into this
+    list; the field was dropped instead. An invitation's link is the one secret
+    the surface returns, and only when no mail carried it -- here the mail
+    works, so no body carries one.
+
+    Driven by an administrator signed in with the console cookie and a fresh
+    second factor, so the factor reset succeeds like the rest.
     """
     org = await users_env.create_org("sweep")
-    _sub, headers, _id = await _admin(users_env, org)
+    admin = await signed_in(users_env, org, "org-admin")
+    headers = admin.headers()
     role_id = await _global_role_id(users_env.admin_engine, "technician")
-    create_response = await users_env.client.post(
-        "/api/v1/users",
-        headers=headers,
-        json={"email": "ada@toeshee.com", "display_name": "Ada", "role_ids": []},
-    )
-    assert create_response.status_code == 201, create_response.text
-    created = create_response.json()
-    uid = created["id"]
+    first = await _invite(users_env, headers)
+    second = await _invite(users_env, headers, email="bea@toeshee.com", display_name="Bea")
+    assert first.status_code == second.status_code == 201, (first.text, second.text)
+    uid, other = first.json()["user_id"], second.json()["user_id"]
     assign_response = await users_env.client.post(
         f"/api/v1/users/{uid}/roles", headers=headers, json={"role_id": str(role_id)}
     )
@@ -1710,11 +1542,14 @@ async def test_no_route_returns_anything_password_shaped(users_env: Any) -> None
         "GET effective": await users_env.client.get(
             f"/api/v1/users/{uid}/effective-permissions", headers=headers
         ),
-        "POST reset-password": await users_env.client.post(
-            f"/api/v1/users/{uid}/reset-password", headers=headers
+        "POST invite/resend": await users_env.client.post(
+            f"/api/v1/users/{uid}/invite/resend", headers=headers
         ),
-        "POST resend-enrolment": await users_env.client.post(
-            f"/api/v1/users/{uid}/resend-enrolment", headers=headers
+        "POST factors/reset": await users_env.client.post(
+            f"/api/v1/users/{uid}/factors/reset", headers=headers
+        ),
+        "DELETE sessions": await users_env.client.delete(
+            f"/api/v1/users/{uid}/sessions", headers=headers
         ),
         "POST disable": await users_env.client.post(
             f"/api/v1/users/{uid}/disable", headers=headers
@@ -1724,6 +1559,9 @@ async def test_no_route_returns_anything_password_shaped(users_env: Any) -> None
         ),
         "DELETE role": await users_env.client.delete(
             f"/api/v1/users/{uid}/roles/{assign['assignment_id']}", headers=headers
+        ),
+        "DELETE invite": await users_env.client.delete(
+            f"/api/v1/users/{other}/invite", headers=headers
         ),
         "DELETE user": await users_env.client.delete(f"/api/v1/users/{uid}", headers=headers),
     }
@@ -1737,7 +1575,7 @@ async def test_no_route_returns_anything_password_shaped(users_env: Any) -> None
     for name, response in responses.items():
         assert response.status_code < 400, f"{name} failed: {response.status_code} {response.text}"
 
-    bodies = {"POST /users": str(created), "POST role": str(assign)}
+    bodies = {"POST /users/invite": first.text + second.text, "POST role": str(assign)}
     bodies |= {name: r.text for name, r in responses.items()}
     for name, body in bodies.items():
         haystack = body.lower()
@@ -1755,15 +1593,12 @@ async def test_no_route_returns_anything_password_shaped(users_env: Any) -> None
 
 
 def test_the_settings_the_surface_depends_on_exist() -> None:
-    """A guard against this workstream's own assumption. `keycloak_config`
-    reads three settings by name; a rename elsewhere would make
-    `from_settings` silently return `None` and every lifecycle route answer 503
-    on a correctly configured deployment."""
-    from app.core.config import Settings
-
+    """A guard against this surface's own assumption: an invitation link is
+    made from `public_console_url` and the domain rule reads
+    `console_email_domain`. A rename elsewhere would make every invitation a
+    503, or switch the rule off."""
     fields = Settings.model_fields
-    assert "keycloak_admin_client_id" in fields
-    assert "keycloak_admin_secret_path" in fields
+    assert "public_console_url" in fields
     assert "console_email_domain" in fields
 
 
@@ -1775,9 +1610,8 @@ def test_the_settings_the_surface_depends_on_exist() -> None:
 async def test_a_contact_is_not_a_user_this_surface_administers(users_env: Any) -> None:
     """A contact (`users.kind = 'contact'`, spec §1.3) is managed from its
     client's page (`/api/v1/contacts/{id}`), never here: it is not listed, and
-    every read and write addressed to its id is a 404 that reaches neither
-    Keycloak (its subject is a placeholder no identity provider issued) nor
-    the row."""
+    every read and write addressed to its id is a 404 that reaches no identity
+    provider and not the row."""
     org = await users_env.create_org("ua-contact")
     _sub, headers, _admin_id = await _admin(users_env, org)
     technician = await _global_role_id(users_env.admin_engine, "technician")
@@ -1808,8 +1642,10 @@ async def test_a_contact_is_not_a_user_this_surface_administers(users_env: Any) 
         ("DELETE", f"/api/v1/users/{contact.id}/roles/{grant.id}", None),
         ("POST", f"/api/v1/users/{contact.id}/disable", None),
         ("POST", f"/api/v1/users/{contact.id}/enable", None),
-        ("POST", f"/api/v1/users/{contact.id}/reset-password", None),
-        ("POST", f"/api/v1/users/{contact.id}/resend-enrolment", None),
+        ("POST", f"/api/v1/users/{contact.id}/invite/resend", None),
+        ("DELETE", f"/api/v1/users/{contact.id}/invite", None),
+        ("POST", f"/api/v1/users/{contact.id}/factors/reset", None),
+        ("DELETE", f"/api/v1/users/{contact.id}/sessions", None),
         ("DELETE", f"/api/v1/users/{contact.id}", None),
     ]
     answers = []

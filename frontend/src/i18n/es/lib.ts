@@ -41,9 +41,6 @@ export const lib: Shape<typeof en> = {
     sentenceOne: "permiso para {phrase}",
     sentenceMany: "permiso para {first} {and} {last}",
   },
-  internalClient: {
-    unknown: "Tu cuenta aún no se ha cargado, así que la consola no sabe para qué cliente es esto. No se envió nada. Recarga la página e inténtalo de nuevo.",
-  },
   clientScope: {
     gone: "El cliente que habías elegido ya no está disponible para ti, así que la consola muestra todos tus clientes.",
   },

@@ -21,7 +21,7 @@ Between them, deleting either guard turns one of the two red.
 """
 
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -37,6 +37,7 @@ from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
 from app.core.tenancy import org_session
 from app.models import Organization
+from tests.session_support import console_headers, cookie_header
 
 
 async def _org_row(engine: AsyncEngine, org_id: UUID) -> Organization:
@@ -538,10 +539,11 @@ async def test_an_audited_write_is_scoped_to_the_writers_org(api_env: Any) -> No
 
 
 async def test_a_patch_for_a_deleted_org_is_404_not_a_crash(api_env: Any) -> None:
-    """Belt and braces on the `scalar_one_or_none()` path: a token whose org
-    no longer exists is refused at authentication, so the handler's own 404 is
-    unreachable in practice -- assert the observable, not the branch."""
-    slug = f"gone-{uuid4().hex[:8]}"
-    headers = {"Authorization": f"Bearer {api_env.idp.token('nobody', slug)}"}
+    """Belt and braces on the `scalar_one_or_none()` path: a cookie that names
+    no session is refused at authentication, so the handler's own 404 is
+    unreachable in practice -- assert the observable, not the branch. (It was
+    a token naming an org that no longer exists, until own authentication
+    Task 13: a session names its org itself.)"""
+    headers = {"Cookie": cookie_header("not-a-session"), **console_headers()}
     response = await api_env.client.get("/api/v1/orgs/current", headers=headers)
     assert response.status_code == 401

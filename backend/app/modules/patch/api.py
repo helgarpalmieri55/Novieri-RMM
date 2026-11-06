@@ -1326,6 +1326,14 @@ async def upsert_policy(
         # take the first existing default rather than risk inserting a second.
         query = select(PatchPolicy).where(PatchPolicy.org_id == ctx.org_id)
         if body.device_group_id is None:
+            # THE ORG DEFAULT IS THE GLOBAL ROW: written only under the
+            # every-client scope, refused before anything is read. The flush
+            # guard alone (`app.core.global_rows`) misses a body identical to
+            # the stored row -- no attribute changes, nothing is flushed -- and
+            # the route answered 200 and audited `patch.policy.changed` for a
+            # write the actor may not make (phase 3 last fix round). Whose row
+            # it is decides the refusal, never what it holds.
+            refuse_unless_every_client(session, "patch_policies")
             query = query.where(PatchPolicy.device_group_id.is_(None))
         else:
             query = query.where(PatchPolicy.device_group_id == body.device_group_id)

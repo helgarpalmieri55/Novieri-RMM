@@ -148,5 +148,7 @@ import { budget } from "./budget";
 import { change } from "./change";
 import { aiAutomation } from "./aiAutomation";
 import { aiAdmin } from "./aiAdmin";
+import { clients } from "./clients";
+import { auth } from "./auth";
 
-export const es: Shape<Catalog> = { common, components, setup, onboarding, profile, platformStatus, errorMonitor, audit, dashboard, shell, time, enums, lib, validation, credentials, jobs, enrollment, devices, agentPush, agentReleases, siteServers, patch, inventory, remote, deploy, health, ipam, provisioning, backup, bcp, serviceDesk, portal, sla, emailIntake, notification, security, settings, people, docs, reporting, licenses, subscriptions, budget, change, aiAutomation, aiAdmin };
+export const es: Shape<Catalog> = { common, components, setup, onboarding, profile, platformStatus, errorMonitor, audit, dashboard, shell, time, enums, lib, validation, credentials, jobs, enrollment, devices, agentPush, agentReleases, siteServers, patch, inventory, remote, deploy, health, ipam, provisioning, backup, bcp, serviceDesk, portal, sla, emailIntake, notification, security, settings, people, docs, reporting, licenses, subscriptions, budget, change, aiAutomation, aiAdmin, clients, auth };

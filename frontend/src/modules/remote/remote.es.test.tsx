@@ -29,8 +29,16 @@ import { StartSessionDialog, UPDATE_AGENT_CTA } from "./StartSessionDialog";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
-const mockAccessToken = vi.fn<() => string | null>(() => "test-token");
-vi.mock("../../lib/auth", () => ({ accessToken: () => mockAccessToken() }));
+// RE-POINTED (own-auth Task 10): this mocked `lib/auth`'s `accessToken`, the
+// token the stream's handshake carried. The session cookie is the credential
+// now; what the page can know is whether this tab's session has ended.
+const mockSessionEnded = vi.fn<() => boolean>(() => false);
+// The viewer also listens for the end (final review D1, Minor 2); nothing
+// here ends a session while a screen is open.
+vi.mock("../../lib/sessionEnd", () => ({
+  isSessionEnded: () => mockSessionEnded(),
+  subscribeSessionEnd: () => () => {},
+}));
 
 // ---------------------------------------------------------------- the engine
 
@@ -242,7 +250,7 @@ beforeEach(() => {
   FakeSocket.last = null;
   vi.stubGlobal("WebSocket", FakeSocket);
   HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as HTMLCanvasElement["getContext"];
-  mockAccessToken.mockReturnValue("test-token");
+  mockSessionEnded.mockReturnValue(false);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -659,18 +667,18 @@ describe("the live screen, in Spanish", () => {
     expectNoEnglish(container);
   });
 
-  it("explains that no token means no screen, and re-words it on a switch", async () => {
-    mockAccessToken.mockReturnValue(null);
+  it("explains that an ended session means no screen, and re-words it on a switch", async () => {
+    mockSessionEnded.mockReturnValue(true);
     renderViewer();
     await screen.findByRole("heading", { name: "laptop-7" });
     expect(
       await screen.findByText(
-        "Esta consola no tiene ningún token de acceso, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
+        "Tu sesión en esta consola terminó, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
       ),
     ).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(
-      screen.getByText(/This console holds no access token, so the screen was not opened/),
+      screen.getByText(/Your session in this console has ended, so the screen was not opened/),
     ).toBeInTheDocument();
   });
 

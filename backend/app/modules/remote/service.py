@@ -325,6 +325,9 @@ class RemoteSessionService:
         )
         session.add(row)
         await session.flush()
+        # The trigger fills it from the device and the INSERT reads it back;
+        # every audit of the session names it (phase 3 design §5.3).
+        client_id = row.client_id
 
         job_params: dict[str, Any] = {
             "session_id": str(row.id),
@@ -375,6 +378,7 @@ class RemoteSessionService:
                 "reason": reason,
                 "job_id": str(job.id),
             },
+            client_id=client_id,
         )
 
         # Invariant #4: the credential ACCESS itself is a privileged action and
@@ -394,6 +398,7 @@ class RemoteSessionService:
                 target_type="credential",
                 target_id=str(credential_id),
                 metadata={"session_id": str(row.id), "device_id": str(device_id)},
+                client_id=client_id,
             )
         return row
 
@@ -499,6 +504,8 @@ class RemoteSessionService:
         )
         session.add(row)
         await session.flush()
+        # Read back by the INSERT (trigger, from the device), as above.
+        client_id = row.client_id
 
         # The raw token rides only inside the signed params (spec §3.2); the
         # job type's redactor and scrubber keep it out of the API, and out of
@@ -574,6 +581,7 @@ class RemoteSessionService:
                 "reason": reason,
                 "job_id": str(job.id),
             },
+            client_id=client_id,
         )
         return row
 
@@ -589,7 +597,8 @@ class RemoteSessionService:
     ) -> None:
         """Audit a session event reported over the relay (consent, input
         changes, privacy blanking). Written by the gateway, which sees them.
-        A ``user`` actor without an id is the session's technician."""
+        A ``user`` actor without an id is the session's technician. Audited
+        in the session's client."""
         row = await self._load(session, session_id)
         if actor_type == "user" and actor_id is None:
             actor_id = row.technician_id
@@ -602,6 +611,7 @@ class RemoteSessionService:
             target_type="session",
             target_id=str(row.id),
             metadata={"device_id": str(row.device_id), **(metadata or {})},
+            client_id=row.client_id,
         )
 
     async def set_input_enabled(
@@ -620,6 +630,10 @@ class RemoteSessionService:
             await session.flush()
             return
 
+        # Read before anything is written: the audit's own query flushes the
+        # update, which expires it (`server_onupdate`), and an async session
+        # cannot lazy-load it.
+        client_id = row.client_id
         # Rejected: terminal. End the session, audit the denial, clean up relay.
         self._transition(row, "ended")
         row.ended_at = datetime.now(UTC)
@@ -633,6 +647,7 @@ class RemoteSessionService:
             target_type="session",
             target_id=str(row.id),
             metadata={"device_id": str(row.device_id)},
+            client_id=client_id,
         )
         await session.flush()
         await self._terminate(row)
@@ -641,6 +656,7 @@ class RemoteSessionService:
         self, session: AsyncSession, *, session_id: UUID, audit_ref: str
     ) -> None:
         row = await self._load(session, session_id)
+        client_id = row.client_id  # before the writes, as in `on_consent`
         self._transition(row, "active")
         row.started_at = datetime.now(UTC)
         event = await audit_service.record(
@@ -652,6 +668,7 @@ class RemoteSessionService:
             target_type="session",
             target_id=str(row.id),
             metadata={"device_id": str(row.device_id), "audit_ref": audit_ref},
+            client_id=client_id,
         )
         row.audit_event_id = event.id
         await session.flush()

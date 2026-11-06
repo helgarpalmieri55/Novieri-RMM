@@ -175,7 +175,54 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 107, MSP clients phase 2 final review.** One static WARNING in
+**NOW 108, own authentication phase 1, fix 3 review (Minor 2).** One site. A
+static WARNING in `app/core/mail.py::_sign_in`, "account mail not sent: the
+vault did not open the relay sign-in", when the vault's backend raises an
+`httpx.HTTPError` at the relay credential's checkout -- OpenBao refused, timed
+out, sealed (503) or forbidding (403). The send becomes `MailSendFailed(
+SIGN_IN_UNAVAILABLE)` rather than an exception out of the caller's
+transaction, so `notices.deliver` never raises for delivery and a notice can
+never roll back one sent before it. `extra` = the org id; no `exc_info`,
+because the error's text names OpenBao's address and the organization's
+transit key.
+
+**BEFORE THAT, 107, own authentication phase 1, final fix wave (K4, K11).** Two sites.
+One static WARNING in `app/core/auth/sessions.py::resolve`, for a session that
+has NOT ended but belongs to a person who is not active (Task 13 M4, final
+review B-M2, the coordinator's decision). Disabling and deleting end every
+session in the same transaction, so that state means a lifecycle path forgot
+to end one: the line is a defect detector, not a refusal log -- the door's
+answer stays a silent 401 / 4401, the narrowing the RBAC design §3.2 now
+records. `extra` = the session's row id and the status; never the cookie or
+its hash. And one static WARNING in `app/core/rate_limit.py::hit`, "request
+refused", when a limit that must hold (`fail_closed=True`: the reset-mail and
+test-send caps, final review A-M1) meets a Redis error; `exc_info=True`,
+nothing in `extra`, never the key. The same wave rate-limits the loopback
+refusal's network case (K9) inside its existing call site, so that adds none.
+
+**BEFORE THAT, 105, P2 phase 1 Task 8.** Five WARNINGs go with the identity provider's
+calls they described -- `user_admin/service.py::_translating`, the language
+mirror (`app/api/v1/me.py::_mirror_locale`), and three on the first-boot path
+(`setup.py::_provisioning`, `_refusal_detail`, `_invitation_error`). The
+claim's refusals left are about the request and answer it; the recovery
+command prints to the operator's terminal and logs nothing.
+
+**BEFORE THAT, 110, own authentication phase 1 (Task 9).** One static WARNING in
+`app/core/auth/loopback.py::_refused`, when the door refuses the assistant's
+internal token. `extra` = the reason, a fixed phrase of that module; never the
+token, the session id or the person.
+
+**BEFORE THAT, 109, own authentication phase 1 (Task 4).** One static WARNING in
+`app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does not
+open for their row (moved from another row, or damaged) and the code is
+refused. Nothing in `extra`: never the seal, the code or the person.
+
+**BEFORE THAT, 108, own authentication phase 1 (Task 3).** One static WARNING in
+`app/core/rate_limit.py::hit`, when Redis fails and the shared limiter lets
+the request through (`exc_info=True`). Nothing in `extra`: never the key,
+which names a person's address or account, nor the count.
+
+**BEFORE THAT, 107, MSP clients phase 2 final review.** One static WARNING in
 `app/worker.py::deploy_window_sweep_all_orgs`, when a deployment's own data
 (any `DeployValidationError`: a stored window the parser cannot read, a
 package whose artifact was never uploaded) stops it and the sweep goes on with

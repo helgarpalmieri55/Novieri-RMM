@@ -12,21 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "./i18n/core";
 
-vi.mock("./lib/auth", () => ({
-  safeReturnTo: () => "/devices",
-  signIn: () => Promise.resolve(),
-  completeSignIn: () => Promise.resolve(null),
-  isAuthenticated: () => true,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  isSessionExpiring: () => false,
-  onSessionExpiring: () => () => {},
-  startAccountAction: () => Promise.resolve(),
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
-
 const apiRef = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("./lib/ApiContext", () => ({
   useApi: () => apiRef.current,

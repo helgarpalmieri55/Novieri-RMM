@@ -171,8 +171,8 @@ export function usePushCredentials() {
 // through a thin fetch of this module's own, because `lib/api.ts` belonged to
 // another cycle. That kept them out of fixture mode (so no screen could be
 // walked without a backend) and out of the mocked client every other test
-// uses. They are methods on `ApiClient` now, on the same bearer token and the
-// same `/api/v1` base; the server's `require_permission` on every route is the
+// uses. They are methods on `ApiClient` now, on the same session cookie and
+// the same `/api/v1` base; the server's `require_permission` on every route is the
 // only authority regardless.
 //
 // **NOTHING HERE POLLS, AND A DISPATCH IS NEVER RETRIED.** A push presents an

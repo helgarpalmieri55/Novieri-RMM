@@ -297,10 +297,9 @@ async def test_a_confirmer_who_cannot_read_the_device_is_refused(api_env: Any) -
     confirmer_id, sub = await ai_user(
         api_env, world.org_id, "ai.act.confirm", "jobs.dispatch"
     )
-    headers = await api_env.headers(world.org_id, sub)
     ctx = type(world.ctx)(
         app=world.ctx.app,
-        bearer=headers["Authorization"],
+        bearer=await api_env.loopback_bearer(world.org_id, sub),
         deadline=world.ctx.deadline,
         org_id=world.org_id,
         user_id=confirmer_id,

@@ -1,0 +1,37 @@
+blocklist-12.txt.gz -- where it comes from and how it is made
+(own authentication plan 2026-11-04, Task 2; decision D17)
+
+Source
+  SecLists, Passwords/Common-Credentials/xato-net-10-million-passwords.txt,
+  at commit 4afe4d3de0a5d227c59ae2f162d22b93b4c27bfd:
+  https://raw.githubusercontent.com/danielmiessler/SecLists/4afe4d3de0a5d227c59ae2f162d22b93b4c27bfd/Passwords/Common-Credentials/xato-net-10-million-passwords.txt
+  5,189,454 lines, 48,312,893 bytes,
+  SHA-256 c95989fecfae9c91aa9f5c730344d5cabd6335bb094c9c60aba16bf1742a72fe
+
+Licence
+  SecLists: MIT, Copyright (c) 2018 Daniel Miessler -- blocklist-12.LICENSE,
+  copied verbatim from
+  https://raw.githubusercontent.com/danielmiessler/SecLists/4afe4d3de0a5d227c59ae2f162d22b93b4c27bfd/LICENSE
+  (SHA-256 3dbdc93d5f8829de0941744841730a09c106d0732e5ae0e98ca1d77be7ded66c).
+  The passwords themselves: Mark Burnett, "Today I Am Releasing Ten Million
+  Passwords", 2015-02-09 -- "So I built a data set of ten million usernames
+  and passwords that I am releasing to the public domain."
+  (https://attrition.org/pipermail/infowarrior/2015-February/012042.html)
+
+Made with
+  backend/.venv/bin/python scripts/build_password_blocklist.py SOURCE backend/app/core/auth/data/blocklist-12.txt.gz
+  Each line: Unicode NFC, then lower case (app.core.auth.blocklist.normalise);
+  kept with 12 to 128 code points; de-duplicated; sorted by code point; one
+  entry per line, UTF-8, "\n"; gzip level 9, no file name, mtime 0.
+
+Result
+  515,286 entries; 7,637,957 bytes uncompressed,
+  content SHA-256 74234a19cf3c94a8a7b8a9d6f790f88ce8f3a55aebb1fc547bd174775c5bce5a
+  (of the decompressed bytes: the .gz itself may differ between zlib builds).
+  backend/tests/test_auth_blocklist.py pins the count, the content SHA-256
+  and every rule above.
+
+Why 12: NIST SP 800-63B-4 Appendix A -- "Since a minimum length requirement
+will also govern the user's choice of passwords, this dictionary only needs
+to include entries that meet that requirement." 12 is the staff minimum; the
+contacts' 15 (phase 2) is a subset.

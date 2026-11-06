@@ -4,7 +4,8 @@
  *
  * WHAT IT DOES. Starts Vite, opens every route in `scripts/routes.mjs` with
  * `?__fixtures` (so each page renders over `src/fixtures/` and no backend is
- * needed), and at 1440x900 and 390x844:
+ * needed), and at 1440x900 and 390x844 with every client -- and again at
+ * 390x844 and 641x900 with a client chosen in the top bar (`VIEWPORTS`):
  *
  *   1. reads the computed `font-size`, `border-radius`, `color`,
  *      `background-color`, `border-color` (and `fill`/`stroke` on SVG) of
@@ -15,7 +16,14 @@
  *   4. reads `window.__fixtureMisses` -- the `ApiClient` methods the page
  *      called that no fixture answered, so the page drew its error state;
  *   5. screenshots the full page to `frontend/.harmony/<lang>/<viewport>/<route>.png`,
- *      which is what the review wave reads against the prototype.
+ *      which is what the review wave reads against the prototype;
+ *   6. measures the top bar's two edges (`chromeProblems`): the drawer toggle
+ *      is a 44 to 70 px target -- at least 60 where it carries the client
+ *      mark (390x844-client), so a mark that wrapped out of sight fails --
+ *      and the account menu ends 10 px clear of the screen's edge -- the
+ *      client mark and the selector are what could push either out, and a
+ *      page-scroll check alone cannot see a bar that clips or squeezes
+ *      instead of scrolling.
  *
  * THE ALLOWLIST IS READ FROM `src/index.css` WHEN THIS RUNS, never hardcoded
  * here: the tokens are transcribed from the design file and guarded by
@@ -28,9 +36,11 @@
  * outside the five-step scale), `2px`/`3px` (heat cells) and `50%` (avatars
  * and pips), plus `0` and full transparency, which are not choices.
  *
- * EXIT 1 on any stray value, any horizontal overflow, any serious or critical
- * axe violation, any route that fails to load -- and, with
- * `--strict-fixtures`, any fixture miss. Without that flag a miss is
+ * EXIT 1 on any stray value, any horizontal overflow, a top bar
+ * `chromeProblems` refuses, any serious or critical axe violation, any route
+ * that fails to load (a client viewport whose selector does not show the
+ * client chosen counts as one) -- and, with `--strict-fixtures`, any fixture
+ * miss. Without that flag a miss is
  * reported and tolerated, which is the Phase A state: the gate runs and
  * names what each module still owes.
  *
@@ -56,7 +66,7 @@ import { createServer as createNetServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ROUTES, patternOf } from "./routes.mjs";
+import { CHOSEN_CLIENT, OPEN_DISCLOSURES, ROUTES, patternOf } from "./routes.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = resolve(HERE, "..");
@@ -104,11 +114,92 @@ function parseArgs(argv) {
 
 /* ------------------------------------------------------------- viewports */
 
-/** The two the spec names: the desktop the design was drawn at, and the phone. */
-const VIEWPORTS = [
-  { width: 1440, height: 900, coarse: false },
-  { width: 390, height: 844, coarse: true },
+/**
+ * The two the spec names -- the desktop the design was drawn at, and the
+ * phone -- with every client, and two with a client chosen in the top bar
+ * (`client: true`, phase 3 final review Important 5):
+ *
+ * - 390 COARSE: the phone's top bar, which marks the chosen client in the
+ *   drawer toggle (operator decision 4, 2026-11-02);
+ * - 641: the first width above the handset's, where the desktop selector sits
+ *   in the bar beside the labelled "Add a computer" -- the band up to 1024 px
+ *   that nothing measured before.
+ *
+ * A native <select> is as wide as its longest option whichever is chosen, so
+ * the bar at 641 is the same with every client; the phone's is not, which is
+ * why it is walked both ways.
+ */
+export const VIEWPORTS = [
+  { width: 1440, height: 900, coarse: false, client: false },
+  { width: 390, height: 844, coarse: true, client: false },
+  { width: 390, height: 844, coarse: true, client: true },
+  { width: 641, height: 900, coarse: false, client: true },
 ];
+
+/** The name a viewport's screenshots are filed under: `390x844`, `390x844-client`. */
+export const viewportLabel = (vp) => `${vp.width}x${vp.height}${vp.client ? "-client" : ""}`;
+
+/* ------------------------------------------------------------ the top bar */
+
+/** Runs INSIDE the page: the top bar's edges, and the client the selector shows. */
+const CHROME_IN_PAGE = () => {
+  const visible = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
+  };
+  const toggle = visible(document.querySelector(".topbar .nav-toggle"));
+  const profile = visible(document.querySelector(".topbar .profile-btn"));
+  const selector = document.querySelector("select.top-client");
+  return {
+    toggle: toggle ? { width: Math.round(toggle.width), height: Math.round(toggle.height) } : null,
+    profileRight: profile ? Math.round(profile.right) : null,
+    innerWidth: window.innerWidth,
+    topbar: document.querySelector(".topbar") !== null,
+    selected: selector ? selector.value : null,
+  };
+};
+
+/**
+ * Whether the viewport draws the client mark in the drawer toggle: a client
+ * chosen, on a handset (`src/shell/handset.ts`, 640 px), where `AppShell`
+ * hands the selector to the drawer and marks the toggle instead.
+ */
+export const markDrawn = (vp) => vp.client && vp.width <= 640;
+
+/**
+ * What is wrong with the top bar's edges, as sentences; `[]` when nothing.
+ *
+ * The drawer toggle, wherever it is drawn: 44 to 70 px wide and at least 44
+ * tall -- the client mark may widen it, never past 70, and a narrow phone
+ * may clip it back, never below the 44 px target. WHERE THE MARK IS DRAWN
+ * (`markDrawn(vp)`) the floor is 60: a mark that wrapped out of sight leaves
+ * the plain 44 px icon, which the band alone passed (phase 3 last fix round),
+ * and a bar that draws no toggle there has nowhere to show the client. The
+ * account menu: its right edge at most `innerWidth - 10`, the bar's own
+ * padding, so nothing pushed it to the edge of the screen or past it.
+ *
+ * `vp` is optional: without it only the band is asked.
+ */
+export function chromeProblems(probe, vp) {
+  const problems = [];
+  const marked = vp !== undefined && markDrawn(vp);
+  if (probe.toggle) {
+    const { width, height } = probe.toggle;
+    if (marked) {
+      if (width < 60 || width > 70) problems.push(`.nav-toggle is ${width}px wide (60-70: the client mark is drawn)`);
+    } else if (width < 44 || width > 70) {
+      problems.push(`.nav-toggle is ${width}px wide (44-70)`);
+    }
+    if (height < 44) problems.push(`.nav-toggle is ${height}px tall (at least 44)`);
+  } else if (marked && probe.topbar) {
+    problems.push(".nav-toggle is not drawn (the client mark needs it)");
+  }
+  if (probe.profileRight !== null && probe.profileRight > probe.innerWidth - 10) {
+    problems.push(`.profile-btn ends at ${probe.profileRight}px, past innerWidth - 10 (${probe.innerWidth - 10})`);
+  }
+  return problems;
+}
 
 /* ------------------------------------------------------------- allowlist */
 
@@ -506,7 +597,7 @@ const slug = (route) =>
   route.replace(/^\//, "").replace(/\//g, "__").replace(/\?/, "--").replace(/=/g, "-").replace(/&/g, "--") || "root";
 /** The route with harmony's fixture flag added, after `?` or, on a query variant, `&`. */
 const withFixtures = (route) => `${route}${route.includes("?") ? "&" : "?"}__fixtures`;
-const vpLabel = (vp) => `${vp.width}x${vp.height}`;
+const vpLabel = viewportLabel;
 
 function selectRoutes(requested) {
   if (!requested) return ROUTES;
@@ -542,6 +633,11 @@ async function walkApp(args, browser, server, allow) {
         misses: [],
         errors: [],
         shot: null,
+        // The measured numbers, kept for every run and not only a failing
+        // one: the page's widths and the top bar's edges (`CHROME_IN_PAGE`).
+        widths: null,
+        chrome: null,
+        chromeProblems: [],
       };
       results.push(result);
 
@@ -553,14 +649,20 @@ async function walkApp(args, browser, server, allow) {
       });
       // The fixture /me carries no saved language, so the console takes this
       // browser's remembered choice -- the same path a person's first paint
-      // takes (spec §1.1, step 2).
-      await ctx.addInitScript((lang) => {
-        try {
-          window.localStorage.setItem("itms.lang", lang);
-        } catch {
-          /* storage blocked: the page falls back to English and the run says so below */
-        }
-      }, args.lang);
+      // takes (spec §1.1, step 2). A client viewport also remembers a client
+      // chosen in the top bar (`itms.client`, phase 3 design §1.1), the same
+      // way a person's return visit does.
+      await ctx.addInitScript(
+        ({ lang, client }) => {
+          try {
+            window.localStorage.setItem("itms.lang", lang);
+            if (client) window.localStorage.setItem("itms.client", client);
+          } catch {
+            /* storage blocked: the page falls back to English and the run says so below */
+          }
+        },
+        { lang: args.lang, client: vp.client ? CHOSEN_CLIENT : null },
+      );
       const page = await ctx.newPage();
       page.on("pageerror", (err) => result.errors.push(`pageerror: ${err.message}`));
       page.on("console", (msg) => {
@@ -572,11 +674,32 @@ async function walkApp(args, browser, server, allow) {
         // React Query settles synchronously against the fixture proxy, but the
         // render behind it is a frame away; give the page a beat.
         await page.waitForTimeout(600);
+        // What a route keeps behind a disclosure is measured open
+        // (`OPEN_DISCLOSURES`, `./routes.mjs`).
+        if (OPEN_DISCLOSURES.has(route)) {
+          const opened = await page.evaluate(() => {
+            const all = [...document.querySelectorAll("details")];
+            for (const disclosure of all) disclosure.open = true;
+            return all.length;
+          });
+          if (opened === 0) throw new Error("OPEN_DISCLOSURES names this route, and it drew no <details> to open");
+          await page.waitForTimeout(150);
+        }
         await page.evaluate(() => window.scrollTo(0, 0));
         // NON-VACUITY: a Spanish walk that rendered English would measure
         // nothing it claims to. <html lang> follows the active language.
         const lang = await page.evaluate(() => document.documentElement.lang);
         if (lang !== args.lang) throw new Error(`rendered in "${lang}", not "${args.lang}"`);
+        // NON-VACUITY, the same for the client: a pass "with a client chosen"
+        // that rendered every client -- the id dropped as unreadable, or as
+        // one /me does not list -- would measure nothing it claims to. Wherever
+        // the selector is drawn (the bar, or a handset's drawer) it shows the
+        // choice; a page with no top bar has no selector to ask.
+        result.chrome = await page.evaluate(CHROME_IN_PAGE);
+        const expected = vp.client ? CHOSEN_CLIENT : "all";
+        if (result.chrome.topbar && result.chrome.selected !== expected) {
+          throw new Error(`the top bar shows client "${result.chrome.selected}", not "${expected}"`);
+        }
         result.loaded = true;
       } catch (err) {
         result.loadError = err.message.split("\n")[0];
@@ -598,7 +721,10 @@ async function walkApp(args, browser, server, allow) {
 
       // 2. overflow
       const overflow = await page.evaluate(OVERFLOW_IN_PAGE);
+      result.widths = { scroll: overflow.scroll, client: overflow.client, inner: overflow.inner };
       if (overflow.scroll > overflow.client + 1) result.overflow = overflow;
+      // ...and the top bar's own edges, which can be pushed without a scroll.
+      result.chromeProblems = chromeProblems(result.chrome, vp);
 
       // 3. axe
       const report = await runAxe(page, axe);
@@ -640,7 +766,8 @@ async function walkPrototype(args, browser, server) {
   for (const route of routes) {
     // The prototype has one page per path: a query variant is its plain route there.
     const key = patternOf(route.split("?")[0]).replace(/^\//, "");
-    for (const vp of VIEWPORTS) {
+    // The prototype has no client to choose: its two viewports only.
+    for (const vp of VIEWPORTS.filter((one) => !one.client)) {
       const result = { route, viewport: vpLabel(vp), key, present: false, shot: null, loadError: null };
       results.push(result);
       const ctx = await browser.newContext({
@@ -675,15 +802,27 @@ async function walkPrototype(args, browser, server) {
 
 const serious = (v) => v.impact === "serious" || v.impact === "critical";
 
+/**
+ * The top bar's measured edges in one cell: the drawer toggle's width (`-`
+ * where the layout does not draw it) and the account menu's right edge
+ * against the viewport's width, `!` when `chromeProblems` refused them.
+ */
+function barCell(r) {
+  if (!r.chrome || !r.chrome.topbar) return "no bar";
+  const toggle = r.chrome.toggle ? `${r.chrome.toggle.width}x${r.chrome.toggle.height}` : "-";
+  const profile = r.chrome.profileRight === null ? "-" : r.chrome.profileRight;
+  return `${toggle} ${profile}/${r.chrome.innerWidth}${r.chromeProblems.length ? " !" : ""}`;
+}
+
 function printAppTable(results, args) {
   console.log("");
   console.log(
-    `${pad("route", 36)} ${pad("viewport", 9)} ${pad("strays", 7)} ${pad("overflow", 9)} ${pad("axe s/c", 8)} ${pad("misses", 7)} errors`,
+    `${pad("route", 36)} ${pad("viewport", 15)} ${pad("strays", 7)} ${pad("overflow", 9)} ${pad("top bar", 16)} ${pad("axe s/c", 8)} ${pad("misses", 7)} errors`,
   );
-  console.log("-".repeat(96));
+  console.log("-".repeat(119));
   for (const r of results) {
     if (!r.loaded) {
-      console.log(`${pad(r.route, 36)} ${pad(r.viewport, 9)} FAILED TO LOAD  ${r.loadError}`);
+      console.log(`${pad(r.route, 36)} ${pad(r.viewport, 15)} FAILED TO LOAD  ${r.loadError}`);
       continue;
     }
     const strayCount = r.strays.reduce((n, s) => n + s.count, 0);
@@ -691,7 +830,7 @@ function printAppTable(results, args) {
     const axeSerious = r.axe.filter(serious).length;
     const axeAll = r.axe.length;
     console.log(
-      `${pad(r.route, 36)} ${pad(r.viewport, 9)} ${pad(strayCount, 7)} ${pad(over, 9)} ${pad(`${axeSerious}/${axeAll}`, 8)} ${pad(r.misses.length, 7)} ${r.errors.length}`,
+      `${pad(r.route, 36)} ${pad(r.viewport, 15)} ${pad(strayCount, 7)} ${pad(over, 9)} ${pad(barCell(r), 16)} ${pad(`${axeSerious}/${axeAll}`, 8)} ${pad(r.misses.length, 7)} ${r.errors.length}`,
     );
   }
   console.log("");
@@ -724,6 +863,7 @@ function printAppTable(results, args) {
         `overflow: scrollWidth ${r.overflow.scroll} > clientWidth ${r.overflow.client} (innerWidth ${r.overflow.inner})  [${named}]`,
       );
     }
+    for (const problem of r.chromeProblems) lines.push(`top bar: ${problem}`);
     for (const v of r.axe) lines.push(`axe ${v.id} [${v.impact}]  ${v.target}  ${v.help}`);
     if (r.misses.length) lines.push(`misses: ${r.misses.join(", ")}`);
     for (const e of r.errors.slice(0, 5)) lines.push(`error: ${e}`);
@@ -753,27 +893,28 @@ function writeAppReport(results, allow, args) {
 
   const md = [];
   md.push(`# Harmony report (${args.lang})`, "", `Generated ${json.generated_at}.`, "");
-  md.push("| route | viewport | strays | overflow | axe serious/all | misses | errors | screenshot |");
-  md.push("|---|---|---|---|---|---|---|---|");
+  md.push("| route | viewport | strays | overflow | top bar (toggle, account edge/width) | axe serious/all | misses | errors | screenshot |");
+  md.push("|---|---|---|---|---|---|---|---|---|");
   for (const r of results) {
     if (!r.loaded) {
-      md.push(`| ${r.route} | ${r.viewport} | failed to load: ${r.loadError} | | | | | |`);
+      md.push(`| ${r.route} | ${r.viewport} | failed to load: ${r.loadError} | | | | | | |`);
       continue;
     }
     const strayCount = r.strays.reduce((n, s) => n + s.count, 0);
     const over = r.overflow ? `${r.overflow.scroll} > ${r.overflow.client}` : "ok";
     const shot = r.shot ? r.shot.slice(OUT.length + 1) : "";
     md.push(
-      `| ${r.route} | ${r.viewport} | ${strayCount} | ${over} | ${r.axe.filter(serious).length}/${r.axe.length} | ${r.misses.length} | ${r.errors.length} | ${shot} |`,
+      `| ${r.route} | ${r.viewport} | ${strayCount} | ${over} | ${barCell(r)} | ${r.axe.filter(serious).length}/${r.axe.length} | ${r.misses.length} | ${r.errors.length} | ${shot} |`,
     );
   }
   md.push("");
   for (const r of results) {
     if (!r.loaded) continue;
-    if (!r.strays.length && !r.overflow && !r.axe.length && !r.misses.length && !r.errors.length) continue;
+    if (!r.strays.length && !r.overflow && !r.chromeProblems.length && !r.axe.length && !r.misses.length && !r.errors.length) continue;
     md.push(`## ${r.route} @ ${r.viewport}`, "");
     for (const s of r.strays) md.push(`- stray ${s.prop} \`${s.value}\` x${s.count}: \`${s.path}\``);
     if (r.overflow) md.push(`- overflow: scrollWidth ${r.overflow.scroll} > clientWidth ${r.overflow.client}; ${[...r.overflow.guilty, ...r.overflow.unfiltered].join("; ")}`);
+    for (const problem of r.chromeProblems) md.push(`- top bar: ${problem}`);
     for (const v of r.axe) md.push(`- axe ${v.id} [${v.impact}] \`${v.target}\`: ${v.help}`);
     if (r.misses.length) md.push(`- fixture misses: ${r.misses.map((m) => `\`${m}\``).join(", ")}`);
     for (const e of r.errors) md.push(`- error: ${e}`);
@@ -848,6 +989,7 @@ async function main() {
     if (!r.loaded) failures.push(`${where}: failed to load (${r.loadError})`);
     if (r.strays.length) failures.push(`${where}: ${r.strays.reduce((n, s) => n + s.count, 0)} stray value(s)`);
     if (r.overflow) failures.push(`${where}: horizontal overflow`);
+    for (const problem of r.chromeProblems ?? []) failures.push(`${where}: top bar: ${problem}`);
     const bad = r.axe.filter(serious).length;
     if (bad) failures.push(`${where}: ${bad} serious/critical axe violation(s)`);
     if (args.strictFixtures && r.misses.length) failures.push(`${where}: ${r.misses.length} fixture miss(es)`);
@@ -862,7 +1004,7 @@ async function main() {
     for (const f of failures) console.log(`  ${f}`);
     process.exit(1);
   }
-  console.log("ok    every route on the tokens, no overflow, no serious axe violation" + (args.strictFixtures ? ", no fixture miss" : ""));
+  console.log("ok    every route on the tokens, no overflow, the top bar in bounds, no serious axe violation" + (args.strictFixtures ? ", no fixture miss" : ""));
   process.exit(0);
 }
 

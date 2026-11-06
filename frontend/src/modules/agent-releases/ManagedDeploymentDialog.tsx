@@ -28,7 +28,7 @@
  * the panel says so instead of showing the same green line everywhere.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
@@ -46,6 +46,7 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { requireKnown } from "../../lib/clientSelection";
 import { platformLabel } from "./platform";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // Catalogue keys, worded when drawn.
 const CHANNELS: { value: AgentDeploymentChannel; label: MessageKey; blurb: MessageKey }[] = [
@@ -97,6 +98,7 @@ export function ManagedDeploymentDialog({
   onClose,
   timezone,
   siteId,
+  siteMissing = null,
 }: {
   release: AgentRelease | null;
   onClose: () => void;
@@ -108,6 +110,15 @@ export function ManagedDeploymentDialog({
    * sending a body the server would answer with a 422.
    */
   siteId: string | null;
+  /**
+   * Why no site can be named yet, in the person's words -- the page's
+   * `whereMissing`: "Site is required", "Client is required", or Unassigned
+   * chosen at the top. A mint shows it instead of sending, before
+   * `requireKnown`'s "the client has not been chosen", which named the wrong
+   * field (phase 3 final review C, Important 7). `null` when nothing is
+   * missing, or while the account loads.
+   */
+  siteMissing?: string | null;
 }) {
   const t = useT();
   const api = useApi();
@@ -123,15 +134,18 @@ export function ManagedDeploymentDialog({
     enabled: release != null,
   });
 
-  const mint = useMutation({
-    mutationFn: () =>
-      api.mintAgentDeploymentToken(release?.id ?? "", {
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const mint = useSecretMutation({
+    mutationFn: () => {
+      if (siteMissing) throw new Error(siteMissing);
+      return api.mintAgentDeploymentToken(release?.id ?? "", {
         max_uses: Number(maxUses),
         expires_in_hours: Number(hours),
         channel,
         // The site chosen on the page (design §3.2).
         site_id: requireKnown(siteId),
-      }),
+      });
+    },
     onSuccess: setMinted,
   });
 

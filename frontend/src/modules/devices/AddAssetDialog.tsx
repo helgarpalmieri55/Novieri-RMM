@@ -20,6 +20,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import type { Attempt } from "../../components/form";
@@ -28,7 +29,7 @@ import { SiteField } from "../../components/SiteField";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import type { AssetCreateInput, Device } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
@@ -73,11 +74,11 @@ function AddAssetForm({ onClose }: { onClose: () => void }) {
   const [pushDetails, setPushDetails] = useState<PushDetails>({ fqdn: "", os: "", arch: "" });
   // THE SITE IS THE ONE REQUIRED FIELD (MSP clients spec §1.5, design §3.2):
   // `POST /devices` takes it and derives the client from it. Its client is the
-  // one chosen at the top, or with every client the Client field's.
-  const target = useNewRowClient("assets.manage");
-  const [pickedClient, setPickedClient] = useState("");
-  const clientId = target.needsField ? pickedClient || null : target.clientId;
+  // one chosen at the top, or with every client the Client field's. Another
+  // client is another set of sites.
   const [siteId, setSiteId] = useState("");
+  const client = useNewRowClientField("assets.manage", undefined, { onPick: () => setSiteId("") });
+  const clientId = client.clientId;
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const create = useMutation({
@@ -113,7 +114,7 @@ function AddAssetForm({ onClose }: { onClose: () => void }) {
     // Held as rules + values, worded at render, so a language switch rewords them.
     const next: Attempt = {
       rules: () => [
-        ...(target.needsField ? [{ name: "client", label: translate("devices.addAsset.client") }] : []),
+        ...(client.needsField ? [{ name: "client", label: translate("devices.addAsset.client") }] : []),
         { name: "site", label: translate("devices.addAsset.site") },
       ],
       values: { client: clientId, site: siteId },
@@ -121,6 +122,22 @@ function AddAssetForm({ onClose }: { onClose: () => void }) {
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     create.mutate();
+  }
+
+  // With Unassigned chosen at the top nothing new can be filed (the server
+  // refuses it, and the header confines the request to Unassigned): the
+  // dialog says so instead of offering a form whose Add can only fail.
+  if (client.refused === "unassigned") {
+    return (
+      <Dialog open onClose={close} title={t("devices.addAsset.title")}>
+        <UnassignedRefusal />
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <Button type="button" variant="ghost" onClick={close}>
+            {t("common.actions.cancel")}
+          </Button>
+        </div>
+      </Dialog>
+    );
   }
 
   return (
@@ -136,17 +153,7 @@ function AddAssetForm({ onClose }: { onClose: () => void }) {
           {t("devices.addAsset.note")}
         </p>
         <div className="form-grid">
-          {target.needsField ? (
-            <ClientField
-              code="assets.manage"
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                // Another client is another set of sites.
-                setSiteId("");
-              }}
-            />
-          ) : null}
+          {client.needsField ? <ClientField field={client} /> : null}
           <SiteField clientId={clientId} value={siteId} onChange={setSiteId} />
           <Field label={t("devices.addAsset.name")}>
             <input

@@ -151,7 +151,7 @@ const REPO: Repository = {
   created_at: "2026-01-01T00:00:00.000Z",
   offsite_target_id: null,
 };
-const REPO_OFF: Repository = { ...REPO, id: "repo2", name: "bóveda-antigua", state: "disabled", offsite_target_id: "t1" };
+const REPO_OFF: Repository = { ...REPO, id: "repo2", name: "bóveda-antigua", state: "retired", offsite_target_id: "t1" };
 
 const POINTS: BackupPoint[] = [
   {
@@ -746,14 +746,14 @@ describe("the repositories page, in Spanish", () => {
     expect(screen.getByText("Almacenes de objetos donde llegan las copias de seguridad de este parque.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Nuevo repositorio" })).toBeInTheDocument();
     const filter = screen.getByRole("combobox", { name: "Filtrar los repositorios por estado" });
-    for (const option of ["Todos los repositorios", "Activos", "No activos"]) {
+    for (const option of ["Todos los repositorios", "Activos", "Retirados"]) {
       expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Estado", "Registrado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
     expect(within(screen.getByText("bóveda-principal").closest("tr") as HTMLElement).getByText("Activo")).toBeInTheDocument();
-    expect(within(screen.getByText("bóveda-antigua").closest("tr") as HTMLElement).getByText("Deshabilitado")).toBeInTheDocument();
+    expect(within(screen.getByText("bóveda-antigua").closest("tr") as HTMLElement).getByText("Retirado")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -1199,7 +1199,7 @@ describe("the sentences the module builds outside React, in Spanish", () => {
     expect(backupPointStateLabel("pruned")).toBe("Eliminado por retención");
     expect(backupRunStateLabel("missed")).toBe("Omitida");
     expect(backupRunStateLabel("success")).toBe("Correcta");
-    expect(repositoryStateLabel("disabled")).toBe("Deshabilitado");
+    expect(repositoryStateLabel("retired")).toBe("Retirado");
     expect(backupRunStateLabel("succeeded")).toBe("Correcto");
     setActiveLanguage("en");
     expect(backupPointStateLabel("pruned")).toBe("Pruned");
@@ -1252,13 +1252,13 @@ describe("the sentences the module builds outside React, in Spanish", () => {
     ]);
     expect(repositoryPickerOptions([REPO, REPO_OFF]).map((o) => o.sublabel)).toEqual([
       "s3://copias/principal · activo",
-      "s3://copias/principal · deshabilitado",
+      "s3://copias/principal · retirado",
     ]);
     expect(devicePickerEmptyHint()).toMatch(/Dispositivos → Añadir un equipo/);
     expect(repositoryPickerEmptyHint()).toMatch(/pestaña Repositorios/);
     setActiveLanguage("en");
     expect(devicePickerOptions(DEVICES.items).map((o) => o.sublabel)).toEqual(["windows · online", "linux · offline", "no agent"]);
-    expect(repositoryPickerOptions([REPO_OFF])[0]?.sublabel).toBe("s3://copias/principal · disabled");
+    expect(repositoryPickerOptions([REPO_OFF])[0]?.sublabel).toBe("s3://copias/principal · retired");
     expect(devicePickerEmptyHint()).toBe(DEVICE_PICKER_EMPTY_HINT);
   });
 

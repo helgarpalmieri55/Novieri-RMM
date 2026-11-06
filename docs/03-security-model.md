@@ -53,7 +53,8 @@ this document.
   (`gateway.identity_mismatch`). So "never to job command" is not a scope that
   needed carving out of a certificate; it is the default, enforced in two
   places.
-- **Operators** are gated by SSO + MFA + RBAC.
+- **Operators** are gated by their own password, a mandatory second factor (a
+  passkey or a TOTP app), a server-side session and RBAC.
 
 ## The signed-job invariant
 
@@ -120,9 +121,44 @@ the system.
 
 ## Authentication & RBAC
 
-- **Authentication:** operators authenticate through **Keycloak** (OIDC/SAML),
-  federated to AD/Entra where present, with **MFA enforced**. Sessions are
-  server-managed with sane expiry.
+- **Authentication:** technicians sign in to the console with the platform's
+  own authentication (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`):
+  a password of 12 to 128 characters, checked against a shipped blocklist and
+  stored as argon2id with a pepper held in OpenBao, plus a **mandatory second
+  factor** -- a passkey with user verification required, or a TOTP app --
+  with ten single-use recovery codes. Failures are counted per account and per
+  factor, with an increasing wait from the fifth and the factor disabled at
+  the hundredth. **The password's wait is split by browser** (operator
+  decision 2026-11-05, design §2.3, OWASP "Slow Down Online Guessing Attacks
+  with Device Cookies"): a browser carrying a remembered-device cookie that is
+  still valid for that account waits on its own counter, every other browser
+  on the account's, so whoever knows an address but not that cookie holds
+  only the unrecognised browsers in the wait. The 100-failure stop counts both
+  and is per account. A person with no remembered browser, or an organization
+  with "remember this device" off, has only the account's counter and can
+  still be held waiting by anyone who knows the address; the remedy there is
+  the edge (block the address), the reset link, or the recovery command.
+  Anyone who knows the address can still reach the 100-failure stop from
+  unrecognised browsers in about a day of paced attempts, if the person does
+  not sign in with their password meanwhile; the password is then disabled
+  for every browser, the remembered one included, and the reset link restores
+  it. Sessions are server-side, carried in a `__Host-` cookie that
+  holds only a random identifier, with a 30-minute idle timeout and a 12-hour
+  maximum by default; every write needs a custom header and a matching
+  `Origin`. **Only the person's own activity renews a session** (design §2.4,
+  NIST SP 800-63B-4 §5.2): the console marks a request made without pointer
+  or keyboard input in the last 60 s with `X-ITMS-Background: 1` -- its
+  minute polls, its refetches -- and the server does not renew the session
+  for it, so an unattended console with its tab visible still reaches the
+  idle limit. An open tab's live socket and an open remote screen are not
+  activity either; a person working a remote desktop keeps the session alive
+  through their input on the viewer page. The header can only decline a
+  renewal. "Remember this device" (15 days by default) skips the second
+  factor at sign-in only, never for a recent-confirmation action, and **does
+  not meet AAL2** on that device -- the operator accepted this knowingly
+  (design §0, S2b). Not built: SAML and on-premises Active Directory
+  federation (out of scope); sign-in with Microsoft and the contacts' portal
+  are phase 2. MCP clients still authenticate through Keycloak until phase 3.
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):
@@ -172,6 +208,11 @@ the system.
 | Tampered agent binary / malicious update | Update only by a signed job pinning the release SHA-256, re-checked at the install location; human-started ring rollout; local rollback; Authenticode against a compiled-in pin once signing exists (`spec-self-update.md`) |
 | Credential theft from the vault | Envelope encryption, decrypt-at-use, no plaintext in DB/logs, audited checkout |
 | Operator abuse / over-privilege | RBAC scoped to org + client (per-client grants, the client scope enforced by RLS, invariant 5a); MFA; full audit trail |
+| Stolen or guessed operator password | Mandatory second factor; shipped blocklist; per-account and per-factor failure counters with backoff and a 100-failure disable; generic answers that take the same work whether or not the account exists |
+| An operator locked out by someone who knows their address (online guessing as denial of service) | The password's wait is per remembered browser for a browser the platform recognises, so the person's own remembered browser signs in while unrecognised ones wait (design §2.3). Not covered: a person with no remembered browser, or remembering switched off -- the edge, the reset link and the recovery command are the remedy. Nor the stop itself: anyone who knows the address can still reach the 100-failure stop from unrecognised browsers in about a day of paced attempts, if the person does not sign in with their password meanwhile; the password is then disabled for every browser and the reset link restores it |
+| An account taken over through its mailbox: a password reset by mail, then an administrator's factor reset | No reset link goes to an account without a second factor, and one sent before the factors went is refused and spent (design §2.8 and §7). An administrator's "Reset sign-in methods" is refused (409 `reset_needs_recovery`) while the person's password was set with an emailed link and no second factor has been used since (operator decision 2026-11-05, design §7; NIST SP 800-63B-4 §4.2.2.2): the server's recovery link, handed to the person directly, is the way back. The two checks share one per-person lock, and a second factor verified on a session the mail reset ended rolls back rather than clearing the refusal. On the MCP channel the route answers 403 `step_up_required` before the service runs. While that mark is set, the recovery link makes the person choose a new password before it finishes (409 `recovery_needs_password` without one, the link unspent; operator decision 2026-11-05, «Pedir contraseña nueva si hay marca», design §7), so the mailbox's password stops working rather than outliving the recovery and the mark; the mark is read under the same per-person lock, so a mail reset between opening the link and pressing it is caught. Every recovery also offers a new password and applies one that is given, mark or not (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»), so a mark cleared by someone holding the mailbox's password and a factor -- between opening the link and pressing it, or before a later recovery -- does not keep their password. Without the mark and with no password given, the password stays (plan decision 10) |
+| A console left signed in on an unattended computer | The 30-minute idle limit is enforced server-side and only the person's activity renews it: the console's background polls carry `X-ITMS-Background: 1` and do not, and neither does an open tab's socket or an open remote screen (design §2.4). After the limit the next request is a 401; within the maximum the password alone resumes the session |
+| Theft of the platform database | Passwords stored only as peppered argon2id (pepper in OpenBao), TOTP secrets sealed by the vault, session and device identifiers stored only as SHA-256 |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |
 | Audit tampering to hide activity | Hash-chained append-only log |

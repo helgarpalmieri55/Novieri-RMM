@@ -40,7 +40,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,9 +101,14 @@ async def list_device_groups(
     limit: int = 100,
     offset: int = 0,
     include_archived: bool = False,
+    client_id: UUID | None = None,
 ) -> DeviceGroupPage:
     """This org's device groups in `(precedence, name)` order, each with how
     many devices it directly holds, plus the size of the ungrouped remainder.
+
+    `client_id` keeps one client's groups and counts only its devices. It is
+    a predicate, not a scope: the caller narrows the session too (the route
+    does, by `ClientScope.narrow`), and this holds on the admin engine.
 
     ORDERED BY `(precedence, name)`, AND THAT IS SEMANTIC RATHER THAN TIDY.
     `inventory.rules.evaluate_rules` walks rule-bearing groups in exactly this
@@ -142,12 +147,15 @@ async def list_device_groups(
     reaches nothing. `include_archived=True` brings them back for the screen
     that has to offer an unarchive.
     """
+    of_client: list[ColumnElement[bool]] = (
+        [] if client_id is None else [Device.client_id == client_id]
+    )
     members = (
         select(
             Device.device_group_id.label("group_id"),
             func.count().label("device_count"),
         )
-        .where(Device.org_id == org_id, Device.device_group_id.is_not(None))
+        .where(Device.org_id == org_id, Device.device_group_id.is_not(None), *of_client)
         .group_by(Device.device_group_id)
         .subquery()
     )
@@ -156,6 +164,8 @@ async def list_device_groups(
         .join(members, members.c.group_id == DeviceGroup.id, isouter=True)
         .where(DeviceGroup.org_id == org_id)
     )
+    if client_id is not None:
+        query = query.where(DeviceGroup.client_id == client_id)
     if not include_archived:
         query = query.where(DeviceGroup.archived_at.is_(None))
 
@@ -175,7 +185,7 @@ async def list_device_groups(
         await session.execute(
             select(func.count())
             .select_from(Device)
-            .where(Device.org_id == org_id, Device.device_group_id.is_(None))
+            .where(Device.org_id == org_id, Device.device_group_id.is_(None), *of_client)
         )
     ).scalar_one()
 

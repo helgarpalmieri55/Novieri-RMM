@@ -7,6 +7,19 @@ from app.models.ai import (
     AiSettings,
 )
 from app.models.approved_actions import ApprovedAction, ApprovedActionScriptExemption
+from app.models.auth import (
+    AccountMailSettings,
+    AuthActionToken,
+    AuthFailure,
+    AuthOrgSettings,
+    AuthPasskey,
+    AuthPassword,
+    AuthRecoveryCode,
+    AuthSession,
+    AuthTotp,
+    AuthTrustedDevice,
+    AuthWebauthnChallenge,
+)
 from app.models.base import Base
 from app.models.clients import Client, Site
 from app.models.core import (
@@ -221,6 +234,17 @@ __all__ = [
     "AiSession",
     "AiSettings",
     "AuditEvent",
+    "AccountMailSettings",
+    "AuthActionToken",
+    "AuthFailure",
+    "AuthOrgSettings",
+    "AuthPasskey",
+    "AuthPassword",
+    "AuthRecoveryCode",
+    "AuthSession",
+    "AuthTotp",
+    "AuthTrustedDevice",
+    "AuthWebauthnChallenge",
     "BackupChunk",
     "BackupChunkCopy",
     "BackupOffsiteTarget",

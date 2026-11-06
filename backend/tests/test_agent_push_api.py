@@ -595,10 +595,27 @@ async def test_a_dispatch_refusal_is_committed_to_the_audit_chain_and_explained(
     """Review Minor 2, through the route: a refusal dispatch finds (here, no
     console address) is a 422 naming the reason with its plain-language help,
     and its `push.refused` row survives -- it is not an exception that rolls
-    the record back."""
-    from app.models import AuditEvent
+    the record back.
 
-    monkeypatch.setattr(api_env.app.state.settings, "public_console_url", None)
+    The console address is taken from DISPATCH only, not from the Settings:
+    since own authentication Task 13 the request is a cookie write, which the
+    CSRF rule refuses outright when no console is configured -- so a
+    deployment without one never reaches this refusal over HTTP. The seam is
+    the argument the route hands dispatch (`test_the_push_route_hands_
+    dispatch_the_configured_console_url` above pins that it is the setting's
+    value)."""
+    from app.models import AuditEvent
+    from app.modules.agent_push import dispatch as dispatch_service
+
+    real_dispatch = dispatch_service.dispatch_push_batch
+
+    async def _without_a_console(*args: Any, **kwargs: Any) -> Any:
+        # The route reads ITS_PUBLIC_CONSOLE_URL and hands it to dispatch;
+        # dispatch is what refuses without one. The console the browser and
+        # the CSRF rule see stays configured.
+        return await real_dispatch(*args, **{**kwargs, "public_console_url": None})
+
+    monkeypatch.setattr(dispatch_service, "dispatch_push_batch", _without_a_console)
     org, headers, credential_id = await _authorized_world(api_env, "push-refused-audit")
     response = await api_env.client.post(
         f"{PUSH}/requests",

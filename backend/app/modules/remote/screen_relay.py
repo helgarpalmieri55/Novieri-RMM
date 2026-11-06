@@ -9,7 +9,9 @@ Two legs meet here, joined by session id:
   it. The registration is consumed (GETDEL) before any of that is checked, so
   a token is good for one attempt.
 * the **viewer leg**: the api's WebSocket on the internal listener
-  (``/relay-internal``), admitted by the viewer ticket.
+  (``/relay-internal``), admitted by the viewer ticket. Its AUTH also names
+  the person the api admitted (``viewer``), whose acts on this leg -- closing
+  it, switching control -- are audited as theirs.
 
 The gateway does not parse frame bodies except STATE (which drives the
 session state machine and the audit log) and CONTROL (so view-only is enforced
@@ -105,6 +107,10 @@ class _Join:
     agent_conn: Conn
     viewer_conn: Conn | None = None
     viewer_claimed: bool = False
+    # The person on the viewer leg, as the api named them in its AUTH: the
+    # owner, or a supervisor who joined. None from an api too old to name
+    # them, which `RemoteSessionService` reads as the session's owner.
+    viewer_id: UUID | None = None
     consented: bool = False
     active: bool = False
     input_enabled: bool = True
@@ -156,12 +162,26 @@ class ScreenRelayHub:
         action: str,
         *,
         target_id: str,
+        vouched: RelayRegistration | None,
         actor_type: ActorType = "agent",
         actor_id: UUID | None = None,
         metadata: dict[str, Any],
     ) -> None:
+        """Filed in the session's client only when ``vouched``, the server's
+        own registration, says which session this was. Without one the
+        session id is the peer's word, and a peer must not choose whose trail
+        a refusal lands in."""
         try:
             async with org_session(org_id, engine=self._app_engine, clients=ClientScope.all()) as s:
+                client_id = None
+                if vouched is not None:
+                    client_id = (
+                        await s.execute(
+                            select(RemoteSession.client_id).where(
+                                RemoteSession.id == vouched.session_id
+                            )
+                        )
+                    ).scalar_one_or_none()
                 await audit_service.record(
                     s,
                     org_id=org_id,
@@ -171,6 +191,7 @@ class ScreenRelayHub:
                     target_type="session",
                     target_id=target_id,
                     metadata=metadata,
+                    client_id=client_id,
                 )
         except Exception:  # noqa: BLE001 - a refusal is still a refusal
             logger.exception("failed to audit %s", action)
@@ -183,6 +204,7 @@ class ScreenRelayHub:
         action: str,
         session_id: str,
         reason: str,
+        vouched: RelayRegistration | None = None,
         code: int = rsp.CLOSE_REFUSED,
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -192,6 +214,7 @@ class ScreenRelayHub:
                 org_id,
                 action,
                 target_id=session_id,
+                vouched=vouched,
                 metadata={"reason": reason, **(metadata or {})},
             )
         with contextlib.suppress(Exception):
@@ -258,6 +281,9 @@ class ScreenRelayHub:
                 metadata=common,
             )
             return
+        # From here the registration -- the server's, consumed by this
+        # attempt -- vouches for the session, so each refusal is filed in its
+        # client.
         if reg.device_id != agent.device_id or reg.org_id != agent.org_id:
             await self._refuse(
                 conn,
@@ -265,6 +291,7 @@ class ScreenRelayHub:
                 action="remote.relay.identity_mismatch",
                 session_id=str(session_id),
                 reason="device_mismatch",
+                vouched=reg,
                 metadata={**common, "expected_device_id": str(reg.device_id)},
             )
             return
@@ -275,6 +302,7 @@ class ScreenRelayHub:
                 action="remote.relay.token_rejected",
                 session_id=str(session_id),
                 reason="bad_token",
+                vouched=reg,
                 metadata=common,
             )
             return
@@ -285,6 +313,7 @@ class ScreenRelayHub:
                 action="remote.relay.token_rejected",
                 session_id=str(session_id),
                 reason="expired",
+                vouched=reg,
                 metadata=common,
             )
             return
@@ -296,6 +325,7 @@ class ScreenRelayHub:
                 action="remote.relay.token_rejected",
                 session_id=str(session_id),
                 reason="session_state",
+                vouched=reg,
                 metadata={**common, "state": state},
             )
             return
@@ -501,8 +531,14 @@ class ScreenRelayHub:
                 raise rsp.FrameError(  # i18n-exempt: caught in the same try, leg refused
                     "text frame"
                 )
-            sid_text, ticket = rsp.parse_auth(rsp.decode(raw), secret_field="ticket")
+            auth = rsp.decode(raw)
+            sid_text, ticket = rsp.parse_auth(auth, secret_field="ticket")
             session_id = UUID(sid_text)
+            # Who the api admitted to this leg (`admit_tunnel_session`). Trusted
+            # as the api's word because only the api holds the ticket checked
+            # below; a value that is not a user id is a malformed AUTH.
+            named = rsp.parse_viewer(auth)
+            viewer_id = UUID(named) if named is not None else None
         except TimeoutError:
             await conn.close(rsp.CLOSE_TIMEOUT, "no AUTH")
             return
@@ -521,6 +557,7 @@ class ScreenRelayHub:
                 action="remote.relay.token_rejected",
                 session_id=str(session_id),
                 reason="bad_ticket" if reg is not None else "no_registration",
+                vouched=reg,
                 metadata={"leg": "viewer"},
             )
             return
@@ -545,6 +582,7 @@ class ScreenRelayHub:
             return
 
         join.viewer_claimed = True
+        join.viewer_id = viewer_id
         join.viewer_attached.set()
         try:
             # Frames that arrive while the backlog drains join its tail, so the
@@ -622,7 +660,9 @@ class ScreenRelayHub:
                             else "remote.session.input_disabled"
                         ),
                         actor_type="user",
-                        actor_id=None,  # the session's technician
+                        # The viewer switched it: the owner or a supervisor
+                        # who joined (None: the owner, from an older api).
+                        actor_id=join.viewer_id,
                         metadata={"by": "technician"},
                     )
         elif frame.type in rsp.INPUT_TYPES and not join.input_enabled:
@@ -648,8 +688,11 @@ class ScreenRelayHub:
             reason = join.end_reason or default_reason
             if not join.ended_in_db:
                 join.ended_in_db = True
-                # The viewer leaving is the technician ending the session;
-                # anything else was decided on the endpoint side.
+                # The viewer leaving is the viewer ending the session: the
+                # person the api put on the leg, who is the owner or a
+                # supervisor who joined (phase 3 design §5.3). None, from an
+                # api too old to name them, is the owner. Anything else was
+                # decided on the endpoint side.
                 by_viewer = ended_by_viewer and join.end_reason is None
                 try:
                     async with org_session(
@@ -660,7 +703,7 @@ class ScreenRelayHub:
                             session_id=join.reg.session_id,
                             reason=reason,
                             actor_type="user" if by_viewer else "agent",
-                            actor_id=None if by_viewer else join.agent.agent_id,
+                            actor_id=join.viewer_id if by_viewer else join.agent.agent_id,
                         )
                 except InvalidSessionState:
                     pass  # already ended by the api (stop) or a job result

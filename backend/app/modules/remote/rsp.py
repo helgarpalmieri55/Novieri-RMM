@@ -127,9 +127,16 @@ def _json_body(frame: Frame) -> dict[str, object]:
     return value
 
 
-def auth_frame(*, session_id: str, secret_field: str, secret: str, seq: int = 1) -> bytes:
-    body = json.dumps({"session_id": session_id, secret_field: secret}).encode()
-    return encode(AUTH, seq, body)
+def auth_frame(
+    *, session_id: str, secret_field: str, secret: str, seq: int = 1, viewer: str | None = None
+) -> bytes:
+    """``viewer`` is the viewer leg's only: the person the api admitted to
+    the session's screen. The agent leg never sends it, and leaving it out
+    writes exactly the frame the agent leg has always sent."""
+    members: dict[str, str] = {"session_id": session_id, secret_field: secret}
+    if viewer is not None:
+        members["viewer"] = viewer
+    return encode(AUTH, seq, json.dumps(members).encode())
 
 
 def parse_auth(frame: Frame, *, secret_field: str) -> tuple[str, str]:
@@ -147,6 +154,18 @@ def parse_auth(frame: Frame, *, secret_field: str) -> tuple[str, str]:
             f"AUTH needs session_id and {secret_field}"
         )
     return session_id, secret
+
+
+def parse_viewer(frame: Frame) -> str | None:
+    """The viewer leg's ``viewer`` member, or None when the api sent none
+    (one older than the member). Read only on the viewer leg; any value but a
+    string is a protocol error."""
+    viewer = _json_body(frame).get("viewer")
+    if viewer is not None and not isinstance(viewer, str):
+        raise FrameError(  # i18n-exempt: relay catches it and closes the leg
+            "AUTH viewer must be a string"
+        )
+    return viewer
 
 
 def auth_ok_frame(session_id: str, seq: int = 1) -> bytes:

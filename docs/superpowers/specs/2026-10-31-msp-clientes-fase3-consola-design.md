@@ -50,7 +50,7 @@ choca se hace en paralelo, con varios agentes (§9).
 - `requestHeaders` (`frontend/src/lib/api.ts`) es el único sitio que arma las cabeceras. Añade
   `X-Client-Id` cuando hay un cliente elegido. `lib/api.language.test.ts` ya obliga a que todo `fetch`
   pase por ahí.
-- **Las rutas de configuración global nunca llevan la cabecera**: las 95 de `GLOBAL_WRITES` y las 4 de
+- **Las rutas de configuración global nunca llevan la cabecera**: las 101 de `GLOBAL_WRITES` y las 4 de
   `GLOBAL_READS` en `backend/tests/test_global_writes.py`. Con ella, darían 403 (refinamiento 3 del §7 del
   diseño del proyecto).
 - Su lista no se copia a mano en la consola. Vive en `frontend/src/lib/globalRoutes.json`, con el

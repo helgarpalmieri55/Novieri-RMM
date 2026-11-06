@@ -9,13 +9,29 @@ question "is this identity one we let in", and it has two rules:
 * the email-domain allowlist (:mod:`app.core.identity.email_domain`);
 * the account's ``users.status``, below.
 
-Both are enforced at every door that turns a token into a principal --
-``app/api/deps.py`` (HTTP), ``app/api/v1/ws.py`` (console WebSocket) and
-``app/modules/remote/tunnel.py`` (remote-control tunnel). There are exactly
-three, verified with ``grep -rn "validate_token" app/``; the agent gateway is
-not a fourth (it identifies agents by TLS peer-certificate fingerprint and
-carries no bearer token). An allowlist enforced at one of three doors is not
-an allowlist.
+Both are enforced at every door that turns a credential into a principal --
+``app/api/deps.py`` (HTTP: the console's session, and on the MCP channel an
+OAuth token), ``app/api/v1/ws.py`` (console WebSocket) and
+``app/modules/remote/tunnel.py`` (remote-control tunnel), the last two by the
+console's session only since own authentication phase 1. There are exactly
+three; the agent gateway is not a fourth (it identifies agents by TLS
+peer-certificate fingerprint and carries no bearer token). An allowlist
+enforced at one of three doors is not an allowlist.
+
+THE STATUS RULE ON A SESSION DOOR IS A 401, NOT A LOGGED REFUSAL (own
+authentication phase 1, final review B-M2; RBAC design §3.2, the note under
+the table). A console session names its person by a row, and
+``app.core.auth.sessions.resolve`` answers ``None`` for a session whose person
+is not ``active``: the HTTP door answers 401 and both sockets close 4401, with
+no :func:`log_admission_refusal` line and no :func:`audit_admission_refusal`
+event. Disabling or deleting a person ends every session of theirs in the same
+transaction, and ``user.disabled`` / ``user.deleted`` are in the chain already;
+the filter in ``resolve`` is defence in depth. What still reaches the logged and
+audited status refusal below is a credential with no session row of its own to
+end: the assistant's loopback token (``deps._admit_session``) and the MCP
+channel's OAuth token. ``resolve`` logs ONE WARNING of its own for a session
+that has NOT ended but belongs to a non-active person -- a lifecycle path that
+forgot to end it, so a defect detector, never the token.
 
 WHY A REFUSAL IS AUDITED ONCE AND LOGGED TWICE, AND WHY THAT ASYMMETRY IS THE
 HONEST ANSWER RATHER THAN AN OVERSIGHT

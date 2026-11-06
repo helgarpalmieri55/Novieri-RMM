@@ -21,13 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, bound_auth_context, require_permission
 from app.core.client_scope import ClientScope
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import read_session_identity
 from app.core.rbac import clients_holding, has_permission
-from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import Client, Role, User, UserRole
 from app.modules.portal.principal import require_portal_permission, resolve_portal_principal
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel
+from app.modules.remote.tunnel import REMOTE_CONTROL, TunnelAuthError
+from tests.session_support import authorize_tunnel_session, sign_in, socket_connection
 
 Grants = list[tuple[str, str | None]]
 
@@ -63,9 +63,7 @@ async def _seed(admin_engine: Any, env: Any, grants: Grants) -> tuple[UUID, UUID
 
 async def _headers(env: Any, org_id: UUID, **extra: str) -> dict[str, str]:
     """`_seed`'s user signs in: its sub is `sub-<org id>`."""
-    slug = await env.org_slug(org_id)
-    token = env.idp.token(f"sub-{org_id}", slug, email="ana@test.local")
-    return {"Authorization": f"Bearer {token}", **extra}
+    return {**(await env.headers(org_id, f"sub-{org_id}")), **extra}
 
 
 def _as_json(scope: ClientScope) -> dict[str, Any]:
@@ -273,13 +271,24 @@ async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
         user = (await s.execute(select(User).where(User.external_subject == sub))).scalar_one()
         user.kind, user.client_id = "contact", org  # the internal client (id convention)
         await s.commit()
-    r = await env.client.get("/api/v1/me", headers=await env.headers(org, sub))
+    headers = await env.headers(org, sub)
+
+    async def last_login() -> Any:
+        async with AsyncSession(env.admin_engine) as s:
+            return (
+                await s.execute(select(User.last_login_at).where(User.external_subject == sub))
+            ).scalar_one()
+
+    # Since own authentication Task 13 `env.headers` is a sign-in, which
+    # records its own login when the session starts; the door's refusal must
+    # record nothing beyond it (it asserted `last_login_at is None` while the
+    # credential was a token that only the door turned into a login).
+    signed_in_at = await last_login()
+    r = await env.client.get("/api/v1/me", headers=headers)
     assert r.status_code == 403
     assert r.json()["detail"] == "this account can only use the portal"
-    # Refused inside the admission transaction: it records no login.
-    async with AsyncSession(env.admin_engine) as s:
-        user = (await s.execute(select(User).where(User.external_subject == sub))).scalar_one()
-        assert user.last_login_at is None
+    # Refused at admission, which writes nothing: it records no login.
+    assert await last_login() == signed_in_at
 
 
 # Global configuration (a per-client grant is not a grant on every client) is
@@ -288,31 +297,37 @@ async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
 
 # --------------------------------------------------------------------------- #
 # Doors 2 and 3: the console WebSocket and the remote tunnel
+#
+# Both turn a console session into a person with `read_session_identity`, and
+# these call it with each door's own arguments: the live socket as
+# `console-ws` with no code (`ws.py::_session_scope`), the tunnel as
+# `remote-tunnel` with `remote.control` (`tunnel.py::admit_tunnel_session`).
+# Until own authentication Task 13 they read a token with
+# `read_door_identity`, which went with the console's bearer.
 # --------------------------------------------------------------------------- #
+
+
+async def _door_identity(env: Any, org: UUID, user_id: UUID, *, door: str) -> Any:
+    return await read_session_identity(
+        door=door,
+        org_id=org,
+        user_id=user_id,
+        settings=env.settings,
+        engine=env.app_engine,
+        code=REMOTE_CONTROL if door == "remote-tunnel" else None,
+    )
 
 
 async def test_the_door_identity_carries_the_persons_scope(api_env: Any) -> None:
     env = api_env
     org, user, c = await _seed(env.admin_engine, env, [("technician", "X"), ("read-only", "Z")])
-    slug = await env.org_slug(org)
 
-    async def identity(sub: str, code: str | None) -> Any:
-        claims = TokenClaims(sub=sub, email="ana@test.local", name="Ana", org_slug=slug)
-        return await read_door_identity(
-            door="test",
-            org_id=org,
-            claims=claims,
-            settings=env.settings,
-            engine=env.app_engine,
-            code=code,
-        )
-
-    ws = await identity(f"sub-{org}", None)
+    ws = await _door_identity(env, org, user, door="console-ws")
     assert (ws.refusal, ws.user_id) == (None, user)
     assert ws.clients == ClientScope.only([c["X"], c["Z"]])
-    tunnel = await identity(f"sub-{org}", "remote.control")
+    tunnel = await _door_identity(env, org, user, door="remote-tunnel")
     assert tunnel.clients == ClientScope.only([c["X"]])
-    unknown = await identity("nobody-at-all", None)
+    unknown = await _door_identity(env, org, uuid4(), door="console-ws")
     assert (unknown.user_id, unknown.clients) == (None, ClientScope.only([]))
 
 
@@ -320,23 +335,17 @@ async def test_a_contact_is_refused_at_the_websocket_and_tunnel_doors(api_env: A
     env = api_env
     org, user, c = await _seed(env.admin_engine, env, [("technician", None)])
     await _make_contact(env, org, user, c["X"])
-    slug = await env.org_slug(org)
-    claims = TokenClaims(sub=f"sub-{org}", email="ana@test.local", name="Ana", org_slug=slug)
-    identity = await read_door_identity(
-        door="test", org_id=org, claims=claims, settings=env.settings, engine=env.app_engine
-    )
-    assert identity.refusal == "this account can only use the portal"
-    assert identity.clients == ClientScope.only([])
+    for door in ("console-ws", "remote-tunnel"):
+        identity = await _door_identity(env, org, user, door=door)
+        assert identity.refusal == "this account can only use the portal", door
+        assert identity.clients == ClientScope.only([]), door
 
 
 async def _tunnel(env: Any, org: UUID) -> tuple[UUID, UUID, ClientScope]:
-    slug = await env.org_slug(org)
-    return await authorize_tunnel(
-        token=env.idp.token(f"sub-{org}", slug, email="ana@test.local"),
+    return await authorize_tunnel_session(
+        connection=socket_connection(env, (await sign_in(env, org, f"sub-{org}")).token),
         session_id=uuid4(),
         settings=env.settings,
-        jwks=env.app.state.jwks,
-        admin_engine=env.admin_engine,
         app_engine=env.app_engine,
     )
 

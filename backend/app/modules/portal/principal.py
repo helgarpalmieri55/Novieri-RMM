@@ -1,9 +1,10 @@
 """The portal's auth seam (spec §0.1, §3).
 
-THIS FILE IS THE EXTENSION POINT. Portal users in v1 are staff already in the
-org's OIDC IdP, holding a portal permission (`portal.ticket.read` /
-`portal.ticket.write`) instead of -- or in addition to -- a technician one.
-External end users -- a managed provider's clients, who are not in that IdP --
+THIS FILE IS THE EXTENSION POINT. Portal users in phase 1 of autenticación
+propia are staff signed in to the console with their session cookie, holding a
+portal permission (`portal.ticket.read` / `portal.ticket.write`) instead of --
+or in addition to -- a technician one. External end users -- a managed
+provider's clients, who are not staff --
 are a real future requirement, and adding them means writing a SECOND
 implementation of `resolve_portal_principal` here. That is the whole seam: no
 pluggable-auth framework is built for a case that does not yet exist, and the
@@ -70,8 +71,9 @@ async def _holds_within(
 async def resolve_portal_principal(request: Request) -> PortalContext:
     """Resolve an authenticated portal principal.
 
-    v1 reuses the OIDC path (`app.api.deps.admit`, the same authentication
-    and admission as the console), then requires the caller hold A portal
+    It reuses the console's door (`app.api.deps.admit`: the session cookie, or
+    the assistant's internal token on an in-process call -- the same
+    authentication and admission as the console), then requires the caller hold A portal
     permission -- `portal.ticket.read` OR `portal.ticket.write` (spec §3,
     exactly: "requiring a portal permission (`portal.ticket.read` or
     `portal.ticket.write`)") -- the minimum bar for being a "portal user" at
@@ -131,7 +133,7 @@ async def bound_portal_principal(request: Request) -> AsyncIterator[PortalContex
     while handling any portal route therefore carried no org_id and no
     user_id, including the AI resolver's loopback calls
     (`app.core.ai.executor_portal`), which re-enter these routes carrying the
-    principal's own token.
+    turn's internal token, which names the principal.
 
     `user_id` is the REQUESTER's id. The kernel's contextvar is named for the
     authenticated person, and for a portal request that person is the

@@ -71,10 +71,11 @@ export function PlanDetail() {
   // "Procedure refs: 3c2b1a09-…". The same two lists the editor picks from name
   // them here (cycle 6's recognition-over-recall, on the read side) and fall
   // back to the id when a row cannot be read rather than to blank.
-  // The plan's client's devices: a plan names no other (see ./api).
+  // The plan's client's devices, groups and articles: a plan names no other
+  // (see ./api).
   const scopeDevices = useScopeDevices(true, plan.data?.client_id ?? null);
-  const scopeGroups = useScopeGroups(true);
-  const articles = useProcedureArticles(true);
+  const scopeGroups = useScopeGroups(true, plan.data?.client_id ?? null);
+  const articles = useProcedureArticles(true, plan.data?.client_id ?? null);
   const scopeDeviceOptions = scopeDevicePickerOptions(scopeDevices.data ?? []);
   const scopeGroupOptions = scopeGroupPickerOptions(scopeGroups.data ?? []);
   const articleOptions = procedurePickerOptions(articles.data ?? [], zone);

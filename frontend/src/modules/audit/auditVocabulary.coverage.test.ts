@@ -216,6 +216,30 @@ const DYNAMIC: Dynamic[] = [
     notActions: ["ticket.approve", "ticket.approval_decided"],
   },
   {
+    file: "core/auth/flows.py",
+    how: "_audit() wrapper literals",
+    codes: [
+      "auth.signed_in",
+      "auth.device_remembered",
+      "auth.recovery_code_used",
+      "auth.factor_added",
+      "auth.sessions_ended",
+      "auth.password_changed",
+      "user.recovery_link_used",
+    ],
+  },
+  {
+    file: "core/auth/account.py",
+    how: "_record() wrapper literals",
+    codes: [
+      "auth.password_changed",
+      "auth.factor_removed",
+      "auth.factor_added",
+      "auth.device_revoked",
+      "auth.sessions_ended",
+    ],
+  },
+  {
     file: "modules/keycloak_events/mapping.py",
     how: "map_event(): _DIRECT table and the passkey branch",
     needles: ["_DIRECT"],
@@ -411,8 +435,8 @@ const DYNAMIC: Dynamic[] = [
   },
   {
     file: "modules/user_admin/service.py",
-    how: "a conditional expression and _mail() literals",
-    codes: ["user.enabled", "user.disabled", "user.enrolment_resent", "user.password_reset_requested"],
+    how: "a conditional expression",
+    codes: ["user.enabled", "user.disabled"],
   },
   {
     file: "services/clients.py",
@@ -446,6 +470,8 @@ const DYNAMIC: Dynamic[] = [
  */
 const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "core/ai/act.py": 11,
+  "core/auth/account.py": 1,
+  "core/auth/flows.py": 1,
   "core/errors/triage.py": 2,
   "core/identity/__init__.py": 1,
   "core/rbac_admin.py": 2,
@@ -477,7 +503,6 @@ const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "modules/remote/service.py": 1,
   "modules/service_desk/approvals.py": 1,
   "modules/service_desk/canned.py": 1,
-  "modules/user_admin/service.py": 1,
   "services/device_review.py": 1,
   "services/clients.py": 1,
   "services/install_link.py": 1,

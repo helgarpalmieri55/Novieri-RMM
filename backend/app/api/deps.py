@@ -1,8 +1,9 @@
 """Request dependencies: authentication context and RBAC gates.
 
 Every privileged route depends on require_permission(code), which resolves the
-operator from the bearer token, pins the tenant, and evaluates RBAC inside the
-tenant session — server-side, always.
+operator -- from the console's session cookie, or on the MCP channel from its
+bearer token -- pins the tenant, and evaluates RBAC inside the tenant session —
+server-side, always.
 
 The same evaluation yields the request's CLIENT SCOPE (MSP clients spec
 §2.1-2.2): the clients where the person holds the route's code, narrowed --
@@ -23,6 +24,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import loopback
+from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
+from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
 from app.core.i18n import N_, tr, tr_marked
 from app.core.identity import (
@@ -46,7 +50,6 @@ from app.core.security import (
     JwksCache,
     TokenClaims,
     TokenValidationError,
-    require_console_token,
     require_person_mcp_token,
     validate_token,
 )
@@ -58,13 +61,27 @@ from app.models import Organization, User
 class AuthContext:
     org_id: UUID
     user_id: UUID
-    claims: TokenClaims
+    # HOW THE PERSON GOT IN -- exactly one of the two (P2 design §6.5). The
+    # console's own session (`principal`, the `__Host-itms_session` cookie), or
+    # a bearer token's claims (`claims`: the MCP channel only, since own
+    # authentication phase 1 Task 13 removed the console's Keycloak token).
+    # Read the person's address through `email`, which works for both (D14).
+    claims: TokenClaims | None
     # The request's client scope (MSP clients spec §2.2), already narrowed by
     # X-Client-Id. `bound_auth_context`: every client the person holds any
     # role in. `require_permission(code)`: every client they hold `code` in.
     # Routes pass it to `org_session(..., clients=ctx.clients)`, and RLS does
     # the rest: a record of a client outside it does not exist for the request.
     clients: ClientScope
+    principal: SessionPrincipal | None = None
+
+    @property
+    def email(self) -> str:
+        """The person's address: the `users` row's for a session, the token's
+        claim for an MCP bearer (what that path has always checked)."""
+        if self.principal is not None:
+            return self.principal.email
+        return "" if self.claims is None else self.claims.email
 
 
 @dataclass(frozen=True)
@@ -79,9 +96,10 @@ class Admission:
 
     org_id: UUID
     user_id: UUID
-    claims: TokenClaims
+    claims: TokenClaims | None
     clients: ClientScope
     requested_client: UUID | None
+    principal: SessionPrincipal | None = None
 
 
 #: The 403 for global configuration -- an O-table row with no client, which
@@ -155,11 +173,39 @@ async def auth_context(request: Request) -> AuthContext:
         user_id=person.user_id,
         claims=person.claims,
         clients=person.clients.narrow(person.requested_client),
+        principal=person.principal,
     )
 
 
+async def _session_principal(request: Request) -> SessionPrincipal | None:
+    """The session that admits this request off the MCP channel, or None:
+    `admit` then refuses it, since the console's bearer is gone (own
+    authentication phase 1, Task 13).
+
+    The assistant's internal token first (autenticación propia design §5.6): a
+    request that SAYS it is the assistant's own call (`X-ITMS-Loopback`) is
+    admitted by `loopback.verify_loopback` or refused there, and never falls
+    through to the cookie. Otherwise the session cookie (`resolve`).
+
+    The principal stays on `request.state`, a plain attribute as `org_id` and
+    `user_id` are, so an assistant route -- the portal's included, whose
+    `PortalContext` carries no principal -- can mint the next turn's token from
+    it (`loopback.loopback_authorization`) without a credential on any
+    context object."""
+    if loopback.claims_loopback(request):
+        principal: SessionPrincipal | None = await loopback.verify_loopback(request)
+        request.state.via_loopback = True
+    else:
+        principal = await resolve(request)
+        request.state.via_loopback = False
+    request.state.session_principal = principal
+    return principal
+
+
 async def admit(request: Request, *, contacts: bool) -> Admission:
-    """Authenticate the token and admit the person behind it (spec §3.2).
+    """Authenticate the request and admit the person behind it (spec §3.2):
+    off the MCP channel by the console's session (`_admit_session`), on it by
+    the MCP OAuth token.
 
     `contacts` is the one difference between the console and the portal: the
     console refuses a contact with 403 (spec §1.3), the portal admits one
@@ -167,12 +213,13 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
     origin, the org, the domain rule, `users.status`, the self-heal -- is the
     same door for both.
     """
-    # THE CHANNEL DECIDES THE AUDIENCE (MCP server design §4). A request that
-    # came in through `/mcp` carries the scope marker and is validated against
-    # the MCP resource ONLY; every other request against `oidc_audience` only.
-    # Neither token is accepted on the other's channel. (The channel itself is
-    # bound for audit by `app.mcp.guard.McpNeverExposedGuard`, for the whole
-    # request, before routing.)
+    # THE CHANNEL DECIDES THE CREDENTIAL (MCP server design §4; own
+    # authentication phase 1). A request that came in through `/mcp` carries
+    # the scope marker and is admitted only by a token validated against the
+    # MCP resource; every other request only by the console's session. Neither
+    # is accepted on the other's channel. (The channel itself is bound for
+    # audit by `app.mcp.guard.McpNeverExposedGuard`, for the whole request,
+    # before routing.)
     call = _mcp_call(request)
     mcp_audience = mcp_resource(request.app.state.settings)
     audience: str | None = None
@@ -189,9 +236,37 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("this action is never available to an AI app")
             )
+    # THE CONSOLE'S OWN SESSION (P2 design §6.5), and never on the MCP
+    # channel: a cookie the browser holds is not a grant an AI app was given
+    # (invariant 1c(a)). Nor is the assistant's internal token, which
+    # `_session_principal` takes first and `verify_loopback` refuses on an MCP
+    # call anyway.
+    if call is None:
+        # Off the MCP channel only the session admits (own authentication
+        # phase 1, Task 13): the console no longer sends a bearer, and the door
+        # no longer reads one.
+        principal = await _session_principal(request)
+        if principal is None:
+            raise AuthRefusal(
+                status.HTTP_401_UNAUTHORIZED, code=AUTH_REQUIRED, detail=tr("sign in to continue")
+            )
+        return await _admit_session(request, principal, contacts=contacts)
+    if loopback.claims_loopback(request):
+        # The two in-process channels never meet (1c(a): on MCP, only OAuth
+        # makes a session).
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, tr("the assistant's internal token was refused")
+        )
+
+    # ON THE MCP CHANNEL ONLY (MCP server design §4; own authentication phase 1
+    # keeps MCP on its OAuth tokens until phase 3): the MCP resource is the
+    # only audience, a token that also grants the console is refused, and so is
+    # a token the console's own client obtained or a service account's.
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, tr("missing bearer token"))
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED, code=AUTH_REQUIRED, detail=tr("missing bearer token")
+        )
     try:
         claims = await validate_token(
             authorization.removeprefix("Bearer "),
@@ -201,29 +276,22 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
         )
     except TokenValidationError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    # OFF THE CHANNEL, A TOKEN THAT CARRIES THE MCP AUDIENCE IS REFUSED even if
-    # it also carries the console's -- by `require_console_token` below, which
-    # the UI WebSocket and the remote tunnel call too: one rule, three doors.
-    #
-    # ON THE CHANNEL: invariant 1c(a) admits a token "carrying the
-    # MCP audience and no other platform audience". A console token that also
-    # names the MCP resource is a misconfigured identity provider, not a grant.
-    if call is not None and request.app.state.settings.oidc_audience in claims.aud:
+    # Invariant 1c(a) admits a token "carrying the MCP audience and no other
+    # platform audience". A token that also names the console's audience is a
+    # misconfigured identity provider, not a grant. (Off the channel no bearer
+    # is read at all, so an MCP grant is never replayable against the console.)
+    if request.app.state.settings.oidc_audience in claims.aud:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             tr("this token also grants the console and is not accepted over MCP"),
         )
-    # THE CHANNEL ALSO DECIDES THE ORIGIN: off the channel only a token the
-    # console's own client obtained, naming no MCP audience; on it only a person's,
-    # never the console's and never a service account's. Before the org
-    # lookup, so a refused token provisions no `users` row and writes no
-    # first-seen `auth.login` -- `McpAsgi` turns this 401 into its
-    # `invalid_token` challenge, and an in-process MCP call is held to it too.
+    # THE ORIGIN: only a person's token, never one the console's own client
+    # obtained and never a service account's. Before the org lookup, so a
+    # refused token provisions no `users` row and writes no first-seen
+    # `auth.login` -- `McpAsgi` turns this 401 into its `invalid_token`
+    # challenge, and an in-process MCP call is held to it too.
     try:
-        if call is None:
-            require_console_token(claims, request.app.state.settings)
-        else:
-            require_person_mcp_token(claims, request.app.state.settings)
+        require_person_mcp_token(claims, request.app.state.settings)
     except TokenValidationError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
@@ -420,6 +488,104 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
         clients=scope,
         requested_client=requested,
     )
+
+
+async def _admit_session(
+    request: Request, principal: SessionPrincipal, *, contacts: bool
+) -> Admission:
+    """Door 1 for a console session: `admit`'s rules, read from the person's
+    own row instead of a token (P2 design §6.5).
+
+    A session that has not finished its second factor is not signed in: 401,
+    and the sign-in routes (Task 7) are the only ones that accept it. Then, in
+    the order the MCP bearer path uses: the console's email-domain rule (staff
+    only -- it says who may use the CONSOLE; a contact, from phase 2, uses the
+    portal), `users.status`, a contact refused unless `contacts`, and the
+    person's scope. Nothing is written and nothing is self-provisioned: a
+    session exists only for a person the platform already has."""
+    if not principal.factor_done:
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED,
+            code=AUTH_REQUIRED,
+            detail=tr("finish signing in: confirm your second factor first"),
+        )
+    requested = requested_client(request)
+    settings = request.app.state.settings
+    async with org_session(
+        principal.org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
+    ) as session:
+        user = (
+            await session.execute(select(User).where(User.id == principal.user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise AuthRefusal(
+                status.HTTP_401_UNAUTHORIZED,
+                code=AUTH_REQUIRED,
+                detail=tr("your session has ended; sign in again"),
+            )
+        who = f"user:{user.id}"
+        reasons = [
+            None
+            if user.kind == CONTACT_KIND
+            else domain_refusal(
+                user.email, await resolve_console_domain(session, principal.org_id, settings)
+            ),
+            status_refusal(user.status),
+            None if contacts else contact_refusal(user.kind),
+        ]
+        for reason in reasons:
+            if reason is not None:
+                log_admission_refusal("session", sub=who, email=user.email, reason=reason)
+                raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(reason))
+        if user.kind == CONTACT_KIND:
+            scope = ClientScope.only([] if user.client_id is None else [user.client_id])
+        else:
+            scope = await clients_holding(session, user.id, None)
+    # The capture middleware's copy, as `admit` stashes it (its comment says why).
+    request.state.org_id = str(principal.org_id)
+    request.state.user_id = str(principal.user_id)
+    return Admission(
+        org_id=principal.org_id,
+        user_id=principal.user_id,
+        claims=None,
+        clients=scope,
+        requested_client=requested,
+        principal=principal,
+    )
+
+
+def require_step_up(ctx: AuthContext, *, now: datetime | None = None) -> None:
+    """Refuse unless a second factor was verified in this session in the last
+    10 minutes (P2 design §2.5): `403 {"code": "step_up_required"}`, which the
+    console answers by asking for it (`/auth/step-up/*`, Task 7).
+
+    A session on a remembered device starts without one, so the vault keeps
+    asking there (design §2.6, falsifier 5). A request with no session -- only
+    MCP enters without one since own authentication phase 1 -- is refused too:
+    the MCP channel never reaches these acts (`MCP_FORBIDDEN_CODES`, the
+    never-exposed table), and if it did, a refusal is the right way to be
+    wrong."""
+    if ctx.principal is None or not step_up_fresh(ctx.principal, now or datetime.now(UTC)):
+        raise AuthRefusal(
+            status.HTTP_403_FORBIDDEN,
+            code=STEP_UP_REQUIRED,
+            detail=tr("confirm your second factor again to do this"),
+        )
+
+
+def require_permission_with_step_up(
+    code: str,
+) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
+    """`require_permission(code)`, then `require_step_up`: a dependency, so the
+    refusal comes before the body is read. `route_permission` still recovers
+    `code` by walking into `gate`, as for `require_permission_on_every_client`."""
+    gate = require_permission(code)
+
+    async def with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
+        require_step_up(ctx)
+        return ctx
+
+    return with_step_up
 
 
 async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { EmptyState } from "../../components/emptystate";
@@ -9,8 +9,8 @@ import { FIXTURE_MODE } from "../../fixtures/mode";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { lazyLabels } from "../../i18n/lazy";
-import { accessToken } from "../../lib/auth";
 import { useApi } from "../../lib/ApiContext";
+import { isSessionEnded, subscribeSessionEnd } from "../../lib/sessionEnd";
 import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
 import { Facts, type Kind } from "../../shell/viz";
 import {
@@ -34,7 +34,7 @@ import { CanvasRenderer } from "./screenCanvas";
 import { SHORTCUTS, HeldKeys, buttonsMask, sendableCode, textChunks, toRemote, wheelUnits } from "./screenInput";
 import { Assembler, INITIAL_STATUS, nextStatus, type Phase, type ScreenEvent } from "./screenModel";
 import { consentModeLabel } from "./sessionState";
-import { canOpenTunnel, screenProtocols, screenUrl } from "./tunnel";
+import { screenUrl } from "./tunnel";
 
 // Accessors over the catalogue: the label is read when it is shown, so a
 // language switch re-words it.
@@ -112,6 +112,12 @@ export function ScreenViewer() {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
+  // THE SESSION ENDING WHILE THE SCREEN IS OPEN closes it (final review D1,
+  // Minor 2), however this tab learnt it -- a 401 anywhere, a `/ws` 4401, a
+  // sign-out. The server cuts the stream too, but only at its next re-check,
+  // up to 60 s later, and an open screen counts as activity, so idle never
+  // does. Defence in depth: the server stays authoritative.
+  const ended = useSyncExternalStore(subscribeSessionEnd, isSessionEnded, isSessionEnded);
 
   const session = useQuery({
     queryKey: ["remote-sessions", sessionId],
@@ -173,15 +179,18 @@ export function ScreenViewer() {
       dispatch({ kind: "open" });
       return;
     }
-    const token = accessToken();
-    if (!canOpenTunnel(token)) {
+    // NO SESSION, NO SOCKET. The session cookie is the stream's credential
+    // (own-auth design §6.5); once this tab has seen a 401 the handshake
+    // would be refused before `accept()`, the browser would report a bare
+    // 1006, and the page would blame the device for it.
+    if (isSessionEnded()) {
       dispatch({ kind: "failed", messageKey: "remote.screen.noCredential" });
       return;
     }
     const canvas = canvasRef.current;
     if (canvas) rendererRef.current = new CanvasRenderer(canvas);
     const assembler = new Assembler();
-    const ws = new WebSocket(screenUrl(sessionId, window.location), screenProtocols(token));
+    const ws = new WebSocket(screenUrl(sessionId, window.location));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     seqRef.current = 0;
@@ -253,7 +262,7 @@ export function ScreenViewer() {
       wsRef.current = null;
       rendererRef.current = null;
     };
-  }, [sessionId, send]);
+  }, [sessionId, send, ended]);
 
   // The consent countdown.
   useEffect(() => {
@@ -527,8 +536,15 @@ export function ScreenViewer() {
               <Btn key={name} label={t("remote.screen.sendShortcut", { label: s.label })} small onClick={() => sendShortcut(name)} />
             ))}
             <form onSubmit={typeText} className="flex flex-wrap items-center gap-2">
+              {/* A SECRET TYPED IN CLEAR: with no clipboard (screen-share
+                  spec §3.8) this box is how a technician gets their own
+                  characters onto the device, a password among them. Never
+                  kept when the session ends (`lib/unsavedText.ts`), never
+                  offered back by the browser (final re-review, I3). */}
               <input
                 className={inputClass}
+                data-secret
+                autoComplete="off"
                 aria-label={t("remote.screen.textLabel")}
                 placeholder={t("remote.screen.textPlaceholder")}
                 value={text}

@@ -831,7 +831,6 @@ async def test_an_invented_credential_tool_never_reaches_the_executor_transport(
     """
     org_id = await api_env.create_org("boundaries")
     _, sub = await ai_user(api_env, org_id, "ai.use", "credentials.read")
-    headers = await api_env.headers(org_id, sub)
     spy = RecordingTransport(api_env.app)
 
     for name in ("credentials.list", "credentials.checkout", "licenses.keys.read", "tickets.list"):
@@ -840,7 +839,7 @@ async def test_an_invented_credential_tool_never_reaches_the_executor_transport(
             tool_name=name,
             raw_args={},
             app=api_env.app,
-            bearer=headers["Authorization"],
+            bearer=await api_env.loopback_bearer(org_id, sub),
             deadline=__import__("time").monotonic() + 30.0,
         )
         assert isinstance(outcome, ToolError), outcome

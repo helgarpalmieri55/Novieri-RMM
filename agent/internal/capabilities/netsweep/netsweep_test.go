@@ -182,6 +182,12 @@ func sweepWith(t testing.TB, o Options) *Service {
 	if o.Neighbours == nil {
 		o.Neighbours = staticNeighbours{}
 	}
+	// No reverse DNS unless the test brings a resolver, for the same reason:
+	// the machine's resolver may name a test address (a GitHub runner answered
+	// 10.20.30.1 with "ip-10-20-30-1.ec2.internal").
+	if o.Resolver == nil {
+		o.Resolver = staticResolver{}
+	}
 	return New(o)
 }
 

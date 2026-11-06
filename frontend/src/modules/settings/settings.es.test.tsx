@@ -24,6 +24,8 @@ import {
   apiClient,
   BUDGET_SETTINGS_FIXTURE,
   CASEY_USER,
+  DANA_USER,
+  INVITED_USER,
   CATEGORY_FIXTURE,
   CLIENTS_FIXTURE,
   CHANNEL_FIXTURE,
@@ -50,10 +52,6 @@ import { settingsHref } from "./tabs";
 import { describeGrantScope, orgSettingChoices, orgSettingLabel, userStatusLabel } from "./types";
 import type { MeClient } from "../../lib/api";
 
-vi.mock("../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 const mockClientScope = vi.fn();
@@ -130,6 +128,7 @@ describe("the settings page in Spanish", () => {
       "Correo electrónico",
       "Roles",
       "Usuarios",
+      "Sesiones",
       "Asistente",
       "Conexiones de IA",
       "Notificaciones",
@@ -317,7 +316,13 @@ describe("the email tab in Spanish", () => {
   it("says email is not set up, and disables the test", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     const { container } = await openIn("email");
-    expect(await screen.findByText("El correo no está configurado, así que no se puede invitar a nadie ni restablecer ninguna contraseña.")).toBeInTheDocument();
+    // RE-POINTED (design §7): without mail an invitation shows its link once;
+    // what is lost is the mail, and the forgotten password.
+    expect(
+      await screen.findByText(
+        "El correo no está configurado: cada invitación muestra su enlace una sola vez para que lo entregues tú, y nadie puede restablecer por correo una contraseña olvidada.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^Contraseña: sin establecer\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enviar un mensaje de prueba" })).toBeDisabled();
     expect(screen.getByText("Antes de guardar, indica un servidor de correo, una dirección del remitente y un puerto válido.")).toBeInTheDocument();
@@ -335,7 +340,9 @@ describe("the email tab in Spanish", () => {
     expect(screen.getByText(/^Secreto de cliente: sin establecer\./)).toBeInTheDocument();
     expect(screen.getByText(/^Al guardar, la contraseña guardada del servidor de correo se sustituirá por un inicio de sesión de Microsoft 365\./)).toBeInTheDocument();
     expect(screen.getByText("Microsoft 365 envía a través de smtp.office365.com, puerto 587, StartTLS.")).toBeInTheDocument();
-    expect(screen.getByText(/^Avanzado: solo para una nube de Microsoft gubernamental o nacional/)).toBeInTheDocument();
+    // RE-POINTED (Task 3): the box is no longer "solo para una nube
+    // gubernamental o nacional" -- there is no address but Microsoft's.
+    expect(screen.getByText("Avanzado")).toBeInTheDocument();
     expect(screen.getByText(/^Antes de guardar, indica un servidor de correo, una dirección del remitente, un puerto válido, el nombre de usuario/)).toBeInTheDocument();
     expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "ITMS", "itms", "smtp.office365.com"]);
   });
@@ -482,8 +489,11 @@ describe("the users tab in Spanish", () => {
     expect(screen.getByRole("button", { name: "Permisos efectivos de operator@example.com" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deshabilitar a operator@example.com" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Habilitar a casey@example.com" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Restablecer la contraseña de casey@example.com" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reenviar la invitación a casey@example.com" })).toBeInTheDocument();
+    // RE-POINTED (design §7): no password reset or enrolment mail any more; an
+    // account in use offers resetting its second factors and signing it out.
+    expect(screen.getByRole("button", { name: "Restablecer los segundos factores de operator@example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cerrar todas las sesiones de operator@example.com" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reenviar la invitación a casey@example.com" })).not.toBeInTheDocument();
     expect(container.textContent).not.toContain(PLANTED_SECRET);
     expectNoEnglish(container, RECORDED);
   });
@@ -582,52 +592,81 @@ describe("the users tab in Spanish", () => {
     const section = await screen.findByRole("region", { name: "Permisos efectivos de operator@example.com" });
     expect(await within(section).findByText("devices.manage")).toBeInTheDocument();
     expect(within(section).getByText("Todos los códigos que tiene esta persona y el rol del que proceden")).toBeInTheDocument();
-    for (const header of ["Permiso", "Concedido por", "Se aplica a"]) {
-      expect(within(section).getByRole("columnheader", { name: header })).toBeInTheDocument();
+    // RE-POINTED (MSP clients phase 3, design §4.2): one table per client,
+    // every client first; "Se aplica a" became the group a grant sits in.
+    for (const header of ["Permiso", "Concedido por"]) {
+      expect(within(section).getAllByRole("columnheader", { name: header })).toHaveLength(2);
     }
-    expect(within(section).getByText("en todas partes")).toBeInTheDocument();
-    expect(within(section).getByText("limitado a Warehouse")).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "Todos los clientes" })).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "Warehouse" })).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 
-  it("words the create form, and what happens when the invitation could not be sent", async () => {
+  it("words the invitation form, and the link shown once without mail", async () => {
+    // RE-POINTED (design §7) from "words the create form, and what happens
+    // when the invitation could not be sent": an account starts as an
+    // invitation, and without mail its link is shown once.
     const user = userEvent.setup();
-    calls.createUser.mockResolvedValue({ ...CASEY_USER, status: "active", enrolment_email_sent: false, enrolment_email_error: "No mail relay is configured on this server." });
+    calls.inviteUser.mockResolvedValue({ user_id: "u-new", invite_link: "https://itms.example.test/invite#one-time-token" });
     const { container } = await openIn("users");
-    expect(await screen.findByText("Crear un usuario")).toBeInTheDocument();
-    expect(screen.getByText("Crea la identidad de inicio de sesión y después el registro de ITMS que guarda sus roles")).toBeInTheDocument();
-    expect(screen.getByText("Dar acceso a")).toBeInTheDocument();
-    expect(screen.getByText(/^Aquí no se establece ninguna contraseña/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Correo electrónico"), "casey@example.com");
-    await user.click(screen.getByRole("button", { name: "Crear usuario" }));
-    const alert = await screen.findByText(/^Se creó casey@example\.com, pero no se envió el correo de invitación/);
-    expect(alert.textContent).toBe(
-      "Se creó casey@example.com, pero no se envió el correo de invitación: No mail relay is configured on this server. Hasta que llegue, esta cuenta no puede iniciar sesión. Corrige el envío del correo y usa «Reenviar invitación» en su fila.",
-    );
-    // The server's own reason for the failure is recorded text.
-    expectNoEnglish(container, [...RECORDED, "configured", "server"]);
+    const invite = await screen.findByRole("region", { name: "Invitar a una persona" });
+    expect(
+      within(invite).getByText(
+        "La persona elige su propia contraseña y su segundo factor desde un enlace que funciona una sola vez y caduca a las 72 horas",
+      ),
+    ).toBeInTheDocument();
+    expect(within(invite).getByText("Dar acceso a")).toBeInTheDocument();
+    expect(within(invite).getByText(/^Todavía no has elegido ningún acceso\./)).toBeInTheDocument();
+    expect(within(invite).getByText(/^Aquí no se establece ninguna contraseña/)).toBeInTheDocument();
+    expect(within(invite).getByRole("button", { name: "Añadir este acceso" })).toBeDisabled();
+    await user.type(within(invite).getByLabelText("Correo electrónico"), "casey@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Enviar invitación" }));
+
+    const shown = await screen.findByRole("region", { name: "Enlace de invitación para casey@example.com" });
+    expect(within(shown).getByText(/^El correo no está configurado, así que este enlace no se envió\./)).toBeInTheDocument();
+    expect(within(shown).getByRole("button", { name: "Listo, ya lo entregué" })).toBeInTheDocument();
+    expectNoEnglish(container, RECORDED);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText(/^casey@example\.com was created, but the enrolment email was not sent/)).toBeInTheDocument();
+    expect(within(shown).getByText(/^Email is not set up, so this link was not sent\./)).toBeInTheDocument();
   });
 
   it("confirms each action in Spanish, with the question carrying the address", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, DANA_USER] });
     const user = userEvent.setup();
     await openIn("users");
     await user.click(await screen.findByRole("button", { name: "Deshabilitar a operator@example.com" }));
     let dialog = await screen.findByRole("dialog", { name: "Deshabilitar usuario" });
-    expect(within(dialog).getByText(/^¿Deshabilitar a operator@example\.com\? Se cerrará su sesión en su siguiente solicitud/)).toBeInTheDocument();
+    // RE-POINTED (design §2.4): disabling ends the sessions at once.
+    expect(within(dialog).getByText(/^¿Deshabilitar a operator@example\.com\? Sus sesiones terminan al instante/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
 
-    await user.click(screen.getByRole("button", { name: "Restablecer la contraseña de casey@example.com" }));
-    dialog = await screen.findByRole("dialog", { name: "Enviar un restablecimiento de contraseña" });
-    expect(within(dialog).getByText(/^¿Enviar el correo de restablecimiento a casey@example\.com\? La persona recibe por correo un enlace/)).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Enviar correo de restablecimiento a casey@example.com" })).toBeInTheDocument();
+    // RE-POINTED (design §7): the password reset by email is the person's own
+    // now; an administrator resets the second factors -- of SOMEONE ELSE
+    // (final review D2, Minor 2): the caller's own row offers no reset.
+    expect(screen.getByRole("button", { name: "Restablecer los segundos factores de operator@example.com" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Tu seguridad" })).toHaveAttribute("href", "/profile/security");
+    await user.click(screen.getByRole("button", { name: "Restablecer los segundos factores de dana@example.com" }));
+    dialog = await screen.findByRole("dialog", { name: "Restablecer segundos factores" });
+    expect(
+      within(dialog).getByText(/^¿Restablecer los segundos factores de dana@example\.com\? Sus claves de acceso/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Restablecer los segundos factores de dana@example.com" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
 
     await user.click(screen.getByRole("button", { name: "Eliminar a casey@example.com" }));
     dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
     expect(within(dialog).getByText(/^¿Eliminar a casey@example\.com\? Se elimina su identidad de inicio de sesión\./)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  });
+
+  it("says in Spanish that a cancelled invitation's address cannot be invited again (C18)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = userEvent.setup();
+    await openIn("users");
+    await user.click(await screen.findByRole("button", { name: "Cancelar la invitación a invitee@example.com" }));
+    const dialog = await screen.findByRole("dialog", { name: "Cancelar invitación" });
+    expect(dialog).toHaveTextContent("Esta dirección no se puede volver a invitar");
+    expect(dialog).not.toHaveTextContent(/volver a invitarla más tarde/);
   });
 
   it("confirms removing a role, and holds a refusal inside the dialog", async () => {
@@ -648,7 +687,11 @@ describe("the users tab in Spanish", () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     const { container } = await openIn("users");
     const banner = await screen.findByRole("alert", { name: "El correo no está configurado" });
-    expect(banner).toHaveTextContent("El correo no está configurado, así que no se pueden enviar invitaciones. Configurar el correo");
+    // RE-POINTED (design §7): without mail an invitation still works -- its
+    // link is shown once; what is lost is the mail, and the forgotten password.
+    expect(banner).toHaveTextContent(
+      "El correo no está configurado, así que las invitaciones no se envían por correo (cada enlace se te muestra una sola vez para que lo entregues tú) y nadie puede restablecer una contraseña olvidada. Configurar el correo",
+    );
     expect(within(banner).getByRole("link", { name: "Configurar el correo" })).toHaveAttribute("href", settingsHref("email"));
     expectNoEnglish(container, RECORDED);
   });
@@ -674,6 +717,35 @@ describe("the users tab in Spanish", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument();
     expect(screen.getByText(/· everywhere/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disable operator@example.com" })).toBeInTheDocument();
+  });
+});
+
+// ----------------------------------------------------------------- Sessions
+
+describe("the sessions tab in Spanish", () => {
+  it("words the three groups, the ranges, the switch and the warning", async () => {
+    const { container } = await openIn("sessions");
+    expect(await screen.findByLabelText("Cerrar la sesión tras la inactividad")).toHaveValue(30);
+    for (const group of ["Técnicos", "Recordar este equipo", "Contactos del portal"]) {
+      expect(screen.getByRole("heading", { name: group })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("switch", { name: "Ofrecer «Recordar este equipo» al iniciar sesión" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getAllByText("Entre 5 y 480 minutos.")).toHaveLength(2);
+    expect(screen.getByText(/^En un equipo recordado no se pide el segundo factor/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeInTheDocument();
+    expectNoEnglish(container, RECORDED);
+  });
+
+  it("refuses a value out of range in Spanish", async () => {
+    const user = userEvent.setup();
+    await openIn("sessions");
+    const days = await screen.findByLabelText("Duración máxima de la sesión de un contacto");
+    await user.clear(days);
+    await user.type(days, "45");
+    expect(screen.getByText("Cada valor tiene que estar dentro del intervalo indicado debajo.")).toBeInTheDocument();
   });
 });
 

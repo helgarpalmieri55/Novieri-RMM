@@ -15,10 +15,13 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../../lib/api";
 import {
   AUDITOR_ROLE,
   CASEY_USER,
   CLIENTS_FIXTURE,
+  DANA_USER,
+  INVITED_USER,
   OPERATOR_USER,
   PLANTED_SECRET,
   ROLES_FIXTURE,
@@ -28,13 +31,10 @@ import {
   apiClient,
   calls,
   installDefaults,
+  mutationCacheText,
   renderSettings,
+  stepUpRequired,
 } from "./harness";
-
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
@@ -50,10 +50,12 @@ async function openUsers() {
 }
 
 /**
- * Disable, Enable, Reset password, Resend enrolment and Delete live behind a
- * closed `<details>` per row (narrow-viewport fix: six inline buttons made
- * the ACTIONS cell 262px tall at 390px wide). A real person opens it before
- * any of those five is reachable, so a test reaching for one does the same
+ * The lifecycle actions -- Disable, Reset second factors and Sign out
+ * everywhere for an account in use, Enable for a disabled one, Resend and
+ * Cancel for an invitation (own authentication design §7) -- and Delete live
+ * behind a closed `<details>` per row (narrow-viewport fix: six inline buttons
+ * made the ACTIONS cell 262px tall at 390px wide). A real person opens it
+ * before any of them is reachable, so a test reaching for one does the same
  * -- reaching straight for the button and relying on jsdom's leniency about
  * closed-`<details>` content would let this regress back to always-visible
  * silently.
@@ -95,44 +97,117 @@ describe("Settings — Users tab", () => {
     expect(document.body.textContent).not.toContain(PLANTED_SECRET);
   });
 
-  it("creates a user with roles and reports what became of the enrolment email", async () => {
+  /**
+   * RE-POINTED (own authentication design §7) from "creates a user with roles
+   * and reports what became of the enrolment email": an account starts as an
+   * INVITATION, carrying what the person may reach on which client -- the
+   * roles panel's (role, client) pairs -- and no password anywhere in the form.
+   */
+  it("invites a person with a role on one client and a role on every client", async () => {
     const user = await openUsers();
-    await user.type(await screen.findByLabelText("Email"), "newbie@example.com");
-    await user.type(screen.getByLabelText("Display name"), "New Bie");
-    // Re-pointed: the fieldset legend "Roles to grant" -> "Give them access
-    // to" (`docs/design/settings-language.md` "Users", verbatim). Same
-    // fieldset, same checkboxes. Re-pointed again: the checkbox label is now
-    // humanized ("Auditor", not "auditor") -- `roleDisplayName`, the same
-    // transform the directory chip uses.
-    await user.click(
-      within(screen.getByRole("group", { name: "Give them access to" })).getByLabelText("Auditor"),
-    );
-    await user.click(screen.getByRole("button", { name: "Create user" }));
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.type(within(invite).getByLabelText("Display name"), "New Bie");
 
-    await waitFor(() => expect(calls.createUser).toHaveBeenCalledTimes(1));
-    expect(calls.createUser).toHaveBeenCalledWith({
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+    await user.click(within(invite).getByLabelText(/client/i));
+    await user.click(await within(invite).findByRole("option", { name: /Warehouse/ }));
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+
+    await user.selectOptions(within(invite).getByLabelText("Role"), TECHNICIAN_ROLE.id);
+    await user.click(within(invite).getByLabelText(/client/i));
+    await user.click(await within(invite).findByRole("option", { name: /Every client/ }));
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+
+    const chosen = within(invite).getAllByRole("listitem");
+    expect(chosen).toHaveLength(2);
+    expect(chosen[0]).toHaveTextContent("Auditor · limited to Warehouse");
+    expect(chosen[1]).toHaveTextContent("Technician · everywhere");
+    expect(within(invite).queryByLabelText(/password/i)).not.toBeInTheDocument();
+
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    await waitFor(() => expect(calls.inviteUser).toHaveBeenCalledTimes(1));
+    expect(calls.inviteUser).toHaveBeenCalledWith({
       email: "newbie@example.com",
       display_name: "New Bie",
-      role_ids: [AUDITOR_ROLE.id],
+      grants: [
+        { role_id: AUDITOR_ROLE.id, client_id: WAREHOUSE_CLIENT.id },
+        { role_id: TECHNICIAN_ROLE.id, client_id: null },
+      ],
     });
-    expect(await screen.findByRole("status")).toHaveTextContent(/enrolment email was sent/i);
+    expect(await screen.findByRole("status")).toHaveTextContent("An invitation was emailed to newbie@example.com.");
+    expect(within(invite).getByLabelText<HTMLInputElement>("Email")).toHaveValue("");
   });
 
-  it("a failed enrolment email is reported, not swallowed (spec §2.3)", async () => {
-    calls.createUser.mockResolvedValue({
-      ...CASEY_USER,
-      status: "active",
-      enrolment_email_sent: false,
-      enrolment_email_error: "Keycloak answered 500",
+  /**
+   * RE-POINTED from "a failed enrolment email is reported, not swallowed":
+   * without mail an invitation is no longer an account nobody can reach -- the
+   * server answers with the link, ONCE, and the tab shows it to pass on. It is
+   * held in the component's state only, and gone when the operator says so.
+   */
+  it("shows the link once when no mail is configured, and forgets it when told", async () => {
+    calls.inviteUser.mockResolvedValue({
+      user_id: INVITED_USER.id,
+      invite_link: "https://itms.example.test/invite#one-time-token",
     });
     const user = await openUsers();
-    await user.type(await screen.findByLabelText("Email"), "newbie@example.com");
-    await user.click(screen.getByRole("button", { name: "Create user" }));
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/enrolment email was not sent/i);
-    expect(alert).toHaveTextContent(/Keycloak answered 500/);
-    expect(alert).toHaveTextContent(/Resend enrolment/i);
+    const shown = await screen.findByRole("region", { name: "Invitation link for newbie@example.com" });
+    expect(within(shown).getByLabelText<HTMLInputElement>("Invitation link")).toHaveValue(
+      "https://itms.example.test/invite#one-time-token",
+    );
+    expect(within(shown).getByText(/It is shown only now/)).toBeInTheDocument();
+
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+    expect(screen.queryByRole("region", { name: /Invitation link/ })).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("one-time-token");
+  });
+
+  it("keeps no invitation link in the mutation cache once it is passed on", async () => {
+    // FIX ROUND (Task 12 review, Important 1): `reset()` only detaches the
+    // mutation; TanStack keeps a detached one, link and all, for its `gcTime`.
+    calls.inviteUser.mockResolvedValue({
+      user_id: INVITED_USER.id,
+      invite_link: "https://itms.example.test/invite#one-time-token",
+    });
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings("/settings?tab=users");
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    const shown = await screen.findByRole("region", { name: "Invitation link for newbie@example.com" });
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("one-time-token"));
+  });
+
+  it("keeps no resent invitation link in the mutation cache once it is passed on", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockResolvedValue({ invite_link: "https://itms.example.test/invite#fresh-token" });
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings("/settings?tab=users");
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+    const shown = await screen.findByRole("region", { name: "Invitation link for invitee@example.com" });
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("fresh-token"));
+  });
+
+  it("does not send an access chosen and not added", async () => {
+    const user = await openUsers();
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+
+    expect(within(invite).getByRole("button", { name: "Add this access" })).toBeDisabled();
+    expect(within(invite).getByRole("button", { name: "Send invitation" })).toBeDisabled();
+    expect(within(invite).getByText("Add the access you chose, or clear it, before sending.")).toBeInTheDocument();
+    expect(calls.inviteUser).not.toHaveBeenCalled();
   });
 
   /**
@@ -298,17 +373,16 @@ describe("Settings — Users tab", () => {
    * `roleDisplayName`'s own comment names them). The directory chip and the
    * "Roles for …" list already read humanized; the grant `<select>` and the
    * create-user checkboxes were the two surfaces still printing the raw wire
-   * value, one click and one scroll away from a chip reading the same role
-   * capitalized. Both are pinned here so a future call site that grows its
-   * own copy of the transform (instead of importing `roleDisplayName`) goes
-   * red.
+   * value. RE-POINTED (own authentication design §7): the create form's
+   * checkboxes are the invitation's role select now. Both selects read the
+   * humanized name, so a future call site that grows its own copy of the
+   * transform (instead of importing `roleDisplayName`) goes red.
    */
-  it("shows humanized role names in the create-user checkboxes and the grant select, not the raw wire value", async () => {
+  it("shows humanized role names in the invitation's role select and the grant select, not the raw wire value", async () => {
     const user = await openUsers();
-
-    const checkboxes = screen.getByRole("group", { name: "Give them access to" });
-    expect(within(checkboxes).getByText("Auditor")).toBeInTheDocument();
-    expect(within(checkboxes).queryByText("auditor")).not.toBeInTheDocument();
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    expect(await within(invite).findByRole("option", { name: "Auditor" })).toBeInTheDocument();
+    expect(within(invite).queryByRole("option", { name: "auditor" })).not.toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
@@ -316,7 +390,7 @@ describe("Settings — Users tab", () => {
     expect(within(panel).queryByText("auditor")).not.toBeInTheDocument();
   });
 
-  it("shows effective permissions annotated with the role that granted each and its scope", async () => {
+  it("shows effective permissions grouped by client, with the role that granted each", async () => {
     const user = await openUsers();
     await user.click(
       await screen.findByRole("button", { name: "Effective permissions for operator@example.com" }),
@@ -327,25 +401,22 @@ describe("Settings — Users tab", () => {
     await waitFor(() =>
       expect(calls.getUserEffectivePermissions).toHaveBeenCalledWith(OPERATOR_USER.id),
     );
-    const orgWide = await within(panel).findByRole("row", { name: /devices\.read/ });
-    // Re-pointed: "Granted by" now reads the humanized role name, same
-    // transform as the directory chip (`roleDisplayName`, `./types.ts`) --
-    // it used to stop at the chip and leave this column on the raw wire
-    // value "technician", which is the language-sweep gap this pins shut.
+    // RE-POINTED (MSP clients phase 3, design §4.2): the "Applies to" column
+    // became the group a grant sits in -- every client first, then each client.
+    // "Granted by" still reads the humanized role name (`roleDisplayName`,
+    // `./types.ts`), never the raw wire value; and the client is named from
+    // `GET /clients`, never by its id.
+    const every = await within(panel).findByRole("table", { name: "Every client" });
+    const orgWide = within(every).getByRole("row", { name: /devices\.read/ });
     expect(within(orgWide).getByText("Technician")).toBeInTheDocument();
-    // Re-pointed: `docs/design/settings-language.md` glossary renders an
-    // org-wide grant as "everywhere", never "organization-wide".
-    expect(within(orgWide).getByText(/everywhere/i)).toBeInTheDocument();
-
-    const scoped = within(panel).getByRole("row", { name: /devices\.manage/ });
-    // Re-pointed for the same reason: "warehouse-technician" -> "Warehouse
-    // technician".
+    const warehouse = within(panel).getByRole("table", { name: "Warehouse" });
+    const scoped = within(warehouse).getByRole("row", { name: /devices\.manage/ });
     expect(within(scoped).getByText("Warehouse technician")).toBeInTheDocument();
-    // CYCLE 9. The scope now names the GROUP, resolved from the same list
-    // the picker offers -- the raw id was the finding, not the fix.
-    // RE-POINTED: the scope is a CLIENT now, named from `GET /clients`.
-    expect(within(scoped).getByText(/limited to Warehouse/i)).toBeInTheDocument();
-    expect(within(scoped).queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
+    expect(within(panel).getAllByRole("table").map((table) => table.getAttribute("aria-label"))).toEqual([
+      "Every client",
+      "Warehouse",
+    ]);
+    expect(within(panel).queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
   });
 
   /**
@@ -401,12 +472,18 @@ describe("Settings — Users tab", () => {
   });
 
   it.each([
-    ["Disable operator@example.com", "Disable", () => calls.setUserEnabled],
-    ["Reset password for operator@example.com", "Send reset email", () => calls.resetUserPassword],
-    ["Delete operator@example.com", "Delete", () => calls.deleteUser],
-  ])("%s confirms first, and the confirmation names the person", async (trigger, verb, mock) => {
+    ["Disable operator@example.com", "Disable", () => calls.setUserEnabled, "operator@example.com"],
+    // RE-POINTED (design §7): the password reset by email is the person's own
+    // now (§2.8); an administrator resets the second factors. RE-POINTED
+    // again (final review D2, Minor 2): at SOMEONE ELSE -- the caller's own
+    // row offers no reset, because the server refuses it.
+    ["Reset second factors for dana@example.com", "Reset second factors for", () => calls.resetUserFactors, "dana@example.com"],
+    ["Sign out operator@example.com everywhere", "Sign out", () => calls.endUserSessions, "operator@example.com"],
+    ["Delete operator@example.com", "Delete", () => calls.deleteUser, "operator@example.com"],
+  ])("%s confirms first, and the confirmation names the person", async (trigger, verb, mock, email) => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, DANA_USER] });
     const user = await openUsers();
-    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    const row = await screen.findByRole("row", { name: new RegExp(email.replace(/\./g, "\\.")) });
     await openMoreActions(user, row);
     await user.click(within(row).getByRole("button", { name: trigger }));
     const dialog = await screen.findByRole("dialog");
@@ -415,13 +492,13 @@ describe("Settings — Users tab", () => {
     // a dialog reading "Disable this user?" over a button that happens to
     // carry the address, which is not the same screen at all.
     expect(
-      within(dialog).getByText(/operator@example\.com\?/),
+      within(dialog).getByText(new RegExp(`${email.replace(/\./g, "\\.")}\\?`)),
       "the confirmation sentence must name the person",
     ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("operator@example.com");
+    expect(dialog).toHaveTextContent(email);
     expect(mock()).not.toHaveBeenCalled();
 
-    await user.click(within(dialog).getByRole("button", { name: `${verb} operator@example.com` }));
+    await user.click(within(dialog).getByRole("button", { name: `${verb} ${email}` }));
     await waitFor(() => expect(mock()).toHaveBeenCalled());
   });
 
@@ -478,12 +555,205 @@ describe("Settings — Users tab", () => {
     await waitFor(() => expect(calls.listUsers).toHaveBeenCalledTimes(2));
   });
 
-  it("resending enrolment is not destructive and needs no confirmation", async () => {
+  it("resending an invitation is not destructive and needs no confirmation", async () => {
+    // RE-POINTED (design §7): it was the enrolment mail on every row; it is the
+    // invitation now, offered on an invitation's row only.
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
     const user = await openUsers();
-    const row = await screen.findByRole("row", { name: /casey@example\.com/ });
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    expect(within(row).getByText("Invitation pending")).toBeInTheDocument();
     await openMoreActions(user, row);
-    await user.click(within(row).getByRole("button", { name: "Resend enrolment to casey@example.com" }));
-    await waitFor(() => expect(calls.resendUserEnrolment).toHaveBeenCalledWith(CASEY_USER.id));
+    expect(within(row).queryByRole("button", { name: "Reset second factors for invitee@example.com" })).not.toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+    await waitFor(() => expect(calls.resendInvite).toHaveBeenCalledWith(INVITED_USER.id));
+    expect(await screen.findByRole("status")).toHaveTextContent("The invitation was emailed to invitee@example.com again.");
+  });
+
+  it("shows a resent invitation's fresh link once when no mail is configured", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockResolvedValue({ invite_link: "https://itms.example.test/invite#fresh-token" });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+
+    const shown = await screen.findByRole("region", { name: "Invitation link for invitee@example.com" });
+    expect(within(shown).getByLabelText<HTMLInputElement>("Invitation link")).toHaveValue(
+      "https://itms.example.test/invite#fresh-token",
+    );
+  });
+
+  it("cancelling an invitation confirms, names the person, and goes to its own route", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    expect(within(dialog).getByText(/invitee@example\.com\?/)).toBeInTheDocument();
+    expect(calls.cancelInvite).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+    await waitFor(() => expect(calls.cancelInvite).toHaveBeenCalledWith(INVITED_USER.id));
+  });
+
+  it("says, before cancelling, that the address can never be invited again (C18, review C, Minor 4)", async () => {
+    // The server marks the account deleted, and the address stays taken
+    // (`ux_users_org_lower_email_staff` covers deleted rows): it said "You
+    // can invite them again later".
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    expect(dialog).toHaveTextContent("This address cannot be invited again");
+    expect(dialog).not.toHaveTextContent(/invite them again later/);
+  });
+
+  /**
+   * FIX ROUND (Task 12 review, Minor 4). The server answers 409 for anyone
+   * without a pending invitation, with a translated `detail` and NO `code`
+   * (plan decision 8): the console says that sentence, once.
+   */
+  it("says the server's own sentence, once, when a resend is refused with 409", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: "this person has no pending invitation" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("this person has no pending invitation");
+    expect(screen.getAllByText("this person has no pending invitation")).toHaveLength(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("says the server's own sentence, once, inside the dialog when a cancel is refused with 409", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.cancelInvite.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: "this person has no pending invitation" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("this person has no pending invitation");
+    expect(screen.getAllByText("this person has no pending invitation")).toHaveLength(1);
+  });
+
+  // RE-POINTED (final review D2, Minor 2): these two targeted the caller's
+  // own row (`ME_FIXTURE.user_id === OPERATOR_USER.id`) and expected the
+  // reset to succeed -- an outcome the real server refuses
+  // (`service._refuse_self`), after a step-up that may have spent a
+  // single-use recovery code. They reset someone else now.
+  it("resetting someone's second factors asks for your own when the server says it is stale", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    calls.resetUserFactors.mockRejectedValueOnce(stepUpRequired()).mockResolvedValueOnce(undefined);
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.resetUserFactors).toHaveBeenCalledTimes(2));
+    expect(calls.resetUserFactors).toHaveBeenLastCalledWith(DANA_USER.id);
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+    expect(await screen.findByRole("status")).toHaveTextContent("The second factors of dana@example.com were reset.");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows the server's own sentence for a reset that needs the recovery command, keeps the dialog open, and does not retry", async () => {
+    // Operator decision, 2026-11-05: `reset_factors` answers 409
+    // `reset_needs_recovery` when the password was set from an emailed reset
+    // link and no second factor has been used since. The server's real body
+    // (`{detail, code}`, as C14 asks of every double).
+    const sentence =
+      "This person's password was set with an emailed reset link, and no second factor has been used since. Resetting their sign-in methods now would hand the account to whoever holds that mailbox. Use the server's recovery command instead, and hand the link to the person directly.";
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    calls.resetUserFactors.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: sentence, code: "reset_needs_recovery" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+
+    expect(await within(confirm).findByRole("alert")).toHaveTextContent(sentence);
+    expect(confirm).not.toHaveTextContent(/something went wrong|went wrong/i);
+    // Still open, nothing more sent, and no second-factor prompt: a 409 is not a stale step-up.
+    expect(screen.getByRole("dialog", { name: "Reset second factors" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("The second factors of dana@example.com were reset.")).not.toBeInTheDocument();
+
+    // The person closes it.
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Reset second factors" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+  });
+
+  it("says, before the reset, that it signs the person out everywhere now (D2, Minor 3)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    expect(confirm).toHaveTextContent(/every session they have open is signed out now/);
+    expect(calls.resetUserFactors).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to reset your own second factors, and points at Your security instead", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    const user = await openUsers();
+    const own = await screen.findByRole("row", { name: /operator@example\.com/ });
+    await openMoreActions(user, own);
+
+    const reset = within(own).getByRole("button", { name: "Reset second factors for operator@example.com" });
+    expect(reset).toBeDisabled();
+    expect(reset).toHaveAccessibleDescription("Your own second factors are changed in Your security.");
+    expect(within(own).getByRole("link", { name: "Your security" })).toHaveAttribute("href", "/profile/security");
+    await user.click(reset);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).not.toHaveBeenCalled();
+
+    // Someone else's row still offers it.
+    const other = screen.getByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, other);
+    expect(within(other).getByRole("button", { name: "Reset second factors for dana@example.com" })).toBeEnabled();
+    expect(within(other).queryByRole("link", { name: "Your security" })).not.toBeInTheDocument();
+  });
+
+  it("resets nothing when the confirmation is closed, and says so inside the dialog", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    calls.resetUserFactors.mockRejectedValue(stepUpRequired());
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(stepUp).getByRole("button", { name: "Cancel" }));
+
+    expect(await within(confirm).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
   });
 
   /**
@@ -496,7 +766,7 @@ describe("Settings — Users tab", () => {
    * overflow menu -- there is no menu or popover component in this kit --
    * a `<details>` needs no positioning and is keyboard-operable for free.
    */
-  it("keeps Disable, Reset password, Resend enrolment and Delete behind a closed disclosure per row, not always inline", async () => {
+  it("keeps Disable, Reset second factors, Sign out everywhere and Delete behind a closed disclosure per row, not always inline", async () => {
     const user = await openUsers();
     const row = await screen.findByRole("row", { name: /operator@example\.com/ });
 
@@ -516,10 +786,13 @@ describe("Settings — Users tab", () => {
 
     await openMoreActions(user, row);
     expect(disclosure).toHaveAttribute("open");
+    // RE-POINTED (design §7): "Reset password" and "Resend enrolment" were
+    // Keycloak's mails; an account in use offers resetting its second factors
+    // and signing it out everywhere.
     for (const name of [
       "Disable operator@example.com",
-      "Reset password for operator@example.com",
-      "Resend enrolment to operator@example.com",
+      "Reset second factors for operator@example.com",
+      "Sign out operator@example.com everywhere",
       "Delete operator@example.com",
     ]) {
       expect(within(row).getByRole("button", { name }), name).toBeInTheDocument();
@@ -529,7 +802,7 @@ describe("Settings — Users tab", () => {
   /**
    * NEW test (spec: "Six equal buttons per row read as a toolbar with no
    * primary"). Roles and Permissions stay the row's two ordinary bordered
-   * buttons; Disable, Reset password and Resend enrolment step down to the
+   * buttons; Disable, Reset second factors and Sign out everywhere step down to the
    * console's existing quiet `ghost` look; Delete goes further still --
    * danger-tinted text, no border at all -- so it reads as set apart rather
    * than a fourth button shouting in the same row. Pinned on class names
@@ -546,10 +819,11 @@ describe("Settings — Users tab", () => {
       within(row).getByRole("button", { name: "Manage roles for operator@example.com" }),
       within(row).getByRole("button", { name: "Effective permissions for operator@example.com" }),
     ];
+    // RE-POINTED (design §7): the three quiet actions of an account in use.
     const quiet = [
       within(row).getByRole("button", { name: "Disable operator@example.com" }),
-      within(row).getByRole("button", { name: "Reset password for operator@example.com" }),
-      within(row).getByRole("button", { name: "Resend enrolment to operator@example.com" }),
+      within(row).getByRole("button", { name: "Reset second factors for operator@example.com" }),
+      within(row).getByRole("button", { name: "Sign out operator@example.com everywhere" }),
     ];
     const deleteBtn = within(row).getByRole("button", { name: "Delete operator@example.com" });
 
@@ -583,11 +857,12 @@ describe("Settings — Users tab", () => {
     // this test itself pins below.
     await openMoreActions(user, row);
 
-    expect(screen.getByRole("button", { name: "Create user" }), "Create user").toBeDisabled();
+    // RE-POINTED (design §7): "Create user" is "Send invitation".
+    expect(screen.getByRole("button", { name: "Send invitation" }), "Send invitation").toBeDisabled();
     for (const name of [
       "Disable operator@example.com",
       "Delete operator@example.com",
-      "Reset password for operator@example.com",
+      "Reset second factors for operator@example.com",
     ]) {
       expect(within(row).getByRole("button", { name }), name).toBeDisabled();
     }

@@ -305,6 +305,56 @@ async def test_an_article_can_link_to_an_ipam_subnet_and_address(
     assert refused.status_code == 404, refused.text
 
 
+async def test_the_article_list_filters_by_client_and_never_widens(api_env) -> None:
+    """`GET /docs/articles?client_id=X` is the list a scope narrowed to X
+    reads, as `X-Client-Id` narrows it: X's articles and the ones for every
+    client (no client) -- exactly what a record of X may link, a BCP plan's
+    procedures included -- and never Y's. A client outside the caller's
+    scope lists nothing, not even the every-client articles; a value that is
+    not an id is a 422. Final review A6: the BCP procedure picker read one
+    page of every client's articles.
+    FALSIFIER: `list_articles` (`app/modules/documentation/api.py`)
+    ignoring `client_id`; filtering on it under the caller's whole scope
+    (a client outside it then lists the every-client articles); or matching
+    `DocArticle.client_id == X` alone (the every-client ones drop out)."""
+    from uuid import uuid4
+
+    from tests.client_scope_support import client_with_site
+    from tests.test_client_record_checks import _holder
+
+    org = await api_env.create_org("docs-client")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    admin = await api_env.headers(org, await api_env.create_user(org, "org-admin"))
+    ids: dict[str, str] = {}
+    for name, client in (("x", x), ("y", y), ("every", None)):
+        body: dict[str, str] = {"title": f"{name} runbook", "body": "Steps."}
+        if client is not None:
+            body["client_id"] = str(client)
+        created = await api_env.client.post("/api/v1/docs/articles", json=body, headers=admin)
+        assert created.status_code == 201, created.text
+        ids[name] = created.json()["id"]
+    _, x_reader = await _holder(api_env, org, {x: ("docs.read",)})
+
+    async def listed(headers: dict[str, str], **params: str) -> set[str]:
+        r = await api_env.client.get("/api/v1/docs/articles", headers=headers, params=params)
+        assert r.status_code == 200, r.text
+        found = {item["id"] for item in r.json()["items"]}
+        assert len(found) == r.json()["total"], r.json()
+        return found
+
+    assert await listed(admin) == {ids["x"], ids["y"], ids["every"]}
+    assert await listed(admin, client_id=str(x)) == {ids["x"], ids["every"]}
+    assert await listed(admin, client_id=str(y)) == {ids["y"], ids["every"]}
+    assert await listed(x_reader, client_id=str(x)) == {ids["x"], ids["every"]}
+    assert await listed(x_reader, client_id=str(y)) == set()
+    assert await listed(x_reader, client_id=str(uuid4())) == set()
+    bad = await api_env.client.get(
+        "/api/v1/docs/articles", headers=admin, params={"client_id": "nope"}
+    )
+    assert bad.status_code == 422, bad.text
+
+
 def test_the_link_target_pattern_and_the_model_map_agree() -> None:
     """The half-change guard, structurally: the regex in `api.py` and the dict in
     `service.py` are two places naming one set, and §14.4 says adding to either

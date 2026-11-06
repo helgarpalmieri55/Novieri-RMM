@@ -18,6 +18,7 @@ share (spec-screen-share.md), where the api joins the browser to the gateway's
 relay. The guacd path (rdp/vnc/ssh) is retired and refused.
 """
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any, Literal
@@ -38,15 +39,21 @@ from sqlalchemy import func, select
 
 from app.api.deps import AuthContext, bound_auth_context, narrowed_to_any, require_permission
 from app.core.audit import audit_service
+from app.core.auth.sessions import SESSION_COOKIE
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
-from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
 from app.models import Device, RemotePolicy, RemoteSession
 from app.modules.remote.models import RECORDING_MAX_BYTES
 from app.modules.remote.screen_tunnel import run_screen_tunnel
 from app.modules.remote.service import SCREEN, InvalidSessionState, ScreenUnavailable
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel, owner_or_admin
+from app.modules.remote.tunnel import (
+    TunnelAuthError,
+    admit_tunnel_session,
+    owner_or_admin,
+    watch_tunnel_session,
+)
 
 router = APIRouter(prefix="/remote", tags=["remote"])
 
@@ -419,6 +426,11 @@ async def upsert_policy(
         # and recording.py's order_by(id).limit(1)).
         query = select(RemotePolicy)
         if body.device_group_id is None:
+            # The org default is the global row: refused under a narrowed
+            # scope before anything is read, even for a body identical to it
+            # (patch's `upsert_policy` gives the reason; phase 3 last fix
+            # round).
+            refuse_unless_every_client(session, "remote_policies")
             query = query.where(RemotePolicy.device_group_id.is_(None))
         else:
             query = query.where(RemotePolicy.device_group_id == body.device_group_id)
@@ -463,25 +475,37 @@ async def upsert_policy(
 async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     """Browser-facing rsp/1 stream for a screen session.
 
-    Admission: the bearer token from the ``Sec-WebSocket-Protocol`` header
-    (never the query string, which access logs record), then
+    Admission: the console's session cookie with the console's ``Origin``
+    (P2 design §6.5), and nothing else since own authentication phase 1
+    (Task 13: no bearer, in the subprotocol or anywhere); then
     ``remote.control`` and owner-or-admin, all server-side. The browser sends
     and receives rsp/1 frames as binary messages; text messages are ignored.
+
+    The screen lives only as long as the console session that opened it
+    (``watch_tunnel_session``): signed out, cut, replaced, disabled, idle or
+    past its maximum, the tunnel is cancelled and the socket closes 4401. An
+    open screen does not keep that session from going idle (fix round 2): the
+    person's input, which the console counts, does.
     """
     state = websocket.app.state
-    token = token_from_subprotocols(websocket)
+    if SESSION_COOKIE not in websocket.cookies:
+        # No credential at all: 4401, as on the live socket.
+        await websocket.close(code=4401)
+        return
     try:
-        org_id, _user_id, _clients = await authorize_tunnel(
-            token=token,
+        # The person admitted is the viewer, whose closing the viewer is
+        # their own act (phase 3 design §5.3): the owner, or a supervisor.
+        admitted = await admit_tunnel_session(
+            connection=websocket,
             session_id=session_id,
             settings=state.settings,
-            jwks=state.jwks,
-            admin_engine=state.admin_engine,
             app_engine=state.app_engine,
         )
     except TunnelAuthError as exc:
         await websocket.close(code=exc.code)
         return
+    org_id, viewer_id = admitted.org_id, admitted.viewer_id
+    principal = admitted.principal
 
     service = state.remote_service
     params = service.connection_params(session_id)
@@ -490,7 +514,8 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
         await websocket.close(code=4409)
         return
 
-    await websocket.accept(subprotocol=AUTH_SUBPROTOCOL)
+    # The console offers no subprotocol, so none is echoed.
+    await websocket.accept()
 
     async def browser_send(data: bytes) -> None:
         await websocket.send_bytes(data)
@@ -504,20 +529,64 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
             if isinstance(data, bytes):
                 return data
 
+    tunnel = run_screen_tunnel(
+        browser_send=browser_send,
+        browser_recv=browser_recv,
+        session_id=session_id,
+        org_id=org_id,
+        viewer_id=viewer_id,
+        service=service,
+        store=lambda: _object_store(websocket),
+        app_engine=state.app_engine,
+        relay_internal_url=state.settings.relay_internal_url,
+        spool_dir=state.settings.remote_recording_spool_dir,
+    )
+    close_code = 1000
     try:
-        await run_screen_tunnel(
-            browser_send=browser_send,
-            browser_recv=browser_recv,
-            session_id=session_id,
-            org_id=org_id,
-            service=service,
-            store=lambda: _object_store(websocket),
-            app_engine=state.app_engine,
-            relay_internal_url=state.settings.relay_internal_url,
-            spool_dir=state.settings.remote_recording_spool_dir,
+        close_code = await _while_signed_in(
+            tunnel,
+            watch_tunnel_session(
+                websocket,
+                principal,
+                session_id=session_id,
+                settings=state.settings,
+                app_engine=state.app_engine,
+            ),
         )
     finally:
         try:
-            await websocket.close()
+            await websocket.close(code=close_code)
         except RuntimeError:
             pass
+
+
+async def _while_signed_in(
+    tunnel: Coroutine[Any, Any, None], watchdog: Coroutine[Any, Any, int]
+) -> int:
+    """Run the screen tunnel while the console session that admitted its
+    viewer lives and its door would still admit them, and return the
+    socket's close code.
+
+    The watchdog (``watch_tunnel_session``) returning first CANCELS the
+    tunnel -- whose own cleanup still ends the remote session and keeps the
+    recording (``screen_tunnel._finish``) -- and the socket closes with its
+    code: 4401 for a session that stopped, the door's 4403/4404 for a viewer
+    it would refuse now. The tunnel returning first (the browser or the agent
+    hung up) ends the watch; an error in either is raised after both have
+    stopped, so a failed re-check never leaves the desktop open."""
+    tunnel_task = asyncio.create_task(tunnel)
+    watch = asyncio.create_task(watchdog)
+    try:
+        await asyncio.wait({tunnel_task, watch}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (tunnel_task, watch):
+            task.cancel()
+        await asyncio.gather(tunnel_task, watch, return_exceptions=True)
+    # `result()` re-raises a task's own failure. (Not `Task.exception()`: the
+    # logging kernel's sweep counts every `.exception(...)` call as a log call,
+    # `tests/test_logging_discipline.py`.)
+    if not watch.cancelled():
+        return watch.result()
+    if not tunnel_task.cancelled():
+        tunnel_task.result()
+    return 1000

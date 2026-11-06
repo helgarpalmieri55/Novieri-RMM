@@ -43,8 +43,9 @@ nobody previewed.
 
 **THE DEVICE VISIBILITY CHECK IS A LOOPBACK, NOT A QUERY** (§6.1 step 5), so
 `require_permission` and RLS decide rather than this module. It goes through the
-persona's own executor, which carries the caller's own bearer token back through
-the whole ASGI stack -- the same control the read tools use, for the same reason.
+persona's own executor, which carries the turn's internal token -- minted from
+the caller's own session (autenticación propia design §5.6) -- back through the
+whole ASGI stack: the same control the read tools use, for the same reason.
 See `_DEVICE_PROBE`'s comment for why its `response_fields` is deliberately
 empty.
 """
@@ -417,7 +418,8 @@ async def _device_is_visible(
     """§6.1 step 5, THROUGH THE LOOPBACK.
 
     A query here would be this module deciding what the principal may see. The
-    loopback re-enters the whole ASGI stack carrying the caller's own token, so
+    loopback re-enters the whole ASGI stack carrying the turn's internal token,
+    which names the caller, so
     `require_permission("devices.read")` and RLS decide -- and a device in
     another org comes back 404 rather than as a row.
 

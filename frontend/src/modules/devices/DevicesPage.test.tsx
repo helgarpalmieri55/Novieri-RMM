@@ -13,7 +13,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -145,7 +145,8 @@ function fakeServer(load: () => Promise<unknown>) {
     const scoped = estate.filter(
       (device) =>
         (!params.q || matchesSearch(device, params.q)) &&
-        (!params.provenance || device.provenance === params.provenance),
+        (!params.provenance || device.provenance === params.provenance) &&
+        (!params.siteId || device.site_id === params.siteId),
     );
     const state = params.state ?? "all";
     const rows = scoped.filter((device) => inState(device, state));
@@ -365,20 +366,22 @@ describe("DevicesPage", () => {
   });
 
   it("shows no fabricated column the API cannot fill", async () => {
-    // The design's table has Site, Patch, Backup and Risk columns with no
-    // field behind them. Omitted rather than faked -- a screen that looks
-    // finished and lies is worse than one that is visibly incomplete, and it
-    // lies most convincingly on the demo where somebody decides to trust it.
+    // The design's table has Patch, Backup and Risk columns with no field
+    // behind them. Omitted rather than faked -- a screen that looks finished
+    // and lies is worse than one that is visibly incomplete, and it lies most
+    // convincingly on the demo where somebody decides to trust it.
     renderPage(() => Promise.resolve({ items: [device()], total: 1 }));
     await screen.findByText("ws-alpha");
     const head = within(document.querySelector("thead") as HTMLElement);
-    expect(head.queryByText("Site")).not.toBeInTheDocument();
     expect(head.queryByText("Patch")).not.toBeInTheDocument();
     expect(head.queryByText("Backup")).not.toBeInTheDocument();
     expect(head.queryByText("Risk")).not.toBeInTheDocument();
-    // Non-vacuity: the columns that DO have data are present.
+    // Non-vacuity: the columns that DO have data are present. RE-POINTED
+    // (MSP clients phase 3, design §4.3): Site was one of the fabricated four
+    // until every device carried a `site_id`; it is a column now.
     expect(head.getByText("Device")).toBeInTheDocument();
     expect(head.getByText("Certificate")).toBeInTheDocument();
+    expect(head.getByText("Site")).toBeInTheDocument();
   });
 });
 
@@ -630,7 +633,9 @@ describe("what the device table owes assistive technology", () => {
     renderPage(one);
     await screen.findByText("ws-alpha");
     const headers = [...document.querySelectorAll("thead th")];
-    expect(headers).toHaveLength(8);
+    // 9, NOT 8 (MSP clients phase 3, design §4.3): the Site column joined the
+    // table. These tests work with one client chosen, so Client is not shown.
+    expect(headers).toHaveLength(9);
     for (const header of headers) expect(header).toHaveAttribute("scope", "col");
   });
 
@@ -1366,12 +1371,141 @@ describe("who each device is assigned to", () => {
     // `/me` has to have answered before an absent column means anything.
     const me = (mockUseApi.mock.results[0]?.value as ApiClient).me as ReturnType<typeof vi.fn>;
     await vi.waitFor(() => expect(me).toHaveBeenCalled());
-    await vi.waitFor(() => expect(view.container.querySelectorAll("thead th")).toHaveLength(8));
+    // 9, NOT 8: the Site column (MSP clients phase 3, design §4.3).
+    await vi.waitFor(() => expect(view.container.querySelectorAll("thead th")).toHaveLength(9));
     expect(screen.queryByRole("columnheader", { name: "Assigned to" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Ana Ruiz" })).toBeNull();
     expect(screen.getByLabelText("Search devices")).toHaveAttribute(
       "placeholder",
       expect.not.stringContaining("assigned"),
     );
+  });
+});
+
+describe("the Client and Site columns (MSP clients phase 3, design §4.3)", () => {
+  const ANDES: MeClient = {
+    id: "c-andes",
+    name: "Andes Logistics",
+    kind: "customer",
+    enabled_modules: [],
+    permissions: ["devices.read", "clients.read"],
+  };
+  const SITES = [
+    { id: "s-main", client_id: "c-andes", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 1 },
+    { id: "s-north", client_id: "c-andes", name: "Bodega norte", address: "", description: "", egress_networks: [], archived_at: null, device_count: 1 },
+  ];
+  const estate = () =>
+    Promise.resolve({
+      items: [
+        device({ id: "a", hostname: "andes-main", fqdn: null, client_id: "c-andes", site_id: "s-main" }),
+        device({ id: "b", hostname: "andes-north", fqdn: null, client_id: "c-andes", site_id: "s-north" }),
+      ],
+      total: 2,
+    });
+
+  it("names each row's client and site with every client chosen", async () => {
+    selectClient(null, [ANDES]);
+    renderPage(estate, { clients: [ANDES] } as Partial<Me>, "/devices", {
+      listClientSites: vi.fn().mockResolvedValue(SITES),
+    });
+    const row = (await screen.findByText("andes-north")).closest("tr") as HTMLElement;
+    expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Site" })).toBeInTheDocument();
+    expect(await within(row).findByText("Andes Logistics")).toBeInTheDocument();
+    expect(await within(row).findByText("Bodega norte")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Filter by site" })).toBeNull();
+  });
+
+  it("hides the Client column with one client chosen, and filters by its sites on the server", async () => {
+    selectClient("c-andes", [ANDES]);
+    const user = userEvent.setup();
+    renderPage(estate, { clients: [ANDES] } as Partial<Me>, "/devices", {
+      listClientSites: vi.fn().mockResolvedValue(SITES),
+    });
+    await screen.findByText("andes-main");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Filter by site" }), "s-north");
+    await waitFor(() => expect(screen.queryByText("andes-main")).toBeNull());
+    expect(screen.getByText("andes-north")).toBeInTheDocument();
+  });
+
+  it("does not ask for the sites of a client the person cannot read", async () => {
+    selectClient(null, [ANDES]);
+    const listClientSites = vi.fn().mockResolvedValue(SITES);
+    renderPage(estate, { clients: [{ ...ANDES, permissions: ["devices.read"] }] } as Partial<Me>, "/devices", {
+      listClientSites,
+    });
+    const row = (await screen.findByText("andes-north")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Site not known")).toBeInTheDocument();
+    expect(listClientSites).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A CHANGE OF CLIENT STARTS THIS PAGE AGAIN (`lib/clientScope.tsx`'s keyed
+   * fragment) and the URL keeps its `?site=`: the remounted page never sees
+   * the change, only a site its client does not have. Rendered here as what
+   * that remount leaves behind -- the page mounted fresh, one client chosen,
+   * another client's site in the URL. Sending it would show an empty fleet
+   * for a filter nobody set on this client.
+   */
+  function Where() {
+    const location = useLocation();
+    return <output data-testid="url">{`${location.pathname}${location.search}`}</output>;
+  }
+  function renderSpied(path: string) {
+    const calls: DeviceListParams[] = [];
+    mockUseApi.mockReturnValue({
+      listDevices: async (params: DeviceListParams = {}) => {
+        calls.push(params);
+        return fakeServer(estate)(params);
+      },
+      me: vi.fn().mockResolvedValue({ permissions: [], clients: [ANDES] } as unknown as Me),
+      listClientSites: vi.fn().mockResolvedValue(SITES),
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route
+              path="/devices"
+              element={
+                <>
+                  <DevicesPage />
+                  <Where />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return calls;
+  }
+
+  it("drops another client's site left in the URL, and never sends it", async () => {
+    selectClient("c-andes", [ANDES]);
+    const calls = renderSpied("/devices?site=s-elsewhere&offset=50");
+    await waitFor(() => expect(screen.getByTestId("url")).toHaveTextContent(/^\/devices$/));
+    expect(await screen.findByText("andes-main")).toBeInTheDocument();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((params) => params.siteId === undefined)).toBe(true);
+  });
+
+  it("sends a site of the chosen client from the URL", async () => {
+    selectClient("c-andes", [ANDES]);
+    const calls = renderSpied("/devices?site=s-north");
+    expect(await screen.findByText("andes-north")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("andes-main")).toBeNull());
+    expect(calls.at(-1)?.siteId).toBe("s-north");
+    expect(screen.getByRole("combobox", { name: "Filter by site" })).toHaveValue("s-north");
+  });
+
+  it("never sends a site with every client chosen, and drops it", async () => {
+    selectClient(null, [ANDES]);
+    const calls = renderSpied("/devices?site=s-north");
+    await waitFor(() => expect(screen.getByTestId("url")).toHaveTextContent(/^\/devices$/));
+    expect(await screen.findByText("andes-main")).toBeInTheDocument();
+    expect(calls.every((params) => params.siteId === undefined)).toBe(true);
   });
 });

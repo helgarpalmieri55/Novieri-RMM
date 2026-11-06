@@ -22,7 +22,8 @@
  * this tab, or text in this tab, and nothing else. A presigned GET would be an
  * unauthenticated same-origin URL for the whole tenant, because MinIO is
  * routed on the console's own hostname; a plain `<a href="/api/v1/…">` would
- * send no `Authorization` header and save the 401 body under the file's name.
+ * carry the session cookie but not the chosen client (`X-Client-Id`), and a
+ * 401 through it would be saved under the file's name (`lib/download.ts`).
  */
 
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -67,8 +68,8 @@ export function DownloadVersionButton({
     mutationFn: async () => {
       const blob = await api.downloadDocumentVersion(documentId, version.version);
       // `saveBlob`, not an anchor at the API URL: the browser navigates to an
-      // `<a download>` itself and sends no bearer token, so the route answers
-      // 401 and the browser cheerfully saves the refusal under the file's name.
+      // `<a download>` itself, without the headers `ApiClient` sends, and
+      // saves whatever answers -- a refusal included -- under the file's name.
       saveBlob(blob, version.filename);
     },
   });

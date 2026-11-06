@@ -27,6 +27,14 @@ export const onboarding = {
       checkAria: "Check {prefix}",
     },
   },
+  // The client and site the journey is for (MSP clients phase 3, design §4.4).
+  target: {
+    title: "Which client and site",
+    subtitle: "What you add from the pages below is filed under this client and this site.",
+    client: "Client: {client}",
+    oneSite: "Site: {site}, the client's only one.",
+    pickFirst: "Choose the client and the site first; the links below then carry them.",
+  },
   state: {
     done: "Done",
     partial: "Partly done",

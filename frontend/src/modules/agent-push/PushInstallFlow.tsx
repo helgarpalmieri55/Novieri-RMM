@@ -82,6 +82,9 @@ export function PushInstallFlow({
     (c) => c.type === kind && oneClient !== null && c.client_id === oneClient,
   );
   const chosen = offered.find((c) => c.id === credentialId) ?? null;
+  // "None is saved" is false while another client holds one of the kind: say
+  // whose is missing instead (phase 3 final review C, Minor).
+  const savedElsewhere = (credentials.data ?? []).some((c) => c.type === kind);
   const targets = machines.map((m) => m.primary_ip as string);
 
   return (
@@ -188,7 +191,7 @@ export function PushInstallFlow({
               <p className="note">
                 {credentials.isError
                   ? t("agentPush.flow.cannotView")
-                  : `${t("agentPush.flow.noneSaved", { kind: credentialTypeLabel(kind) })} `}
+                  : `${t(savedElsewhere ? "agentPush.flow.noneSavedForClient" : "agentPush.flow.noneSaved", { kind: credentialTypeLabel(kind) })} `}
                 {!credentials.isError ? (
                   <Link to={`/credentials?new=${kind}`}>{t("agentPush.flow.addOne")}</Link>
                 ) : null}

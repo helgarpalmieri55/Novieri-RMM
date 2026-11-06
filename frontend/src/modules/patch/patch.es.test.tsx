@@ -217,7 +217,9 @@ const mockDefaults = (): Partial<ApiClient> => ({
     total: 1,
   }),
   listPatchAppSources: vi.fn().mockResolvedValue({ items: [] }),
-  listChanges: vi.fn().mockResolvedValue([{ id: "c1", title: "Ventana de octubre", state: "approved" }]),
+  // `client_id` as `GET /changes` sends it: the bar offers only the approval's
+  // client's changes (phase 3 final review D2), here the internal one chosen.
+  listChanges: vi.fn().mockResolvedValue([{ id: "c1", client_id: "o1", title: "Ventana de octubre", state: "approved" }]),
   getCurrentOrg: vi.fn().mockResolvedValue({ id: "o1", name: "Org", slug: "org", status: "active", settings: {} }),
 });
 
@@ -332,6 +334,21 @@ describe("the fleet patch page in Spanish", () => {
     expect(dialog).toHaveTextContent("Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.");
     await user.click(within(dialog).getByRole("button", { name: "Aprobar" }));
     expect(await screen.findByText("2 actualizaciones aprobadas para el anillo test. 1 ya estaba en vigor.")).toBeInTheDocument();
+  });
+
+  // Plan Task 11 D11.3: with every client chosen and the bar's Client field
+  // empty, the approval is the client the person chooses -- read after "del
+  // cliente", as `ownClient` is.
+  it("words the approval's owner as the client the person chooses until one is picked", async () => {
+    selectClient(null);
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue({});
+    renderPage(<FleetPatchPage />);
+    await screen.findByText("Acumulativa de octubre");
+    await user.click(screen.getByLabelText("Seleccionar KB5031354"));
+    expect(screen.getByRole("checkbox", { name: /Para todos los clientes/ }).closest("label")).toHaveTextContent(
+      "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo test. Sin marcar, solo en los del cliente que elijas.",
+    );
   });
 
   it("says what a scan and an export did, and that an export failed", async () => {

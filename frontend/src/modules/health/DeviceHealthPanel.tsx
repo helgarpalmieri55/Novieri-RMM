@@ -12,10 +12,12 @@ import {
   useDeviceHealth,
   useUserTimezone,
 } from "./api";
+import { useListedClientName } from "./ProfileAssignments";
 import {
   ALERT_STATE_PRESENTATION,
   CHECK_STATE_PRESENTATION,
   SEVERITY_PRESENTATION,
+  appliedByLabel,
   checkGlyph,
   checkLabel,
   checkStateBands,
@@ -54,6 +56,9 @@ export function DeviceHealthPanel({
   onOpenAlert?: (alertId: string) => void;
 }) {
   const t = useT();
+  // A client default's client by name, never "All clients" for one the
+  // person's `/me` does not list.
+  const clientName = useListedClientName();
   const health = useDeviceHealth(deviceId);
   const zone = useUserTimezone();
   const checkNow = useCheckDeviceNowMutation();
@@ -139,12 +144,7 @@ export function DeviceHealthPanel({
                 {
                   // Spec §0.2's requirement, in full: the level AND the target.
                   k: t("health.devicePanel.factAppliedBy"),
-                  v:
-                    device.resolution_level === "org"
-                      ? t("health.devicePanel.appliedOrg")
-                      : device.resolution_level === "group"
-                        ? t("health.devicePanel.appliedGroup", { group: String(device.assignment?.device_group_id) })
-                        : t("health.devicePanel.appliedDevice"),
+                  v: appliedByLabel(device.resolution_level, device.assignment, clientName),
                 },
                 {
                   k: t("health.devicePanel.factPolicy"),

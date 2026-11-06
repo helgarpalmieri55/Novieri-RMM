@@ -46,6 +46,44 @@ GLOBAL_CONSTRAINTS_NEVER_EXPOSED = {
     ("POST", "/api/v1/setup/claim"),
 }
 
+# P2 phase 1 (own sign-in): every route that takes or hands back a sign-in
+# credential (plan decision 10).
+OWN_SIGN_IN_NEVER_EXPOSED = {
+    *(
+        ("POST", f"/api/v1/auth/{path}")
+        for path in (
+            "login",
+            "factor/totp",
+            "factor/recovery",
+            "factor/passkey/options",
+            "factor/passkey",
+            "enroll/totp/start",
+            "enroll/totp/confirm",
+            "enroll/passkey/options",
+            "enroll/passkey",
+            "enroll/finish",
+            "step-up/totp",
+            "step-up/recovery",
+            "step-up/passkey/options",
+            "step-up/passkey",
+            "logout",
+            "logout-everywhere",
+            "password/forgot",
+            "password/reset",
+            # Task 8: the invitation's and the server's recovery link.
+            "invite/details",
+            "invite/accept",
+            "recover/details",
+            "recover/accept",
+        )
+    ),
+    ("PUT", "/api/v1/me/password"),
+    ("POST", "/api/v1/me/recovery-codes"),
+    # Task 8: an invitation's answer carries its one-time link when no mail did.
+    ("POST", "/api/v1/users/invite"),
+    ("POST", "/api/v1/users/{user_id}/invite/resend"),
+}
+
 
 @pytest.fixture()
 async def mcp_env(api_env):
@@ -102,14 +140,21 @@ async def test_an_mcp_token_is_accepted_on_a_marked_request(mcp_env) -> None:
 
 
 async def test_a_console_token_is_refused_on_a_marked_request(mcp_env) -> None:
-    org_id, _, sub = await _org_admin(mcp_env)
+    """The token the console's own client obtained. Minted here: since own
+    authentication Task 13 `mcp_env.headers` is a session cookie, which
+    `tests/test_auth_falsifiers.py::test_the_mcp_channel_takes_no_cookie`
+    holds on the channel."""
+    _, slug, sub = await _org_admin(mcp_env)
+    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
     async with marked_client(mcp_env) as client:
-        resp = await client.get("/api/v1/me", headers=await mcp_env.headers(org_id, sub))
+        resp = await client.get("/api/v1/me", headers=_bearer(token))
     assert resp.status_code == 401
 
 
-async def test_a_marked_request_without_a_console_url_is_503(api_env) -> None:
-    assert api_env.settings.public_console_url is None
+async def test_a_marked_request_without_a_console_url_is_503(api_env, monkeypatch) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
     _, slug, sub = await _org_admin(api_env)
     async with marked_client(api_env) as client:
         resp = await client.get(
@@ -139,9 +184,9 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_never_exposed_is_exactly_the_ten_routes_of_the_global_constraints() -> None:
-    assert len(NEVER_EXPOSED) == 10
-    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED
+def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
+    assert len(NEVER_EXPOSED) == 36
+    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 
 def test_never_exposed_names_only_real_routes(api_env) -> None:

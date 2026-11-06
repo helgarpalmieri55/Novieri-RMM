@@ -219,8 +219,3 @@ export function useTurnOffSignIn(personId: string) {
     },
   });
 }
-
-/** Who may turn this account's sign-in off: `users.manage` for staff, `clients.manage` for a contact. */
-export function turnOffPermission(account: Pick<AccountOut, "kind">): string {
-  return account.kind === "contact" ? "clients.manage" : "users.manage";
-}

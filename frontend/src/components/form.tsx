@@ -31,7 +31,7 @@ import type { FormEvent, ReactNode } from "react";
 
 import { useT } from "../i18n/context";
 import { getLanguage, translate } from "../i18n/core";
-import { ApiError } from "../lib/api";
+import { ApiError, apiErrorCode } from "../lib/api";
 import { Icon } from "../shell/icons";
 import { KIND_ICON } from "../shell/viz";
 import { Button } from "./ui";
@@ -130,10 +130,10 @@ function humaniseField(name: string): string {
 /**
  * FastAPI's validation errors, as sentences.
  *
- * THE SHAPE. This backend registers no custom handler, so a 422 arrives as
- * `{"detail":[{"type","loc","msg","input","ctx"}, …]}`. Every part of that is
- * for a machine except `msg`, and `loc` -- which names the field -- is an
- * array whose first element is the request part ("body").
+ * THE SHAPE. A 422 arrives as `{"detail":[{"type","loc","msg","ctx"}, …]}`
+ * (`backend/app/core/errors/validation.py` removes Pydantic's `input`). Every
+ * part of that is for a machine except `msg`, and `loc` -- which names the
+ * field -- is an array whose first element is the request part ("body").
  *
  * `input` IS DELIBERATELY NEVER READ. It echoes the value the user submitted,
  * so a secret field that fails a length rule puts the secret in the error
@@ -251,6 +251,9 @@ export function describeSubmitError(error: unknown): string {
     if (validation) return validation;
 
     if (error.status === 503) return translate("validation.serviceUnavailable");
+    // The door's CSRF refusal is not a missing permission: the request did not
+    // come from the console's own address (own-auth Task 6).
+    if (error.status === 403 && apiErrorCode(error) === "csrf") return translate("validation.csrf");
     if (error.status === 403) return translate("validation.forbidden");
     if (error.status === 404) return translate("validation.notFound");
     if (error.status === 409) return translate("validation.conflict");

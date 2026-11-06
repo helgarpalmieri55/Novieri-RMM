@@ -26,6 +26,44 @@ same symptoms if you ever diverge from these versions.
 **What is NOT verified** is marked inline as ⚠ **UNVERIFIED** wherever it
 appears. Nothing else in the first-boot section is a guess.
 
+**Since own authentication phase 1 (2026-11) the console signs in on the
+platform's own screens** -- password and a second factor, a session cookie --
+and not at Keycloak (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
+Keycloak still signs MCP clients in until phase 3. The sections of this
+runbook that describe the console's sign-in through Keycloak -- the
+enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
+predate that change; the runbook is rewritten with the deployment project
+(design §9). Three things phase 1 changed that every deployment needs:
+
+- **`ITS_PUBLIC_CONSOLE_URL` is required for any console sign-in**, and it must
+  be exactly the `https://host[:port]` origin the browser's address bar shows
+  (step 1). Unset, or naming another host, port or scheme, every sign-in write
+  is refused as `csrf` and nobody can sign in -- first boot completes, then the
+  sign-in screen refuses. Passkeys, the reset and invitation links and the
+  recovery command are built from it too. The platform, not Keycloak, now
+  sends invitations and password resets, through **Settings → Email**.
+- **`ITS_AUTH_KEYS_BACKEND=openbao` must be in `.env`** (step 3, the sign-in
+  keys). A new `.env` copied from `.env.example` has it; an existing one does
+  not, and without it the api will not start.
+- **Phase 1 installs on a fresh database.** Design P7: "no hay datos que
+  conservar" -- there are no Keycloak users to migrate. Migration 0245 is safe
+  on a populated database (it only creates tables), but an existing technician
+  has no password row and **no path to one**: forgot-password needs an existing
+  password, an invitation refuses an address that already has an account, and
+  the recovery command keeps the password as it is. First boot (step 8) mints
+  the one `org-admin`, who sets their password on the setup screen; every
+  other technician is invited from **Settings → Users**.
+- **A super-admin is never invited** (no organization can grant the role, so
+  none can invite or re-invite its holder), and an account without a password
+  has no way to get one: forgot-password needs an existing password and a
+  second factor, and the recovery command leaves the password as it is. So a
+  super-admin is made from a technician who has already signed in -- the
+  first-boot `org-admin`, or an invited technician who finished enrolment --
+  by the direct database grant in [Publishing the agent to the
+  console](#publishing-the-agent-to-the-console) (`super-admin` is not
+  grantable from any screen). The account keeps its own password and second
+  factor; nothing is mailed.
+
 ---
 
 ## Prerequisites (Ubuntu Server 24.04 / 26.04)
@@ -212,6 +250,45 @@ must not stay unset: with `ITS_ENVIRONMENT=production` the api and worker
 refuse to touch object storage without it, rather than mint artifact URLs
 naming `minio` that no endpoint can resolve.
 
+**Set `ITS_PUBLIC_CONSOLE_URL` now: nobody can sign in to the console without
+it** (own authentication, phase 1). It must be exactly the origin the browser's
+address bar will show — `https://itms.toeshee.com` here, or
+`https://host:port` if the console is not on 443 — with no path and no
+trailing slash. Every sign-in write is checked against it, and a different
+host, port or scheme is refused as `csrf`. The line deletes any earlier value
+first, because a second `ITS_PUBLIC_CONSOLE_URL=` further down silently wins:
+
+```sh
+sed -i '/^ITS_PUBLIC_CONSOLE_URL=/d' .env && echo 'ITS_PUBLIC_CONSOLE_URL=https://itms.toeshee.com' >> .env
+grep '^ITS_PUBLIC_CONSOLE_URL=' .env
+```
+
+```
+ITS_PUBLIC_CONSOLE_URL=https://itms.toeshee.com
+```
+
+**The per-address sign-in limits are optional** (`ITS_AUTH_LOGIN_IP_LIMIT` and
+`ITS_AUTH_FACTOR_IP_LIMIT`). Unset, one address may send 30 requests in 10
+minutes to the password step, and 30 to the second-factor steps: the code or
+passkey at sign-in, setting one up, and confirming it again inside the console.
+Every request counts, successes included, and the next one answers 429 until
+the 10 minutes are up. On the second-factor budget a typed code is 1 request
+and a passkey 2; setting up the first factor at first sign-in is 3, so ten
+technicians doing that on the first day spend all 30 (`.env.example` gives the
+rest, including adding a factor later). The address is the
+one Traefik saw, so technicians behind one office NAT address share one budget.
+Raise them for that, within 5-1000, and only as far as the office needs. They
+protect against guessing from one address, and the password limit also bounds
+how often one address can time whether an email has an account (a difference
+of about 10-15 ms the sign-in design accepted because this limit exists). The
+per-account wait and the stop after 100 failures in a row are separate and do
+not change. A value outside 5-1000 stops the api, the gateway and the workers
+at startup, since each reads `.env`. A change takes effect on the next
+`docker compose up -d`, which recreates every service that reads `.env`, the
+gateway included, so the agents reconnect even for a valid value. A misspelled
+name is ignored and the limit stays 30. Step 7 shows how to see the values the
+api started with, once it is running.
+
 ### Step 2 — Postgres
 
 ```sh
@@ -328,7 +405,7 @@ shipped and mounted into the container:
 
 | policy | file | who uses it | what it may do |
 |---|---|---|---|
-| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs |
+| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs, HMAC passwords with the sign-in pepper, sign the platform's own tokens |
 | `gateway-issuer` | `/bao/gateway-issuer.hcl` | `scripts/issue-gateway-cert.py` (step 6) | `update` on `pki/issue/gateway`, and nothing else |
 
 > **Do not paste the root token onto a command line.** `docker compose exec -e
@@ -427,6 +504,33 @@ root CA, the `agent` role (client certificates, Ed25519, with the
 the `gateway` role (the gateway's own server certificate). The credential vault
 (`ITS_VAULT_BACKEND=openbao`) reuses the same `transit` mount for its per-org
 keys, created on first use — nothing extra to provision.
+
+⚠ **UNVERIFIED — this paragraph has not been run against a live OpenBao.** No CI
+job runs `openbao-init` or starts the api against OpenBao (the `deploy` job
+starts postgres, keycloak and traefik), and no report has run transit `hmac`
+with an `hmac`-type key, or `sign` with `marshaling_algorithm=jws`, live. The
+code (`backend/app/core/auth/keys.py`) was written and reviewed against
+OpenBao 2.6.1's source; that is read, not run.
+
+Since own authentication phase 1 it also creates two transit keys for sign-in:
+`auth-pepper` (HMAC, the versioned pepper every password verifier is
+computed with) and `auth-signing` (ECDSA P-256, which signs the assistant's
+internal tokens and, from phase 3, MCP access tokens). Neither key ever leaves
+OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
+the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
+API cannot verify a password. **And add `ITS_AUTH_KEYS_BACKEND=openbao` to an
+existing `.env`** (a new one copied from `.env.example` has it): without it the
+api uses the `local` backend, which with `ITS_ENVIRONMENT=production` refuses
+to start (`MissingAuthKeyError`), so the api restart-loops:
+
+```sh
+sed -i '/^ITS_AUTH_KEYS_BACKEND=/d' .env && echo 'ITS_AUTH_KEYS_BACKEND=openbao' >> .env
+grep '^ITS_AUTH_KEYS_BACKEND=' .env
+```
+
+```
+ITS_AUTH_KEYS_BACKEND=openbao
+```
 
 **If this exits 2 with `Vault is sealed`,** unseal (3.3) and re-run. It is
 idempotent.
@@ -657,6 +761,20 @@ subject=CN = itms.toeshee.com
 Two different issuers on the two ports is the correct picture. If `:8443` shows
 your public CA, an agent will never connect.
 
+**The per-address sign-in limits the api started with** (`ITS_AUTH_LOGIN_IP_LIMIT`
+and `ITS_AUTH_FACTOR_IP_LIMIT`, step 1). Unset, both are 30. This works from
+here on, once the api is running, and again after any change to them followed by
+`docker compose up -d` (⚠ **UNVERIFIED** on a deployed host: the Python part was
+run against this release's settings, not inside the container):
+
+```sh
+docker compose exec api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)"
+```
+
+```
+30 30
+```
+
 ### Step 8 — Claim the installation
 
 **This replaces what used to be three steps: creating the first administrator by
@@ -683,10 +801,17 @@ idempotent — before going further:
 docker compose up keycloak-init
 ```
 
+> **Superseded by own authentication (phase 1).** The setup screen now sets the
+> administrator's password on the screen itself and sends **no mail**; the first
+> sign-in enrols the second factor. Keycloak SMTP is not needed for first boot,
+> and the paragraph below, and step 9's enrolment mail, describe the old flow.
+> Account mail (invitations, resets) is configured afterwards in ITMS at
+> **Settings → Email**.
+
 **Configure email first if you can.** The screen below finishes by *emailing* the
 administrator it creates, and an installation with no working SMTP finishes it
 with a detour through the break-glass tunnel. [Keycloak
-SMTP](#keycloak-smtp--required-before-user-management-works-at-all) below is ten
+SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all) below is ten
 minutes and removes that entirely.
 
 Then:
@@ -744,7 +869,7 @@ has already been set up". Recovery is vendor-side, through the tunnel in
 console](#break-glass-the-identity-admin-console-vendor-only):
 
 - **Fix the cause, then re-send** (prefer this). Configure [Keycloak
-  SMTP](#keycloak-smtp--required-before-user-management-works-at-all), then in
+  SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all), then in
   the same console: **Users →** your account **→ Credentials → Credential
   Reset**, actions `Update Password` and `webauthn-register-passwordless`,
   **Send email**. That is the identical mail setup tried to send.
@@ -932,6 +1057,47 @@ creates it on first use.
 
 ---
 
+## Recovery link: an administrator who lost every second factor
+
+For the one technician who lost every passkey, the authenticator app and the
+recovery codes, and has no other administrator to reset them (Settings →
+Users → Reset second factors), whoever holds the server prints a one-time
+recovery link (design §7, Q5). Opening it removes the person's second
+factors, remembered browsers and sessions, and starts a session that sets up
+a new factor. **It asks for no current password: the link alone is the
+account.** The recovery page always offers a new password, and requires one
+when the person's password was set by an emailed link.
+
+**It is also what to do when "Reset second factors" is refused with
+`reset_needs_recovery`** (operator decision 2026-11-05). That refusal means the
+person's current password was set with an emailed reset link and no second
+factor has been used since: that password may be whoever holds the mailbox,
+and a factor reset would hand them the account. Confirm who the person is
+yourself, then give them a recovery link the way below. Opening it also clears
+the refusal.
+
+- **Hand it to the person directly** — in person, or read out over a call to
+  someone you recognise. Whoever opens it before it expires gets the account;
+  the command's warning says how long that is (`RECOVER_TTL`,
+  `backend/app/core/auth/action_tokens.py`).
+- **Never send it by email**, chat or ticket: the second factor is never
+  restored by mail alone (Q5, "nunca solo por correo").
+- The holder is told by mail that a link was issued, and the issue is audited
+  as `user.recovery_link_issued` (never the link itself).
+
+First, by hand, set `RECOVER` to the address the person signs in with — for
+example `RECOVER=ana@toeshee.com` — then, from the directory holding
+`docker-compose.yml`:
+
+```sh
+: "${RECOVER:?set RECOVER to the address the person signs in with first}"
+docker compose exec api python -m app.core.auth.recover --email "$RECOVER"
+```
+
+The link is printed on stdout and the same warning on stderr. It needs
+`ITS_PUBLIC_CONSOLE_URL` and `ITS_DEFAULT_ORG_SLUG`; without either it prints
+`refused: ...` and exits 1.
+
 ## Break-glass: the identity admin console (VENDOR-ONLY)
 
 **This is not an operator task and it is not part of normal operation.**
@@ -1070,6 +1236,10 @@ docker compose exec keycloak /opt/keycloak/bin/kcadm.sh --help
 
 ## Branding and extending sign-in (VENDOR-ONLY)
 
+> **Not the console's sign-in any more.** Since own authentication phase 1 the
+> console signs in on the platform's own screens. What follows is Keycloak's
+> login page, which only MCP clients meet until own authentication phase 3.
+
 > **Every "Admin console →" step in this section runs inside the SSH tunnel
 > above, not on the public hostname.** The console is not routed on `:443`;
 > `https://itms.toeshee.com/admin/` answers with the ITMS console's own
@@ -1094,6 +1264,11 @@ again, on every `docker compose up`:
 | WebAuthn passwordless policy | every `webAuthnPolicyPasswordless*` key |
 | Whether a user may change their own username | `editUsername` |
 | `it-suite-web`'s `rootUrl`, `redirectUris`, post-logout URIs | that client's entry |
+
+> **Superseded by own authentication (phase 1)** for Settings → Email: it no
+> longer writes the realm. The relay's password or client secret is stored in
+> ITMS's vault (Settings → Email), ITMS fetches the Microsoft token itself and
+> sends the mail. The allowlist below still keeps a hand-set realm SMTP block.
 
 **An allowlist, not the whole representation, and the reason is worth
 knowing.** `Settings → Email` writes the realm's `smtpServer` through the same
@@ -1294,16 +1469,12 @@ org slug (the same one as `ITS_DEFAULT_ORG_SLUG` in `.env`).
 **The mapper is not optional, and its absence is masked.** With
 `ITS_MULTI_TENANT=false` a federated user carrying no `org` attribute falls back
 to the default org — so sign-in *works*, and every Microsoft account silently
-lands in one tenant. Verify the **claim**, not the login: sign in through
-Microsoft once, then in the browser's devtools console on the console page:
-
-```js
-const k = Object.keys(sessionStorage).find(k => k.startsWith("oidc.user"));
-JSON.parse(atob(JSON.parse(sessionStorage[k]).access_token.split(".")[1])).org
-```
-
-That must print your org slug. `undefined` means the mapper is missing and the
-fallback is carrying the login.
+lands in one tenant. Verify the **claim**, not the login. The console page
+used to hold a Keycloak token that could be decoded in the browser's devtools;
+since own authentication phase 1 it holds none (its session is an `HttpOnly`
+cookie naming a server-side session), so the claim is now only in the access
+tokens MCP clients obtain, and the devtools one-liner that read it from the
+console's session storage is gone with that token.
 
 **Trust Email off is deliberate.** With it on, a Microsoft identity that merely
 claims an existing user's email address is linked to that account
@@ -1483,20 +1654,26 @@ forwarding is running.
 
 ---
 
-## Keycloak SMTP — required before user management works at all
+## Keycloak SMTP (before phase 1) — required before user management works at all
 
 > **SUPERSEDED BY THE PRODUCT FOR EVERY DAY BUT THE FIRST.** Email is now
 > **Settings → Email** inside ITMS — host, port, TLS mode, from address,
-> credentials and a test send, with the password written straight through to the
-> realm and never stored or echoed back by ITMS. That is where an operator
-> configures delivery, and this section no longer describes their work.
+> credentials and a test send. **Since own authentication (phase 1) the relay's
+> password is stored in ITMS's vault (Settings → Email)**, encrypted, decrypted
+> only to send and never echoed back; ITMS sends the account mail itself, and
+> the realm is not written. That is where an operator configures delivery, and
+> this section no longer describes their work.
 >
-> **It still describes yours, in exactly one situation: first boot.** Settings →
-> Email is behind a sign-in, and on a brand-new installation nobody can sign in
-> until the enrolment mail arrives — which needs SMTP. Configuring it here, once,
-> before [Step 8 — Claim the installation](#step-8--claim-the-installation),
-> breaks that circle. Doing it afterwards is the recovery in
-> [Step 9](#step-9--finish-enrolment-and-sign-in).
+> **Superseded by own authentication (phase 1) for first boot too:** the setup
+> screen sends no mail (step 8), so nothing below is needed to claim an
+> installation.
+>
+> **Before phase 1:** it still described yours in exactly one situation, first
+> boot. Settings → Email was behind a sign-in, and on a brand-new installation
+> nobody could sign in until the enrolment mail arrived — which needed SMTP.
+> Configuring it here, once, before [Step 8 — Claim the
+> installation](#step-8--claim-the-installation), broke that circle. Since own
+> authentication phase 1 there is no such circle (the note above).
 >
 > **VENDOR-ONLY either way.** The "Admin console →" step below runs inside the
 > SSH tunnel in [Break-glass: the identity admin
@@ -1570,11 +1747,12 @@ affects a live realm.
 ### 4. Signing in to Microsoft 365 instead of with a password
 
 Microsoft is retiring password sign-in (basic auth) for SMTP. **Settings →
-Email → Sign-in: Microsoft 365** makes the realm sign in to
-`smtp.office365.com` with an Azure application instead. The realm fetches the
-token itself (Keycloak 26.2 XOAUTH2, client-credentials grant); ITMS never
-holds it. The client secret is written straight through to the realm like the
-password, and is never stored or shown by ITMS.
+Email → Sign-in: Microsoft 365** makes ITMS sign in to `smtp.office365.com`
+with an Azure application instead. **Since own authentication (phase 1)** the
+client secret is stored in ITMS's vault (Settings → Email), encrypted and
+decrypted only to send; ITMS fetches the Microsoft token itself
+(client-credentials grant) and sends the mail. The secret is never shown back.
+The realm is not involved.
 
 > ⚠ **UNVERIFIED against a live Microsoft tenant.** The permission, the scope
 > and the Exchange commands below follow Microsoft's documentation
@@ -1790,6 +1968,11 @@ create it any more and the cost is permanent.
 | Authentication flow | **Service accounts roles** only — standard flow and direct access grants are both off, so a leaked secret is not a password grant |
 | Roles | from `realm-management`: **`manage-users`** and **`manage-realm`**. Nothing else — not `realm-admin`, and never the bootstrap `admin` account from `.env` |
 | Secret | `/var/lib/its/secrets/keycloak-admin.secret`, on the `its-secrets` volume, mode 600 |
+
+> **Superseded by own authentication (phase 1):** Settings → Email no longer
+> writes the realm's SMTP block; the relay secret is stored in ITMS's vault and
+> ITMS sends the mail. Nothing in `app/` uses `manage-realm` for mail now
+> (`user_admin/realm_config.py` is kept, uncalled, until phase 4).
 
 `manage-realm` is the 2026-08-19 widening
 (`docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §4): it
@@ -3151,7 +3334,7 @@ again if you pin different versions.
 | 10 | first administrator authenticates but gets `403 requires ...` on everything | JIT user provisioning assigns **no role**, and nothing granted one | step 10 added to this runbook |
 | 11 | `enroll: certificate and key do not form a pair: tls: failed to find any PEM data in certificate input` | OpenBao returns PEM **without a trailing newline**; the agent concatenates `cert_pem + chain_pem`, producing `-----END CERTIFICATE----------BEGIN CERTIFICATE-----`. **No device could enroll against the production CA backend.** Tests were green because they use `LocalCA`, whose PEM is newline-terminated | one-line normalisation in `backend/app/core/ca.py` (server-side, so it repairs agents already in the field) |
 | 12 | an `app.deploy` job dispatches, reaches the endpoint, and fails at the artifact download with a name-resolution error; nothing in the control plane looks wrong | MinIO had **no published port and no Traefik router**, and presigned URLs were signed against `ITS_S3_ENDPOINT` (`http://minio:9000`) — a Docker-internal name. Every grant was correctly scoped, correctly time-bounded and unreachable | a `minio` router on `:443` matching `/<bucket>/`, and a separate `ITS_S3_PUBLIC_ENDPOINT` used only for signing (required in production). See "Object storage on :443" |
-| 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server |
+| 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server. (Since own authentication phase 1 the console has no OIDC client at all -- `lib/auth.ts` is gone -- and fetches no discovery document) |
 | 14 | Keycloak answers **`Invalid parameter: redirect_uri`** on a correctly-formed authorization request | the `it-suite-web` client shipped `redirectUris: ["https://*/auth/callback"]`. Keycloak honours a wildcard **only as a trailing `*`**; one in the host position is compared as a literal string and matches nothing. `rootUrl` was also `https://localhost`, so even a relative URI resolved to the wrong host | `rootUrl` emptied and the redirect made **relative** (`/auth/callback`), which resolves against the request and is therefore correct at any hostname. **A running realm is not re-imported** — an existing deployment must be patched through the admin API |
 
 Two smaller things worth knowing:

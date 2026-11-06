@@ -26,25 +26,23 @@ WHAT THE PROFILE MAY WRITE, AND WHY THE LIST IS CLOSED. Four fields:
 `display_name`, `phone`, `timezone`, `locale`. `ProfileUpdate` forbids
 everything else (`extra="forbid"`) rather than ignoring it, because "ignored"
 and "written" are one careless model edit apart, and the fields not on the list
-are `email` (Keycloak's, per §7.1 -- changing it there is a re-authenticated
-flow that ITMS deliberately does not reimplement), `status` (the §3 admission
+are `email` (the address a person signs in with and is mailed at: changing
+it is an administrator's act, not a profile field), `status` (the §3 admission
 gate: a self-service form that re-enables a disabled account is the disable
 feature deleted), `org_id` and `external_subject` (identity, not preference),
 and anything role-shaped (privilege escalation, stated plainly). A request
 carrying any of them is refused with 422 and writes nothing at all -- not even
 the legitimate fields alongside it.
 
-`locale` ALSO REACHES THE SIGN-IN PROVIDER (spec §3.5): after the commit, the
-saved value is mirrored to the caller's own Keycloak user so its pages and
-emails follow it. The target is the `external_subject` of the row `ctx.user_id`
-selected, never a request field, and a failure there never fails the PATCH.
+`locale` STAYS IN THE PLATFORM. Until P2 phase 1 it was mirrored to the
+caller's Keycloak user so that Keycloak's pages and mails followed it; the
+sign-in pages and the account mails are the platform's own now and read
+`users.locale` directly (`app/core/auth/notices.py`), so nothing is mirrored
+(P2 design §1.3).
 """
 
-import asyncio
-import logging
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,22 +52,9 @@ from app.core.i18n import tr
 from app.core.identity.own_profile import (
     OwnProfile,
     OwnRowMissing,
-    read_own_locale,
     read_own_profile,
     update_own_profile,
 )
-from app.modules.user_admin.kc_client import (
-    KeycloakAdminConfig,
-    KeycloakAdminError,
-    set_locale_attribute,
-)
-
-logger = logging.getLogger(__name__)
-
-#: The whole Keycloak mirror -- token, read, write and check -- gets this long.
-#: The save is already committed, but the request is held open while we wait,
-#: and a wedged identity provider must not hold it for four 15-second calls.
-_MIRROR_TIMEOUT_SECONDS = 5
 
 router = APIRouter(tags=["me"])
 
@@ -110,11 +95,6 @@ class MeResponse(BaseModel):
     #: the account chip, which used to show the constant "Operator" for every
     #: user on every deployment.
     roles: list[str]
-    #: Set only by `PATCH /me` when `locale` was supplied: `True` when the
-    #: language was also written to the sign-in provider, `False` when that
-    #: write failed (the console setting is saved either way), `None` when no
-    #: write was attempted -- locale not supplied, or no provider configured.
-    identity_locale_synced: bool | None = None
 
 
 class ProfileUpdate(BaseModel):
@@ -180,10 +160,11 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
 
     `display_name` used to be `ctx.claims.name`, which made the §7.1 override
     unobservable: the profile form could write it and this route would keep
-    reporting Keycloak's value. `email` reads from the row too, and that is
-    only correct because admission now refreshes it from the claim
-    (`app/api/deps.py`, §7.2) -- before that fix the row was the stale source
-    and this would have been the bug rather than the fix.
+    reporting the identity provider's value. `email` reads from the row too,
+    and since own authentication phase 1 the row IS the source: the console
+    session carries no claim, and the address is the one the person signs in
+    with (`app/core/auth/lookup.py`). (On the MCP channel `deps.admit` still
+    refreshes it from the Keycloak token's claim until phase 3.)
 
     Under EVERY client, not `ctx.clients`: the profile is the person's, and a
     person with no grant has the empty scope, which sees no staff row
@@ -216,7 +197,7 @@ async def update_me(
     # own_profile`, where the four written-out assignments and the audit
     # event live): `ctx.user_id`, never the body.
     try:
-        profile, previous_locale = await update_own_profile(
+        profile, _previous_locale = await update_own_profile(
             org_id=ctx.org_id,
             user_id=ctx.user_id,
             engine=request.app.state.app_engine,
@@ -228,57 +209,4 @@ async def update_me(
         )
     except OwnRowMissing:  # pragma: no cover -- admission created or found this row
         raise _no_such_user() from None
-    response = _response(profile, ctx.clients)
-    subject = profile.external_subject
-
-    # AFTER THE COMMIT (the call above has returned), so a Keycloak that is down
-    # or slow can never lose the console setting. The target is the caller's
-    # own row's `external_subject`, read from the row `ctx.user_id` selected --
-    # no request field reaches this call.
-    #
-    # ONLY WHEN IT CHANGED. The profile form re-sends the stored value on every
-    # save, and a null stored value would otherwise delete a `locale` an
-    # administrator set in Keycloak. Picking the language again (a different
-    # one, then back) is the retry path after a `false`.
-    if "locale" in supplied and body.locale != previous_locale:
-        response.identity_locale_synced = await _mirror_locale(
-            request, subject=subject, locale=body.locale
-        )
-        # OVERLAPPING SAVES. Two quick switches (or two tabs) each commit, then
-        # mirror; the earlier request's write can land in Keycloak after the
-        # later one's. So once ours is written, look again: if the saved value
-        # has moved on, write that instead. Whichever request finishes last
-        # reads the latest committed value, so Keycloak ends on it.
-        if response.identity_locale_synced:
-            current = await read_own_locale(
-                org_id=ctx.org_id, user_id=ctx.user_id, engine=request.app.state.app_engine
-            )
-            if current != body.locale:
-                response.identity_locale_synced = await _mirror_locale(
-                    request, subject=subject, locale=current
-                )
-    return response
-
-
-async def _mirror_locale(request: Request, *, subject: str, locale: str | None) -> bool | None:
-    """Write the saved language to the caller's Keycloak user.
-
-    `None` when this deployment has no provisioning client (nothing attempted),
-    `True` on success, `False` on any failure. Never raises: the setting is
-    already committed, and the form is told rather than the request failed.
-    The log line is a static template plus the exception's own traceback
-    (`exc_info`); the token and the user representation are never passed to it.
-    """
-    try:
-        # `TimeoutError` is an `OSError`, so the clause below already catches it.
-        async with asyncio.timeout(_MIRROR_TIMEOUT_SECONDS):
-            config = KeycloakAdminConfig.from_settings(request.app.state.settings)
-            if config is None:
-                return None
-            await set_locale_attribute(config, user_id=subject, locale=locale)
-    except (KeycloakAdminError, httpx.HTTPError, OSError, ValueError, KeyError):
-        logger.warning(
-            "could not mirror the saved language to the identity provider", exc_info=True
-        )
-        return False
-    return True
+    return _response(profile, ctx.clients)

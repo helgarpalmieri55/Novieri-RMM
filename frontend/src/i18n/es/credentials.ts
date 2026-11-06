@@ -87,6 +87,7 @@ export const credentials: Shape<typeof en> = {
     caCertificate: "Certificado de la CA (PEM opcional, para la confianza de HTTPS/5986)",
     cancel: "Cancelar",
     store: "Guardar",
+    forEveryClientHint: "Los técnicos de todos los clientes pueden retirarla, y solo alguien con acceso a todos los clientes puede borrarla. Sin marcar, pertenece al cliente en el que la guarda este formulario.",
   },
   types: {
     windows_admin: {

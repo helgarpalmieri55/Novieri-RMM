@@ -240,6 +240,11 @@ const TEXT_ON_BACKGROUND: ReadonlyArray<readonly [string, string, string]> = [
   ["--accent", "--bg", "a link on the page background"],
   ["--accent", "--surface-2", "a link inside a hovered row"],
   ["--accent", "--accent-s", ".pill.p-info, .chip.on"],
+  // The phone's client mark in the drawer toggle (operator decision 4): the
+  // deeper accent on its wash, and on the surface it turns to while the
+  // toggle's own ground is the wash (hover).
+  ["--accent-2", "--accent-s", ".client-mark"],
+  ["--accent-2", "--surface", ".nav-toggle:hover .client-mark"],
   // Ink on the accent fill: the primary button's label, the brand chip.
   ["--accent-ink", "--accent", ".btn.pri, .brand i"],
 ];

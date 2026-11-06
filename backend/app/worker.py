@@ -439,7 +439,7 @@ async def deliver_pending(
     stamps `claimed_at` and commits immediately (`org_session`'s block
     below). The actual attempt (an outbound HTTP POST or an SMTP
     conversation -- `attempt_delivery`, which can take up to its own
-    `_SMTP_TIMEOUT_S`/egress timeout) happens AFTERWARDS, one delivery at a
+    `app.core.mail.SMTP_TIMEOUT_S`/egress timeout) happens AFTERWARDS, one delivery at a
     time, each in its OWN fresh transaction -- never inside the claim
     transaction. Holding a database connection open for the duration of an
     outbound call with someone else's timeout is how a handful of slow

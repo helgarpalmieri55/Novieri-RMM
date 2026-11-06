@@ -1,31 +1,34 @@
 """Admission for the browser's screen WebSocket (spec-screen-share.md §2.1).
 
-``authorize_tunnel`` is the auth/ownership gate, factored out of the WebSocket
-route so it can be exercised without a live socket. Authorization is always
-server-side (RBAC + ownership), never gated by the frontend. The guacd media
-tunnel that used to live here was retired with guacd (operator decision
-2026-09-23).
+``admit_tunnel_session`` is the auth/ownership gate, factored out of the
+WebSocket route so it can be exercised without a live socket, and
+``watch_tunnel_session`` holds an open screen to the console session that
+opened it. Authorization is always server-side (RBAC + ownership), never gated
+by the frontend. The credential is the console's session cookie only: the
+console's Keycloak bearer left this door in own authentication phase 1
+(Task 13). The guacd media tunnel that used to live here was retired with
+guacd (operator decision 2026-09-23).
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from starlette.requests import HTTPConnection
 
+from app.core.auth.csrf import origin_allowed
+from app.core.auth.sessions import SessionPrincipal, resolve
 from app.core.client_scope import ClientScope
 from app.core.config import Settings
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import DoorIdentity, read_session_identity
 from app.core.rbac import has_permission
-from app.core.security import (
-    JwksCache,
-    TokenValidationError,
-    require_console_token,
-    validate_token,
-)
 from app.core.tenancy import org_session
-from app.models import Organization, RemoteSession
+from app.models import RemoteSession
 
 # --------------------------------------------------------------------------- #
 # Auth/ownership gate (factored out of the WS route so it is testable without a
@@ -38,6 +41,13 @@ REMOTE_CONTROL = "remote.control"
 #: The code that lets a person stop or join ANOTHER technician's session, on
 #: the session's client (phase 3 design §5.3, migration 0244).
 REMOTE_SUPERVISE = "remote.supervise"
+
+#: How often an open screen re-reads the console session that admitted its
+#: viewer (`watch_tunnel_session`). A module constant so a test can shorten it.
+RECHECK_INTERVAL_S = 60.0
+
+#: The close code when that session stops: the browser must sign in again.
+CLOSE_SESSION_ENDED = 4401
 
 
 class TunnelAuthError(Exception):
@@ -76,86 +86,146 @@ async def owner_or_admin(
     return await has_permission(session, user_id, REMOTE_SUPERVISE, client_id=client_id)
 
 
-async def authorize_tunnel(
+@dataclass(frozen=True)
+class TunnelSession:
+    """A viewer the console's session cookie admitted, and that session --
+    which `watch_tunnel_session` holds the open screen to."""
+
+    org_id: UUID
+    viewer_id: UUID
+    clients: ClientScope
+    principal: SessionPrincipal
+
+
+async def admit_tunnel_session(
     *,
-    token: str,
+    connection: HTTPConnection,
     session_id: UUID,
     settings: Settings,
-    jwks: JwksCache,
-    admin_engine: AsyncEngine,
     app_engine: AsyncEngine,
-) -> tuple[UUID, UUID, ClientScope]:
-    """Authenticate the token and authorize this caller for ``session_id``.
-
-    Returns ``(org_id, user_id, clients)`` on success -- ``clients`` is the
-    caller's client scope, which the screen tunnel's own sessions run under
-    (MSP clients spec §2.3), exactly as a route passes ``ctx.clients``.
-
-    Requires the ``remote.control`` permission on at least one client -- the
-    session is then looked up under the clients where it is held -- AND that
-    the caller either owns the session (is its technician) or holds
-    ``remote.supervise`` on the session's client (``owner_or_admin``).
-    Raises ``TunnelAuthError`` otherwise:
-      * 4401 — bad/absent token, unknown org, or unknown user;
+) -> TunnelSession:
+    """Admit the console's session cookie to ``session_id``'s screen (P2
+    design §6.5; coordinator D15), or raise ``TunnelAuthError`` with the close
+    code:
+      * 4403 — the handshake's `Origin` is not the console's: the cookie rides
+        on a handshake any page opens, and a WebSocket is not subject to CORS;
+      * 4401 — no live, signed-in session (none, ended, idle, past its
+        maximum, or without its second factor), or its person is gone;
       * 4403 — not admitted (email domain, a non-active account, or a
-        contact), lacks remote.control everywhere, or not the owner and
+        contact), lacks ``remote.control`` everywhere, or not the owner and
         without ``remote.supervise`` on the session's client;
-      * 4404 — no such session in the caller's tenant.
+      * 4404 — no such session in the caller's scope.
 
     ADMISSION, DOOR 3 OF 3 (spec §3.2). This door is the one with real teeth:
     it is the entry point to a live interactive desktop on a managed endpoint,
-    so an identity this platform no longer admits must not reach it even
-    while a previously issued token is still inside its lifetime. The
-    admission rules are checked FIRST, ahead of ``remote.control`` and ahead
-    of ownership — a refusal should not depend on which of several reasons the
-    caller happens to also trip.
-    """
-    try:
-        claims = await validate_token(token, settings=settings, jwks=jwks)
-        require_console_token(claims, settings)
-    except TokenValidationError as exc:
-        raise TunnelAuthError(4401, str(exc)) from exc
+    so an identity this platform no longer admits must not reach it. The
+    admission rules (`read_session_identity`: the domain rule first, then
+    `users.status` and `users.kind`) are checked ahead of ``remote.control``
+    and ahead of ownership -- a refusal should not depend on which of several
+    reasons the caller happens to also trip. THE SCOPE IS WHERE THE PERSON
+    HOLDS ``remote.control``, exactly as ``require_permission`` scopes a route
+    (spec §2.1-2.2): the session lookup runs under it, so a session on a
+    device of a client where they lack it does not exist for them (spec §2.6).
 
-    async with AsyncSession(admin_engine) as s:
-        org_id = (
-            await s.execute(
-                select(Organization.id).where(Organization.slug == claims.org_slug)
-            )
-        ).scalar_one_or_none()
-    if org_id is None:
+    Opening a screen is the person's own act, so it TOUCHES the session, as
+    an HTTP request does. Keeping it open is not (fix round 2, which reverses
+    the Task 6 decision): `watch_tunnel_session` re-checks without touching."""
+    if not origin_allowed(connection.headers.get("origin"), settings):
         raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
-            4401, "unknown organization"
+            4403, "not the console's origin"
         )
-
-    # IDENTITY: the org's email-domain rule, then the `users` row and its
-    # status (`read_door_identity`). It runs before the person's client scope
-    # exists -- the scope is computed from those rows -- and it is the only
-    # part of this gate that does (MSP clients spec §2.2-2.3).
-    #
-    # 4403, matching this door's existing vocabulary (4401 bad token / 4403
-    # authenticated-but-refused / 4404 no such session) rather than inventing
-    # a fourth code, so "the allowlist turned you away" is legible to the same
-    # client-side handling that already distinguishes the other three. The
-    # domain rule stays FIRST, ahead of `users.status`, `remote.control` and
-    # ownership: a refusal must not depend on which of several reasons the
-    # caller happens to also trip.
-    #
-    # `users.status`: a disabled or deleted account stops driving a remote
-    # session immediately, not when its access token happens to expire.
-    #
-    # THE SCOPE IS WHERE THE PERSON HOLDS `remote.control` -- the code this
-    # door guards, exactly as `require_permission("remote.control")` scopes a
-    # route (spec §2.1-2.2). Holding it on SOME client passes; the session
-    # lookup below then runs under that scope, so a session on a device of a
-    # client where they lack it does not exist for them (spec §2.6).
-    identity = await read_door_identity(
+    principal = await resolve(connection, touch=True)
+    if principal is None or not principal.factor_done:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            CLOSE_SESSION_ENDED, "no live session"
+        )
+    identity = await read_session_identity(
         door="remote-tunnel",
-        org_id=org_id,
-        claims=claims,
+        org_id=principal.org_id,
+        user_id=principal.user_id,
         settings=settings,
         engine=app_engine,
         code=REMOTE_CONTROL,
     )
+    org_id, viewer_id, clients = await _authorize_person(
+        org_id=principal.org_id, identity=identity, session_id=session_id, app_engine=app_engine
+    )
+    return TunnelSession(org_id=org_id, viewer_id=viewer_id, clients=clients, principal=principal)
+
+
+async def watch_tunnel_session(
+    connection: HTTPConnection,
+    principal: SessionPrincipal,
+    *,
+    session_id: UUID,
+    settings: Settings,
+    app_engine: AsyncEngine,
+) -> int:
+    """Wait until the console session that admitted an open screen stops, or
+    its door would refuse it now, and return the code to close it with.
+
+    A SCREEN MUST NOT OUTLIVE ITS SIGN-IN. It is remote control of a live
+    desktop, and design §2.4 cuts a person's sessions at once when they sign
+    out, an administrator ends them, a sign-in replaces them, or the account
+    is disabled. `session_screen` runs this beside the tunnel and cancels the
+    tunnel when it returns. Every `RECHECK_INTERVAL_S` the handshake's cookie
+    is resolved again and must still name THE SAME session (`principal.
+    session_id`): ended, replaced, its person no longer `active`, or past its
+    maximum, it stops with 4401. At the session's absolute maximum
+    (`expires_at`) it stops on its own, whenever the next re-check would fall.
+
+    NOR ITS DOOR (final review B-M5). The same re-check then runs the door's
+    tail again -- `read_session_identity` with ``remote.control``, then the
+    scope, the screen session (``session_id``) and its owner or supervisor
+    (`_authorize_person`), exactly as `admit_tunnel_session` ran them -- so a
+    domain rule switched on, a ``remote.control`` or ``remote.supervise``
+    grant revoked, or a client taken out of the person's scope closes the
+    screen with the code the door would refuse it with (4403, or 4404 for a
+    session no longer in scope), as `/api/v1/ws` re-runs its door.
+
+    AN OPEN REMOTE SCREEN IS NOT ACTIVITY (fix round 2, console re-review P1;
+    it reverses the Task 6 coordinator decision that it was). The re-read
+    does NOT touch the session (`touch=False`), as the live-status socket's
+    does not (`app/api/v1/ws.py`): an open screen nobody works is idle like
+    any tab, and the inactivity limit cuts it with 4401. A person driving the
+    desktop keeps the session alive through the console, which counts their
+    pointer and keyboard on the viewer page as activity and says so on its
+    next request (design §2.4; NIST SP 800-63B-4 §5.2)."""
+    deadline = principal.expires_at.timestamp()
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return CLOSE_SESSION_ENDED
+        await asyncio.sleep(min(RECHECK_INTERVAL_S, remaining))
+        if time.time() >= deadline:
+            return CLOSE_SESSION_ENDED
+        current = await resolve(connection, touch=False)
+        if current is None or current.session_id != principal.session_id:
+            return CLOSE_SESSION_ENDED
+        identity = await read_session_identity(
+            door="remote-tunnel",
+            org_id=current.org_id,
+            user_id=current.user_id,
+            settings=settings,
+            engine=app_engine,
+            code=REMOTE_CONTROL,
+        )
+        try:
+            await _authorize_person(
+                org_id=current.org_id,
+                identity=identity,
+                session_id=session_id,
+                app_engine=app_engine,
+            )
+        except TunnelAuthError as refused:
+            return refused.code
+
+
+async def _authorize_person(
+    *, org_id: UUID, identity: DoorIdentity, session_id: UUID, app_engine: AsyncEngine
+) -> tuple[UUID, UUID, ClientScope]:
+    """The gate's tail: refusal (4403), no person (4401), no `remote.control`
+    (4403), then the session and its owner under that scope."""
     if identity.refusal is not None:
         raise TunnelAuthError(4403, identity.refusal)
     if identity.user_id is None:

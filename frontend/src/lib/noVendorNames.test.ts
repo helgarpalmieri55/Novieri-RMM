@@ -283,3 +283,15 @@ describe("user-visible copy", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("the walk reaches the platform's own sign-in", () => {
+  // Own authentication design §10.10. The sign-in screens are the copy most
+  // likely to name the old identity provider, so the guard must be seen to
+  // read them: a walk that skipped them would report them clean.
+  it("scans the auth catalogues and the auth screens", () => {
+    const walked = [...sourceFiles(SRC)].map((file) => relative(SRC, file).replaceAll("\\", "/"));
+    expect(walked).toContain("i18n/en/auth.ts");
+    expect(walked).toContain("i18n/es/auth.ts");
+    expect(walked.some((file) => file.startsWith("modules/auth/"))).toBe(true);
+  });
+});

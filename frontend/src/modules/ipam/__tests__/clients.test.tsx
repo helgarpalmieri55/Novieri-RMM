@@ -181,6 +181,19 @@ describe("the registry names the client where nothing above a row does", () => {
     expect(body).not.toHaveProperty("client_id");
   });
 
+  it("sends a person who reads clients to the Clients page to manage the sites", async () => {
+    stubApi({ me: vi.fn().mockResolvedValue({ ...ME, permissions: [...ME.permissions, "clients.read"] }) });
+    const { unmount } = renderWithProviders(<RegistryPage />, "/ipam/registry");
+    expect(await screen.findByRole("link", { name: "Manage sites" })).toHaveAttribute("href", "/clients");
+    unmount();
+
+    const api = stubApi();
+    renderWithProviders(<RegistryPage />, "/ipam/registry");
+    expect((await screen.findAllByText("Medellín")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: "Manage sites" })).toBeNull();
+  });
+
   it("files a VLAN with no site under the client chosen at the top", async () => {
     const createIpamVlan = vi.fn().mockResolvedValue(vlan({}));
     stubApi({ createIpamVlan });
@@ -335,6 +348,8 @@ describe("a subnet, an address and a scan authorization", () => {
 // --------------------------------------------------------------------------
 
 const ME_WITH_CLIENTS = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+/** What the top bar lists -- /me's clients -- and so what a row's client is named from. */
+const LISTED = ME.clients as MeClient[];
 const CLIENT_ROWS = [
   { id: "o1", name: "Novieri", kind: "internal", status: "active" },
   { id: "c-x", name: "Acme", kind: "customer", status: "active" },
@@ -374,6 +389,7 @@ describe("pickers follow the row's client", () => {
   });
 
   it("registers a subnet with the sites of the chosen VRF's client", async () => {
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     const api = stubApi({
       me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
       listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
@@ -395,6 +411,7 @@ describe("pickers follow the row's client", () => {
   });
 
   it("names each VRF's client in the scan authorization's picker and the registry", async () => {
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     stubApi({
       me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
       listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
@@ -583,6 +600,7 @@ describe("an apply goes where its preview read, whatever the list says by then",
   it("applies into the previewed VRF when a re-read moves the default", async () => {
     // A technician sees X's VRF alone; the preview reads it. Then the list is
     // read again and Y's `global` sorts first: the default would now be Y's.
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     const listIpamVrfs = vi.fn().mockResolvedValue([X_GLOBAL]);
     const { queryClient, user, previewIpamImport, applyIpamImport } = await previewHeld(listIpamVrfs);
     expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ vrfId: "vrf-x" });
@@ -635,5 +653,52 @@ describe("the sweeper picker asks only when it may be used", () => {
     const picker = await screen.findByLabelText("Designated agent");
     await within(picker).findByRole("option", { name: "10.4.7.20" });
     expect(within(picker).queryByRole("option", { name: "pending-01" })).toBeNull();
+  });
+});
+
+describe("the subnet tree opened from the add-a-computer journey (design §4.4)", () => {
+  // Closing the register dialog replaces `?register=` away and choosing a view
+  // pushes `?state=`, both keeping the journey's `client=`: the same arrival,
+  // so the client the person chose since is not undone.
+  const ACME_SCOPE: MeClient = { id: "c-x", name: "Acme", kind: "customer", enabled_modules: [], permissions: [] };
+  const select = vi.fn();
+  function scopeOn(selected: string | null): void {
+    mockClientScope.mockReturnValue({ selected, select, clients: [SCOPE_INTERNAL, ACME_SCOPE], ready: true });
+  }
+  beforeEach(() => select.mockReset());
+
+  it("keeps «Todos mis clientes» chosen when the dialog is closed and a view chosen", async () => {
+    stubApi();
+    scopeOn(null);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // A change of client starts the page again on the same URL (`lib/clientScope.tsx`).
+    const ui = (key: string) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={["/devices/onboard", "/ipam?client=c-x&site=site-x&register=1"]}
+          initialIndex={1}
+        >
+          <SubnetTreePage key={key} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const view = render(ui("first"));
+    expect(select).toHaveBeenCalledWith("c-x");
+    scopeOn("c-x");
+    view.rerender(ui("on-acme"));
+    // The person picks «Todos mis clientes» above: it starts again, and stays.
+    scopeOn(null);
+    view.rerender(ui("every-client"));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const views = screen.getByLabelText("Filter by view") as HTMLSelectElement;
+    await user.selectOptions(views, "assignable");
+    expect(views.value).toBe("assignable");
+    await user.selectOptions(views, "never-swept");
+    expect(views.value).toBe("never-swept");
+    expect(select).toHaveBeenCalledTimes(1);
   });
 });

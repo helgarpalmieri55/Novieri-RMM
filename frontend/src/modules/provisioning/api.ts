@@ -12,6 +12,7 @@ import type {
   ProfileUpsertRequest,
   RunStartRequest,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /**
  * The zone every date on a provisioning screen is rendered in (cycle 5).
@@ -65,7 +66,8 @@ export function useProvisionProfiles() {
 export function useCreateProvisionProfileMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: ProfileUpsertRequest) => api.createProvisionProfile(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["provisioning-profiles"] });
@@ -76,7 +78,8 @@ export function useCreateProvisionProfileMutation() {
 export function useUpdateProvisionProfileMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: ProfileUpsertRequest }) =>
       api.updateProvisionProfile(id, body),
     onSuccess: () => {

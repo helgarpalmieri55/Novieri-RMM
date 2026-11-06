@@ -57,10 +57,21 @@ beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
     </QueryClientProvider>,
+  );
+  return { ...rendered, queryClient };
+}
+
+/** What the mutation cache holds, as the console's own harness reads it. */
+function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
   );
 }
 
@@ -655,6 +666,22 @@ describe("LicensesPage", () => {
     return user;
   }
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every license whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files a new license under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    const user = await openNewLicense();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await pick(user, "Product", /Acme Office Suite/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createLicense).toHaveBeenCalledTimes(1));
+    expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", product_id: "p1" }));
+  });
+
   it("with every client chosen, asks for the license's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
@@ -666,6 +693,56 @@ describe("LicensesPage", () => {
     await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme" })));
+  });
+
+  // Phase 3 final review D (T11): "Client is required" had only its not-ready
+  // twin under test. With every client chosen and the field left empty, Save
+  // names the Client field -- before anything is built -- and sends nothing.
+  it("with every client chosen, names the empty Client field on Save and sends nothing", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    const user = await openNewLicense();
+    await pick(user, "Product", /Acme Office Suite/);
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createLicense).not.toHaveBeenCalled();
+  });
+
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // new row would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says so instead of offering Save", async () => {
+    selectClient("c-unassigned", [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    await openNewLicense();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(api.createLicense).not.toHaveBeenCalled();
+  });
+
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may MANAGE licenses, not every one they can read.
+  it("with every client chosen, offers only the clients holding licenses.manage, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["licenses.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    await openNewLicense();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
   });
 
   // Design §3.4: with one client chosen every row is that client's.
@@ -908,6 +985,18 @@ describe("LicenseDetail", () => {
     expect(screen.queryByText(/31 Dec 2024/)).not.toBeInTheDocument();
   });
 
+  it("shows the revealed key from the page's own state, and keeps none of it in the mutation cache (D2, Minor 1)", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderDetail();
+
+    await screen.findByText("Acme Office Suite");
+    await user.click(screen.getByRole("button", { name: "Reveal key" }));
+
+    expect(await screen.findByText("ABCD-1234")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("ABCD-1234"));
+    expect(screen.getByText("ABCD-1234")).toBeInTheDocument();
+  });
+
   // Cycle 4. Revealing a key is an audited, privileged call; a refusal that
   // renders "ApiError:" tells the operator nothing and announces nothing.
   it("announces a bodyless 503 from Reveal key as a sentence, not as \"ApiError:\"", async () => {
@@ -1064,7 +1153,8 @@ describe("ComplianceDashboard", () => {
   // spare seats. Each row says whose it is -- with every client chosen, the
   // only choice under which two clients' rows are listed (design §3.4).
   it("shows a product once per client, each row naming its client", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does: names are read from that list.
+    selectClient(null, ME_READS_CLIENTS.clients ?? []);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseCompliance = vi.fn().mockResolvedValue([
@@ -1085,8 +1175,9 @@ describe("ComplianceDashboard", () => {
   });
 
   it("names a row's client /me does not list as all clients, and never reads the clients list", async () => {
-    // The Client column is there with every client chosen (design §3.4).
-    selectClient(null);
+    // The Client column is there with every client chosen (design §3.4). /me
+    // (`ME`) lists no client, so neither does the top bar.
+    selectClient(null, []);
     api.listClients = vi.fn();
     api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
     renderWithProviders(<ComplianceDashboard />);
@@ -1157,7 +1248,8 @@ describe("RenewalCalendar (licenses)", () => {
 
   // With every client chosen: the only choice that lists two clients' rows.
   it("names each renewal's client (MSP clients phase 2)", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does: names are read from that list.
+    selectClient(null, ME_READS_CLIENTS.clients ?? []);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseRenewals = vi.fn().mockResolvedValue([ROW, { ...ROW, license_id: "l9", client_id: "c2" }]);
@@ -1556,7 +1648,12 @@ describe("ReviewQueue: Ignore asks first", () => {
     expect(dialog).toHaveTextContent(/cannot be brought back from the console/i);
   });
 
-  it("ignores the title once the confirmation is accepted", async () => {
+  // CORRECTED (phase 3 final review D2): this pinned `{ name }` alone, which
+  // is a GLOBAL ignore -- every client's computers -- whoever was chosen at the
+  // top (review B, Critical 1; the comment it pinned said "Ignoring is not
+  // global"). Design §3.1 rule 2: the client chosen at the top, here the
+  // internal one.
+  it("ignores the title once the confirmation is accepted, for the client chosen at the top", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ReviewQueue />);
 
@@ -1564,7 +1661,136 @@ describe("ReviewQueue: Ignore asks first", () => {
     await user.click(screen.getByRole("button", { name: "Ignore" }));
     await confirmWith(user, "Ignore title");
 
-    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor" });
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "o1" });
+  });
+
+  // Phase 3 final review D, Important 1: "o1" is the organisation's own id,
+  // where phases 1-2 filed every row; only another client tells the rules apart.
+  it("ignores it for the client chosen at the top, which is not the organisation's own, and says whose", async () => {
+    selectClient("c-acme", [SCOPE_INTERNAL, { ...SCOPE_INTERNAL, id: "c-acme", name: "Acme", kind: "customer" }]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("on every device of Acme that reports it");
+    await confirmWith(user, "Ignore title");
+
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "c-acme" });
+  });
+
+  it("with every client chosen, asks for the client: Ignore names the empty field, then sends the one chosen", async () => {
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    const reader: MeClient = { ...manager, id: "c-beta", name: "Beta", kind: "customer", permissions: ["licenses.read"] };
+    const unassigned: MeClient = { ...manager, id: "c-unassigned", name: "Unassigned", kind: "unassigned" };
+    selectClient(null, [manager, acme, reader, unassigned]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await user.selectOptions(field, "c-acme");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    await confirmWith(user, "Ignore title");
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "c-acme" });
+  });
+
+  // Phase 3 last fix round, item 8. With every client chosen the queue -- and
+  // so its device count -- is every client's, while the ignore is the one
+  // client's picked in the field: the confirmation says whose count it is.
+  it("with every client chosen, says the count is every client's while the ignore is the one picked", async () => {
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    selectClient(null, [manager, acme]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("Unknown PDF Editor (12 devices across all my clients)");
+    expect(dialog).toHaveTextContent("on every device of Acme that reports it");
+  });
+
+  it("with a client chosen at the top, the count is that client's and says nothing more", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("Unknown PDF Editor (12 devices)");
+    expect(dialog).not.toHaveTextContent("across all my clients");
+  });
+
+  it("before /me has answered, Ignore names the missing client instead of opening", async () => {
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.ignoreSoftware).not.toHaveBeenCalled();
+  });
+
+  it("confirmed once the client is no longer known, sends nothing and says the client is required", async () => {
+    // The pick is lost while the confirmation is open: `/me` answered again
+    // and Acme no longer holds licenses.manage, so the field offers it no more.
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    selectClient(null, [manager, acme]);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = () => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ReviewQueue />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree());
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    selectClient(null, [manager, { ...acme, permissions: ["licenses.read"] }]);
+    rerender(tree());
+    await confirmWith(user, "Ignore title");
+
+    expect(api.ignoreSoftware).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+  });
+
+  // Phase 3 final review B, Important 4: nothing new is filed under Unassigned.
+  it("with Unassigned chosen at the top, says so and offers no Ignore", async () => {
+    const unassigned: MeClient = { ...SCOPE_INTERNAL, id: "c-unassigned", name: "Unassigned", kind: "unassigned" };
+    selectClient(unassigned.id, [SCOPE_INTERNAL, unassigned]);
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    expect(
+      screen.getByText(
+        "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ignore" })).toBeNull();
   });
 
   it("ignores nothing when the confirmation is dismissed", async () => {

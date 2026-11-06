@@ -9,15 +9,23 @@
  * gate, and never something the gate quietly stopped doing.
  *
  * `EXCLUDED` are the ones the gate cannot or must not walk: the dev-only
- * preview harness (it has its own browser pass, `a11y-browser.mjs`), the two
- * sign-in callbacks (the console's own and Email intake's Microsoft return,
- * pages whose only job is to consume an authorization code the gate does not
- * have) and the `*` redirect.
+ * preview harness (it has its own browser pass, `a11y-browser.mjs`), Email
+ * intake's Microsoft return (a page whose only job is to consume an
+ * authorization code the gate does not have) and the `*` redirect. The
+ * console's own OIDC callback, `/auth/callback`, left with `oidc-client-ts`
+ * (own-auth plan, Task 10).
  *
  * Read by `harmony.mjs` (Node) and by the vitest guard, so it is plain ESM
  * with no imports. The `.d.mts` beside it is what lets the TypeScript test
  * import it under `strict`.
  */
+
+/**
+ * THE CLIENT HARMONY CHOOSES IN THE TOP BAR for its passes with a client
+ * chosen: Andes Logistics, `src/fixtures/core.ts`'s `CUSTOMER_ID`. A UUID,
+ * because the console reads back nothing else from `itms.client`.
+ */
+export const CHOSEN_CLIENT = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
 
 /** Sample ids for every `:param` in `App.tsx`. Same value in every fixture. */
 export const PARAMS = Object.freeze({
@@ -36,11 +44,11 @@ export const PARAMS = Object.freeze({
   actionId: "act-1",
   subnetId: "subnet-1",
   sessionId: "sess-1",
+  clientId: CHOSEN_CLIENT,
 });
 
 export const EXCLUDED = new Set([
   "/__preview",
-  "/auth/callback",
   "/settings/email-intake/oauth/callback",
   "*",
 ]);
@@ -63,7 +71,28 @@ export function patternOf(route) {
   return out;
 }
 
+/**
+ * ROUTES WHOSE `<details>` THE WALK OPENS BEFORE IT MEASURES. A closed
+ * disclosure's controls are in the DOM but drawn nowhere, so axe, the token
+ * diff and the overflow probe never see them. The Users tab keeps every
+ * row's Disable, Reset, Sign out everywhere, Resend, Cancel and Delete behind
+ * one (final review D2, Minor 5).
+ */
+export const OPEN_DISCLOSURES = new Set(["/settings?tab=users"]);
+
 export const ROUTES = [
+  // The pages reached without a session (own-auth Task 11). No top bar, so
+  // harmony measures their tokens, overflow and axe, and skips the bar.
+  "/sign-in",
+  "/sign-in/factor",
+  "/sign-in/enroll",
+  "/sign-in/recovery-codes",
+  "/forgot-password",
+  // The emailed links carry their token in the fragment, which harmony cannot
+  // add (`?__fixtures` would land inside it); the fixtures answer any token.
+  "/reset-password",
+  "/invite",
+  "/recover",
   "/devices",
   "/devices/onboard",
   "/devices/push-runs",
@@ -156,6 +185,8 @@ export const ROUTES = [
   "/device-groups",
   "/discovered",
   "/agent-packages",
+  "/clients",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
   "/settings",
   // A QUERY VARIANT: `/settings` opens Organization, so no other tab is ever
   // measured. A variant is `<a route listed here>?<query>`; the guard checks
@@ -163,8 +194,17 @@ export const ROUTES = [
   // `__fixtures` flag with `&`. Settings -> AI connections is walked because
   // it is the console's door for connecting AI apps (MCP design §8).
   "/settings?tab=ai-connections",
+  // Settings -> Sessions (own authentication design §2.4) is walked for the
+  // same reason: `/settings` alone never opens it.
+  "/settings?tab=sessions",
+  // Settings -> Users (final review D2, Minor 5): the screen own
+  // authentication changed most -- the invite form, the shown-once link,
+  // and the row's actions, with Resend and Cancel for the fixtures' open
+  // invitation (`usr-invited-seed`).
+  "/settings?tab=users",
   "/admin",
   "/governance",
   "/assets",
   "/profile",
+  "/profile/security",
 ];

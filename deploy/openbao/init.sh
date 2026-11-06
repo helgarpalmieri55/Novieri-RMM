@@ -1,6 +1,6 @@
 #!/bin/sh
-# One-shot OpenBao provisioning: transit signing key + agent PKI + the
-# gateway's own server-cert role.
+# One-shot OpenBao provisioning: transit signing key + the sign-in pepper and
+# token key + agent PKI + the gateway's own server-cert role.
 #
 # Assumes the operator has initialized/unsealed OpenBao and exported a token
 # with policy to manage mounts (see deploy/README.md first-boot runbook).
@@ -14,6 +14,19 @@ bao() { command bao "$@" 2>/dev/null || vault "$@"; }
 if ! bao read transit/keys/job-signing >/dev/null 2>&1; then
   bao secrets enable transit || true
   bao write -f transit/keys/job-signing type=ed25519
+fi
+
+# Own authentication (backend/app/core/auth/keys.py). The password pepper is
+# an HMAC key and the token signing key ECDSA P-256 (ES256); neither is
+# exportable, so neither private half ever leaves OpenBao. Guarded like
+# job-signing: re-creating either would orphan every stored password or every
+# issued token. Rotation is `bao write -f transit/keys/<name>/rotate`, which
+# keeps the older versions for verification.
+if ! bao read transit/keys/auth-pepper >/dev/null 2>&1; then
+  bao write transit/keys/auth-pepper type=hmac key_size=32
+fi
+if ! bao read transit/keys/auth-signing >/dev/null 2>&1; then
+  bao write transit/keys/auth-signing type=ecdsa-p256
 fi
 
 # PKI mount for agent client certificates.

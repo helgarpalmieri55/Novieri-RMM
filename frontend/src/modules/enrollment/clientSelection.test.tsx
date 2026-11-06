@@ -36,7 +36,18 @@ function site(id: string, clientId: string, name: string): ClientSiteOut {
   return { id, client_id: clientId, name, address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 };
 }
 
-function renderPage() {
+/**
+ * `behind` puts history entries before the page, so it arrives on an entry
+ * with a key of its own (the first entry's is always "default", and
+ * `useAdoptJourneyClient` remembers the entries it has decided on).
+ * `remount` starts the page again on the same URL, as a change of client does
+ * (`lib/clientScope.tsx`).
+ */
+function renderPage(
+  path = "/enrollment",
+  behind: string[] = [],
+  acmeSites: ClientSiteOut[] = [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")],
+) {
   listEnrollmentTokens.mockResolvedValue({ items: [], total: 0, revoked_count: 0, unlimited_count: 0 });
   createEnrollmentToken.mockResolvedValue({
     id: "t1", name: "lab", token: "plain", expires_at: "2099-01-01T00:00:00Z", max_uses: 1,
@@ -47,18 +58,20 @@ function renderPage() {
     listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     listClientSites: vi.fn((clientId: string) =>
       Promise.resolve(
-        clientId === "c-acme" ? [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")] : [site("site-o", "o", "Principal")],
+        clientId === "c-acme" ? acmeSites : [site("site-o", "o", "Principal")],
       ),
     ),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const ui = (key: string) => (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/enrollment"]}>
-        <EnrollmentPage />
+      <MemoryRouter initialEntries={[...behind, path]} initialIndex={behind.length}>
+        <EnrollmentPage key={key} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(ui("first"));
+  return { ...view, remount: (key: string) => view.rerender(ui(key)) };
 }
 
 beforeEach(() => {
@@ -96,6 +109,27 @@ describe("an enrollment token's site", () => {
     await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-o"));
   });
 
+  it("uses the only site of a client chosen at the top that is not the organisation's own", async () => {
+    // `org_id` is "o": the phase 1-2 rule took the organisation's own client
+    // whoever was chosen, so only a client other than "o" tells the two rules
+    // apart (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const user = userEvent.setup();
+    renderPage("/enrollment", [], [site("site-a1", "c-acme", "Acme HQ")]);
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a1"));
+    expect(within(screen.getByLabelText("Site")).queryByRole("option", { name: "Principal" })).toBeNull();
+    await user.type(screen.getByLabelText("Token name"), "lab");
+    await user.click(screen.getByRole("button", { name: "Issue token…" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    await waitFor(() =>
+      expect(createEnrollmentToken).toHaveBeenCalledWith(expect.anything(), {
+        name: "lab", expires_in_hours: 72, max_uses: 1, site_id: "site-a1",
+      }),
+    );
+  });
+
   it("refuses to open the confirmation without a site, and names the field", async () => {
     selectClient(null);
     const user = userEvent.setup();
@@ -107,5 +141,146 @@ describe("an enrollment token's site", () => {
     expect(await screen.findByText(/Site is required/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(createEnrollmentToken).not.toHaveBeenCalled();
+  });
+
+  it("starts on the journey's site when opened from the add-a-computer journey (design §4.4)", async () => {
+    selectClient("c-acme");
+    const user = userEvent.setup();
+    renderPage("/enrollment?client=c-acme&site=site-a2");
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a2"));
+    await user.type(screen.getByLabelText("Token name"), "lab");
+    await user.click(screen.getByRole("button", { name: "Issue token…" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    await waitFor(() =>
+      expect(createEnrollmentToken).toHaveBeenCalledWith(expect.anything(), {
+        name: "lab", expires_in_hours: 72, max_uses: 1, site_id: "site-a2",
+      }),
+    );
+  });
+});
+
+describe("a tab clicked on a page opened from the journey (design §4.4)", () => {
+  // A tab is pushed into the URL (`?tab=`) with the journey's `client=` kept:
+  // the same arrival, so the client the person chose since is not undone.
+  const select = vi.fn();
+  function scopeOn(selected: string | null): void {
+    mockClientScope.mockReturnValue({ selected, select, clients: [INTERNAL, ACME], ready: true });
+  }
+  beforeEach(() => select.mockReset());
+
+  it("keeps «Todos mis clientes» chosen after the journey's client was adopted", async () => {
+    scopeOn(null);
+    const user = userEvent.setup();
+    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    expect(select).toHaveBeenCalledWith("c-acme");
+    // The console works on Acme: the page starts again.
+    scopeOn("c-acme");
+    view.remount("on-acme");
+    // The person picks «Todos mis clientes» above: it starts again, and stays.
+    scopeOn(null);
+    view.remount("every-client");
+    await user.click(await screen.findByRole("tab", { name: "Certificates" }));
+    expect(screen.getByRole("tab", { name: "Certificates" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "Enrollment flow" }));
+    expect(screen.getByRole("tab", { name: "Enrollment flow" })).toHaveAttribute("aria-selected", "true");
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps «Todos mis clientes» chosen after arriving on the journey's client", async () => {
+    scopeOn("c-acme");
+    const user = userEvent.setup();
+    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    scopeOn(null);
+    view.remount("every-client");
+    await user.click(await screen.findByRole("tab", { name: "Certificates" }));
+    expect(screen.getByRole("tab", { name: "Certificates" })).toHaveAttribute("aria-selected", "true");
+    expect(select).not.toHaveBeenCalled();
+  });
+});
+
+describe("with Unassigned chosen at the top", () => {
+  it("the token form says nothing new can be filed there, and offers no Issue", async () => {
+    // Phase 3 final review C, Important 1 / review B, Important 4: the shared
+    // hook's `refused` -- a token's site would be Unassigned's, which has none
+    // and files nothing new.
+    const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+    mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [INTERNAL, ACME, UNASSIGNED], ready: true });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    expect(
+      await screen.findByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue token…" })).toBeNull();
+    expect(screen.queryByLabelText("Site")).toBeNull();
+  });
+});
+
+// Phase 3 final review C, Important 6 (design §3.4): the token list said
+// nothing about whose fleet each bootstrap credential enrols into, although
+// the API has sent `client_id` and `site_id` since phase 1.
+describe("the token list says where each token enrols", () => {
+  const READER = [...CODES, "clients.read"];
+  function token(id: string, clientId: string, siteId: string, name: string) {
+    return {
+      id, name, expires_at: "2099-01-01T00:00:00Z", max_uses: 5, use_count: 0, revoked: false,
+      client_id: clientId, site_id: siteId,
+    };
+  }
+
+  function renderList(selected: string | null) {
+    mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: [INTERNAL, ACME], ready: true });
+    listEnrollmentTokens.mockResolvedValue({
+      items: [token("t-o", "o", "site-o", "own-lab"), token("t-a", "c-acme", "site-a2", "acme-lab")],
+      total: 2, revoked_count: 0, unlimited_count: 0,
+    });
+    const listClientSites = vi.fn((clientId: string) =>
+      Promise.resolve(
+        clientId === "c-acme"
+          ? [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")]
+          : [site("site-o", "o", "Principal")],
+      ),
+    );
+    mockUseApi.mockReturnValue({
+      me: () =>
+        Promise.resolve({
+          user_id: "u", org_id: "o", email: "a@b.c", display_name: "A", permissions: READER, timezone: null,
+          clients: [{ ...INTERNAL, permissions: READER }, { ...ACME, permissions: READER }],
+        }),
+      listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listClientSites,
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/enrollment"]}>
+          <EnrollmentPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { listClientSites };
+  }
+
+  it("with every client chosen, names each token's client and site", async () => {
+    renderList(null);
+    const row = (await screen.findByText("acme-lab")).closest("tr") as HTMLElement;
+    const table = row.closest("table") as HTMLElement;
+    expect(within(table).getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Site" })).toBeInTheDocument();
+    expect(within(row).getByText("Acme")).toBeInTheDocument();
+    expect(await within(row).findByText("Acme Lab")).toBeInTheDocument();
+    const own = screen.getByText("own-lab").closest("tr") as HTMLElement;
+    expect(within(own).getByText("Novieri")).toBeInTheDocument();
+    expect(await within(own).findByText("Principal")).toBeInTheDocument();
+  });
+
+  it("with one client chosen, hides the Client column and keeps the Site", async () => {
+    renderList("c-acme");
+    const row = (await screen.findByText("acme-lab")).closest("tr") as HTMLElement;
+    const table = row.closest("table") as HTMLElement;
+    expect(within(table).queryByRole("columnheader", { name: "Client" })).toBeNull();
+    expect(within(table).getByRole("columnheader", { name: "Site" })).toBeInTheDocument();
+    expect(await within(row).findByText("Acme Lab")).toBeInTheDocument();
   });
 });

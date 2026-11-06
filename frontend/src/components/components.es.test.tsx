@@ -346,3 +346,12 @@ describe("inputs and displays in Spanish", () => {
     expectNoEnglish(container);
   });
 });
+
+describe("describeSubmitError in Spanish (own-auth Task 10)", () => {
+  it("says a csrf refusal is about the request's address, not about permission", () => {
+    setActiveLanguage("es");
+    const described = describeSubmitError(new ApiError(403, '{"code":"csrf"}'));
+    expect(described).toMatch(/dirección de esta consola/);
+    expect(described).not.toMatch(/permiso/i);
+  });
+});

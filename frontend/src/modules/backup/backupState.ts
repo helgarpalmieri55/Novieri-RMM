@@ -55,13 +55,12 @@ export function restoreJobStateVariant(state: string): BadgeVariant {
 }
 
 // backup_repositories state vocabulary exactly as written by the backend
-// (models.py:45 BackupRepository.state default "active";
-// repository.py:49 sets "active" on create; "disabled" is the only other
-// value the 16-char column is documented to hold — the repository's
-// off state once retired from use).
+// (models.py BackupRepository.state default "active"; repository.py sets
+// "active" on create; the retire route, MSP clients phase 3 design §5.5, sets
+// "retired" -- no new backups, its points still restorable).
 const REPOSITORY_STATE_VARIANTS: Record<string, BadgeVariant> = {
   active: "success",
-  disabled: "muted",
+  retired: "muted",
 };
 
 export function repositoryStateVariant(state: string): BadgeVariant {
@@ -76,7 +75,7 @@ export function repositoryStateVariant(state: string): BadgeVariant {
  */
 const BACKUP_POINT_STATES: ReadonlySet<string> = new Set(["complete", "failed", "pruned"]);
 const BACKUP_RUN_STATES: ReadonlySet<string> = new Set(["pending", "running", "success", "failed", "missed"]);
-const REPOSITORY_STATES: ReadonlySet<string> = new Set(["active", "disabled"]);
+const REPOSITORY_STATES: ReadonlySet<string> = new Set(["active", "retired"]);
 
 export function backupPointStateLabel(state: string): string {
   return BACKUP_POINT_STATES.has(state) ? humaniseEnum(state, "BackupPointState") : humaniseStatus(state);

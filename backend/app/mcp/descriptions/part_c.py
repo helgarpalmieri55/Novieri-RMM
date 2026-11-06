@@ -156,9 +156,9 @@ PART_C: dict[str, str] = {
     ),
     # --- devices ---
     "GET /api/v1/devices": (
-        "Lists the fleet one page at a time, filterable by OS, status, provenance, client, search "
-        "text and tab, with total, per-tab and fleet-wide counts. The assigned person appears only "
-        "on devices of clients where the caller also holds the people read permission."
+        "Lists the fleet one page at a time, filterable by OS, status, provenance, client, site, "
+        "search text and tab, with total, per-tab and fleet-wide counts. The assigned person "
+        "appears only on devices of clients where the caller also holds the people read permission."
     ),
     "POST /api/v1/devices": (
         "Records an asset by hand, such as warehouse stock or equipment that cannot run an agent. "

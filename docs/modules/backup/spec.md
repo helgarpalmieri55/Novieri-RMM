@@ -199,13 +199,18 @@ and the `backup.*` permission seed + role grants.
 > The `state` vocabulary is therefore `active|retired` (no CHECK constraint
 > holds it, 0014).
 >
-> **Every backup audit that has its record's client at hand names it** (same
-> date, §5.5): the restore and its result, the automatic test restore, the
-> verification, the off-site copy and its failure, and the two
+> **The backup audits listed in the phase 3 design (§5.5) name their record's
+> client** (same date): the restore and its result, the automatic test
+> restore, the verification, the off-site copy and its failure, and the two
 > reconciliations, each in its device's client. `backup.dedup_refused` and
 > `backup.read_refused` name the client when the agent named a job of its own
 > device, and none otherwise. `backup.offsite_gc` names none, deliberately: it
 > is one summary of every target, repository and client of the organisation.
+> **That list is not every backup audit.** The off-site target and recovery
+> key audits, and `credential.accessed` when a client-owned target or key is
+> read, still name no client even where the row has one. That is outside
+> §5.5, predates phase 3 and is tracked for after it; the audit API offers no
+> client filter, so nothing reads it differently today.
 
 ## 5. Repository format (§5) — pinned now
 

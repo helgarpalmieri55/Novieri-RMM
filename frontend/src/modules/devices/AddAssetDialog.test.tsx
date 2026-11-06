@@ -69,6 +69,10 @@ function renderDialog(onClose: () => void = () => {}, sites: ClientSiteOut[] = [
     listClientSites: () => Promise.resolve(sites),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+  // C5): the Site field's read is in the cache before the first render, so
+  // it picks the only site at once rather than one async hop later.
+  queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], sites);
   const ui = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
       <AddAssetDialog open={open} onClose={onClose} />
@@ -155,6 +159,29 @@ describe("AddAssetDialog", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Site is required");
     expect(createAsset).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing, reads no site and asks for no client, while the account has not loaded", async () => {
+    // RESTORED (phase 3 final review D, Minor 5). Phase 3 re-pointed the "/me
+    // not loaded" case above to "the client has no sites", and the not-ready
+    // path went untested. Before `/me` answers the scope is not ready: the
+    // client chosen at the top is not known to be one of the person's, so no
+    // site is listed for it, nothing is filed, and no Client field is shown.
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
+    const listClientSites = vi.fn().mockResolvedValue([PRINCIPAL]);
+    mockUseApi.mockReturnValue({ createAsset, me: () => new Promise(() => {}), listClientSites } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <AddAssetDialog open onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
+    await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Site is required");
+    expect(createAsset).not.toHaveBeenCalled();
+    expect(listClientSites).not.toHaveBeenCalled();
   });
 
   it("records the DNS name, OS and processor a push needs, and says why", async () => {

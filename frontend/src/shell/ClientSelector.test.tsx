@@ -5,15 +5,16 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "../i18n/core";
 import type { ApiClient, Me, MeClient } from "../lib/api";
-import { CLIENT_STORAGE_KEY, selectedClient } from "../lib/clientChoice";
-import { ClientScopeProvider } from "../lib/clientScope";
-import { ClientSelector } from "./ClientSelector";
+import { CLIENT_STORAGE_KEY, selectedClient, setSelectedClient } from "../lib/clientChoice";
+import { ClientScopeProvider, useClientScope } from "../lib/clientScope";
+import { ClientSelector, useClientMark } from "./ClientSelector";
 
 const mockUseApi = vi.fn();
 vi.mock("../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -177,5 +178,78 @@ describe("a change through the selector, inside the provider", () => {
 
     await act(async () => answer(ME));
     expect(screen.getByRole("combobox", { name: "Client" })).toBe(box);
+  });
+});
+
+/**
+ * WHAT THE PHONE'S TOP BAR MARKS (operator decision 4, 2026-11-02): the
+ * client chosen, as a monogram and its full name, for `AppShell`'s drawer
+ * toggle. Nothing with every client chosen.
+ */
+describe("useClientMark", () => {
+  function markOf(choice: string | null) {
+    setSelectedClient(choice);
+    const me = vi.fn().mockResolvedValue(ME);
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const hook = renderHook(() => useClientMark(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    return { ...hook, me };
+  }
+
+  it("marks nothing with every client chosen", async () => {
+    const { result, me } = markOf(null);
+    await waitFor(() => expect(me).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(result.current).toBeUndefined();
+  });
+
+  it("marks the chosen client by its initials, with its whole name", async () => {
+    const { result } = markOf(ACME);
+    await waitFor(() => expect(result.current).toEqual({ short: "AD", name: "Acme Dental" }));
+  });
+
+  it("names Unassigned in the person's language, and marks it so", async () => {
+    const { result } = markOf(UNASSIGNED);
+    await waitFor(() => expect(result.current).toEqual({ short: "UN", name: "Unassigned" }));
+    act(() => setActiveLanguage("es"));
+    expect(result.current).toEqual({ short: "SA", name: "Sin asignar" });
+  });
+
+  it("marks nothing for a choice /me does not list", async () => {
+    const { result, me } = markOf("7e6d5c4b-3a29-4180-9fed-cba987654305");
+    await waitFor(() => expect(me).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(result.current).toBeUndefined();
+  });
+
+  it("keeps the mark while /me is asked again after a change", async () => {
+    // The list the selector keeps (`LastListed`) is what the mark is read
+    // from, so it does not blink off on every change.
+    const me = vi.fn().mockResolvedValueOnce(ME).mockReturnValue(new Promise<Me>(() => {}));
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ mark: useClientMark(), listed: useClientScope().clients.length }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>
+            <ClientScopeProvider>{children}</ClientScopeProvider>
+          </QueryClientProvider>
+        ),
+      },
+    );
+    // The first /me ANSWERED, not merely asked: until it has, there is no list
+    // for the provider to keep, and the change below would test nothing.
+    await waitFor(() => expect(result.current.listed).toBeGreaterThan(0));
+    await act(async () => undefined);
+
+    act(() => setSelectedClient(ZETA));
+
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    expect(result.current.mark).toEqual({ short: "ZF", name: "Zeta Foods" });
   });
 });
