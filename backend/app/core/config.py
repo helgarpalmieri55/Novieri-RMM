@@ -164,6 +164,17 @@ class Settings(BaseSettings):
     # app/core/client_address.py so a typo fails the process, not a request.
     trusted_proxy_cidrs: str = "172.19.240.0/24"
 
+    # The per-address sign-in limits (`app/api/v1/auth.py::_LOGIN`, `_FACTOR`):
+    # requests to the password step, and to the second-factor steps, from one
+    # address in 10 minutes. EVERY request counts, successes included, and the
+    # address is the one `trusted_proxy_cidrs` above lets through -- so an office
+    # behind one NAT address shares one budget, which is why the operator may
+    # raise them (decision of 2026-11-06, design §2.3). The floor of 5 keeps them
+    # from being switched off; out of range, the process does not start. The
+    # per-account counters (`app/core/auth/failures.py`) are a separate control.
+    auth_login_ip_limit: int = Field(default=30, ge=5, le=1000)
+    auth_factor_ip_limit: int = Field(default=30, ge=5, le=1000)
+
     gateway_url: str = "wss://localhost:8443/agent"
     # Relay endpoint the agent dials for remote-control media tunnels. Handed to
     # the agent via the signed remote.session.open job (never the raw token).

@@ -59,6 +59,7 @@ from app.core.auth.sessions import (
     set_device_cookie,
     set_session_cookie,
 )
+from app.core.config import Settings
 from app.core.i18n import locale_var, tr
 from app.core.rate_limit import hit, ip_key
 
@@ -66,17 +67,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 me_router = APIRouter(prefix="/me", tags=["me"])
 
 
-def _limit(bucket: str, limit: int, window_s: int) -> Callable[[Request], Awaitable[None]]:
+def _limit(
+    bucket: str, limit: int | Callable[[Settings], int], window_s: int
+) -> Callable[[Request], Awaitable[None]]:
     """At most `limit` calls per `window_s` from one address (Task 3's limiter).
     It fails open when Redis does, because each sits on a control that does
     not need Redis: the per-account counters in the database for the password
     and the factors (design §2.3), the per-address mail cap -- which fails
     CLOSED (`flows.send_reset_link`) -- behind `_FORGOT`, and a 256-bit secret
-    behind `_LINK`."""
+    behind `_LINK`.
+
+    `limit` is a number, or a reader of the operator's setting
+    (`ITS_AUTH_LOGIN_IP_LIMIT`, `ITS_AUTH_FACTOR_IP_LIMIT`: decision of
+    2026-11-06), which is asked on every request, from `app.state.settings`.
+    `Settings` bounds it to 5-1000 at startup, so it is never 0 here."""
 
     async def within(request: Request) -> None:
+        settings: Settings = request.app.state.settings
+        allowed = limit(settings) if callable(limit) else limit
         if not await hit(
-            request.app.state.redis, ip_key(request, bucket), limit=limit, window_s=window_s
+            request.app.state.redis, ip_key(request, bucket), limit=allowed, window_s=window_s
         ):
             refusal = AuthRefusal(
                 status.HTTP_429_TOO_MANY_REQUESTS,
@@ -90,8 +100,8 @@ def _limit(bucket: str, limit: int, window_s: int) -> Callable[[Request], Awaita
     return within
 
 
-_LOGIN = _limit("auth-login", 30, 600)
-_FACTOR = _limit("auth-factor", 30, 600)
+_LOGIN = _limit("auth-login", lambda settings: settings.auth_login_ip_limit, 600)
+_FACTOR = _limit("auth-factor", lambda settings: settings.auth_factor_ip_limit, 600)
 _FORGOT = _limit("auth-forgot", 5, 3600)
 _LINK = _limit("auth-link", 20, 600)
 
