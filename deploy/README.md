@@ -273,9 +273,10 @@ minutes to the password step and 30 to the second-factor steps; every request
 counts, successes included, and the next one answers 429 until the 10 minutes
 are up. The address is the one Traefik saw, so technicians signing in from
 behind one office NAT address share one budget — raise them for that, within
-5-1000; a value outside that range stops the api at startup. They protect
-against guessing from one address; the per-account wait and the stop after 100
-failures in a row are separate and do not change.
+5-1000; a value outside that range stops the api, the gateway and the workers
+at startup, since each reads `.env`. They protect against guessing from one
+address; the per-account wait and the stop after 100 failures in a row are
+separate and do not change.
 
 ### Step 2 — Postgres
 
