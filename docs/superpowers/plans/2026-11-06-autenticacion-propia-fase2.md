@@ -210,7 +210,7 @@ Las D continúan la numeración de la fase 1 (D1–D24): se tomaron leyendo el c
 - **D26** (§3) **Los contactos usan las rutas de su propia cuenta** (`/me/security`, `/me/password`, `/me/passkeys/*`, `/me/totp`, `/me/recovery-codes`, `/me/trusted-devices/*`, `/me/sessions/*`, `/me/microsoft`, `/auth/enroll/*` con la sesión completa, `/auth/step-up/*`) por una puerta que admite contactos, `admit(contacts=True)`, sin exigir un código `portal.*`. `GET /me` y todo lo demás de la consola siguen cerrados a un contacto (B2-02, con sus tres condiciones: A2-71, A2-39, A2-37).
 - **D27** (§3, Q2; C5) **El segundo factor de un contacto** es opcional y es **su app TOTP, y nada más**: una clave de acceso es otra forma de entrar. La contraseña pide la app solo si la activó (salvo equipo recordado); una clave de acceso usada para entrar no pide nada más. *Revisada: decía «con la regla de los técnicos», que C5 descarta.*
 - **D28** (§3) **Clave de acceso de contacto descubrible.** Se registra con `residentKey: "required"` ([W1]) y se usa sin dirección (`allowCredentials` vacío, el camino que la fase 1 dejó listo en `passkeys.authentication_options(user_id=None)`). Así entrar con una clave no revela si una dirección tiene cuenta. Consecuencia (B2-21): una llave antigua sin almacenamiento de credenciales descubribles no puede ser la clave de un contacto (el navegador rechaza crearla); el runbook lo dice.
-- **D29** (§2.5, §2.6, §3; C5, B2-07) **Confirmación reciente de un contacto con la contraseña** (`/auth/step-up/password`), **solo si no tiene app TOTP**: quien la activó confirma con ella o con su clave de acceso, que la ruta de confirmación con clave ya acepta y que es por sí sola un autenticador multifactor (NIST SP 800-63B-4 §3.1.7.2, §2.2.1; f2-1 M7, f2-3 M10: el diseño §3 lo dice desde la Task 13, y el operador lo confirma, «Lo que sigue abierto», 9). Un técnico sigue confirmando solo con un segundo factor. *Revisada: decía «también con la contraseña» para todo contacto, contra §2.6.*
+- **D29** (§2.5, §2.6, §3; C5, B2-07) **Confirmación reciente de un contacto con la contraseña** (`/auth/step-up/password`), **solo si no tiene app TOTP**: quien la activó confirma con ella o con su clave de acceso, que la ruta de confirmación con clave ya acepta y que es por sí sola un autenticador multifactor (NIST SP 800-63B-4 §3.1.7.2, §2.2.1; f2-1 M7, f2-3 M10: el diseño §3 y §2.6 lo dicen desde la Task 13, y el operador lo confirma, «Lo que sigue abierto», 9). Un técnico sigue confirmando solo con un segundo factor. *Revisada: decía «también con la contraseña» para todo contacto, contra §2.6.*
 - **D30** (§4; B2-03, B2-04) **La transacción de Microsoft.** `response_mode=fragment` a la página `/sign-in/microsoft` (el código no llega a ningún log de servidor ni a un `Referer`, como los enlaces de la fase 1), que lo envía por `POST` con `state`. El `code_verifier` de PKCE es el valor de la cookie `__Host-itms_entra`: así la transacción queda *«securely bound to the client and the user agent in which the transaction was started»* ([R1] §2.1.1) sin guardar nada secreto en el servidor. `state` (clave en Redis) y `nonce` son de un solo uso, 10 minutos.
 - **D31** (§4, [S61]; falsificador 8) **El ID token se valida aquí** y la persona es `(tid, oid)`. Nunca por `email` (*«Never use it for authorization»*, [S61]); nunca se crea una cuenta; un `tid`/`oid` sin fila —o con una persona o un tenant que ya no valen— es 401 `microsoft_not_linked` (A2-54).
 - **D32** (§4; B2-05) **Autoridad: `organizations` en todos los botones**, y al volver manda el tipo de la persona encontrada: un técnico solo con `tid = staff_tenant_id`; un contacto solo con un `tid` de `clients.microsoft_tenants` de su cliente activo; un `idp` de invitado se rechaza. *Revisada: decía que el botón de la consola usaba el GUID del tenant de Novieri, lo que deja entrar a sus invitados, cuentas personales incluidas ([M2]).*
@@ -1104,7 +1104,7 @@ En `backend/tests/test_client_catalog.py`, en `ORG_WIDE_KEYS` (`:601-639`), desp
 
 En `backend/tests/test_auth_tables.py`:
 
-1. `AUTH_TABLES` (`:55-66`) gana `"auth_external_identities"` y `"auth_entra_settings"` al final, así que `test_with_no_organization_pinned_no_auth_table_shows_a_row` y `test_an_organization_reads_only_its_own_auth_rows` las cubren. La segunda exige una fila de cada tabla por organización (`:197-209`), así que `_one_of_each` (`:142-178`) gana, al final de su lista, `AuthExternalIdentity(org_id=org, user_id=user, provider=ENTRA, tenant_id=uuid4(), subject=uuid4())` y `AuthEntraSettings(org_id=org)` (con `ENTRA`, `AuthEntraSettings` y `AuthExternalIdentity` en el `from app.models.auth import (...)` del archivo); su docstring pasa a «A row in every table of 0245 and 0246, for one person of `org`.», y la de `test_with_no_organization_pinned_no_auth_table_shows_a_row` (`:184`), «all eleven tables» a «all thirteen tables».
+1. `AUTH_TABLES` (`:55-66`) gana `"auth_external_identities"` y `"auth_entra_settings"` al final, así que `test_with_no_organization_pinned_no_auth_table_shows_a_row` y `test_an_organization_reads_only_its_own_auth_rows` las cubren. La segunda exige una fila de cada tabla por organización (`:197-209`), así que `_one_of_each` (`:142-178`) gana, al final de su lista, `AuthExternalIdentity(org_id=org, user_id=user, provider=ENTRA, tenant_id=uuid4(), subject=uuid4())` y `AuthEntraSettings(org_id=org)` (`AuthEntraSettings` y `AuthExternalIdentity` en el `from app.models import (...)` del archivo (`:38-53`), en su orden alfabético, y `from app.models.auth import ENTRA` debajo: `app.models` no reexporta `ENTRA`, solo los dos modelos, Step 5; N-M1 de la segunda revisión); su docstring pasa a «A row in every table of 0245 and 0246, for one person of `org`.», y la de `test_with_no_organization_pinned_no_auth_table_shows_a_row` (`:184`), «all eleven tables» a «all thirteen tables».
 2. La parametrización de `test_only_the_application_role_may_call_them` (`:342-372`) pasa a tres funciones, y la llamada que debe fallar, a un diccionario:
 
 ```python
@@ -2057,7 +2057,7 @@ Esta tarea no tiene consola (Task 10) ni claves de acceso sin dirección (Task 6
 - Modify: `backend/app/core/i18n/es.py`
 - Modify: `backend/tests/auth_support.py` (`CONTACT_PASSWORD`, `contact`, `Staff.client_id`)
 - Modify: `backend/tests/test_mcp_channel_api.py`, `backend/tests/test_route_gating.py`, `backend/tests/test_ai_tool_surface.py`, `backend/tests/test_auth_session_door.py`
-- Modify: `backend/tests/test_auth_notice_order.py` (`:264`, `:269`, `:279`: `flows._started` → `flows.started`, A2-15)
+- Modify: `backend/tests/test_auth_notice_order.py` (`:264`, `:269`, `:279`, `:373`, `:378`, `:388`: `flows._started` y `"_started"` → `flows.started` y `"started"`, A2-15)
 - Create: `backend/tests/test_auth_contacts_signin.py`, `backend/tests/test_portal_me.py`
 - Test: los nuevos, `backend/tests/test_auth_signin.py`, `backend/tests/test_auth_password_reset.py`, `backend/tests/test_auth_falsifiers.py`, `backend/tests/test_auth_notice_order.py`, `backend/tests/test_i18n_catalog.py`, `backend/tests/test_portal_api.py`
 
@@ -2067,7 +2067,7 @@ Esta tarea no tiene consola (Task 10) ni claves de acceso sin dirección (Task 6
 
 **Decisión del plan (1): la regla por tipo vive en el flujo, no en una ruta nueva** (D25, B2-01). `login`, `send_reset_link` y `reset_password` buscan a la persona con `find_person` y aplican la regla de su tipo: la longitud mínima (`minimum_for`), si hace falta un segundo factor para enviar un restablecimiento (solo técnicos, §2.8) y qué pasa cuando no hay segundo factor (técnico: `enroll_required`; contacto: `signed_in`, D27). Todo lo demás —contadores por cuenta y por equipo, espera, bloqueo a los 100, el mismo trabajo de argon2 para quien no existe, el 401 genérico— es el de la fase 1, sin cambio. **La dirección doble** (un técnico y un contacto con la misma dirección; `its_auth_principal` da primero al técnico) **solo la produce hoy el alta en el primer acceso por MCP** (`app/api/deps.py:353-375`, que inserta un técnico con el `email` que Keycloak afirme), y la fase 3 la retira: invitar ya rechaza con 409 cualquier dirección que tenga otra persona, contactos incluidos (`user_admin/service.py:634-646`), y 0232 rechaza un contacto con la dirección de cualquiera. Mientras dure, la consecuencia es esta: un contacto con esa dirección que escribe su contraseña en `/portal/sign-in` se compara con la del técnico, y cada intento cuenta contra el contador de la cuenta del técnico (esperas y la parada de los 100). No hay filas desplegadas (el diseño: nada se despliega hasta acabar los cuatro proyectos), así que se acepta.
 
-**Decisión del plan (2): `_started` y `_after_password` pasan a ser públicas** (`started`, `after_first_factor`), porque la Task 9 (Microsoft) entra por el mismo camino después de su primer factor. `after_first_factor` recibe `method` (`"password"`, y `"microsoft"` en la Task 9), que va a la auditoría `auth.signed_in`. El renombre alcanza también a `tests/test_auth_notice_order.py` (`:264`, `:269`, `:279`), que parchea `flows._started`.
+**Decisión del plan (2): `_started` y `_after_password` pasan a ser públicas** (`started`, `after_first_factor`), porque la Task 9 (Microsoft) entra por el mismo camino después de su primer factor. `after_first_factor` recibe `method` (`"password"`, y `"microsoft"` en la Task 9), que va a la auditoría `auth.signed_in`. El renombre alcanza también a `tests/test_auth_notice_order.py`, que parchea `flows._started` en dos pruebas, tres veces en cada una (`:264`, `:269`, `:279` y `:373`, `:378`, `:388`). El `_started` de `tests/test_agent_update_api.py:233` es otra función, una ayuda de esa prueba, y no se toca.
 
 **Decisión del plan (3): el segundo factor de un contacto es su app TOTP, y nada más** (decisión del operador **C5**, 2026-11-06; D27 revisada). Una clave de acceso es para un contacto **otra forma de entrar**, no un segundo factor de su contraseña: la contraseña sola sigue entrando. Solo una app TOTP **confirmada** convierte la contraseña (y Microsoft) en dos pasos, salvo equipo recordado (§2.6). Es el «o» de Q2 («Llave de acceso **o** contraseña de 15+ caracteres») y el «que lo activaron» de §2.6. Para un técnico nada cambia: su clave de acceso o su app son su segundo factor. Lo concreta `_has_second_factor(session, user)`, que distingue el tipo y define «segundo factor activado» para todo lo que lo pregunta: el inicio de sesión, el restablecimiento, la confirmación reciente (decisión 6), los códigos de recuperación de Mi seguridad (B2-06, Task 7) y el diálogo de la consola (Task 11). La ruta `/auth/factor/passkey` sigue aceptando la clave de un contacto que esté en el paso del segundo factor (una clave con verificación del usuario es al menos igual de fuerte), pero el paso no la ofrece: con ella el contacto entra directamente.
 
@@ -2732,7 +2732,7 @@ async def microsoft_only(session: AsyncSession, user_id: UUID) -> bool:
 En `backend/app/core/auth/flows.py`:
 
 1. Imports: `from app.core.auth.lookup import find_person` (en lugar de `find_staff`, que este archivo ya no usa); `from app.core.auth.methods import has_sign_in_method, microsoft_only`; `from app.core.identity import ACTIVE_STATUS, CONTACT_KIND, STAFF_KIND`.
-2. **Antes del renombre**, en `accept_recovery`, la variable local `started` (`app/core/auth/flows.py:1151` `started = await _started(session, request, user, state="enroll_required")` y `:1161` `return started`) pasa a `signed` (`signed = await _started(...)`, `return signed`): si no, el `sed` deja `started = await started(...)`, `started` se vuelve local en esa función y cada aceptación de un enlace de recuperación del servidor lanza `UnboundLocalError` (ruff: `F823`; f2-1 I5, reproducido en `scratchpad/rr-chk/shadow.py`). Después, renombrar en todo el archivo: `sed -i 's/\b_started(/started(/g; s/\b_after_password(/after_first_factor(/g' app/core/auth/flows.py`; en `tests/test_auth_notice_order.py`, las tres menciones de `flows._started` (`:264` `real_started = flows._started`, `:269` `monkeypatch.setattr(flows, "_started", failing)` y `:279`, la restauración) pasan a `flows.started` y `"started"` (sin ese cambio, la primera lanza `AttributeError`, y también `monkeypatch.setattr` con su `raising=True`). Comprobar con `grep -rn --include='*.py' '\b_started\b\|\b_after_password\b' app tests` (sin salida: los `\b` de los dos lados dejan fuera `rollout_started`, `oauth_started`, `session_started` y los demás nombres que solo acaban así) y con `grep -n '\bstarted = ' app/core/auth/flows.py` (sin salida).
+2. **Antes del renombre**, en `accept_recovery`, la variable local `started` (`app/core/auth/flows.py:1151` `started = await _started(session, request, user, state="enroll_required")` y `:1161` `return started`) pasa a `signed` (`signed = await _started(...)`, `return signed`): si no, el `sed` deja `started = await started(...)`, `started` se vuelve local en esa función y cada aceptación de un enlace de recuperación del servidor lanza `UnboundLocalError` (ruff: `F823`; f2-1 I5). Después, renombrar en todo el archivo: `sed -i 's/\b_started(/started(/g; s/\b_after_password(/after_first_factor(/g' app/core/auth/flows.py`; en `tests/test_auth_notice_order.py`, las **seis** menciones —tres en `test_a_recovery_link_tells_only_once_its_session_is_made` (`:264` `real_started = flows._started`, `:269` `monkeypatch.setattr(flows, "_started", failing)`, `:279` la restauración) y tres en `test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_made` (`:373`, `:378`, `:388`, las mismas)— pasan a `flows.started` y `"started"`: `sed -i 's/flows\._started\b/flows.started/g; s/(flows, "_started"/(flows, "started"/g' tests/test_auth_notice_order.py` (sin ese cambio, `real_started = flows._started` lanza `AttributeError`, y también `monkeypatch.setattr` con su `raising=True`). **`tests/test_agent_update_api.py` no se toca:** su `async def _started(` (`:233`, con ocho llamadas) es una ayuda propia de esa prueba, sin relación con `flows`. Comprobar con `grep -rn --include='*.py' '\b_started\b\|\b_after_password\b' app tests | grep -v '^tests/test_agent_update_api.py:'` (sin salida: los `\b` de los dos lados dejan fuera `rollout_started`, `oauth_started`, `session_started` y los demás nombres que solo acaban así, y el `grep -v` deja fuera esa ayuda; en `3a1ba1c` la orden sin el renombre imprime las nueve líneas de `flows.py` y las seis de la prueba) y con `grep -n '\bstarted = ' app/core/auth/flows.py` (sin salida).
 3. Reemplazar las definiciones de `started` y `after_first_factor`:
 
 ```python
@@ -3304,7 +3304,7 @@ Esta tarea no inicia la sesión de nadie: produce el protocolo (Task 9 lo compon
 - **la clave privada** (PEM, PKCS#8) es el secreto de un `Credential` de tipo `entra_sign_in`, guardado con `vault.store` (el sobre de la organización que envuelve OpenBao: D9, el patrón de la contraseña SMTP de la fase 1, B2-35); se descifra solo para firmar una aserción (`entra_settings.signing_key`, auditado `auth.entra_credential_used`, invariantes 3 y 4) y `credentials.py` se niega a revelarla, rotarla o borrarla. **El certificado** es público y va en claro en `auth_entra_settings`, con su huella `x5t#S256` y su caducidad, para que Ajustes lo ofrezca y lo muestre;
 - en el canje, `client_assertion` + `client_assertion_type` sustituyen a `client_secret` (*«Client assertions can be used anywhere a client secret would be used. For example, in the authorization code flow … You can replace this with client_assertion and client_assertion_type parameters.»*, [M9]). La aserción es un JWT `PS256` (*«alg … Should be PS256»*, [M9]) con cabecera `typ: JWT` y `x5t#S256` (*«Base64url-encoded SHA-256 thumbprint of the X.509 certificate's DER encoding»*), y claims `aud` = el endpoint de token al que se envía, `iss` = `sub` = el id de la app, `jti` único, `nbf` = `iat` = ahora y `exp` a los 5 minutos (*«keep it short - 5-10 minutes after nbf at most»*, [M9]). PyJWT 2.15.1 firma PS256 (*«PS256 - RSASSA-PSS signature using SHA-256 and MGF1 padding with SHA-256»*): ninguna dependencia nueva;
 - `configured` = hay id de la app, clave y certificado; `usable` = encendido, configurado **y el certificado en uso sin caducar**: con uno caducado la Task 9 responde «no está configurado» antes de mandar a nadie a Microsoft, en vez de un `microsoft_failed` después;
-- **renovar es en dos actos y no deja hueco** (Task 1 decisión 5; decisión del coordinador del 2026-11-06, ronda 2; f2-2 I-1, f2-3 M4). Entra guarda varios certificados por aplicación (*«The keyCredentials property is multi-valued, so you may upload multiple certificates for richer key management.»*, [M9]) y la aserción nombra el suyo por `x5t#S256`. El **primer** certificado de una aplicación va directo al hueco en uso: nada firma todavía. Después, `new_certificate: true` llena el hueco siguiente (`next_*`, una clave nueva en un `Credential` propio) y **no toca el que está en uso**: las aserciones se siguen firmando con la clave en uso, cuyo certificado Entra ya tiene, mientras una persona sube el nuevo a Entra junto al viejo. `activate_certificate: true` («ya lo subí») promueve el siguiente al hueco en uso y destruye el `Credential` de la clave vieja; el certificado viejo se puede quitar de Entra después. Los dos actos van en guardados distintos (juntos, 422: la subida va entre uno y otro); activar sin nada esperando, o cambiando a la vez el id de la app, es 422; un segundo `new_certificate` antes de activar reemplaza al que esperaba. **Activar antes de subirlo es el único modo de abrir un hueco**: Ajustes lo dice junto al botón (Task 12) y la descripción MCP también (decisión 6). **Cambiar el id de la app exige un certificado nuevo** (A2-29): sin `new_certificate`, 422; con él, es el primero de la app nueva, va directo al hueco en uso, y el que esperaba (hecho para la app vieja) se destruye. **Borrar el id de la app** (apagado) destruye los dos pares y sus claves (f2-2 M7, la primera de sus dos opciones): eran de esa app. Así un certificado nunca queda contado como «configurado» para una app a la que nadie lo subió. **No se construye un aviso antes de la caducidad:** Ajustes muestra las fechas (Task 12) y nada avisa a nadie fuera de esa pestaña; «Lo que sigue abierto» lo lista como seguimiento.
+- **renovar es en dos actos y no deja hueco** (Task 1 decisión 5; decisión del coordinador del 2026-11-06, ronda 2; f2-2 I-1, f2-3 M4). Entra guarda varios certificados por aplicación (*«The keyCredentials property is multi-valued, so you may upload multiple certificates for richer key management.»*, [M9]) y la aserción nombra el suyo por `x5t#S256`. El **primer** certificado de una aplicación va directo al hueco en uso: nada firma todavía. Después, `new_certificate: true` llena el hueco siguiente (`next_*`, una clave nueva en un `Credential` propio) y **no toca el que está en uso**: las aserciones se siguen firmando con la clave en uso, cuyo certificado Entra ya tiene, mientras una persona sube el nuevo a Entra junto al viejo. `activate_certificate: true` («ya lo subí») promueve el siguiente al hueco en uso y destruye el `Credential` de la clave vieja; el certificado viejo se puede quitar de Entra después. Los dos actos van en guardados distintos (juntos, 422: la subida va entre uno y otro); activar sin nada esperando, o cambiando a la vez el id de la app, es 422; un segundo `new_certificate` antes de activar reemplaza al que esperaba. **Activar antes de subirlo es el único modo de abrir un hueco**: Ajustes lo dice junto al botón (Task 12) y la descripción MCP también (decisión 6). **Cambiar el id de la app exige un certificado nuevo** (A2-29): sin `new_certificate`, 422; con él, es el primero de la app nueva, va directo al hueco en uso, y el que esperaba (hecho para la app vieja) se destruye. **Borrar el id de la app** (apagado) destruye los dos pares y sus claves (f2-2 M7, la primera de sus dos opciones): eran de esa app. Así un certificado nunca queda contado como «configurado» para una app a la que nadie lo subió. **El hueco que sí queda, y se dice** (N-M3 de la segunda revisión; de sus dos opciones, la segunda: decirlo, no rechazarlo): el primer certificado de una aplicación firma desde el guardado, porque no hay otro con que firmar, así que si se guarda con la entrada encendida —o si el id de la app cambia con ella encendida— la entrada con Microsoft falla hasta que alguien lo suba a esa app. Para una app nueva no se rompe nada que funcionara, y el README pone encender después de subir; para un cambio de id sí, y Ajustes lo avisa junto al id y el README lo dice. No se rechaza `enabled: true` en ese guardado: no quitaría el hueco del cambio de id —apagada, la entrada con Microsoft tampoco deja entrar a nadie— y pediría dos guardados donde basta uno. **No se construye un aviso antes de la caducidad:** Ajustes muestra las fechas (Task 12) y nada avisa a nadie fuera de esa pestaña; «Lo que sigue abierto» lo lista como seguimiento.
 
 La respuesta no lleva ningún campo con nombre de secreto: `configured`, `certificate`, `certificate_thumbprint`, `certificate_expires_at`, `next_certificate`, `next_certificate_thumbprint`, `next_certificate_expires_at` (las palabras `key`, `secret` y `credential` las bloquea el filtro de MCP, `app/core/secrets.py`).
 
@@ -4270,12 +4270,14 @@ in use signing meanwhile; every save audited; nothing switched on half
 configured; nothing written by a save that changes nothing; `orgs.manage` on
 every client to save."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -4520,12 +4522,76 @@ async def test_clearing_the_application_drops_its_certificates_and_keys(api_env:
     await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
     await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
     assert len(await _keys(api_env, org)) == 2
+    waiting = (await api_env.client.get(API, headers=headers)).json()
     cleared = await api_env.client.put(API, headers=headers, json=OFF)
     assert cleared.status_code == 200, cleared.text
     body = cleared.json()
     assert body["configured"] is False
     assert (body["certificate"], body["next_certificate"]) == (None, None)
     assert await _keys(api_env, org) == []
+    async with AsyncSession(api_env.admin_engine) as s:
+        last = (
+            await s.execute(
+                select(AuditEvent.meta)
+                .where(
+                    AuditEvent.org_id == org,
+                    AuditEvent.action == "auth.entra_settings_updated",
+                )
+                .order_by(AuditEvent.ts.desc())
+            )
+        ).scalars().first()
+    assert last is not None
+    assert last["certificate"] == {
+        "dropped": [waiting["certificate_thumbprint"], waiting["next_certificate_thumbprint"]]
+    }
+
+
+async def test_two_saves_at_once_take_turns(api_env: Any) -> None:
+    """N-M2 (second re-review): an activation and a renewal at the same
+    moment. `save` locks the row, so the renewal waits for the activation and
+    reads what it wrote; the key in use always matches the certificate in
+    use. Unlocked, the renewal reads the row as it was: here, with the
+    activation's write already made, its own write then fails on
+    `ck_auth_entra_settings_next_certificate` (red); had both read before
+    either wrote, it would have re-encrypted the credential being promoted,
+    leaving its key under the activated certificate, which Entra refuses."""
+    org, headers = await _admin(api_env)
+    await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
+    await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
+    async with AsyncSession(api_env.admin_engine) as s:
+        actor = await s.scalar(select(User.id).where(User.org_id == org).limit(1))
+    vault = api_env.app.state.vault
+    values: dict[str, Any] = {
+        "org_id": org,
+        "actor_id": actor,
+        "enabled": True,
+        "app_client_id": APP,
+        "staff_tenant_id": TENANT,
+    }
+
+    async def renew() -> entra_settings.EntraConfig:
+        async with org_session(
+            org, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
+            return await entra_settings.save(session, vault, new_certificate=True, **values)
+
+    async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as first:
+        await entra_settings.save(first, vault, activate_certificate=True, **values)
+        second = asyncio.create_task(renew())
+        await asyncio.sleep(0.5)
+        assert not second.done(), "the renewal waits for the activation's lock"
+    renewed = await second
+    assert renewed.pending
+    async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as session:
+        config = await entra_settings.read(session, org)
+        private_pem = await entra_settings.signing_key(
+            session, vault, org_id=org, config=config, actor_id=None
+        )
+    assert config.certificate_pem is not None
+    certificate = x509.load_pem_x509_certificate(config.certificate_pem.encode())
+    private = serialization.load_pem_private_key(private_pem.encode(), password=None)
+    spki = (serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    assert private.public_key().public_bytes(*spki) == certificate.public_key().public_bytes(*spki)
 
 
 def test_an_expired_certificate_is_not_usable() -> None:
@@ -4832,10 +4898,13 @@ def _config(row: AuthEntraSettings | None) -> EntraConfig:
     )
 
 
-async def _row(session: AsyncSession, org_id: UUID) -> AuthEntraSettings | None:
-    return (
-        await session.execute(select(AuthEntraSettings).where(AuthEntraSettings.org_id == org_id))
-    ).scalar_one_or_none()
+async def _row(
+    session: AsyncSession, org_id: UUID, *, lock: bool = False
+) -> AuthEntraSettings | None:
+    query = select(AuthEntraSettings).where(AuthEntraSettings.org_id == org_id)
+    if lock:
+        query = query.with_for_update()
+    return (await session.execute(query)).scalar_one_or_none()
 
 
 async def read(session: AsyncSession, org_id: UUID) -> EntraConfig:
@@ -4944,7 +5013,15 @@ async def save(
     nothing waiting, or along with another application id; on with no
     certificate and none asked for; another application id without a new
     certificate (A2-29). A save that changes nothing writes nothing -- no
-    row, no audit -- and returns what was there."""
+    row, no audit -- and returns what was there.
+
+    ONE SAVE AT A TIME (N-M2 of the second re-review): the row is read FOR
+    UPDATE, so a second save -- another person, or an AI app (B2-20) --
+    waits and then reads what the first wrote. Unlocked, an activation and
+    a renewal that read the same waiting pair could leave the renewal's key
+    under the activated certificate, or fail on the next-slot CHECK. Two
+    FIRST saves have no row to lock:
+    the second fails on the primary key and writes nothing."""
     if staff_tenant_id == CONSUMER_TENANT:
         raise EntraSettingsInvalid(
             tr("a personal Microsoft account tenant cannot sign anyone in here")
@@ -4956,7 +5033,7 @@ async def save(
                 "in between"
             )
         )
-    row = await _row(session, org_id)
+    row = await _row(session, org_id, lock=True)
     before = _config(row)
     if enabled and app_client_id is None:
         raise EntraSettingsInvalid(
@@ -5115,7 +5192,7 @@ async def signing_key(
     return pem
 ```
 
-(Un certificado se pide con el id de la app ya escrito: su nombre lo lleva, y así nunca hay un certificado sin la app a la que se sube. El orden natural en Ajustes es: registrar la app en Entra, escribir su id, pedir el certificado, subirlo a Entra y encender. **Renovar es otro orden, en dos guardados**: pedir un certificado nuevo (espera en el segundo hueco; las aserciones siguen firmándose con la clave en uso, que Entra conoce), subirlo a Entra junto al viejo, y cambiar a él (`activate_certificate`), que destruye la clave vieja; el viejo se puede quitar de Entra después. Cambiar antes de subirlo es el único modo de abrir un hueco, y Ajustes lo dice al lado del botón (Task 12). Los CHECK se evalúan por sentencia, así que `save` mueve los dos huecos en un solo `UPDATE` (un `flush`) y borra la clave retirada después, cuando ninguna columna la nombra.)
+(Un certificado se pide con el id de la app ya escrito: su nombre lo lleva, y así nunca hay un certificado sin la app a la que se sube. El orden natural en Ajustes es: registrar la app en Entra, escribir su id, pedir el certificado, subirlo a Entra y encender. **Renovar es otro orden, en dos guardados**: pedir un certificado nuevo (espera en el segundo hueco; las aserciones siguen firmándose con la clave en uso, que Entra conoce), subirlo a Entra junto al viejo, y cambiar a él (`activate_certificate`), que destruye la clave vieja; el viejo se puede quitar de Entra después. Cambiar antes de subirlo es el único modo de abrir un hueco, y Ajustes lo dice al lado del botón (Task 12). Los CHECK se evalúan por sentencia, así que `save` mueve los dos huecos en un solo `UPDATE` (un `flush`) y borra la clave retirada después, cuando ninguna columna la nombra. Y lee la fila con `FOR UPDATE` (N-M2 de la segunda revisión): dos guardados a la vez —dos personas, o una persona y una app de IA— van por turno, y el segundo ve lo que escribió el primero; `test_two_saves_at_once_take_turns` lo comprueba con la clave en uso contra el certificado en uso. Ajustes → Correo (`app/core/mail.py::save_settings`) tiene la misma forma sin candado; no se toca aquí.)
 
 Crear `backend/app/api/v1/entra_settings.py`:
 
@@ -5371,20 +5448,20 @@ En `backend/app/mcp/descriptions/part_d.py`, en «settings», después de `"PUT 
 
 ```python
     "GET /api/v1/settings/microsoft-sign-in": (
-        "Returns how people sign in with Microsoft here: whether it is on, the Microsoft "
-        "application ID, Novieri's tenant for technicians, the platform's public certificate "
-        "and when it expires, and the redirect URI to register. Never returns the private key."
+        "Returns how people sign in with Microsoft here: whether it is on, the app ID, "
+        "Novieri's tenant for technicians, the platform's public certificate in use and any "
+        "new one waiting, with their expiry, and the redirect URI to register. Never returns a "
+        "private key."
     ),
     "PUT /api/v1/settings/microsoft-sign-in": (
-        "Saves sign-in with Microsoft: the switch, the application ID and Novieri's tenant. "
-        "new_certificate makes a new key and certificate, the key kept in the vault and never "
-        "returned: the application's first is used at once; a later one waits beside the one "
-        "in use, which keeps signing. activate_certificate switches to the waiting one and "
-        "destroys the old key: only after a person has uploaded the waiting certificate to "
-        "the Microsoft application, or sign-in with Microsoft fails until they do. Needs every "
-        "client. Audited."
+        "Saves sign-in with Microsoft: the switch, the app ID and Novieri's tenant. "
+        "new_certificate makes a key (kept in the vault) and certificate; a renewal waits "
+        "beside the one in use. activate_certificate switches to it and destroys the old key, "
+        "only once it is in Entra. Needs every client. Audited."
     ),
 ```
+
+(Cada descripción cabe en los 300 caracteres de `tests/test_mcp_descriptions.py::test_descriptions_are_short_and_plain` (`:62-66`, `0 < len(text) <= 300`), medido sobre la cadena ya concatenada: la de `GET` tiene 259, la de `PUT` 295 (N-I1 de la segunda revisión: la de la ronda anterior tenía 518) y la de `PATCH /clients/{client_id}` con su frase nueva, 235.)
 
 y en la descripción de `PATCH /api/v1/clients/{client_id}` añadir al final la frase «Also sets the Microsoft tenants whose accounts its contacts may sign in with.».
 
@@ -12414,7 +12491,7 @@ Diseño §4 (técnicos desde el tenant de Novieri, contactos desde los tenants d
 
 **Decisión del plan (5): la invitación de un técnico con Microsoft pide también la contraseña** (decisión del operador C3). En `/invite`, para un técnico con `microsoft: true`, «Aceptar con Microsoft» está debajo del formulario de la contraseña y la usa: comprueba la regla localmente (`checkNewPassword(…, 12)`) y la envía en `POST /auth/microsoft/start {intent: "invite", token, password}`, que la guarda antes de salir hacia Microsoft (Task 9, decisión 4). La página lo dice: la contraseña es su forma de volver si Microsoft deja de funcionar. Un contacto acepta con Microsoft solo, como antes. El botón no es una mutación de TanStack (llama a `api.microsoftStart` directamente, como `acceptInvite` en la fase 1), así que la contraseña está solo en el estado de la página.
 
-**Decisión del plan (6): Ajustes → Microsoft muestra el certificado de la plataforma, no pide un secreto** (decisión del operador C4; A2-34, A2-70). No hay casilla de secreto: la plataforma hace el par de claves y el certificado (Task 5). La pestaña muestra la huella SHA-256 (`x5t#S256`, la que la aserción nombra; no se dice que sea la que el portal de Entra enseña, que puede ser otra: f2-3 M6), la fecha de caducidad —con un aviso desde 30 días antes y otro si ya caducó, cuando la entrada con Microsoft deja de empezar (`EntraConfig.usable`)— y el certificado en PEM para copiarlo o descargarlo como `itms-sign-in.cer` y subirlo a la aplicación en Entra («Certificates & secrets → Certificates → Upload certificate»). **Renovar son dos actos, sin hueco** (Task 5, decisión 5): «Hacer un certificado nuevo al guardar» envía `new_certificate: true`, y el nuevo **espera junto al que está en uso** —la pestaña muestra los dos, cada uno con su huella y su caducidad, y el nuevo se descarga como `itms-sign-in-new.cer`—, mientras la entrada sigue firmándose con el que está en uso; la pestaña lo dice antes de guardar. Cuando la persona lo ha subido a Entra junto al viejo, «Ya lo subí: cambiar al certificado nuevo» envía los valores guardados con `activate_certificate: true` (deshabilitado mientras el formulario tenga cambios sin guardar, para que el cambio no se lleve otros), y un aviso junto al botón dice que cambiar antes de subirlo deja la entrada con Microsoft fallando hasta que se suba. Ni el cuerpo ni la respuesta llevan un secreto —los certificados son públicos—, así que `putMicrosoftSettings` no es un método secreto (`secretMutations.test.ts` no lo lista, y su regla por nombre no lo reconoce como tal: `certificate`, `certificate_thumbprint`, `next_certificate`, `new_certificate`, `activate_certificate`). **No hay aviso fuera de la pestaña** antes de la caducidad (Task 5, decisión 5; «Lo que sigue abierto»).
+**Decisión del plan (6): Ajustes → Microsoft muestra el certificado de la plataforma, no pide un secreto** (decisión del operador C4; A2-34, A2-70). No hay casilla de secreto: la plataforma hace el par de claves y el certificado (Task 5). La pestaña muestra la huella SHA-256 (`x5t#S256`, la que la aserción nombra; no se dice que sea la que el portal de Entra enseña, que puede ser otra: f2-3 M6), la fecha de caducidad —con un aviso desde 30 días antes y otro si ya caducó, cuando la entrada con Microsoft deja de empezar (`EntraConfig.usable`)— y el certificado en PEM para copiarlo o descargarlo como `itms-sign-in.cer` y subirlo a la aplicación en Entra («Certificates & secrets → Certificates → Upload certificate»). **Renovar son dos actos, sin hueco** (Task 5, decisión 5): «Hacer un certificado nuevo al guardar» envía `new_certificate: true`, y el nuevo **espera junto al que está en uso** —la pestaña muestra los dos, cada uno con su huella y su caducidad, y el nuevo se descarga como `itms-sign-in-new.cer`—, mientras la entrada sigue firmándose con el que está en uso; la pestaña lo dice antes de guardar. Cuando la persona lo ha subido a Entra junto al viejo, «Ya lo subí: cambiar al certificado nuevo» envía los valores guardados con `activate_certificate: true` (deshabilitado mientras el formulario tenga cambios sin guardar, para que el cambio no se lleve otros), y un aviso junto al botón dice que cambiar antes de subirlo deja la entrada con Microsoft fallando hasta que se suba. Otro aviso, junto al id de la app, sale cuando se escribe un id distinto del guardado y ya hay certificado: esa app necesita el suyo, y desde el guardado nadie entra con Microsoft hasta subirlo (Task 5, decisión 5; N-M3). Ni el cuerpo ni la respuesta llevan un secreto —los certificados son públicos—, así que `putMicrosoftSettings` no es un método secreto (`secretMutations.test.ts` no lo lista, y su regla por nombre no lo reconoce como tal: `certificate`, `certificate_thumbprint`, `next_certificate`, `new_certificate`, `activate_certificate`). **No hay aviso fuera de la pestaña** antes de la caducidad (Task 5, decisión 5; «Lo que sigue abierto»).
 
 - [ ] **Step 1: Escribir las pruebas**
 
@@ -12687,7 +12764,9 @@ describe("Microsoft sign-in", () => {
     renderSettings("/settings?tab=microsoft");
     const tab = await screen.findByRole("tabpanel");
     expect(
-      await within(tab).findByText("The certificate has expired: nobody can sign in with Microsoft until you ask for a new one and upload it."),
+      await within(tab).findByText(
+        "The certificate has expired: nobody can sign in with Microsoft until you ask for a new one, upload it and switch to it.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -12749,6 +12828,22 @@ describe("Microsoft sign-in", () => {
         activate_certificate: true,
       }),
     );
+  });
+
+  it("says that another application stops sign-in with Microsoft until its certificate is uploaded", async () => {
+    calls.getMicrosoftSettings.mockResolvedValue(WITH_CERTIFICATE);
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    const appId = await within(tab).findByLabelText("Application (client) ID");
+    expect(within(tab).queryByText(/Another application needs a certificate of its own/)).not.toBeInTheDocument();
+    await user.clear(appId);
+    await user.type(appId, TENANT);
+    expect(
+      within(tab).getByText(
+        "Another application needs a certificate of its own, so tick Make a new certificate when I save. From that save on, nobody signs in with Microsoft until you upload it to that application.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("refuses an identifier that is not one before asking", async () => {
@@ -13595,6 +13690,9 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
   const certificate = settings.data?.certificate ?? null;
   const waiting = settings.data?.next_certificate ?? null;
   const ending = expiry(settings.data?.certificate_expires_at, Date.now());
+  // Another application ID stops sign-in until its own certificate is uploaded (Task 5, decision 5).
+  const typedApp = form.app_client_id.trim().toLowerCase();
+  const appChanged = certificate !== null && typedApp !== "" && typedApp !== (settings.data?.app_client_id ?? "").toLowerCase();
 
   function submit() {
     if (badId) return;
@@ -13657,6 +13755,12 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
                 />
               </Field>
             </div>
+            {appChanged ? (
+              <p className="notice gold" style={{ marginTop: 8 }}>
+                <Icon name={KIND_ICON.warn} size={16} />
+                <span>{t("settings.microsoft.appChangeWarning")}</span>
+              </p>
+            ) : null}
           </FieldGroup>
           <FieldGroup title={t("settings.microsoft.groups.certificate")} icon="lock">
             {certificate ? (
@@ -13936,6 +14040,8 @@ En `en/settings.ts`, `page.tabs.microsoft: "Microsoft sign-in"` y la sección:
     renewWarning:
       "The new certificate waits beside the one in use, which keeps signing people in. Upload it to the application in Entra, then switch to it here.",
     renewReplaces: "This replaces the new certificate still waiting. Upload the one it makes instead.",
+    appChangeWarning:
+      "Another application needs a certificate of its own, so tick Make a new certificate when I save. From that save on, nobody signs in with Microsoft until you upload it to that application.",
     waiting: "New certificate, waiting: upload it beside the one in use",
     waitingHelp:
       "In Microsoft Entra ID, upload it to the same application, next to the current one; Entra keeps several at once. Then switch to it here.",
@@ -13980,6 +14086,8 @@ y en `es/settings.ts`, `page.tabs.microsoft: "Entrar con Microsoft"` y:
     renewWarning:
       "El certificado nuevo espera junto al que está en uso, que sigue dejando entrar. Súbelo a la aplicación en Entra y después cambia a él aquí.",
     renewReplaces: "Esto sustituye al certificado nuevo que aún espera. Sube el que haga en su lugar.",
+    appChangeWarning:
+      "Otra aplicación necesita su propio certificado: marca Hacer un certificado nuevo al guardar. Desde ese guardado, nadie entra con Microsoft hasta que lo subas a esa aplicación.",
     waiting: "Certificado nuevo, en espera: súbelo junto al que está en uso",
     waitingHelp:
       "En Microsoft Entra ID, súbelo a la misma aplicación, junto al actual; Entra guarda varios a la vez. Después cambia a él aquí.",
@@ -14307,7 +14415,8 @@ En `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` (decisión
 2. En §3, la viñeta de **Olvidé mi contraseña** gana: «El enlace va a todo contacto que ya aceptó su invitación, salvo a quien solo entra con Microsoft (decisión del operador C6, 2026-11-06).»
 3. En §4, «Su secreto va a OpenBao (invariante 3).» pasa a: «La plataforma se identifica ante Microsoft con un certificado que ella misma genera —`private_key_jwt`, aserción PS256 [M9]—, que el administrador sube a la app desde Ajustes → Microsoft, donde ve su caducidad. La clave privada va a la bóveda de la plataforma —una credencial sellada con la clave de sobre que envuelve OpenBao, como la contraseña SMTP— y solo se descifra para firmar (invariante 3). **El certificado es autofirmado porque así lo eligió el operador (C4), no porque no haya otra opción:** Microsoft prefiere uno de una CA (*«use a certificate from a trusted certificate authority (CA) instead of a self-signed certificate. Configure a policy to enforce that certificates come from trusted issuers. However, if using a trusted CA isn't possible, self-signed certificates are still preferred over passwords.»*). Una política de gestión de aplicaciones del tenant de Novieri —`trustedCertificateAuthority`, o `asymmetricKeyLifetime` por debajo de 360 días— rechazaría la subida, y la plataforma no importa certificados de una CA. **Renovar no deja hueco:** el certificado nuevo espera junto al que está en uso, que sigue firmando, mientras el administrador lo sube a la app (Entra guarda varios), y solo cuando él dice «ya lo subí» pasa a firmar el nuevo y la clave vieja se destruye. *(Corregido el 2026-11-06: decía «Su secreto va a OpenBao»; decisiones del operador C4 y B2-35, plan de la fase 2, D33 y Task 5, decisión 5.)*»
 4. En §4, la viñeta de **Técnicos** gana: «Un técnico que acepta su invitación con Microsoft elige también una contraseña: Microsoft nunca es su única forma de entrar (decisión del operador C3, 2026-11-06). Siempre por la autoridad `organizations` y `tid` igual al tenant de Novieri: un invitado B2B en ese tenant no entra como técnico con Microsoft (B2-05).»
-5. En §9, «OpenBao: rutas nuevas para el pepper, la clave de firma, la contraseña SMTP y el secreto de Entra; `openbao-init` las crea.» pasa a: «OpenBao: rutas nuevas para el pepper y la clave de firma; `openbao-init` las crea. La contraseña SMTP (fase 1, D9) y la clave privada de Entra (fase 2, D33) son credenciales de la bóveda de la plataforma, que OpenBao envuelve: ninguna ruta nueva para ellas. *(Corregido el 2026-11-06.)*»
+5. En §2.6, en **Límites**, «las acciones de §2.5 siguen pidiendo el segundo factor» pasa a «las acciones de §2.5 siguen pidiendo el segundo factor (un contacto con app TOTP lo da también con su clave de acceso, §3)» (N-M5 de la segunda revisión: sin esto, §2.6 diría lo contrario de la frase nueva de §3, porque con C5 la clave de acceso de un contacto no es su segundo factor).
+6. En §9, «OpenBao: rutas nuevas para el pepper, la clave de firma, la contraseña SMTP y el secreto de Entra; `openbao-init` las crea.» pasa a: «OpenBao: rutas nuevas para el pepper y la clave de firma; `openbao-init` las crea. La contraseña SMTP (fase 1, D9) y la clave privada de Entra (fase 2, D33) son credenciales de la bóveda de la plataforma, que OpenBao envuelve: ninguna ruta nueva para ellas. *(Corregido el 2026-11-06.)*»
 
 En `docs/03-security-model.md`, en el párrafo de la autenticación (el que termina «Not built: SAML and on-premises Active Directory federation (out of scope); sign-in with Microsoft and the contacts' portal are phase 2. MCP clients still authenticate through Keycloak until phase 3.»), esa frase final pasa a:
 
@@ -14456,10 +14565,17 @@ is two steps and leaves no gap:**
    moment the platform signs with the new key and destroys the old one;
    remove the old certificate from Entra afterwards.
 
-Switching before the upload is the only way to break sign-in: until the new
-certificate is in Entra, every sign-in with Microsoft fails. Clearing the
-application ID (with sign-in switched off) destroys both certificates and
-their keys.
+Switching before the upload is the only way a renewal breaks sign-in: until
+the new certificate is in Entra, every sign-in with Microsoft fails. Clearing
+the application ID (with sign-in switched off) destroys both certificates
+and their keys.
+
+**Changing the application ID** needs a new certificate in the same save
+(the tab says so beside the ID), and **from that save on nobody signs in with
+Microsoft until the new certificate is uploaded to the new application**:
+there is no certificate Entra already holds for it to keep signing with. Do
+it at a quiet time. The very first certificate is the same, which is why the
+order above is save, upload, and only then switch sign-in on.
 
 Nothing is added to `.env` and nothing to OpenBao: the private key is a
 vault credential sealed by the organization's envelope key, like the SMTP
@@ -14532,7 +14648,7 @@ El informe de la tarea termina con estas líneas, tal cual (decisión 2):
 - **Qué comprobar después:** `/sign-in` y `/portal/sign-in` cargan; un contacto invitado entra al portal y `/devices` lo lleva a `/portal`; «Entrar con Microsoft» con una cuenta no vinculada responde «no está vinculada a nadie aquí»; Ajustes → Microsoft muestra la fecha de caducidad del certificado. Antes de registrar la app, mirar si el tenant de Novieri tiene una política de gestión de aplicaciones que rechace certificados autofirmados o de 360 días (`deploy/README.md`).
 - **A comunicar al operador** (B2-05): un contratista que sea invitado B2B en el tenant de Novieri no puede entrar con Microsoft como técnico; sí con su contraseña.
 - **El resultado del Step 6** en Chromium, Safari y Firefox, y si el canje real y la renovación en dos actos salieron bien contra Entra.
-- **A confirmar por el operador:** un contacto con app TOTP confirma también con su clave de acceso («Lo que sigue abierto», 9).
+- **A confirmar por el operador:** un contacto con app TOTP confirma también con su clave de acceso («Lo que sigue abierto», 9); y si los ajustes de inicio de sesión de la organización deben pedir una confirmación reciente («Lo que sigue abierto», 10).
 
 ---
 
@@ -14588,7 +14704,7 @@ La fase 3 (servidor OAuth para MCP y el asistente interno, diseño §5) se plani
 
 ## Lo que sigue abierto
 
-Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas: las que eran del operador, por sus decisiones C3–C7 del 2026-11-06 (Global Constraints), y el resto por una regla en la consolidación (Apéndice B, B2-01–B2-35). Lo que queda, salvo el punto 9 (para el operador) y el 8 (un seguimiento), no es una pregunta de producto, sino cosas que solo la ejecución puede confirmar, y por eso no se pueden cerrar en el plan:
+Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas: las que eran del operador, por sus decisiones C3–C7 del 2026-11-06 (Global Constraints), y el resto por una regla en la consolidación (Apéndice B, B2-01–B2-35). Lo que queda, salvo los puntos 9 y 10 (para el operador) y el 8 (un seguimiento), no es una pregunta de producto, sino cosas que solo la ejecución puede confirmar, y por eso no se pueden cerrar en el plan:
 
 1. **Si `idp` llega siempre en el ID token de un invitado B2B.** Microsoft dice que el claim *«is emitted in federated domain scenarios involving guests users and should always be sent in managed domain scenarios»*, frase ambigua, y `idp` no está en `claims_supported` ([M3]). Por eso la barrera que manda es `organizations` + `tid` (B2-05), y `idp` es solo defensa añadida: si no llega, no se pierde nada. Sin verificar contra un tenant real.
 2. **Que el código de Microsoft quepa siempre en 2.048 caracteres** (el residuo de `fragment`, B2-03). Microsoft documenta el límite de la dirección, no el largo de un código. Lo mide el Step 6 de la Task 13.
@@ -14596,6 +14712,7 @@ Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas:
 4. **Que cada contador de las Global Constraints sea exacto en el árbol fusionado**: los números se tomaron de `0182206` y del dossier; los revisores los midieron en la fase 1. La Task 13 exige explicar cualquier delta antes de tocar un número (A2-72).
 5. **El `user_id` de `auth_external_identities` no se comprueba contra la organización de la fila** (A2-06), igual que en las tablas de 0245: bajo el alcance «todos» se aceptaría el de otra organización. Es el seguimiento que la revisión final de la fase 1 dejó abierto («`user_id` key is not org-checked») para todas las tablas de autenticación; cerrarlo es una clave compuesta `(org_id, user_id)` sobre `users` en todas a la vez, no en una, y esta fase no lo hace. La migración 0246 lo anota en su docstring.
 6. **Comunicar al operador** (B2-05, no es una pregunta): un contratista que sea invitado B2B en el tenant de Novieri no puede entrar con Microsoft como técnico; sí con su contraseña. Lo dice el informe de la Task 13.
-7. **Que Entra acepte la aserción con `aud` = el endpoint de token de `organizations`** (f2-2 M3). La página del flujo de código admite `organizations` en esa ruta ([M1]) y MSAL para Python firma así ([M12]); no se probó contra un tenant de verdad. Lo prueba el Step 6 de la Task 13 (punto 4), y si Entra la rechaza, se para. Con él, dos lecturas sin frase de Microsoft que las respalde: que Entra no valide una cadena para `private_key_jwt`, solo la firma con el certificado subido (lo que hace aceptable el autofirmado de C4), y que no reutilice el código tras un `invalid_client` (la rotación en dos actos no depende de esto).
+7. **Que Entra acepte la aserción con `aud` = el endpoint de token de `organizations`** (f2-2 M3). La página del flujo de código admite `organizations` en esa ruta ([M1]) y MSAL para Python firma así ([M12]); no se probó contra un tenant de verdad. Lo prueba el Step 6 de la Task 13 (punto 4), y si Entra la rechaza, se para. Con él, una lectura sin frase de Microsoft que la respalde: que no reutilice el código tras un `invalid_client` (la rotación en dos actos no depende de esto). Lo que el plan necesita del autofirmado de C4 sí lo dice Microsoft —que Entra lo acepta ([M7], *«you can create a self-signed certificate and configure your apps to authenticate with it»*; [M8])—, con la única excepción documentada de una política del tenant (`trustedCertificateAuthority`, [M10]); que Entra no valide ninguna cadena no hace falta afirmarlo.
 8. **Ningún aviso antes de que caduque el certificado** (seguimiento, no construido; f2-2 I-1, «consider also»). Ajustes → Microsoft avisa desde 30 días antes, pero solo a quien abre la pestaña; un aviso a los administradores de la organización, o una entrada en los canales de notificación existentes, queda para después. Hasta entonces, el README pide apuntar la fecha.
-9. **Para el operador: un contacto con app TOTP confirma las acciones de §2.5 también con su clave de acceso** (D29; f2-1 M7, f2-3 M10). Es una ampliación deliberada: la clave de acceso pide y el servidor comprueba la verificación de la persona, así que es por sí sola un autenticador criptográfico multifactor, que NIST SP 800-63B-4 admite en AAL2 (§2.2.1, §3.1.7.2, [N1]) y que es al menos tan fuerte como la app. Pero con C5 la clave de un contacto «no es un segundo factor» para entrar, y el diseño §2.6 dice que esas acciones «siguen pidiendo el segundo factor»: la Task 13 lo escribe en el §3 del diseño para que se vea, y el operador dice si lo mantiene. Quitarlo sería que la confirmación con clave rechace a un contacto y que el diálogo no se la ofrezca (Task 11, decisión 4).
+9. **Para el operador: un contacto con app TOTP confirma las acciones de §2.5 también con su clave de acceso** (D29; f2-1 M7, f2-3 M10). Es una ampliación deliberada: la clave de acceso pide y el servidor comprueba la verificación de la persona, así que es por sí sola un autenticador criptográfico multifactor, que NIST SP 800-63B-4 admite en AAL2 (§2.2.1, §3.1.7.2, [N1]) y que es al menos tan fuerte como la app. Pero con C5 la clave de un contacto «no es un segundo factor» para entrar, y el diseño §2.6 dice que esas acciones «siguen pidiendo el segundo factor»: la Task 13 lo escribe en el §3 y en el §2.6 del diseño para que se vea, y el operador dice si lo mantiene. Quitarlo sería que la confirmación con clave rechace a un contacto y que el diálogo no se la ofrezca (Task 11, decisión 4).
+10. **Para el operador: ¿piden una confirmación reciente los ajustes de inicio de sesión de toda la organización?** (segunda revisión, §5; no es un defecto del plan, que sigue al diseño y a `CLAUDE.md`, cuyas invariantes 4 y 6 —auditoría y RBAC— se cumplen). El diseño §2.5 cierra su lista en cambiar la contraseña o los factores propios, restablecer los factores de otro y sacar una credencial de la bóveda: **no nombra ningún ajuste de inicio de sesión de la organización**. Así que Ajustes → Correo, Ajustes → Sesiones, Ajustes → Microsoft, los tenants de Microsoft de un cliente y la concesión de roles corren **sin confirmación reciente del segundo factor**, solo con su permiso (`orgs.manage` en todos los clientes, `clients.manage`) y su auditoría, como hoy `PUT /settings/email` y `POST /users/invite`. Quien tuviera la cookie de una sesión de administrador inactiva, sin su segundo factor, podría apagar o romper para todos la entrada con Microsoft (cambiar el id de la app o el tenant de Novieri, o activar un certificado antes de subirlo), apuntar «Entrar con Microsoft» a una aplicación registrada por él o invitar a otro administrador, aunque no quedarse con una identidad: una vinculación pide una confirmación reciente y la clave privada no sale de la bóveda. OWASP ASVS 5.0 pide reautenticar *«before allowing modifications to sensitive account attributes which may affect authentication»* (V7.5.1, nivel 2) y *«before performing highly sensitive transactions or operations»* (V7.5.3, nivel 3) — https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md —, aunque V7.5.1 habla de la cuenta de la propia persona. **Se pregunta al operador** si §2.5 debe ampliarse a esos ajustes (por riesgo, primero Correo; después Sesiones, Microsoft, los tenants de los clientes y los roles). Si dice que sí, es un cambio aparte; este plan no lo construye.
