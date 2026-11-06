@@ -169,14 +169,21 @@ def test_the_sign_in_limits_per_address_are_documented_as_the_code_has_them(
     of 2026-11-06, design §2.3), so they are named where `.env` is edited and in
     the README, and the default and range `.env.example` gives are the ones
     `Settings` enforces: a range that says 1-1000 over a field that refuses 4
-    teaches the operator a value that stops the api."""
+    teaches the operator a value that stops the api.
+
+    Checked against THIS block, cut out from its header to the next one: the
+    file is 600-odd lines, and a range another key documents must not stand in
+    for this one's (review M5)."""
     from app.core.config import Settings
 
     info = Settings.model_fields[field]
     bounds = {type(rule).__name__: rule for rule in info.metadata}
-    example = ENV_EXAMPLE.read_text()
-    assert f"\n# {variable}={info.default}\n" in example, (
+    text = ENV_EXAMPLE.read_text()
+    start = text.index("# --- Sign-in limits per address")
+    block = text[start : text.index("\n# --- ", start)]
+    flat = " ".join(line.lstrip("# ").strip() for line in block.splitlines())
+    assert f"\n# {variable}={info.default}\n" in block, (
         f"{variable} is not documented, commented out, at its default {info.default}"
     )
-    assert f"{bounds['Ge'].ge}-{bounds['Le'].le}" in example
+    assert f"Range {bounds['Ge'].ge}-{bounds['Le'].le}:" in flat, flat
     assert variable in DEPLOY_README.read_text()
