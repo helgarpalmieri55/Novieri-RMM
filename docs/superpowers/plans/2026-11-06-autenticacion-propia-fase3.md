@@ -90,7 +90,8 @@ La Task 13 lleva el último número porque nació en la revisión del 2026-11-06
 
 ## Notas de integración del coordinador
 
-- **Oleada 1.** Las Tasks 1, 2 y 3 crean archivos distintos bajo `backend/app/core/auth/oauth/`; las tres crean también `backend/app/core/auth/oauth/__init__.py` **con el mismo contenido** (Task 1, Step 1): al fusionar se toma una copia. La Task 1 añade una línea en `backend/app/main.py` (el manejador); nadie más toca `main.py` en esta oleada. Las Tasks 4 y 11 tocan `frontend/src/lib/api.ts` en sitios distintos (métodos nuevos al final de la clase / el método `revokeMcpConnection` y sus tipos): unión. La Task 4 toca `deploy/nginx.conf`; nadie más.
+- **Oleada 1.** Las Tasks 1, 2 y 3 crean archivos distintos bajo `backend/app/core/auth/oauth/`; las tres crean también `backend/app/core/auth/oauth/__init__.py` **con el mismo contenido** (Task 1, Step 1): al fusionar se toma una copia. La Task 1 añade una línea en `backend/app/main.py` (el manejador); nadie más toca `main.py` en esta oleada. Las Tasks 4 y 11 tocan `frontend/src/lib/api.ts` en sitios distintos (la 4: dos métodos nuevos después de `acceptRecovery`, con sus tipos en `frontend/src/modules/auth/types.ts`; la 11:
+el método `revokeMcpConnection` y sus tipos): unión. La Task 4 toca `deploy/nginx.conf`; nadie más.
 - **Oleada 3, choques esperados** (orden de fusión: 6, 7):
   - `backend/app/main.py`: cada una incluye su router (`oauth_registration` la 6, `oauth_tokens` la 7): unión.
   - `backend/tests/oauth_support.py` (lo crea la Task 5): la 6 y la 7 añaden funciones al final: unión.
@@ -103,7 +104,7 @@ La Task 13 lleva el último número porque nació en la revisión del 2026-11-06
   - `backend/app/mcp/exclusions.py`: solo la 8 (y la 10 en la oleada 5).
   - `backend/app/core/i18n/es.py`: unión (la 8 añade entradas, el aviso incluido; la 9 añade una y borra dos que dejan de usarse).
   - `backend/tests/oauth_support.py` solo lo toca la 8, y `backend/tests/mcp_support.py` solo la 9.
-- **Oleada 5.** La 10 parte de `backend/tests/test_mcp_admin_api.py` con los dos ayudantes que la 9 ya re-apuntó (`_old_token`, `_call_a_tool`) y reescribe el resto de las pruebas de revocar; sube el recuento de logs de 110 a 107. La 13 solo toca `backend/app/core/auth/retention.py` y `backend/tests/test_auth_retention.py` (de la fase 2) y crea `backend/tests/test_oauth_retention.py`: no choca con la 10.
+- **Oleada 5.** La 10 parte de `backend/tests/test_mcp_admin_api.py` con los dos ayudantes que la 9 ya re-apuntó (`_old_token`, `_call_a_tool`) y reescribe el resto de las pruebas de revocar; baja el recuento de logs de 110 a 107 (−3). La 13 solo toca `backend/app/core/auth/retention.py` y `backend/tests/test_auth_retention.py` (de la fase 2) y crea `backend/tests/test_oauth_retention.py`: no choca con la 10.
 - **Firmas que una tarea fija y otras consumen:** el Apéndice A. Donde el bloque «Interfaces» de una tarea dice otra cosa, manda la tarea, que se escribió contra el código real.
 - **Para el informe de despliegue** (cuando acaben los cuatro proyectos; el operador decidió el 2026-10-31 que nada se despliega antes): el `migrate` aplica 0247 en el siguiente `up -d`; la etiqueta de Traefik del servicio `api` cambia (Task 6), así que `docker compose up -d` recrea `api`; la imagen `web` cambia (`deploy/nginx.conf`, Task 4); `ITS_MCP_REGISTRATION=open` pasa a leerlo también la API y abre solo el registro dinámico (C2), sin clave `.env` nueva; ninguna ruta nueva de OpenBao (la clave `auth-signing` es de la fase 1). La secuencia completa de despliegue la da el informe del proyecto 4, y empieza por `docker compose exec openbao bao status` (Task 12, Step 7); esta lista es lo que esta fase le añade.
 
@@ -120,34 +121,39 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 | `backend/app/core/client_scope_catalog.py` | cuatro entradas `oauth_*` (Task 5) | unión |
 | `backend/app/core/client_scope.py` | `ALL_SCOPE_ALLOWLIST` gana `app/core/auth/oauth/store.py::oauth_session` (Task 5) | unión (la fase 2 añade `retention.py::sweep_org` y `entra_flows.py::_entra_session`) |
 | `backend/tests/test_client_catalog.py` | `SURROGATE_COLUMNS` gana `oauth_codes.code_hash` y `oauth_refresh_tokens.token_hash`; la guarda nueva `OAUTH_SESSION_USERS` (Tasks 5–10); el motivo de `users_org_id_external_subject_key` (Task 9) | unión |
-| `backend/app/api/deps.py` | la rama MCP de `admit()` verifica el token propio (Task 9); la rama de la cookie y `require_step_up` no cambian | si la fase 2 toca `admit(contacts=True)` o `_admit_session`, se conservan los dos cambios; esta fase no toca la rama de la sesión |
+| `backend/app/api/deps.py` | la rama MCP de `admit()` verifica el token propio (Task 9); la rama de la cookie y `require_step_up` no cambian | si la fase 2 toca `admit(contacts=True)` o `_admit_session`, se conservan los dos cambios; esta fase no toca la rama de la sesión. Tras la fusión, la puerta de la consola responde a un contacto 403 `portal_only` sin log, y la de MCP sigue como en la fase 1 (su log y un 403 sin código): a propósito, porque un contacto no llega a tener concesión (Task 9, decisión 2; re-revisión f3-3, X10) |
 | `backend/app/api/v1/auth.py` | **no lo toca**: el consentimiento va en `backend/app/api/v1/oauth_consent.py` | — |
-| `backend/app/core/auth/notices.py` | el aviso `app_connected` y el parámetro `host` de `_compose` y `tell` (Task 8) | unión; si la fase 2 añade avisos (contactos, Microsoft), se conservan los dos y `Notice` lleva los de ambas |
+| `backend/app/core/auth/notices.py` | el aviso `app_connected` y el parámetro `host` de `_compose` y `tell` (Task 8) | unión: la fase 2 no añade tipos de `Notice` (sus avisos reutilizan `factor_added`, `factor_removed` y `password_changed`); cambia `reset_mail`, `contact_invitation_mail` y la rama `"microsoft"` de `_factor_name`, otras líneas (re-revisión f3-3, X7) |
 | `backend/app/core/auth/flows.py`, `backend/app/core/auth/account.py` | el import `grants as ai_grants`, una línea junto a cada `revoke_all_for_user(session, user.id)` y `ai_grants_revoked` en el evento del acto; en `account.py`, el tipo de `_record` (Task 10) | unión; si la fase 2 añade un acto que revoca los equipos recordados de un contacto, no necesita la línea (un contacto no tiene concesiones de IA: no pasa la puerta de la consola) |
 | `backend/app/modules/user_admin/service.py` | lo mismo, en `set_enabled`, `reset_factors` y `delete_user` (Task 10) | unión |
 | `backend/tests/test_auth_signin.py`, `backend/tests/test_auth_password_reset.py`, `backend/tests/test_auth_recover_command.py` | cinco aserciones de metadatos exactos ganan `ai_grants_revoked` (Task 10) | unión; si la fase 2 cambia los mismos metadatos, las claves de las dos |
-| `backend/app/core/config.py` | `mcp_registration: str = ""` (Task 6) | unión (la fase 2 añade los de Entra) |
+| `backend/app/core/config.py` | `mcp_registration: str = ""` (Task 6) | sin choque: la fase 2 no añade campos a `Settings` (con su C4, la credencial de Microsoft vive en la bóveda; re-revisión f3-3, X5) |
 | `backend/app/main.py` | el manejador de `OAuthError` (Task 1) y tres routers (Tasks 6, 7, 8) | unión |
 | `backend/app/core/i18n/es.py` | entradas nuevas (Tasks 6, 8, 9, 10) | unión |
-| `backend/app/api/security_headers.py`, `backend/tests/test_security_headers.py` | `NO_STORE_ROUTES` y `SECRET_ONCE` ganan la decisión del consentimiento (Task 8) | unión |
+| `backend/app/api/security_headers.py`, `backend/tests/test_security_headers.py` | `NO_STORE_ROUTES` y `SECRET_ONCE` ganan la decisión del consentimiento, `POST /api/v1/oauth/authorize/decision` (Task 8) | unión: la fase 2 añade a los dos `POST /api/v1/clients/{client_id}/contacts/{contact_id}/invite` y `POST /api/v1/clients/{client_id}/contacts/{contact_id}/access/reset` (pueden devolver un enlace de invitación); en el árbol fusionado los dos conjuntos llevan las tres rutas, y `test_every_never_exposed_route_that_returns_a_secret_is_listed` lo exige (re-revisión f3-3, X2) |
 | auditoría: `frontend/src/i18n/{en,es}/auditVocabulary.ts`, `frontend/src/modules/audit/auditVocabulary.english.test.ts` | cinco acciones `mcp.*` y una en `HAND_WORDED` (Tasks 7, 8) | unión |
 | `frontend/src/lib/globalRoutes.json` | no cambia | regenerado en el árbol fusionado si la fase 2 lo cambia |
 | `backend/tests/test_logging_discipline.py` y el §2.2 de `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` | +1 (Task 3), +1 (Task 7), −3 (Task 10) | se suman los deltas de las dos fases y se escribe un párrafo «NOW N» por cambio |
 | `backend/app/mcp/exclusions.py` y `backend/tests/test_mcp_channel_api.py` (`NEVER_EXPOSED`) | +1 (`POST /api/v1/oauth/authorize/decision`), una clave de `NOT_FOR_MCP` nueva y otra cambiada (Tasks 8 y 10) | unión; el recuento final es 36 + 1 + lo de la fase 2 |
 | `backend/tests/test_route_gating.py` (`UNGATED_BY_DESIGN`) | +2 rutas del consentimiento (Task 8) | unión |
+| `backend/tests/test_auth_phase2_falsifiers.py` | **no lo toca**: lo crea la Task 13 de la fase 2 y recorre toda `/api/v1`; las rutas nuevas de esta fase lo pasan sin excepción (las del consentimiento, por `bound_auth_context`, que a un contacto le responde `portal_only`; la de revocar, por `require_permission`). La Task 8 lo corre si la worktree lo tiene (re-revisión f3-2, M-7) | la suite completa de la Task 12, Step 5, lo corre en el árbol fusionado |
 | `deploy/nginx.conf`, `backend/tests/test_deploy_frame_headers.py` | `frame-ancestors 'none'` y `X-Frame-Options: DENY` en cada `location` (Task 4) | si la fase 2 añade un `location` (la vuelta de Entra es una ruta de la consola, así que probablemente no), lleva las dos cabeceras: la prueba lo exige |
 | `deploy/.env.example` | comentario de `ITS_MCP_REGISTRATION` (C2) y de `KC_HOSTNAME` (Task 12) | unión |
-| `deploy/README.md` | la sección «AI connections (MCP)» (Task 12) | unión: la fase 2 escribe la de Microsoft y el portal |
+| `deploy/README.md` | la sección «AI connections (MCP)», tres frases sueltas, una fila de una tabla y, en «Status of this runbook», solo la línea `:32` (Task 12) | unión: la fase 2 escribe la de Microsoft y el portal, y en «Status of this runbook» solo la frase «Three things phase 1 changed…» (línea 36 en `3a1ba1c`); ninguna de las dos refluye ese párrafo, o la fusión choca (re-revisión f3-3, X11) |
 | `deploy/docker-compose.yml` | la regla de Traefik del router `api` (Task 6) | si la fase 2 también la cambia, se conservan los dos `Path` |
 | `.github/workflows/ci.yml` | **no lo toca** (fase 4) | — |
-| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | enmiendas fechadas en §2.5, §2.7 (C1) y §5.4 (C2) (Task 12) | unión: la fase 2 enmienda las suyas (§3, §4, la retención) |
-| `docs/03-security-model.md`, `docs/modules/console-auth/spec.md` | una frase cada uno, la de MCP (Task 12) | unión: la fase 2 cambia la de Microsoft y el portal |
+| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | enmiendas fechadas en §2.5, §2.7 (C1) y §5.4 (C2) (Task 12) | unión: la fase 2 enmienda §3, §4 y §9; en §9 no hay nada de esta fase que corregir (re-revisión f3-3, X6) |
+| `docs/03-security-model.md`, `docs/modules/console-auth/spec.md` | una frase cada uno, la de MCP (Task 12) | unión: la fase 2 cambia la de Microsoft y el portal. Nada de lo que escribe esta fase dice que la fase 3 retire Keycloak: lo retira la fase 4 (diseño §8); la búsqueda de «until phase 3» de la Task 12, Step 4, lo comprueba en el árbol fusionado (re-revisión f3-3, X1) |
 | `backend/app/api/v1/me.py`, `backend/app/core/auth/__init__.py`, `backend/tests/conftest.py` | solo comentarios que decían «hasta la fase 3» (Task 12) | unión |
 | `backend/tests/test_domain_gate_doors.py`, `backend/tests/test_auth_falsifiers.py`, `backend/tests/test_me_profile.py` | pruebas de la puerta de MCP re-apuntadas al token propio (Task 9) | si la fase 2 añade pruebas de la puerta de un contacto o de Microsoft, se conservan las dos; ninguna de las de aquí toca la rama de la sesión |
 | `frontend/src/App.tsx`, `frontend/src/lib/session.ts`, `frontend/scripts/routes.mjs`, `frontend/src/test/routes-covered.test.ts` | la ruta `/oauth/authorize`, la prop `bare` de `RequireAuth`, `EDGE_PATHS`, `EXCLUDED` (Task 4) | unión; `PUBLIC_PATHS` no cambia aquí |
 | `frontend/src/i18n/{en,es}/auth.ts`, `frontend/src/modules/auth/__tests__/harness.tsx` | `auth.consent.*`, los métodos del consentimiento y del segundo factor en `calls`, la ruta en `renderAuth` (Task 4) | unión |
 | `frontend/src/components/stepUp.tsx` | **no lo toca**: `ConsentPage` usa `useStepUp` (C1, Task 4) | — |
-| `frontend/src/lib/api.ts` | dos métodos y tipos del consentimiento; `revokeMcpConnection` y sus tipos (Tasks 4, 11) | unión |
+| `frontend/src/lib/api.ts` | dos métodos del consentimiento, después de `acceptRecovery` (sus tipos van en `frontend/src/modules/auth/types.ts`); `revokeMcpConnection` y sus tipos (Tasks 4, 11) | unión |
+| `frontend/src/modules/settings/__tests__/harness.tsx` | `MCP_APP_ID`, `MCP_APP_FIXTURE` con `id`, `name`, `host` y `kind`, y el `mockResolvedValue` de `calls.revokeMcpConnection` (Task 11) | unión: la fase 2 añade sus fixtures y llamadas de Microsoft; la Task 11 ancla cada edición por su texto, no por la línea (re-revisión f3-3, X8) |
+| `frontend/src/modules/settings/fixtures.ts` | `MCP_APPS`, su comentario y `revokeMcpConnection` (Task 11) | unión: la fase 2 añade `getMicrosoftSettings` y `putMicrosoftSettings` |
+| `frontend/src/modules/settings/SettingsPage.tsx` (la tabla de rutas de la cabecera) | la fila «AI connections»: `POST /mcp/connections/{app_id}/revoke` (Task 11) | unión: la fase 2 añade su fila (Microsoft); cada fase cambia solo la suya |
+| `frontend/src/i18n/{en,es}/settings.ts` | en `aiConnections.apps`: `calledItself`, `selfRegistered`, `unregistered`, `subtitle` y `empty`; se van `partialMe` y `partial` (Task 11) | unión: la fase 2 añade `page.tabs.microsoft` y la sección `microsoft` |
 | `frontend/src/test/secretMutations.test.ts` | `oauthAuthorizeDecision` en `SECRET_METHODS` y su sitio en `SECRET_SITES`, por `stepUp.run` (Task 4) | unión |
 
 ## Apéndice A — Contratos
@@ -161,11 +167,11 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 - `access.py` (Task 2): `@dataclass(frozen=True) class McpGrant(user_id: UUID, org_id: UUID, client_id: str, family_id: UUID, iat: int, exp: int, email: str = "")` con la propiedad `azp -> str` (= `client_id`); `async def mint_access_token(*, settings: object, user_id: UUID, org_id: UUID, client_id: str, family_id: UUID, now: int | None = None) -> tuple[str, int]`; `async def verify_access_token(token: str, *, settings: object) -> McpGrant | None`; `def unverified_client_id(token: str) -> str`; `REFRESH_EVERY_S = 5.0`.
 - `cimd.py` (Task 3): `MAX_DOCUMENT_BYTES = 5 * 1024`, `FETCH_TIMEOUT_S = 5.0`, `MIN_CACHE = timedelta(minutes=5)`, `MAX_CACHE = timedelta(hours=24)`; `Reason` (`not_a_document_url`, `own_origin`, `blocked`, `unavailable`, `not_ok`, `too_large`, `encoded`, `not_json`, `mismatch`, `incomplete`, `bad_redirect`, `secret`, `unsupported`), `TRANSIENT = frozenset({"unavailable"})`; `class DocumentRefused(Exception)` con `reason: Reason` y la propiedad `transient`; `@dataclass(frozen=True) class ClientDocument(client_id: str, client_name: str, redirect_uris: tuple[str, ...], cache_for: timedelta)`; `def is_document_client_id(client_id: str) -> bool` (CIMD-03 §3, ASCII); `def on_origin(client_id: str, issuer: str) -> bool`; `def cache_lifetime(cache_control: str) -> timedelta` (`clamp(max-age o 0, 5 min, 24 h)`); `async def fetch_document(client_id: str) -> ClientDocument` (un WARNING por minuto como mucho).
 - `store.py` (Task 5): `async def deployment_org(app: Any) -> UUID | None` (`lookup.org_of_slug(app.state.app_engine, slug)`, de la fase 2); `@asynccontextmanager async def oauth_session(org_id: UUID, engine: AsyncEngine) -> AsyncIterator[AsyncSession]`.
-- `clients.py` (Task 5, ampliado por la 6): `TOUCH_EVERY = timedelta(hours=1)`; `@dataclass(frozen=True) class ClientView(id: UUID, client_id: str, kind: str, client_name: str | None, redirect_uris: tuple[str, ...])`; `def view(row: OAuthClient) -> ClientView`; `async def find_client(session, *, org_id: UUID, client_id: str, now: datetime) -> OAuthClient | None`; `def touch(row: OAuthClient, now: datetime) -> None` (escribe como mucho una vez por `TOUCH_EVERY`). Task 6: `PURGE_BATCH = 100`; `REGISTRATIONS_PER_HOUR`; `@dataclass(frozen=True) class Registration(client_name: str | None, redirect_uris: tuple[str, ...])`; `def parse_registration(body: object) -> Registration`; `async def mcp_switched_on(session, org_id: UUID) -> bool`; `async def registration_offered(app: Any) -> bool`; `async def purge_idle(session, *, org_id: UUID, now: datetime) -> int`; `async def register(session, *, org_id: UUID, registration: Registration, now: datetime) -> OAuthClient`; `def registration_response(row: OAuthClient) -> dict[str, Any]`; `async def register_new(app: Any, *, org_id: UUID, registration: Registration, now: datetime) -> dict[str, Any]` (el interruptor, la purga, el techo y la escritura en una transacción); `Fetch = Callable[[str], Awaitable[cimd.ClientDocument]]`; `async def resolve_client(app: Any, *, org_id: UUID, client_id: str, now: datetime, fetch: Fetch | None = None) -> ClientView | None` (sin `fetch`, `cimd.fetch_document`, resuelto al llamar; lanza `cimd.DocumentRefused`; un fallo transitorio conserva la copia guardada).
+- `clients.py` (Task 5, ampliado por la 6): `TOUCH_EVERY = timedelta(hours=1)`; `@dataclass(frozen=True) class ClientView(id: UUID, client_id: str, kind: str, client_name: str | None, redirect_uris: tuple[str, ...])`; `def view(row: OAuthClient) -> ClientView`; `async def find_client(session, *, org_id: UUID, client_id: str, now: datetime) -> OAuthClient | None`; `def touch(row: OAuthClient, now: datetime) -> None` (escribe como mucho una vez por `TOUCH_EVERY`). Task 6: `PURGE_BATCH = 100`; `REGISTRATIONS_PER_HOUR`; `@dataclass(frozen=True) class Registration(client_name: str | None, redirect_uris: tuple[str, ...])`; `def parse_registration(body: object) -> Registration`; `async def mcp_switched_on(session, org_id: UUID) -> bool`; `async def registration_offered(app: Any) -> bool`; `async def purge_idle(session, *, org_id: UUID, now: datetime) -> int`; `async def register(session, *, org_id: UUID, registration: Registration, now: datetime) -> OAuthClient`; `def registration_response(row: OAuthClient) -> dict[str, Any]`; `async def register_new(app: Any, *, org_id: UUID, registration: Registration, now: datetime) -> dict[str, Any]` (el interruptor, la purga, el techo y la escritura en una transacción); `Fetch = Callable[[str], Awaitable[cimd.ClientDocument]]`; `async def resolve_client(app: Any, *, org_id: UUID, client_id: str, now: datetime, fetch: Fetch | None = None, record_use: bool = True) -> ClientView | None` (sin `fetch`, `cimd.fetch_document`, resuelto al llamar; lanza `cimd.DocumentRefused`, que no se guarda ni borra la copia guardada; un fallo transitorio la conserva; con `record_use=False` no escribe nada, re-revisión f3-2, M-3).
 - `grants.py` (Task 7): `def hash_secret(value: str) -> bytes`; `def new_secret() -> str`; `def names_resource(value: str, resource: str) -> bool`; `@dataclass(frozen=True) class IssuedTokens(access_token: str, expires_in: int, refresh_token: str)`; `async def issue_code(session, *, org_id, user_id, oauth_client_id, redirect_uri, code_challenge, resource, now) -> str`; `async def open_family(session, *, org_id, user_id, oauth_client_id, resource, now) -> tuple[OAuthRefreshFamily, str]`; `async def exchange_code(app, *, org_id, client_id, code, redirect_uri: str | None, code_verifier) -> IssuedTokens`; `async def refresh_grant(app, *, org_id, client_id, refresh_token) -> IssuedTokens`; `async def revoke_presented(app, *, org_id, client_id, token) -> None`; `async def revoke_family(session, family_id, reason, now) -> bool`; `async def revoke_all_for_user(session, user_id, reason) -> int`; `async def revoke_app(session, *, oauth_client_id, user_id: UUID | None, reason, now) -> int`; `async def family_is_live(session, *, family_id, user_id, client_id: str, now) -> bool`. Ya no `CODE_KEPT` ni `FAMILY_KEPT` (las ventanas son de la Task 13).
-- `authorize.py` (Task 8): `@dataclass(frozen=True) class AuthorizationRequest(client: ClientView, redirect_uri: str, state: str | None, code_challenge: str, resource: str)`; `class NotRedirectable(Exception)` con `__init__(self, detail: str, *, error: str)`; `class Redirectable(Exception)` con `__init__(self, redirect_uri: str, state: str | None, problem: Problem)`; `def parse_query(query: str) -> dict[str, list[str]]`; `def answer(redirect_uri: str, state: str | None, iss: str, **params: str) -> str`; `async def validate(app, *, org_id: UUID, query: str, now: datetime, fetch: Fetch | None = None) -> AuthorizationRequest`.
+- `authorize.py` (Task 8): `@dataclass(frozen=True) class AuthorizationRequest(client: ClientView, redirect_uri: str, state: str | None, code_challenge: str, resource: str)`; `class NotRedirectable(Exception)` con `__init__(self, detail: str, *, error: str)`; `class Redirectable(Exception)` con `__init__(self, redirect_uri: str, state: str | None, problem: Problem)`; `def parse_query(query: str) -> dict[str, list[str]]`; `def answer(redirect_uri: str, state: str | None, iss: str, **params: str) -> str`; `async def validate(app, *, org_id: UUID, query: str, now: datetime, fetch: Fetch | None = None, record_use: bool = True) -> AuthorizationRequest` (los dos, a `resolve_client`).
 - `consent.py` (Task 8): `async def details(request: Request, ctx: AuthContext, *, query: str) -> dict[str, Any]`; `async def decide(request: Request, ctx: AuthContext, *, query: str, approve: bool) -> dict[str, Any]` (la ruta ya pidió el segundo factor reciente si `approve`).
-- `connections.py` (Task 10): `@dataclass(frozen=True) class Registration(id: UUID, client_id: str, name: str | None, kind: str, host: str)`; `async def registrations(engine, *, org_id: UUID, client_ids: Sequence[str]) -> dict[str, Registration]`; `async def held_apps(engine, *, org_id: UUID, user_id: UUID, now: datetime, limit: int) -> list[Registration]`; `async def revoke_app_access(engine, *, org_id: UUID, actor_id: UUID, app_id: UUID, scope: Literal["me", "everyone"], now: datetime) -> int`.
+- `connections.py` (Task 10): `@dataclass(frozen=True) class Registration(id: UUID, client_id: str, name: str | None, kind: str, host: str)`; `async def registrations(engine, *, org_id: UUID, client_ids: Sequence[str]) -> dict[str, Registration]`; `@dataclass(frozen=True) class HeldApp(registration: Registration, mine: bool)` (`mine`: uno de los permisos vivos es de quien pregunta; re-revisión f3-3, N4); `async def held_apps(engine, *, org_id: UUID, user_id: UUID, now: datetime, limit: int) -> list[HeldApp]`; `async def revoke_app_access(engine, *, org_id: UUID, actor_id: UUID, app_id: UUID, scope: Literal["me", "everyone"], now: datetime) -> int`.
 - `backend/app/core/egress.py` (Task 3): `@dataclass(frozen=True) class EgressBody(status_code: int, content: bytes, truncated: bool, content_type: str, cache_control: str, content_encoding: str = "")`; `async def get_bounded(url: str, *, max_bytes: int, timeout_s: float = 10.0, headers: Mapping[str, str] | None = None) -> EgressBody` (toda dirección resuelta, pública: ninguna de uso especial).
 - `backend/app/core/auth/notices.py` (Task 8): `Notice` gana `"app_connected"`; `tell(..., host: str | None = None)`.
 - `backend/app/core/auth/retention.py` (de la fase 2; Task 13): `OAUTH_CODE_RETENTION = timedelta(minutes=10)`, `OAUTH_GRANT_RETENTION = timedelta(days=1)`; `STEPS` termina en `("oauth_codes", …)`, `("oauth_grants", …)`, `("oauth_apps", …)`.
@@ -236,6 +242,16 @@ La primera versión de este plan dejaba catorce preguntas al operador (P1–P14)
 - **D14. Un `kid` desconocido no hace leer OpenBao en cada petición.** `/mcp` es público; un token con `kid` inventado forzaría `keys.jwks(refresh=True)` por petición. `access.py` vuelve a leer las claves públicas como mucho una vez cada `REFRESH_EVERY_S` (5 s) por proceso, la defensa que `JwksCache` tenía para Keycloak (`security.py`, «minimum interval between refetches»); tras una rotación, un token con la clave nueva puede esperar hasta esos 5 s (A3-07). El token interno del asistente no cambia (solo lo presenta el propio proceso).
 - **D15. `ITS_MCP_REGISTRATION=open` abre el registro dinámico, y nada más** (decisión del operador C2, 2026-11-06). La API lee `mcp_registration` (ajuste nuevo; `env_file: .env` ya lo carga en el contenedor `api`). Sin él, `POST /oauth/register` responde 403 `access_denied` y los metadatos no anuncian `registration_endpoint`; con él, sigue cerrado mientras MCP esté apagado. CIMD no depende de él: los metadatos anuncian `client_id_metadata_document_supported: true` siempre que hay emisor, y el consentimiento lee el documento siempre que MCP esté encendido. Antes de C2 la misma clave abría los dos.
 - **D16. CIMD solo en el 443** (B3-17). La protección de salida no abre otro puerto para un documento que cualquiera nombra; CIMD-03 §3 lo permite («MAY contain a port»), y este servidor no lo acepta, decisión técnica escrita en el runbook.
+- **D17. Un documento CIMD que se rechaza no termina las concesiones de su app** (re-revisión f3-2, M-1; de sus dos
+  opciones, la segunda). CIMD-03 §6.1: «A terminal failure caused by a client_id mismatch SHOULD invalidate the
+  client's outstanding refresh tokens immediately». El plan lo declina, y lo dice: un rechazo definitivo se levanta,
+  no se guarda y **no borra** la copia guardada (Task 6, decisión 4), así que un fallo transitorio posterior la vuelve
+  a servir. Dos razones. Terminar concesiones es de `grants.py` (Task 7), que corre en paralelo con la 6; hacerlo
+  desde `resolve_client` pediría un motivo nuevo en `REVOKE_REASONS` y una escritura de concesiones en una lectura que
+  hoy solo escribe la fila del cliente. Y una concesión no depende del documento: la persona aprobó un host, que el
+  documento no puede cambiar (su `client_id` es su URL); la puerta exige en cada llamada que la concesión siga viva
+  (D6), y Ajustes la revoca. Lo que el rechazo sí corta es lo que el documento decide: no se aprueba nada nuevo
+  mientras el host responda con él.
 
 ### B.2 Decididas por una regla (revisión del 2026-11-06)
 
@@ -300,7 +316,7 @@ Además de [S1]–[S65] del dossier. Cada cita del plan está copiada del texto 
 - [P-3986] RFC 3986, URI Generic Syntax. https://www.rfc-editor.org/rfc/rfc3986.txt — §2 («A URI is composed from a limited set of characters consisting of digits, letters, and a few graphic symbols.»; A3-01); §6.2.2.1 (el esquema y el host no distinguen mayúsculas; B3-05).
 - [P-6265BIS] draft-ietf-httpbis-rfc6265bis-22. https://www.ietf.org/archive/id/draft-ietf-httpbis-rfc6265bis-22.txt — §5.2.1 (el *site for cookies* de un documento enmarcado por otro del mismo sitio): por qué `SameSite=Strict` no cubre el enmarcado (B3-16).
 - [P-MCP] MCP 2026-07-28 (la versión actual, https://modelcontextprotocol.io/specification/versioning.md). https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization.md («Authorization servers MUST implement OAuth 2.1»; «implementations SHOULD accept uppercase scheme and host components for robustness and interoperability»; «MCP servers MUST NOT accept or transit any other tokens.»; «MCP servers MUST only accept tokens that are valid for use with their own resources.»); …/authorization/client-registration.md («Dynamic Client Registration is deprecated. New implementations should use Client ID Metadata Documents instead.»); …/authorization/security-considerations.md («MUST take precautions to prevent redirecting user agents to untrusted URI's»; «SHOULD display additional warnings for localhost-only redirect URIs»; «MUST clearly display the redirect URI hostname during authorization»).
-- [P-ANTH] Anthropic. https://claude.com/docs/connectors/building/authentication.md (el refresh «reactively on a 401 response»; hasta 30 s para una petición de refresh; «Claude normally selects CIMD only when your authorization server metadata advertises both "client_id_metadata_document_supported": true and "none" in token_endpoint_auth_methods_supported»; «DCR causes Claude to register a new client on every fresh connection»; «Anthropic's outbound traffic to your server originates from 160.79.104.0/21»); https://claude.com/docs/connectors/building/lazy-authentication.md («name the host of the client_id URL as the app asking for access, not the document's client_name, because the document is self-asserted»); https://platform.claude.com/docs/en/api/ip-addresses.md (salida: `160.79.104.0/21` **y** `153.61.208.0/20`; la página de conectores solo nombra el primero); https://claude.ai/oauth/claude-code-client-metadata (el documento de Claude Code: `redirect_uris` `http://localhost/callback` y `http://127.0.0.1/callback`, `token_endpoint_auth_method: "none"`, `cache-control: public, max-age=300`).
+- [P-ANTH] Anthropic. https://claude.com/docs/connectors/building/authentication.md («Claude refreshes tokens reactively on a `401` response, and proactively up to five minutes before the stored expiry», la frase entera, re-revisión f3-2, M-4; «up to 30 seconds for refresh token requests»; «If you rotate, return the new refresh token in the same response that invalidates the old one»; «Claude normally selects CIMD only when your authorization server metadata advertises both "client_id_metadata_document_supported": true and "none" in token_endpoint_auth_methods_supported»; «DCR causes Claude to register a new client on every fresh connection»; «Anthropic's outbound traffic to your server originates from 160.79.104.0/21»); https://claude.com/docs/connectors/building/lazy-authentication.md («name the host of the client_id URL as the app asking for access, not the document's client_name, because the document is self-asserted»); https://platform.claude.com/docs/en/api/ip-addresses.md («These are the stable IP addresses that Anthropic uses for outbound requests»: `160.79.104.0/21` **y** `153.61.208.0/20`, 6.144 direcciones IPv4; la página de conectores solo nombra el primero, y ninguna dice cuántas de ellas usa Anthropic de verdad, así que «pocas» no se afirma en ningún sitio del plan); https://claude.ai/oauth/claude-code-client-metadata (el documento de Claude Code: `redirect_uris` `http://localhost/callback` y `http://127.0.0.1/callback`, `token_endpoint_auth_method: "none"`, `cache-control: public, max-age=300`).
 - [P-OWASP] OWASP Clickjacking Defense Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html — «Content-Security-Policy: frame-ancestors 'none'; This prevents any domain from framing the content. This setting is recommended unless a specific need has been identified for framing.»
 - [P-GRACE] La gracia de la reutilización, para el operador si quisiera reabrir B3-27: Okta, https://developer.okta.com/docs/guides/refresh-tokens/main/ («The default number of seconds for the Grace period for token rotation is set to 30 seconds.»); Auth0, https://auth0.com/docs/secure/tokens/refresh-tokens/configure-refresh-token-rotation («Rotation Overlap Period … By default leeway is disabled.»).
 - [P-C1] Para C1: NIST SP 800-63B-4, https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63B-4.pdf, §5.1.1 («Cookies and similar "remember my browser" features SHALL NOT be used instead of authentication except as provided for reauthentication at AAL2»); Microsoft, https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/protect-against-consent-phishing («Consent phishing attacks trick users into granting permissions to malicious cloud applications.»); RFC 7591 §5 («a rogue client might use the name and logo of a legitimate client that it is trying to impersonate»).
@@ -631,12 +647,17 @@ def test_the_host_shown_to_the_person() -> None:
         ("https://localhost/cb", True),
         ("https://127.0.0.1/cb", True),
         ("http://[::1]/cb", True),
+        # Any loopback address, and `localhost` with its root dot (re-review
+        # f3-1, Minor 7): https to any host registers, so these can.
+        ("https://127.0.0.2/cb", True),
+        ("https://localhost./cb", True),
         ("https://claude.ai/cb", False),
+        ("https://localhost.claude.ai/cb", False),
     ],
 )
 def test_an_answer_that_stays_on_this_computer_is_told_by_its_host(uri: str, here: bool) -> None:
     """MCP: "SHOULD display additional warnings for localhost-only redirect URIs"
-    [S30], whatever the scheme."""
+    [S30], whatever the scheme, however the machine is spelled."""
     assert redirects.stays_on_this_computer(uri) is here
 
 
@@ -971,6 +992,7 @@ The answer keeps the redirect's own query as written (OAuth 2.1-17 §2.3: "MUST
 be retained when adding additional query parameters").
 """
 
+import ipaddress
 from collections.abc import Mapping, Sequence
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -1037,10 +1059,18 @@ def is_loopback(uri: str) -> bool:
 
 
 def stays_on_this_computer(uri: str) -> bool:
-    """The answer goes to the person's own machine, whatever the scheme: the
-    consent screen's warning (MCP [S30]: "SHOULD display additional warnings
-    for localhost-only redirect URIs")."""
-    return host_of(uri) in LOOPBACK_HOSTS
+    """The answer goes to the person's own machine, whatever the scheme and
+    however it is spelled -- `localhost` (with or without its root dot) or
+    any loopback address, `127.0.0.0/8` and `::1`: the consent screen's
+    warning (MCP [S30]: "SHOULD display additional warnings for
+    localhost-only redirect URIs")."""
+    host = host_of(uri).rstrip(".")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _without_port(uri: str) -> tuple[str, str, str, str]:
@@ -1204,6 +1234,13 @@ del canal, `McpCall.azp`; la fila de auditoría, `"app": principal.claims.azp`).
 **Decisión de la tarea (2): el correo no va en el token.** La puerta lo lee de la fila `users` (Task 9) y lo pone en
 `McpGrant.email` con `dataclasses.replace`. Un token que no lleva el correo no puede quedarse desfasado de él, y no
 expone el correo a quien lo lea.
+
+- [ ] **Step 0: El paquete y, si falta, `policy.py`** (re-revisión f3-1, Minor 9)
+
+`backend/app/core/auth/oauth/__init__.py`: el contenido de la Task 1, Step 1. Si `backend/app/core/auth/oauth/policy.py`
+no existe (la Task 1 aún no está en la rama), se crea con el contenido exacto del bloque `policy.py` de la Task 1,
+Step 3. Sin este paso, el rojo del Step 1 sería `ModuleNotFoundError: No module named 'app.core.auth.oauth'` y no el
+que espera.
 
 - [ ] **Step 1: La prueba que falla**
 
@@ -1742,7 +1779,8 @@ memoria. `get_bounded` manda `Accept-Encoding: identity`, cuenta con `aiter_raw(
 
 **Decisión de la tarea (5): un fallo transitorio no es un rechazo** (CIMD-03 §6.1: «A transient failure SHOULD NOT by
 itself invalidate a Client»). Los motivos se separan: `unavailable` (tiempo agotado, error de red, 5xx o 429) es
-transitorio, y el resto (`blocked`, `not_ok`, …) definitivo. `DocumentRefused.transient` lo dice; la Task 6 sigue
+transitorio, y también un nombre que no resolvió (`dns_failure` de la protección de salida: no se recuperó nada;
+§6.1 pone «a network error or timeout» entre los transitorios); el resto (`blocked`, `not_ok`, …) es definitivo. `DocumentRefused.transient` lo dice; la Task 6 sigue
 usando una copia guardada válida ante un fallo transitorio, y la pantalla de consentimiento (Task 4) dice «inténtalo
 de nuevo» en vez de «no se puede usar».
 
@@ -1750,11 +1788,15 @@ de nuevo» en vez de «no se puede usar».
 MUST filter the grant_types and response_types array-valued fields and find the intersection … If the intersection of
 either of these two properties is empty, the Authorization Server MUST reject the request with invalid_client»). Sin
 ellos valen los de RFC 7591 §2 (`["authorization_code"]`, `["code"]`); una intersección vacía, o una sin
-`authorization_code`, es `unsupported`.
+`authorization_code`, es `unsupported`. La intersección decide si el documento sirve, no qué se concede: un documento
+que declara solo `authorization_code` recibe igualmente un refresh token, porque este servidor lo emite siempre (D7:
+el cliente «MUST NOT assume refresh tokens will be issued; the AS retains discretion» [S27]), y el refresh lo
+gobiernan la rotación y la inactividad de la familia, no los metadatos que el cliente afirma de sí mismo (RFC 7591
+§5). El documento de Claude Code declara los dos (re-revisión f3-1, Minor 8).
 
 **Decisión de la tarea (7): un documento en el origen propio no se descarga** (CIMD-03 §10.1: «SHOULD reject a Client
-Identifier URL that is equal … to its own issuer identifier»). `on_origin(client_id, issuer)` lo dice, y la Task 6 lo
-rechaza antes de la descarga (`own_origin`).
+Identifier URL that is equal … to its own issuer identifier»). `on_origin(client_id, issuer)` lo dice —el puerto 443
+escrito y el punto final del nombre no lo disfrazan—, y la Task 6 lo rechaza antes de la descarga (`own_origin`).
 
 **Decisión de la tarea (8): una línea de log por documento rechazado, con freno** (B3-32). Sin ella, una conexión que
 falla porque el documento de un cliente no vale sería invisible para el operador; sin freno, cualquier persona con
@@ -1765,7 +1807,9 @@ fija, y en `extra` la razón, el host y `unlogged`; nunca la URL completa ni el 
 
 - [ ] **Step 1: El paquete**
 
-`backend/app/core/auth/oauth/__init__.py`: el contenido de la Task 1, Step 1.
+`backend/app/core/auth/oauth/__init__.py`: el contenido de la Task 1, Step 1. Si `policy.py` o `redirects.py` no
+existen en `backend/app/core/auth/oauth/` (la Task 1 aún no está en la rama), se crean con el contenido exacto de sus
+bloques de la Task 1, Step 3.
 
 - [ ] **Step 2: Las pruebas que fallan**
 
@@ -1930,6 +1974,10 @@ async def test_what_the_guard_refuses_before_any_connection(
         "100::1",
         "64:ff9b:1::a00:5",
         "64:ff9b::a00:5",
+        # NAT64 of TEST-NET-1: `is_global` counts it as global; only the
+        # embedded-IPv4 branch of `_is_special_use` refuses it (re-review
+        # f3-1, Minor 2).
+        "64:ff9b::c000:201",
     ],
 )
 async def test_a_special_use_answer_is_never_dialled(monkeypatch, address: str) -> None:
@@ -2072,6 +2120,9 @@ def test_a_document_on_the_issuers_own_origin_is_known_as_such() -> None:
     to its own issuer identifier"."""
     assert cimd.on_origin("https://itms.example.com/mcp", "https://itms.example.com")
     assert cimd.on_origin("https://ITMS.example.com/x.json", "https://itms.example.com")
+    # The default port written out, and the root dot (re-review f3-1, Minor 3).
+    assert cimd.on_origin("https://itms.example.com:443/x.json", "https://itms.example.com")
+    assert cimd.on_origin("https://itms.example.com./x.json", "https://itms.example.com")
     assert not cimd.on_origin(URL, "https://itms.example.com")
     assert not cimd.on_origin("https://itms.example.com:8443/x", "https://itms.example.com")
 
@@ -2174,14 +2225,25 @@ async def test_an_answer_that_is_not_a_document_is_refused(
     assert refused.value.transient is transient
 
 
-async def test_a_url_the_guard_refuses_is_blocked_for_good(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("guard", "reason", "transient"),
+    [
+        ("blocked_private", "blocked", False),
+        ("port_not_allowed", "blocked", False),
+        # A resolver that did not answer retrieved nothing (CIMD-03 §6.1).
+        ("dns_failure", "unavailable", True),
+    ],
+)
+async def test_a_url_the_guard_refuses_is_blocked_for_good(
+    monkeypatch, guard: str, reason: str, transient: bool
+) -> None:
     async def blocked(url: str, **kwargs: Any) -> EgressBody:
-        raise EgressBlocked("blocked_private", "no")
+        raise EgressBlocked(guard, "no")
 
     monkeypatch.setattr(egress, "get_bounded", blocked)
     with pytest.raises(cimd.DocumentRefused) as refused:
         await cimd.fetch_document(URL)
-    assert (refused.value.reason, refused.value.transient) == ("blocked", False)
+    assert (refused.value.reason, refused.value.transient) == (reason, transient)
 
 
 @pytest.mark.parametrize("error", [TimeoutError(), httpx.ConnectError("down"), OSError("reset")])
@@ -2432,7 +2494,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import SplitResult, unquote, urlsplit
 
 import httpx
 
@@ -2524,13 +2586,15 @@ def on_origin(client_id: str, issuer: str) -> bool:
     resource is, and so is anything else this server answers."""
     try:
         mine, theirs = urlsplit(issuer), urlsplit(client_id)
-        return (theirs.scheme, theirs.hostname, theirs.port) == (
-            mine.scheme,
-            mine.hostname,
-            mine.port,
-        )
+        return _origin(theirs) == _origin(mine)
     except ValueError:
         return False
+
+
+def _origin(parts: SplitResult) -> tuple[str, str, int]:
+    """Scheme, host without its root dot, and port with https's default
+    filled in: `https://host:443/` and `https://host./` are `https://host/`."""
+    return parts.scheme, (parts.hostname or "").rstrip("."), parts.port or 443
 
 
 def cache_lifetime(cache_control: str) -> timedelta:
@@ -2562,7 +2626,11 @@ async def _read(client_id: str) -> ClientDocument:
             headers={"Accept": "application/json"},
         )
     except egress.EgressBlocked as exc:
-        raise DocumentRefused("blocked") from exc  # i18n-exempt: a reason code
+        # A name that did not resolve retrieved nothing: transient (CIMD-03
+        # §6.1, "a network error or timeout"); anything else the guard refused
+        # is for good (re-review f3-1, Minor 1).
+        reason: Reason = "unavailable" if exc.reason == "dns_failure" else "blocked"
+        raise DocumentRefused(reason) from exc  # i18n-exempt: a reason code
     except (httpx.HTTPError, TimeoutError, OSError) as exc:
         raise DocumentRefused("unavailable") from exc  # i18n-exempt: a reason code
     if answer.status_code >= 500 or answer.status_code == 429:
@@ -2628,8 +2696,15 @@ async def fetch_document(client_id: str) -> ClientDocument:
 
 - [ ] **Step 5: El recuento de logs**
 
-En `backend/tests/test_logging_discipline.py`, en el docstring de la prueba del recuento, antes del párrafo «NOW 108,
-own authentication phase 1, fix 3 review Minor 2», añadir:
+**La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
+`backend/tests/test_logging_discipline.py` al empezar la tarea: 108 hoy, en la oleada 1, y otro si la rama ya trae la fase 2 (su Task 5
+añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
+docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+el `assert` (y el «expected N» de su mensaje) dicen **N+1** (abajo, 109, con N = 108). Lo mismo en el §2.2 de
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
+arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
+
+En el docstring de la prueba del recuento:
 
 ```text
     NOW 109, own authentication phase 3 (plan 2026-11-06, Task 3): one static
@@ -2644,13 +2719,20 @@ own authentication phase 1, fix 3 review Minor 2», añadir:
 
 ```
 
-y cambiar «NOW 108, own authentication phase 1, fix 3 review Minor 2» por «BEFORE THAT, 108, own authentication phase
-1, fix 3 review Minor 2», y `assert total == 108` / `expected 108` por `109`. En
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`, §2.2, antes de «**NOW 108, own authentication phase 1,
-fix 3 review (Minor 2).**», un párrafo nuevo con el mismo texto que el anterior en prosa
-(«**NOW 109, own authentication phase 3 (plan 2026-11-06, Task 3).** One site. …»), y «**NOW 108,» pasa a
-«**BEFORE THAT, 108,». Si al fusionar la base ya no es 108 (la fase 2), el coordinador ajusta el número: el delta de
-esta tarea es **+1**.
+En el §2.2 del diseño del kernel de logs:
+
+```markdown
+**NOW 109, own authentication phase 3 (plan 2026-11-06, Task 3).** One site. A
+static WARNING in `app/core/auth/oauth/cimd.py::fetch_document`, "client
+metadata document refused", when an AI app's client metadata document cannot
+be its client -- unreachable, not JSON, a mismatched `client_id`, a shared
+secret. Without it a connection that fails on the document is invisible to the
+operator. At most one a minute per process, saying how many were held (the
+C-M8 throttle, `loopback.RefusalThrottle`), because any signed-in person can
+cause one. `extra` = the reason code, the document's host and `unlogged`; never
+the URL's path, and never the body, which a stranger wrote.
+
+```
 
 - [ ] **Step 6: Las pruebas pasan**
 
@@ -2771,6 +2853,23 @@ origen. En **cada** `location` de `deploy/nginx.conf` (nginx no hereda `add_head
 suyos, y los dos declaran `Cache-Control`); la consola no se enmarca a sí misma en ninguna parte, así que `'none'` no
 rompe nada y cubre también las páginas de inicio de sesión. Como respaldo para un navegador sin CSP (RFC 6819), la
 página se niega a pintarse si `window.top !== window.self`.
+
+Lo que las cabeceras no cubren, y queda escrito como riesgo (re-revisión f3-1, Minor 6; de sus dos opciones, la
+segunda): el *DoubleClickjacking*. OWASP: «The target page is a top-level window, so framing restrictions such as
+X-Frame-Options and CSP frame-ancestors do not prevent this attack». Una página de otro sitio abre la de
+consentimiento bajo el segundo clic de un doble clic, y ese clic cae en «Aprobar». C1 lo cierra salvo en los diez
+minutos que siguen a una confirmación del segundo factor (`sessions.py:342`); en esa ventana basta un clic. La
+defensa que OWASP describe —el botón inactivo hasta que la página lleva un momento visible y con el foco— es, en sus
+palabras, «a proposed supplementary mitigation», y aquí obligaría a esperar en cada prueba que aprueba; el plan no la
+construye. La Task 12 lo escribe en el runbook (riesgo 10), con lo que lo acota: el host en el título, el correo
+«Has conectado <host>» y la revocación en Ajustes.
+
+**Decisión de la tarea (7): un fallo que pasa se lee como pasajero** (A3-24, B3-33). Si la pregunta de los detalles no
+recibe respuesta, o recibe un 5xx o un 429 (la API reiniciando, la red, el límite), la tarjeta dice «Ahora mismo no se
+puede comprobar esta solicitud» con «Intentarlo de nuevo», no «Esta solicitud de conexión no se puede usar»; lo mismo
+cuando el servidor responde `temporarily_unavailable` a los detalles **o a la decisión** (re-revisión f3-1, Minor 4).
+«Intentarlo de nuevo» descarta la respuesta de la decisión y vuelve a pedir los detalles, que el servidor valida otra
+vez. Solo un rechazo de la petición en sí (un 4xx, o `refused` con otro `error`) se lee como definitivo.
 
 - [ ] **Step 1: Las pruebas que fallan**
 
@@ -3070,6 +3169,46 @@ describe("everything else waits for the person (B3-15)", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Connect the app at claude.ai" })).toBeInTheDocument();
     expect(calls.oauthAuthorizeDetails).toHaveBeenCalledTimes(2);
+  });
+
+  // A3-24: the server not answering is not a verdict on the request.
+  it.each([
+    ["a 5xx", new ApiError(503, JSON.stringify({ detail: "unavailable" }))],
+    ["no answer at all", new TypeError("Failed to fetch")],
+  ])("a details request that got %s says to try again", async (_what, failure) => {
+    calls.oauthAuthorizeDetails.mockRejectedValueOnce(failure).mockResolvedValueOnce(CONSENT);
+    const user = userEvent.setup();
+    renderAuth(PAGE);
+    expect(await screen.findByRole("heading", { name: "This request cannot be checked right now" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Connect the app at claude.ai" })).toBeInTheDocument();
+    expect(calls.oauthAuthorizeDetails).toHaveBeenCalledTimes(2);
+  });
+
+  it("a details request the server refused is for good, with nothing to try again", async () => {
+    calls.oauthAuthorizeDetails.mockRejectedValueOnce(
+      new ApiError(422, JSON.stringify({ detail: "the request is not valid" })),
+    );
+    renderAuth(PAGE);
+    expect(await screen.findByRole("heading", { name: "This connection request cannot be used" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("a decision that could not be checked just now offers to ask again", async () => {
+    // Re-review f3-1, Minor 4: the transient answer of the decision too.
+    calls.oauthAuthorizeDecision.mockResolvedValueOnce({
+      outcome: "refused",
+      error: "temporarily_unavailable",
+      detail: "This AI app's description could not be read just now.",
+    });
+    const user = userEvent.setup();
+    renderAuth(PAGE);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByRole("heading", { name: "This request cannot be checked right now" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Connect the app at claude.ai" })).toBeInTheDocument();
+    expect(calls.oauthAuthorizeDetails).toHaveBeenCalledTimes(2);
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("shows the server's refusal of the decision and lets the person try nothing else", async () => {
@@ -3501,6 +3640,12 @@ export function isFramed(): boolean {
  * NEVER INSIDE ANOTHER PAGE (B3-16): nginx sends `frame-ancestors 'none'`, and
  * the page draws nothing when it is framed anyway.
  *
+ * A FAILURE THAT PASSES READS AS ONE (B3-33, A3-24): a details request that
+ * got no answer, a 5xx or a 429 (the api restarting, the network, the limit),
+ * and a `temporarily_unavailable` from the server at either step, say "cannot
+ * be checked right now" with "Try again", which asks the server again; only a
+ * refusal of the request itself reads as for good.
+ *
  * NOTHING HERE DECIDES ANYTHING (invariant 6): a request the page shows is a
  * request the server accepted a moment ago, and the server accepts it again,
  * or not, at the decision.
@@ -3512,6 +3657,7 @@ import { useLocation } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { StepUpCancelled, useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
+import { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useSecretMutation } from "../../lib/secretMutation";
 import { navigation } from "../../lib/session";
@@ -3527,6 +3673,11 @@ const BACK_TITLE = {
   declined: "auth.consent.declinedTitle",
   denied: "auth.consent.deniedTitle",
 } as const;
+
+/** No answer, a 5xx or a 429: worth asking again (A3-24). */
+function passes(cause: unknown): boolean {
+  return !(cause instanceof ApiError) || cause.status >= 500 || cause.status === 429;
+}
 
 export function ConsentPage() {
   const t = useT();
@@ -3597,10 +3748,23 @@ function ConsentRequest() {
       </AuthCard>
     );
   }
+  // Asking again starts from the question: an answer the decision gave is
+  // dropped, and the server validates the request once more.
+  function askAgain() {
+    setAnswered(null);
+    setFailure(null);
+    void details.refetch();
+  }
   if (details.isError) {
+    const passing = passes(details.error);
     return (
-      <AuthCard title={t("auth.consent.refusedTitle")}>
+      <AuthCard title={t(passing ? "auth.consent.unavailableTitle" : "auth.consent.refusedTitle")}>
         <AuthAlert text={describeSubmitError(details.error)} />
+        {passing ? (
+          <div className="form-actions">
+            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
+          </div>
+        ) : null}
       </AuthCard>
     );
   }
@@ -3610,9 +3774,9 @@ function ConsentRequest() {
     return (
       <AuthCard title={t(passing ? "auth.consent.unavailableTitle" : "auth.consent.refusedTitle")}>
         <AuthAlert text={shown.detail} />
-        {passing && answered === null ? (
+        {passing ? (
           <div className="form-actions">
-            <Btn label={t("auth.consent.retry")} onClick={() => void details.refetch()} />
+            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
       </AuthCard>
@@ -5104,8 +5268,8 @@ publicando RFC 9728, apuntando a la plataforma»).
 - Produces: `Settings.mcp_registration: str`; `clients.Registration`, `parse_registration`, `register`, `purge_idle`,
   `PURGE_BATCH = 100`, `registration_response`, `mcp_switched_on(session, org_id) -> bool`,
   `registration_offered(app) -> bool`, `register_new(app, *, org_id, registration, now) -> dict`,
-  `resolve_client(app, *, org_id, client_id, now, fetch=None)` (Apéndice A.1; `fetch` es `cimd.fetch_document` por
-  defecto, leído al llamar); las rutas `GET METADATA_PATH` y `POST REGISTER_PATH`; en `tests/oauth_support.py`,
+  `resolve_client(app, *, org_id, client_id, now, fetch=None, record_use=True)` (Apéndice A.1; `fetch` es
+  `cimd.fetch_document` por defecto, leído al llamar; `record_use=False` no escribe nada); las rutas `GET METADATA_PATH` y `POST REGISTER_PATH`; en `tests/oauth_support.py`,
   `async def register(env, **metadata) -> dict` y `async def forget_registration_limit(env) -> None`.
 
 **Decisión de la tarea (1): CIMD siempre que MCP esté encendido; el registro dinámico solo con la opción** (C2,
@@ -5133,9 +5297,14 @@ cuenta el techo y registra en una transacción; la ruta solo lee la petición y 
 
 **Decisión de la tarea (4): un documento CIMD guardado sobrevive a un fallo transitorio** (CIMD-03 §6.1: «An
 authorization server SHOULD NOT discard previously cached valid client metadata on transient failures»). Si la copia
-caducó y la nueva lectura falla con `transient`, `resolve_client` sigue con la guardada; un rechazo definitivo no se
-guarda nunca y la copia vieja deja de servir. Un `client_id` en el origen propio no se descarga (`own_origin`, CIMD-03
-§10.1).
+caducó y la nueva lectura falla con `transient`, `resolve_client` sigue con la guardada; un rechazo definitivo se
+levanta y no se guarda nunca, pero **no borra** la copia vieja: si una lectura posterior vuelve a fallar de forma
+transitoria, esa copia vuelve a servir. Un `client_id` en el origen propio no se descarga (`own_origin`, CIMD-03 §10.1).
+La -03 añade, para un rechazo por `client_id` distinto, «SHOULD invalidate the client's outstanding refresh tokens
+immediately»; el plan no lo hace (re-revisión f3-2, M-1; de sus dos opciones, la segunda), por dos razones escritas
+en el Apéndice B (D17): terminar concesiones es de `grants.py` (Task 7, que corre en paralelo con esta), y una
+concesión no depende del documento: la persona aprobó un host, la puerta exige en cada llamada que la concesión siga
+viva, y Ajustes la revoca.
 
 **Decisión de la tarea (5): sin CORS en los extremos de máquina** (B3-26; diseño §6.4: «la plataforma no abre CORS
 [S63]»). Un cliente MCP que corre en un navegador no puede conectar; Claude y Claude Code no se ven afectados.
@@ -5461,6 +5630,37 @@ async def test_one_network_may_register_only_so_often(env, monkeypatch) -> None:
     assert answers[2].headers["retry-after"] == "3600"
 
 
+async def test_the_limit_is_counted_before_the_database_is_read(env, monkeypatch) -> None:
+    """Re-review f3-2, M-2: a network over its limit costs Redis, not a lookup."""
+    from app.api import oauth_registration
+
+    async def never(app: Any) -> Any:
+        raise AssertionError("the deployment's organization was read over the limit")
+
+    monkeypatch.setattr(clients, "REGISTRATIONS_PER_HOUR", 1)
+    async with oauth_http(env) as client:
+        first = await client.post("/oauth/register", json={"redirect_uris": [CLAUDE_CALLBACK]})
+        monkeypatch.setattr(oauth_registration, "deployment_org", never)
+        second = await client.post("/oauth/register", json={"redirect_uris": [CLAUDE_CALLBACK]})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 429
+
+
+async def test_a_database_that_does_not_answer_leaves_registration_out_of_the_metadata(
+    env, monkeypatch
+) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    async def down(app: Any) -> bool:
+        raise OperationalError("SELECT its_auth_org(:slug)", {}, OSError("down"))
+
+    monkeypatch.setattr(clients, "registration_offered", down)
+    resp = await _metadata(env)
+    assert resp.status_code == 200
+    assert "registration_endpoint" not in resp.json()
+    assert resp.json()["client_id_metadata_document_supported"] is True
+
+
 async def test_an_ipv6_network_is_one_bucket_by_its_64(env, monkeypatch) -> None:
     """B3-02: a host owns its /64; counted by address it would never run out."""
     monkeypatch.setattr(clients, "REGISTRATIONS_PER_HOUR", 2)
@@ -5599,9 +5799,12 @@ async def test_a_refused_document_is_never_kept(env) -> None:
         assert (await session.execute(select(OAuthClient))).scalars().all() == []
 
 
-async def test_a_stored_document_survives_a_passing_failure_and_not_a_refusal(env) -> None:
+async def test_a_stored_document_survives_a_passing_failure_and_a_refusal_is_raised(
+    env,
+) -> None:
     """CIMD-03 §6.1: "SHOULD NOT discard previously cached valid client metadata
-    on transient failures"."""
+    on transient failures". A refusal is raised, never stored, and does not
+    delete the old copy (Task 6, decision 4)."""
     now = datetime.now(UTC)
     stored = await _resolve(env, FakeFetch(), now)
     later = now + timedelta(hours=2)
@@ -5609,6 +5812,8 @@ async def test_a_stored_document_survives_a_passing_failure_and_not_a_refusal(en
     assert kept is not None and kept.id == stored.id
     with pytest.raises(cimd.DocumentRefused):
         await _resolve(env, FakeFetch(refused="mismatch"), later)
+    again = await _resolve(env, FakeFetch(refused="unavailable"), later)
+    assert again is not None and again.id == stored.id
 
 
 async def test_a_document_on_the_platforms_own_origin_is_never_read(env) -> None:
@@ -5934,6 +6139,7 @@ async def resolve_client(
     client_id: str,
     now: datetime,
     fetch: Fetch | None = None,
+    record_use: bool = True,
 ) -> ClientView | None:
     """The app an authorization request names, or None. A registered app is
     looked up; a client metadata document is read whenever MCP is on (C2: the
@@ -5945,7 +6151,9 @@ async def resolve_client(
     this server's own origin is never read (§10.1).
 
     `fetch` defaults to `cimd.fetch_document`, looked up at call time so a
-    test can replace it on the module."""
+    test can replace it on the module. `record_use=False` writes nothing: the
+    consent of a person who may not connect AI apps here neither downloads a
+    document (its `fetch`) nor keeps an idle app alive (re-review f3-2, M-3)."""
     engine = app.state.app_engine
     async with oauth_session(org_id, engine) as session:
         row = await find_client(session, org_id=org_id, client_id=client_id, now=now)
@@ -5954,7 +6162,8 @@ async def resolve_client(
             or (row.metadata_expires_at is not None and row.metadata_expires_at > now)
         )
         if row is not None and fresh:
-            touch(row, now)
+            if record_use:
+                touch(row, now)
             return view(row)
         stored = view(row) if row is not None and row.kind == "metadata_document" else None
     if not cimd.is_document_client_id(client_id):
@@ -6047,7 +6256,14 @@ THE METADATA (RFC 8414 §2) names the platform as its own issuer (plan D1);
 a client metadata document instead of registering [S33]; the registration
 endpoint only while registration is offered; `S256` alone in
 `code_challenge_methods_supported` [S17, S30]; and RFC 9207's
-`authorization_response_iss_parameter_supported`.
+`authorization_response_iss_parameter_supported`. It is cached for 300
+seconds, so turning MCP on or off shows in `registration_endpoint` up to five
+minutes late; and a database that does not answer leaves the endpoint out
+rather than turning the metadata into a 500 (re-review f3-2, M-2).
+
+THE NETWORK'S LIMIT IS COUNTED BEFORE ANYTHING IS READ (re-review f3-2, M-2):
+its key needs no organization, so a flood of registrations costs Redis, never
+the database, as at the token endpoint (Task 7).
 """
 
 import json
@@ -6055,6 +6271,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.auth.oauth import clients
 from app.core.auth.oauth.errors import (
@@ -6113,7 +6330,11 @@ async def authorization_server_metadata(request: Request) -> JSONResponse:
         "authorization_response_iss_parameter_supported": True,
         "client_id_metadata_document_supported": True,
     }
-    if await clients.registration_offered(request.app):
+    try:
+        offered = await clients.registration_offered(request.app)
+    except (SQLAlchemyError, OSError):
+        offered = False  # the metadata still answers; registering would not
+    if offered:
         document["registration_endpoint"] = iss + REGISTER_PATH
     return JSONResponse(document, headers={"Cache-Control": CACHE_CONTROL})
 
@@ -6125,9 +6346,6 @@ async def register_client(request: Request) -> JSONResponse:
         raise OAuthError(UNAVAILABLE)
     if not registration_open(settings):
         raise OAuthError(REGISTRATION_CLOSED)
-    org_id = await deployment_org(request.app)
-    if org_id is None:
-        raise OAuthError(UNAVAILABLE)
     network = network_of(client_address(request, request.app.state.trusted_proxies))
     within = await hit(
         request.app.state.redis,
@@ -6138,6 +6356,9 @@ async def register_client(request: Request) -> JSONResponse:
     )
     if not within:
         raise OAuthError(SLOW_DOWN, headers={"Retry-After": "3600"})
+    org_id = await deployment_org(request.app)
+    if org_id is None:
+        raise OAuthError(UNAVAILABLE)
     media = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if media != "application/json":
         raise OAuthError(NOT_JSON)
@@ -6305,8 +6526,8 @@ diseño §7 audita los «consentimientos y revocaciones de clientes de IA». Una
 app (RFC 7009) o una persona que ya no está activa terminan una concesión que la persona no terminó: la fila de
 auditoría lleva `actor_type="system"`, la persona como objetivo y la app en `metadata.app` (`mcp.code_reused`,
 `mcp.refresh_reused`, `mcp.grant_revoked`, `mcp.grant_ended` con `metadata.reason="person_inactive"`). **No se
-auditan, a propósito,** el refresh —continúa cada diez minutos un consentimiento ya auditado (`mcp.app_authorized`,
-Task 8) y enterraría la cadena— ni el registro (Task 6), que es la afirmación de un extraño y no concede nada hasta
+auditan, a propósito,** el refresh —continúa cada 5 a 10 minutos, mientras se use, un consentimiento ya auditado
+(`mcp.app_authorized`, Task 8) y enterraría la cadena— ni el registro (Task 6), que es la afirmación de un extraño y no concede nada hasta
 que una persona lo aprueba. Cada acción es un literal en su llamada (Global Constraints).
 
 **Decisión de la tarea (4): OpenBao caído es 503 `temporarily_unavailable` y no gasta nada.** El token se firma dentro
@@ -6333,9 +6554,16 @@ residual (A3-40).
 **Decisión de la tarea (8): un límite por red en los dos extremos, que falla en abierto (B3-24).** RFC 7009 §5:
 «Appropriate countermeasures, which should be in place for the token endpoint as well, MUST be applied to the
 revocation endpoint». `TOKEN_REQUESTS_PER_MINUTE` (600) por red (`policy.network_of`: IPv6 por /64), un cubo para los
-dos, 429 `temporarily_unavailable` con `Retry-After: 60`. Es alto porque Claude en la web pide los tokens de todas las
-personas desde las pocas direcciones de salida de Anthropic (Apéndice C): una organización entera refrescando cada
-diez minutos tiene que caber. Falla en abierto (el valor por defecto de `rate_limit.hit`, que lo registra): lo que
+dos, 429 `temporarily_unavailable` con `Retry-After: 60`. Es alto porque Claude en la web pide los tokens de todas sus
+personas desde la salida de Anthropic, que comparten todos sus clientes (Apéndice C, [P-ANTH]). La página de
+conectores, https://claude.com/docs/connectors/building/authentication.md: «Anthropic's outbound traffic to your server
+originates from `160.79.104.0/21`»; la de direcciones, https://platform.claude.com/docs/en/api/ip-addresses.md: «These
+are the stable IP addresses that Anthropic uses for outbound requests», `160.79.104.0/21` y `153.61.208.0/20`.
+**Cuántas** de esas 6.144 direcciones usa de verdad no lo publica (re-revisión f3-2, M-4); el cubo es por dirección
+IPv4 o por /64, así que cuantas más use, menos comparte cada una. La cadencia, de la primera página: «Claude refreshes
+tokens reactively on a `401` response, and proactively up to five minutes before the stored expiry»; con tokens de
+600 s, una conexión en uso refresca cada 5 a 10 minutos. A una cada cinco minutos, 600 al minuto son unas 3.000
+conexiones por dirección de salida, y una oficina con Claude Code detrás de un NAT cabe también. Falla en abierto (el valor por defecto de `rate_limit.hit`, que lo registra): lo que
 estas rutas guardan es un secreto de 256 bits que ninguna avalancha adivina, y sin Redis se pierde el límite, no cada
 conexión de IA. El registro (Task 6) falla en cerrado porque escribe filas que cualquiera puede crear.
 
@@ -7044,10 +7272,11 @@ WHAT IS AUDITED (§7, "consentimientos y revocaciones de clientes de IA"; plan
 B3-22): every end of a grant the person did not cause -- a reused code, a
 reused refresh token, the app's own RFC 7009 request, a person no longer
 active -- as "system", the person as the target, the app in `metadata.app`.
-NOT a refresh, which continues every ten minutes a consent already audited
-(`mcp.app_authorized`, Task 8), and NOT a registration (Task 6), a
-stranger's claim that grants nothing until a person approves it. Each action
-is a literal at its call: the audit vocabulary's coverage test reads them.
+NOT a refresh, which continues a consent already audited
+(`mcp.app_authorized`, Task 8) every five to ten minutes while the app is in
+use, and NOT a registration (Task 6), a stranger's claim that grants nothing
+until a person approves it. Each action is a literal at its call: the audit
+vocabulary's coverage test reads them.
 
 ONE TRANSACTION PER REQUEST, SIGNED INSIDE IT (`oauth_session`): the access
 token is minted before the commit, so OpenBao down rolls back and spends
@@ -7777,8 +8006,15 @@ y en `frontend/src/i18n/es/auditVocabulary.ts`, después de `mcp_app_revoked`:
 
 - [ ] **Step 5: El recuento de logs**
 
-En `backend/tests/test_logging_discipline.py`, en el docstring de la prueba del recuento, antes del párrafo «NOW 109,
-own authentication phase 3 (plan 2026-11-06, Task 3)», añadir:
+**La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
+`backend/tests/test_logging_discipline.py` al empezar la tarea: 109 si solo está la Task 3 (la 7 corre en paralelo con la 6, después de la 3), y otro si la rama ya trae la fase 2 (su Task 5
+añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
+docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+el `assert` (y el «expected N» de su mensaje) dicen **N+1** (abajo, 110, con N = 109). Lo mismo en el §2.2 de
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
+arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
+
+En el docstring de la prueba del recuento:
 
 ```text
     NOW 110, own authentication phase 3 (plan 2026-11-06, Task 7): one static
@@ -7793,13 +8029,20 @@ own authentication phase 3 (plan 2026-11-06, Task 3)», añadir:
 
 ```
 
-y cambiar «NOW 109, own authentication phase 3 (plan 2026-11-06, Task 3)» por «BEFORE THAT, 109, own authentication
-phase 3 (plan 2026-11-06, Task 3)», y `assert total == 109` / `expected 109` por `110`. En
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`, §2.2, antes de «**NOW 109, own authentication phase 3
-(plan 2026-11-06, Task 3).**», un párrafo nuevo con el mismo texto en prosa («**NOW 110, own authentication phase 3
-(plan 2026-11-06, Task 7).** One site. …»), y «**NOW 109,» pasa a «**BEFORE THAT, 109,». La Task 7 corre en paralelo
-con la 6, después de la 3: la base que ve es 109. El delta de esta tarea es **+1**; si al fusionar la base es otra (la
-fase 2), el coordinador ajusta el número.
+En el §2.2 del diseño del kernel de logs:
+
+```markdown
+**NOW 110, own authentication phase 3 (plan 2026-11-06, Task 7).** One site. A
+static WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization
+code refused and spent", when a live code arrives with another app, another
+redirect or a wrong PKCE verifier. The code is used up (RFC 6749 §10.5, plan
+B3-21), and a legitimate client never sends any of the three wrong, so the line
+is the trace of a stolen or forged code. No throttle: each line costs a code,
+and each code a signed-in person's approval. `extra` = the reason (`client`,
+`redirect` or `verifier`) and the presenting app's `client_id`; never the code
+or the verifier.
+
+```
 
 - [ ] **Step 6: Las pruebas pasan**
 
@@ -7857,7 +8100,7 @@ su host y vuelve a la app solo con un clic), y, al aprobar con el segundo factor
 - Consumes: Task 1 (`errors`, `policy.issuer`, `policy.SCOPE`, `redirects.matches`, `redirects.with_params`,
   `redirects.host_of`, `redirects.stays_on_this_computer`, `pkce.valid_challenge`), Task 3 (`cimd.DocumentRefused` y
   su `transient`, `cimd.ClientDocument`, `cimd.MIN_CACHE`), Task 5 (`oauth_session`, `deployment_org`, `ClientView`,
-  `touch`), Task 6 (`resolve_client` con su `fetch`, `clients.Fetch`, `clients.mcp_switched_on`; en
+  `touch`), Task 6 (`resolve_client` con su `fetch` y su `record_use`, `clients.Fetch`, `clients.mcp_switched_on`; en
   `tests/oauth_support.py`, `register`), Task 7 (`issue_code`, `names_resource`; en `tests/oauth_support.py`,
   `pkce_pair`, `token_request`). Existentes: `AuthContext` (con `principal`, `email`, `clients`), `bound_auth_context`
   y `require_step_up(ctx)` (`backend/app/api/deps.py:557`: 403 `step_up_required` sin un segundo factor en los
@@ -7867,7 +8110,7 @@ su host y vuelve a la app solo con un clic), y, al aprobar con el segundo factor
   (`tests/auth_support.py:246`), `sign_in`, `remembered_device`, `refusal_code` (`tests/session_support.py`).
 - Produces: `authorize.AuthorizationRequest`, `NotRedirectable(detail, *, error)`, `Redirectable(redirect_uri, state, problem)`,
   `parse_query`, `answer(redirect_uri, state, iss, **params) -> str`, `validate(app, *, org_id, query, now,
-  fetch=None)`; `consent.details`, `consent.decide`; las rutas `POST /api/v1/oauth/authorize/details` y `…/decision`
+  fetch=None, record_use=True)`; `consent.details`, `consent.decide`; las rutas `POST /api/v1/oauth/authorize/details` y `…/decision`
   con el contrato del Apéndice A.2 (el de `ConsentDetails` y `ConsentAnswer` de la Task 4); el aviso
   `notices.tell(..., "app_connected", host=...)`; la acción `mcp.app_authorized`; en `tests/oauth_support.py`,
   `authorize_query(client_id, *, challenge, redirect_uri=CLAUDE_CALLBACK, state="st4te", **extra) -> str`, `async def
@@ -7901,6 +8144,9 @@ emite el canje; con varias organizaciones el consentimiento y el canje caerían 
 allí y la persona tiene `mcp.use`. Si no, la petición se comprueba solo contra lo guardado (`fetch=_not_read`): una
 app registrada o un documento CIMD ya guardado dan el redirect y la respuesta es `back` (`access_denied`, con el host
 y el botón); un documento que habría que descargar no se descarga, y la respuesta es `refused`, sin camino de vuelta.
+Y no se escribe nada (`record_use=False`, re-revisión f3-2, M-3): sin él, cualquiera que no puede conectar —sin
+`mcp.use`, con MCP apagado o de otra organización— abriría un enlace de consentimiento y mantendría viva una app
+inactiva (`last_used_at`, que decide su retención en la Task 13).
 
 **Decisión de la tarea (5): solo la aprobación navega sola** (B3-15, A3-19). `details` nunca responde `redirect`. Un
 error que la app debe oír (`reason: "error"`), un rechazo (`"declined"`) o una persona que no puede conectar
@@ -8396,6 +8642,51 @@ async def test_a_person_of_another_organization_cannot_connect_here(env: Env) ->
         assert (await session.execute(select(OAuthCode))).scalars().all() == []
 
 
+async def test_a_person_who_may_not_connect_keeps_no_idle_app_alive(env: Env) -> None:
+    """Re-review f3-2, M-3: without `mcp.use`, neither the question nor the
+    answer writes the app's `last_used_at`, which decides its retention."""
+    technician = await env.api.create_user(env.org_id, "technician")
+    long_ago = datetime.now(UTC) - timedelta(days=20)
+    app = await seed_client(env.api, env.org_id, last_used_at=long_ago)
+    _, challenge = pkce_pair()
+    query = authorize_query(app.client_id, challenge=challenge)
+    asked = (await _details(env, query, sub=technician)).json()
+    answered = (await decide(env.api, env.org_id, technician, query)).json()
+    assert (asked["outcome"], asked["reason"]) == ("back", "denied")
+    assert (answered["outcome"], answered["reason"]) == ("back", "denied")
+    async with oauth_session(env.org_id, env.api.app_engine) as session:
+        row = await session.get(OAuthClient, app.id)
+        assert row is not None and row.last_used_at == long_ago
+
+
+async def test_a_document_app_is_approved_and_redeemed_with_registration_closed(
+    env: Env, monkeypatch
+) -> None:
+    """Operator decision C2 at the consent route: a client metadata document
+    needs no `ITS_MCP_REGISTRATION`, only `POST /oauth/register` does
+    (re-review f3-2, M-6)."""
+    env.api.settings.mcp_registration = ""
+
+    async def document(client_id: str) -> cimd.ClientDocument:
+        return _document(client_id)
+
+    monkeypatch.setattr(cimd, "fetch_document", document)
+    verifier, challenge = pkce_pair()
+    redirect = "http://localhost:6123/callback"
+    query = authorize_query(DOCUMENT_URL, challenge=challenge, redirect_uri=redirect)
+    body = (await decide(env.api, env.org_id, env.sub, query)).json()
+    assert body["outcome"] == "redirect", body
+    token = await token_request(
+        env.api,
+        grant_type="authorization_code",
+        code=code_of(body["redirect_to"]),
+        redirect_uri=redirect,
+        client_id=DOCUMENT_URL,
+        code_verifier=verifier,
+    )
+    assert token.status_code == 200, token.text
+
+
 # --------------------------------------------------------------------------- #
 # The decision
 # --------------------------------------------------------------------------- #
@@ -8682,8 +8973,10 @@ the request ... by using a predefined default resource value"; plan B3-05).
 `scope` is ignored beyond `mcp` (plan D7): the token's scope is `mcp`
 whatever was asked.
 
-`fetch` is `resolve_client`'s: the consent passes one that reads nothing
-while the person may not connect AI apps (Task 8, decision 4).
+`fetch` and `record_use` are `resolve_client`'s: while the person may not
+connect AI apps the consent passes a `fetch` that reads nothing and
+`record_use=False`, so the question neither downloads a document nor keeps
+an idle app alive (Task 8, decision 4; re-review f3-2, M-3).
 """
 
 from dataclasses import dataclass
@@ -8770,7 +9063,13 @@ def _host(client_id: str) -> str:
 
 
 async def validate(
-    app: Any, *, org_id: UUID, query: str, now: datetime, fetch: Fetch | None = None
+    app: Any,
+    *,
+    org_id: UUID,
+    query: str,
+    now: datetime,
+    fetch: Fetch | None = None,
+    record_use: bool = True,
 ) -> AuthorizationRequest:
     resource = mcp_resource(app.state.settings)
     assert resource is not None  # consent._ready refused it otherwise
@@ -8791,7 +9090,9 @@ async def validate(
             tr("this connection request names no AI app"), error="invalid_request"
         )
     try:
-        client = await resolve_client(app, org_id=org_id, client_id=client_id, now=now, fetch=fetch)
+        client = await resolve_client(
+            app, org_id=org_id, client_id=client_id, now=now, fetch=fetch, record_use=record_use
+        )
     except cimd.DocumentRefused as exc:
         if exc.transient:
             raise NotRedirectable(
@@ -9032,6 +9333,7 @@ async def _question(
             query=query,
             now=datetime.now(UTC),
             fetch=None if refusal is None else _not_read,
+            record_use=refusal is None,
         )
     except NotRedirectable as refused:
         if refusal is not None:
@@ -9158,11 +9460,18 @@ async def decide(request: Request, ctx: AuthContext, *, query: str, approve: boo
     POST /api/v1/oauth/authorize/decision   the person's answer: a code, or access_denied
 
 UNGATED BY DESIGN (`tests/test_route_gating.py::UNGATED_BY_DESIGN`): the
-caller's own console session -- not a token, not the assistant's internal
-token (`_console_ctx`) -- and the deployment's organization, `mcp.use` and
-the org switch checked in the service, so a refusal can go back to the AI app
+caller's own console session -- not a token (`_console_ctx`: the door must
+have admitted a console principal) -- and the deployment's organization,
+`mcp.use` and the org switch checked in the service, so a refusal can go back to the AI app
 (`consent._refusal`, plan D11). The CSRF rule (`app/core/auth/csrf.py`) holds
 both: a POST under `/api/v1` on the session cookie.
+
+NOT THE ASSISTANT'S INTERNAL TOKEN, and not because of `_console_ctx`: that
+token yields a console principal too (`app/api/deps.py`). It is kept out
+because `verify_loopback` admits it only for GET or HEAD
+(`app/core/auth/loopback.py`, its rule 4) and both routes are POST; a request
+that says it is the assistant's never falls through to the cookie (re-review
+f3-2, M-5).
 
 APPROVING NEEDS A RECENT SECOND FACTOR (operator decision C1, 2026-11-06):
 `require_step_up` before the decision when `approve`, on a remembered device
@@ -9345,6 +9654,13 @@ y en `frontend/src/modules/audit/auditVocabulary.english.test.ts`, en `HAND_WORD
 Run: `cd backend && .venv/bin/pytest -q tests/test_oauth_consent.py tests/test_mcp_channel_api.py tests/test_route_gating.py tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_ai_tool_surface.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_security_headers.py tests/test_auth_notice_order.py tests/test_oauth_token.py`
 Expected: PASS.
 
+Run, si la worktree ya lo tiene: `cd backend && .venv/bin/pytest -q tests/test_auth_phase2_falsifiers.py`
+Expected: PASS. Llega con la fase 2 (lo crea su Task 13; re-revisión f3-2, M-7) y recorre **toda** `/api/v1`: a la
+sesión de un contacto, cada ruta le responde 403 `portal_only` o está en su lista exacta de excepciones. Las dos
+rutas de esta tarea no están en esa lista ni deben entrar: `bound_auth_context` pasa por `_admit_session`, que a un
+contacto le responde `portal_only` (la Task 4 de la fase 2). Si la rama todavía no lo trae, la suite completa de la
+Task 12 (Step 5, en el árbol fusionado) lo corre.
+
 Run: `cd frontend && npx vitest run src/modules/audit src/i18n src/modules/auth`
 Expected: PASS (las pruebas de la Task 4 contra este contrato incluidas).
 
@@ -9427,6 +9743,16 @@ puerta de MCP lee la fila como la de la sesión: dominio (no a un contacto), `us
 `contacts=True`). Se copia el orden y no se comparte el código, para no tocar la rama de la sesión (Puntos de encuentro
 con la fase 2). El log de un rechazo dice `door="mcp"` y `sub="user:<id>"`, como la sesión; antes decía `"http"` y el
 `sub` de Keycloak.
+
+**Con la fase 2 fusionada, la puerta de la consola y esta difieren para un contacto, y queda así a propósito**
+(re-revisión f3-3, X10; de sus dos caminos, explicar por qué no se alcanza). Tras la fase 2, `_admit_session` responde
+a un contacto 403 con `code: "portal_only"` y **sin** log (su Task 4); esta puerta, con el orden de la fase 1, escribe
+la línea de `log_admission_refusal` y responde un 403 sin código. No se iguala porque la rama no se alcanza: un
+contacto no tiene concesión que presentar. La única forma de tener una es aprobar en el consentimiento, y sus dos
+rutas pasan por `bound_auth_context`, que a un contacto le responde `portal_only` antes de leer la petición (Task 8,
+Step 8, con `tests/test_auth_phase2_falsifiers.py`). Si un día llegara aquí un contacto con un token, no sería un
+rechazo ordinario sino una anomalía, y una línea en el log es lo que se quiere; `portal_only`, además, es un código
+para la consola, que ningún cliente MCP lee.
 
 **Decisión de la tarea (3): el marcador del canal tiene que nombrar la app del token.** Una llamada en proceso
 (`app/mcp/invoke.py`) marca `azp=principal.claims.azp`, ya verificado; `McpAsgi` compara su etiqueta después. La puerta
@@ -10416,7 +10742,10 @@ def test_every_door_that_verifies_an_mcp_token_reads_its_grant() -> None:
 @pytest.mark.parametrize(
     "kw",
     [
-        {"azp": "claude", "extra": {"preferred_username": "service-account-x", "client_id": "claude"}},
+        {
+            "azp": "claude",
+            "extra": {"preferred_username": "service-account-x", "client_id": "claude"},
+        },
         {"azp": "claude", "extra": {"client_id": "claude"}},
         {"azp": "it-suite-web", "extra": {"client_id": "it-suite-web"}},
         {"azp": "claude", "typ": "ID", "extra": {"client_id": "claude"}},
@@ -10796,8 +11125,12 @@ los dos de `McpGrant`.
 Comprobación de que no queda ninguna llamada sin `await` a los cuatro ayudantes asíncronos (`mcp_token`, `_mcp_token`,
 `_token_issued_at`, `_old_token`; A3-47):
 
-Run: `cd backend && grep -rnE "(^|[^_a-zA-Z])(mcp_token|_mcp_token|_token_issued_at|_old_token)\(" tests | grep -v "await \|def "`
-Expected: sin salida.
+Run: `cd backend && grep -rnoP "(?:await |def )?(?<![A-Za-z0-9_])(?:mcp_token|_mcp_token|_token_issued_at|_old_token)\(" tests --include=*.py | grep -vE ":(await |def )"`
+Expected: sin salida. La búsqueda es **por llamada**, no por línea (re-revisión f3-3, N1): `-o` imprime cada llamada con
+su `await ` o su `def ` delante si los tiene, y solo esas se descartan. Así ve la llamada interior que perdió su
+`await` en `assert await _initialize(env, _old_token(...)) == 401`, que un `grep -v "await "` por línea descartaría
+entera; y no ve `signed_mcp_token(` ni `require_person_mcp_token(`. Antes de los Steps 6 y 7, en `3a1ba1c`, imprime
+50 llamadas: las que esos dos pasos cambian.
 
 Y de que solo quedan los tokens de Keycloak hechos a propósito para que la puerta los rechace, contados por archivo en
 lugar de excluir archivos enteros:
@@ -10882,7 +11215,8 @@ también sus concesiones de IA, con el acto como motivo y el recuento en su even
   `McpRevocation`; en las pruebas, `tests.auth_support` (`signed_in`, `console_ready`, `capture_mail`, `browser`,
   `link_token`) y `app.core.auth.action_tokens.issue`.
 - Produces: `connections.Registration(id, client_id, name, kind, host)`, `connections.registrations(engine, *, org_id, client_ids)
-  -> dict[str, Registration]`, `connections.held_apps(engine, *, org_id, user_id, now, limit) -> list[Registration]`,
+  -> dict[str, Registration]`, `connections.HeldApp(registration, mine)`, `connections.held_apps(engine, *, org_id, user_id, now, limit) ->
+  list[HeldApp]`,
   `connections.revoke_app_access(engine, *, org_id, actor_id, app_id, scope, now) -> int`; `POST
   /api/v1/mcp/connections/{app_id}/revoke` → `{"revoked": true, "grants_revoked": int}`; en `GET
   /api/v1/mcp/connections`, cada app con `id: UUID | null`, `name: str | null`, `host: str | null` y `kind` (B3-10:
@@ -11192,7 +11526,9 @@ OAUTH_SESSION_USERS`).
   person's own, and everyone's for an `orgs.manage` holder -- so an app
   approved a moment ago, which has called no tool, can be revoked (B3-28;
   `CLAUDE.md` 1c(d): "every registered AI client can be revoked, with effect
-  on its next call");
+  on its next call"); each says whether one of those grants is the
+  person's, so a row only a colleague holds can show "revoked for you"
+  (re-review f3-3, N4);
 - `revoke_app_access`: the app's grants end -- the actor's for "me",
   everyone's in the organization for "everyone" -- together with the
   `mcp_revocation` row and the `mcp.app_revoked` event, in ONE transaction
@@ -11241,6 +11577,13 @@ class Registration:
     host: str
 
 
+@dataclass(frozen=True)
+class HeldApp:
+    registration: Registration
+    #: Whether one of the live grants is the caller's own.
+    mine: bool
+
+
 def _registration(row: Any) -> Registration:
     app_id, client_id, name, kind, redirect_uris = row
     if kind == "metadata_document":
@@ -11270,20 +11613,21 @@ async def registrations(
 
 async def held_apps(
     engine: AsyncEngine, *, org_id: UUID, user_id: UUID, now: datetime, limit: int
-) -> list[Registration]:
+) -> list[HeldApp]:
     """The apps holding a live grant here: `user_id`'s own, and anyone's when
-    they hold `orgs.manage` across the organization; in `client_id` order."""
+    they hold `orgs.manage` across the organization; in `client_id` order,
+    each with whether `user_id` holds one of them."""
+    live = (
+        OAuthRefreshFamily.org_id == org_id,
+        OAuthRefreshFamily.revoked_at.is_(None),
+        OAuthRefreshFamily.expires_at > now,
+    )
     async with oauth_session(org_id, engine) as session:
         everyone = await has_permission(session, user_id, "orgs.manage")
         query = (
             select(*_COLUMNS)
             .join(OAuthRefreshFamily, OAuthRefreshFamily.oauth_client_id == OAuthClient.id)
-            .where(
-                OAuthClient.org_id == org_id,
-                OAuthRefreshFamily.org_id == org_id,
-                OAuthRefreshFamily.revoked_at.is_(None),
-                OAuthRefreshFamily.expires_at > now,
-            )
+            .where(OAuthClient.org_id == org_id, *live)
             .distinct()
             .order_by(OAuthClient.client_id)
             .limit(limit)
@@ -11291,7 +11635,17 @@ async def held_apps(
         if not everyone:
             query = query.where(OAuthRefreshFamily.user_id == user_id)
         rows = (await session.execute(query)).all()
-    return [_registration(row) for row in rows]
+        mine = set(
+            (
+                await session.execute(
+                    select(OAuthRefreshFamily.oauth_client_id).where(
+                        OAuthRefreshFamily.user_id == user_id, *live
+                    )
+                )
+            ).scalars()
+        )
+    found = [_registration(row) for row in rows]
+    return [HeldApp(registration, registration.id in mine) for registration in found]
 
 
 async def revoke_app_access(
@@ -11533,9 +11887,11 @@ async def list_connections(
         engine, org_id=org_id, user_id=user_id, now=now, limit=MAX_APPS
     )
 
+    # The held rows read the revocations too (re-review f3-3, N4).
+    asked = used + [held_app.registration.client_id for held_app in held]
     for_everyone: dict[str, datetime] = {}
     for_me: dict[str, datetime] = {}
-    if used:
+    if asked:
         revocations = (
             await session.execute(
                 select(
@@ -11545,7 +11901,7 @@ async def list_connections(
                 )
                 .where(
                     McpRevocation.org_id == org_id,
-                    McpRevocation.client_id.in_(used),
+                    McpRevocation.client_id.in_(asked),
                     or_(McpRevocation.user_id.is_(None), McpRevocation.user_id == user_id),
                 )
                 .group_by(McpRevocation.client_id, McpRevocation.user_id)
@@ -11573,11 +11929,13 @@ async def list_connections(
             )
         )
     listed = set(used)
-    for registration in held:
+    for held_app in held:
+        registration = held_app.registration
         if len(apps) >= MAX_APPS:
             break
         if registration.client_id in listed:
             continue
+        me_at = for_me.get(registration.client_id)
         apps.append(
             McpAppOut(
                 client_id=registration.client_id,
@@ -11587,8 +11945,11 @@ async def list_connections(
                 kind=_kind(registration.kind),
                 people=0,
                 last_used_at=None,
+                # A live grant is newer than any revocation for everyone,
+                # which ends every grant in its own transaction (D12).
                 revoked_for_everyone=False,
-                revoked_for_me=False,
+                # Revoked for me, and no grant of mine since.
+                revoked_for_me=me_at is not None and not held_app.mine,
             )
         )
     return apps
@@ -11643,9 +12004,11 @@ se sustituye por:
 - [ ] **Step 3: Los actos de la cuenta**
 
 En `backend/app/modules/user_admin/service.py`, `backend/app/core/auth/account.py` y `backend/app/core/auth/flows.py`,
-`from app.core.auth.oauth import grants as ai_grants` en su sitio de isort (después de `from app.core.auth.factors
-import …` en `service.py`, de `from app.core.auth.keys import UnknownKeyVersion` en `account.py` y de `from
-app.core.auth.lookup import find_staff` en `flows.py`; decisión 3), y después de
+`from app.core.auth.oauth import grants as ai_grants` **en el orden de isort dentro del bloque `app.core.auth`** (por
+el nombre del módulo: detrás de cada `from app.core.auth.<m> import …` con `<m>` anterior a `oauth`, como `factors`,
+`keys`, `lookup` o `methods`, y delante del primero posterior; decisión 3). La regla, no un vecino (re-revisión f3-3,
+X9): con la fase 2 fusionada, `flows.py` ya no importa `find_staff` sino `find_person, org_of_slug`, y gana imports de
+`app.core.auth.methods`. `ruff check --select I` (Step 6) lo comprueba. Después de
 cada `await revoke_all_for_user(session, user.id)`, con el mismo sangrado, la línea de la tabla; el evento de
 auditoría del acto, que en los siete sitios se escribe **después** de esa línea, gana `"ai_grants_revoked":
 ai_ended` en sus metadatos (decisión 4):
@@ -11807,10 +12170,58 @@ async def test_a_settings_revoke_also_ends_the_refresh_token(env: Any) -> None:
     assert resp.json()["error"] == "invalid_grant"
 ```
 
-- `test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing`: la persona abre antes su concesión
-  (`await _approved(env, org_id, slug, tech)`, con `org_id, slug = await _org(env)`), para que la aserción nueva no sea
-  vacía (A3-57): `assert env.kc.deleted == []` pasa a `assert env.kc.requests == []`, y se añade `assert await
-  _live(env, org_id, tech) == 1`. El control de no vacuidad del final (revocar «me» da 200) se queda.
+- `test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing` pasa a la de abajo: la persona abre antes
+  su concesión, para que la aserción nueva no sea vacía (A3-57), y **después** de `_grant` (re-revisión f3-3, N7):
+  sin `mcp.use` el consentimiento responde `back`/`denied`, sin código, y el `code_of` de `connect` levanta
+  `KeyError`. El control de no vacuidad del final (revocar «me» da 200) se queda:
+
+```python
+async def test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing(
+    env: Any,
+) -> None:
+    org_id, slug = await _org(env)
+    tech = await env.api.create_user(org_id, "technician")
+    await _grant(env, org_id, tech, "mcp.use")
+    # After `_grant`: without `mcp.use` the consent gives back no code.
+    await _approved(env, org_id, slug, tech)
+
+    resp = await _revoke(env, org_id, tech, "everyone")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "requires orgs.manage"
+    assert await _rows(env, org_id) == []
+    assert await _events(env, org_id, "mcp.app_revoked") == []
+    assert env.kc.requests == []
+    assert await _live(env, org_id, tech) == 1
+    # Non-vacuity: the same person may revoke for themselves.
+    assert (await _revoke(env, org_id, tech, "me")).status_code == 200
+```
+
+- Nueva, junto a la anterior (re-revisión f3-3, N4): una fila que solo sostiene un compañero lee también las
+  revocaciones:
+
+```python
+async def test_revoking_for_me_an_app_only_a_colleague_holds_shows_it_revoked_for_me(
+    env: Any,
+) -> None:
+    """An `orgs.manage` holder lists the apps everyone holds. Revoking for
+    themselves one that only a colleague holds ends nothing, and the row says
+    "revoked for you"; the colleague's grant and row stand."""
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    colleague = await env.api.create_user(org_id, "org-admin")
+    await _approved(env, org_id, slug, colleague)
+    app_id = str(await mcp_app(env.api, org_id))
+
+    resp = await _revoke(env, org_id, me, "me", app=app_id)
+
+    assert resp.json() == {"revoked": True, "grants_revoked": 0}
+    (app,) = (await _connections(env, org_id, me)).json()["apps"]
+    assert (app["id"], app["revoked_for_me"], app["revoked_for_everyone"]) == (app_id, True, False)
+    (theirs,) = (await _connections(env, org_id, colleague)).json()["apps"]
+    assert (theirs["revoked_for_me"], theirs["revoked_for_everyone"]) == (False, False)
+    assert await _live(env, org_id, colleague) == 1
+```
 - `test_revoke_for_everyone_cuts_off_the_whole_org_and_no_other`: dentro de `running_mcp`, antes de revocar, cada uno
   abre su concesión (`await _call_a_tool(env, slug, admin)`, `… colleague`, `… other_slug, stranger`); la respuesta es
   `{"revoked": True, "grants_revoked": 2}`; las cuatro líneas de Keycloak (`deleted`, `token_requests`, `clients`)
@@ -12006,7 +12417,7 @@ la función, junto al `from sqlalchemy import update` que ya tiene.
 Cinco pruebas existentes comparan los metadatos enteros de un acto que ahora lleva el recuento (decisión 4); ganan
 `"ai_grants_revoked": 0` (la persona no tenía ninguna concesión), y nada más cambia:
 
-`tests/test_auth_signin.py:808`:
+`tests/test_auth_signin.py:1024` (en `3a1ba1c`; era `:808` en `0182206`, re-revisión f3-3, N5):
 
 ```python
     assert [e.meta for e in ended] == [
@@ -12040,8 +12451,15 @@ Cinco pruebas existentes comparan los metadatos enteros de un acto que ahora lle
 
 - [ ] **Step 5: El recuento de logs**
 
-En `backend/tests/test_logging_discipline.py`, en el docstring de la prueba del recuento, antes del párrafo «NOW 110, own
-authentication phase 3 (plan 2026-11-06, Task 7)», añadir:
+**La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
+`backend/tests/test_logging_discipline.py` al empezar la tarea: 110 con las Tasks 3 y 7, y otro si la rama ya trae la fase 2 (su Task 5
+añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
+docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+el `assert` (y el «expected N» de su mensaje) dicen **N−3** (abajo, 107, con N = 110). Lo mismo en el §2.2 de
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
+arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **−3**.
+
+En el docstring de la prueba del recuento:
 
 ```text
     NOW 107, own authentication phase 3 (plan 2026-11-06, Task 10): three
@@ -12053,12 +12471,17 @@ authentication phase 3 (plan 2026-11-06, Task 7)», añadir:
 
 ```
 
-y cambiar «NOW 110, own authentication phase 3 (plan 2026-11-06, Task 7)» por «BEFORE THAT, 110, own authentication
-phase 3 (plan 2026-11-06, Task 7)», y `assert total == 110` / `expected 110` por `107`. En
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`, §2.2, antes de «**NOW 110, own authentication phase 3
-(plan 2026-11-06, Task 7).**», el mismo texto en prosa («**NOW 107, own authentication phase 3 (plan 2026-11-06, Task
-10).** Three sites fewer…»), y «**NOW 110,» pasa a «**BEFORE THAT, 110,». La base que ve esta tarea es 110 (Tasks 3 y
-7); el delta es **−3**. Si al fusionar la base es otra (la fase 2), el coordinador ajusta el número.
+En el §2.2 del diseño del kernel de logs:
+
+```markdown
+**NOW 107, own authentication phase 3 (plan 2026-11-06, Task 10).** Three
+sites fewer, all in `app/mcp/api.py`: the two WARNINGs of `remove_consents`
+and the one of `_record_incomplete`. Revoking an AI app no longer calls the
+identity provider; its grants end in the same transaction as the
+`mcp_revocation` row and the `mcp.app_revoked` event, so there is no
+best-effort half left to report.
+
+```
 
 - [ ] **Step 6: Las pruebas pasan**
 
@@ -12102,16 +12525,24 @@ consentimiento, Task 4); se revoca por `id`, y el resultado es `{revoked, grants
 viva que aún no llamó herramientas también sale (Task 10, B3-28), sin personas ni último uso.
 
 **Files:**
-- Modify: `frontend/src/lib/api.ts` (`McpAppOut`, `McpRevokeOut`, `revokeMcpConnection` y sus comentarios,
-  `:1004-1043` y `:5996-6014` hoy; el comentario de `RequestRoute.global`, `:1633-1640`)
-- Modify: `frontend/src/modules/settings/api.ts` (`useRevokeMcpConnection`, `:239-256`)
+- Modify: `frontend/src/lib/api.ts` (`McpAppOut`, `McpRevokeOut`, `revokeMcpConnection` y sus comentarios; el
+  comentario de `RequestRoute.global`)
+- Modify: `frontend/src/modules/settings/api.ts` (`useRevokeMcpConnection`)
 - Modify: `frontend/src/modules/settings/AiConnectionsTab.tsx`
-- Modify: `frontend/src/modules/settings/fixtures.ts` (`MCP_APPS`, `revokeMcpConnection`, `:425-448`)
-- Modify: `frontend/src/modules/settings/__tests__/harness.tsx` (`MCP_APP_FIXTURE`, `:209-215`; `:648`)
+- Modify: `frontend/src/modules/settings/fixtures.ts` (el comentario de `MCP_APPS`, `MCP_APPS` y `revokeMcpConnection`)
+- Modify: `frontend/src/modules/settings/__tests__/harness.tsx` (`MCP_APP_FIXTURE` y el `mockResolvedValue` de
+  `calls.revokeMcpConnection`)
 - Modify: `frontend/src/i18n/en/settings.ts`, `frontend/src/i18n/es/settings.ts` (`aiConnections`)
-- Modify: `frontend/src/modules/settings/SettingsPage.tsx` (el comentario de la ruta, `:19`; A3-60)
+- Modify: `frontend/src/modules/settings/SettingsPage.tsx` (la fila «AI connections» de la tabla de rutas; A3-60)
 - Test: `frontend/src/modules/settings/__tests__/aiConnections.test.tsx`, `frontend/src/modules/settings/settings.es.test.tsx`
-  (`:880-895`), `frontend/src/lib/api.test.ts` (`:38-53`), `frontend/src/lib/api.clientScope.test.ts` (`:108-152`)
+  («words the warning when sign-in could not be withdrawn, for one person and for you» y la que fija el texto de la
+  lista vacía), `frontend/src/lib/api.test.ts` («puts an MCP client id in the revoke path as one encoded segment…»),
+  `frontend/src/lib/api.clientScope.test.ts` (las llamadas con `"some-ai-app"`)
+
+**Cada edición se ancla por el texto que cita, nunca por un número de línea** (re-revisión f3-3, X8). La fase 2 edita
+los mismos cuatro archivos de la consola —`harness.tsx`, `fixtures.ts`, la tabla de rutas de `SettingsPage.tsx` e
+`i18n/{en,es}/settings.ts`— (Puntos de encuentro con la fase 2), y con su rama fusionada las líneas se mueven. Esta
+tarea corre en la oleada 1 y puede verlas sin moverse; las anclas de texto valen en los dos casos.
 
 **Interfaces:**
 - Consumes: el contrato del Apéndice A.2 (`GET /api/v1/mcp/connections` con `id`, `name`, `host` y `kind` por app;
@@ -12159,7 +12590,8 @@ export const MCP_APP_FIXTURE = {
 ```
 
 (el comentario de arriba gana: «`name` null: an app that gave itself no name; the row is titled by its host»), y
-la línea `:648` pasa a `calls.revokeMcpConnection.mockResolvedValue({ revoked: true, grants_revoked: 1 });`.
+la línea `calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 0 });` pasa a
+`calls.revokeMcpConnection.mockResolvedValue({ revoked: true, grants_revoked: 1 });`.
 
 En `frontend/src/modules/settings/__tests__/aiConnections.test.tsx`: el import gana `MCP_APP_ID`; cada
 `toHaveBeenCalledWith("claude", "everyone")` y `toHaveBeenCalledWith("claude", "me")` pasa a
@@ -12271,7 +12703,8 @@ withdrawn, for one person and for you» se sustituye por:
 (`openIn` devuelve lo que devuelve `renderSettings`, que extiende el resultado de `render`, así que trae `unmount`; el
 import del archivo gana `MCP_APP_FIXTURE` junto a `MCP_CONNECTIONS_FIXTURE`.)
 
-En `frontend/src/lib/api.test.ts`, la prueba de `:40-53` pasa a:
+En `frontend/src/lib/api.test.ts`, la prueba «puts an MCP client id in the revoke path as one encoded segment, with
+the scope in the body», con el comentario que la precede, pasa a:
 
 ```ts
   // The app is named by its row id, one UUID path segment: a client id can be
@@ -12296,12 +12729,21 @@ En `frontend/src/lib/api.test.ts`, la prueba de `:40-53` pasa a:
   });
 ```
 
-En `frontend/src/lib/api.clientScope.test.ts:108-152`, `"some-ai-app"` pasa a `"7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70"`
-en las llamadas y en las rutas, y el docstring dice `/mcp/connections/{app_id}/revoke`. Lo que prueban no cambia.
+En `frontend/src/lib/api.clientScope.test.ts`, en el bloque cuyo comentario empieza «A route that is global BY ITS
+BODY», `"some-ai-app"` pasa a `"7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70"` en las dos llamadas y en las dos rutas, y el
+comentario dice `/mcp/connections/{app_id}/revoke`. Lo que prueban no cambia.
+
+**La lista ya no es solo de apps usadas** (re-revisión f3-3, N3): con B3-28 trae también las que tienen una concesión
+viva y no llamaron nada. En `aiConnections.test.tsx`, la prueba «says so when no AI app has been used here» pasa a
+llamarse «says so when no AI app has been used here or holds access», y su `findByText` a
+`"No AI app has been used in this organization in the last 90 days, and none holds access."`; en
+`settings.es.test.tsx`, el `getByText("Ninguna aplicación de IA se ha usado en esta organización en los últimos 90
+días.")` pasa a `getByText("Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días, y
+ninguna tiene acceso.")`.
 
 Run: `cd frontend && npx vitest run src/modules/settings src/lib/api.test.ts src/lib/api.clientScope.test.ts`
 Expected: FAIL (el tipo `McpAppOut` no tiene `id`; la pestaña revoca por `client_id`; no existe
-`apps.unregistered`).
+`apps.unregistered`; el texto de la lista vacía es el de antes).
 
 - [ ] **Step 2: Los tipos y el método**
 
@@ -12508,7 +12950,15 @@ En `frontend/src/i18n/en/settings.ts`, dentro de `aiConnections.apps`, después 
       unregistered: "No longer registered here, so it holds no access.",
 ```
 
-y se quitan `partialMe` y `partial` de `aiConnections`. En `frontend/src/i18n/es/settings.ts`, lo mismo:
+y se quitan `partialMe` y `partial` de `aiConnections`. En el mismo `aiConnections.apps`, `subtitle` y `empty`
+pasan a decir que la lista trae también las apps con acceso sin usar (N3):
+
+```ts
+      subtitle: "Apps people here used in the last 90 days, most recent first, then apps holding access that have not been used yet",
+      empty: "No AI app has been used in this organization in the last 90 days, and none holds access.",
+```
+
+En `frontend/src/i18n/es/settings.ts`, lo mismo:
 
 ```ts
       calledItself: "Dice llamarse «{name}».",
@@ -12516,12 +12966,20 @@ y se quitan `partialMe` y `partial` de `aiConnections`. En `frontend/src/i18n/es
       unregistered: "Ya no está registrada aquí, así que no tiene acceso.",
 ```
 
-y se quitan `partialMe` y `partial`.
+se quitan `partialMe` y `partial`, y `subtitle` y `empty` pasan a:
 
-En `frontend/src/modules/settings/SettingsPage.tsx:19`, el comentario de la tabla de rutas, `POST
-/mcp/connections/{client_id}/revoke` pasa a `POST /mcp/connections/{app_id}/revoke` (A3-60).
+```ts
+      subtitle: "Aplicaciones que las personas de esta organización han usado en los últimos 90 días, las más recientes primero, y después las que tienen acceso y aún no se han usado",
+      empty: "Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días, y ninguna tiene acceso.",
+```
 
-En `frontend/src/modules/settings/fixtures.ts`:
+En `frontend/src/modules/settings/SettingsPage.tsx`, en la fila `AI connections` del comentario de la tabla de rutas,
+`POST /mcp/connections/{client_id}/revoke` pasa a `POST /mcp/connections/{app_id}/revoke` (A3-60).
+
+En `frontend/src/modules/settings/fixtures.ts`, el comentario de encima de `MCP_APPS` termina, en lugar de «The apps
+are ones used before it was turned off: the list is derived from audited use, not from the switch.», con «The apps
+are ones used, or approved, before it was turned off: the list is derived from audited use and live grants, not from
+the switch.» (N3); y:
 
 ```ts
 const MCP_APPS: McpAppOut[] = [
@@ -12864,16 +13322,27 @@ devolverlo. Cambiar `claims["aud"] != aud` por `aud not in claims["aud"]` en `ac
 
 En `deploy/README.md`:
 
-1. Línea 32, «Keycloak still signs MCP clients in until phase 3.» pasa a «Since phase 3 AI apps connect over MCP
-   through the platform's own OAuth server too; Keycloak stays deployed, out of every sign-in path, until phase 4
-   removes it.»
-2. Líneas 1204–1205, «What follows is Keycloak's login page, which only MCP clients meet until own authentication phase
+Cada edición se ancla por el texto que cita; los números de línea son los de `3a1ba1c` (re-revisión f3-3, N5) y solo
+orientan.
+
+1. En «Status of this runbook», **solo la línea** `Keycloak still signs MCP clients in until phase 3. The sections of
+   this` (la 32) pasa a estas tres, sin tocar ninguna otra línea del párrafo (re-revisión f3-3, X11: la fase 2 edita
+   la frase «Three things phase 1 changed…», que en `3a1ba1c` empieza en la línea 36, cuatro más abajo; si ninguno de
+   los dos refluye el párrafo, git fusiona los dos cambios):
+
+   ```markdown
+   Since own authentication phase 3 AI apps connect over MCP through the
+   platform's own OAuth server too; Keycloak signs nobody in, and phase 4
+   removes it. The sections of this
+   ```
+
+2. Líneas 1240–1241, «What follows is Keycloak's login page, which only MCP clients meet until own authentication phase
    3.» pasa a «What follows is Keycloak's login page, which nobody meets since own authentication phase 3 (AI apps
    approve on the console's own consent page); it goes in phase 4.»
-3. Líneas 1438–1440, «so the claim is now only in the access tokens MCP clients obtain, and the devtools one-liner…»
+3. Líneas 1475–1476, «so the claim is now only in the access tokens MCP clients obtain, and the devtools one-liner…»
    pasa a «and since own authentication phase 3 no token Keycloak issues is accepted anywhere, so no token carries the
    claim to check; the devtools one-liner…» (el resto de la frase igual).
-4. En la tabla de mitigaciones del cliente de aprovisionamiento (línea 1974), «remove one AI app's consent for a user
+4. En la tabla de mitigaciones del cliente de aprovisionamiento (línea 2010), «remove one AI app's consent for a user
    (revoking an app under Settings → AI connections; needs nothing beyond `manage-users`)» pasa a «remove one AI app's
    consent for a user (no caller since own authentication phase 3, when revoking an app stopped involving Keycloak; it
    goes with Keycloak in phase 4)». «The code calls exactly six operations» no cambia: lo fija
@@ -12887,9 +13356,20 @@ En `deploy/README.md`:
      another.
    ```
 
-6. La sección `## AI connections (MCP)`, desde su encabezado hasta el final de `### What Traefik routes` y desde
-   `### Revoking` hasta el final de `### Residual risks, stated plainly`, pasa a lo que sigue. `### What is never
-   reachable over MCP` queda en su sitio, con la línea del punto 5.
+6. Tres sustituciones, cada una de un encabezado hasta **justo antes** del siguiente que se nombra (re-revisión
+   f3-3, N6; en `3a1ba1c` el orden es `## AI connections (MCP)`, `### Turning it on`, `### What keycloak-init
+   converges`, `### What Traefik routes`, `### Revoking`, `### What is never reachable over MCP`, `### Residual risks,
+   stated plainly` y `## Publishing the agent to the console`):
+   - desde `## AI connections (MCP)` hasta justo antes de `### Revoking` (es decir, hasta el final de `### What
+     Traefik routes`): el primer bloque de abajo;
+   - desde `### Revoking` hasta justo antes de `### What is never reachable over MCP`, el siguiente `###`: el
+     segundo;
+   - desde `### Residual risks, stated plainly` hasta justo antes de `## Publishing the agent to the console`, el
+     siguiente `##`: el tercero.
+
+   `### What is never reachable over MCP` queda en su sitio, entre la segunda y la tercera, con la línea del punto 5.
+
+El primer bloque:
 
 ````markdown
 ## AI connections (MCP)
@@ -13054,7 +13534,11 @@ settings are set, its PKCE sign-in and its audience. It does not yet run the
 platform's own OAuth server against the deployed containers: phase 4 rewrites
 it for that, when Keycloak goes (design §8). The platform's server is proved
 by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`).
+````
 
+El segundo:
+
+````markdown
 ### Revoking
 
 - **One app:** Settings → AI connections lists every app that called a tool
@@ -13096,14 +13580,14 @@ by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`)
   install link — so it is a last resort, not a switch.
 ````
 
-Y la sección de riesgos residuales:
+Y el tercero, la sección de riesgos residuales:
 
 ````markdown
 ### Residual risks, stated plainly
 
 **Risks 3, 7 and 8 exist only while self-registration is open**
 (`ITS_MCP_REGISTRATION=open`); closing it ends them for new apps. **Risks 1,
-2 and 4 exist whenever MCP is on**, because an app known by its client
+2, 4 and 10 exist whenever MCP is on**, because an app known by its client
 metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
 
 1. **Consent phishing.** Anyone can publish a client metadata document — or,
@@ -13138,9 +13622,11 @@ metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    grants nothing without a person's consent. The hosted Claude apps do not
    register: they use their metadata documents. Their requests come from
    Anthropic's published egress ranges (`160.79.104.0/21` and
-   `153.61.208.0/20`), not from your office, so a per-network limit counts
-   all of hosted Claude as one or two networks; that is why the token and
-   revocation endpoints allow 600 requests a minute per network.
+   `153.61.208.0/20`), not from your office. Every Claude user shares those
+   addresses, and Anthropic does not say how many of them it uses, so one
+   address can carry many people's requests; that is why the token and
+   revocation endpoints allow 600 requests a minute per address (an IPv6
+   address is counted by its /64).
 4. **http redirects are allowed only to the person's own computer**
    (`127.0.0.1`, `[::1]`, `localhost`, any port), which desktop AI apps use
    (Claude Code's metadata document among them). Whatever answers on that
@@ -13169,8 +13655,21 @@ metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    what a copied token looks like (design §5.3). It is also what an honest
    race looks like: a refresh whose answer the app never read (Claude stops
    waiting after 30 seconds), or two refreshes with the same token at once.
+   Claude refreshes on two triggers, ahead of time (up to five minutes before
+   the token expires) and when a call is refused with 401, so two can meet.
    Either way the app's next call is refused, and the person removes the
    connector and adds it again.
+10. **One click can approve, within ten minutes of a second factor.** The
+    consent page refuses to be framed (`frame-ancestors 'none'`,
+    `X-Frame-Options: DENY`), but a page on another site can open it as a
+    window of its own under the second click of a double click, which then
+    lands on **Approve**. OWASP calls this DoubleClickjacking, and framing
+    rules do not stop it. Approving needs the person's second factor
+    confirmed in the last ten minutes, so outside that window the trick only
+    reaches the second-factor prompt; inside it, one click is enough. It is
+    bounded, not removed: the page is titled by the app's host, the person
+    is mailed "You connected <host>", and Settings → AI connections revokes
+    the app.
 
 Separately from those, and by design: the platform cannot tell whether the
 person or the AI app approved a call — approval happens in the app. A
@@ -13397,6 +13896,8 @@ añade tres pasos al final, y nada más: ni otra tarea de beat ni otra acción d
 **Files:**
 - Modify: `backend/app/core/auth/retention.py` (de la fase 2: dos ventanas, tres pasos, tres entradas de `STEPS`, el
   docstring)
+- Modify: `backend/app/core/client_scope.py` (de la fase 2: la razón de `retention.py::sweep_org` en
+  `ALL_SCOPE_ALLOWLIST`)
 - Modify: `backend/tests/test_auth_retention.py` (de la fase 2: los metadatos exactos del evento ganan los tres pasos)
 - Create: `backend/tests/test_oauth_retention.py`
 
@@ -13431,6 +13932,12 @@ van al día de terminar: un escaneo secuencial por organización y día, como lo
 
 **Decisión de la tarea (3): el orden.** Códigos, concesiones, apps: cada paso cuenta lo que borra su sentencia; lo que
 se va en cascada con una app no se cuenta dos veces ni se cuenta como suyo.
+
+**Decisión de la tarea (4): la lista revisada dice para qué se usa el alcance** (re-revisión f3-3, N8 y X3).
+`CLAUDE.md` 5a: «Solo los procesos internos usan el alcance "todos", y cada uso está en una lista revisada». Con esta
+tarea, el `ClientScope.all()` de `sweep_org` borra también filas de OAuth de técnicos, que no tienen cliente; la razón
+de su entrada en `ALL_SCOPE_ALLOWLIST` y la frase «over these tables only» del docstring lo dicen. Ninguna prueba las
+lee, así que nada se pone rojo si se olvidan: por eso son un paso de esta tarea y no un comentario.
 
 - [ ] **Step 1: Las pruebas que fallan**
 
@@ -13613,8 +14120,33 @@ final:
 - an AI app unused for `CLIENT_IDLE` (30 days), with its grants and codes.
 ```
 
-y la frase «Phase 3 adds its expired authorization codes and refresh tokens here.» pasa a «Phase 3 adds its codes,
-grants and idle AI apps here, last: the apps after the grants, because an app takes its remaining grants along.»
+y dos párrafos más pasan a los de abajo, enteros y con el mismo ancho que el resto del docstring (en el plan de la
+fase 2, el primero termina «Phase 3 adds its authorization codes, its grants (refresh-token families, whose tokens
+cascade) and its idle apps (`oauth_clients`) here.» y el segundo dice «over these tables only.»; si su revisión los
+cambió, se conserva lo suyo y se cambian solo esas dos frases). El de `STEPS`:
+
+```text
+THE REGISTRY (`STEPS`) IS WHERE A NEW TABLE JOINS (plan decision 4): a
+`(name, step)` pair, appended in order; each step deletes in the session it
+is given, with its own `org_id` predicate, and returns how many rows went.
+Phase 3 adds its codes, grants and idle AI apps here, last: the apps after
+the grants, because an app takes its remaining grants along.
+```
+
+y el del alcance (decisión 4):
+
+```text
+ONE ORGANIZATION, EVERY CLIENT. A technician's rows have no client and only
+an every-client scope deletes them (migration 0231), so `sweep_org` holds
+`ClientScope.all()` (`ALL_SCOPE_ALLOWLIST`), over these tables only: phase
+2's four and, since phase 3, `oauth_codes`, `oauth_refresh_families` and
+`oauth_clients`, with what their foreign keys cascade to. The worker runs it
+daily (`app/worker.py`, `auth-retention`); no person is behind it. No index
+helps these scans (`auth_sessions` has none on `ended_at` or `expires_at`):
+one sequential scan per organization per day is fine at this size, and a
+step on a large table decides for itself.
+```
+
 Los imports ganan, en su sitio de isort:
 
 ```python
@@ -13676,6 +14208,19 @@ y `STEPS` gana, al final:
     ("oauth_apps", _oauth_apps),
 ```
 
+En `backend/app/core/client_scope.py`, la entrada `"app/core/auth/retention.py::sweep_org"` de `ALL_SCOPE_ALLOWLIST`
+pasa a (decisión 4; si la fase 2 cambió su texto en su revisión, se conserva lo suyo y se añade lo de esta fase):
+
+```python
+    "app/core/auth/retention.py::sweep_org": (
+        "worker: own authentication's retention (final review A-M6, operator decision C7; "
+        "phase 3 plan 2026-11-06, Task 13) -- one organization's old sessions, forgotten "
+        "devices, spent links and old challenges, and its AI apps' spent codes, ended grants "
+        "and idle registrations, whose technician rows only an every-client scope may delete; "
+        "every step carries its own org_id predicate, and the sweep is audited"
+    ),
+```
+
 En `backend/tests/test_auth_retention.py` (fase 2),
 `test_a_sweep_that_deleted_something_is_audited_and_one_that_did_not_is_not` compara los metadatos enteros; ganan los
 tres pasos, a cero (su mundo no tiene filas de OAuth):
@@ -13707,15 +14252,21 @@ Expected: `Success: no issues found` y `All checks passed!`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/core/auth/retention.py backend/tests/test_auth_retention.py backend/tests/test_oauth_retention.py
+git add backend/app/core/auth/retention.py backend/app/core/client_scope.py backend/tests/test_auth_retention.py \
+  backend/tests/test_oauth_retention.py
 git commit -m "feat(oauth): spent codes, ended grants and idle AI apps go with the daily retention sweep"
 ```
 ---
 
 ## Autorrevisión
 
-Hecha sobre el plan entero, contra el diseño, el dossier de decisiones y el código de `0182206`, el 2026-11-06, después
-de aplicar la revisión.
+Hecha sobre el plan entero, contra el diseño, el dossier de decisiones y el código de **`3a1ba1c`**, el 2026-11-06,
+después de aplicar la revisión y las tres re-revisiones de `4e39978`. `3a1ba1c` es la base sobre la que se ejecuta el
+plan (la rama `claude/compassionate-bardeen-vgtwus`, que cada worktree fusiona antes de empezar), no `0182206`, contra
+la que se comprobó la versión anterior (re-revisión f3-3, N9): entre las dos cambiaron `api/v1/auth.py`, `config.py`,
+`.env.example`, `deploy/README.md`, `test_auth_signin.py`, `test_deploy_env_documentation.py`, una línea de
+`test_auth_falsifiers.py` y el §2.3 del diseño. Los números de línea que el plan cita son los de `3a1ba1c`, y cada
+edición se ancla además por su texto.
 
 **Cobertura del diseño.**
 
@@ -13762,11 +14313,54 @@ error::RuntimeWarning`, y con él solo un coroutine sin esperar **no** hace fall
 error::pytest.PytestUnraisableExceptionWarning`. Y A3-64 dice que los riesgos 4 y 8 del runbook existen solo con el
 registro abierto; eso valía para la primera versión, en la que la opción abría también CIMD. Con C2, el riesgo 4 (los
 redirects http a este equipo) existe siempre que MCP esté encendido, porque el documento de Claude Code los usa: el
-runbook lo agrupa así (3, 7 y 8 con la opción; 1, 2 y 4 con MCP encendido).
+runbook lo agrupa así (3, 7 y 8 con la opción; 1, 2, 4 y 10 con MCP encendido).
+
+**Las tres re-revisiones de `4e39978`, hallazgo a hallazgo.** Todos corregidos; donde el revisor daba dos caminos, se
+dice cuál se tomó.
+
+| Re-revisión | Hallazgo | Dónde, y cómo |
+|---|---|---|
+| f3-1 | A3-24 (PARCIAL) | Task 4: un fallo de `details` que pasa (5xx, 429, sin red) muestra `unavailableTitle` con «Intentarlo de nuevo», y una vitest para un 503 y para un `TypeError`; un 422 sigue siendo definitivo |
+| f3-1 | Minor 1 | Task 3: `dns_failure` es `unavailable` (transitorio), con su caso en la prueba de la guarda |
+| f3-1 | Minor 2 | Task 3: `64:ff9b::c000:201` en la lista de direcciones de uso especial |
+| f3-1 | Minor 3 | Task 3: `on_origin` compara el host sin el punto final y el puerto con 443 por defecto, con los dos casos |
+| f3-1 | Minor 4 | Task 4: un `temporarily_unavailable` de la decisión ofrece «Intentarlo de nuevo», que vuelve a pedir los detalles |
+| f3-1 | Minor 5 | Notas de integración: los métodos van después de `acceptRecovery` y los tipos en `types.ts`; el recuento **baja** de 110 a 107 |
+| f3-1 | Minor 6 | La segunda opción: documentarlo. Task 4, decisión 6, y el riesgo 10 del runbook (Task 12); el botón con espera no se construye |
+| f3-1 | Minor 7 | Task 1: `stays_on_this_computer` acepta `localhost.` y todo `127.0.0.0/8` y `::1` |
+| f3-1 | Minor 8 | La primera opción: la decisión 6 de la Task 3 dice que la intersección decide si el documento vale, no qué se concede; el refresh se emite siempre (D7) |
+| f3-1 | Minor 9 | Task 2, Step 0: el paquete y, si falta, `policy.py` |
+| f3-1 | Minor 10 | Tasks 3, 7 y 10, Step 5: el párrafo del diseño de logs y el del docstring, enteros |
+| f3-2 | M-1 | La segunda opción: la decisión 4 de la Task 6 dice que un rechazo no borra la copia guardada (y la prueba lo fija), y D17 declina el SHOULD de CIMD-03 §6.1 con sus razones |
+| f3-2 | M-2 | Task 6: el límite por red antes de leer la organización, y una prueba que lo fija; los metadatos sin `registration_endpoint` si la base de datos no responde, con su prueba; el docstring nombra la caché de 300 s |
+| f3-2 | M-3 | Tasks 6 y 8: `record_use` en `resolve_client` y `validate`; quien no puede conectar no escribe `last_used_at`, con su prueba |
+| f3-2 | M-4 | Task 7 (decisiones 3 y 8, el docstring), Task 12 (riesgos 3 y 9) y el Apéndice C: la cadencia de 5 a 10 minutos, las dos páginas de Anthropic citadas con su URL, sin «pocas» |
+| f3-2 | M-5 | Task 8: el docstring de `oauth_consent.py` atribuye la exclusión del token interno a la regla 4 de `verify_loopback` (solo GET o HEAD). La prueba opcional no se añade: la regla ya la prueba `tests/test_loopback.py` |
+| f3-2 | M-6 | Task 8: una app de documento se aprueba y se canjea con `mcp_registration = ""` |
+| f3-2 | M-7 | Puntos de encuentro (fila de `tests/test_auth_phase2_falsifiers.py`) y Task 8, Step 8; la fila de `notices.py` en la tabla de la fase 2 es de su plan, y ya está |
+| f3-2 | M-8 | Tasks 3, 7 y 10, Step 5: la base es la N que tenga la worktree, y el párrafo va encima del «NOW» de más arriba |
+| f3-3 | N1 | Task 9, Step 7: la búsqueda por llamada; en `3a1ba1c` imprime 50 |
+| f3-3 | N2 | Task 12, riesgo 3: un cubo por dirección, direcciones que comparten todos los usuarios de Claude; sin «pocas» (M-4) |
+| f3-3 | N3 | Task 11: `subtitle`, `empty` y el comentario de `fixtures.ts`, con las dos pruebas que fijan el texto vacío |
+| f3-3 | N4 | Corregido, no documentado: `held_apps` dice si la concesión es de quien pregunta, y las filas sin uso leen las revocaciones (Task 10, con su prueba) |
+| f3-3 | N5 | Tasks 10 y 12: los números de `3a1ba1c` (`test_auth_signin.py:1024`; README 1240–1241, 1475–1476, 2010) |
+| f3-3 | N6 | Task 12, punto 6: tres sustituciones, cada una hasta el siguiente encabezado que se nombra, en tres bloques |
+| f3-3 | N7 | Task 10, Step 4: la prueba entera, con `_approved` después de `_grant` |
+| f3-3 | N8 | Task 13, decisión 4: la razón de `ALL_SCOPE_ALLOWLIST` y «over these tables only» |
+| f3-3 | N9 | Este párrafo |
+
+**Lo que cruza con la fase 2 (X1–X11), por el lado de esta fase.** X1: ninguna frase de este plan dice que la fase 3
+retire Keycloak, y la búsqueda de la Task 12, Step 4, sigue. X2: la fila de `security_headers.py` nombra las dos rutas
+de la fase 2 y la de la Task 8. X3: es N8. X5, X6 y X7: las filas de `config.py`, del diseño y de `notices.py`,
+corregidas. X8: cuatro filas nuevas, y la Task 11 ancla por texto. X9: la Task 10, Step 3, da la regla de isort. X10:
+la Task 9, decisión 2, dice por qué la puerta de MCP no se iguala a la de la consola para un contacto (de los dos
+caminos, explicar que no se alcanza). X11: la Task 12 cambia solo la línea 32 del README, sin refluir. X4 es del plan
+de la fase 2.
 
 **Marcadores.** Buscado en el plan: `TBD`, `TODO`, «rellenar», «similar a la Task», «añadir manejo de errores»; ninguno.
 Cada paso que cambia código trae el código; los cambios mecánicos (`await mcp_token(`, los metadatos de los actos, las
-filas de las pruebas de Ajustes) dicen cada archivo y línea y traen la orden que comprueba que no queda ninguno.
+filas de las pruebas de Ajustes) dicen cada archivo y su texto (y la línea, en `3a1ba1c`) y traen la orden que
+comprueba que no queda ninguno.
 Ningún comando lleva un valor que haya que sustituir.
 
 **Coherencia de nombres y tipos**, comprobada entre tareas:
@@ -13780,8 +14374,11 @@ Ningún comando lleva un valor que haya que sustituir.
   archivos de la Task 10 el módulo se importa como `ai_grants`: `user_admin/service.py` tiene variables locales
   `grants` en `delete_user` y `cancel_invite`, que taparían al módulo (A3-54), y `devices.revoke_all_for_user` ya
   ocupa el nombre corto.
-- `clients.resolve_client(..., fetch: Fetch | None = None)` (Task 6) resuelve `cimd.fetch_document` al llamar; el
-  consentimiento le pasa `_not_read` mientras la persona no puede conectar (Task 8); el Apéndice A.1 lo dice igual.
+- `clients.resolve_client(..., fetch: Fetch | None = None, record_use: bool = True)` (Task 6) resuelve
+  `cimd.fetch_document` al llamar; `authorize.validate` lleva los dos y los pasa; el consentimiento le pasa `_not_read`
+  y `record_use=False` mientras la persona no puede conectar (Task 8); el Apéndice A.1 lo dice igual.
+- `connections.held_apps(...) -> list[HeldApp]` (Task 10), con `HeldApp(registration, mine)`: lo lee
+  `list_connections` y nadie más; el Apéndice A.1 lo dice igual.
 - `authorize.NotRedirectable(detail, *, error)` y `Redirectable(redirect_uri, state, problem)` (Task 8): `consent.py`
   construye las cuatro respuestas del Apéndice A.2, que son las de `ConsentDetails` y `ConsentAnswer` de la Task 4.
 - `tests/mcp_support.mcp_token` es asíncrono desde la Task 9; la Task 10 usa `mcp_app` y la 12 `mcp_claims` y
@@ -13792,14 +14389,20 @@ Ningún comando lleva un valor que haya que sustituir.
 - Recuentos: logs 108 → 109 (Task 3) → 110 (Task 7) → 107 (Task 10); `NEVER_EXPOSED` 36 → 37 (Task 8);
   `UNGATED_BY_DESIGN` +2 (Task 8); `SECRET_ONCE` +1 (Task 8); la Task 12 los comprueba en el árbol fusionado.
 
-**Comprobado ejecutándolo, en una copia del árbol de `0182206`** (con un 0246 de sustitución que solo crea
+**Comprobado ejecutándolo, en una copia del árbol de `3a1ba1c`** (con un 0246 de sustitución que solo crea
 `its_auth_org`, el `lookup.org_of_slug` que la fase 2 publica, y el `retention.py` de su plan): los bloques de código
-de las Tasks 1–8, 10 (todo lo que no necesita llamar a `/mcp`) y 13, con sus pruebas, `mypy app` y `ruff check`; y,
-desde `frontend/`, las Tasks 4, 7 y 8 (vitest de `src/modules/auth`, `src/modules/audit` y `src/i18n`). Lo que se
+de las Tasks 1–8, 10 (todo lo que no necesita llamar a `/mcp`, más sus cambios en prosa a cinco aserciones de
+metadatos, al recuento de logs y a `test_global_writes.py`) y 13, con sus pruebas y los `-W error` de la Task 9, `mypy
+app` y `ruff check` (E, F, I, UP, B a 100 columnas); y, desde `frontend/`, las Tasks 4, 7 y 8 (vitest de
+`src/modules/auth`, `src/modules/audit` y `src/i18n`, y `tsc -b`). Tras las re-revisiones: 356 pruebas de las tareas
+de OAuth, y 284 de las guardas y de los archivos que la Task 10 cambia, en verde; las pruebas nuevas de `record_use`
+y de las filas sin uso fallan con el código de antes. Ninguna línea de un bloque Python pasa de 100 columnas. Lo que se
 encontró así y se corrigió en el plan: dos E501 y un `NotRedirectable` cuyo primer argumento posicional era un código y
 la guarda de i18n leía como texto; la prueba del límite de inactividad, que violaba `expires_at > created_at`; un
 `_record` tipado `dict[str, str]` que no admite el recuento; cinco aserciones de metadatos exactos que el recuento
-rompía; la posición de isort del import nuevo en tres archivos. **No se ejecutaron**: la Task 9 entera (re-apunta
+rompía; la posición de isort del import nuevo en tres archivos; y, en esta vuelta, buscando en todos los bloques
+Python del plan líneas de más de 100 columnas, una de 103 en la parametrización de `test_token_origin.py` de la Task 9
+(que no se ejecuta), partida. **No se ejecutaron**: la Task 9 entera (re-apunta
 pruebas en prosa, archivo por archivo), las pruebas de la Task 10 que llaman a `/mcp` (`_call_a_tool`,
 `_initialize`), la Task 11 (consola) y la Task 12 (necesita el árbol fusionado).
 
