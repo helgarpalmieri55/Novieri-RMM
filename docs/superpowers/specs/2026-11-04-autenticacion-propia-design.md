@@ -103,6 +103,12 @@ La persona no llega a la consola hasta registrar uno.
 ### 2.3 Intentos fallidos
 
 - Contados por cuenta y por factor, nunca solo por IP [S5].
+- **Límites por dirección, configurables** (decisión del operador del 2026-11-06, «Hacerlo configurable»): 30 peticiones
+  cada 600 s a la contraseña (`ITS_AUTH_LOGIN_IP_LIMIT`) y 30 a los pasos del segundo factor
+  (`ITS_AUTH_FACTOR_IP_LIMIT`) por defecto, aciertos incluidos, ajustables entre 5 y 1000 para una oficina tras una sola
+  NAT; son un freno y no la defensa: OWASP, «Blocking IP addresses [...] should not be used as the sole or primary
+  defense due to the ease in circumvention» [S9]; NIST trata la IP como señal de riesgo, «the use of the claimant’s IP
+  address, geolocation, timing of request patterns, or browser metadata» [S1 §3.2.2].
 - Desde el 5.º fallo, espera creciente: 1 s, duplicando hasta 15 min.
 - **La contraseña lleva dos contadores** (decisión del operador del 2026-11-05, «Cookie de equipo», sobre la revisión
   final B-I2). Un intento que llega con una cookie `__Host-itms_device` que `devices.recognised` acepta para esa
@@ -472,6 +478,8 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
 - [S6] OWASP Session Management Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 - [S7] OWASP Multifactor Authentication Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
 - [S8] OWASP Forgot Password Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html
+- [S9] OWASP Credential Stuffing Prevention Cheat Sheet, «IP Mitigation and Intelligence». https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html
+  Las citas de §2.3 (esta y la de [S1 §3.2.2]) se comprobaron contra la página y el PDF el 2026-11-06.
 - [S10] OWASP Passkey Security Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Passkey_Security_Cheat_Sheet.html
 - [S11] RFC 9106, Argon2. https://www.rfc-editor.org/rfc/rfc9106.txt
 - [S12] RFC 6238, TOTP. https://www.rfc-editor.org/rfc/rfc6238.txt

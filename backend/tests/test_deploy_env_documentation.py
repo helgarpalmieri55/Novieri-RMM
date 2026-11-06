@@ -153,3 +153,30 @@ def test_the_console_address_says_every_push_install_needs_it() -> None:
     flat = " ".join(line.lstrip("# ").strip() for line in block.splitlines())
     assert "EVERY PUSH INSTALL IS REFUSED WITHOUT IT" in flat
     assert "Set ITS_PUBLIC_CONSOLE_URL so a pushed computer knows where to enroll." in flat
+
+
+@pytest.mark.parametrize(
+    ("variable", "field"),
+    [
+        ("ITS_AUTH_LOGIN_IP_LIMIT", "auth_login_ip_limit"),
+        ("ITS_AUTH_FACTOR_IP_LIMIT", "auth_factor_ip_limit"),
+    ],
+)
+def test_the_sign_in_limits_per_address_are_documented_as_the_code_has_them(
+    variable: str, field: str
+) -> None:
+    """The operator raises these for an office behind one NAT address (decision
+    of 2026-11-06, design §2.3), so they are named where `.env` is edited and in
+    the README, and the default and range `.env.example` gives are the ones
+    `Settings` enforces: a range that says 1-1000 over a field that refuses 4
+    teaches the operator a value that stops the api."""
+    from app.core.config import Settings
+
+    info = Settings.model_fields[field]
+    bounds = {type(rule).__name__: rule for rule in info.metadata}
+    example = ENV_EXAMPLE.read_text()
+    assert f"\n# {variable}={info.default}\n" in example, (
+        f"{variable} is not documented, commented out, at its default {info.default}"
+    )
+    assert f"{bounds['Ge'].ge}-{bounds['Le'].le}" in example
+    assert variable in DEPLOY_README.read_text()
