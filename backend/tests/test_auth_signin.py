@@ -27,7 +27,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
+import pyotp
 import pytest
 from argon2 import PasswordHasher
 from pydantic import ValidationError
@@ -520,6 +522,60 @@ def test_the_limits_come_from_their_variables_within_their_bounds(
     with pytest.raises(ValidationError) as refused:
         Settings(**_REQUIRED)
     assert [error["loc"] for error in refused.value.errors()] == [(setting,)]
+
+
+async def _factor_count(env: Any, who: Any) -> int:
+    """What `who`'s address has spent of the `auth-factor` budget so far."""
+    address = ipaddress.ip_address(who.network["X-Forwarded-For"])
+    return int(await env.app.state.redis.get(f"ratelimit:auth-factor:ip:{address}") or 0)
+
+
+async def test_what_setting_up_the_app_costs_is_what_the_deploy_docs_say(auth_env: Any) -> None:
+    """Two of the costs `deploy/.env.example` gives the operator (review M6;
+    `test_deploy_env_documentation.py` holds the sentences), counted on one
+    address's `auth-factor` bucket while the console's own requests are
+    replayed in its order:
+
+    - at first sign-in, 3: `EnrollPage.tsx` sends `enrollTotpStart`,
+      `enrollTotpConfirm`, then `enrollFinish` (`enrol_totp`);
+    - later from Sign-in and security with no recent confirmation, 4 when it
+      is a code: `_enrollable`'s `require_fresh` refuses the start with 403
+      `step_up_required`, and `_FACTOR` has counted it already; `stepUp.tsx`'s
+      `run` confirms (`/auth/step-up/totp`), sends the start once more, and the
+      page then sends the confirm."""
+    org = await auth_env.create_org("ip-costs")
+    who = await signed_in(auth_env, org, "technician")
+    assert await _factor_count(auth_env, who) == 3
+
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == who.user_id)
+            .values(step_up_at=datetime.now(UTC) - timedelta(minutes=11))
+        )
+        await session.commit()
+    who.network = browser()
+
+    refused = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "step_up_required"
+    assert await _factor_count(auth_env, who) == 1
+    confirmed = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert confirmed.status_code == 204, confirmed.text
+    start = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert start.status_code == 200, start.text
+    secret = parse_qs(urlsplit(start.json()["otpauth_uri"]).query)["secret"][0]
+    confirm = await auth_env.client.post(
+        "/api/v1/auth/enroll/totp/confirm",
+        headers=who.headers(),
+        json={"code": pyotp.TOTP(secret).now()},
+    )
+    assert confirm.status_code == 204, confirm.text
+    assert await _factor_count(auth_env, who) == 4
 
 
 async def test_a_code_is_not_taken_twice(auth_env: Any) -> None:
