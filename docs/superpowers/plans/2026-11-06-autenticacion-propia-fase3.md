@@ -99,7 +99,7 @@ el método `revokeMcpConnection` y sus tipos): unión. La Task 4 toca `deploy/ng
   - `backend/tests/test_logging_discipline.py` y el §2.2 del diseño del kernel de logs: la 7 añade su párrafo «NOW 110» sobre el de la 3; la 6 no los toca.
   - `backend/app/core/i18n/es.py`: solo la 6 en esta oleada.
 - **Oleada 4, choques esperados** (orden de fusión: 8, 9):
-  - `backend/tests/test_mcp_channel_api.py`: la 8 añade una ruta a `OWN_SIGN_IN_NEVER_EXPOSED` y sube el recuento a 37; la 9 cambia cada `mcp_token(` por `await mcp_token(` y re-apunta tres pruebas (y el docstring). Se conservan los dos cambios.
+  - `backend/tests/test_mcp_channel_api.py`: la 8 añade una ruta a `OWN_SIGN_IN_NEVER_EXPOSED` y sube el recuento en 1 (el número que veas + 1: 55 → 56 con la fase 2 de `3a214fd`); la 9 cambia cada `mcp_token(` por `await mcp_token(` y re-apunta tres pruebas (y el docstring). Se conservan los dos cambios.
   - `backend/tests/test_client_catalog.py`: la 8 añade `consent.py` a `OAUTH_SESSION_USERS`; la 9 cambia el motivo de `users_org_id_external_subject_key`: unión.
   - `backend/app/mcp/exclusions.py`: solo la 8 (y la 10 en la oleada 5).
   - `backend/app/core/i18n/es.py`: unión (la 8 añade entradas, el aviso incluido; la 9 añade una y borra dos que dejan de usarse).
@@ -134,7 +134,7 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 | `backend/app/api/security_headers.py`, `backend/tests/test_security_headers.py` | `NO_STORE_ROUTES` y `SECRET_ONCE` ganan la decisión del consentimiento, `POST /api/v1/oauth/authorize/decision` (Task 8) | unión: la fase 2 añade a los dos `POST /api/v1/clients/{client_id}/contacts/{contact_id}/invite` y `POST /api/v1/clients/{client_id}/contacts/{contact_id}/access/reset` (pueden devolver un enlace de invitación); en el árbol fusionado los dos conjuntos llevan las tres rutas, y `test_every_never_exposed_route_that_returns_a_secret_is_listed` lo exige (re-revisión f3-3, X2) |
 | auditoría: `frontend/src/i18n/{en,es}/auditVocabulary.ts`, `frontend/src/modules/audit/auditVocabulary.english.test.ts` | cinco acciones `mcp.*` y una en `HAND_WORDED` (Tasks 7, 8) | unión |
 | `frontend/src/lib/globalRoutes.json` | no cambia | regenerado en el árbol fusionado si la fase 2 lo cambia |
-| `backend/tests/test_logging_discipline.py` y el §2.2 de `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` | +1 (Task 3), +1 (Task 7), −3 (Task 10) | se suman los deltas de las dos fases y se escribe un párrafo «NOW N» por cambio |
+| `backend/tests/test_logging_discipline.py` y el §2.2 de `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` | +1 (Task 3), +1 (Task 7), −3 (Task 10) | se suman los deltas de las dos fases y se escribe un párrafo «NOW N» por cambio. **La línea `assert total == …` (y el «expected N» de su mensaje) la cambian las dos fases igual, 108 → 109 (la Task 5 de la fase 2 y la Task 3), así que git las une sin avisar y deja 109 donde la cuenta es 110: se escribe a mano 108 + 1 (T5 de la fase 2) + 1 (Task 3) = 110, y la Task 7 lo comprueba antes de sumar la suya.** Los párrafos del docstring, en cambio, anclan los dos sobre «NOW 108»: ahí git sí choca y se conservan los dos |
 | `backend/app/mcp/exclusions.py` y `backend/tests/test_mcp_channel_api.py` (`NEVER_EXPOSED`) | **+1**: `POST /api/v1/oauth/authorize/decision`, en `NEVER_EXPOSED_REASONS` tras `POST /users/{user_id}/invite/resend` y en `OWN_SIGN_IN_NEVER_EXPOSED` tras las dos de invitaciones (Task 8); una clave de `NOT_FOR_MCP` nueva y otra cambiada (Tasks 8 y 10); en la prueba, `await mcp_token(` y tres pruebas re-apuntadas (Task 9) | unión. La fase 2 suma sus entradas, las de su Task 14 incluidas: `_RECENT_FACTOR`, un párrafo del docstring y su bloque tras `POST /me/recovery-codes` —las cinco rutas de S1 y las cuatro de S5 (`POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}`, `POST /users/{user_id}/enable`)—, y en la prueba `RECENT_FACTOR_NEVER_EXPOSED` tras el `}` de `OWN_SIGN_IN_NEVER_EXPOSED` y la igualdad con los tres conjuntos, que la entrada de esta fase sigue cumpliendo. Ningún número fusionado se fija aquí: la línea `assert len(NEVER_EXPOSED) == …`, que cambian las dos, se escribe a mano como 36 (la base) + el delta de la fase 2, el que diga su plan al fusionar (+19 en `3a214fd`), + 1 (esta fase). Si entradas de las dos fases caen en el mismo sitio (p. ej. las dos de contactos de la Task 8 de la fase 2, que su plan no sitúa dentro del conjunto), a mano, conservando todas; nunca se resta una |
 | `backend/app/mcp/descriptions/part_d.py` | **no lo toca**: ninguna ruta nueva de esta fase es herramienta (la decisión del consentimiento está en `NEVER_EXPOSED`; sus detalles y la de revocar, en `NOT_FOR_MCP`), así que ninguna lleva descripción | nada que fusionar. La Task 14 de la fase 2 quita las descripciones de las rutas que salen de las herramientas y reescribe las de `PATCH /orgs/current` y `PATCH /clients/{client_id}`; `tests/test_mcp_descriptions.py`, que corren las Tasks 8 y 10, lee lo que haya en la rama |
 | `backend/tests/test_mcp_catalog.py` | **no lo toca**; lo corren las Tasks 8 y 10 | la Task 14 de la fase 2 cambia su ejemplo `users_roles_create` por `clients_sites_create`: nada que fusionar. Ninguna prueba de esta fase espera que sea herramienta una ruta que la Task 14 saca de las herramientas, de S1 o de S5 |
@@ -153,8 +153,8 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 | `docs/modules/console-auth/spec.md` | una frase, la de MCP (`:98-99`; Task 12) | unión: la fase 2 añade su párrafo «Superseded again on 2026-11-06» debajo del de `:6` (su Task 13), lejos de `:98`. Nada de lo que escribe esta fase dice que la fase 3 retire Keycloak: lo retira la fase 4 (diseño §8); la búsqueda de «until phase 3» de la Task 12, Step 4, lo comprueba en el árbol fusionado (re-revisión f3-3, X1) |
 | `backend/app/api/v1/me.py`, `backend/app/core/auth/__init__.py`, `backend/tests/conftest.py` | solo comentarios que decían «hasta la fase 3» (Task 12) | unión |
 | `backend/tests/test_domain_gate_doors.py`, `backend/tests/test_auth_falsifiers.py`, `backend/tests/test_me_profile.py` | pruebas de la puerta de MCP re-apuntadas al token propio (Task 9) | si la fase 2 añade pruebas de la puerta de un contacto o de Microsoft, se conservan las dos; ninguna de las de aquí toca la rama de la sesión |
-| `frontend/src/App.tsx`, `frontend/src/lib/session.ts`, `frontend/scripts/routes.mjs`, `frontend/src/test/routes-covered.test.ts` | la ruta `/oauth/authorize`, la prop `bare` de `RequireAuth`, `EDGE_PATHS`, `EXCLUDED` (Task 4) | unión; `PUBLIC_PATHS` no cambia aquí |
-| `frontend/src/i18n/{en,es}/auth.ts`, `frontend/src/modules/auth/__tests__/harness.tsx` | `auth.consent.*`, los métodos del consentimiento y del segundo factor en `calls`, la ruta en `renderAuth` (Task 4) | unión |
+| `frontend/src/App.tsx`, `frontend/src/lib/session.ts`, `frontend/scripts/routes.mjs`, `frontend/src/test/routes-covered.test.ts` | la ruta `/oauth/authorize`, la prop `bare` de `RequireAuth`, `EDGE_PATHS`, `EXCLUDED` (Task 4) | unión; `PUBLIC_PATHS` no cambia aquí. En `App.tsx`, esta fase y la fase 2 añaden una ruta pública o de sesión tras el mismo ancla (`<Route path="/recover" …>`): mismo ancla, git choca; se conservan las dos |
+| `frontend/src/i18n/{en,es}/auth.ts`, `frontend/src/modules/auth/__tests__/harness.tsx` | `auth.consent.*`, los métodos del consentimiento y del segundo factor en `calls`, la ruta en `renderAuth` (Task 4) | unión; la fase 2 también toca `calls`, `installDefaults` y `renderAuth` del arnés y los dos `auth.ts`: mismo ancla, git choca; se conservan las dos |
 | `frontend/src/components/stepUp.tsx` | **no lo toca**: `ConsentPage` usa `useStepUp` (C1, Task 4) | la Task 14 de la fase 2 añade `sendOnce` y amplía el docstring; `useStepUp`, `run` y `StepUpRun` no cambian, así que la página de consentimiento y sus pruebas (Task 4) siguen igual |
 | `frontend/src/lib/api.ts` | dos métodos del consentimiento, después de `acceptRecovery` (sus tipos van en `frontend/src/modules/auth/types.ts`); `revokeMcpConnection` y sus tipos (Tasks 4, 11) | unión |
 | `frontend/src/modules/settings/AiConnectionsTab.tsx`, `frontend/src/modules/settings/api.ts` | en la pestaña, la ruta de la primera frase de la cabecera (`{app_id}`), el párrafo «A REVOKE IS IN FORCE …», `revokeFor`, `confirming`, el `subject` de la `ConfirmDialog` de «para todos», `RevokeOutcome` y `AppRow`; en `api.ts`, `useRevokeMcpConnection` (Task 11) | unión: la Task 14 de la fase 2 añade, en la pestaña, un párrafo antes de «TURNING IT ON ASKS FIRST», el import de `useStepUp`, `useUpdateCurrentOrgMutation(stepUp.run)` y `{stepUp.dialog}` detrás de la última `ConfirmDialog`; en `api.ts`, `sendOnce` en el import de `stepUp` y `run` en doce hooks (cuatro de S5). Entre cada cambio de una fase y el más cercano de la otra queda al menos una línea sin tocar, y la Task 11 ancla por texto. `useRevokeMcpConnection` sigue sin `run`: revocar solo quita acceso (S4) |
@@ -162,7 +162,7 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 | `frontend/src/modules/settings/fixtures.ts` | `MCP_APPS`, su comentario y `revokeMcpConnection` (Task 11) | unión: la fase 2 añade `getMicrosoftSettings` y `putMicrosoftSettings` |
 | `frontend/src/modules/settings/SettingsPage.tsx` (la tabla de rutas de la cabecera) | la fila «AI connections»: `POST /mcp/connections/{app_id}/revoke` (Task 11) | unión: la fase 2 añade su fila (Microsoft); cada fase cambia solo la suya |
 | `frontend/src/i18n/{en,es}/settings.ts` | en `aiConnections.apps`: `calledItself`, `selfRegistered`, `unregistered`, `subtitle` y `empty`; se van `partialMe` y `partial` (Task 11) | unión: la fase 2 añade `page.tabs.microsoft` y la sección `microsoft` |
-| `frontend/src/test/secretMutations.test.ts` | `oauthAuthorizeDecision` en `SECRET_METHODS` y su sitio en `SECRET_SITES`, por `stepUp.run` (Task 4) | unión |
+| `frontend/src/test/secretMutations.test.ts` | `oauthAuthorizeDecision` en `SECRET_METHODS` y su sitio en `SECRET_SITES`, por `stepUp.run` (Task 4) | unión; la fase 2 también añade sitios a `SECRET_SITES`, tras `acceptRecovery`: mismo ancla, git choca; se conservan las dos |
 
 ## Apéndice A — Contratos
 
@@ -2242,7 +2242,7 @@ async def test_an_answer_that_is_not_a_document_is_refused(
         ("dns_failure", "unavailable", True),
     ],
 )
-async def test_a_url_the_guard_refuses_is_blocked_for_good(
+async def test_what_the_guard_refuses_is_blocked_or_transient(
     monkeypatch, guard: str, reason: str, transient: bool
 ) -> None:
     async def blocked(url: str, **kwargs: Any) -> EgressBody:
@@ -2706,11 +2706,12 @@ async def fetch_document(client_id: str) -> ClientDocument:
 
 **La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
 `backend/tests/test_logging_discipline.py` al empezar la tarea: 108 hoy, en la oleada 1, y otro si la rama ya trae la fase 2 (su Task 5
-añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
-docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW N» cuyo N es el del `assert`** (en `3a1ba1c`, «NOW 108, own authentication
+phase 1, fix 3 review Minor 2», `:441` de la prueba y `:178` del diseño; no el «NOW 65» de `:334` ni el «NOW 70» de `:135`, que
+son los de más arriba) del docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
 el `assert` (y el «expected N» de su mensaje) dicen **N+1** (abajo, 109, con N = 108). Lo mismo en el §2.2 de
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
-arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW N**» cuyo N es el
+del `assert` (el mismo párrafo nombrado arriba), que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
 
 En el docstring de la prueba del recuento:
 
@@ -8015,12 +8016,12 @@ y en `frontend/src/i18n/es/auditVocabulary.ts`, después de `mcp_app_revoked`:
 - [ ] **Step 5: El recuento de logs**
 
 **La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
-`backend/tests/test_logging_discipline.py` al empezar la tarea: 109 si solo está la Task 3 (la 7 corre en paralelo con la 6, después de la 3), y otro si la rama ya trae la fase 2 (su Task 5
-añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
-docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
-el `assert` (y el «expected N» de su mensaje) dicen **N+1** (abajo, 110, con N = 109). Lo mismo en el §2.2 de
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
-arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
+`backend/tests/test_logging_discipline.py` al empezar la tarea, **pero no se fía de lo que muestre la worktree**: la Task 7 corre después de fusionar la fase 2 (oleada 3), cuya Task 5 y la Task 3 cambiaron esa línea igual (108 → 109) y git las unió sin avisar. La base es 108 + 1 (T5 de la fase 2) + 1 (Task 3) = **110** si las dos están en la rama; si el `assert` dice 109, se corrige a mano a 110 (y su «expected») y se comprueba que el titular del párrafo de la Task 3 dice 110 antes de seguir; con otro orden de fusión, 108 más el delta de cada una que esté. El párrafo nuevo va **encima del párrafo «NOW N» cuyo N es el del `assert`** (en `3a1ba1c`, «NOW 108, own authentication
+phase 1, fix 3 review Minor 2», `:441` de la prueba y `:178` del diseño; no el «NOW 65» de `:334` ni el «NOW 70» de `:135`, que
+son los de más arriba) del docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+el `assert` (y el «expected N» de su mensaje) dicen **N+1** (abajo, 110, con N = 109, la rama sin la fase 2; con ella, N = 110 y todo número de abajo gana +1). Lo mismo en el §2.2 de
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW N**» cuyo N es el
+del `assert` (el mismo párrafo nombrado arriba), que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **+1**.
 
 En el docstring de la prueba del recuento:
 
@@ -8097,7 +8098,7 @@ su host y vuelve a la app solo con un clic), y, al aprobar con el segundo factor
 - Modify: `backend/app/core/i18n/es.py`
 - Modify: `frontend/src/i18n/en/auditVocabulary.ts`, `frontend/src/i18n/es/auditVocabulary.ts` (`mcp.app_authorized`)
 - Modify: `frontend/src/modules/audit/auditVocabulary.english.test.ts` (`HAND_WORDED` +1)
-- Modify: `backend/tests/test_mcp_channel_api.py` (`OWN_SIGN_IN_NEVER_EXPOSED`, recuento 36 → 37)
+- Modify: `backend/tests/test_mcp_channel_api.py` (`OWN_SIGN_IN_NEVER_EXPOSED`, recuento: el número que veas + 1, 55 → 56 con la fase 2 de `3a214fd`)
 - Modify: `backend/tests/test_route_gating.py` (`UNGATED_BY_DESIGN` +2)
 - Modify: `backend/tests/test_security_headers.py` (`SECRET_ONCE` +1)
 - Modify: `backend/tests/test_client_catalog.py` (`OAUTH_SESSION_USERS` gana `consent.py`)
@@ -8885,7 +8886,7 @@ En `backend/tests/test_mcp_channel_api.py`, `OWN_SIGN_IN_NEVER_EXPOSED` gana, de
     ("POST", "/api/v1/oauth/authorize/decision"),
 ```
 
-y `assert len(NEVER_EXPOSED) == 36` pasa a `37` (delta **+1** sobre la base que vea esta tarea).
+y `assert len(NEVER_EXPOSED) == …` pasa al número que veas + 1 (55 → 56 con la fase 2 de `3a214fd`: la Task 8 corre con la fase 2 en la rama; delta **+1** sobre la base que vea esta tarea).
 
 En `backend/tests/test_route_gating.py`, `UNGATED_BY_DESIGN` gana, después de `("DELETE", "/api/v1/me/sessions/{session_id}")`:
 
@@ -8920,7 +8921,7 @@ En `backend/tests/test_client_catalog.py`, `OAUTH_SESSION_USERS` gana:
 ```
 
 Run: `cd backend && .venv/bin/pytest -q tests/test_oauth_consent.py tests/test_mcp_channel_api.py tests/test_route_gating.py tests/test_security_headers.py`
-Expected: FAIL (`404` en las rutas; `NEVER_EXPOSED` 36; `UNGATED_BY_DESIGN` no casa con el router; `NO_STORE_ROUTES`
+Expected: FAIL (`404` en las rutas; `NEVER_EXPOSED` con el número que veas, sin el +1 (55 con la fase 2 de `3a214fd`); `UNGATED_BY_DESIGN` no casa con el router; `NO_STORE_ROUTES`
 no es `SECRET_ONCE`).
 
 - [ ] **Step 2: Los errores del punto de autorización**
@@ -12526,11 +12527,12 @@ Cinco pruebas existentes comparan los metadatos enteros de un acto que ahora lle
 
 **La base, la que tenga la worktree** (re-revisión f3-2, M-8). Sea N el número de `assert total == N` en
 `backend/tests/test_logging_discipline.py` al empezar la tarea: 110 con las Tasks 3 y 7, y otro si la rama ya trae la fase 2 (su Task 5
-añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW …» de más arriba** del
-docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
+añade un sitio) o el orden de fusión fue otro. El párrafo nuevo va **encima del párrafo «NOW N» cuyo N es el del `assert`** (en `3a1ba1c`, «NOW 108, own authentication
+phase 1, fix 3 review Minor 2», `:441` de la prueba y `:178` del diseño; no el «NOW 65» de `:334` ni el «NOW 70» de `:135`, que
+son los de más arriba) del docstring de la prueba del recuento, que pasa a «BEFORE THAT, …» (sin cambiar nada más de él); el titular del nuevo y
 el `assert` (y el «expected N» de su mensaje) dicen **N−3** (abajo, 107, con N = 110). Lo mismo en el §2.2 de
-`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW …**» de más
-arriba, que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **−3**.
+`docs/superpowers/specs/2026-08-14-logging-kernel-design.md`: el párrafo de abajo va encima del «**NOW N**» cuyo N es el
+del `assert` (el mismo párrafo nombrado arriba), que pasa a «**BEFORE THAT, …**», con el mismo número en su titular. El delta de esta tarea es **−3**.
 
 En el docstring de la prueba del recuento:
 
@@ -12558,7 +12560,7 @@ best-effort half left to report.
 
 - [ ] **Step 6: Las pruebas pasan**
 
-Run: `cd backend && .venv/bin/pytest -q -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning tests/test_mcp_grant_lifecycle.py tests/test_mcp_admin_api.py tests/test_global_writes.py tests/test_logging_discipline.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_mcp_channel_api.py tests/test_mcp_catalog.py tests/test_ai_tool_surface.py tests/test_user_lifecycle.py tests/test_auth_my_security.py tests/test_auth_password_reset.py tests/test_auth_notice_order.py tests/test_auth_signin.py tests/test_auth_recover_command.py tests/test_route_gating.py`
+Run: `cd backend && .venv/bin/pytest -q -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning tests/test_mcp_grant_lifecycle.py tests/test_mcp_admin_api.py tests/test_global_writes.py tests/test_logging_discipline.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_mcp_channel_api.py tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_ai_tool_surface.py tests/test_user_lifecycle.py tests/test_auth_my_security.py tests/test_auth_password_reset.py tests/test_auth_notice_order.py tests/test_auth_signin.py tests/test_auth_recover_command.py tests/test_route_gating.py`
 Expected: PASS (los dos `-W error` hacen fallo de un `await` olvidado; Task 9, Step 7).
 
 Run: `cd backend && grep -rn "revoke_all_for_user(session, user.id, " app | grep -vc "ai_grants.revoke_all_for_user"`
@@ -13797,7 +13799,7 @@ y el bloque de `ITS_MCP_REGISTRATION` (C2: abre el registro dinámico y nada má
   pide nada en las dos (Puntos de encuentro):
 
   ```markdown
-  > **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También aprobar una aplicación de
+  > **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También **la pide** aprobar una aplicación de
   > IA en la pantalla de consentimiento, en un equipo recordado también: aprobarla le entrega toda la autoridad de la
   > persona (`CLAUDE.md` 1c) mientras se use. Rechazarla no la pide.
   ```
@@ -13902,6 +13904,17 @@ Comentarios del código que dicen «hasta la fase 3»:
 Run: `cd "$(git rev-parse --show-toplevel)" && grep -rnI --exclude-dir=__pycache__ "until phase 3\|until own authentication phase 3" deploy backend/app backend/tests docs/03-security-model.md docs/modules/console-auth | grep -v "backend/tests/client_scope_support.py"`
 Expected: sin salida (A3-63: `-I` y `__pycache__` dejan fuera los `.pyc`; `client_scope_support.py:172` habla de la fase
 3 del proyecto de clientes MSP, no de esta).
+
+En la misma viñeta «Retention:» que la Task 13 de la fase 2 añade a `docs/03-security-model.md` («sessions are deleted 90
+days after they ended or expired; remembered devices and one-time links 30 days after; WebAuthn challenges after a day;
+each daily sweep is audited (`auth.retention_applied`).»), esta fase añade entre «after a day» y «; each daily sweep»:
+«; since phase 3, spent OAuth authorization codes 10 minutes after they expire, ended AI-app grants after a day, and AI
+apps unused for 30 days» (los periodos son los de la Task 13: `OAUTH_CODE_RETENTION = 10 minutos`,
+`OAUTH_GRANT_RETENTION = 1 día`, `CLIENT_IDLE = 30 días`). La viñeta ya existe en la rama porque la Task 12 corre en el
+árbol fusionado con la fase 2.
+
+Run: `cd "$(git rev-parse --show-toplevel)" && grep -c "since phase 3, spent OAuth authorization codes 10 minutes after they expire, ended AI-app grants after a day, and AI apps unused for 30 days" docs/03-security-model.md`
+Expected: `1`.
 
 Run: `cd "$(git rev-parse --show-toplevel)" && grep -n "authenticate through Keycloak" docs/03-security-model.md`
 Expected: sin salida: no queda ni la frase de `3a1ba1c` ni la de la Task 13 de la fase 2, que la búsqueda de arriba no
