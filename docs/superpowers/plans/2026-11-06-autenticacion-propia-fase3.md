@@ -116,12 +116,13 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 |---|---|---|
 | `backend/migrations/versions/` | 0247 con `down_revision "0246"` (Task 5) | después de 0246, nunca a la vez |
 | `backend/app/core/auth/lookup.py` | **no lo toca**: consume `org_of_slug(engine, slug)` y su función `its_auth_org` (`SECURITY DEFINER`), de la Task 1 de la fase 2 (Task 5, `store.deployment_org`; B3-13) | la fase 2 primero |
-| `backend/app/core/auth/retention.py`, `backend/tests/test_auth_retention.py` | tres pasos al final de `STEPS` (`oauth_codes`, `oauth_grants`, `oauth_apps`), sus dos ventanas, y las tres claves a cero en la prueba de los metadatos exactos (Task 13) | después de la Task 3 de la fase 2; si la fase 2 cambia el registro o esa prueba en su revisión, se conserva lo suyo y se añaden los tres pasos |
+| `backend/app/core/auth/retention.py`, `backend/tests/test_auth_retention.py` | tres pasos al final de `STEPS` (`oauth_codes`, `oauth_grants`, `oauth_apps`), sus dos ventanas, tres viñetas al final de «WHAT GOES, AND AFTER HOW LONG», el párrafo del alcance («over these tables only», decisión 4) y las tres claves a cero en la prueba de los metadatos exactos (Task 13). El párrafo de `STEPS` **no lo toca**: la fase 2 ya lo termina con «Phase 3 adds its authorization codes, its grants (refresh-token families, whose tokens cascade) and its idle apps (`oauth_clients`) here.» (su X4), que dice lo que esta fase añade (N-M7) | después de la Task 3 de la fase 2; si la fase 2 cambia el registro o esa prueba en su revisión, se conserva lo suyo y se añaden los tres pasos. Su fila dice que, si esta fase reescribe esa frase, la busque por su texto nuevo: no la reescribe, así que no hay nada que buscar |
 | `backend/app/models/__init__.py` | exporta `OAuthClient`, `OAuthCode`, `OAuthRefreshFamily`, `OAuthRefreshToken` junto a `McpRevocation` (Task 5) | unión |
 | `backend/app/core/client_scope_catalog.py` | cuatro entradas `oauth_*` (Task 5) | unión |
 | `backend/app/core/client_scope.py` | `ALL_SCOPE_ALLOWLIST` gana `app/core/auth/oauth/store.py::oauth_session` (Task 5) | unión (la fase 2 añade `retention.py::sweep_org` y `entra_flows.py::_entra_session`) |
 | `backend/tests/test_client_catalog.py` | `SURROGATE_COLUMNS` gana `oauth_codes.code_hash` y `oauth_refresh_tokens.token_hash`; la guarda nueva `OAUTH_SESSION_USERS` (Tasks 5–10); el motivo de `users_org_id_external_subject_key` (Task 9) | unión |
-| `backend/app/api/deps.py` | la rama MCP de `admit()` verifica el token propio (Task 9); la rama de la cookie y `require_step_up` no cambian | si la fase 2 toca `admit(contacts=True)` o `_admit_session`, se conservan los dos cambios; esta fase no toca la rama de la sesión. Tras la fusión, la puerta de la consola responde a un contacto 403 `portal_only` sin log, y la de MCP sigue como en la fase 1 (su log y un 403 sin código): a propósito, porque un contacto no llega a tener concesión (Task 9, decisión 2; re-revisión f3-3, X10) |
+| `backend/app/api/deps.py` | la rama MCP de `admit()` verifica el token propio y devuelve su `Admission` sin `principal` (Task 9; decisión 6, la fila siguiente); sus imports pierden `AsyncSession`, `audit_service`, `Organization` y lo de Keycloak salvo `JwksCache`; la rama de la cookie y `require_step_up` no cambian | si la fase 2 toca `admit(contacts=True)` o `_admit_session`, se conservan los dos cambios; esta fase no toca la rama de la sesión. Tras la fusión, la puerta de la consola responde a un contacto 403 `portal_only` sin log, y la de MCP sigue como en la fase 1 (su log y un 403 sin código): a propósito, porque un contacto no llega a tener concesión (Task 9, decisión 2; re-revisión f3-3, X10). La Task 14 de la fase 2 añade `require_permission_on_every_client_with_step_up` al final del archivo, lejos de `admit()`: unión. Esta fase no quita ningún nombre que usen los cambios de la fase 2 (la Task 14 usa `Callable`, `Coroutine`, `Any` y `Depends`) |
+| El canal MCP nunca cuenta como confirmación reciente (el punto 4 de los «Puntos de encuentro con la fase 3» de la fase 2; su Task 14, decisión 5) | la rama MCP de `admit()` no lleva `principal`, así que `require_step_up` responde 403 `step_up_required` a toda llamada del canal (Task 9, decisión 6, y el comentario de su `return`). Lo fija `tests/test_mcp_own_tokens.py::test_an_mcp_call_never_counts_as_a_recent_confirmation`: la persona acaba de confirmar su factor en la consola, y `factors/reset` por el canal sigue pidiéndolo | se sostiene sin tocar nada de la fase 2. En el árbol fusionado lo prueban también las dos pruebas MCP de `tests/test_step_up_widened.py` (los tenants por `clients_update` y el interruptor por `PATCH /orgs/current`), re-apuntadas como dice su fila. La decisión del consentimiento (Task 8, C1) pide la confirmación a la sesión de la consola; por el canal está en `NEVER_EXPOSED` |
 | `backend/app/api/v1/auth.py` | **no lo toca**: el consentimiento va en `backend/app/api/v1/oauth_consent.py` | — |
 | `backend/app/core/auth/notices.py` | el aviso `app_connected` y el parámetro `host` de `_compose` y `tell` (Task 8) | unión: la fase 2 no añade tipos de `Notice` (sus avisos reutilizan `factor_added`, `factor_removed` y `password_changed`); cambia `reset_mail`, `contact_invitation_mail` y la rama `"microsoft"` de `_factor_name`, otras líneas (re-revisión f3-3, X7) |
 | `backend/app/core/auth/flows.py`, `backend/app/core/auth/account.py` | el import `grants as ai_grants`, una línea junto a cada `revoke_all_for_user(session, user.id)` y `ai_grants_revoked` en el evento del acto; en `account.py`, el tipo de `_record` (Task 10) | unión; si la fase 2 añade un acto que revoca los equipos recordados de un contacto, no necesita la línea (un contacto no tiene concesiones de IA: no pasa la puerta de la consola) |
@@ -134,22 +135,29 @@ La fase 2 (diseño §3 contactos del portal, §4 Microsoft Entra) se planifica a
 | auditoría: `frontend/src/i18n/{en,es}/auditVocabulary.ts`, `frontend/src/modules/audit/auditVocabulary.english.test.ts` | cinco acciones `mcp.*` y una en `HAND_WORDED` (Tasks 7, 8) | unión |
 | `frontend/src/lib/globalRoutes.json` | no cambia | regenerado en el árbol fusionado si la fase 2 lo cambia |
 | `backend/tests/test_logging_discipline.py` y el §2.2 de `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` | +1 (Task 3), +1 (Task 7), −3 (Task 10) | se suman los deltas de las dos fases y se escribe un párrafo «NOW N» por cambio |
-| `backend/app/mcp/exclusions.py` y `backend/tests/test_mcp_channel_api.py` (`NEVER_EXPOSED`) | +1 (`POST /api/v1/oauth/authorize/decision`), una clave de `NOT_FOR_MCP` nueva y otra cambiada (Tasks 8 y 10) | unión; el recuento final es 36 + 1 + lo de la fase 2 |
+| `backend/app/mcp/exclusions.py` y `backend/tests/test_mcp_channel_api.py` (`NEVER_EXPOSED`) | **+1**: `POST /api/v1/oauth/authorize/decision`, en `NEVER_EXPOSED_REASONS` tras `POST /users/{user_id}/invite/resend` y en `OWN_SIGN_IN_NEVER_EXPOSED` tras las dos de invitaciones (Task 8); una clave de `NOT_FOR_MCP` nueva y otra cambiada (Tasks 8 y 10); en la prueba, `await mcp_token(` y tres pruebas re-apuntadas (Task 9) | unión. La fase 2 suma sus entradas, las de su Task 14 incluidas: `_RECENT_FACTOR`, un párrafo del docstring y su bloque tras `POST /me/recovery-codes` —las cinco rutas de S1 y las cuatro de S5 (`POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}`, `POST /users/{user_id}/enable`)—, y en la prueba `RECENT_FACTOR_NEVER_EXPOSED` tras el `}` de `OWN_SIGN_IN_NEVER_EXPOSED` y la igualdad con los tres conjuntos, que la entrada de esta fase sigue cumpliendo. Ningún número fusionado se fija aquí: la línea `assert len(NEVER_EXPOSED) == …`, que cambian las dos, se escribe a mano como 36 (la base) + el delta de la fase 2, el que diga su plan al fusionar (+19 en `3a214fd`), + 1 (esta fase). Si entradas de las dos fases caen en el mismo sitio (p. ej. las dos de contactos de la Task 8 de la fase 2, que su plan no sitúa dentro del conjunto), a mano, conservando todas; nunca se resta una |
+| `backend/app/mcp/descriptions/part_d.py` | **no lo toca**: ninguna ruta nueva de esta fase es herramienta (la decisión del consentimiento está en `NEVER_EXPOSED`; sus detalles y la de revocar, en `NOT_FOR_MCP`), así que ninguna lleva descripción | nada que fusionar. La Task 14 de la fase 2 quita las descripciones de las rutas que salen de las herramientas y reescribe las de `PATCH /orgs/current` y `PATCH /clients/{client_id}`; `tests/test_mcp_descriptions.py`, que corren las Tasks 8 y 10, lee lo que haya en la rama |
+| `backend/tests/test_mcp_catalog.py` | **no lo toca**; lo corren las Tasks 8 y 10 | la Task 14 de la fase 2 cambia su ejemplo `users_roles_create` por `clients_sites_create`: nada que fusionar. Ninguna prueba de esta fase espera que sea herramienta una ruta que la Task 14 saca de las herramientas, de S1 o de S5 |
+| `backend/tests/test_step_up_widened.py` (lo crea la Task 14 de la fase 2) | sus dos pruebas de MCP, re-apuntadas como toda prueba de MCP (Task 9, Step 7): `await mcp_token(...)`, y en `test_on_the_mcp_channel_switching_ai_access_on_is_refused` el token en su propia línea, porque con el `await` dentro de la f-string la de `bearer` pasaría de 100 columnas. Lo que afirman no cambia: la negativa es la de `require_step_up` (la fila del canal MCP, arriba) | lo hace la Task 9 si el archivo ya está en su rama; si no, quien fusione después la Task 14 de la fase 2, con el mismo cambio. La fila de la fase 2 pide `await mcp_token(...)`: es eso, con la línea partida |
+| `backend/tests/test_mcp_tools.py` | `await mcp_token(` en `:210` (`_admin`) y `:277`, y los dos `McpPrincipal` con `McpGrant` (Task 9, Step 7) | unión. La Task 14 de la fase 2 (S5: `POST /roles` deja de ser herramienta) pasa de `roles_create` a `roles_update` `test_a_technician_does_not_see_or_call_an_org_admin_tool` (desde `:280`, debajo de la `:277` de esta fase) y `test_a_409_is_the_apis_detail` (`:438-:447`). Entre `:277` y `:280` quedan dos líneas sin tocar (el `async with` y `catalog = …`), así que git une los dos cambios; si no, a mano, conservando los dos (`await mcp_token(...)` arriba, `roles_update` debajo). Ninguna prueba de esta fase llama a `roles_create`, `roles_permissions_set`, `roles_delete` ni `users_enable` |
+| Las pruebas de esta fase y las rutas de la Task 14 de la fase 2 (S1, S3 y S5) | ninguna prueba que esta fase crea o reescribe llama con una sesión a `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/invite`, `POST /users/{user_id}/invite/resend`, `POST /users/{user_id}/roles`, `DELETE /users/{user_id}/roles/{assignment_id}`, `PATCH /clients/{client_id}`, `PATCH /orgs/current`, `POST /roles`, `DELETE /roles/{role_id}`, `PUT /roles/{role_id}/permissions` ni `POST /users/{user_id}/enable`: el interruptor de MCP se fija por SQL (`oauth_org`, `mcp_org`), y el técnico invitado de la Task 12 lo siembra `create_user`. Las rutas que ya pedían la confirmación (`factors/reset`, `/me/password`, la decisión del consentimiento) las llaman sesiones frescas (`signed_in`, `sign_in(..., step_up=True)`, `connect`). Las pruebas MCP de esta fase llaman `me_get`, ninguna herramienta de esas rutas | una prueba que se añada y llame a una de ellas con una sesión usa `tests.session_support.sign_in(env, org_id, sub, step_up=True)` —lo que hace `ApiEnv.headers`— o, para una sesión que ya existe, `app.core.auth.sessions.mark_step_up(session, session_id)`. Es lo que dice la fila de la fase 2 |
 | `backend/tests/test_route_gating.py` (`UNGATED_BY_DESIGN`) | +2 rutas del consentimiento (Task 8) | unión |
 | `backend/tests/test_auth_phase2_falsifiers.py` | **no lo toca**: lo crea la Task 13 de la fase 2 y recorre toda `/api/v1`; las rutas nuevas de esta fase lo pasan sin excepción (las del consentimiento, por `bound_auth_context`, que a un contacto le responde `portal_only`; la de revocar, por `require_permission`). La Task 8 lo corre si la worktree lo tiene (re-revisión f3-2, M-7) | la suite completa de la Task 12, Step 5, lo corre en el árbol fusionado |
 | `deploy/nginx.conf`, `backend/tests/test_deploy_frame_headers.py` | `frame-ancestors 'none'` y `X-Frame-Options: DENY` en cada `location` (Task 4) | si la fase 2 añade un `location` (la vuelta de Entra es una ruta de la consola, así que probablemente no), lleva las dos cabeceras: la prueba lo exige |
 | `deploy/.env.example` | comentario de `ITS_MCP_REGISTRATION` (C2) y de `KC_HOSTNAME` (Task 12) | unión |
-| `deploy/README.md` | la sección «AI connections (MCP)», tres frases sueltas, una fila de una tabla y, en «Status of this runbook», solo la línea `:32` (Task 12) | unión: la fase 2 escribe la de Microsoft y el portal, y en «Status of this runbook» solo la frase «Three things phase 1 changed…» (línea 36 en `3a1ba1c`); ninguna de las dos refluye ese párrafo, o la fusión choca (re-revisión f3-3, X11) |
+| `deploy/README.md` | la sección «AI connections (MCP)» (tres sustituciones), tres frases sueltas, una fila de una tabla, una viñeta al final de la lista «Refused twice» de `### What is never reachable over MCP` y, en «Status of this runbook», solo la línea `:32` (Task 12) | unión: la fase 2 escribe la de Microsoft y el portal, y en «Status of this runbook» solo la frase «Three things phase 1 changed…», que en `3a1ba1c` está en la línea 36, cuatro más abajo (su fila dice `:35`, «dos líneas más abajo»); ninguna de las dos refluye ese párrafo, o la fusión choca (re-revisión f3-3, X11). En `### What is never reachable over MCP`, el párrafo de su Task 14 («The acts that ask for your second factor again», entre «**Not tools:** …» y «Every result is also scanned …») queda entre las dos ediciones de esta fase, la viñeta de «Refused twice» arriba y la sustitución desde `### Residual risks, stated plainly` abajo, con líneas sin tocar a cada lado: ninguna lo toca. Lo que escribe esta fase no lo contradice: apagar MCP, revocar una app y desactivar a una persona no piden la confirmación en ninguna de las dos, y de lo que la Task 14 sí ampara (encender MCP, quitar un rol) no dice que no la pida |
 | `deploy/docker-compose.yml` | la regla de Traefik del router `api` (Task 6) | si la fase 2 también la cambia, se conservan los dos `Path` |
 | `.github/workflows/ci.yml` | **no lo toca** (fase 4) | — |
-| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | enmiendas fechadas en §2.5, §2.7 (C1) y §5.4 (C2) (Task 12) | unión: la fase 2 enmienda §3, §4 y §9; en §9 no hay nada de esta fase que corregir (re-revisión f3-3, X6) |
-| `docs/03-security-model.md`, `docs/modules/console-auth/spec.md` | una frase cada uno, la de MCP (Task 12) | unión: la fase 2 cambia la de Microsoft y el portal. Nada de lo que escribe esta fase dice que la fase 3 retire Keycloak: lo retira la fase 4 (diseño §8); la búsqueda de «until phase 3» de la Task 12, Step 4, lo comprueba en el árbol fusionado (re-revisión f3-3, X1) |
+| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | enmiendas fechadas en §2.5, §2.7 (C1) y §5.4 (C2) (Task 12); la de §2.5, al final de la sección, detrás de la línea en blanco que sigue al párrafo «Exigida en los últimos 10 minutos para: …» y antes de `### 2.6` | unión: la fase 2 enmienda §3, §4, §9 y los «Límites» de §2.6 (su Task 13), y reescribe ese párrafo de §2.5 con la ampliación del 2026-11-08 sin tocar la línea en blanco que lo sigue (su Task 14). Esa línea queda entre las dos ediciones, así que git las une: en el árbol fusionado §2.5 lleva las dos, la de la Task 14 primero. La enmienda C1 no contradice la lista ampliada: aprobar una aplicación de IA no está en ella ni en lo que deja fuera, y rechazarla, como revocarla, no pide nada en las dos. En §9 no hay nada de esta fase que corregir (re-revisión f3-3, X6) |
+| `docs/03-security-model.md` | la frase de MCP de la viñeta de la autenticación (Task 12, Step 4): en `3a1ba1c`, «MCP clients still authenticate through Keycloak until phase 3.» (`:161`) | **no es una unión, aunque las filas de las dos fases lo decían**: la fase 2 reescribe esa misma frase (su Task 13: «Not built: … (out of scope).» y «MCP clients still authenticate through Keycloak; phase 3 replaces that, and phase 4 removes Keycloak.», con sus viñetas de contactos y de Microsoft detrás) y añade una fila a la tabla «Threat model», debajo de «A console left signed in on an unattended computer» (su Task 14). Con la Task 13 de la fase 2 en la rama, la Task 12 sustituye la frase de MCP de la fase 2 por la suya (Step 4, con su `grep`). Si la fase 2 se fusiona después, `:161` choca: queda la frase de esta fase en lugar de las dos de MCP, y todo lo demás de la fase 2. La fila de la Task 14 no la toca esta fase, y no dice nada que la frase nueva contradiga |
+| `docs/modules/console-auth/spec.md` | una frase, la de MCP (`:98-99`; Task 12) | unión: la fase 2 añade su párrafo «Superseded again on 2026-11-06» debajo del de `:6` (su Task 13), lejos de `:98`. Nada de lo que escribe esta fase dice que la fase 3 retire Keycloak: lo retira la fase 4 (diseño §8); la búsqueda de «until phase 3» de la Task 12, Step 4, lo comprueba en el árbol fusionado (re-revisión f3-3, X1) |
 | `backend/app/api/v1/me.py`, `backend/app/core/auth/__init__.py`, `backend/tests/conftest.py` | solo comentarios que decían «hasta la fase 3» (Task 12) | unión |
 | `backend/tests/test_domain_gate_doors.py`, `backend/tests/test_auth_falsifiers.py`, `backend/tests/test_me_profile.py` | pruebas de la puerta de MCP re-apuntadas al token propio (Task 9) | si la fase 2 añade pruebas de la puerta de un contacto o de Microsoft, se conservan las dos; ninguna de las de aquí toca la rama de la sesión |
 | `frontend/src/App.tsx`, `frontend/src/lib/session.ts`, `frontend/scripts/routes.mjs`, `frontend/src/test/routes-covered.test.ts` | la ruta `/oauth/authorize`, la prop `bare` de `RequireAuth`, `EDGE_PATHS`, `EXCLUDED` (Task 4) | unión; `PUBLIC_PATHS` no cambia aquí |
 | `frontend/src/i18n/{en,es}/auth.ts`, `frontend/src/modules/auth/__tests__/harness.tsx` | `auth.consent.*`, los métodos del consentimiento y del segundo factor en `calls`, la ruta en `renderAuth` (Task 4) | unión |
-| `frontend/src/components/stepUp.tsx` | **no lo toca**: `ConsentPage` usa `useStepUp` (C1, Task 4) | — |
+| `frontend/src/components/stepUp.tsx` | **no lo toca**: `ConsentPage` usa `useStepUp` (C1, Task 4) | la Task 14 de la fase 2 añade `sendOnce` y amplía el docstring; `useStepUp`, `run` y `StepUpRun` no cambian, así que la página de consentimiento y sus pruebas (Task 4) siguen igual |
 | `frontend/src/lib/api.ts` | dos métodos del consentimiento, después de `acceptRecovery` (sus tipos van en `frontend/src/modules/auth/types.ts`); `revokeMcpConnection` y sus tipos (Tasks 4, 11) | unión |
+| `frontend/src/modules/settings/AiConnectionsTab.tsx`, `frontend/src/modules/settings/api.ts` | en la pestaña, la ruta de la primera frase de la cabecera (`{app_id}`), el párrafo «A REVOKE IS IN FORCE …», `revokeFor`, `confirming`, el `subject` de la `ConfirmDialog` de «para todos», `RevokeOutcome` y `AppRow`; en `api.ts`, `useRevokeMcpConnection` (Task 11) | unión: la Task 14 de la fase 2 añade, en la pestaña, un párrafo antes de «TURNING IT ON ASKS FIRST», el import de `useStepUp`, `useUpdateCurrentOrgMutation(stepUp.run)` y `{stepUp.dialog}` detrás de la última `ConfirmDialog`; en `api.ts`, `sendOnce` en el import de `stepUp` y `run` en doce hooks (cuatro de S5). Entre cada cambio de una fase y el más cercano de la otra queda al menos una línea sin tocar, y la Task 11 ancla por texto. `useRevokeMcpConnection` sigue sin `run`: revocar solo quita acceso (S4) |
 | `frontend/src/modules/settings/__tests__/harness.tsx` | `MCP_APP_ID`, `MCP_APP_FIXTURE` con `id`, `name`, `host` y `kind`, y el `mockResolvedValue` de `calls.revokeMcpConnection` (Task 11) | unión: la fase 2 añade sus fixtures y llamadas de Microsoft; la Task 11 ancla cada edición por su texto, no por la línea (re-revisión f3-3, X8) |
 | `frontend/src/modules/settings/fixtures.ts` | `MCP_APPS`, su comentario y `revokeMcpConnection` (Task 11) | unión: la fase 2 añade `getMicrosoftSettings` y `putMicrosoftSettings` |
 | `frontend/src/modules/settings/SettingsPage.tsx` (la tabla de rutas de la cabecera) | la fila «AI connections»: `POST /mcp/connections/{app_id}/revoke` (Task 11) | unión: la fase 2 añade su fila (Microsoft); cada fase cambia solo la suya |
@@ -9708,7 +9716,8 @@ Keycloak en la puerta de MCP. Las que prueban funciones de Keycloak que siguen e
   `backend/tests/test_mcp_admin_api.py` (solo `_old_token` y `_call_a_tool`; el resto es de la Task 10)
 - Modify (mecánicas, Step 7): `backend/tests/test_mcp_tools.py`, `backend/tests/test_deploy_window.py`,
   `backend/tests/test_backup_policy_window.py`, `backend/tests/test_client_scoped_config.py`,
-  `backend/tests/test_auth_reset_needs_recovery.py`
+  `backend/tests/test_auth_reset_needs_recovery.py`, y `backend/tests/test_step_up_widened.py` si la rama ya tiene la
+  Task 14 de la fase 2
 - Modify: `backend/tests/test_route_session_discipline.py` (`RAW_SESSIONS_BY_DESIGN` pierde `api/deps.py::admit`)
 - Modify: `backend/tests/test_client_catalog.py` (el motivo de `users_org_id_external_subject_key` en `ORG_WIDE_KEYS`)
 
@@ -9771,6 +9780,20 @@ tokens that are valid for use with their own resources». Una conexión hecha co
 `invalid_token`; la persona quita el conector y lo vuelve a añadir (que la app vuelva a descubrir el emisor ella sola
 está SIN VERIFICAR: Anthropic solo documenta el refresh tras un 401). No llega a ningún host: nada se despliega antes
 de la fase 4.
+
+**Decisión de la tarea (6): una llamada MCP nunca cuenta como confirmación reciente** (el punto 4 de los «Puntos de
+encuentro con la fase 3» del plan de la fase 2; su Task 14, decisión 5). `require_step_up` (`deps.py:557-573`) rechaza
+un `AuthContext` sin `principal`, y la rama MCP de `admit()` devuelve su `Admission` sin él (el campo vale `None` por
+omisión): la concesión admite a la persona, nunca su segundo factor, y nada en la rama lee la sesión de la consola de
+esa persona. Así lo dejó la fase 1 con el token de Keycloak, y así sigue con el propio; el `return` de la rama lo dice
+en un comentario. Lo fija `test_mcp_own_tokens.py::test_an_mcp_call_never_counts_as_a_recent_confirmation`: la persona
+acaba de confirmar su factor en la consola, y por el canal `POST /api/v1/users/{user_id}/factors/reset`, que lo
+pregunta antes de leer nada, sigue respondiendo 403 `step_up_required`, mientras su sesión de la consola pasa la misma
+pregunta y llega al 404 de una persona que no existe. (La ruta está en `NOT_FOR_MCP`, así que no es herramienta, pero
+una llamada marcada como del canal llega a ella, como en
+`tests/test_auth_reset_needs_recovery.py::test_the_mcp_channel_is_refused_too`.) Con la Task 14 de la fase 2 fusionada
+dependen de esto las dos herramientas que piden la confirmación solo para una parte (`clients_update` con los tenants
+de Microsoft y `orgs_current_update` al encender MCP), y `tests/test_step_up_widened.py` lo prueba por ellas (Step 7).
 
 - [ ] **Step 1: Los ayudantes de prueba**
 
@@ -9909,6 +9932,8 @@ What is pinned here:
   admits nobody;
 - the channel marker must name the token's app;
 - the door provisions nobody and writes nothing about the person;
+- the grant admits the person, never their second factor: an MCP call
+  never counts as a recent confirmation (phase 2's Task 14);
 - with no https console there is no issuer, and the channel says so (503).
 """
 
@@ -9936,7 +9961,7 @@ from tests.mcp_support import (
     running_mcp,
     signed_mcp_token,
 )
-from tests.session_support import user_id_of
+from tests.session_support import refusal_code, sign_in, user_id_of
 
 METADATA_URL = f"{MCP_BASE}/.well-known/oauth-protected-resource/mcp"
 REFUSED_CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}", error="invalid_token"'
@@ -9947,6 +9972,7 @@ MARKER_EN = "the MCP channel marker is malformed"
 NO_ISSUER_EN = (
     "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address without a path."
 )
+CONFIRM_AGAIN = "confirm your second factor again to do this"
 MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
     "Content-Type": "application/json",
@@ -10138,6 +10164,27 @@ async def test_an_mcp_call_writes_nothing_about_the_person(mcp_env) -> None:
     assert await _auth_events(mcp_env, org_id) == []
 
 
+async def test_an_mcp_call_never_counts_as_a_recent_confirmation(mcp_env) -> None:
+    """Phase 2's Task 14 (its plan's "Puntos de encuentro con la fase 3", 4):
+    the grant admits the person, never their second factor. They confirmed it
+    in the console a moment ago; over MCP, `require_step_up` -- the first
+    question `factors/reset` asks, before it reads anyone -- still refuses.
+    Give the MCP branch of `admit` a principal with a `step_up_at`, or the
+    person's console session, and this call answers what the console's does."""
+    org_id, slug, sub = await _admin(mcp_env)
+    console = await sign_in(mcp_env, org_id, sub, step_up=True)
+    token = await mcp_token(mcp_env, slug, sub)
+    reset = f"/api/v1/users/{uuid4()}/factors/reset"
+    async with marked_client(mcp_env) as client:
+        over_mcp = await client.post(reset, headers={"Authorization": f"Bearer {token}"})
+    in_console = await mcp_env.client.post(reset, headers=console.headers)
+    assert (over_mcp.status_code, refusal_code(over_mcp)) == (403, "step_up_required")
+    assert over_mcp.json()["detail"] == CONFIRM_AGAIN
+    # Non-vacuity: the same person's console session gets past the question,
+    # to the unknown person the path names.
+    assert in_console.status_code == 404, in_console.text
+
+
 async def test_without_an_https_console_there_is_no_issuer_and_mcp_is_503(mcp_env) -> None:
     _, slug, sub = await _admin(mcp_env)
     token = await mcp_token(mcp_env, slug, sub)
@@ -10327,6 +10374,9 @@ row; the token carries none)». En `Admission`, `claims: McpGrant | None`.
     request.state.org_id = str(grant.org_id)
     request.state.user_id = str(grant.user_id)
 
+    # NO `principal` (Task 9, decision 6; phase 2's Task 14): the grant admits
+    # the person, never their second factor, so `require_step_up` refuses every
+    # act that asks for one -- as it refused the Keycloak token's.
     return Admission(
         org_id=grant.org_id,
         user_id=grant.user_id,
@@ -11122,6 +11172,24 @@ azp="claude")` pasa a
 él; en `_direct_call`, `user_id` ya es su parámetro; `from uuid import uuid4` si falta). `_gate` lee `.iat` y `.azp`,
 los dos de `McpGrant`.
 
+**`backend/tests/test_step_up_widened.py`** (lo crea la Task 14 de la fase 2), **si la rama ya lo tiene**: sus dos
+pruebas de MCP siguen el mismo re-apuntado, como piden los «Puntos de encuentro con la fase 3» de la fase 2. En
+`test_over_mcp_a_tenant_change_is_refused_and_the_rest_of_the_edit_is_not`, `token = mcp_token(mcp_env, slug, sub)`
+pasa a `token = await mcp_token(mcp_env, slug, sub)`. En `test_on_the_mcp_channel_switching_ai_access_on_is_refused`,
+la línea `bearer = {"Authorization": f"Bearer {mcp_token(mcp_env, await mcp_env.org_slug(org), sub)}"}` pasa a estas
+dos (con el `await` dentro de la f-string tendría 102 columnas, y ruff E501 la rechaza):
+
+```python
+    token = await mcp_token(mcp_env, await mcp_env.org_slug(org), sub)
+    bearer = {"Authorization": f"Bearer {token}"}
+```
+
+Nada más cambia, ni lo que afirman: su `mcp_env` pone `MCP_BASE` (una consola https sin ruta, así que hay emisor);
+`mcp_org` enciende MCP por SQL; la puerta propia no lee el interruptor (lo lee `/mcp`), así que la segunda, con MCP
+apagado, sigue llegando a `PATCH /orgs/current`; `marked_client` y `mcp_token` nombran la misma app, `"claude"`; y la
+negativa sigue siendo la de `require_step_up` (decisión 6). Si la rama aún no lo tiene, el mismo cambio lo hace quien
+fusione después la Task 14 de la fase 2 (Puntos de encuentro).
+
 Comprobación de que no queda ninguna llamada sin `await` a los cuatro ayudantes asíncronos (`mcp_token`, `_mcp_token`,
 `_token_issued_at`, `_old_token`; A3-47):
 
@@ -11130,7 +11198,8 @@ Expected: sin salida. La búsqueda es **por llamada**, no por línea (re-revisi�
 su `await ` o su `def ` delante si los tiene, y solo esas se descartan. Así ve la llamada interior que perdió su
 `await` en `assert await _initialize(env, _old_token(...)) == 401`, que un `grep -v "await "` por línea descartaría
 entera; y no ve `signed_mcp_token(` ni `require_person_mcp_token(`. Antes de los Steps 6 y 7, en `3a1ba1c`, imprime
-50 llamadas: las que esos dos pasos cambian.
+50 llamadas: las que esos dos pasos cambian (y dos más, las de `tests/test_step_up_widened.py`, si la rama ya lo
+tiene).
 
 Y de que solo quedan los tokens de Keycloak hechos a propósito para que la puerta los rechace, contados por archivo en
 lugar de excluir archivos enteros:
@@ -11157,6 +11226,9 @@ con un coroutine sin esperar).
 Run: `cd backend && .venv/bin/pytest -q -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning tests/test_mcp_own_tokens.py tests/test_mcp_server.py tests/test_mcp_channel_api.py tests/test_token_origin.py tests/test_domain_gate_doors.py tests/test_domain_policy.py tests/test_clients_api.py tests/test_me_profile.py tests/test_auth_falsifiers.py tests/test_mcp_admin_api.py tests/test_mcp_tools.py tests/test_deploy_window.py tests/test_backup_policy_window.py tests/test_client_scoped_config.py tests/test_auth_reset_needs_recovery.py tests/test_route_session_discipline.py tests/test_client_catalog.py tests/test_i18n_catalog.py tests/test_loopback.py tests/test_auth_session_door.py tests/test_auth_csrf.py tests/test_security.py`
 Expected: PASS.
 
+Run: `cd backend && test ! -e tests/test_step_up_widened.py || .venv/bin/pytest -q -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning tests/test_step_up_widened.py`
+Expected: PASS, o nada que correr si la rama aún no tiene la Task 14 de la fase 2.
+
 Run: `cd backend && .venv/bin/mypy app && .venv/bin/ruff check app tests`
 Expected: `Success: no issues found` y `All checks passed!`.
 
@@ -11171,6 +11243,7 @@ git add backend/app/api/deps.py backend/app/mcp/server.py backend/app/core/i18n/
   backend/tests/test_deploy_window.py backend/tests/test_backup_policy_window.py \
   backend/tests/test_client_scoped_config.py backend/tests/test_auth_reset_needs_recovery.py \
   backend/tests/test_route_session_discipline.py backend/tests/test_client_catalog.py
+test ! -e backend/tests/test_step_up_widened.py || git add backend/tests/test_step_up_widened.py
 git commit -m "feat(mcp): the MCP door admits only the platform's own access token, and reads its grant on every call"
 ```
 
@@ -13716,7 +13789,12 @@ y el bloque de `ITS_MCP_REGISTRATION` (C2: abre el registro dinámico y nada má
 
 `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` (decisiones del operador del 2026-11-06):
 
-- Al final de `### 2.5 Confirmación reciente del segundo factor`:
+- Al final de `### 2.5 Confirmación reciente del segundo factor`, justo antes de `### 2.6`: detrás de la línea en
+  blanco que sigue al párrafo «Exigida en los últimos 10 minutos para: …», y con una línea en blanco propia detrás. La
+  Task 14 de la fase 2 reescribe ese párrafo sin tocar esa línea en blanco; si ya está en la rama, la enmienda va
+  detrás de todo lo que escribe (la lista ampliada, «Por qué…» y «Lo que esto deliberadamente no cubre…») y no se toca
+  nada suyo: aprobar una aplicación de IA no está en su lista ni en lo que deja fuera, y rechazarla, como revocarla, no
+  pide nada en las dos (Puntos de encuentro):
 
   ```markdown
   > **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También aprobar una aplicación de
@@ -13790,7 +13868,11 @@ y justo después de `### 7.4 Falsifiers` (A3-52: los falsificadores están aquí
 `docs/03-security-model.md:161`, «MCP clients still authenticate through Keycloak until phase 3.» pasa a «MCP clients
 authenticate on the platform's own OAuth 2.1 server since phase 3: PKCE S256, consent in the console with a recently
 confirmed second factor, a ten-minute ES256 access token for exactly the MCP resource, and a refresh token that rotates
-and whose reuse ends the grant.»
+and whose reuse ends the grant.» Si la Task 13 de la fase 2 ya está en la rama, la frase de MCP es la suya, «MCP
+clients still authenticate through Keycloak; phase 3 replaces that, and phase 4 removes Keycloak.» (partida en dos
+líneas, entre «Not built: SAML and on-premises Active Directory federation (out of scope).» y sus viñetas de contactos
+y de Microsoft): pasa a la misma frase, y lo demás de la fase 2 se queda, también la fila que su Task 14 añade a la
+tabla «Threat model» (Puntos de encuentro).
 
 `docs/modules/console-auth/spec.md:98-99`, «MCP keeps signing in at Keycloak until own authentication phase 3, and the
 realm is removed in phase 4.» pasa a «Since own authentication phase 3 MCP signs in on the platform's own OAuth server
@@ -13820,6 +13902,10 @@ Comentarios del código que dicen «hasta la fase 3»:
 Run: `cd "$(git rev-parse --show-toplevel)" && grep -rnI --exclude-dir=__pycache__ "until phase 3\|until own authentication phase 3" deploy backend/app backend/tests docs/03-security-model.md docs/modules/console-auth | grep -v "backend/tests/client_scope_support.py"`
 Expected: sin salida (A3-63: `-I` y `__pycache__` dejan fuera los `.pyc`; `client_scope_support.py:172` habla de la fase
 3 del proyecto de clientes MSP, no de esta).
+
+Run: `cd "$(git rev-parse --show-toplevel)" && grep -n "authenticate through Keycloak" docs/03-security-model.md`
+Expected: sin salida: no queda ni la frase de `3a1ba1c` ni la de la Task 13 de la fase 2, que la búsqueda de arriba no
+ve (no dice «until phase 3»).
 
 - [ ] **Step 5: Los recuentos y la suite, en el árbol fusionado**
 
@@ -13894,8 +13980,8 @@ auditado como `auth.retention_applied` con un recuento por paso, y dice que la f
 añade tres pasos al final, y nada más: ni otra tarea de beat ni otra acción de auditoría.
 
 **Files:**
-- Modify: `backend/app/core/auth/retention.py` (de la fase 2: dos ventanas, tres pasos, tres entradas de `STEPS`, el
-  docstring)
+- Modify: `backend/app/core/auth/retention.py` (de la fase 2: dos ventanas, tres pasos, tres entradas de `STEPS`; en
+  el docstring, tres viñetas y el párrafo del alcance)
 - Modify: `backend/app/core/client_scope.py` (de la fase 2: la razón de `retention.py::sweep_org` en
   `ALL_SCOPE_ALLOWLIST`)
 - Modify: `backend/tests/test_auth_retention.py` (de la fase 2: los metadatos exactos del evento ganan los tres pasos)
@@ -14120,20 +14206,17 @@ final:
 - an AI app unused for `CLIENT_IDLE` (30 days), with its grants and codes.
 ```
 
-y dos párrafos más pasan a los de abajo, enteros y con el mismo ancho que el resto del docstring (en el plan de la
-fase 2, el primero termina «Phase 3 adds its authorization codes, its grants (refresh-token families, whose tokens
-cascade) and its idle apps (`oauth_clients`) here.» y el segundo dice «over these tables only.»; si su revisión los
-cambió, se conserva lo suyo y se cambian solo esas dos frases). El de `STEPS`:
+El párrafo «THE REGISTRY (`STEPS`) …» **no cambia** (N-M7 de la segunda re-revisión del plan de la fase 2). Una
+versión anterior de este paso sustituía en él «Phase 3 adds its expired authorization codes and refresh tokens here.»,
+una frase que la fase 2 ya no escribe: con su X4, el párrafo termina «Phase 3 adds its authorization codes, its grants
+(refresh-token families, whose tokens cascade) and its idle apps (`oauth_clients`) here.», que nombra lo que esta tarea
+añade, tabla por tabla. Lo único que la frase de esta fase decía además, el orden de los tres pasos, lo dicen el
+comentario de sus tres entradas en `STEPS` (abajo) y el orden de la lista de arriba. Si la revisión de la fase 2 vuelve
+a cambiar esa frase, tampoco se toca.
 
-```text
-THE REGISTRY (`STEPS`) IS WHERE A NEW TABLE JOINS (plan decision 4): a
-`(name, step)` pair, appended in order; each step deletes in the session it
-is given, with its own `org_id` predicate, and returns how many rows went.
-Phase 3 adds its codes, grants and idle AI apps here, last: the apps after
-the grants, because an app takes its remaining grants along.
-```
-
-y el del alcance (decisión 4):
+Un párrafo sí pasa al de abajo, entero y con el mismo ancho que el resto del docstring: el del alcance (decisión 4),
+que en el plan de la fase 2 dice «over these tables only.» (si su revisión lo cambió, se conserva lo suyo y se cambia
+solo esa frase):
 
 ```text
 ONE ORGANIZATION, EVERY CLIENT. A technician's rows have no client and only
@@ -14357,6 +14440,32 @@ la Task 9, decisión 2, dice por qué la puerta de MCP no se iguala a la de la c
 caminos, explicar que no se alcanza). X11: la Task 12 cambia solo la línea 32 del README, sin refluir. X4 es del plan
 de la fase 2.
 
+**Ronda 3 (2026-11-09): la Task 14 de la fase 2, su cuarto contrato y N-M7.** La fase 2 añadió su Task 14 (la
+confirmación reciente para los ajustes de inicio de sesión, el acceso de los técnicos y la definición de los roles,
+decisiones del operador S1–S4 del 2026-11-08 y S5 del 2026-11-09) y, en sus «Puntos de encuentro con la fase 3», un
+cuarto contrato. Leída en `3a214fd`. Por el lado de esta fase:
+
+- **N-M7** (de la segunda re-revisión de la fase 2): la Task 13 ya no reescribe el párrafo de `STEPS` de
+  `retention.py`. La frase que la fase 2 escribe con su X4 nombra lo que esta fase añade, y el orden de los pasos lo
+  dicen el comentario de sus entradas y la lista del docstring. El párrafo del alcance sí cambia (decisión 4).
+- **El contrato 4** (el canal MCP nunca cuenta como confirmación reciente): la rama MCP de `admit()` ya lo cumplía,
+  porque devuelve su `Admission` sin `principal`. La Task 9 lo dice (decisión 6, y un comentario en el `return`) y lo
+  fija con `test_an_mcp_call_never_counts_as_a_recent_confirmation`.
+- **Las pruebas**: ninguna que esta fase crea o reescribe llama con una sesión a una ruta de la Task 14 (S1, S3 ni
+  S5), y ninguna prueba MCP de esta fase espera que una de ellas sea herramienta. Lo único que cambia es de la fase 2:
+  `test_step_up_widened.py`, re-apuntada en la Task 9, Step 7.
+- **Puntos de encuentro**: filas nuevas o reescritas para `deps.py`, el contrato 4, `exclusions.py` y
+  `test_mcp_channel_api.py` (por deltas, sin un número fusionado), `part_d.py`, `test_mcp_catalog.py`,
+  `test_step_up_widened.py`, `test_mcp_tools.py`, las pruebas que llamarían a esas rutas, el diseño (§2.5),
+  `deploy/README.md`, `docs/03-security-model.md`, `docs/modules/console-auth/spec.md`, `AiConnectionsTab.tsx` y
+  `api.ts` de Ajustes, y `stepUp.tsx`. Donde las filas de las dos fases no decían lo mismo que el código, dicen lo que
+  es: `docs/03-security-model.md:161` lo cambian las dos (no es una unión), y la frase del README que edita la fase 2
+  está en la línea 36, no en la 35.
+- **El diseño y el runbook (Task 12)**: la enmienda C1 va al final de §2.5, detrás de la línea en blanco que la Task 14
+  deja intacta, y no contradice su lista; la frase de `docs/03-security-model.md` se ancla también en la que escribe la
+  Task 13 de la fase 2, con un `grep` que lo comprueba; las ediciones del runbook dejan el párrafo de la Task 14 entre
+  ellas, sin tocarlo.
+
 **Marcadores.** Buscado en el plan: `TBD`, `TODO`, «rellenar», «similar a la Task», «añadir manejo de errores»; ninguno.
 Cada paso que cambia código trae el código; los cambios mecánicos (`await mcp_token(`, los metadatos de los actos, las
 filas de las pruebas de Ajustes) dicen cada archivo y su texto (y la línea, en `3a1ba1c`) y traen la orden que
@@ -14402,9 +14511,30 @@ la guarda de i18n leía como texto; la prueba del límite de inactividad, que vi
 `_record` tipado `dict[str, str]` que no admite el recuento; cinco aserciones de metadatos exactos que el recuento
 rompía; la posición de isort del import nuevo en tres archivos; y, en esta vuelta, buscando en todos los bloques
 Python del plan líneas de más de 100 columnas, una de 103 en la parametrización de `test_token_origin.py` de la Task 9
-(que no se ejecuta), partida. **No se ejecutaron**: la Task 9 entera (re-apunta
-pruebas en prosa, archivo por archivo), las pruebas de la Task 10 que llaman a `/mcp` (`_call_a_tool`,
-`_initialize`), la Task 11 (consola) y la Task 12 (necesita el árbol fusionado).
+(que no se ejecuta), partida. **No se ejecutaron**: de la Task 9, sus Steps 6 y 7 (re-apuntan pruebas en prosa,
+archivo por archivo; sus Steps 1–4, hasta la ronda 3 tampoco); las pruebas de la Task 10 que llaman a `/mcp`
+(`_call_a_tool`, `_initialize`), la Task 11 (consola) y la Task 12 (necesita el árbol fusionado).
+
+**En la ronda 3**, en una copia nueva de ese árbol (Redis en la base 11):
+- la Task 13 otra vez, sobre el `retention.py` y el `test_auth_retention.py` del plan de la fase 2 (iguales en
+  `5d8fd85` y en `3a214fd`, con su X4), y con el párrafo de `STEPS` sin tocar: las pruebas de su Step 3
+  (`test_oauth_retention.py`, `test_auth_retention.py`, `test_client_catalog.py` y
+  `test_worker_sweep_containment.py`), 51 en verde. Se deseleccionó `test_auth_retention.py::test_the_sweep_runs_daily`,
+  que pide la entrada de beat que la fase 2 añade a `app/worker.py` y la copia no tiene. Y `ruff check` y `mypy app`,
+  limpios;
+- por primera vez, los Steps 1–4 de la Task 9 (los ayudantes, la puerta, `/mcp` y la entrada de `es.py`) y su
+  `test_mcp_own_tokens.py` entero, con los dos `-W error`: 12 en verde. La prueba nueva se pone roja con una puerta
+  que da a la `Admission` de MCP un `principal` con `step_up_at` reciente (contesta 404, lo que contesta la consola),
+  y vuelve a verde al quitarlo. `ruff check` de los archivos tocados y `mypy app`, limpios;
+- el `test_step_up_widened.py` del plan de la fase 2 (en `5d8fd85` y en `3a214fd`) con las dos líneas re-apuntadas
+  pasa `ruff check`. Así se vio que la línea de `bearer` con el `await` tendría 102 columnas. No se ejecuta: necesita
+  las Tasks 5, 8 y 14 de la fase 2;
+- `git merge-file` sobre `3a1ba1c`, con un lado editado como dice la fase 2 en `3a214fd` y el otro como dice esta. El
+  §2.5 del diseño, «What is never reachable over MCP» del runbook, `AiConnectionsTab.tsx` y `test_mcp_tools.py` se
+  unen solos.
+  `docs/03-security-model.md` choca en la línea 161, que es la fila nueva. Con la fase 2 primero, la frase de la
+  Task 12 no deja ningún «authenticate through Keycloak»;
+- ninguna línea de un bloque Python del plan pasa de 100 columnas.
 
 ---
 
