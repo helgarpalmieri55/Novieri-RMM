@@ -23,6 +23,8 @@
   - **S2 — un contacto con app TOTP confirma también con su clave de acceso** (NIST SP 800-63B-4 §3.1.7.2, §2.2.1; D29): decidido, ya no pendiente. Tasks 11, 13.
   - **S3 — encender MCP** (`mcp_enabled` de apagado a encendido, `PATCH /orgs/current`) pide la misma confirmación. Task 14.
   - **S4 — solo técnicos.** Los actos sobre un contacto no cambian (invitar al portal, reenviar, restablecer el acceso, desactivar). Siguen sin confirmación los que protegen —cancelar una invitación (`DELETE /users/{user_id}/invite`), desactivar a una persona, cerrar sus sesiones, apagar MCP, revocar una aplicación de IA— y el correo de prueba (`POST /settings/email/test`), que no cambia nada. Task 14.
+- **Decisión del operador del 2026-11-09** (vinculante; era el punto 9 de «Lo que sigue abierto», contestado «Sí, los tres»; la Task 14 la construye):
+  - **S5 — la definición de los roles y reactivar a una persona piden también la confirmación reciente, y salen de las herramientas de MCP:** crear un rol (`POST /roles`), cambiar los permisos de un rol (`PUT /roles/{role_id}/permissions`), borrar un rol (`DELETE /roles/{role_id}`) y reactivar a una persona desactivada (`POST /users/{user_id}/enable`), que vuelve con los roles que tenía. Las cuatro, con la misma dependencia que S1 (`require_permission_on_every_client_with_step_up`, sobre el `_MANAGE` de `roles.py` y de `user_admin/api.py`) y en `NEVER_EXPOSED`. **No la piden:** renombrar o redescribir un rol (`PATCH /roles/{role_id}`, `RoleUpdate`: solo `name` y `description`), que no cambia lo que nadie puede; desactivar a una persona, que protege (S4); y los actos sobre un contacto (S4). Tasks 14, 13.
 - **Seguridad.** Invariantes 1, 1b, 1c, 2, 2a, 3, 4, 5, 5a y 6 de `CLAUDE.md` intactas.
   - Ninguna tarea cambia trabajos firmados, el sobre ni el protocolo del agente.
   - La consola no protege nada: toda comprobación vive en el servidor.
@@ -51,11 +53,11 @@
 - **Negativas de `/auth/*` y `/me/*`:** el cuerpo `AuthRefusal` de la fase 1 (`{"code", "detail", …}`). Códigos nuevos: `portal_only` (403, la puerta de la consola ante un contacto), `last_method` (409), `password_exists` (409), `passkey_rejected` (401 al entrar, 400 al aceptar), `method_unavailable` (409: la confirmación con contraseña de quien tiene segundo factor; los códigos de recuperación de un contacto sin app), `password_required` / `password_not_used` (422, `/auth/microsoft/start` con una invitación; `password_required` también 409, el técnico sin contraseña que quiere vincular Microsoft), `microsoft_unavailable` (409/503), `microsoft_failed` (400), `microsoft_not_linked` (401), `microsoft_tenant_refused` (403, solo al vincular o aceptar), `microsoft_already_linked` (409), y `sign_in_unavailable` (503, el de la fase 1) cuando no hay claves de Microsoft o la clave privada no se puede leer.
 - **Textos.** Backend por `tr()` con `backend/app/core/i18n/es.py` (cada literal nuevo con su entrada; `tests/test_i18n_catalog.py`); consola por `t()` con claves en `frontend/src/i18n/{en,es}/`. *Passkey* = «clave de acceso» (D18 de la fase 1). La marca se escribe «Microsoft»; la pantalla de Ajustes dice «Microsoft Entra ID» una vez, para quien registra la app.
 - **Auditoría.** Acciones nuevas: `contact.invited`, `contact.invite_cancelled`, `contact.access_reset`, `contact.invite_accepted`, `auth.entra_settings_updated`, `auth.entra_credential_used` (cada uso de la clave privada, Task 5), `auth.retention_applied` (cada barrido que borra algo, Task 3, B2-15). Se reutilizan `auth.identity_linked` y `auth.identity_unlinked` (ya en el vocabulario) con `metadata.provider = "entra"` y `metadata.source` (nunca `via`, la clave del canal MCP, A2-56), y `auth.factor_added` para la clave de acceso con que un contacto acepta (A2-47). Cada una va a `frontend/src/i18n/{en,es}/auditVocabulary.ts` con la clave escrita con `_` en vez de `.` (`auth_retention_applied`: el archivo lo dice en `:7-8`, y la guarda lo busca con `code.replace(/\./g, "_")`; el inglés = el código humanizado); un literal pasado a un envoltorio (`flows._audit`, `account._record`) se lista en `DYNAMIC` de `auditVocabulary.coverage.test.ts`. Si una tarea toca `backend/app`, corre también `cd frontend && npx vitest run src/modules/audit/auditVocabulary.coverage.test.ts src/i18n`.
-- **MCP.** Sigue en Keycloak en esta fase (la fase 3 lo sustituye). Toda ruta HTTP nueva queda clasificada en el mismo commit que la crea: descripción MCP (`app/mcp/descriptions/part_*.py`), `NOT_FOR_MCP` o `NEVER_EXPOSED_REASONS` (`app/mcp/exclusions.py`), y `tests/test_mcp_channel_api.py` lleva el conjunto y el recuento. `PUT /settings/microsoft-sign-in` es herramienta como `PUT /settings/email` (B2-20): no lleva ni devuelve un secreto. **Hasta la Task 14:** desde la decisión S1 del operador, las dos piden la confirmación reciente y salen de las herramientas (`NEVER_EXPOSED`), con `PUT /settings/sessions`, `POST /users/{user_id}/roles` y `DELETE /users/{user_id}/roles/{assignment_id}`; `PATCH /clients/{client_id}` y `PATCH /orgs/current` siguen siéndolo y rechazan la parte que la pide (Task 14, decisión 5).
+- **MCP.** Sigue en Keycloak en esta fase (la fase 3 lo sustituye). Toda ruta HTTP nueva queda clasificada en el mismo commit que la crea: descripción MCP (`app/mcp/descriptions/part_*.py`), `NOT_FOR_MCP` o `NEVER_EXPOSED_REASONS` (`app/mcp/exclusions.py`), y `tests/test_mcp_channel_api.py` lleva el conjunto y el recuento. `PUT /settings/microsoft-sign-in` es herramienta como `PUT /settings/email` (B2-20): no lleva ni devuelve un secreto. **Hasta la Task 14:** desde la decisión S1 del operador, las dos piden la confirmación reciente y salen de las herramientas (`NEVER_EXPOSED`), con `PUT /settings/sessions`, `POST /users/{user_id}/roles` y `DELETE /users/{user_id}/roles/{assignment_id}`, y desde la S5, también `POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}` y `POST /users/{user_id}/enable`; `PATCH /clients/{client_id}` y `PATCH /orgs/current` siguen siéndolo y rechazan la parte que la pide (Task 14, decisión 5).
 - **Pruebas.** Ninguna se borra, se salta ni se debilita. Las que cambian de expectativa por una decisión de este plan se re-apuntan y el informe de la tarea lo dice, con la decisión que lo manda. Toda barrera de seguridad nueva tiene una prueba que muestra que **rechaza**, no solo que admite (`CLAUDE.md`: *«Security-relevant paths (signing, auth, tenancy) require explicit tests»*; A2-37, A2-50).
 - **Recuentos que mueven varias tareas** (cada tarea cambia el número **respecto de la base que ve** y dice su delta; el coordinador suma al fusionar y corre la prueba en el árbol fusionado; un delta que no se puede explicar por una tarea no se corrige, se para, Task 13):
   - llamadas de log en `tests/test_logging_discipline.py`: **108** hoy; +1 Task 5 (`entra.exchange`) → **109**;
-  - `NEVER_EXPOSED` en `tests/test_mcp_channel_api.py`: **36** hoy; +1 Task 4, +2 Task 6, +1 Task 7, +4 Task 8, +2 Task 9 → **46**; +5 Task 14 → **51**;
+  - `NEVER_EXPOSED` en `tests/test_mcp_channel_api.py`: **36** hoy; +1 Task 4, +2 Task 6, +1 Task 7, +4 Task 8, +2 Task 9 → **46**; +9 Task 14 → **55** (la fase 2 sola: +19);
   - `EXPECTED_GET_ROUTES` en `tests/test_ai_tool_surface.py`: **255** hoy; +1 Task 4 (`/portal/me`), +1 Task 5 (`/settings/microsoft-sign-in`) → **257**;
   - `GLOBAL_WRITES` en `tests/test_global_writes.py`: +1 Task 5; `NOT_GLOBAL`: +3 Task 8 (las rutas de acceso del contacto, `clients.manage` en su cliente, A2-42);
   - `UNGATED_BY_DESIGN` en `tests/test_route_gating.py`: una entrada por ruta nueva de `/auth/*` o `/me/*` (Tasks 4, 6, 7, 8, 9);
@@ -104,7 +106,7 @@
 | 11 | Consola: Contactos (invitar, cancelar, restablecer), aceptar la invitación como contacto, Mi seguridad del contacto, confirmación con contraseña | §3, §7 |
 | 12 | Consola: «Entrar con Microsoft» (consola, portal, invitación), la vuelta `/sign-in/microsoft`, vincular y desvincular, Ajustes → Microsoft con el certificado, tenants del cliente | §4 |
 | 13 | Cierre: falsificador 1 en toda la API y los sockets, el 8, documentos (diseño §3, §4 y §9 corregidos), `globalRoutes.json`, recuentos, la vuelta de Microsoft en un navegador, el informe | §9, §10 |
-| 14 | La confirmación reciente ampliada (S1–S4): Ajustes → Correo, Sesiones y Microsoft, los tenants de un cliente, invitar y reenviar a un técnico, conceder y quitar un rol, encender MCP; lo que la pide entero sale de las herramientas de MCP. Corre antes que la 13 | §2.5, §2.6 |
+| 14 | La confirmación reciente ampliada (S1–S5): Ajustes → Correo, Sesiones y Microsoft, los tenants de un cliente, invitar y reenviar a un técnico, conceder y quitar un rol, reactivar a una persona, crear, cambiar los permisos de y borrar un rol, encender MCP; lo que la pide entero sale de las herramientas de MCP. Corre antes que la 13 | §2.5, §2.6 |
 
 ## Notas de integración del coordinador
 
@@ -211,15 +213,16 @@ Es el contrato con el que se redactaron las tareas. **Donde el bloque «Interfac
 - `modules/portal/usePortalMe.ts` (`usePortalMe`, `PORTAL_ME_KEY`), `modules/portal/PortalShell.tsx` (olvida el cliente guardado) (10); `modules/profile/SecurityPage.tsx::PortalSecurityPage` (11); `modules/auth/microsoft.ts`, `MicrosoftButton.tsx` (`check`), `MicrosoftCallbackPage.tsx`, `modules/settings/MicrosoftTab.tsx` (12).
 - Páginas: `/portal/sign-in` (10), `/portal/security` (11), `/sign-in/microsoft` (12); pestaña `?tab=microsoft` de Ajustes (12).
 
-### Task 14 — la confirmación reciente ampliada (S1–S4)
+### Task 14 — la confirmación reciente ampliada (S1–S5)
 
 - `app/api/deps.py`: `def require_permission_on_every_client_with_step_up(code: str) -> Callable[..., Coroutine[Any, Any, AuthContext]]` (`require_permission_on_every_client(code)` y después `require_step_up`; la negativa, 403 `step_up_required`).
-- `app/modules/user_admin/api.py`: `_MANAGE_CONFIRMED` (invitar, reenviar, conceder y quitar un rol).
+- `app/modules/user_admin/api.py`: `_MANAGE_CONFIRMED` (invitar, reenviar, conceder y quitar un rol; reactivar, S5).
+- `app/api/v1/roles.py`: `_MANAGE_CONFIRMED` (crear un rol, cambiar sus permisos, borrarlo; S5). Renombrar sigue con `_MANAGE`.
 - `app/services/clients.py`: `update_client(session, *, org_id, actor_id, client_id, changes, confirm_tenants: Callable[[], None]) -> Client` (obligatorio; se llama antes de escribir un cambio de `microsoft_tenants`).
 - `app/api/v1/orgs.py`: `PATCH /orgs/current` llama `require_step_up(ctx)` cuando `mcp_enabled` pasa de apagado a encendido.
-- `app/mcp/exclusions.py`: `_RECENT_FACTOR`; `NEVER_EXPOSED` gana `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles`, `DELETE /users/{user_id}/roles/{assignment_id}`.
-- `frontend/src/components/stepUp.tsx`: `export const sendOnce: StepUpRun`. `modules/settings/api.ts`: `useUpdateCurrentOrgMutation(run = sendOnce)`, `useUpdateEmailSettingsMutation(run)`, `useUpdateSessionSettingsMutation(run)`, `usePutMicrosoftSettingsMutation(run)`, `useInviteUserMutation(run)`, `useResendInviteMutation(run)`, `useAssignRoleMutation(run)`, `useRemoveRoleMutation(run)`; `modules/clients/api.ts`: `useUpdateClientMutation(clientId, run = sendOnce)`; todas con `Error` por error.
-- Pruebas: `tests/test_step_up_widened.py` (`Act`, `ACTS`, `WHOLE`, `PART`, `_confirmed(env, org, sub, state)`); `RECENT_FACTOR_NEVER_EXPOSED` en `tests/test_mcp_channel_api.py`.
+- `app/mcp/exclusions.py`: `_RECENT_FACTOR`; `NEVER_EXPOSED` gana `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles`, `DELETE /users/{user_id}/roles/{assignment_id}` (S1) y `POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}`, `POST /users/{user_id}/enable` (S5).
+- `frontend/src/components/stepUp.tsx`: `export const sendOnce: StepUpRun`. `modules/settings/api.ts`: `useUpdateCurrentOrgMutation(run = sendOnce)`, `useUpdateEmailSettingsMutation(run)`, `useUpdateSessionSettingsMutation(run)`, `usePutMicrosoftSettingsMutation(run)`, `useInviteUserMutation(run)`, `useResendInviteMutation(run)`, `useAssignRoleMutation(run)`, `useRemoveRoleMutation(run)`, y por S5 `useCreateRoleMutation(run)`, `useSetRolePermissionsMutation(run)`, `useDeleteRoleMutation(run)` y `useSetUserEnabledMutation(run)` (solo reactivar pasa por `run`); `modules/clients/api.ts`: `useUpdateClientMutation(clientId, run = sendOnce)`; todas con `Error` por error.
+- Pruebas: `tests/test_step_up_widened.py` (`Act`, `ACTS`, `WHOLE`, `PART`, `_confirmed(env, org, sub, state)`, `_own_role(env, admin)`); `RECENT_FACTOR_NEVER_EXPOSED` en `tests/test_mcp_channel_api.py`.
 
 ## Apéndice B — Decisiones del coordinador (D25–D44) y las decididas por una regla (B2-01–B2-35)
 
@@ -14143,9 +14146,9 @@ git commit -m "feat(console): sign in with Microsoft, link and unlink, and its s
 
 ---
 
-### Task 14: La confirmación reciente para los ajustes de inicio de sesión y el acceso de los técnicos (diseño §2.5 ampliado)
+### Task 14: La confirmación reciente para los ajustes de inicio de sesión, el acceso de los técnicos y la definición de los roles (diseño §2.5 ampliado)
 
-Decisiones del operador S1–S4 del 2026-11-08 (Global Constraints); era «Lo que sigue abierto», 10 (ahora en su nota de decididos). Diseño §2.5 (la confirmación reciente, 10 minutos, `require_step_up`) y §2.6 (un equipo recordado no la da). Oleada 7, sola: después de las Tasks 5 (`PUT /settings/microsoft-sign-in` y los tenants de un cliente, que cierra), 8 (`clients.py`, `services/clients.py`, `exclusions.py`, `part_d.py` y `test_mcp_channel_api.py`, que esta tarea lee como la 8 los deja) y 12 (la pestaña de Microsoft y el editor de tenants, que piden la confirmación), y de las 9–11, con las que comparte `exclusions.py`, `test_mcp_channel_api.py` y `clients/api.ts`; antes de la 13, que cuenta lo que esta añade. **Se numera 14 para no renumerar la 13**, a la que cita todo el plan; va aquí, delante de ella, porque corre antes.
+Decisiones del operador S1–S4 del 2026-11-08 y S5 del 2026-11-09 (Global Constraints); eran «Lo que sigue abierto», 10 y, después, 9 (ahora en su nota de decididos). Diseño §2.5 (la confirmación reciente, 10 minutos, `require_step_up`) y §2.6 (un equipo recordado no la da). Oleada 7, sola: después de las Tasks 5 (`PUT /settings/microsoft-sign-in` y los tenants de un cliente, que cierra), 8 (`clients.py`, `services/clients.py`, `exclusions.py`, `part_d.py` y `test_mcp_channel_api.py`, que esta tarea lee como la 8 los deja) y 12 (la pestaña de Microsoft y el editor de tenants, que piden la confirmación), y de las 9–11, con las que comparte `exclusions.py`, `test_mcp_channel_api.py` y `clients/api.ts`; antes de la 13, que cuenta lo que esta añade. **Se numera 14 para no renumerar la 13**, a la que cita todo el plan; va aquí, delante de ella, porque corre antes.
 
 **Fuente** (OWASP ASVS 5.0, V7.5 «Defenses Against Session Abuse», https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md, leído el 2026-11-08; el texto, del mismo archivo en `raw.githubusercontent.com`):
 - **V7.5.3 (nivel 3):** *«Verify that the application requires further authentication with at least one factor or secondary verification before performing highly sensitive transactions or operations.»*
@@ -14154,24 +14157,25 @@ Decisiones del operador S1–S4 del 2026-11-08 (Global Constraints); era «Lo qu
 **Files:**
 - Modify: `backend/app/api/deps.py` (`require_permission_on_every_client_with_step_up`, al final del archivo)
 - Modify: `backend/app/api/v1/realm_settings.py` (`PUT /settings/email`), `backend/app/api/v1/session_settings.py` (`PUT /settings/sessions`), `backend/app/api/v1/entra_settings.py` (`PUT /settings/microsoft-sign-in`, de la Task 5)
-- Modify: `backend/app/modules/user_admin/api.py` (`_MANAGE_CONFIRMED`; invitar, reenviar, conceder y quitar un rol)
+- Modify: `backend/app/modules/user_admin/api.py` (`_MANAGE_CONFIRMED`; invitar, reenviar, conceder y quitar un rol, reactivar)
+- Modify: `backend/app/api/v1/roles.py` (`_MANAGE_CONFIRMED`; crear un rol, cambiar sus permisos, borrarlo; S5)
 - Modify: `backend/app/services/clients.py` (`update_client(..., confirm_tenants)`) y `backend/app/api/v1/clients.py` (`PATCH /clients/{client_id}`)
 - Modify: `backend/app/api/v1/orgs.py` (`PATCH /orgs/current`, `mcp_enabled` de apagado a encendido)
-- Modify: `backend/app/mcp/exclusions.py` (+5 `NEVER_EXPOSED_REASONS`, `_RECENT_FACTOR`, el docstring), `backend/app/mcp/descriptions/part_d.py` (−5 descripciones, 2 ampliadas)
+- Modify: `backend/app/mcp/exclusions.py` (+9 `NEVER_EXPOSED_REASONS`, `_RECENT_FACTOR`, el docstring), `backend/app/mcp/descriptions/part_d.py` (−9 descripciones, 2 ampliadas)
 - Create: `backend/tests/test_step_up_widened.py`
-- Modify: `backend/tests/test_mcp_channel_api.py` (`RECENT_FACTOR_NEVER_EXPOSED`, recuento +5), `backend/tests/test_mcp_catalog.py` (el ejemplo de `users_roles_create`)
+- Modify: `backend/tests/test_mcp_channel_api.py` (`RECENT_FACTOR_NEVER_EXPOSED`, recuento +9), `backend/tests/test_mcp_catalog.py` (el ejemplo de `users_roles_create`), `backend/tests/test_mcp_tools.py` (las dos pruebas que llamaban a `roles_create`)
 - Modify: `frontend/src/components/stepUp.tsx` (`sendOnce`, el docstring)
-- Modify: `frontend/src/modules/settings/api.ts` (ocho hooks), `EmailTab.tsx`, `SessionsTab.tsx`, `MicrosoftTab.tsx` (de la Task 12), `UsersTab.tsx`, `AiConnectionsTab.tsx`
+- Modify: `frontend/src/modules/settings/api.ts` (doce hooks), `EmailTab.tsx`, `SessionsTab.tsx`, `MicrosoftTab.tsx` (de la Task 12), `UsersTab.tsx`, `AiConnectionsTab.tsx`, `RolesTab.tsx`
 - Modify: `frontend/src/modules/clients/api.ts` (`useUpdateClientMutation`), `frontend/src/modules/clients/ClientForm.tsx`
-- Modify: `frontend/src/modules/settings/__tests__/{users,email,sessions,aiConnections,microsoft}.test.tsx`, `frontend/src/modules/clients/__tests__/clients.test.tsx`
+- Modify: `frontend/src/modules/settings/__tests__/{users,roles,email,sessions,aiConnections,microsoft}.test.tsx`, `frontend/src/modules/clients/__tests__/clients.test.tsx`
 - Modify: `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` (§2.5), `docs/03-security-model.md` (una fila de la tabla de amenazas), `deploy/README.md` (un párrafo en «What is never reachable over MCP»)
-- Test: los nuevos y los cambiados; `backend/tests/test_global_writes.py`, `test_route_gating.py`, `test_rbac.py`, `test_mcp_descriptions.py`, `test_mcp_tools.py`, `test_security_headers.py`, `test_console_global_routes.py`, y los que llaman a estas rutas (Step 9); `frontend/src/test/secretMutations.test.ts`
+- Test: los nuevos y los cambiados; `backend/tests/test_global_writes.py`, `test_route_gating.py`, `test_rbac.py`, `test_mcp_descriptions.py`, `test_mcp_tools.py`, `test_security_headers.py`, `test_console_global_routes.py`, y los que llaman a estas rutas (Step 9; para las de S5, `test_rbac_admin_api.py`, `test_user_admin_api.py`, `test_user_lifecycle.py` y `test_i18n_core_api.py`); `frontend/src/test/secretMutations.test.ts`, `frontend/src/modules/settings/settings.es.test.tsx`
 
 **Interfaces:**
-- Consumes: `deps.require_step_up` (`backend/app/api/deps.py:557-573`, en `3a1ba1c`), `deps.require_permission_on_every_client` (`:742-766`); `sessions.step_up_fresh`/`STEP_UP_WINDOW` (`app/core/auth/sessions.py:83`, `:178-180`) y `start_session`, que deja `step_up_at` vacío en un equipo recordado (`:342`); la ruta y los modelos de la Task 5 (`EntraSettingsIn`, `update_client` con `microsoft_tenants`), las de la Task 8 (contactos); `MCP_SWITCH_KEY` (`app/api/v1/orgs.py:209`); en la consola, `useStepUp`/`StepUpRun`/`StepUpCancelled` (`frontend/src/components/stepUp.tsx`), `stepUpRequired()` del arnés de Ajustes; en las pruebas, `tests.session_support.sign_in`/`remembered_device`/`user_id_of`/`refusal_code`, `tests.auth_support.console_ready`/`capture_mail`, `tests.mcp_support.*`, `tests.entra_support.APP`/`TENANT` (Task 5).
+- Consumes: `deps.require_step_up` (`backend/app/api/deps.py:557-573`, en `3a1ba1c`), `deps.require_permission_on_every_client` (`:742-766`); `sessions.step_up_fresh`/`STEP_UP_WINDOW` (`app/core/auth/sessions.py:83`, `:178-180`) y `start_session`, que deja `step_up_at` vacío en un equipo recordado (`:342`); la ruta y los modelos de la Task 5 (`EntraSettingsIn`, `update_client` con `microsoft_tenants`), las de la Task 8 (contactos); `MCP_SWITCH_KEY` (`app/api/v1/orgs.py:209`); para S5, el `_MANAGE` de `app/api/v1/roles.py:62` (`create_role` `:218`, `set_role_permissions` `:277`, `delete_role` `:309`; `update_role`, `:242-275`, no cambia) y el de `app/modules/user_admin/api.py:80` (`enable_user` `:566`), en `3a1ba1c` —ninguna tarea anterior toca `roles.py`—; en la consola, `useStepUp`/`StepUpRun`/`StepUpCancelled` (`frontend/src/components/stepUp.tsx`), `stepUpRequired()` del arnés de Ajustes; en las pruebas, `tests.session_support.sign_in`/`remembered_device`/`user_id_of`/`refusal_code`, `tests.auth_support.console_ready`/`capture_mail`, `tests.mcp_support.*`, `tests.entra_support.APP`/`TENANT` (Task 5).
 - Produces: Apéndice A, Task 14.
 
-**Decisión del plan (1): qué pide la confirmación, y dónde se pide.** Exactamente lo de S1 y S3:
+**Decisión del plan (1): qué pide la confirmación, y dónde se pide.** Exactamente lo de S1, S3 y S5:
 
 | Acto | Ruta | Cómo |
 |---|---|---|
@@ -14183,9 +14187,13 @@ Decisiones del operador S1–S4 del 2026-11-08 (Global Constraints); era «Lo qu
 | Reenviar su invitación | `POST /users/{user_id}/invite/resend` | dependencia |
 | Conceder un rol | `POST /users/{user_id}/roles` | dependencia |
 | Quitar un rol | `DELETE /users/{user_id}/roles/{assignment_id}` | dependencia |
+| Reactivar a una persona (S5) | `POST /users/{user_id}/enable` | dependencia |
+| Crear un rol (S5) | `POST /roles` | dependencia |
+| Cambiar los permisos de un rol (S5) | `PUT /roles/{role_id}/permissions` | dependencia |
+| Borrar un rol (S5) | `DELETE /roles/{role_id}` | dependencia |
 | Encender MCP | `PATCH /orgs/current`, **solo cuando `mcp_enabled` pasa de apagado a encendido** | en la ruta |
 
-**Decisión del plan (2): una dependencia nueva, no `require_permission_with_step_up`.** Siete de las nueve rutas son escrituras globales: dependen de `require_permission_on_every_client` (`GLOBAL_WRITES` de `tests/test_global_writes.py`), no de `require_permission`. `require_permission_with_step_up(code)` (`deps.py:576-588`) envuelve `require_permission` y les quitaría el «en todos los clientes»: un técnico con `orgs.manage` en un cliente podría guardar Ajustes → Correo para todos, y `test_the_declared_list_and_the_router_agree` se pondría rojo. Así que `require_permission_on_every_client_with_step_up(code)` compone las dos que ya existen: primero el alcance, luego el factor. El orden importa: a un técnico limitado se le dice que el acto no es suyo, nunca se le pide un factor que no lo haría suyo (`test_every_global_write_needs_a_scope_of_every_client` espera la negativa del alcance). `route_permission` (`app/core/rbac.py:586-627`) y `_gated_on_every_client` de `test_global_writes.py` recorren el árbol de dependencias entero (`_walk_dependant`, `rbac.py:558-566`), así que siguen encontrando `require_permission.<locals>.dependency` y `on_every_client` debajo. Es una dependencia, como las dos que une, para que la negativa llegue antes de leer el cuerpo.
+**Decisión del plan (2): una dependencia nueva, no `require_permission_with_step_up`.** Once de las trece rutas son escrituras globales —las siete de S1 y las cuatro de S5, que `tests/test_global_writes.py:83-91` ya lista con `users.manage` y `roles.manage`—: dependen de `require_permission_on_every_client` (`GLOBAL_WRITES`), no de `require_permission`. `require_permission_with_step_up(code)` (`deps.py:576-588`) envuelve `require_permission` y les quitaría el «en todos los clientes»: un técnico con `orgs.manage` en un cliente podría guardar Ajustes → Correo para todos, o uno con `roles.manage` en un cliente redefinir un rol que tienen los técnicos de todos, y `test_the_declared_list_and_the_router_agree` se pondría rojo. Así que `require_permission_on_every_client_with_step_up(code)` compone las dos que ya existen: primero el alcance, luego el factor. El orden importa: a un técnico limitado se le dice que el acto no es suyo, nunca se le pide un factor que no lo haría suyo (`test_every_global_write_needs_a_scope_of_every_client` espera la negativa del alcance). `route_permission` (`app/core/rbac.py:586-627`) y `_gated_on_every_client` de `test_global_writes.py` recorren el árbol de dependencias entero (`_walk_dependant`, `rbac.py:558-566`), así que siguen encontrando `require_permission.<locals>.dependency` y `on_every_client` debajo. Es una dependencia, como las dos que une, para que la negativa llegue antes de leer el cuerpo.
 
 **Decisión del plan (3): lo que se pide solo para una parte de la petición, se pide donde se sabe, antes de escribir y de auditar.**
 - **Los tenants:** `services.clients.update_client` gana el argumento **obligatorio** `confirm_tenants: Callable[[], None]`, que llama solo si `"microsoft_tenants"` está en `changed` —la lista normalizada (`_tenants`: ordenada, sin repetidos) distinta de la guardada—, después de calcular `changed` y antes de `setattr`, `_flush_client` y `audit_service.record`. La ruta pasa `lambda: require_step_up(ctx)`. Sin valor por omisión: hay un solo llamador, y uno nuevo que lo olvide es un `TypeError`, no una puerta abierta. Los mismos tenants en otro orden, o repetidos, no son un cambio y no piden nada.
@@ -14194,15 +14202,15 @@ Decisiones del operador S1–S4 del 2026-11-08 (Global Constraints); era «Lo qu
 **Decisión del plan (4): la negativa es la de siempre.** `require_step_up` (`deps.py:557-573`): 403 `{"detail": "confirm your second factor again to do this", "code": "step_up_required"}`, la que ya contesta la bóveda; ningún texto nuevo, ninguna entrada nueva en `es.py`. No escribe auditoría ni cambia nada: la dependencia responde antes del cuerpo, y las dos negativas parciales saltan dentro de `org_session` antes de cualquier escritura, así que la transacción se deshace vacía. Un equipo recordado no cuenta (diseño §2.6): la sesión que empieza en él no tiene `step_up_at` (`sessions.py:342`).
 
 **Decisión del plan (5): MCP, y por qué el invariante 1c no cambia.** El canal MCP no lleva sesión —`ctx.principal` es `None`—, así que `require_step_up` lo rechaza siempre (su docstring: *«the MCP channel never reaches these acts (`MCP_FORBIDDEN_CODES`, the never-exposed table), and if it did, a refusal is the right way to be wrong»*). Para que eso siga siendo verdad:
-- **Las rutas que piden la confirmación enteras salen de las herramientas** y van a `NEVER_EXPOSED_REASONS` con la razón `_RECENT_FACTOR` (*«needs the administrator's own recent second-factor confirmation in the console (design §2.5, operator 2026-11-08)»*): `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles`, `DELETE /users/{user_id}/roles/{assignment_id}` (+5; sus descripciones de `part_d.py` se van, o `test_no_description_names_an_unexposed_route` falla). `POST /users/invite` y su reenvío ya están en la tabla desde la fase 1 (pueden devolver un enlace) y no cambian. «Refused twice»: la guarda (`app/mcp/guard.py`) los rechaza antes de autenticar, y `require_step_up` otra vez. Ninguna razón nueva dice «return», así que no entran en `SECRET_ONCE` (`tests/test_security_headers.py:105-112`). El docstring de `exclusions.py` decía que la tabla es de lo que da o acuña un secreto; gana un párrafo con esta segunda clase. *(El precedente de la fase 1 para un acto con confirmación, `POST /users/{user_id}/factors/reset`, está en `NOT_FOR_MCP`; esta tarea no lo mueve.)*
+- **Las rutas que piden la confirmación enteras salen de las herramientas** y van a `NEVER_EXPOSED_REASONS` con la razón `_RECENT_FACTOR` (*«needs the administrator's own recent second-factor confirmation in the console (design §2.5, as the operator widened it on 2026-11-08 and 2026-11-09)»*): `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles`, `DELETE /users/{user_id}/roles/{assignment_id}` (S1) y `POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}`, `POST /users/{user_id}/enable` (S5) (+9; sus nueve descripciones de `part_d.py` se van, o `test_no_description_names_an_unexposed_route` falla). `PATCH /roles/{role_id}` (`roles_update`) y `POST /users/{user_id}/disable` (`users_disable`) siguen siendo herramientas: no piden nada. `POST /users/invite` y su reenvío ya están en la tabla desde la fase 1 (pueden devolver un enlace) y no cambian. «Refused twice»: la guarda (`app/mcp/guard.py`) los rechaza antes de autenticar, y `require_step_up` otra vez. Ninguna razón nueva dice «return», así que no entran en `SECRET_ONCE` (`tests/test_security_headers.py:105-112`). El docstring de `exclusions.py` decía que la tabla es de lo que da o acuña un secreto; gana un párrafo con esta segunda clase. *(El precedente de la fase 1 para un acto con confirmación, `POST /users/{user_id}/factors/reset`, está en `NOT_FOR_MCP`; esta tarea no lo mueve.)*
 - **Las dos que la piden solo en parte conservan su herramienta** —`clients_update` y `orgs_current_update`—, su descripción lo dice en 300 caracteres o menos (`tests/test_mcp_descriptions.py:62-66`: la de `PATCH /clients/{client_id}` queda en 297, la de `PATCH /orgs/current` en 271), y la ruta responde a esa parte 403 `step_up_required`, que la herramienta devuelve como su error (`app/mcp/invoke.py::error_text`: un 403 es el `detail` del API). Encender MCP por MCP no llega a pasar —con el interruptor apagado el servidor MCP no deja llamar a nada (`app/mcp/server.py:263`)—: la negativa de la ruta queda detrás, por si acaso.
 - **1c(e):** *«The API's own bounds still hold.»* Desde S1, la confirmación reciente es uno de esos límites, y el canal MCP no puede tenerla. 1c dice que la IA *«may reach what that person may reach»*: un permiso, no una obligación de alcanzar todo; y esta tarea no toca 1c(a)–(d). Estos actos quedan fuera del alcance de una IA como ya lo están el restablecimiento de factores de otro y la bóveda. El asistente interno tampoco los alcanza: su token nunca cuenta como confirmación (`tests/test_loopback.py::test_the_token_never_counts_as_a_recent_confirmation`) y su registro solo tiene lecturas (`app/core/ai/tools/registry.py`).
 
-**Decisión del plan (6): la consola, como la bóveda y el restablecimiento de factores.** Cada mutación de estos actos pasa por `useStepUp().run` (`components/stepUp.tsx`): ante un 403 `step_up_required` pide el factor y reenvía la misma petición una vez; cerrar el diálogo rechaza con `StepUpCancelled` («Nothing was changed: the confirmation was closed.»). Los hooks toman `run: StepUpRun`, como `useResetUserFactorsMutation` (`modules/settings/api.ts`), y su error pasa a `Error`. Dos hooks los comparten pestañas que nunca mandan la parte que se pide —la de Organización no escribe `mcp_enabled` (`SWITCHES_WITH_OWN_TAB`, `modules/settings/types.ts`), la de Módulos solo `enabled_modules`—: `useUpdateCurrentOrgMutation` y `useUpdateClientMutation` toman `run` con `sendOnce` por omisión, un `StepUpRun` que envía una vez y devuelve la negativa tal cual. El diálogo se pinta fuera de todo formulario y de todo panel; en Correo, Sesiones y Microsoft el panel pasa a una constante (`const panel = (…)`) para no reindentar el archivo, y en el formulario del cliente el diálogo de edición deja de cerrarse con Escape mientras la confirmación está abierta (`dismissible={!stepUp.open}`, como `UsersTab`). `run` ya es una llamada revisada de `secretMutations.test.ts` (`KNOWN_CALLS`), así que la guarda de secretos sigue leyendo `api.updateEmailSettings(`, `api.inviteUser(` y `api.resendInvite(` dentro del cierre: `SECRET_METHODS` y `SECRET_SITES` no cambian.
+**Decisión del plan (6): la consola, como la bóveda y el restablecimiento de factores.** Cada mutación de estos actos pasa por `useStepUp().run` (`components/stepUp.tsx`): ante un 403 `step_up_required` pide el factor y reenvía la misma petición una vez; cerrar el diálogo rechaza con `StepUpCancelled` («Nothing was changed: the confirmation was closed.»). Los hooks toman `run: StepUpRun`, como `useResetUserFactorsMutation` (`modules/settings/api.ts`), y su error pasa a `Error`. **S5:** la pestaña de Roles (`RolesTab.tsx`) hace lo que la de Usuarios —`useStepUp`, sus tres mutaciones de escritura con `stepUp.run` (no `useUpdateRoleMutation`, que la pestaña no usa y que renombra), el diálogo de borrar con `dismissible={!stepUp.open}` y `{stepUp.dialog}` al final, fuera de todo formulario—; y `useSetUserEnabledMutation(run)`, que comparten desactivar y reactivar, pasa por `run` **solo al reactivar**: desactivar se envía una vez, fuera de él, porque parar a alguien nunca espera una confirmación (S4). Dos hooks los comparten pestañas que nunca mandan la parte que se pide —la de Organización no escribe `mcp_enabled` (`SWITCHES_WITH_OWN_TAB`, `modules/settings/types.ts`), la de Módulos solo `enabled_modules`—: `useUpdateCurrentOrgMutation` y `useUpdateClientMutation` toman `run` con `sendOnce` por omisión, un `StepUpRun` que envía una vez y devuelve la negativa tal cual. El diálogo se pinta fuera de todo formulario y de todo panel; en Correo, Sesiones y Microsoft el panel pasa a una constante (`const panel = (…)`) para no reindentar el archivo, y en el formulario del cliente el diálogo de edición deja de cerrarse con Escape mientras la confirmación está abierta (`dismissible={!stepUp.open}`, como `UsersTab`). `run` ya es una llamada revisada de `secretMutations.test.ts` (`KNOWN_CALLS`), así que la guarda de secretos sigue leyendo `api.updateEmailSettings(`, `api.inviteUser(` y `api.resendInvite(` dentro del cierre: `SECRET_METHODS` y `SECRET_SITES` no cambian (`createRole` y `setRolePermissions` ya están en `NOT_SECRET`, y `deleteRole` y `setUserEnabled` no llevan nada con nombre de secreto).
 
-**Decisión del plan (7): las pruebas que ya existen no se ponen rojas por la confirmación, y se dice por qué.** Cada prueba del backend que llama a estas rutas con una sesión usa `ApiEnv.headers` (`tests/conftest.py:289-307`: `sign_in(..., step_up=True)`, una sesión nueva por llamada), `tests.session_support.sign_in` sin equipo recordado (`start_session` deja `step_up_at` = ahora, `sessions.py:342`) o un inicio de sesión real con el factor (`tests.auth_support.signed_in`): todas frescas durante la prueba. Ninguna llama a estas rutas con un equipo recordado ni con la confirmación envejecida (`_age_step_up` de `test_user_lifecycle.py` y `test_auth_my_security.py` solo envejece antes de `factors/reset` y de `/me/*`), y ninguna las llama por el canal MCP (el Step 9 lo comprueba con `grep`). **El ayudante de una confirmación fresca es `tests.session_support.sign_in(env, org_id, sub, step_up=True)` —es lo que hace `ApiEnv.headers`—, y para una sesión que ya existe, `app.core.auth.sessions.mark_step_up(session, session_id)`** (como `tests/test_auth_session_door.py:236-238` ante la bóveda). Las dos pruebas que sí cambian son de las guardas de MCP: el recuento y los conjuntos de `test_mcp_channel_api.py`, y el ejemplo `users_roles_create` de `test_mcp_catalog.py`, que deja de ser herramienta. En la consola, las pruebas que conducen estas mutaciones resuelven a la primera, y `run` solo interviene ante la negativa: ninguna cambia.
+**Decisión del plan (7): las pruebas que ya existen no se ponen rojas por la confirmación, y se dice por qué.** Cada prueba del backend que llama a estas rutas con una sesión usa `ApiEnv.headers` (`tests/conftest.py:289-307`: `sign_in(..., step_up=True)`, una sesión nueva por llamada), `tests.session_support.sign_in` sin equipo recordado (`start_session` deja `step_up_at` = ahora, `sessions.py:342`) o un inicio de sesión real con el factor (`tests.auth_support.signed_in`): todas frescas durante la prueba. Ninguna llama a estas rutas con un equipo recordado ni con la confirmación envejecida (`_age_step_up` de `test_user_lifecycle.py` y `test_auth_my_security.py` solo envejece antes de `factors/reset` y de `/me/*`), y ninguna las llama por el canal MCP salvo dos de `test_mcp_tools.py` (abajo; el Step 9 lo comprueba con `grep`). Las de las rutas de S5 son de las mismas tres clases: `test_rbac_admin_api.py` (`rbac_env` es `api_env`), `test_user_admin_api.py` (`users_env`, ídem) y `test_i18n_core_api.py:45` usan `ApiEnv.headers`, y `test_user_lifecycle.py:600` reactiva con un administrador de `signed_in`, en una prueba que no envejece nada. **El ayudante de una confirmación fresca es `tests.session_support.sign_in(env, org_id, sub, step_up=True)` —es lo que hace `ApiEnv.headers`—, y para una sesión que ya existe, `app.core.auth.sessions.mark_step_up(session, session_id)`** (como `tests/test_auth_session_door.py:236-238` ante la bóveda). Las que sí cambian son de MCP: el recuento y los conjuntos de `test_mcp_channel_api.py`; el ejemplo `users_roles_create` de `test_mcp_catalog.py`, que deja de ser herramienta (S1); y las dos de `test_mcp_tools.py` que llamaban a `roles_create`, que deja de serlo (S5): `test_a_technician_does_not_see_or_call_an_org_admin_tool` y `test_a_409_is_the_apis_detail` pasan a `roles_update` (`PATCH /roles/{role_id}`, el mismo `roles.manage`, que sigue siendo herramienta). En la consola, las pruebas que conducen estas mutaciones —también las de Roles en `roles.test.tsx` y `settings.es.test.tsx`— resuelven a la primera, y `run` solo interviene ante la negativa: ninguna cambia.
 
-**Decisión del plan (8): lo que esto deliberadamente no cubre** (S4). Los actos de un contacto no cambian: invitarlo al portal, reenviar, restablecer su acceso (que ya pide la confirmación desde la Task 8, D39) y desactivarlo. No piden nada los que solo quitan acceso —cancelar una invitación, desactivar a una persona, cerrar sus sesiones, apagar MCP, revocar una aplicación de IA—, porque son lo que se hace con prisa para parar a alguien, ni el correo de prueba de Ajustes → Correo, que no cambia nada. La prueba lo fija para cada uno. **Ni S1 ni S4 nombran** reactivar a una persona (`POST /users/{user_id}/enable`) ni la definición de los roles (`POST`/`PATCH`/`DELETE /roles…`, `PUT /roles/{role_id}/permissions`), que también deciden quién puede qué: esta tarea no los toca y quedan para el operador («Lo que sigue abierto», 9).
+**Decisión del plan (8): lo que esto deliberadamente no cubre** (S4). Los actos de un contacto no cambian: invitarlo al portal, reenviar, restablecer su acceso (que ya pide la confirmación desde la Task 8, D39) y desactivarlo. No piden nada los que solo quitan acceso —cancelar una invitación, desactivar a una persona, cerrar sus sesiones, apagar MCP, revocar una aplicación de IA—, porque son lo que se hace con prisa para parar a alguien, ni el correo de prueba de Ajustes → Correo, que no cambia nada. La prueba lo fija para cada uno. **S5 (2026-11-09) añade** reactivar a una persona (`POST /users/{user_id}/enable`: vuelve con los roles que tenía) y la definición de los roles —crear uno, cambiar sus permisos (que cambia de una vez lo que puede cada persona que lo tiene) y borrarlo—, **y deja fuera** renombrar o redescribir un rol (`PATCH /roles/{role_id}`: `RoleUpdate` solo lleva `name` y `description`, `roles.py:242-275`), que no cambia lo que nadie puede, y desactivar a una persona, que protege (S4). La misma prueba fija los dos.
 
 - [ ] **Step 1: Las pruebas del backend**
 
@@ -14211,16 +14219,17 @@ Crear `backend/tests/test_step_up_widened.py`:
 ```python
 """A recent second factor for the organization's sign-in settings and for a
 technician's access (design §2.5, widened by the operator on 2026-11-08,
-S1-S4; plan 2026-11-06, Task 14).
+S1-S4, and on 2026-11-09, S5; plan 2026-11-06, Task 14).
 
 Each act in `ACTS` needs the caller's own second factor confirmed in the last
 ten minutes. Without one -- none in this session, one eleven minutes old, or a
 session a remembered device started (design §2.6) -- it is the vault's 403
 `step_up_required`: nothing changes and no audit row is written. With one it
 goes through. Pinned as needing none: what only takes access away, the test
-mail and a contact's acts (S4), a client edit that leaves its Microsoft
-tenants as they were, and switching AI access off. Over MCP, an act gated as
-a whole is not a tool, and a tool gated in part refuses that part.
+mail and a contact's acts (S4), renaming a role (S5), a client edit that
+leaves its Microsoft tenants as they were, and switching AI access off. Over
+MCP, an act gated as a whole is not a tool, and a tool gated in part refuses
+that part.
 """
 
 from collections.abc import Awaitable, Callable
@@ -14236,7 +14245,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mcp import exclusions
 from app.mcp.catalog import build_catalog
-from app.models import AuditEvent, Client, Organization, Role, User, UserRole
+from app.models import (
+    AuditEvent,
+    Client,
+    Organization,
+    Permission,
+    Role,
+    RolePermission,
+    User,
+    UserRole,
+)
 from app.models.auth import (
     AccountMailSettings,
     AuthActionToken,
@@ -14390,6 +14408,31 @@ async def _grants(env: Any, user_id: UUID) -> list[UUID]:
         )
 
 
+async def _own_role(env: Any, admin: dict[str, str]) -> UUID:
+    """A role of the organization's own, with no codes and nobody holding it,
+    made with the administrator's fresh headers."""
+    made = await env.client.post(
+        "/api/v1/roles",
+        headers=admin,
+        json={"name": f"role-{uuid4().hex[:8]}", "description": "", "codes": []},
+    )
+    assert made.status_code == 201, made.text
+    return UUID(made.json()["id"])
+
+
+async def _role_codes(env: Any, role_id: UUID) -> list[str]:
+    async with AsyncSession(env.admin_engine) as s:
+        return sorted(
+            (
+                await s.execute(
+                    select(Permission.code)
+                    .join(RolePermission, RolePermission.permission_id == Permission.id)
+                    .where(RolePermission.role_id == role_id)
+                )
+            ).scalars()
+        )
+
+
 async def _customer(env: Any, admin: dict[str, str]) -> str:
     made = await env.client.post("/api/v1/clients", headers=admin, json={"name": "Acme"})
     assert made.status_code == 201, made.text
@@ -14421,7 +14464,7 @@ async def _entra(env: Any, org: UUID) -> tuple[object, ...] | None:
 
 
 # --------------------------------------------------------------------------- #
-# The acts (S1, S3)
+# The acts (S1, S3, S5)
 # --------------------------------------------------------------------------- #
 
 
@@ -14560,6 +14603,69 @@ async def _remove(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Rea
     return send, read
 
 
+async def _create_role(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Read]:
+    name = f"role-{uuid4().hex[:8]}"
+
+    async def send(headers: dict[str, str]) -> httpx.Response:
+        return await env.client.post(
+            "/api/v1/roles",
+            headers=headers,
+            json={"name": name, "description": "", "codes": ["devices.read"]},
+        )
+
+    async def read() -> object:
+        async with AsyncSession(env.admin_engine) as s:
+            return await s.scalar(
+                select(func.count())
+                .select_from(Role)
+                .where(Role.org_id == org, Role.name == name)
+            )
+
+    return send, read
+
+
+async def _role_permissions(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Read]:
+    role = await _own_role(env, admin)
+
+    async def send(headers: dict[str, str]) -> httpx.Response:
+        return await env.client.put(
+            f"/api/v1/roles/{role}/permissions", headers=headers, json={"codes": ["devices.read"]}
+        )
+
+    async def read() -> object:
+        return await _role_codes(env, role)
+
+    return send, read
+
+
+async def _delete_role(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Read]:
+    role = await _own_role(env, admin)
+
+    async def send(headers: dict[str, str]) -> httpx.Response:
+        return await env.client.delete(f"/api/v1/roles/{role}", headers=headers)
+
+    async def read() -> object:
+        async with AsyncSession(env.admin_engine) as s:
+            return await s.get(Role, role) is not None
+
+    return send, read
+
+
+async def _enable(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Read]:
+    target = await _technician(env, org)
+    disabled = await env.client.post(f"/api/v1/users/{target}/disable", headers=admin)
+    assert disabled.status_code == 200, disabled.text
+
+    async def send(headers: dict[str, str]) -> httpx.Response:
+        return await env.client.post(f"/api/v1/users/{target}/enable", headers=headers)
+
+    async def read() -> object:
+        async with AsyncSession(env.admin_engine) as s:
+            return await s.scalar(select(User.status).where(User.id == target))
+
+    return send, read
+
+
 async def _ai_on(env: Any, org: UUID, admin: dict[str, str]) -> tuple[Send, Read]:
     async def send(headers: dict[str, str]) -> httpx.Response:
         return await env.client.patch(
@@ -14597,6 +14703,10 @@ ACTS = (
     Act("resend an invitation", 200, _resend),
     Act("assign a role", 201, _assign),
     Act("remove a role", 204, _remove),
+    Act("create a role", 201, _create_role),
+    Act("change a role's permissions", 200, _role_permissions),
+    Act("delete a role", 204, _delete_role),
+    Act("re-enable a person", 200, _enable),
     Act("switch ai access on", 200, _ai_on),
 )
 
@@ -14694,15 +14804,18 @@ async def test_only_switching_ai_access_on_asks(env: Any) -> None:
     assert (await _org_settings(env, org)).get("mcp_enabled") is False
 
 
-async def test_what_only_takes_access_away_needs_none(env: Any) -> None:
+async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     """S4, pinned: cancelling an invitation, disabling a person, signing them
     out, turning AI access off and revoking an AI app protect, and must never
     wait for a factor; the test mail changes nothing; a contact's acts are
-    unchanged (inviting to the portal, cancelling it, deactivating). Each with
-    an eleven-minute-old confirmation."""
+    unchanged (inviting to the portal, cancelling it, deactivating). S5,
+    pinned: renaming or re-describing a role changes nobody's access, and
+    disabling stays as it was while enabling again asks. Each with an
+    eleven-minute-old confirmation."""
     org, sub, admin = await _admin(env)
     invited = await _invited(env, admin)
     disabled, signed_out = await _technician(env, org), await _technician(env, org)
+    role = await _own_role(env, admin)
     client_id = await _customer(env, admin)
     made = await env.client.post(
         f"/api/v1/clients/{client_id}/contacts",
@@ -14732,6 +14845,11 @@ async def test_what_only_takes_access_away_needs_none(env: Any) -> None:
         "send the test mail": await client.post(
             "/api/v1/settings/email/test", headers=stale, json={}
         ),
+        "rename a role": await client.patch(
+            f"/api/v1/roles/{role}",
+            headers=stale,
+            json={"name": "night-shift", "description": "Nights only"},
+        ),
         "invite a contact": await client.post(contact_invite, headers=stale),
         "cancel a contact's invitation": await client.delete(contact_invite, headers=stale),
         "deactivate a contact": await client.patch(
@@ -14751,6 +14869,7 @@ async def test_what_only_takes_access_away_needs_none(env: Any) -> None:
     assert answers["switch ai access off"].status_code == 200
     # Nothing saved to send through: past the gate, refused by the route.
     assert answers["send the test mail"].status_code == 409
+    assert answers["rename a role"].status_code == 200
     assert answers["invite a contact"].status_code == 200
     assert answers["cancel a contact's invitation"].status_code == 204
     assert answers["deactivate a contact"].status_code == 200
@@ -14769,6 +14888,10 @@ WHOLE = {
     ("POST", "/api/v1/users/{user_id}/invite/resend"): "users_invite_resend",
     ("POST", "/api/v1/users/{user_id}/roles"): "users_roles_create",
     ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"): "users_roles_delete",
+    ("POST", "/api/v1/roles"): "roles_create",
+    ("PUT", "/api/v1/roles/{role_id}/permissions"): "roles_permissions_set",
+    ("DELETE", "/api/v1/roles/{role_id}"): "roles_delete",
+    ("POST", "/api/v1/users/{user_id}/enable"): "users_enable",
 }
 #: Gated in part: a tool whose description says which part needs the console.
 PART = {
@@ -14832,34 +14955,39 @@ async def test_on_the_mcp_channel_switching_ai_access_on_is_refused(mcp_env: Any
     assert (await _org_settings(mcp_env, org)).get("mcp_enabled") is None
 ```
 
-(`_confirmed` comprueba la sesión que fabrica, para que un caso que creía tener una confirmación vieja no la tenga fresca sin decirlo. Cada escritura lleva `json=` con un objeto bien formado: Task 13, Step 1, sobre las negativas de una puerta. `"remove a role"` toma la única asignación del técnico que crea `create_user(org, "technician")`.)
+(`_confirmed` comprueba la sesión que fabrica, para que un caso que creía tener una confirmación vieja no la tenga fresca sin decirlo. Cada escritura lleva `json=` con un objeto bien formado: Task 13, Step 1, sobre las negativas de una puerta. `"remove a role"` toma la única asignación del técnico que crea `create_user(org, "technician")`. Los cuatro actos de S5: `_own_role` hace con los encabezados frescos del administrador un rol propio, sin códigos ni titulares, para que `"change a role's permissions"` no copie un rol de la plataforma y `"delete a role"` no tope con la negativa de un rol que alguien tiene; `"re-enable a person"` desactiva antes al técnico, también con los encabezados frescos —desactivar no pide nada, S4—; y cada uno escribe su auditoría al pasar (`role.created`, `role.permissions_set`, `role.deleted`, `user.enabled`).)
 
 En `backend/tests/test_mcp_channel_api.py`, después del conjunto `OWN_SIGN_IN_NEVER_EXPOSED` (tras su `}`):
 
 ```python
 # Own authentication phase 2, Task 14 (design §2.5, widened by the operator on
-# 2026-11-08, S1): the acts that need a recent second factor as a whole. The
-# channel has none to confirm. `POST /users/invite` and its resend need one
-# too, and are above already: they can answer a one-time link.
+# 2026-11-08, S1, and on 2026-11-09, S5): the acts that need a recent second
+# factor as a whole. The channel has none to confirm. `POST /users/invite` and
+# its resend need one too, and are above already: they can answer a one-time
+# link.
 RECENT_FACTOR_NEVER_EXPOSED = {
     ("PUT", "/api/v1/settings/email"),
     ("PUT", "/api/v1/settings/sessions"),
     ("PUT", "/api/v1/settings/microsoft-sign-in"),
     ("POST", "/api/v1/users/{user_id}/roles"),
     ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"),
+    ("POST", "/api/v1/roles"),
+    ("PUT", "/api/v1/roles/{role_id}/permissions"),
+    ("DELETE", "/api/v1/roles/{role_id}"),
+    ("POST", "/api/v1/users/{user_id}/enable"),
 }
 ```
 
-y en `test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes`, el recuento **+5 respecto del que veas** (46 tras las Tasks 4–9: 46 → 51) y la igualdad, con los tres conjuntos:
+y en `test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes`, el recuento **+9 respecto del que veas** (46 tras las Tasks 4–9: 46 → 55) y la igualdad, con los tres conjuntos:
 
 ```python
-    assert len(NEVER_EXPOSED) == 51
+    assert len(NEVER_EXPOSED) == 55
     assert set(NEVER_EXPOSED) == (
         GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED | RECENT_FACTOR_NEVER_EXPOSED
     )
 ```
 
-`test_every_never_exposed_route_refuses_the_channel` se parametriza sobre `NEVER_EXPOSED`, así que las cinco ganan sus casos solas (403 con *«esta acción nunca está disponible para una aplicación de IA»*).
+`test_every_never_exposed_route_refuses_the_channel` se parametriza sobre `NEVER_EXPOSED`, así que las nueve ganan sus casos solas (403 con *«esta acción nunca está disponible para una aplicación de IA»*).
 
 En `backend/tests/test_mcp_catalog.py::test_a_post_on_a_thing_is_create_only_when_it_answers_201`, la línea de `users_roles_create` (re-apuntada por S1: la ruta deja de ser herramienta, y `names[...]` sería un `KeyError`) pasa a otro miembro nuevo de una subcolección que sigue siéndolo:
 
@@ -14872,10 +15000,55 @@ En `backend/tests/test_mcp_catalog.py::test_a_post_on_a_thing_is_create_only_whe
 
 (la de `people_logins_create`, debajo, no cambia).
 
+En `backend/tests/test_mcp_tools.py` (re-apuntadas por S5: `roles_create` deja de ser herramienta, y `catalog["roles_create"]` sería un `KeyError` y su `call_tool`, una herramienta que no existe), dos pruebas pasan a `roles_update` —`PATCH /roles/{role_id}`, con el mismo `roles.manage`, que sigue siendo herramienta porque renombrar no pide nada—:
+
+1. En `test_a_technician_does_not_see_or_call_an_org_admin_tool`, después de `catalog = mcp_env.app.state.mcp_catalog` (la línea de encima, `token = mcp_token(...)`, no cambia aquí: es la que la fase 3 vuelve `await`), desde `assert catalog["roles_create"].permission == "roles.manage"` hasta `assert not await _events(mcp_env, org_id, "role.created")`, pasa a:
+
+   ```python
+           # `roles_update`, not `roles_create`: creating a role is no tool since
+           # 2026-11-09 (design §2.5, S5); renaming one still is, on the same code.
+           assert catalog["roles_update"].permission == "roles.manage"
+           names = {t.name for t in (await session.list_tools()).tools}
+           assert "devices_list" in names  # non-vacuity: the technician sees tools
+           assert "roles_update" not in names
+           result = await session.call_tool(
+               "roles_update", {"role_id": str(uuid4()), "body": {"name": "x"}}
+           )
+       assert "requires roles.manage" in _error_text(result)
+       # Refused before the route: no role was renamed, and the refusal is audited.
+       (event,) = await _events(mcp_env, org_id, "mcp.tool_called")
+       assert event.meta["tool"] == "roles_update"
+       assert event.meta["status"] == 403
+       assert not await _events(mcp_env, org_id, "role.updated")
+   ```
+
+2. `test_a_409_is_the_apis_detail`, hasta su `async with` incluido, pasa a (las dos líneas de `assert` del final no cambian: el `detail` de un nombre repetido al renombrar es «a role named 'technician' already exists», `rbac_admin.update_role`):
+
+   ```python
+   async def test_a_409_is_the_apis_detail(mcp_env) -> None:
+       # A rename onto a name the organization already has: `roles_create` was the
+       # example until creating a role left the tools on 2026-11-09 (S5).
+       org_id, sub, token = await _admin(mcp_env)
+       headers = await mcp_env.headers(org_id, sub)
+       made = await mcp_env.client.post("/api/v1/roles", json={"name": "night-shift"}, headers=headers)
+       assert made.status_code == 201, made.text
+       role_id = made.json()["id"]
+       console = await mcp_env.client.patch(
+           f"/api/v1/roles/{role_id}", json={"name": "technician"}, headers=headers
+       )
+       assert console.status_code == 409
+       async with running_mcp(mcp_env), _session(mcp_env, token) as session:
+           result = await session.call_tool(
+               "roles_update", {"role_id": role_id, "body": {"name": "technician"}}
+           )
+   ```
+
+   (`mcp_env.headers` lleva una confirmación fresca, así que el `POST /roles` de la consola pasa; `uuid4` ya está importado.)
+
 - [ ] **Step 2: Verlas fallar**
 
-Run (desde `backend/`, con `PYTHONPATH=$PWD`): `.venv/bin/pytest -q tests/test_step_up_widened.py tests/test_mcp_channel_api.py::test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes tests/test_mcp_catalog.py`
-Expected: FAIL — en `test_step_up_widened.py`, 38 de 50: los 33 casos de `test_without_a_recent_second_factor_nothing_happens` (11 actos × 3: cada uno contesta su éxito —200, 201 o 204— en vez del 403), `test_a_client_edit_that_leaves_its_tenants_alone_needs_none` (el cambio de tenants entra), `test_only_switching_ai_access_on_asks`, `test_the_acts_gated_as_a_whole_are_not_tools`, `test_over_mcp_a_tenant_change_is_refused_and_the_rest_of_the_edit_is_not` y `test_on_the_mcp_channel_switching_ai_access_on_is_refused`; pasan ya los 11 de `test_with_a_recent_second_factor_it_goes_through` y `test_what_only_takes_access_away_needs_none`, que fijan lo que no debe cambiar. Y la de `NEVER_EXPOSED` (los conjuntos difieren en cinco). `test_mcp_catalog.py` pasa antes y después: `clients_sites_create` ya es herramienta.
+Run (desde `backend/`, con `PYTHONPATH=$PWD`): `.venv/bin/pytest -q tests/test_step_up_widened.py tests/test_mcp_channel_api.py::test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes tests/test_mcp_catalog.py tests/test_mcp_tools.py::test_a_technician_does_not_see_or_call_an_org_admin_tool tests/test_mcp_tools.py::test_a_409_is_the_apis_detail`
+Expected: FAIL — en `test_step_up_widened.py`, 50 de 66: los 45 casos de `test_without_a_recent_second_factor_nothing_happens` (15 actos × 3: cada uno contesta su éxito —200, 201 o 204— en vez del 403), `test_a_client_edit_that_leaves_its_tenants_alone_needs_none` (el cambio de tenants entra), `test_only_switching_ai_access_on_asks`, `test_the_acts_gated_as_a_whole_are_not_tools`, `test_over_mcp_a_tenant_change_is_refused_and_the_rest_of_the_edit_is_not` y `test_on_the_mcp_channel_switching_ai_access_on_is_refused`; pasan ya los 15 de `test_with_a_recent_second_factor_it_goes_through` y `test_the_acts_left_without_a_confirmation_need_none`, que fijan lo que no debe cambiar. Y la de `NEVER_EXPOSED` (los conjuntos difieren en nueve). `test_mcp_catalog.py` y las dos de `test_mcp_tools.py` pasan antes y después: `clients_sites_create` y `roles_update` ya son herramientas, y lo siguen siendo. (Medido en `3a1ba1c` con lo de la Task 14 que existe ahí —sin los actos de Microsoft, tenants y contactos—: los 12 casos de S5 en `test_without_…` y `test_the_acts_gated_as_a_whole_are_not_tools` fallan contestando 201, 200, 204 y 200; los 4 de S5 en `test_with_…`, la fijada con el renombre y las dos de `test_mcp_tools.py` pasan.)
 
 - [ ] **Step 3: La dependencia**
 
@@ -14888,13 +15061,14 @@ def require_permission_on_every_client_with_step_up(
     """`require_permission_on_every_client(code)`, then `require_step_up`.
 
     For the global writes the operator put behind a recent second factor on
-    2026-11-08 (design §2.5, decisions S1-S3): the organization's sign-in
-    settings and who gets a technician's access. A DEPENDENCY, like the two it
-    joins, so both refusals come before the body is read -- the scope first:
-    a per-client technician is told the act is not theirs, never asked for a
-    factor that could not make it so. `route_permission` still recovers `code`
-    through both wrappers, and `tests/test_global_writes.py` still finds
-    `on_every_client` under this one."""
+    2026-11-08 and 2026-11-09 (design §2.5, decisions S1-S3 and S5): the
+    organization's sign-in settings, who gets a technician's access and what a
+    role grants. A DEPENDENCY, like the two it joins, so both refusals come
+    before the body is read -- the scope first: a per-client technician is
+    told the act is not theirs, never asked for a factor that could not make
+    it so. `route_permission` still recovers `code` through both wrappers, and
+    `tests/test_global_writes.py` still finds `on_every_client` under this
+    one."""
     gate = require_permission_on_every_client(code)
 
     async def on_every_client_with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
@@ -14979,19 +15153,20 @@ En `backend/app/api/v1/entra_settings.py` (de la Task 5):
 
 (`tests/test_global_writes.py` no cambia: las tres siguen en `GLOBAL_WRITES` con `orgs.manage`, y `_gated_on_every_client` encuentra `on_every_client` dentro de la dependencia nueva. `frontend/src/lib/globalRoutes.json` tampoco.)
 
-- [ ] **Step 5: El acceso de los técnicos**
+- [ ] **Step 5: El acceso de los técnicos y la definición de los roles**
 
 En `backend/app/modules/user_admin/api.py`:
-1. En la tabla del docstring, las cuatro filas de `POST /users/invite`, `POST /users/{id}/invite/resend`, `POST /users/{id}/roles` y `DELETE /users/{id}/roles/{assignment_id}` ganan `, and a recent second factor` tras `users.manage`, como ya la tiene `factors/reset`. Y, antes del párrafo «TWO CODES, NOT ONE, …»:
+1. En la tabla del docstring, las cinco filas de `POST /users/invite`, `POST /users/{id}/invite/resend`, `POST /users/{id}/roles`, `DELETE /users/{id}/roles/{assignment_id}` y `POST /users/{id}/enable` (S5) ganan `, and a recent second factor` tras `users.manage`, como ya la tiene `factors/reset`. Y, antes del párrafo «TWO CODES, NOT ONE, …»:
 
    ```
    A TECHNICIAN'S ACCESS NEEDS A RECENT SECOND FACTOR (design §2.5, widened by
-   the operator on 2026-11-08, S1): inviting, a new invitation link, granting and
-   removing a role -- like resetting somebody's factors -- each ask for the
-   administrator's own second factor confirmed in the last ten minutes
-   (`_MANAGE_CONFIRMED`, before the body is read). Cancelling an invitation,
-   disabling a person and ending their sessions, what is done in a hurry to stop
-   somebody, never do (S4).
+   the operator on 2026-11-08, S1, and on 2026-11-09, S5): inviting, a new
+   invitation link, granting and removing a role and enabling a disabled person
+   again -- who comes back with every role they held -- each ask, like resetting
+   somebody's factors, for the administrator's own second factor confirmed in
+   the last ten minutes (`_MANAGE_CONFIRMED`, before the body is read).
+   Cancelling an invitation, disabling a person and ending their sessions, what
+   is done in a hurry to stop somebody, never do (S4).
    ```
 
 2. La importación de `app.api.deps` gana `require_permission_on_every_client_with_step_up,` entre `require_permission_on_every_client,` y `require_step_up,`.
@@ -14999,12 +15174,51 @@ En `backend/app/modules/user_admin/api.py`:
 
    ```python
    #: `_MANAGE`, and the caller's own second factor confirmed in the last ten
-   #: minutes (design §2.5; operator 2026-11-08, S1): the acts that give a
-   #: technician access, or take a role away.
+   #: minutes (design §2.5; operator 2026-11-08, S1, and 2026-11-09, S5): the
+   #: acts that give a technician access -- enabling a disabled one again among
+   #: them -- or take a role away.
    _MANAGE_CONFIRMED = require_permission_on_every_client_with_step_up("users.manage")
    ```
 
-4. En `invite_user` (`:368`), `resend_invite` (`:405`), `assign_role` (`:458`) y `remove_role` (`:492`), `ctx: AuthContext = Depends(_MANAGE),` pasa a `ctx: AuthContext = Depends(_MANAGE_CONFIRMED),`; y cada docstring gana «Needs your own second factor confirmed in the last ten minutes.» (en `remove_role`, en su primera frase: «Revoke one assignment. Needs your own second factor confirmed in the last ten minutes.»). `cancel_invite`, `disable_user`, `enable_user`, `end_sessions` y `delete_user` siguen con `_MANAGE` (S4; «Lo que sigue abierto», 9, para `enable_user`). `reset_factors` sigue con su `require_step_up(ctx)` en el cuerpo.
+4. En `invite_user` (`:368`), `resend_invite` (`:405`), `assign_role` (`:458`), `remove_role` (`:492`) y `enable_user` (`:566`, S5), `ctx: AuthContext = Depends(_MANAGE),` pasa a `ctx: AuthContext = Depends(_MANAGE_CONFIRMED),`; y cada docstring gana «Needs your own second factor confirmed in the last ten minutes.» (en `remove_role`, en su primera frase: «Revoke one assignment. Needs your own second factor confirmed in the last ten minutes.»; el de `enable_user` entero pasa a «Undo a disable: the person signs in again, with every role they held. A deleted user is not re-enabled here. Needs your own second factor confirmed in the last ten minutes.», reenvuelto a tres líneas de 79 columnas). `cancel_invite`, `disable_user`, `end_sessions` y `delete_user` siguen con `_MANAGE` (S4). `reset_factors` sigue con su `require_step_up(ctx)` en el cuerpo.
+
+En `backend/app/api/v1/roles.py` (S5; ninguna tarea anterior lo toca, así que las líneas son las de `3a1ba1c`):
+1. En la tabla del docstring, las filas de `POST /api/v1/roles`, `PUT /api/v1/roles/{role_id}/permissions` y `DELETE /api/v1/roles/{role_id}` ganan `, and a recent second factor` tras `roles.manage`; la de `PATCH` no. Y, después del párrafo «Two codes, not one. …» (el que acaba «delivered by a description string (spec §0.7).»):
+
+   ```
+   DEFINING A ROLE NEEDS A RECENT SECOND FACTOR (design §2.5, widened by the
+   operator on 2026-11-09, S5): creating one, changing its codes and deleting it
+   each ask for the administrator's own second factor confirmed in the last ten
+   minutes (`_MANAGE_CONFIRMED`, before the body is read) -- a role's codes are
+   what every person holding it may do, changed for all of them at once.
+   Renaming or re-describing one does not: it changes nobody's access. The three
+   are no MCP tools: the channel has no second factor to confirm
+   (`app/mcp/exclusions.py`).
+   ```
+
+2. La importación de `app.api.deps` (`:50`) pasa a:
+
+   ```python
+   from app.api.deps import (
+       AuthContext,
+       require_permission,
+       require_permission_on_every_client,
+       require_permission_on_every_client_with_step_up,
+   )
+   ```
+
+3. Debajo de `_MANAGE = require_permission_on_every_client("roles.manage")` (`:62`):
+
+   ```python
+   #: `_MANAGE`, and the caller's own second factor confirmed in the last ten
+   #: minutes (design §2.5; operator 2026-11-09, S5): creating a role, changing
+   #: its codes and deleting it. Renaming one stays on `_MANAGE`.
+   _MANAGE_CONFIRMED = require_permission_on_every_client_with_step_up("roles.manage")
+   ```
+
+4. En `create_role` (`:218`), `set_role_permissions` (`:277`) y `delete_role` (`:309`), `ctx: AuthContext = Depends(_MANAGE),` pasa a `ctx: AuthContext = Depends(_MANAGE_CONFIRMED),`, y cada docstring gana en su primer párrafo «Needs your own second factor confirmed in the last ten minutes.» (`create_role`: «Create a role in this organization and set its permission codes. Needs / your own second factor confirmed in the last ten minutes.»; `set_role_permissions`: «… that changed things for. Needs your own second factor / confirmed in the last ten minutes.»; `delete_role`: «Delete one of this organization's own roles. Needs your own second / factor confirmed in the last ten minutes.»). `update_role` (`:242`) sigue con `_MANAGE`: renombrar no pide nada (S5).
+
+(`tests/test_global_writes.py` no cambia: las cuatro de S5 ya están en `GLOBAL_WRITES`, `:83-91`, con `users.manage` y `roles.manage`, y `_gated_on_every_client` encuentra `on_every_client` dentro de la dependencia nueva; `tests/test_rbac_admin_api.py:177-182` y `tests/test_user_admin_api.py:338`, que leen el código de cada ruta con `route_permission`, tampoco.)
 
 - [ ] **Step 6: Los tenants de un cliente**
 
@@ -15082,8 +15296,9 @@ En `backend/app/mcp/exclusions.py`:
 
    ```
    SINCE 2026-11-08, ALSO EVERY ACT THAT NEEDS A RECENT SECOND FACTOR AS A WHOLE
-   (design §2.5, widened by the operator, S1): the organization's sign-in
-   settings and the grants of a technician's access. The channel carries no
+   (design §2.5, widened by the operator, S1, and on 2026-11-09, S5): the
+   organization's sign-in settings, the grants of a technician's access, the
+   definition of a role and enabling a person again. The channel carries no
    session, so `deps.require_step_up` refuses each of them anyway; listing them
    here keeps them off the tool list rather than offering a tool that can only
    fail, and refuses them twice, like the rest (`deps.require_step_up`'s
@@ -15097,7 +15312,7 @@ En `backend/app/mcp/exclusions.py`:
    #: Why a route that needs a recent second factor as a whole is never a tool.
    _RECENT_FACTOR = (
        "needs the administrator's own recent second-factor confirmation in the console "
-       "(design §2.5, operator 2026-11-08)"
+       "(design §2.5, as the operator widened it on 2026-11-08 and 2026-11-09)"
    )
    ```
 
@@ -15123,10 +15338,20 @@ En `backend/app/mcp/exclusions.py`:
        ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"): (
            f"revokes a technician's role; {_RECENT_FACTOR}"
        ),
+       # The definition of a role and enabling a person again (design §2.5,
+       # widened by the operator on 2026-11-09, S5): the same.
+       ("POST", "/api/v1/roles"): f"defines a new role and its permissions; {_RECENT_FACTOR}",
+       ("PUT", "/api/v1/roles/{role_id}/permissions"): (
+           f"changes what every holder of a role may do; {_RECENT_FACTOR}"
+       ),
+       ("DELETE", "/api/v1/roles/{role_id}"): f"deletes a role; {_RECENT_FACTOR}",
+       ("POST", "/api/v1/users/{user_id}/enable"): (
+           f"gives a disabled person their access back, with the roles they held; {_RECENT_FACTOR}"
+       ),
    ```
 
 En `backend/app/mcp/descriptions/part_d.py`:
-1. Se quitan las cinco entradas `"PUT /api/v1/settings/email"`, `"PUT /api/v1/settings/sessions"`, `"PUT /api/v1/settings/microsoft-sign-in"` (la de la Task 5), `"POST /api/v1/users/{user_id}/roles"` y `"DELETE /api/v1/users/{user_id}/roles/{assignment_id}"` (`test_no_description_names_an_unexposed_route`). Las de `GET` de los tres ajustes siguen.
+1. Se quitan las nueve entradas `"PUT /api/v1/settings/email"`, `"PUT /api/v1/settings/sessions"`, `"PUT /api/v1/settings/microsoft-sign-in"` (la de la Task 5), `"POST /api/v1/users/{user_id}/roles"` y `"DELETE /api/v1/users/{user_id}/roles/{assignment_id}"` (S1), y `"POST /api/v1/roles"`, `"DELETE /api/v1/roles/{role_id}"`, `"PUT /api/v1/roles/{role_id}/permissions"` (bajo `# --- roles ---`) y `"POST /api/v1/users/{user_id}/enable"` (bajo `# --- users ---`) (S5) (`test_no_description_names_an_unexposed_route`). Las de `GET` de los tres ajustes siguen, y también `"GET /api/v1/roles"`, `"PATCH /api/v1/roles/{role_id}"` y `"POST /api/v1/users/{user_id}/disable"`.
 2. La de `"PATCH /api/v1/orgs/current"` pasa a (271 caracteres):
 
    ```python
@@ -15151,19 +15376,19 @@ En `backend/app/mcp/descriptions/part_d.py`:
 
    (Si la Task 5 dejó otra frase para los tenants, se conserva la suya y se añade «Changing them needs a second factor confirmed in the console.», midiendo los 300 de `test_descriptions_are_short_and_plain`; la prueba nueva busca «needs a second factor confirmed in the console» en las dos.)
 
-Ningún otro recuento se mueve: `tests/test_ai_tool_surface.py` mide solo las rutas `GET` (`api_v1_get_routes`) y esta tarea no añade ni quita ninguna (`EXPECTED_GET_ROUTES` sigue en 257); `GLOBAL_WRITES`, `UNGATED_BY_DESIGN`, `SECRET_ONCE`, las llamadas de log, `es.py` y el vocabulario de auditoría no cambian (ni rutas, ni textos, ni acciones nuevas).
+Ningún otro recuento se mueve: `tests/test_ai_tool_surface.py` mide solo las rutas `GET` (`api_v1_get_routes`) y esta tarea no añade ni quita ninguna (`EXPECTED_GET_ROUTES` sigue en 257); `GLOBAL_WRITES`, `UNGATED_BY_DESIGN`, `SECRET_ONCE` (ninguna de las nueve razones dice «return»), las llamadas de log, `es.py` y el vocabulario de auditoría no cambian (ni rutas, ni textos, ni acciones nuevas).
 
 - [ ] **Step 9: Correr las pruebas del backend**
 
-Run (desde `backend/`, con `PYTHONPATH=$PWD`): `.venv/bin/pytest -q tests/test_step_up_widened.py tests/test_mcp_channel_api.py tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_mcp_tools.py tests/test_mcp_server.py tests/test_mcp_admin_api.py tests/test_mcp_schema.py tests/test_security_headers.py tests/test_global_writes.py tests/test_route_gating.py tests/test_rbac.py tests/test_console_global_routes.py tests/test_realm_settings_api.py tests/test_session_settings_api.py tests/test_entra_settings_api.py tests/test_clients_microsoft_tenants.py tests/test_clients_api.py tests/test_user_admin_api.py tests/test_user_lifecycle.py tests/test_rbac_admin_api.py tests/test_org_settings.py tests/test_domain_policy.py tests/test_i18n_modules_rest.py tests/test_device_group_write.py tests/test_auth_entra_flows.py tests/test_contact_access_api.py tests/test_auth_falsifiers.py tests/test_auth_session_door.py tests/test_loopback.py`
+Run (desde `backend/`, con `PYTHONPATH=$PWD`): `.venv/bin/pytest -q tests/test_step_up_widened.py tests/test_mcp_channel_api.py tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_mcp_tools.py tests/test_mcp_server.py tests/test_mcp_admin_api.py tests/test_mcp_schema.py tests/test_security_headers.py tests/test_global_writes.py tests/test_route_gating.py tests/test_rbac.py tests/test_console_global_routes.py tests/test_realm_settings_api.py tests/test_session_settings_api.py tests/test_entra_settings_api.py tests/test_clients_microsoft_tenants.py tests/test_clients_api.py tests/test_user_admin_api.py tests/test_user_lifecycle.py tests/test_rbac_admin_api.py tests/test_org_settings.py tests/test_domain_policy.py tests/test_i18n_modules_rest.py tests/test_i18n_core_api.py tests/test_device_group_write.py tests/test_auth_entra_flows.py tests/test_contact_access_api.py tests/test_auth_falsifiers.py tests/test_auth_session_door.py tests/test_loopback.py`
 Expected: PASS. Si una de estas falla con 403 `step_up_required`, es una sesión sin confirmación fresca que el Step de auditoría de abajo no vio: se le da con `sign_in(..., step_up=True)` o `mark_step_up` (decisión 7), y el informe la lista, vieja → nueva.
 
 La auditoría de la decisión 7, desde `backend/`: los archivos que llaman a estas rutas y además hacen una sesión sin confirmación fresca, o hablan por el canal MCP.
 
-Run: `grep -lE '/settings/(email|sessions|microsoft-sign-in)"|users/invite|invite/resend|/roles"|/roles/\{|orgs/current"|PATCH.*clients/' tests/test_*.py | xargs grep -lE 'trusted_device_id=|remembered_device\(|minutes=11|step_up_at=|marked_client|mcp_session|loopback_bearer'`
+Run: `grep -lE '/settings/(email|sessions|microsoft-sign-in)"|users/invite|invite/resend|/roles"|/roles/\{|/enable"|orgs/current"|PATCH.*clients/' tests/test_*.py | xargs grep -lE 'trusted_device_id=|remembered_device\(|minutes=11|step_up_at=|marked_client|mcp_session|loopback_bearer'`
 Expected (en `3a1ba1c` más esta tarea; las Tasks 5–9 pueden añadir alguno, que se lee igual): `tests/test_auth_reset_needs_recovery.py`, `tests/test_domain_policy.py`, `tests/test_mcp_channel_api.py`, `tests/test_mcp_tools.py`, `tests/test_step_up_widened.py`, `tests/test_user_lifecycle.py`.
 Run: `grep -nE 'trusted_device_id=|remembered_device\(|minutes=11|step_up_at=|marked_client|mcp_session' tests/test_auth_reset_needs_recovery.py tests/test_domain_policy.py tests/test_user_lifecycle.py && grep -ohE 'call_tool\(\s*"[a-z_]+"' tests/test_mcp_*.py tests/test_token_origin.py | sort -u`
-Expected: el canal marcado de `test_auth_reset_needs_recovery.py` (`:375`) va a `factors/reset`, y su invitación (`:282-290`) la manda un administrador que acaba de entrar con su factor (`signed_in`); el de `test_domain_policy.py` (`:617`, `:642`) es `GET /orgs/current`; `test_user_lifecycle.py` envejece la confirmación (`:92`) solo antes de `factors/reset` (`:519`); y ninguna herramienta llamada es de esta tarea (`budget_expenses_get`, `devices_get`, `devices_list`, `licenses_get`, `me_get`, `me_update`, `no_such_tool`, `roles_create`, `roles_update`: `roles_create` es `POST /roles`, que S1 no nombra). `test_mcp_channel_api.py` y `test_step_up_widened.py` son los de esta tarea. Si la orden encuentra otra cosa, se lee antes de seguir: una sesión de las Tasks 5–9 sin confirmación fresca contra una de estas rutas se re-apunta con `sign_in(..., step_up=True)` y el informe la lista.
+Expected: el canal marcado de `test_auth_reset_needs_recovery.py` (`:375`) va a `factors/reset`, y su invitación (`:282-290`) la manda un administrador que acaba de entrar con su factor (`signed_in`); el de `test_domain_policy.py` (`:617`, `:642`) es `GET /orgs/current`; `test_user_lifecycle.py` envejece la confirmación (`:92`) solo antes de `factors/reset` (`:519`), y su reactivación (`:600`) es de otra prueba, con un administrador de `signed_in`; y ninguna herramienta llamada es de esta tarea (`budget_expenses_get`, `devices_get`, `devices_list`, `licenses_get`, `me_get`, `me_update`, `no_such_tool`, `roles_update`: `roles_update` es `PATCH /roles/{role_id}`, que no pide nada; `roles_create` ya no aparece, porque el Step 1 re-apuntó sus dos pruebas). Medido en `3a1ba1c` con esta tarea: la primera orden da esos seis archivos (`/enable"` no añade ninguno), y la segunda, esas líneas y esas ocho herramientas. `test_mcp_channel_api.py` y `test_step_up_widened.py` son los de esta tarea. Si la orden encuentra otra cosa, se lee antes de seguir: una sesión de las Tasks 5–9 sin confirmación fresca contra una de estas rutas se re-apunta con `sign_in(..., step_up=True)` y el informe la lista.
 
 Run (desde `backend/`): `.venv/bin/mypy app && .venv/bin/ruff check app tests`
 Expected: `Success: no issues found`, `All checks passed!`.
@@ -15176,8 +15401,9 @@ Al final de `frontend/src/modules/settings/__tests__/users.test.tsx`, después d
 
 ```tsx
 /**
- * Own authentication phase 2, Task 14 (design §2.5, operator 2026-11-08, S1):
- * inviting, sending an invitation again, granting and removing a role need the
+ * Own authentication phase 2, Task 14 (design §2.5, operator 2026-11-08, S1,
+ * and 2026-11-09, S5): inviting, sending an invitation again, granting and
+ * removing a role and enabling a disabled person again need the
  * administrator's second factor confirmed in the last 10 minutes. The server
  * says when it is stale (403 `step_up_required`); the tab asks for it and
  * sends the same act once more, and only then.
@@ -15255,6 +15481,19 @@ describe("Settings — Users tab, a recent second factor", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  it("asks for it before a disabled person is enabled again (S5)", async () => {
+    calls.setUserEnabled.mockRejectedValueOnce(stepUpRequired());
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /casey@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Enable casey@example.com" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.setUserEnabled).toHaveBeenCalledTimes(2));
+    expect(calls.setUserEnabled).toHaveBeenLastCalledWith(CASEY_USER.id, true);
+  });
+
   it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
     calls.inviteUser.mockRejectedValue(stepUpRequired());
     const user = await openUsers();
@@ -15269,6 +15508,84 @@ describe("Settings — Users tab, a recent second factor", () => {
   });
 });
 ```
+
+(`CASEY_USER` es la persona desactivada del arnés: su fila ofrece «Enable casey@example.com» detrás de «More actions».)
+
+En `frontend/src/modules/settings/__tests__/roles.test.tsx` (S5), `stepUpRequired,` en la importación de `./harness` (tras `renderSettings,`), y al final del archivo, después del `describe("Settings — Roles tab", …)`:
+
+```tsx
+/**
+ * Own authentication phase 2, Task 14 (design §2.5, operator 2026-11-09, S5):
+ * creating a role, saving its permissions and deleting it need the
+ * administrator's second factor confirmed in the last 10 minutes. The server
+ * says when it is stale (403 `step_up_required`); the tab asks for it and
+ * sends the same act once more, and only then. Renaming is not asked, and
+ * this tab does not rename.
+ */
+describe("Settings — Roles tab, a recent second factor", () => {
+  async function confirm(user: ReturnType<typeof userEvent.setup>) {
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+  }
+
+  it("asks for it before a role is created, then creates the same role once more", async () => {
+    calls.createRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.type(await screen.findByLabelText("New role name"), "warehouse-technician");
+    await user.click(screen.getByRole("button", { name: "Create role" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.createRole).toHaveBeenCalledTimes(2));
+    expect(calls.createRole.mock.calls[1]).toEqual(calls.createRole.mock.calls[0]);
+    await waitFor(() => expect(screen.getByLabelText("New role name")).toHaveValue(""));
+  });
+
+  it("asks for it before a role's permissions are saved", async () => {
+    calls.setRolePermissions.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
+    await user.click(await screen.findByLabelText("devices.manage"));
+    await user.click(screen.getByRole("button", { name: "Save permissions" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.setRolePermissions).toHaveBeenCalledTimes(2));
+    expect(calls.setRolePermissions).toHaveBeenLastCalledWith(TECHNICIAN_ROLE.id, ["devices.manage", "devices.read"]);
+  });
+
+  it("asks for it before a role is deleted, over the confirmation, which then closes", async () => {
+    calls.deleteRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Delete role auditor" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete auditor" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.deleteRole).toHaveBeenCalledTimes(2));
+    expect(calls.deleteRole).toHaveBeenLastCalledWith(AUDITOR_ROLE.id);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
+    calls.createRole.mockRejectedValue(stepUpRequired());
+    const user = await openRoles();
+    await user.type(await screen.findByLabelText("New role name"), "warehouse-technician");
+    await user.click(screen.getByRole("button", { name: "Create role" }));
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(stepUp).getByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByText("Nothing was changed: the confirmation was closed.")).toBeInTheDocument();
+    expect(calls.createRole).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+(El vaciado de «New role name» de la primera prueba es el `onSuccess` de la pestaña: prueba que la respuesta del segundo envío llega a quien llamó. Las pruebas que ya había en `roles.test.tsx` y `settings.es.test.tsx` no cambian: su servidor contesta a la primera.)
 
 En `frontend/src/modules/settings/__tests__/email.test.tsx`, `stepUpRequired,` en la importación de `./harness` (tras `renderSettings,`), y antes de `it("refuses to save a password with no sign-in username", …)`:
 
@@ -15422,12 +15739,12 @@ En `frontend/src/modules/clients/__tests__/clients.test.tsx`, al final del `desc
 
 (El arnés de esta página no tiene `stepUpRequired()`: la negativa se escribe con su forma, la de `auth_refusal_handler`. `getMySecurity` lleva los campos de las Tasks 7 y 11.)
 
-**Lo que S4 deja sin confirmación no tiene prueba de consola**, a propósito: la consola solo reacciona a la negativa del servidor, así que una prueba de que cancelar o apagar no abre el diálogo pasaría igual con o sin `run`. Lo fija el backend (`test_what_only_takes_access_away_needs_none`, `test_only_switching_ai_access_on_asks`); en la consola esas mutaciones siguen sin `run`.
+**Lo que S4 y S5 dejan sin confirmación no tiene prueba de consola**, a propósito: la consola solo reacciona a la negativa del servidor, así que una prueba de que cancelar, apagar, desactivar o renombrar no abre el diálogo pasaría igual con o sin `run`. Lo fija el backend (`test_the_acts_left_without_a_confirmation_need_none`, `test_only_switching_ai_access_on_asks`); en la consola esas mutaciones siguen sin `run`, y desactivar, aunque comparta hook con reactivar, se envía fuera de él.
 
 - [ ] **Step 11: Verlas fallar**
 
-Run (desde `frontend/`): `npx vitest run src/modules/settings/__tests__/users.test.tsx src/modules/settings/__tests__/email.test.tsx src/modules/settings/__tests__/sessions.test.tsx src/modules/settings/__tests__/aiConnections.test.tsx src/modules/settings/__tests__/microsoft.test.tsx src/modules/clients/__tests__/clients.test.tsx`
-Expected: FAIL en las once nuevas —cinco de `users`, una de `email`, `sessions`, `aiConnections` y `clients`, dos de `microsoft`—: sin `run` la negativa llega a la pantalla como error, no se abre «Confirm it's you» y `findByRole` agota su espera. Todas las demás pasan.
+Run (desde `frontend/`): `npx vitest run src/modules/settings/__tests__/users.test.tsx src/modules/settings/__tests__/roles.test.tsx src/modules/settings/__tests__/email.test.tsx src/modules/settings/__tests__/sessions.test.tsx src/modules/settings/__tests__/aiConnections.test.tsx src/modules/settings/__tests__/microsoft.test.tsx src/modules/clients/__tests__/clients.test.tsx`
+Expected: FAIL en las dieciséis nuevas —seis de `users`, cuatro de `roles`, una de `email`, `sessions`, `aiConnections` y `clients`, dos de `microsoft`—: sin `run` la negativa llega a la pantalla como error, no se abre «Confirm it's you» y `findByRole` agota su espera. Todas las demás pasan. (Las cinco de S5 se midieron así en `3a1ba1c` con lo de la Task 14 que existe ahí: `Unable to find role="dialog" and name "Confirm it's you"`; con el Step 12, 72 de 72 en `users` y `roles`.)
 
 - [ ] **Step 12: La consola**
 
@@ -15441,7 +15758,9 @@ En `frontend/src/components/stepUp.tsx`:
     * 2026-11-08 (S1, S3), saving the organization's Email, Sessions and Microsoft
     * sign-in settings, changing a client's Microsoft tenants, inviting a
     * technician or sending their invitation again, granting or removing a role,
-    * and switching AI access on. The SERVER decides that, on every such
+    * and switching AI access on -- and, since 2026-11-09 (S5), creating a role,
+    * changing a role's permissions, deleting a role and enabling a disabled
+    * person again. The SERVER decides that, on every such
    ```
 
 2. Debajo de `export type StepUpRun = …`:
@@ -15456,7 +15775,7 @@ En `frontend/src/components/stepUp.tsx`:
    export const sendOnce: StepUpRun = (action) => action();
    ```
 
-En `frontend/src/modules/settings/api.ts`: `import type { StepUpRun } from "../../components/stepUp";` pasa a `import { sendOnce, type StepUpRun } from "../../components/stepUp";`, y ocho hooks toman el `run` de su pestaña, con `Error` por error (un `StepUpCancelled` no es un `ApiError`), como `useResetUserFactorsMutation`:
+En `frontend/src/modules/settings/api.ts`: `import type { StepUpRun } from "../../components/stepUp";` pasa a `import { sendOnce, type StepUpRun } from "../../components/stepUp";`, y doce hooks toman el `run` de su pestaña, con `Error` por error (un `StepUpCancelled` no es un `ApiError`), como `useResetUserFactorsMutation`:
 
 ```ts
 /**
@@ -15533,7 +15852,55 @@ export function useResendInviteMutation(run: StepUpRun) {
     mutationFn: (userId) => run(() => api.resendInvite(userId)),
 ```
 
-(El resto de cada hook —`onSuccess`, `gcTime: 0`— no cambia. `useCancelInviteMutation`, `useSetUserEnabledMutation`, `useEndUserSessionsMutation`, `useDeleteUserMutation` y `useRevokeMcpConnection` siguen sin `run`: S4.)
+y, por S5, los tres de los roles y el de desactivar y reactivar:
+
+```ts
+/** Through the tab's `useStepUp().run`: creating a role needs the second factor confirmed in the last 10 minutes (§2.5, S5). */
+export function useCreateRoleMutation(run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<RoleOut, Error, RoleCreate>({
+    mutationFn: (body) => run(() => api.createRole(body)),
+```
+
+```ts
+ * their own reach, and the tab strip is drawn from it.
+ *
+ * Through the tab's `useStepUp().run`: it needs the second factor confirmed in
+ * the last 10 minutes (§2.5, S5).
+ */
+export function useSetRolePermissionsMutation(run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<RolePermissionsOut, Error, { roleId: string; codes: string[] }>({
+    mutationFn: ({ roleId, codes }) => run(() => api.setRolePermissions(roleId, codes)),
+```
+
+```ts
+/** Through the tab's `useStepUp().run`: deleting a role needs the second factor confirmed in the last 10 minutes (§2.5, S5). */
+export function useDeleteRoleMutation(run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (roleId) => run(() => api.deleteRole(roleId)),
+```
+
+```ts
+/**
+ * Enabling goes through the tab's `useStepUp().run`: it gives a disabled
+ * person their access back, with every role they held, and needs the second
+ * factor confirmed in the last 10 minutes (§2.5, S5). Disabling is sent once,
+ * outside it: stopping somebody never waits for a confirmation (S4).
+ */
+export function useSetUserEnabledMutation(run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<UserOut, Error, { userId: string; enabled: boolean }>({
+    mutationFn: ({ userId, enabled }) =>
+      enabled ? run(() => api.setUserEnabled(userId, true)) : api.setUserEnabled(userId, false),
+```
+
+(El resto de cada hook —`onSuccess`, `gcTime: 0`— no cambia. `useCancelInviteMutation`, `useEndUserSessionsMutation`, `useDeleteUserMutation` y `useRevokeMcpConnection` siguen sin `run` (S4), y `useUpdateRoleMutation` también: renombrar no pide nada (S5).)
 
 En `frontend/src/modules/settings/EmailTab.tsx`: `import { useStepUp } from "../../components/stepUp";` tras la de `../../components/form`; `const update = useUpdateEmailSettingsMutation();` pasa a:
 
@@ -15607,7 +15974,8 @@ En `frontend/src/modules/settings/UsersTab.tsx`: el párrafo de cabecera «RESET
 ```tsx
 // RESETTING SOMEONE'S SECOND FACTORS NEEDS YOUR OWN (§2.5, §7), and so, since
 // the operator widened §2.5 on 2026-11-08 (S1), do inviting, sending an
-// invitation again, granting and removing a role. The server answers 403
+// invitation again, granting and removing a role -- and, since 2026-11-09
+// (S5), enabling a disabled person again. The server answers 403
 // `step_up_required` unless the operator confirmed their own second factor in
 // the last 10 minutes; `useStepUp` asks for it -- over the confirmation, where
 // there is one -- and sends the act once more only after the server accepted
@@ -15622,12 +15990,43 @@ En `frontend/src/modules/settings/UsersTab.tsx`: el párrafo de cabecera «RESET
   const invite = useInviteUserMutation(stepUp.run);
   const assignRole = useAssignRoleMutation(stepUp.run);
   const removeRole = useRemoveRoleMutation(stepUp.run);
-  const setEnabled = useSetUserEnabledMutation();
+  const setEnabled = useSetUserEnabledMutation(stepUp.run);
   const resendInvite = useResendInviteMutation(stepUp.run);
   const cancelInvite = useCancelInviteMutation();
 ```
 
-en lugar de las siete líneas de `const invite = useInviteUserMutation();` a `const stepUp = useStepUp();`. La pestaña ya pinta `{stepUp.dialog}` al final, fuera de todo formulario, y su diálogo de confirmación ya tiene `dismissible={!stepUp.open}`: quitar un rol pasa por él.
+en lugar de las siete líneas de `const invite = useInviteUserMutation();` a `const stepUp = useStepUp();`. La pestaña ya pinta `{stepUp.dialog}` al final, fuera de todo formulario, y su diálogo de confirmación ya tiene `dismissible={!stepUp.open}`: quitar un rol pasa por él. Reactivar es el botón «Enable» de la fila, sin diálogo propio (no quita nada); su negativa y un `StepUpCancelled` salen en el aviso que ya pinta `setEnabled.error`.
+
+En `frontend/src/modules/settings/RolesTab.tsx` (S5): al final del comentario de cabecera, después de «… redefines what some number of real people can do to the fleet.»:
+
+```tsx
+//
+// CREATING, CHANGING THE PERMISSIONS OF AND DELETING A ROLE NEED A RECENT
+// SECOND FACTOR (design §2.5, widened by the operator on 2026-11-09, S5). The
+// server answers 403 `step_up_required` unless the operator confirmed their
+// own second factor in the last 10 minutes; `useStepUp` asks for it -- over
+// the delete confirmation, for a delete -- and sends the same act once more
+// only after the server accepted it. Renaming a role is never asked.
+```
+
+`import { useStepUp } from "../../components/stepUp";` tras la de `../../components/form`; las tres líneas de `const createRole = useCreateRoleMutation();` a `const deleteRole = useDeleteRoleMutation();` pasan a:
+
+```tsx
+  const stepUp = useStepUp();
+  const createRole = useCreateRoleMutation(stepUp.run);
+  const setPermissions = useSetRolePermissionsMutation(stepUp.run);
+  const deleteRole = useDeleteRoleMutation(stepUp.run);
+```
+
+el `<Dialog` de borrar gana, tras `title={t("settings.roles.deleteDialog.title")}`, `dismissible={!stepUp.open}`; y entre su `</Dialog>` y el `</>` final:
+
+```tsx
+
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
+```
+
+(`describeSubmitError` y `SaveBar` ya toman `unknown`, así que el `Error` de los tres hooks no cambia nada más: el `StepUpCancelled` sale como «Nothing was changed: the confirmation was closed.».)
 
 En `frontend/src/modules/settings/AiConnectionsTab.tsx`: en el comentario de cabecera, antes del párrafo «TURNING IT ON ASKS FIRST; …» (no junto al de «A REVOKE IS IN FORCE …», que reescribe la fase 3):
 
@@ -15709,16 +16108,16 @@ y el cierre, `      </Form>\n    </Dialog>\n  );\n}`, a:
 - [ ] **Step 13: Correr la consola**
 
 Run (desde `frontend/`): `npx vitest run src/modules/settings src/modules/clients src/components/stepUp.test.tsx src/test/secretMutations.test.ts && npx tsc -b && npm run build`
-Expected: PASS y sin errores. `secretMutations.test.ts` no cambia: `run` es una llamada revisada (`KNOWN_CALLS`) y los sitios de `updateEmailSettings`, `inviteUser` y `resendInvite` siguen en `modules/settings/api.ts`.
+Expected: PASS y sin errores. `secretMutations.test.ts` no cambia: `run` es una llamada revisada (`KNOWN_CALLS`) y los sitios de `updateEmailSettings`, `inviteUser` y `resendInvite` siguen en `modules/settings/api.ts`. (En `3a1ba1c` con lo de la Task 14 que existe ahí, `src/modules/settings src/modules/clients src/modules/people src/components/stepUp.test.tsx src/test/secretMutations.test.ts`: 504 de 504; `tsc -b` y `npm run build`, sin errores.)
 
 - [ ] **Step 14: Los documentos**
 
-En `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`, en `### 2.5 Confirmación reciente del segundo factor`, el párrafo «Exigida en los últimos 10 minutos para: cambiar la propia contraseña o los factores; que un administrador restablezca / los factores de otro; sacar una credencial de la bóveda [S5, S7].» pasa a lo de abajo. **Solo ese párrafo**, con la línea en blanco que lo sigue intacta: la fase 3 añade su enmienda (C1) al final de §2.5, detrás de esa línea («Puntos de encuentro»).
+En `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`, en `### 2.5 Confirmación reciente del segundo factor`, el párrafo «Exigida en los últimos 10 minutos para: cambiar la propia contraseña o los factores; que un administrador restablezca / los factores de otro; sacar una credencial de la bóveda [S5, S7].» pasa a lo de abajo (los `[S5, S7]` entre corchetes son fuentes de `-fuentes.md`; la decisión del operador S5 se escribe sin corchetes). **Solo ese párrafo**, con la línea en blanco que lo sigue intacta: la fase 3 añade su enmienda (C1) al final de §2.5, detrás de esa línea («Puntos de encuentro»).
 
 ```markdown
 Exigida en los últimos 10 minutos para: cambiar la propia contraseña o los factores; que un administrador restablezca
 los factores de otro; sacar una credencial de la bóveda [S5, S7]. **Ampliada el 2026-11-08** (decisiones del operador
-S1 y S3; plan de la fase 2, Task 14), también para:
+S1 y S3) **y el 2026-11-09** (decisión del operador S5; plan de la fase 2, Task 14), también para:
 
 - guardar **Ajustes → Correo** (`PUT /settings/email`), **Ajustes → Sesiones** (`PUT /settings/sessions`) y
   **Ajustes → Microsoft** (`PUT /settings/microsoft-sign-in`, también al pedir un certificado nuevo y al cambiar al que
@@ -15727,7 +16126,11 @@ S1 y S3; plan de la fase 2, Task 14), también para:
   ficha, no);
 - **el acceso de un técnico:** invitarlo (`POST /users/invite`), reenviar su invitación
   (`POST /users/{id}/invite/resend`), concederle un rol (`POST /users/{id}/roles`) y quitárselo
-  (`DELETE /users/{id}/roles/{assignment_id}`);
+  (`DELETE /users/{id}/roles/{assignment_id}`); **y, desde el 2026-11-09** (decisión del operador S5), reactivarlo
+  (`POST /users/{id}/enable`), que vuelve con los roles que tenía;
+- **la definición de los roles** (S5, 2026-11-09): crear uno (`POST /roles`), cambiar sus permisos
+  (`PUT /roles/{id}/permissions`), que cambia de una vez lo que puede cada persona que lo tiene, y borrarlo
+  (`DELETE /roles/{id}`);
 - **encender MCP** (`mcp_enabled` de apagado a encendido, `PATCH /orgs/current`).
 
 Por qué, con OWASP ASVS 5.0, V7.5 (https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md,
@@ -15739,8 +16142,9 @@ information used in account recovery.»* —este habla de la cuenta de la propia
 cómo entra toda la organización y quién tiene acceso—. Así, la cookie de una sesión de administrador inactiva, sin su
 segundo factor, ya no basta para apuntar el correo de las invitaciones y los enlaces a otro relé, alargar las sesiones
 o dejar que un equipo se salte el factor, cambiar la aplicación de Microsoft o su certificado, abrir la entrada a otro
-tenant, dar o quitar acceso a un técnico, ni abrir la organización a las aplicaciones de IA. Un equipo recordado no la
-da (§2.6). Una IA conectada por MCP no hace ninguno de estos actos: el canal no lleva sesión que confirmar, y las
+tenant, dar o quitar acceso a un técnico, devolvérselo a una persona desactivada, redefinir lo que puede un rol, ni abrir
+la organización a las aplicaciones de IA. Un equipo recordado no la da (§2.6). Una IA conectada por MCP no hace
+ninguno de estos actos: el canal no lleva sesión que confirmar, y las
 rutas que la piden enteras no son herramientas (`CLAUDE.md` 1c(e): los límites de la propia API se mantienen). Un
 contacto con app TOTP confirma con ella o con su clave de acceso (decisión del operador S2, 2026-11-08; §3).
 
@@ -15748,14 +16152,14 @@ contacto con app TOTP confirma con ella o con su clave de acceso (decisión del 
 invitarlo al portal, reenviar, restablecer su acceso —que ya la pide— y desactivarlo. No la piden cancelar una
 invitación, desactivar a una persona, cerrar sus sesiones, apagar MCP ni revocar una aplicación de IA: solo quitan
 acceso, y son lo que se hace con prisa para parar a alguien. Ni el correo de prueba de Ajustes → Correo, que no cambia
-nada. S1 tampoco nombra reactivar a una persona ni definir los roles; quedan para el operador (plan de la fase 2, «Lo
-que sigue abierto»).
+nada. Ni renombrar o redescribir un rol (`PATCH /roles/{id}`), que no cambia lo que nadie puede (decisión del operador
+S5, 2026-11-09).
 ```
 
 En `docs/03-security-model.md`, en la tabla «Threat model», debajo de la fila «A console left signed in on an unattended computer»:
 
 ```markdown
-| An administrator's idle session used to change how the organization signs in, or who has access | A second factor confirmed in the last 10 minutes -- never a remembered device -- to save Settings → Email, Sessions or Microsoft sign-in, change a client's Microsoft tenants, invite a technician or send the invitation again, grant or remove a role, and switch AI connections over MCP on (design §2.5, widened by the operator on 2026-11-08). None of these is reachable over MCP: the channel carries no session to confirm. Not asked, on purpose: cancelling an invitation, disabling a person, signing them out, switching MCP off and revoking an AI app, which only take access away |
+| An administrator's idle session used to change how the organization signs in, or who has access | A second factor confirmed in the last 10 minutes -- never a remembered device -- to save Settings → Email, Sessions or Microsoft sign-in, change a client's Microsoft tenants, invite a technician or send the invitation again, grant or remove a role, re-enable a disabled person, create a role, change a role's permissions or delete a role, and switch AI connections over MCP on (design §2.5, widened by the operator on 2026-11-08 and 2026-11-09). None of these is reachable over MCP: the channel carries no session to confirm. Not asked, on purpose: cancelling an invitation, disabling a person, signing them out, switching MCP off and revoking an AI app, which only take access away, and renaming a role, which changes nobody's access |
 ```
 
 En `deploy/README.md`, en `### What is never reachable over MCP`, entre el párrafo «**Not tools:** files and streams — …» y «Every result is also scanned for secret-looking field names, …» (no al final de la lista «Refused twice», donde añade la fase 3, ni junto a `### Residual risks, stated plainly`, que la fase 3 reescribe):
@@ -15764,13 +16168,15 @@ En `deploy/README.md`, en `### What is never reachable over MCP`, entre el párr
 **The acts that ask for your second factor again** (own authentication phase
 2): saving Settings → Email, Sessions or Microsoft sign-in, changing a
 client's Microsoft tenants, inviting a technician or sending the invitation
-again, granting or removing a role, and switching AI connections on need the
-person's second factor confirmed in the console in the last ten minutes, and
-**an AI app connected over MCP cannot do any of them** -- the settings, the
-invitations and the roles are not tools and are refused on the channel; a
-client edit and the organization's settings stay tools and refuse that part.
-Cancelling an invitation, disabling a person, signing them out, switching MCP
-off and revoking an app never ask.
+again, granting or removing a role, re-enabling a disabled person, creating a
+role, changing a role's permissions or deleting a role, and switching AI
+connections on need the person's second factor confirmed in the console in
+the last ten minutes, and **an AI app connected over MCP cannot do any of
+them** -- the settings, the invitations, the grants, re-enabling and the
+role definitions are not tools and are refused on the channel; a client edit
+and the organization's settings stay tools and refuse that part. Cancelling
+an invitation, disabling a person, signing them out, switching MCP off,
+revoking an app and renaming a role never ask.
 ```
 
 - [ ] **Step 15: Commit**
@@ -15778,21 +16184,21 @@ off and revoking an app never ask.
 ```bash
 git add backend/app/api/deps.py backend/app/api/v1/realm_settings.py backend/app/api/v1/session_settings.py \
   backend/app/api/v1/entra_settings.py backend/app/modules/user_admin/api.py backend/app/services/clients.py \
-  backend/app/api/v1/clients.py backend/app/api/v1/orgs.py backend/app/mcp/exclusions.py \
-  backend/app/mcp/descriptions/part_d.py backend/tests/test_step_up_widened.py \
-  backend/tests/test_mcp_channel_api.py backend/tests/test_mcp_catalog.py \
+  backend/app/api/v1/clients.py backend/app/api/v1/orgs.py backend/app/api/v1/roles.py \
+  backend/app/mcp/exclusions.py backend/app/mcp/descriptions/part_d.py backend/tests/test_step_up_widened.py \
+  backend/tests/test_mcp_channel_api.py backend/tests/test_mcp_catalog.py backend/tests/test_mcp_tools.py \
   frontend/src/components/stepUp.tsx frontend/src/modules/settings frontend/src/modules/clients \
   docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md docs/03-security-model.md deploy/README.md
-git commit -m "feat(auth): a recent second factor for sign-in settings and technicians' access (own auth phase 2 Task 14)"
+git commit -m "feat(auth): a recent second factor for sign-in settings, technicians' access and role definitions (own auth phase 2 Task 14)"
 ```
 
-El informe de la tarea dice: las rutas que piden la confirmación (decisión 1) y cuáles salieron de las herramientas de MCP (5, `NEVER_EXPOSED` 46 → 51); las pruebas existentes cambiadas, vieja → nueva (`test_mcp_channel_api.py::test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes`, 46 → 51 y el conjunto nuevo; `test_mcp_catalog.py::test_a_post_on_a_thing_is_create_only_when_it_answers_201`, `users_roles_create` → `clients_sites_create`), con S1 como razón; y la salida de la auditoría del Step 9, aunque no encuentre nada.
+El informe de la tarea dice: las rutas que piden la confirmación (decisión 1) y cuáles salieron de las herramientas de MCP (9, `NEVER_EXPOSED` 46 → 55); las pruebas existentes cambiadas, vieja → nueva, con la decisión que lo manda (`test_mcp_channel_api.py::test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes`, 46 → 55 y el conjunto nuevo, S1 y S5; `test_mcp_catalog.py::test_a_post_on_a_thing_is_create_only_when_it_answers_201`, `users_roles_create` → `clients_sites_create`, S1; `test_mcp_tools.py::test_a_technician_does_not_see_or_call_an_org_admin_tool`, `roles_create` → `roles_update` y `role.created` → `role.updated`, S5; `test_mcp_tools.py::test_a_409_is_the_apis_detail`, un `POST /roles` repetido y `roles_create` → un renombre repetido y `roles_update`, S5); y la salida de la auditoría del Step 9, aunque no encuentre nada.
 
 ---
 
 ### Task 13: Cierre — falsificadores, documentos, archivos generados, recuentos y el informe
 
-Diseño §9 (documentos que cambian a propósito), §10 (falsificadores 1 y 8). Decisiones del operador C3–C7 y S1–S4; B2-05, B2-21, B2-34, B2-35. Oleada 8, en el árbol fusionado de las Tasks 1–12 y 14.
+Diseño §9 (documentos que cambian a propósito), §10 (falsificadores 1 y 8). Decisiones del operador C3–C7 y S1–S5; B2-05, B2-21, B2-34, B2-35. Oleada 8, en el árbol fusionado de las Tasks 1–12 y 14.
 
 **Files:**
 - Create: `backend/tests/test_auth_phase2_falsifiers.py`
@@ -16069,7 +16475,7 @@ y después `git diff --stat ../frontend/src/lib/globalRoutes.json`.
 Expected: el archivo cambia solo si el árbol fusionado difiere de lo que la Task 5 regeneró (la ruta `PUT /api/v1/settings/microsoft-sign-in`); no se edita a mano.
 
 Run (desde `backend/`): `.venv/bin/pytest -q tests/test_console_global_routes.py tests/test_logging_discipline.py tests/test_mcp_channel_api.py tests/test_ai_tool_surface.py tests/test_global_writes.py tests/test_route_gating.py tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_worker_sweep_containment.py`
-Expected: PASS con los recuentos de las Global Constraints (`NEVER_EXPOSED` **51**, con los +5 de la Task 14; ningún otro recuento lo mueve la 14). **Si uno falla por un recuento, primero se explica el delta** (A2-72): se lista qué sitios, rutas o entradas añadió cada tarea fusionada (`git log -p` de las tareas sobre ese archivo) y se compara con la cuenta de las Global Constraints. Solo cuando cada unidad de diferencia tiene su tarea y su razón —dos tareas que sumaron el mismo delta a una base distinta, o una que no lo sumó— se corrige el número. Una llamada de log, una ruta o una exclusión que no está en ninguna tarea de este plan no es un recuento que corregir: es un cambio que nadie revisó, y se para.
+Expected: PASS con los recuentos de las Global Constraints (`NEVER_EXPOSED` **55**, con los +9 de la Task 14 —cinco de S1, cuatro de S5—; ningún otro recuento lo mueve la 14). **Si uno falla por un recuento, primero se explica el delta** (A2-72): se lista qué sitios, rutas o entradas añadió cada tarea fusionada (`git log -p` de las tareas sobre ese archivo) y se compara con la cuenta de las Global Constraints. Solo cuando cada unidad de diferencia tiene su tarea y su razón —dos tareas que sumaron el mismo delta a una base distinta, o una que no lo sumó— se corrige el número. Una llamada de log, una ruta o una exclusión que no está en ninguna tarea de este plan no es un recuento que corregir: es un cambio que nadie revisó, y se para.
 
 Run (desde `frontend/`): `npx vitest run src/modules/audit/auditVocabulary.coverage.test.ts src/i18n src/lib/globalRoutes.test.ts src/lib/api.clientScope.test.ts src/test/routes-covered.test.ts src/test/secretMutations.test.ts`
 Expected: PASS.
@@ -16312,11 +16718,11 @@ El informe de la tarea termina con estas líneas, tal cual (decisión 2):
 - **No se despliega ahora**, y por eso este informe no da la secuencia completa: la da el proyecto 4, que empieza por `docker compose exec openbao bao status` (OpenBao se sella en cada reinicio) y deja que `migrate` corra como dependencia de `api` en cada `up -d`.
 - **Camino hasta un `main` desplegado:** fase 3 (MCP y el asistente, migración 0247 sobre la 0246) → proyecto 4 (despliegue) → fusión a `main` → la secuencia del proyecto 4.
 - **Lo que la fase 2 añade a esa secuencia:** la migración **0246**; **ninguna clave nueva en `.env`**; **ninguna ruta ni política nueva en OpenBao**; ningún servicio nuevo; registrar la aplicación de Entra, pedir el certificado en Ajustes → Microsoft sign-in, subirlo a Entra y encender (`deploy/README.md`, «Sign in with Microsoft (own authentication, phase 2)»). Y, por A-M2 (Task 2): un `.env` de producción con `ITS_AUTH_KEYS_BACKEND=local` hace que el api se niegue a arrancar; `grep '^ITS_AUTH_KEYS_BACKEND=openbao' .env` debe imprimir la línea.
-- **Qué comprobar después:** `/sign-in` y `/portal/sign-in` cargan; un contacto invitado entra al portal y `/devices` lo lleva a `/portal`; guardar Ajustes → Correo con una sesión de más de diez minutos —o abierta en un equipo recordado— pide el segundo factor, y apagar MCP no lo pide (Task 14); «Entrar con Microsoft» con una cuenta no vinculada responde «no está vinculada a nadie aquí»; Ajustes → Microsoft muestra la fecha de caducidad del certificado. Antes de registrar la app, mirar si el tenant de Novieri tiene una política de gestión de aplicaciones que rechace certificados autofirmados o de 360 días (`deploy/README.md`).
+- **Qué comprobar después:** `/sign-in` y `/portal/sign-in` cargan; un contacto invitado entra al portal y `/devices` lo lleva a `/portal`; guardar Ajustes → Correo con una sesión de más de diez minutos —o abierta en un equipo recordado— pide el segundo factor, también crear un rol o reactivar a una persona, y apagar MCP, desactivar o renombrar un rol no lo pide (Task 14); «Entrar con Microsoft» con una cuenta no vinculada responde «no está vinculada a nadie aquí»; Ajustes → Microsoft muestra la fecha de caducidad del certificado. Antes de registrar la app, mirar si el tenant de Novieri tiene una política de gestión de aplicaciones que rechace certificados autofirmados o de 360 días (`deploy/README.md`).
 - **A comunicar al operador** (B2-05): un contratista que sea invitado B2B en el tenant de Novieri no puede entrar con Microsoft como técnico; sí con su contraseña.
 - **El resultado del Step 6** en Chromium, Safari y Firefox, y si el canje real y la renovación en dos actos salieron bien contra Entra.
-- **Decidido por el operador el 2026-11-08 y construido:** un contacto con app TOTP confirma también con su clave de acceso (S2); los ajustes de inicio de sesión, los tenants de un cliente, el acceso de los técnicos y encender MCP piden la confirmación reciente (S1, S3; Task 14), y lo que solo quita acceso no (S4). **A comunicar:** una aplicación de IA conectada por MCP ya no puede guardar Ajustes → Correo, Sesiones ni Microsoft, ni conceder o quitar roles, ni cambiar los tenants de un cliente (Task 14, decisión 5).
-- **A confirmar por el operador:** si reactivar a una persona y definir los roles piden también la confirmación reciente («Lo que sigue abierto», 9).
+- **Decidido por el operador el 2026-11-08 y el 2026-11-09, y construido:** un contacto con app TOTP confirma también con su clave de acceso (S2); los ajustes de inicio de sesión, los tenants de un cliente, el acceso de los técnicos y encender MCP piden la confirmación reciente (S1, S3; Task 14), y lo que solo quita acceso no (S4); la piden también crear un rol, cambiar sus permisos, borrarlo y reactivar a una persona, y renombrar un rol no (S5; Task 14). **A comunicar:** una aplicación de IA conectada por MCP ya no puede guardar Ajustes → Correo, Sesiones ni Microsoft, ni conceder o quitar roles, ni crear, cambiar los permisos de o borrar un rol, ni reactivar a una persona, ni cambiar los tenants de un cliente (Task 14, decisión 5); sí renombrar un rol y desactivar a una persona.
+- **Nada queda para el operador** en «Lo que sigue abierto»: lo que hay allí lo confirma la ejecución (puntos 1–7) o es un seguimiento (el 8, el aviso antes de que caduque el certificado).
 
 ---
 
@@ -16343,8 +16749,8 @@ La fase 3 (servidor OAuth para MCP y el asistente interno, diseño §5) se plani
 | `backend/app/core/client_scope.py` (`ALL_SCOPE_ALLOWLIST`) | +2: `app/core/auth/retention.py::sweep_org` (T3), `app/core/auth/entra_flows.py::_entra_session` (T9); razones reescritas de `flows.py::_identity_session` (T4, T8) y `account.py::_own_session` (T7). | Unión, cada una con su razón; la de la fase 3 no reutiliza ninguna de estas sesiones para sus rutas (B3-31). |
 | `backend/tests/test_client_catalog.py`, `backend/tests/test_auth_tables.py` | `ORG_WIDE_KEYS` gana `uq_auth_external_identities_subject`; `AUTH_TABLES` las dos tablas nuevas; `REVIEWED_SECURITY_DEFINER` gana `its_auth_org` (T1). | Unión. |
 | `backend/app/core/i18n/es.py` | Una entrada por literal nuevo de T4–T9. | Unión; `tests/test_i18n_catalog.py` en el árbol fusionado. |
-| `backend/app/mcp/exclusions.py`, `backend/tests/test_mcp_channel_api.py` | `NEVER_EXPOSED` 36 → **51** (+1 T4, +2 T6, +1 T7, +4 T8, +2 T9, +5 T14); `NOT_FOR_MCP` gana `GET /portal/me` (T4) y `DELETE /me/microsoft` (T9); las rutas de acceso del contacto (T8) van a `NEVER_EXPOSED` o llevan descripción, no a `NOT_FOR_MCP`. T14: un párrafo del docstring, la constante `_RECENT_FACTOR` y un bloque de cinco **después de `POST /me/recovery-codes`**, no junto a las invitaciones; en la prueba, el conjunto `RECENT_FACTOR_NEVER_EXPOSED` y la igualdad con los tres conjuntos. | Se suman los deltas de las dos fases al número que vea la fusión (52 con el +1 de la fase 3); nunca se resta una entrada. La fase 3 inserta su `POST /api/v1/oauth/authorize/decision` tras `POST /users/{user_id}/invite/resend` y en `OWN_SIGN_IN_NEVER_EXPOSED`: sin choque con el bloque de T14. Las dos cambian la línea `assert len(NEVER_EXPOSED) == …`: a mano, la suma. |
-| `backend/app/mcp/descriptions/part_d.py` | Las descripciones de `GET`/`PUT /settings/microsoft-sign-in` (con `new_certificate` y `activate_certificate`) y la de `PATCH /clients/{client_id}` con `microsoft_tenants` (T5); la descripción nueva de `DELETE /clients/{client_id}/contacts/{contact_id}/invite` y la frase nueva de `GET /clients/{client_id}/contacts` (T8). `GET /portal/me` no lleva descripción (`NOT_FOR_MCP`, T4). T14 quita las de `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles` y `DELETE /users/{user_id}/roles/{assignment_id}`, y reescribe las de `PATCH /orgs/current` y `PATCH /clients/{client_id}` (la parte que pide la consola). | Unión. Una descripción que la fase 3 añada a una de esas cinco rutas sobra: ya no son herramientas (`test_no_description_names_an_unexposed_route`). |
+| `backend/app/mcp/exclusions.py`, `backend/tests/test_mcp_channel_api.py` | `NEVER_EXPOSED` 36 → **55**: el delta de la fase 2 es **+19** (+1 T4, +2 T6, +1 T7, +4 T8, +2 T9, +9 T14: cinco de S1 y cuatro de S5); `NOT_FOR_MCP` gana `GET /portal/me` (T4) y `DELETE /me/microsoft` (T9); las rutas de acceso del contacto (T8) van a `NEVER_EXPOSED` o llevan descripción, no a `NOT_FOR_MCP`. T14: un párrafo del docstring, la constante `_RECENT_FACTOR` y un bloque de nueve —las cinco de S1 y, tras su propio comentario, las cuatro de S5 (`POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}`, `POST /users/{user_id}/enable`)— **después de `POST /me/recovery-codes`**, no junto a las invitaciones; en la prueba, el conjunto `RECENT_FACTOR_NEVER_EXPOSED` (nueve) y la igualdad con los tres conjuntos. | El recuento fusionado es **36 + el delta de la fase 2 (+19) + el delta de la fase 3** (+1 en su plan, `POST /api/v1/oauth/authorize/decision`: 56); si la revisión que la fase 3 hace en paralelo cambia su delta, se suma el suyo, y el de la fase 2 no se toca. Nunca se resta una entrada. La fase 3 inserta su `POST /api/v1/oauth/authorize/decision` tras `POST /users/{user_id}/invite/resend` y en `OWN_SIGN_IN_NEVER_EXPOSED`: sin choque con el bloque de T14. Las dos cambian la línea `assert len(NEVER_EXPOSED) == …`: a mano, la suma. |
+| `backend/app/mcp/descriptions/part_d.py` | Las descripciones de `GET`/`PUT /settings/microsoft-sign-in` (con `new_certificate` y `activate_certificate`) y la de `PATCH /clients/{client_id}` con `microsoft_tenants` (T5); la descripción nueva de `DELETE /clients/{client_id}/contacts/{contact_id}/invite` y la frase nueva de `GET /clients/{client_id}/contacts` (T8). `GET /portal/me` no lleva descripción (`NOT_FOR_MCP`, T4). T14 quita las de `PUT /settings/email`, `PUT /settings/sessions`, `PUT /settings/microsoft-sign-in`, `POST /users/{user_id}/roles` y `DELETE /users/{user_id}/roles/{assignment_id}` (S1), y las de `POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}` y `POST /users/{user_id}/enable` (S5), y reescribe las de `PATCH /orgs/current` y `PATCH /clients/{client_id}` (la parte que pide la consola). | Unión. Una descripción que la fase 3 añada a una de esas nueve rutas sobra: ya no son herramientas (`test_no_description_names_an_unexposed_route`). |
 | `backend/tests/test_logging_discipline.py` | 108 → **109** (T5: el aviso de `entra.exchange`). | Se suma el delta de la fase 3. |
 | `backend/tests/test_ai_tool_surface.py` | `EXPECTED_GET_ROUTES` 255 → **257** (T4 `/portal/me`, T5 `/settings/microsoft-sign-in`); «P5 self-describing» 176 → 177 (T4). | Se suman los deltas. |
 | `backend/tests/test_route_gating.py`, `backend/tests/test_global_writes.py` | `UNGATED_BY_DESIGN` gana las rutas nuevas de `/auth/*` y `/me/*`; `GLOBAL_WRITES` gana `PUT /api/v1/settings/microsoft-sign-in` (T5); `NOT_GLOBAL`, las tres de acceso del contacto (T8). | Unión. |
@@ -16361,7 +16767,7 @@ La fase 3 (servidor OAuth para MCP y el asistente interno, diseño §5) se plani
 | `frontend/src/i18n/{en,es}/settings.ts` | `page.tabs.microsoft` y la sección `microsoft` (T12). | Las dos fases lo editan; fusión por unión. |
 | `deploy/.env.example` | El comentario de `ITS_AUTH_KEYS_BACKEND` (T2) y el de `ENTRA_*` (T13): ninguna clave nueva. | Unión. Las tres `ENTRA_*` y su comentario se van con Keycloak en la fase 4 (diseño §8, punto 4); desde la fase 3 no inician la sesión de nadie, y ni la fase 2 ni la 3 las quitan. Ninguna línea de la fase 2 dice «until phase 3», que la Task 12 de la fase 3 busca con `grep` en `deploy` y `docs/modules/console-auth` (X1). |
 | `deploy/README.md` | La frase de A-M2 (T2); en «Status of this runbook», la línea `:35` y dos viñetas (T13); la sección propia `## Sign in with Microsoft (own authentication, phase 2)` (T13); en `### What is never reachable over MCP`, un párrafo entre «**Not tools:** …» y «Every result is also scanned …» (T14). | Unión. La fase 3 añade una viñeta al final de la lista «Refused twice» de esa misma sección y reescribe desde `### Residual risks, stated plainly`: el párrafo de T14 queda entre las dos, sin tocarlas. **Ninguna de las dos fases rehace el párrafo de «Status of this runbook»**: la fase 3 reescribe `:32` y la fase 2 solo la línea `:35`, dos líneas más abajo; cada una cambia solo las líneas de su propia frase, o la fusión choca (X11). Las secciones de Keycloak y la frase «This replaces "3. Sign in with Microsoft — by hand, for now" above» se quedan hasta que la fase 4 retire Keycloak. |
-| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | §3, §4 y §9 corregidos a propósito (T13; C3–C5, B2-35); en §2.5, el párrafo «Exigida en los últimos 10 minutos para: …» reescrito con la ampliación del 2026-11-08 (T14; S1–S4), sin tocar la línea en blanco que lo sigue. | Unión; la fase 3 corrige §5 y añade su enmienda de C1 **al final de §2.5**, detrás de esa línea en blanco: en el árbol fusionado §2.5 lleva las dos, la de T14 primero. |
+| `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` | §3, §4 y §9 corregidos a propósito (T13; C3–C5, B2-35); en §2.5, el párrafo «Exigida en los últimos 10 minutos para: …» reescrito con la ampliación del 2026-11-08 (T14; S1–S4) y la del 2026-11-09 (T14; S5), sin tocar la línea en blanco que lo sigue. | Unión; la fase 3 corrige §5 y añade su enmienda de C1 **al final de §2.5**, detrás de esa línea en blanco: en el árbol fusionado §2.5 lleva las dos, la de T14 primero. |
 | `backend/app/core/auth/notices.py` | Ningún tipo de `Notice` nuevo: los avisos nuevos reutilizan `factor_added`, `factor_removed` y `password_changed`. Añade `reset_mail(link, *, second_factor)` (T4), `contact_invitation_mail` (T8) y la rama `"microsoft"` de `_factor_name` (T9). | La fase 3 añade el tipo `app_connected` y un parámetro `host=`; tocan otras líneas, así que la fusión por unión sirve (X7). |
 | `backend/app/api/security_headers.py`, `backend/tests/test_security_headers.py` | `NO_STORE_ROUTES` y `SECRET_ONCE` ganan `POST …/contacts/{contact_id}/invite` y `POST …/contacts/{contact_id}/access/reset` (T8, X2): sus respuestas pueden llevar un enlace de invitación, y sus razones de `NEVER_EXPOSED_REASONS` dicen «returns». | Unión con la ruta de decisión de la fase 3 (su Task 8): en el árbol fusionado, las dos listas llevan las tres. |
 | `.github/workflows/ci.yml` | **Ningún cambio.** | Lo que añada la fase 3 entra sin conflicto. |
@@ -16369,18 +16775,20 @@ La fase 3 (servidor OAuth para MCP y el asistente interno, diseño §5) se plani
 | `backend/app/core/auth/csrf.py` | **Sin cambios.** | — |
 | `backend/app/main.py` | Incluye el router de `app/api/v1/entra_settings.py` (T5). | Unión. |
 | `backend/tests/test_mcp_catalog.py` | El ejemplo de `test_a_post_on_a_thing_is_create_only_when_it_answers_201` pasa de `users_roles_create` a `clients_sites_create` (T14: `POST /users/{user_id}/roles` deja de ser herramienta). | Unión. |
-| `backend/tests/test_step_up_widened.py` (nuevo, T14) | Sus dos pruebas de MCP usan `tests.mcp_support.mcp_token` (síncrono, el token de Keycloak), `mcp_session`, `running_mcp` y `marked_client`. | La Task 9 de la fase 3 vuelve asíncrono `mcp_token` y re-apunta toda prueba de MCP a su propio token: estas dos siguen el mismo re-apuntado (`await mcp_token(...)` y lo que su Task 9 pida a una prueba de MCP); lo que afirman no cambia, porque la negativa es la de `require_step_up` (punto 4). |
-| Las pruebas de la fase 3 que llamen a una ruta de T14 con una sesión | — | Necesitan una confirmación fresca, o reciben 403 `step_up_required`. **El ayudante es `tests.session_support.sign_in(env, org_id, sub, step_up=True)`** —lo que hace `ApiEnv.headers`—, y para una sesión que ya existe, `app.core.auth.sessions.mark_step_up(session, session_id)`. La fase 3 ya usa `sign_in(..., step_up=True)` (su Task 8). Su Task 10 revoca las concesiones de IA en siete actos de la cuenta (desactivar, restablecer factores, borrar, cambiar la contraseña, cerrar todas las sesiones, el restablecimiento y la recuperación): ninguno lo cierra T14 —desactivar y borrar quedan fuera por S4 y «Lo que sigue abierto», 9; `factors/reset` ya pedía la confirmación—, y quitar un rol, que sí la pide, no está entre ellos; si la fase 3 lo añade, o sus pruebas conceden o quitan un rol, invitan o guardan unos ajustes, es con el ayudante. Ella fija el interruptor de MCP por SQL (`oauth_org`), no por `PATCH /orgs/current`. |
-| `backend/app/api/v1/clients.py`, `backend/app/services/clients.py`, `backend/app/api/v1/orgs.py`, `backend/app/modules/user_admin/api.py`, `backend/app/api/v1/realm_settings.py`, `backend/app/api/v1/session_settings.py` | T14 (la confirmación; en `update_client`, el argumento `confirm_tenants`). | La fase 3 no los toca, salvo `user_admin/service.py` (su Task 10), que T14 no toca. |
+| `backend/tests/test_mcp_tools.py` | T14 (S5): `test_a_technician_does_not_see_or_call_an_org_admin_tool` (`:280-290` en `3a1ba1c`) y `test_a_409_is_the_apis_detail` (`:438-447`) pasan de `roles_create` a `roles_update`: `POST /roles` deja de ser herramienta. | La Task 9 de la fase 3 cambia en este archivo `mcp_token(` por `await mcp_token(` (`:210` y `:277`) y los dos `McpPrincipal` (`:965-1008`). Su `:277` es el `token = …` de la primera de estas pruebas, justo encima de las líneas de T14: unión, a mano si git las ve juntas; se quedan las dos (`await mcp_token(...)` arriba, `roles_update` debajo). Ninguna prueba de la fase 3 llama a `roles_create`, `roles_permissions_set`, `roles_delete` ni `users_enable`. |
+| `backend/tests/test_step_up_widened.py` (nuevo, T14) | Quince actos (once de S1 y S3, cuatro de S5) y la prueba de lo que queda sin confirmación (S4, y renombrar un rol, S5). Sus dos pruebas de MCP usan `tests.mcp_support.mcp_token` (síncrono, el token de Keycloak), `mcp_session`, `running_mcp` y `marked_client`. | La Task 9 de la fase 3 vuelve asíncrono `mcp_token` y re-apunta toda prueba de MCP a su propio token: estas dos siguen el mismo re-apuntado (`await mcp_token(...)` y lo que su Task 9 pida a una prueba de MCP); lo que afirman no cambia, porque la negativa es la de `require_step_up` (punto 4). |
+| Las pruebas de la fase 3 que llamen a una ruta de T14 con una sesión | — | Necesitan una confirmación fresca, o reciben 403 `step_up_required`. **El ayudante es `tests.session_support.sign_in(env, org_id, sub, step_up=True)`** —lo que hace `ApiEnv.headers`—, y para una sesión que ya existe, `app.core.auth.sessions.mark_step_up(session, session_id)`. La fase 3 ya usa `sign_in(..., step_up=True)` (su Task 8). Su Task 10 revoca las concesiones de IA en siete actos de la cuenta (desactivar, restablecer factores, borrar, cambiar la contraseña, cerrar todas las sesiones, el restablecimiento y la recuperación): ninguno lo cierra T14 —desactivar y borrar quitan acceso y quedan fuera (S4); `factors/reset` ya pedía la confirmación—, y quitar un rol, que sí la pide, no está entre ellos; si la fase 3 lo añade, o sus pruebas conceden o quitan un rol, invitan, guardan unos ajustes, crean, cambian o borran un rol o reactivan a una persona (S5), es con el ayudante (hoy, ninguna de sus pruebas llama a `POST /roles`, `PUT /roles/{role_id}/permissions`, `DELETE /roles/{role_id}` ni `POST /users/{user_id}/enable`). Ella fija el interruptor de MCP por SQL (`oauth_org`), no por `PATCH /orgs/current`. |
+| `backend/app/api/v1/clients.py`, `backend/app/services/clients.py`, `backend/app/api/v1/orgs.py`, `backend/app/modules/user_admin/api.py`, `backend/app/api/v1/realm_settings.py`, `backend/app/api/v1/session_settings.py`, `backend/app/api/v1/roles.py` | T14 (la confirmación; en `update_client`, el argumento `confirm_tenants`; en `roles.py` y `user_admin/api.py`, `_MANAGE_CONFIRMED`, S5 incluida). | La fase 3 no los toca, salvo `user_admin/service.py` (su Task 10), que T14 no toca. |
 | `docs/03-security-model.md` | Una fila de la tabla «Threat model», debajo de «A console left signed in on an unattended computer» (T14); las frases de la autenticación (T13). | Unión: la fase 3 cambia la frase de MCP (`:161`), no la tabla. |
-| `frontend/src/modules/settings/AiConnectionsTab.tsx`, `frontend/src/modules/settings/api.ts` | T14: el interruptor —un párrafo de cabecera **antes** de «TURNING IT ON ASKS FIRST», `useStepUp`, `useUpdateCurrentOrgMutation(stepUp.run)` y el diálogo al final— y, en `api.ts`, `sendOnce` y los ocho hooks con `run`. | Unión: la Task 11 de la fase 3 cambia las partes de revocar (`useRevokeMcpConnection`, el párrafo «A REVOKE IS IN FORCE …», `confirming`, `RevokeOutcome`, `AppRow`), otras líneas. |
+| `frontend/src/modules/settings/AiConnectionsTab.tsx`, `frontend/src/modules/settings/api.ts` | T14: el interruptor —un párrafo de cabecera **antes** de «TURNING IT ON ASKS FIRST», `useStepUp`, `useUpdateCurrentOrgMutation(stepUp.run)` y el diálogo al final— y, en `api.ts`, `sendOnce` y los doce hooks con `run` (cuatro de S5: los tres de los roles y `useSetUserEnabledMutation`). | Unión: la Task 11 de la fase 3 cambia las partes de revocar (`useRevokeMcpConnection`, el párrafo «A REVOKE IS IN FORCE …», `confirming`, `RevokeOutcome`, `AppRow`), otras líneas. |
 | `frontend/src/components/stepUp.tsx` | `sendOnce` y una frase del docstring (T14). | La fase 3 no lo toca: su `ConsentPage` usa `useStepUp` tal cual. |
+| `frontend/src/modules/settings/RolesTab.tsx`, `UsersTab.tsx`, `__tests__/roles.test.tsx`, `__tests__/users.test.tsx` | T14: en Roles, `useStepUp` para crear, cambiar los permisos y borrar (S5); en Usuarios, `useStepUp` para invitar, reenviar, conceder, quitar (S1) y reactivar (S5); una prueba nueva por acto. | La fase 3 no los toca. |
 
 ---
 
 ## Lo que sigue abierto
 
-Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas: las que eran del operador, por sus decisiones C3–C7 del 2026-11-06 (Global Constraints), y el resto por una regla en la consolidación (Apéndice B, B2-01–B2-35). Las dos que quedaban para el operador las decidió el 2026-11-08 (S1–S4, nota al final). Lo que queda, salvo el punto 9 (para el operador) y el 8 (un seguimiento), no es una pregunta de producto, sino cosas que solo la ejecución puede confirmar, y por eso no se pueden cerrar en el plan:
+Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas: las que eran del operador, por sus decisiones C3–C7 del 2026-11-06 (Global Constraints), y el resto por una regla en la consolidación (Apéndice B, B2-01–B2-35). Las dos que quedaban para el operador las decidió el 2026-11-08 (S1–S4), y la que esas abrieron, el 2026-11-09 (S5); notas al final. Lo que queda, salvo el punto 8 (un seguimiento), no es una pregunta de producto, sino cosas que solo la ejecución puede confirmar, y por eso no se pueden cerrar en el plan:
 
 1. **Si `idp` llega siempre en el ID token de un invitado B2B.** Microsoft dice que el claim *«is emitted in federated domain scenarios involving guests users and should always be sent in managed domain scenarios»*, frase ambigua, y `idp` no está en `claims_supported` ([M3]). Por eso la barrera que manda es `organizations` + `tid` (B2-05), y `idp` es solo defensa añadida: si no llega, no se pierde nada. Sin verificar contra un tenant real.
 2. **Que el código de Microsoft quepa siempre en 2.048 caracteres** (el residuo de `fragment`, B2-03). Microsoft documenta el límite de la dirección, no el largo de un código. Lo mide el Step 6 de la Task 13.
@@ -16390,10 +16798,13 @@ Las dieciséis preguntas que esta sección tenía (P1–P16) están contestadas:
 6. **Comunicar al operador** (B2-05, no es una pregunta): un contratista que sea invitado B2B en el tenant de Novieri no puede entrar con Microsoft como técnico; sí con su contraseña. Lo dice el informe de la Task 13.
 7. **Que Entra acepte la aserción con `aud` = el endpoint de token de `organizations`** (f2-2 M3). La página del flujo de código admite `organizations` en esa ruta ([M1]) y MSAL para Python firma así ([M12]); no se probó contra un tenant de verdad. Lo prueba el Step 6 de la Task 13 (punto 4), y si Entra la rechaza, se para. Con él, una lectura sin frase de Microsoft que la respalde: que no reutilice el código tras un `invalid_client` (la rotación en dos actos no depende de esto). Lo que el plan necesita del autofirmado de C4 sí lo dice Microsoft —que Entra lo acepta ([M7], *«you can create a self-signed certificate and configure your apps to authenticate with it»*; [M8])—, con la única excepción documentada de una política del tenant (`trustedCertificateAuthority`, [M10]); que Entra no valide ninguna cadena no hace falta afirmarlo.
 8. **Ningún aviso antes de que caduque el certificado** (seguimiento, no construido; f2-2 I-1, «consider also»). Ajustes → Microsoft avisa desde 30 días antes, pero solo a quien abre la pestaña; un aviso a los administradores de la organización, o una entrada en los canales de notificación existentes, queda para después. Hasta entonces, el README pide apuntar la fecha.
-9. **Para el operador: ¿piden también la confirmación reciente reactivar a una persona y definir los roles?** S1 nombra invitar, reenviar, conceder y quitar un rol; S4 deja sin ella lo que solo quita acceso. Ninguna de las dos nombra `POST /users/{user_id}/enable` —devuelve el acceso a una persona desactivada, con los roles que tenía— ni la definición de los roles: `POST /roles`, `PATCH /roles/{role_id}`, `PUT /roles/{role_id}/permissions` (cambiar los códigos de un rol cambia de una vez lo que puede cada persona que lo tiene) y `DELETE /roles/{role_id}`. La Task 14 no los toca: siguen con su permiso (`users.manage` o `roles.manage`, en todos los clientes) y su auditoría, y siguen siendo herramientas MCP. Si el operador los quiere dentro, es la misma forma: la dependencia de la Task 14 y `NEVER_EXPOSED`.
 
-**Decididos por el operador el 2026-11-08** (ya no abiertos; Global Constraints, S1–S4):
+**Decididos por el operador el 2026-11-08** (ya no abiertos; Global Constraints, S1–S4; los números son los de esta lista hasta ese día):
 
 - **Antes punto 9 — un contacto con app TOTP confirma las acciones de §2.5 también con su clave de acceso** (D29; f2-1 M7, f2-3 M10): **sí** (S2). La clave de acceso pide y el servidor comprueba la verificación de la persona, así que es por sí sola un autenticador criptográfico multifactor, que NIST SP 800-63B-4 admite en AAL2 (§2.2.1, §3.1.7.2, [N1]). La Task 11 (decisión 4) y la Task 13 (diseño §3 y §2.6) lo construyen y lo escriben como decidido.
 - **Antes punto 10 — los ajustes de inicio de sesión de la organización y el acceso de los técnicos piden una confirmación reciente:** **sí** (S1, S3), salvo lo que solo quita acceso y los actos sobre un contacto (S4). Es la **Task 14**, con OWASP ASVS 5.0 V7.5.3 (nivel 3) y V7.5.1 (nivel 2) como fuente (https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md, leído el 2026-11-08). Lo que esa pregunta temía —que la cookie de una sesión de administrador inactiva bastara para apagar o romper la entrada con Microsoft, apuntar el correo a otro relé o invitar a otro administrador— deja de bastar; y una IA conectada por MCP tampoco lo hace.
+
+**Decidido por el operador el 2026-11-09** (ya no abierto; Global Constraints, S5; el número es el de esta lista del 2026-11-08 al 2026-11-09):
+
+- **Antes punto 9 — ¿piden también la confirmación reciente reactivar a una persona y definir los roles?** «Sí, los tres» (S5): crear un rol (`POST /roles`), cambiar sus permisos (`PUT /roles/{role_id}/permissions`: cambia de una vez lo que puede cada persona que lo tiene), borrarlo (`DELETE /roles/{role_id}`) y reactivar a una persona (`POST /users/{user_id}/enable`: vuelve con los roles que tenía) piden la confirmación y salen de las herramientas de MCP. Es la misma forma que S1: la dependencia de la Task 14 sobre el `_MANAGE` de `roles.py` y de `user_admin/api.py`, `NEVER_EXPOSED` con `_RECENT_FACTOR`, y `useStepUp` en Roles y en el botón «Enable» de Usuarios. Quedan sin ella renombrar o redescribir un rol (`PATCH /roles/{role_id}`), que no cambia lo que nadie puede, desactivar a una persona (S4) y los actos sobre un contacto. La Task 14 lo construye y su prueba lo fija; `NEVER_EXPOSED` pasa de 51 a 55 en la fase 2. El punto 9 era el último de la lista: no hay que renumerar ninguno.
 
