@@ -135,18 +135,35 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
     re-read (`populate_existing`), so what a writer committed while this
     waited -- a switch-off, a deletion -- is what the caller then checks.
 
-    THE LOCK ORDER of a person's account, kept by the administrators' acts on
-    a person (`contact_access._contact`, the archive's `_lock_contacts`,
-    `update_contact`, `user_admin.service._target(lock=True)`), by every use
-    of their links (`flows._consumed`) and by their own steps here: THE
-    PERSON'S ROW; then, when the transaction takes it, their advisory lock
-    (`factors.lock_person`); then their links, sessions, devices and
-    credentials -- `users.last_login_at` among them, already held -- and
-    LAST the organization's audit chain (`audit_service`'s advisory lock),
-    which every transaction of the organization that audits takes, so it is
-    never held while waiting on a row. Two transactions that both take the
-    row wait for each other here, before either holds anything the other
-    needs: no 40P01 (`tests/test_auth_sign_in_races.py`).
+    THE LOCK ORDER of a person's account: THE PERSON'S ROW; then, when the
+    transaction takes it, their advisory lock (`factors.lock_person`); then
+    their links, sessions, devices and credentials -- `users.last_login_at`
+    among them, already held -- and LAST the organization's audit chain
+    (`audit_service`'s advisory lock). Kept by:
+    - the administrators' acts on a contact (`contact_access._contact`, the
+      archive's `_lock_contacts`, `update_contact`);
+    - every act of `user_admin.service` on a technician
+      (`_target(lock=True)`: `resend_invite`, `cancel_invite`,
+      `assign_role`, `remove_role`, `set_enabled`, `reset_factors`,
+      `end_sessions`, `delete_user`; the last four writers of these to take
+      it since the final review of phase 2);
+    - every use of their links (`flows._consumed`) and the mailing of a
+      reset link (`flows.send_reset_link`);
+    - their own steps: sign-in, step-up and sign-out (`locked_user`, here),
+      My security (`account`'s session) and Microsoft's (`entra_flows`);
+    - the MCP door's refresh of their address (`deps.admit`, final review
+      of phase 2, item 3), which took the chain before the row until then.
+    THESE WRITERS take the chain last, so none of them holds it while
+    waiting on a person's row; it is not a claim about every transaction
+    that audits. Two of them that both take the row wait for each other
+    here, before either holds anything the other needs: no 40P01
+    (`tests/test_auth_sign_in_races.py`, `tests/test_user_admin_races.py`).
+
+    Two writers take no row, in this order's spirit: the retention sweep
+    (`retention.py`), which deletes only rows long dead that none of the
+    above reads; and the server's recovery command (`recover.py`), which
+    issues its link and then audits -- link before chain -- and whose link
+    is checked against the locked row when it is used (`flows._consumed`).
 
     NO KEY UPDATE, not UPDATE: a row inserted meanwhile that refers to the
     person (a session, a link) takes KEY SHARE on it, which this does not

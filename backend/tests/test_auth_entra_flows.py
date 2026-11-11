@@ -602,6 +602,28 @@ async def test_a_contact_whose_client_lists_no_tenant_is_not_sent_to_microsoft(
     assert cookie(refused, ENTRA_COOKIE) is None
 
 
+async def test_a_link_microsoft_is_not_offered_for_asks_no_confirmation_first(
+    auth_env: Any,
+) -> None:
+    """Final review of phase 2, item 7. `/start` asked for a recent
+    confirmation before it asked whether Microsoft is offered to the person
+    at all: somebody it is not offered to typed their password or code, and
+    only then read "not set up here". Offered-ness is checked first now. It
+    protects nothing to check it second: whether Microsoft is offered is not
+    secret from a signed-in person (My security shows it), and a link that
+    is offered still asks for the confirmation, at both ends
+    (`test_linking_needs_a_recent_confirmation_at_both_ends`)."""
+    org, _admin = await entra_org(auth_env)
+    who = await contact(auth_env, org)
+    signed = await login(auth_env, who)
+    assert signed.json()["state"] == "signed_in", signed.text
+    await _step_up(auth_env, who, minutes_ago=30)
+    refused = await start_microsoft(auth_env, who.headers(), {"intent": "link"})
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "microsoft_unavailable"
+    assert cookie(refused, ENTRA_COOKIE) is None
+
+
 async def test_a_key_that_cannot_be_used_to_sign_is_a_503_and_nothing_is_sent(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -893,6 +915,66 @@ async def test_a_factor_after_a_microsoft_first_step_leaves_the_mail_reset_mark(
         f"/api/v1/users/{tech.user_id}/factors/reset", headers=admin
     )
     assert allowed.status_code == 204, allowed.text
+
+
+async def _signed_in_meta(env: Any, user_id: UUID) -> list[dict[str, Any]]:
+    async with AsyncSession(env.admin_engine) as s:
+        return list(
+            (
+                await s.execute(
+                    select(AuditEvent.meta)
+                    .where(
+                        AuditEvent.target_id == str(user_id),
+                        AuditEvent.action == "auth.signed_in",
+                    )
+                    .order_by(AuditEvent.ts, AuditEvent.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def test_the_record_of_a_factor_sign_in_says_how_it_started(auth_env: Any) -> None:
+    """Final review of phase 2, item 4. `auth.signed_in` after a second
+    factor said only the factor (`{"method": "totp"}`): in the immutable
+    audit, a sign-in Microsoft started was indistinguishable from one the
+    password started. It carries the session's first step now, the column
+    `_after_the_password` reads."""
+    org, _admin = await entra_org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    oid = uuid4()
+    linked = await round_trip(auth_env, tech.headers(), {"intent": "link"}, oid=oid)
+    assert linked.status_code == 200, linked.text
+
+    network = browser()
+    asked = await round_trip(auth_env, network, {"intent": "sign_in"}, oid=oid)
+    assert asked.json()["state"] == "factor_required", asked.text
+    by_microsoft = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=_carrying(network, asked),
+        json={"code": await fresh_code(auth_env, tech)},
+    )
+    assert by_microsoft.json()["state"] == "signed_in", by_microsoft.text
+    assert (await _signed_in_meta(auth_env, tech.user_id))[-1] == {
+        "method": "totp",
+        "trusted_device": False,
+        "first_step": "microsoft",
+    }
+
+    tech.session, tech.network = None, browser()
+    assert (await login(auth_env, tech)).json()["state"] == "factor_required"
+    by_password = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=tech.headers(),
+        json={"code": await fresh_code(auth_env, tech)},
+    )
+    assert by_password.json()["state"] == "signed_in", by_password.text
+    assert (await _signed_in_meta(auth_env, tech.user_id))[-1] == {
+        "method": "totp",
+        "trusted_device": False,
+        "first_step": "password",
+    }
 
 
 async def test_a_step_up_in_a_session_microsoft_started_leaves_the_mark(auth_env: Any) -> None:

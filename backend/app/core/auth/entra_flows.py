@@ -316,7 +316,6 @@ async def start(
             raise _unavailable()
     elif intent == "link":
         principal = await session_of(request)
-        require_fresh(principal)
         org_id, session_id = principal.org_id, principal.session_id
         # The signed-in person's own scope (item C): a contact's client.
         async with flows.principal_session(request, principal) as session:
@@ -330,6 +329,14 @@ async def start(
             raise _unavailable()
         if bare:
             raise _password_first()
+        # The recent confirmation LAST (final review of phase 2, item 7):
+        # asked first, somebody Microsoft is not offered to -- or a
+        # technician who must choose a password first -- typed their
+        # password or code and only then read why the link cannot be made.
+        # Neither answer is secret from the signed-in person, so asking them
+        # first protects nothing; a link that can be made still asks, here
+        # and at the return.
+        require_fresh(principal)
     else:
         invited_org = action_tokens.org_of(token or "")
         if invited_org is None:

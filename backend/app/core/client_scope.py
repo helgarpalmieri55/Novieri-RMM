@@ -94,9 +94,11 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "before the scope exists (spec §2.2)"
     ),
     "app/core/auth/sessions.py::resolve": (
-        "a session cookie names a row before anybody knows whose: a staff session has no "
-        "client, so it is read and touched under every client, after its_auth_session gave "
-        "the organisation (P2 design §6.2, §6.5)"
+        "a session cookie names a row before anybody knows whose: a session of either kind "
+        "-- a technician's, which has no client, or a contact's -- is read under every "
+        "client, after its_auth_session gave the organisation; a contact's is touched here "
+        "only as the row its own cookie's hash named, before its client is known (P2 design "
+        "§6.2, §6.5; phase 2 final review, item 8)"
     ),
     "app/api/deps.py::_admit_session": (
         "door 1 for a console session (P2 design §6.5): the person's row and grants, read "

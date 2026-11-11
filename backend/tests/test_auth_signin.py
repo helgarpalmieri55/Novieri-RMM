@@ -118,7 +118,10 @@ async def test_a_new_technician_enrols_a_factor_and_only_then_reaches_the_consol
     assert me.json()["user_id"] == str(who.user_id)
     assert len(who.recovery_codes) == 10
     signed = await _audit(auth_env, org, "auth.signed_in")
-    assert [e.meta for e in signed] == [{"method": "enrolment", "trusted_device": False}]
+    # Final review of phase 2, item 4: the session's first step too.
+    assert [e.meta for e in signed] == [
+        {"method": "enrolment", "trusted_device": False, "first_step": "password"}
+    ]
 
 
 async def test_the_next_sign_in_asks_for_the_factor_and_changes_the_identifier(
@@ -142,6 +145,9 @@ async def test_the_next_sign_in_asks_for_the_factor_and_changes_the_identifier(
     who.session = cookie(done, SESSION_COOKIE)
     assert who.session and who.session != pending
     assert cookie(done, DEVICE_COOKIE) is None
+    # Final review of phase 2, item 4: how the sign-in started, beside the factor.
+    signed = await _audit(auth_env, org, "auth.signed_in")
+    assert signed[-1].meta == {"method": "totp", "trusted_device": False, "first_step": "password"}
 
     # Design §2.4: the identifier changes when the factor is confirmed
     # (`sessions.mark_factor`, Task 6); the pending value names nothing now.
