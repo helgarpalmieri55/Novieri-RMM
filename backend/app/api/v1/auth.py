@@ -630,7 +630,9 @@ async def accept_recovery(
 
 async def _account_ctx(ctx: AuthContext = Depends(bound_account_context)) -> AuthContext:
     """My security's door (phase 2, D26): a technician's or a contact's own
-    browser session; `bound_account_context` already refused anything else."""
+    browser session; `bound_account_context` already refused anything else.
+    Every handler hands `ctx.clients` to `app.core.auth.account`, which runs a
+    contact's request in that scope -- their own client (invariant 5a)."""
     return ctx
 
 
@@ -642,7 +644,7 @@ def _me(ctx: AuthContext) -> SessionPrincipal:
 @me_router.get("/security", response_model=MySecurityOut)
 async def my_security(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> MySecurityOut:
     """The caller's second factors, remembered browsers and open sessions."""
-    mine = await account.my_security(request, _me(ctx))
+    mine = await account.my_security(request, _me(ctx), clients=ctx.clients)
     return MySecurityOut(
         kind=mine.kind,
         has_password=mine.has_password,
@@ -663,7 +665,7 @@ async def change_password(
     caller's session stays under a new cookie; every other session ends."""
     require_step_up(ctx)
     token, expires_at = await account.change_password(
-        request, _me(ctx), current=body.current, new=body.new
+        request, _me(ctx), current=body.current, new=body.new, clients=ctx.clients
     )
     response = _no_content()
     # The new identifier, expiring with the session as the change capped it.
@@ -678,7 +680,7 @@ async def add_password(
     """The first password of an account that has none, after a recent
     confirmation (409 `password_exists` when there is one)."""
     require_step_up(ctx)
-    await account.add_password(request, _me(ctx), new=body.new)
+    await account.add_password(request, _me(ctx), new=body.new, clients=ctx.clients)
     return _no_content()
 
 
@@ -689,7 +691,7 @@ async def remove_passkey(
     """Remove one of the caller's passkeys; never a technician's last second
     factor (`last_factor`) nor a contact's last way in (`last_method`)."""
     require_step_up(ctx)
-    await account.remove_passkey(request, _me(ctx), passkey_id)
+    await account.remove_passkey(request, _me(ctx), passkey_id, clients=ctx.clients)
     return _no_content()
 
 
@@ -698,7 +700,7 @@ async def remove_totp(request: Request, ctx: AuthContext = Depends(_account_ctx)
     """Remove the caller's authenticator app; never a technician's last second
     factor. A contact's is optional, and their recovery codes go with it."""
     require_step_up(ctx)
-    await account.remove_totp(request, _me(ctx))
+    await account.remove_totp(request, _me(ctx), clients=ctx.clients)
     return _no_content()
 
 
@@ -709,7 +711,8 @@ async def new_recovery_codes(
     """Ten new recovery codes, once; the old ones stop working. A contact has
     them only with an authenticator app (409 `method_unavailable`)."""
     require_step_up(ctx)
-    return RecoveryCodesOut(recovery_codes=await account.new_recovery_codes(request, _me(ctx)))
+    codes = await account.new_recovery_codes(request, _me(ctx), clients=ctx.clients)
+    return RecoveryCodesOut(recovery_codes=codes)
 
 
 @me_router.delete("/trusted-devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -717,7 +720,7 @@ async def forget_device(
     device_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """Stop remembering one browser."""
-    await account.forget_device(request, _me(ctx), device_id)
+    await account.forget_device(request, _me(ctx), device_id, clients=ctx.clients)
     return _no_content()
 
 
@@ -726,5 +729,5 @@ async def end_my_session(
     session_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """End one of the caller's own sessions."""
-    await account.end_my_session(request, _me(ctx), session_id)
+    await account.end_my_session(request, _me(ctx), session_id, clients=ctx.clients)
     return _no_content()

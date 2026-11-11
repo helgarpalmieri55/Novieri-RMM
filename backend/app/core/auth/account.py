@@ -1,16 +1,20 @@
 """My security: the caller's own factors, remembered devices and sessions
 (design §2.4-§2.6).
 
-PERSONAL, SO IT RUNS UNDER EVERY CLIENT, for the reason `own_profile.py`
-gives: a technician's auth rows are global rows of an O table, which a
-per-client scope may read and not change, and which the empty scope of a
-person with no grant yet cannot even read. Every query below is the caller's
-OWN rows, by the `user_id` of the session the door admitted -- never a request
-field: an id in a path (`/me/passkeys/{id}`) is matched together with that
-`user_id`, so another person's id is a 404. A client's contact comes through
-the same routes (plan 2026-11-06, Task 7, D26): their auth rows are C rows of
-their own client, which the every-client scope reaches as well; the rows
-touched are still only the caller's own.
+PERSONAL. Every query below is the caller's OWN rows, by the `user_id` of the
+session the door admitted -- never a request field: an id in a path
+(`/me/passkeys/{id}`) is matched together with that `user_id`, so another
+person's id is a 404. The SCOPE depends on who the caller is (`_own_session`):
+
+- A TECHNICIAN runs under every client, for the reason `own_profile.py` gives:
+  their auth rows are global rows of an O table, which a per-client scope may
+  read and not change, and which the empty scope of a person with no grant yet
+  cannot even read.
+- A CLIENT'S CONTACT (own authentication phase 2, D26: the same routes) runs
+  under the scope the door established for them -- their own client, never
+  every client (invariant 5a; Task 7 fix round 1). Their auth rows are C rows
+  of that client, so the database confines the request as well as the
+  `user_id` filter: a row of another client does not exist for it.
 
 THE CHANGES ASK FOR THE RECENT CONFIRMATION (design §2.5) at the route
 (`deps.require_step_up`, Task 6): password, a factor removed, new recovery
@@ -118,11 +122,21 @@ class MySecurity:
 
 @asynccontextmanager
 async def _own_session(
-    principal: SessionPrincipal, request: Request
+    principal: SessionPrincipal, request: Request, clients: ClientScope
 ) -> AsyncIterator[AsyncSession]:
-    """See the module docstring: the caller's own auth rows, every client."""
+    """See the module docstring: the caller's own auth rows. A technician's
+    session is every client. A contact's is `clients`, the scope the door
+    established (`AuthContext.clients`: their own client, or none when
+    `X-Client-Id` named another); every client is refused for a contact,
+    so a caller that passed it fails closed rather than reopening 5a."""
     engine: AsyncEngine = request.app.state.app_engine
-    async with org_session(principal.org_id, engine=engine, clients=ClientScope.all()) as session:
+    if principal.kind != CONTACT_KIND:
+        scope = ClientScope.all()
+    elif clients.is_all:
+        raise sign_in_again()
+    else:
+        scope = clients
+    async with org_session(principal.org_id, engine=engine, clients=scope) as session:
         yield session
 
 
@@ -149,13 +163,15 @@ def _not_found(what: str) -> AuthRefusal:
     return AuthRefusal(status.HTTP_404_NOT_FOUND, code="not_found", detail=what)
 
 
-async def my_security(request: Request, principal: SessionPrincipal) -> MySecurity:
+async def my_security(
+    request: Request, principal: SessionPrincipal, *, clients: ClientScope
+) -> MySecurity:
     now = datetime.now(UTC)
     # Which listed device is this browser: compared by the cookie's hash, so a
     # read does not renew the device as `devices.recognised` would.
     here = cookie_token(request, DEVICE_COOKIE)
     here_hash = token_hash(here) if here is not None else None
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         _has_passkey, has_totp, codes = await summary(session, user.id)
         password = await has_password(session, user.id)
@@ -277,7 +293,7 @@ async def _detach_from_device(
 
 
 async def change_password(
-    request: Request, principal: SessionPrincipal, *, current: str, new: str
+    request: Request, principal: SessionPrincipal, *, current: str, new: str, clients: ClientScope
 ) -> tuple[str, datetime]:
     """The current password again (OWASP [S5]: "require the current credentials
     for an account before updating ... the user's password"), then: the other
@@ -303,7 +319,7 @@ async def change_password(
     or change, and the refusal raised after the block commits the count."""
     require_fresh(principal)
     changed: tuple[str, datetime] | None = None
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         stored = await session.get(AuthPassword, user.id)
         device = await presented(session, user.id, request)
@@ -400,7 +416,9 @@ async def _require_live(session: AsyncSession, principal: SessionPrincipal) -> N
         raise sign_in_again()
 
 
-async def add_password(request: Request, principal: SessionPrincipal, *, new: str) -> None:
+async def add_password(
+    request: Request, principal: SessionPrincipal, *, new: str, clients: ClientScope
+) -> None:
     """The first password of an account that has none (plan 2026-11-06, Task
     7, decision 4): in practice a contact who entered with a passkey or with
     Microsoft -- a technician always has one (operator decision C3). With a
@@ -412,7 +430,7 @@ async def add_password(request: Request, principal: SessionPrincipal, *, new: st
     somebody does who fears for the account, and the notice goes all the
     same (design §2.7)."""
     require_fresh(principal)
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         await _require_live(session, principal)
@@ -449,13 +467,15 @@ def _last_method() -> AuthRefusal:
     )
 
 
-async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_id: UUID) -> None:
+async def remove_passkey(
+    request: Request, principal: SessionPrincipal, passkey_id: UUID, *, clients: ClientScope
+) -> None:
     """Remove one of the caller's passkeys. A technician never loses the last
     second factor (`last_factor`); a contact never loses the last way in
     (`last_method`, decision 2). Under the person's lock: two removals at
     once each see the other's key still there, and without it both would
     pass and leave no way in."""
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         key = (
@@ -467,11 +487,6 @@ async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_
         ).scalar_one_or_none()
         if key is None:
             raise _not_found(tr("no such passkey"))
-        keys = (
-            await session.execute(
-                select(func.count()).select_from(AuthPasskey).where(AuthPasskey.user_id == user.id)
-            )
-        ).scalar_one()
         if user.kind == CONTACT_KIND:
             await session.delete(key)
             await session.flush()
@@ -479,6 +494,13 @@ async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_
                 # Raised after the delete, inside the block: it rolls back.
                 raise _last_method()
         else:
+            keys = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(AuthPasskey)
+                    .where(AuthPasskey.user_id == user.id)
+                )
+            ).scalar_one()
             _has_passkey, has_totp, _codes = await summary(session, user.id)
             if keys == 1 and not has_totp:
                 raise _last_factor()
@@ -494,12 +516,14 @@ async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_
         )
 
 
-async def remove_totp(request: Request, principal: SessionPrincipal) -> None:
+async def remove_totp(
+    request: Request, principal: SessionPrincipal, *, clients: ClientScope
+) -> None:
     """Remove the caller's authenticator app. A technician keeps a second
     factor (`last_factor`); a contact's is optional (D27), and their
     recovery codes go with it (decision 3, B2-06): codes made for an app
     that is gone must not come back as the backup of the next one."""
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         has_passkey, has_totp, _codes = await summary(session, user.id)
@@ -520,14 +544,19 @@ async def remove_totp(request: Request, principal: SessionPrincipal) -> None:
         )
 
 
-async def new_recovery_codes(request: Request, principal: SessionPrincipal) -> list[str]:
+async def new_recovery_codes(
+    request: Request, principal: SessionPrincipal, *, clients: ClientScope
+) -> list[str]:
     """A new set of recovery codes, the old set spent. A contact has them
     only with an authenticator app (decision 3, B2-06): with none, 409
     `method_unavailable` -- a passkey is a contact's way in, not a second
     factor (operator decision C5), and codes back up a second factor."""
-    async with _own_session(principal, request) as session:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
+        # A2-38, as `add_password`: a reset that won the lock has wiped the
+        # codes; the session it cut must not mint new ones after it.
+        await _require_live(session, principal)
         if user.kind == CONTACT_KIND:
             _has_passkey, has_totp, _codes = await summary(session, user.id)
             if not has_totp:
@@ -549,16 +578,20 @@ async def new_recovery_codes(request: Request, principal: SessionPrincipal) -> l
     return codes
 
 
-async def forget_device(request: Request, principal: SessionPrincipal, device_id: UUID) -> None:
-    async with _own_session(principal, request) as session:
+async def forget_device(
+    request: Request, principal: SessionPrincipal, device_id: UUID, *, clients: ClientScope
+) -> None:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         if not await revoke(session, user.id, device_id):
             raise _not_found(tr("no such remembered device"))
         await _record(session, user, "auth.device_revoked", {"by": "self"})
 
 
-async def end_my_session(request: Request, principal: SessionPrincipal, session_id: UUID) -> None:
-    async with _own_session(principal, request) as session:
+async def end_my_session(
+    request: Request, principal: SessionPrincipal, session_id: UUID, *, clients: ClientScope
+) -> None:
+    async with _own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         mine = (
             await session.execute(

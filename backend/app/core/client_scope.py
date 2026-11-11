@@ -149,11 +149,12 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "own auth rows and users row only (P2 design §6.2; phase 2, D25)"
     ),
     "app/core/auth/account.py::_own_session": (
-        "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
-        "session the door admitted (P2 phase 1 design §2.4-§2.6). Since phase 2 a client's "
-        "contact too (D26): their rows are C rows of their own client and the queries are "
-        "still by their own user id, so the every-client scope reaches nothing of another "
-        "client's (plan 2026-11-06, Task 7)"
+        "My security is personal, like /me: a TECHNICIAN's own auth rows, by the user id of "
+        "the session the door admitted (P2 phase 1 design §2.4-§2.6); their rows are global, "
+        "which a per-client scope may read and not change. The technician's path only: a "
+        "client's contact on the same routes (phase 2, D26) runs under the scope the door "
+        "pinned to their own client, and every client is refused for one (plan 2026-11-06, "
+        "Task 7 fix round 1, invariant 5a)"
     ),
     "app/core/auth/recover.py::issue_recovery_link": (
         "the server's own recovery command, never HTTP: one technician's recovery link, "
