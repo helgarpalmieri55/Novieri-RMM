@@ -111,6 +111,10 @@ export const auth = {
     intro: "You were invited to this console as <b>{email}</b>. Choose a password; adding your second factor comes next.",
     submit: "Set password and continue",
     invalid: "This invitation has expired, was already used, or was cancelled. Ask the person who invited you for a new one.",
+    introContact: "You were invited to the support portal as <b>{email}</b>. Choose a password, or use a passkey.",
+    usePasskey: "Use a passkey instead",
+    passkeyName: "Name for this passkey",
+    or: "or",
   },
   recover: {
     heading: "Account recovery",
@@ -130,9 +134,9 @@ export const auth = {
   password: {
     new: "New password",
     confirm: "The same password again",
-    rules: "At least 12 characters, any you like, spaces included. A phrase you can remember works well.",
+    rules: "At least {min} characters, any you like, spaces included. A phrase you can remember works well.",
     mismatch: "The two passwords are not the same.",
-    too_short: "Use at least 12 characters.",
+    too_short: "Use at least {min} characters.",
     too_long: "Use at most 128 characters.",
   },
   passkey: {

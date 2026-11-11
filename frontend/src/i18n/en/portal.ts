@@ -8,6 +8,7 @@ export const portal = {
   shell: {
     meFailed: "Your details could not be loaded.",
     brand: "Support portal",
+    security: "Sign-in and security",
   },
   state: {
     groupIncident: "Report a problem",

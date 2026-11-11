@@ -42,7 +42,20 @@ export interface MySession {
   current: boolean;
 }
 
+/** The Microsoft account linked to this person (own-auth phase 2): which organisation, and when. */
+export interface MyMicrosoftLink {
+  /** The Microsoft organisation (tenant) the account belongs to. */
+  tenant_id: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface MySecurity {
+  /** A technician or a client's contact: whose rules apply (own-auth phase 2). */
+  kind: "staff" | "contact";
+  /** False for someone who signed up with a passkey or Microsoft and never set one. */
+  has_password: boolean;
+  microsoft: MyMicrosoftLink | null;
   has_totp: boolean;
   passkeys: MyPasskey[];
   recovery_codes_left: number;

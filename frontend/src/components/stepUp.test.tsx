@@ -349,3 +349,78 @@ describe("useStepUp on a browser that cannot use passkeys (final review D1, Mino
     expect(within(dialog).queryByText(/cannot use passkeys/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * WHO MAY CONFIRM WITH THE PASSWORD (own-auth phase 2, Task 11, decision 4;
+ * D29, C5; design §2.6): a client's contact with a password and without the
+ * authenticator app, and nobody else. The server refuses the others anyway
+ * (409 `method_unavailable`); the dialog only says so first.
+ */
+describe("useStepUp for a client's contact, and never for a technician (Task 11, fix round 1)", () => {
+  const PASSKEY = EVERYTHING.passkeys[0];
+  const CONTACT = {
+    ...EVERYTHING,
+    kind: "contact",
+    has_password: true,
+    has_totp: false,
+    passkeys: [],
+    recovery_codes_left: 0,
+    microsoft: null,
+  };
+
+  it("never offers a technician the password", async () => {
+    api.getMySecurity.mockResolvedValue({ ...EVERYTHING, kind: "staff", has_password: true, has_totp: false, microsoft: null });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    await within(dialog).findByRole("button", { name: "Use a passkey" });
+    expect(within(dialog).queryByLabelText("Your password")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Confirm with your password" })).not.toBeInTheDocument();
+  });
+
+  it("tells a contact who has only Microsoft to sign in again", async () => {
+    api.getMySecurity.mockResolvedValue({
+      ...CONTACT,
+      has_password: false,
+      microsoft: { tenant_id: "7d3c1f0e-1b2a-4c5d-8e9f-0a1b2c3d4e5f", created_at: "2026-11-01T00:00:00Z", last_used_at: null },
+    });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    expect(
+      await within(dialog).findByText("Sign out and sign in again, then make this change within 10 minutes."),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Your password")).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/Ask an administrator/);
+  });
+
+  it("asks a contact without the app for the password, not for a second factor", async () => {
+    api.getMySecurity.mockResolvedValue(CONTACT);
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    await within(dialog).findByLabelText("Your password");
+    expect(within(dialog).getByText("Enter your password to continue.")).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/second factor/);
+  });
+
+  it("offers a contact with a passkey both, in words that fit both", async () => {
+    api.getMySecurity.mockResolvedValue({ ...CONTACT, passkeys: [PASSKEY] });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    await within(dialog).findByLabelText("Your password");
+    expect(within(dialog).getByRole("button", { name: "Use a passkey" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Use a passkey or enter your password to continue.")).toBeInTheDocument();
+  });
+
+  it("never says a contact with a password has nothing to confirm with, on a browser without passkeys", async () => {
+    webauthn.supported = false;
+    api.getMySecurity.mockResolvedValue({ ...CONTACT, passkeys: [PASSKEY] });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    await within(dialog).findByLabelText("Your password");
+    expect(
+      within(dialog).getByText(
+        "This browser cannot use passkeys, so your passkey is not offered here. Confirm with your password.",
+      ),
+    ).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/second factor/);
+  });
+});

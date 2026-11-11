@@ -37,6 +37,8 @@ export const calls = {
   resetPassword: vi.fn(),
   getInvite: vi.fn(),
   acceptInvite: vi.fn(),
+  invitePasskeyOptions: vi.fn(),
+  invitePasskey: vi.fn(),
   getRecovery: vi.fn(),
   acceptRecovery: vi.fn(),
 };
@@ -66,8 +68,15 @@ export function installDefaults(): void {
   calls.enrollFinish.mockResolvedValue({ recovery_codes: TEN_CODES });
   calls.forgotPassword.mockResolvedValue(undefined);
   calls.resetPassword.mockResolvedValue(undefined);
-  calls.getInvite.mockResolvedValue({ email: "dana@example.test", display_name: "Dana Okafor" });
-  calls.acceptInvite.mockResolvedValue(undefined);
+  calls.getInvite.mockResolvedValue({
+    email: "dana@example.test",
+    display_name: "Dana Okafor",
+    kind: "staff",
+    password_minimum: 12,
+    passkey: false,
+    microsoft: false,
+  });
+  calls.acceptInvite.mockResolvedValue({ state: "enroll_required" });
   calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: false });
   calls.acceptRecovery.mockResolvedValue(undefined);
 }

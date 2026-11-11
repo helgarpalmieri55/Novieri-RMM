@@ -12,6 +12,7 @@
  * WHAT THIS DOES WITH THAT ANSWER. `run(action)` sends the request. On that
  * one refusal it opens a dialog asking for a passkey, a code from the
  * authenticator app or a recovery code -- passkey first, the design's order --
+ * or, for a client's contact, the password (own-auth phase 2, D29) --
  * sends it to `/auth/step-up/*`, and only after the server ACCEPTS it sends
  * the same request once more. A second refusal comes back as it came: no loop,
  * and no retry the server did not make possible. Closing the dialog rejects
@@ -162,12 +163,14 @@ function StepUpDialog({
   });
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     setCode("");
     setRecovery("");
+    setPassword("");
     setFailure(null);
     setBusy(false);
   }, [open]);
@@ -179,6 +182,7 @@ function StepUpDialog({
       await confirm();
       setCode("");
       setRecovery("");
+      setPassword("");
       onConfirmed();
     } catch (error) {
       setFailure(describe(error));
@@ -190,19 +194,36 @@ function StepUpDialog({
   const data = security.data;
   const hasTotp = data?.has_totp === true;
   const codesLeft = data?.recovery_codes_left ?? 0;
+  // A CLIENT'S CONTACT CONFIRMS WITH THE PASSWORD ONLY WITHOUT THE APP (D29,
+  // design §2.6: "the actions of §2.5 still ask for the second factor" of
+  // whoever turned one on; operator decision C5: a contact's second factor is
+  // the authenticator app alone). One who has only Microsoft is told to sign
+  // in again, which leaves the confirmation fresh. The server answers the
+  // password of a contact with the app 409 `method_unavailable` (Task 4).
+  const contactPassword = data?.kind === "contact" && data.has_password && !hasTotp;
   // A PASSKEY THIS BROWSER CANNOT USE IS NOT OFFERED (final review D1, Minor
   // 6): the click would only fail with advice about an app the person may
   // not have. The dialog says why it is missing, and what is left.
   const ownsPasskey = (data?.passkeys.length ?? 0) > 0;
   const hasPasskey = ownsPasskey && canUsePasskeys();
+  // A contact who may confirm with the password still has a way to confirm
+  // (fix round 1): "no other second factor" would contradict the form below.
   const hiddenAdvice =
     ownsPasskey && !hasPasskey
-      ? (passkeyHiddenAdvice({ totp: hasTotp, recovery: codesLeft > 0 }) ?? "components.stepUp.passkeyOnly")
+      ? contactPassword
+        ? "components.stepUp.passkeyUsePassword"
+        : (passkeyHiddenAdvice({ totp: hasTotp, recovery: codesLeft > 0 }) ?? "components.stepUp.passkeyOnly")
       : null;
+  // The password is no second factor (C5): the dialog asks for what it offers.
+  const body = contactPassword
+    ? hasPasskey
+      ? "components.stepUp.bodyPasswordOrPasskey"
+      : "components.stepUp.bodyPassword"
+    : "components.stepUp.body";
 
   return (
     <Dialog open={open} onClose={onCancel} title={t("components.stepUp.title")}>
-      <p style={{ marginBottom: 12 }}>{t("components.stepUp.body")}</p>
+      <p style={{ marginBottom: 12 }}>{t(body)}</p>
       {security.isLoading ? <p className="note">{t("components.stepUp.loading")}</p> : null}
       {security.error ? (
         <p role="alert" className="notice red">
@@ -253,6 +274,31 @@ function StepUpDialog({
           </div>
         </Form>
       ) : null}
+      {contactPassword ? (
+        <Form onSubmit={() => void attempt(() => api.stepUpPassword(password))}>
+          <div className="form-grid">
+            <Field label={t("components.stepUp.password")}>
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                disabled={busy}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="form-actions">
+            <Btn
+              type="submit"
+              icon="check"
+              variant={hasPasskey ? "secondary" : "primary"}
+              label={t("components.stepUp.confirmPassword")}
+              disabled={busy || password === ""}
+            />
+          </div>
+        </Form>
+      ) : null}
       {codesLeft > 0 ? (
         <details style={{ marginTop: 10 }}>
           <summary className="note cursor-pointer">{t("components.stepUp.useRecovery")}</summary>
@@ -282,8 +328,10 @@ function StepUpDialog({
           </Form>
         </details>
       ) : null}
-      {data && !ownsPasskey && !hasTotp && codesLeft === 0 ? (
-        <p className="note">{t("components.stepUp.noMethod")}</p>
+      {data && !ownsPasskey && !hasTotp && codesLeft === 0 && !contactPassword ? (
+        <p className="note">
+          {t(data.kind === "contact" ? "components.stepUp.noMethodContact" : "components.stepUp.noMethod")}
+        </p>
       ) : null}
       {failure ? (
         <p role="alert" className="notice red" style={{ marginTop: 12 }}>

@@ -133,7 +133,7 @@ import { EnrollmentPage } from "./modules/enrollment/EnrollmentPage";
 import { ProfilePage } from "./modules/profile/ProfilePage";
 // Your own sign-in security (`/profile/security`), not the fleet's security
 // posture above (`modules/security`): two pages with the same component name.
-import { SecurityPage as YourSecurityPage } from "./modules/profile/SecurityPage";
+import { PortalSecurityPage, SecurityPage as YourSecurityPage } from "./modules/profile/SecurityPage";
 import { SettingsPage } from "./modules/settings/SettingsPage";
 import { ClientDetailPage } from "./modules/clients/ClientDetailPage";
 import { ClientsPage } from "./modules/clients/ClientsPage";
@@ -1467,6 +1467,16 @@ export default function App() {
               element={
                 <RequireAuth>
                   <PortalTicketDetailPage />
+                </RequireAuth>
+              }
+            />
+            {/* A client's contact's own sign-in security (own-auth phase 2,
+                Task 11): the same page as /profile/security, in the portal. */}
+            <Route
+              path="/portal/security"
+              element={
+                <RequireAuth>
+                  <PortalSecurityPage />
                 </RequireAuth>
               }
             />

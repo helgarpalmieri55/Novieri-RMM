@@ -44,6 +44,9 @@ const updateMe: FixtureMap["updateMe"] = async (body) => {
 };
 
 let security: MySecurity = {
+  kind: "staff",
+  has_password: true,
+  microsoft: null,
   has_totp: true,
   passkeys: [
     { id: "pk-laptop", name: "Work laptop", created_at: at(-40 * DAY), last_used_at: at(-HOUR), backup_state: false },
@@ -129,6 +132,12 @@ const stepUpPasskey: FixtureMap["stepUpPasskey"] = () => undefined;
 
 const stepUpRecovery: FixtureMap["stepUpRecovery"] = () => undefined;
 
+const stepUpPassword: FixtureMap["stepUpPassword"] = () => undefined;
+
+const addPassword: FixtureMap["addPassword"] = () => {
+  security = { ...security, has_password: true };
+};
+
 const fixtures: FixtureMap = {
   updateMe,
   getMySecurity,
@@ -142,6 +151,8 @@ const fixtures: FixtureMap = {
   stepUpPasskeyOptions,
   stepUpPasskey,
   stepUpRecovery,
+  stepUpPassword,
+  addPassword,
 };
 
 export default fixtures;

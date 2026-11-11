@@ -2,8 +2,9 @@
  * THE PORTAL'S OWN FRAME, for a client's contact (own-auth design §3; plan
  * D42, Task 10). The console's frame -- the rail, the client selector, the
  * organisation, search, health -- reads the console's API, which a contact is
- * refused; this one reads `GET /portal/me` alone and offers the portal's two
- * pages and signing out.
+ * refused; this one reads `GET /portal/me` alone and offers the portal's
+ * pages (tickets, through each page's own navigation), the contact's own
+ * sign-in security (`/portal/security`, Task 11) and signing out.
  *
  * `RequireAuth` draws it when the console's door answers 403 `portal_only`
  * on a portal page. It remembers the person (`sessionPerson`), so a session
@@ -49,6 +50,10 @@ export function PortalShell({ children }: { children: ReactNode }) {
       <header className="flex flex-wrap items-center gap-4 border-b border-[var(--line)] px-6 py-3">
         <Link to="/portal" className="font-semibold">
           {t("portal.shell.brand")}
+        </Link>
+        {/* The contact's own sign-in security (own-auth phase 2, Task 11). */}
+        <Link to="/portal/security" className="text-sm">
+          {t("portal.shell.security")}
         </Link>
         <span className="ml-auto text-sm text-[var(--muted)]">
           {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}

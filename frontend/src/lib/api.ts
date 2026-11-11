@@ -932,6 +932,10 @@ export interface ContactOut {
   phone: string | null;
   /** `active` or `disabled`. */
   status: string;
+  /** Portal access (own-auth phase 2): none yet, an open invitation, or able to sign in. */
+  access: "none" | "invited" | "active";
+  /** When the open invitation expires; `null` without one. */
+  invite_expires_at: string | null;
 }
 
 /** A partial edit of a contact; `status` switches it off and on (`ContactUpdate`). */
@@ -940,6 +944,16 @@ export interface ContactUpdate {
   display_name?: string;
   phone?: string | null;
   status?: "active" | "disabled";
+}
+
+/**
+ * `POST .../contacts/{id}/invite` and `.../access/reset`: the contact as it
+ * stands now, and the one-time link ONLY when no mail carried it -- shown
+ * once, kept nowhere (invariant 3's spirit: the server keeps its hash only).
+ */
+export interface ContactInviteOut {
+  contact: ContactOut;
+  invite_link: string | null;
 }
 
 /** `POST /clients` (`ClientCreate`): a customer client, born with a site called Principal. */
@@ -1141,6 +1155,7 @@ import type {
 import type {
   AuthenticationResponseJSON,
   EnrollFrom,
+  InviteAccepted,
   InviteDetails,
   LoginResult,
   PublicKeyCredentialCreationOptionsJSON,
@@ -1913,9 +1928,35 @@ export class ApiClient {
     );
   }
 
-  /** `POST /auth/invite/accept`: the password; answers `{"state": "enroll_required"}` and a session that still needs a factor. */
-  acceptInvite(body: { token: string; password: string }): Promise<void> {
-    return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  /**
+   * `POST /auth/invite/accept`: the password. A technician's answer is
+   * `enroll_required` and a session that still needs a factor; a contact's is
+   * `signed_in` (own-auth phase 2).
+   */
+  acceptInvite(body: { token: string; password: string }): Promise<InviteAccepted> {
+    return this.request<InviteAccepted>(
+      "/auth/invite/accept",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
+  }
+
+  /** A contact's first passkey from the invitation: the creation options. The link stays unused. */
+  invitePasskeyOptions(token: string): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    return this.request<PublicKeyCredentialCreationOptionsJSON>(
+      "/auth/invite/passkey/options",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /** Accept a contact's invitation with that passkey: signed in. A refused one leaves the link usable. */
+  invitePasskey(body: { token: string; credential: RegistrationResponseJSON; name: string }): Promise<SignedIn> {
+    return this.request<SignedIn>(
+      "/auth/invite/passkey",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
   }
 
   /** `POST /auth/recover/details`: whose account the server's recovery link (`recover` command) is for. */
@@ -2183,6 +2224,15 @@ export class ApiClient {
   /** `PUT /me/password`. Both passwords travel once, in the body, and come back in nothing. */
   changePassword(body: PasswordChange): Promise<void> {
     return this.request<void>("/me/password", { method: "PUT", body: JSON.stringify(body) }, { global: true });
+  }
+
+  /**
+   * `POST /me/password`: the FIRST password, for someone who has none -- a
+   * contact who signed in with a passkey or Microsoft (a technician always
+   * has one, operator decision C3). 409 `password_exists` otherwise.
+   */
+  addPassword(password: string): Promise<void> {
+    return this.request<void>("/me/password", { method: "POST", body: JSON.stringify({ new: password }) }, { global: true });
   }
 
   removePasskey(passkeyId: string): Promise<void> {
@@ -2458,6 +2508,34 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(body),
     });
+  }
+
+  /** Send a contact a one-time portal link, valid 72 hours, replacing any open one (`clients.manage`). */
+  inviteContact(clientId: string, contactId: string): Promise<ContactInviteOut> {
+    return this.request<ContactInviteOut>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/invite`,
+      { method: "POST" },
+    );
+  }
+
+  /** Cancel a contact's open invitation; the contact stays. */
+  cancelContactInvite(clientId: string, contactId: string): Promise<void> {
+    return this.request<void>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/invite`,
+      { method: "DELETE" },
+    );
+  }
+
+  /**
+   * Everything the contact signs in with goes, and a new invitation is sent.
+   * Needs the technician's recent confirmation: 403 `step_up_required`, sent
+   * through `useStepUp().run`.
+   */
+  resetContactAccess(clientId: string, contactId: string): Promise<ContactInviteOut> {
+    return this.request<ContactInviteOut>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/access/reset`,
+      { method: "POST" },
+    );
   }
 
   /** `DELETE /users/{id}`. The row is RETAINED, marked `deleted`, so the audit log can still say who did what. */

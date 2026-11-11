@@ -6,6 +6,7 @@ export const portal: Shape<typeof en> = {
   shell: {
     meFailed: "No se pudieron cargar tus datos.",
     brand: "Portal de soporte",
+    security: "Acceso y seguridad",
   },
   state: {
     groupIncident: "Informar de un problema",
