@@ -383,7 +383,7 @@ async def change_password(
                 await staff_password.store(
                     session, org_id=user.org_id, user_id=user.id, plain=new, now=now
                 )
-                await record_success(session, user.id, "password")
+                await record_success(session, user.id, "password", clear_mail_mark=False)
                 await end_all_for_user(
                     session, user.id, "password_changed", except_id=principal.session_id
                 )

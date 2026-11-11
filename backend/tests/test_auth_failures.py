@@ -7,6 +7,7 @@ restores it [S1 §3.2.2]; a success clears that factor's failures.
 """
 
 import asyncio
+import inspect
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -85,7 +86,7 @@ async def _check(
 
 async def _succeed(w: _World, factor: Factor = "totp") -> None:
     async with org_session(w.org_id, engine=w.app_engine, clients=ClientScope.all()) as session:
-        await failures.record_success(session, w.user_id, factor)
+        await failures.record_success(session, w.user_id, factor, clear_mail_mark=True)
 
 
 async def _consecutive(w: _World, factor: Factor = "totp") -> int | None:
@@ -516,3 +517,17 @@ async def test_a_parallel_burst_on_one_device_waits_its_turn(world: _World) -> N
 
     assert results.count(True) == 1
     assert await _device_failures(world, device) == (5, NOW)
+
+
+def test_whether_a_success_clears_the_mail_mark_is_always_said() -> None:
+    """Task 9b fix round 1. `record_success` clears the "password set by
+    mail" mark only when its caller says so, and every caller must say:
+    `clear_mail_mark` is a required keyword with no default, as
+    `sessions.start_session(first_step=)` is. A default of True failed open
+    -- a new caller that forgot it cleared the mark for a factor proved
+    without the password (the Task 9 review's I1)."""
+    parameter = inspect.signature(failures.record_success).parameters["clear_mail_mark"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        failures.record_success(None, uuid4(), "totp")  # type: ignore[call-arg, arg-type]

@@ -82,7 +82,7 @@ import hmac
 import json
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
@@ -149,16 +149,6 @@ async def _entra_session(org_id: UUID, engine: AsyncEngine) -> AsyncIterator[Asy
 def _engine(request: Request) -> AsyncEngine:
     engine: AsyncEngine = request.app.state.app_engine
     return engine
-
-
-def _own(
-    request: Request, principal: SessionPrincipal
-) -> AbstractAsyncContextManager[AsyncSession]:
-    """The signed-in person's own scope (`flows.signed_in_session`): a
-    contact's client, a technician's every client (Task 9b, item C)."""
-    return flows.signed_in_session(
-        _engine(request), org_id=principal.org_id, user_id=principal.user_id, kind=principal.kind
-    )
 
 
 def _vault(request: Request) -> VaultService:
@@ -329,7 +319,7 @@ async def start(
         require_fresh(principal)
         org_id, session_id = principal.org_id, principal.session_id
         # The signed-in person's own scope (item C): a contact's client.
-        async with _own(request, principal) as session:
+        async with flows.principal_session(request, principal) as session:
             user = await signed_user(session, principal)
             config = await entra_settings.read(session, org_id)
             # A2-58: a contact whose client lists no tenant does not set out.
@@ -559,8 +549,10 @@ async def _insert_link(
 ) -> None:
     """The link, or `microsoft_already_linked`: the unique key is
     organization-wide, so a savepoint catches another person's (Task 1,
-    decision 1). The row only: `_record_link` audits it after the
-    transaction's other rows (Task 9b, the lock order)."""
+    decision 1). The row only. ITS PARTNER IS `_record_link`, split from it
+    only because the audit chain's lock goes last (Task 9b): `_add_link`
+    calls both; `_contact_invited` writes its role and session between them,
+    handing `_record_link` to `flows.contact_admitted`, which records it."""
     try:
         async with session.begin_nested():
             session.add(
@@ -582,7 +574,8 @@ async def _record_link(
     session: AsyncSession, org_id: UUID, user: User, identity: entra.EntraIdentity, *, source: str
 ) -> None:
     """Audited `auth.identity_linked`; `source`, never `via`, the key the MCP
-    channel writes (A2-56)."""
+    channel writes (A2-56). ITS PARTNER IS `_insert_link` (above): the row it
+    records, written first because the audit chain's lock goes last."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -595,6 +588,16 @@ async def _record_link(
     )
 
 
+async def _add_link(
+    session: AsyncSession, org_id: UUID, user: User, identity: entra.EntraIdentity, *, source: str
+) -> None:
+    """The link and its record, in the lock order (Task 9b fix round 1):
+    `_insert_link`, then `_record_link`, so the audit cannot be left out
+    (invariant 4). For a transaction with no other row after the link."""
+    await _insert_link(session, org_id, user, identity)
+    await _record_link(session, org_id, user, identity, source=source)
+
+
 async def _link(
     request: Request,
     org_id: UUID,
@@ -605,7 +608,7 @@ async def _link(
     """Decision 3: the session that started, complete and recently confirmed
     (`_caller`); one account per person. In the person's own scope (item C):
     a contact's link is written under their client alone."""
-    async with _own(request, principal) as session:
+    async with flows.principal_session(request, principal) as session:
         # The person first (Task 9b), then their advisory lock.
         user = await locked_user(session, principal)
         await lock_person(session, user.id)
@@ -620,8 +623,7 @@ async def _link(
         if not await _tenant_allowed(session, user, config, identity.tenant_id):
             raise _tenant_refused()
         await _refuse_a_second_link(session, user, identity)
-        await _insert_link(session, org_id, user, identity)
-        await _record_link(session, org_id, user, identity, source="profile")
+        await _add_link(session, org_id, user, identity, source="profile")
         await notices.tell(
             session,
             user,
@@ -642,8 +644,9 @@ async def _technician_invited(
     """Decision 4 (C3): the invitation was accepted with a password at
     `start`; the account is linked to that same new person now. A refused
     tenant leaves them where the password put them. The session is the
-    signed-in person's own (`_own`): a technician's, every client."""
-    async with _own(request, principal) as session:
+    signed-in person's own (`flows.principal_session`): a technician's,
+    every client."""
+    async with flows.principal_session(request, principal) as session:
         user = await locked_user(session, principal)
         if user.kind != STAFF_KIND:
             raise _failed()
@@ -651,8 +654,7 @@ async def _technician_invited(
             raise _tenant_refused()
         # D3 (Task 9b): linked meanwhile from another tab is said as such.
         await _refuse_a_second_link(session, user, identity)
-        await _insert_link(session, org_id, user, identity)
-        await _record_link(session, org_id, user, identity, source="invite")
+        await _add_link(session, org_id, user, identity, source="invite")
     if principal.factor_done:
         return None
     return flows.SignIn(state="enroll_required")
@@ -675,11 +677,18 @@ async def _contact_invited(
             raise _failed()
         if not await _tenant_allowed(session, user, config, identity.tenant_id):
             raise _tenant_refused()
+        # The link's row now, its record with the acceptance's: the role and
+        # the session come between them (the audit chain last).
         await _insert_link(session, org_id, user, identity)
-        admitted = await flows.contact_admitted(session, request, user, method="microsoft")
-        await _record_link(session, org_id, user, identity, source="invite")
-        await flows.record_admitted(session, user, method="microsoft")
-        return admitted
+        return await flows.contact_admitted(
+            session,
+            request,
+            user,
+            method="microsoft",
+            recorded_first=lambda: _record_link(
+                session, org_id, user, identity, source="invite"
+            ),
+        )
 
 
 async def unlink(request: Request, principal: SessionPrincipal, *, clients: ClientScope) -> None:

@@ -187,7 +187,18 @@ async def test_an_acceptance_in_flight_holds_the_person_so_a_switch_off_waits_an
         assert not off.done()
         assert _on_the_person(waiting), waiting
         # What deadlocked: the acceptance's own write to the person's row.
-        signed = await flows.contact_admitted(s, http_request(auth_env), user, method="password")
+        # This test stores no password before it, so the acceptance has no
+        # row of the caller's own to record first (Task 9b fix round 1).
+        async def nothing_of_its_own() -> None:
+            return None
+
+        signed = await flows.contact_admitted(
+            s,
+            http_request(auth_env),
+            user,
+            method="password",
+            recorded_first=nothing_of_its_own,
+        )
         assert signed.state == "signed_in"
     answer = await asyncio.wait_for(off, timeout=30)
     assert answer.status_code == 200, answer.text

@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.passkeys import user_handle
 from app.core.auth.passwords import hash_password
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
 from app.core.auth.totp import step_of
@@ -38,10 +39,12 @@ from app.core.mail import MailFailure, MailNotConfigured, MailSendFailed
 from app.models import Client, Role, User, UserRole
 from app.models.auth import AuthPasskey, AuthPassword, AuthTotp
 from tests.session_support import CONSOLE, console_headers, use_console
+from tests.webauthn_authenticator import SoftPasskey
 
 __all__ = [
     "CONSOLE",
     "CONTACT_PASSWORD",
+    "PASSKEY_RP_ID",
     "PASSWORD",
     "MailBox",
     "Staff",
@@ -56,6 +59,7 @@ __all__ = [
     "link_token",
     "login",
     "point_at",
+    "register_passkey",
     "signed_in",
     "staff",
     "wrong_code",
@@ -290,6 +294,34 @@ async def add_passkey(env: Any, who: Staff, name: str = "Laptop") -> UUID:
         session.add(key)
         await session.commit()
         return key.id
+
+
+#: The relying party the console's tests sign passkeys for (`CONSOLE`'s host).
+PASSKEY_RP_ID = "itms.test"
+
+
+async def register_passkey(env: Any, who: Staff) -> SoftPasskey:
+    """A REAL passkey of `who`: its public key on the server, its private key
+    in the software authenticator (`tests/webauthn_authenticator.py`), for
+    the tests that verify assertions with real signatures."""
+    authenticator = SoftPasskey(rp_id=PASSKEY_RP_ID, user_handle=user_handle(who.user_id))
+    async with AsyncSession(env.admin_engine) as s:
+        s.add(
+            AuthPasskey(
+                org_id=who.org_id,
+                user_id=who.user_id,
+                credential_id=authenticator.credential_id,
+                public_key=authenticator.cose_public_key(),
+                sign_count=0,
+                transports=["internal"],
+                backup_eligible=True,
+                backup_state=True,
+                name="Phone",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await s.commit()
+    return authenticator
 
 
 @dataclass(frozen=True)

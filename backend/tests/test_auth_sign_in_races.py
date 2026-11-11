@@ -33,6 +33,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import entra_flows
 from app.core.auth.passkeys import user_handle
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
@@ -50,19 +51,21 @@ from tests.auth_support import (
     fresh_code,
     login,
     point_at,
+    register_passkey,
     signed_in,
 )
-from tests.entra_support import FakeMicrosoft
+from tests.entra_support import (
+    OTHER_TENANT,
+    FakeMicrosoft,
+    entra_org,
+    finish_microsoft,
+    list_other_tenant,
+    round_trip,
+    seed_link,
+    start_microsoft,
+)
 from tests.race_helpers import backend_pid, normalised, until_blocked_by
 from tests.session_support import CONSOLE
-from tests.test_auth_entra_flows import (
-    OTHER_TENANT,
-    _linked,
-    _lists_other_tenant,
-    _org,
-    _round_trip,
-)
-from tests.test_auth_passkey_signin import _register
 
 
 @pytest.fixture()
@@ -112,15 +115,23 @@ async def _race(
     step: Callable[[], Awaitable[Any]],
 ) -> tuple[Any, Any, list[str], bool]:
     """The act is running and will pause; the step is started once it has;
-    once the step is seen waiting on the act, the act goes on. Returns (the
-    act's outcome, the step's, what the step waited in, whether it was still
-    waiting when seen)."""
+    once the step is seen waiting on the act -- or has finished without ever
+    waiting, which a test then reports as its red -- the act goes on. Returns
+    (the act's outcome, the step's, what the step waited in, whether it was
+    still waiting when seen)."""
     await asyncio.wait_for(paused.wait(), 30)
     stepping = asyncio.create_task(step())
+    watching = asyncio.create_task(until_blocked_by(env.app_engine, seen["pid"]))
     try:
-        waiting = await until_blocked_by(env.app_engine, seen["pid"])
-        held = not stepping.done()
+        await asyncio.wait(
+            {watching, stepping}, timeout=30, return_when=asyncio.FIRST_COMPLETED
+        )
+        seen_waiting = watching.done() and watching.exception() is None
+        waiting = watching.result() if seen_waiting else []
+        held = seen_waiting and not stepping.done()
     finally:
+        if not watching.done():
+            watching.cancel()
         go.set()
     acted, stepped = await asyncio.wait_for(
         asyncio.gather(act, stepping, return_exceptions=True), timeout=60
@@ -290,7 +301,7 @@ async def test_a_passkey_sign_in_against_a_contacts_access_reset(
     org = await auth_env.create_org("race-passkey-reset")
     who = await contact(auth_env, org, password=None)
     await point_at(auth_env, org)
-    authenticator = await _register(auth_env, who)
+    authenticator = await register_passkey(auth_env, who)
     assert authenticator.user_handle == user_handle(who.user_id)
     _actor, admin = await _admin(auth_env, org)
     options = await auth_env.client.post("/api/v1/auth/passkey/options", headers=who.network)
@@ -329,16 +340,16 @@ async def test_a_microsoft_sign_in_against_a_contacts_access_reset(
     unlocked only to learn whose it is, waits on that person's row, reads
     the link again and finds it gone: the 401 of an account linked to
     nobody."""
-    org, admin = await _org(auth_env)
+    org, admin = await entra_org(auth_env)
     who = await contact(auth_env, org)
-    await _lists_other_tenant(auth_env, who.client_id)
+    await list_other_tenant(auth_env, who.client_id)
     oid = uuid4()
-    await _linked(auth_env, who, tenant=OTHER_TENANT, oid=oid)
+    await seed_link(auth_env, who, tenant=OTHER_TENANT, oid=oid)
     paused, go, seen = _pause(monkeypatch, contact_access, "lock_person")
     resetting = _reset_access(auth_env, who, admin)
 
     async def step() -> Any:
-        return await _round_trip(
+        return await round_trip(
             auth_env, browser(), {"intent": "sign_in"}, oid=oid, tid=OTHER_TENANT
         )
 
@@ -358,3 +369,128 @@ async def test_a_microsoft_sign_in_against_a_contacts_access_reset(
             .where(AuthExternalIdentity.user_id == who.user_id)
         )
     assert links == 0
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1: the two administrator's acts on a technician that read their
+# target without the person's row -- a factor reset and ending the sessions
+# --------------------------------------------------------------------------- #
+
+
+async def _links_of(env: Any, user_id: UUID) -> int:
+    async with AsyncSession(env.admin_engine) as s:
+        found = await s.scalar(
+            select(func.count())
+            .select_from(AuthExternalIdentity)
+            .where(AuthExternalIdentity.user_id == user_id)
+        )
+    return int(found or 0)
+
+
+async def test_a_passkey_factor_step_against_a_technicians_factor_reset(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reset has deleted the technician's passkeys and is about to end
+    their sessions. The passkey step used to take the person's row (which
+    the reset did not hold), read the passkey -- still there in its snapshot
+    -- verify it, and wait to write its counter on the row the reset had
+    deleted; when the reset committed, the counter's UPDATE matched nothing:
+    the ORM's StaleDataError, a 500. Now the reset takes the person's row
+    first (`_target(lock=True)`), the step waits on it before anything, and
+    then finds its session ended: 401."""
+    org = await auth_env.create_org("race-passkey-factors")
+    _admin_id, admin = await _admin(auth_env, org)
+    tech = await signed_in(auth_env, org, "technician")
+    authenticator = await register_passkey(auth_env, tech)
+    await auth_env.client.post("/api/v1/auth/logout", headers=tech.headers())
+    tech.session = None
+    assert (await login(auth_env, tech)).json()["state"] == "factor_required"
+    options = await auth_env.client.post(
+        "/api/v1/auth/factor/passkey/options", headers=tech.headers()
+    )
+    assert options.status_code == 200, options.text
+    assertion = authenticator.get(options.json(), origin=CONSOLE)
+    paused, go, seen = _pause(monkeypatch, ua, "end_all_for_user")
+    resetting = asyncio.create_task(
+        auth_env.client.post(f"/api/v1/users/{tech.user_id}/factors/reset", headers=admin)
+    )
+
+    async def step() -> Any:
+        return await auth_env.client.post(
+            "/api/v1/auth/factor/passkey",
+            headers=tech.headers(),
+            json={"credential": assertion, "remember_device": False},
+        )
+
+    reset, factor, waiting, held = await _race(auth_env, go, paused, seen, resetting, step)
+    assert not isinstance(reset, BaseException), reset
+    assert not isinstance(factor, BaseException), factor
+    assert reset.status_code == 204, reset.text
+    assert factor.status_code == 401, factor.text
+    assert factor.json()["code"] == "auth_required"
+    assert held
+    assert _on_the_person(waiting), waiting
+    assert await _live_sessions(auth_env, tech.user_id) == 0
+    async with AsyncSession(auth_env.admin_engine) as s:
+        keys = await s.scalar(
+            select(func.count())
+            .select_from(AuthPasskey)
+            .where(AuthPasskey.user_id == tech.user_id)
+        )
+    assert keys == 0
+
+
+@pytest.mark.parametrize("first", ["administrator", "link"])
+async def test_a_microsoft_link_against_ending_the_technicians_sessions(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch, first: str
+) -> None:
+    """Ending a technician's sessions (`user_admin.service.end_sessions`)
+    against their Microsoft link's return (`entra_flows._link`), which
+    checks its session is live and then links. A LINK NEVER LANDS IN A
+    SESSION ENDED BEFORE IT COMMITTED.
+
+    `administrator`: the act has read its target and is about to end the
+    sessions when the return arrives. It used to read the target without
+    the person's row, so the return passed its check and linked; now the
+    return waits on the row and finds its session ended: 401, nothing
+    linked.
+
+    `link`: the return has passed its check (under the person's row and
+    advisory lock) when the act arrives. The act used to end the sessions
+    and commit meanwhile, and the link then landed in an ended session; now
+    the act waits on the person's row until the link has committed, and
+    ends the sessions after it."""
+    org, _settings_admin = await entra_org(auth_env)
+    _admin_id, admin = await _admin(auth_env, org)
+    tech = await signed_in(auth_env, org, "technician")
+    start = await start_microsoft(auth_env, tech.headers(), {"intent": "link"})
+    assert start.status_code == 200, start.text
+
+    def link() -> Awaitable[Any]:
+        return finish_microsoft(auth_env, tech.headers(), start, oid=uuid4())
+
+    def end() -> Awaitable[Any]:
+        return auth_env.client.delete(f"/api/v1/users/{tech.user_id}/sessions", headers=admin)
+
+    if first == "administrator":
+        paused, go, seen = _pause(monkeypatch, ua, "end_all_for_user")
+        ending = asyncio.create_task(end())
+        ended, linked, waiting, held = await _race(auth_env, go, paused, seen, ending, link)
+    else:
+        paused, go, seen = _pause(monkeypatch, entra_flows, "_refuse_a_second_link")
+        linking = asyncio.create_task(link())
+        linked, ended, waiting, held = await _race(auth_env, go, paused, seen, linking, end)
+    assert not isinstance(ended, BaseException), ended
+    assert not isinstance(linked, BaseException), linked
+    assert ended.status_code == 204, ended.text
+    if first == "administrator":
+        assert linked.status_code == 401, linked.text
+        assert linked.json()["code"] == "auth_required"
+        assert await _links_of(auth_env, tech.user_id) == 0
+    else:
+        assert linked.status_code == 200, linked.text
+        assert await _links_of(auth_env, tech.user_id) == 1
+    # Whoever came second waited on the technician's row, and never in between.
+    assert held, (first, linked.text)
+    assert _on_the_person(waiting), waiting
+    assert await _live_sessions(auth_env, tech.user_id) == 0

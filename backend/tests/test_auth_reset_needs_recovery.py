@@ -240,11 +240,13 @@ async def test_every_second_factors_success_clears_the_mark_and_the_password_doe
     who = await signed_in(auth_env, org, "technician")
     await _set_mark(auth_env, who)
     async with org_session(org, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
-        await failures.record_success(s, who.user_id, "password")
+        await failures.record_success(s, who.user_id, "password", clear_mail_mark=True)
     assert await _mark(auth_env, who) is not None
 
     async with org_session(org, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
-        await failures.record_success(s, who.user_id, factor)  # type: ignore[arg-type]
+        await failures.record_success(
+            s, who.user_id, factor, clear_mail_mark=True  # type: ignore[arg-type]
+        )
 
     assert await _mark(auth_env, who) is None
 
