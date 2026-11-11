@@ -250,17 +250,30 @@ async def _audit(
 async def _consumed(
     session: AsyncSession, *, digest: bytes, purposes: tuple[str, ...]
 ) -> AuthActionToken | None:
-    """A one-time link consumed IN THE LOCK ORDER (Task 8, fix round 1): THE
-    PERSON'S `users` ROW FIRST, FOR NO KEY UPDATE, THEN THE LINK'S ROW, then
-    -- whenever the caller audits -- the chain. Every writer that switches a
-    contact off, edits them or touches their links takes that order: the
-    archive (`services.clients._lock_contacts`, then `_cut_access`), a
-    switch-off or an address change (`update_contact`'s UPDATE, then the
-    links), and `services.contact_access._contact`. A use that took the link
-    first and wrote the person's row last (`users.last_login_at`, in
-    `sessions.start_session`; a reset's sessions, which `_cut_access` ends
-    too) waited on them while they waited on it: a 40P01, and a 500
-    (`tests/test_contact_access_races.py`).
+    """A one-time link consumed IN THE LOCK ORDER (Task 8, fix rounds 1-2):
+    THE PERSON'S `users` ROW FIRST, FOR NO KEY UPDATE, THEN THE LINK'S ROW,
+    then -- whenever the caller audits -- the chain. For a technician as for
+    a contact: an invitation's acceptance (`invitee`) and a password reset
+    (`reset_password`) serve both kinds, and so must every administrator's
+    act that touches a person's links or sessions and writes their row:
+    - a contact's: the archive (`services.clients._lock_contacts`, then
+      `_cut_access`), a switch-off or an address change (`update_contact`'s
+      UPDATE, then the links), and `services.contact_access._contact`;
+    - a technician's: `user_admin.service.cancel_invite` and `delete_user`
+      (`_target(lock=True)`, fix round 2), and `set_enabled`, which writes
+      the row before it ends anything.
+    A use that took the link first and wrote the person's row last
+    (`users.last_login_at`, in `sessions.start_session`; a reset's sessions)
+    waited on them while they waited on it: a 40P01, and a 500
+    (`tests/test_contact_access_races.py`, `tests/test_user_admin_races.py`).
+
+    NOT YET COVERED -- the person's OWN concurrent sign-in steps, which do
+    not take their row first: `sessions.mark_factor` locks a session and
+    then writes the row; `login` takes its failure rows and the audit chain
+    before `start_session` writes it. Any users-first writer above -- this
+    function's callers included, a reset of the person's own password among
+    them -- can meet one of them the other way round, and one of the two is
+    a 40P01. That class is a lock-order task of its own, after Task 9.
 
     The link is read unlocked, only to learn whose it is; the person is
     locked, re-read (`populate_existing`: what a switch-off committed
