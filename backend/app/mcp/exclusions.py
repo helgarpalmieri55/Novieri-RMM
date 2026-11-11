@@ -94,6 +94,7 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
         )
     },
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
+    ("POST", "/api/v1/me/password"): "takes the first password of an account that has none",
     ("POST", "/api/v1/me/recovery-codes"): "returns new recovery codes for the account",
     # An invitation's answer carries its one-time link when no mail did: a
     # link that lets a person into the organization (1c(c), like an
@@ -277,7 +278,8 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/mcp/connections"): _CONNECTIONS,
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): _CONNECTIONS,
     # My security (P2 phase 1): the person's own factors, remembered browsers
-    # and sessions; each needs the console session (`api/v1/auth.py::_console_ctx`).
+    # and sessions; each needs `api/v1/auth.py::_account_ctx`, a technician's
+    # or a contact's own browser session (phase 2, D26).
     ("GET", "/api/v1/me/security"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/passkeys/{passkey_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,

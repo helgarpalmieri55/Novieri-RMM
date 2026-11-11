@@ -82,7 +82,7 @@ async def test_my_security_needs_the_console_session(auth_env: Any) -> None:
     """The token the console used to send is no way into My security: 401
     `auth_required`. Minted here, because `auth_env.headers` makes a session
     cookie since own authentication Task 13 (and the door, not only
-    `_console_ctx`, now refuses the token)."""
+    `_account_ctx`, now refuses the token)."""
     org = await auth_env.create_org("mysec-bearer")
     sub = await auth_env.create_user(org, "technician")
     token = auth_env.idp.token(sub, await auth_env.org_slug(org), email=f"{sub}@test.local")

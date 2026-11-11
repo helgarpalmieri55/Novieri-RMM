@@ -7,7 +7,10 @@ per-client scope may read and not change, and which the empty scope of a
 person with no grant yet cannot even read. Every query below is the caller's
 OWN rows, by the `user_id` of the session the door admitted -- never a request
 field: an id in a path (`/me/passkeys/{id}`) is matched together with that
-`user_id`, so another person's id is a 404.
+`user_id`, so another person's id is a 404. A client's contact comes through
+the same routes (plan 2026-11-06, Task 7, D26): their auth rows are C rows of
+their own client, which the every-client scope reaches as well; the rows
+touched are still only the caller's own.
 
 THE CHANGES ASK FOR THE RECENT CONFIRMATION (design §2.5) at the route
 (`deps.require_step_up`, Task 6): password, a factor removed, new recovery
@@ -22,16 +25,17 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Request, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import notices, staff_password
 from app.core.auth.devices import presented, revoke, revoke_all_for_user
-from app.core.auth.factors import count_failure, gate, summary
+from app.core.auth.factors import count_failure, gate, lock_person, summary
 from app.core.auth.failures import record_success
 from app.core.auth.guards import require_fresh, sign_in_again, signed_user
 from app.core.auth.keys import UnknownKeyVersion
+from app.core.auth.methods import has_password, has_sign_in_method
 from app.core.auth.passwords import verify_password
 from app.core.auth.recovery import replace_codes
 from app.core.auth.refusals import AuthRefusal
@@ -48,10 +52,19 @@ from app.core.auth.sessions import end as end_session
 from app.core.auth.totp import remove_totp as drop_totp
 from app.core.client_scope import ClientScope
 from app.core.i18n import tr
+from app.core.identity import CONTACT_KIND
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
 from app.models import User
-from app.models.auth import AuthPasskey, AuthPassword, AuthSession, AuthTrustedDevice
+from app.models.auth import (
+    ENTRA,
+    AuthExternalIdentity,
+    AuthPasskey,
+    AuthPassword,
+    AuthRecoveryCode,
+    AuthSession,
+    AuthTrustedDevice,
+)
 
 
 @dataclass(frozen=True)
@@ -85,12 +98,22 @@ class SessionView:
 
 
 @dataclass(frozen=True)
+class MicrosoftLinkView:
+    tenant_id: UUID
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+@dataclass(frozen=True)
 class MySecurity:
+    kind: str
+    has_password: bool
     has_totp: bool
     passkeys: list[PasskeyView]
     recovery_codes_left: int
     trusted_devices: list[DeviceView]
     sessions: list[SessionView]
+    microsoft: MicrosoftLinkView | None
 
 
 @asynccontextmanager
@@ -135,6 +158,14 @@ async def my_security(request: Request, principal: SessionPrincipal) -> MySecuri
     async with _own_session(principal, request) as session:
         user = await signed_user(session, principal)
         _has_passkey, has_totp, codes = await summary(session, user.id)
+        password = await has_password(session, user.id)
+        link = (
+            await session.execute(
+                select(AuthExternalIdentity).where(
+                    AuthExternalIdentity.user_id == user.id, AuthExternalIdentity.provider == ENTRA
+                )
+            )
+        ).scalar_one_or_none()
         keys = (
             await session.execute(
                 select(AuthPasskey)
@@ -165,6 +196,8 @@ async def my_security(request: Request, principal: SessionPrincipal) -> MySecuri
             )
         ).scalars().all()
     return MySecurity(
+        kind=user.kind,
+        has_password=password,
         has_totp=has_totp,
         passkeys=[
             PasskeyView(
@@ -200,6 +233,11 @@ async def my_security(request: Request, principal: SessionPrincipal) -> MySecuri
             )
             for s in sessions
         ],
+        microsoft=None
+        if link is None
+        else MicrosoftLinkView(
+            tenant_id=link.tenant_id, created_at=link.created_at, last_used_at=link.last_used_at
+        ),
     )
 
 
@@ -296,6 +334,7 @@ async def change_password(
                     email=user.email,
                     display_name=user.display_name,
                     org_name=await staff_password.organization_name(session, user.org_id),
+                    minimum=staff_password.minimum_for(user.kind),
                 )
                 # The moment of the change: the password's `changed_at` and
                 # the start of the caller's capped lifetime.
@@ -338,6 +377,62 @@ async def change_password(
     return changed
 
 
+def _password_exists() -> AuthRefusal:
+    return AuthRefusal(
+        status.HTTP_409_CONFLICT,
+        code="password_exists",
+        detail=tr("you already have a password; change it instead"),
+    )
+
+
+async def _require_live(session: AsyncSession, principal: SessionPrincipal) -> None:
+    """Under `lock_person`: the caller's session has not ended since the door
+    admitted it (plan 2026-11-06, A2-38). A reset of the person's access
+    takes the same lock (`factors.clear_second_factors`), so one that won
+    the race has committed by now, and what it meant to cut must not add a
+    way in after it."""
+    live = await session.scalar(
+        select(AuthSession.id).where(
+            AuthSession.id == principal.session_id, AuthSession.ended_at.is_(None)
+        )
+    )
+    if live is None:
+        raise sign_in_again()
+
+
+async def add_password(request: Request, principal: SessionPrincipal, *, new: str) -> None:
+    """The first password of an account that has none (plan 2026-11-06, Task
+    7, decision 4): in practice a contact who entered with a passkey or with
+    Microsoft -- a technician always has one (operator decision C3). With a
+    recent confirmation (the route's `require_step_up`, and here) and the rule
+    of the person's kind; a person who has one changes it (`change_password`;
+    409 `password_exists` here). Under the person's lock, on a session still
+    live (A2-38): two at once are one 204 and one 409, never a 500 on the
+    primary key. The other sessions stay (B2-27): adding a way in is not what
+    somebody does who fears for the account, and the notice goes all the
+    same (design §2.7)."""
+    require_fresh(principal)
+    async with _own_session(principal, request) as session:
+        user = await signed_user(session, principal)
+        await lock_person(session, user.id)
+        await _require_live(session, principal)
+        if await has_password(session, user.id):
+            raise _password_exists()
+        # A refused password raises its 422 here, before anything is written.
+        await staff_password.require_acceptable(
+            new,
+            email=user.email,
+            display_name=user.display_name,
+            org_name=await staff_password.organization_name(session, user.org_id),
+            minimum=staff_password.minimum_for(user.kind),
+        )
+        await staff_password.store(session, org_id=user.org_id, user_id=user.id, plain=new)
+        await _record(session, user, "auth.password_changed", {"via": "self_added"})
+        await notices.tell(
+            session, user, "password_changed", vault=_vault(request), actor_id=user.id
+        )
+
+
 def _last_factor() -> AuthRefusal:
     return AuthRefusal(
         status.HTTP_409_CONFLICT,
@@ -346,9 +441,23 @@ def _last_factor() -> AuthRefusal:
     )
 
 
+def _last_method() -> AuthRefusal:
+    return AuthRefusal(
+        status.HTTP_409_CONFLICT,
+        code="last_method",
+        detail=tr("this is your only way to sign in; add another one before removing it"),
+    )
+
+
 async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_id: UUID) -> None:
+    """Remove one of the caller's passkeys. A technician never loses the last
+    second factor (`last_factor`); a contact never loses the last way in
+    (`last_method`, decision 2). Under the person's lock: two removals at
+    once each see the other's key still there, and without it both would
+    pass and leave no way in."""
     async with _own_session(principal, request) as session:
         user = await signed_user(session, principal)
+        await lock_person(session, user.id)
         key = (
             await session.execute(
                 select(AuthPasskey).where(
@@ -363,10 +472,17 @@ async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_
                 select(func.count()).select_from(AuthPasskey).where(AuthPasskey.user_id == user.id)
             )
         ).scalar_one()
-        _has_passkey, has_totp, _codes = await summary(session, user.id)
-        if keys == 1 and not has_totp:
-            raise _last_factor()
-        await session.delete(key)
+        if user.kind == CONTACT_KIND:
+            await session.delete(key)
+            await session.flush()
+            if not await has_sign_in_method(session, user.id):
+                # Raised after the delete, inside the block: it rolls back.
+                raise _last_method()
+        else:
+            _has_passkey, has_totp, _codes = await summary(session, user.id)
+            if keys == 1 and not has_totp:
+                raise _last_factor()
+            await session.delete(key)
         await _record(session, user, "auth.factor_removed", {"factor": "passkey", "name": key.name})
         await notices.tell(
             session,
@@ -379,23 +495,47 @@ async def remove_passkey(request: Request, principal: SessionPrincipal, passkey_
 
 
 async def remove_totp(request: Request, principal: SessionPrincipal) -> None:
+    """Remove the caller's authenticator app. A technician keeps a second
+    factor (`last_factor`); a contact's is optional (D27), and their
+    recovery codes go with it (decision 3, B2-06): codes made for an app
+    that is gone must not come back as the backup of the next one."""
     async with _own_session(principal, request) as session:
         user = await signed_user(session, principal)
+        await lock_person(session, user.id)
         has_passkey, has_totp, _codes = await summary(session, user.id)
         if not has_totp:
             raise _not_found(tr("that sign-in method is not set up on this account"))
-        if not has_passkey:
+        if user.kind != CONTACT_KIND and not has_passkey:
             raise _last_factor()
         await drop_totp(session, user.id)
-        await _record(session, user, "auth.factor_removed", {"factor": "totp"})
+        meta = {"factor": "totp"}
+        if user.kind == CONTACT_KIND:
+            await session.execute(
+                delete(AuthRecoveryCode).where(AuthRecoveryCode.user_id == user.id)
+            )
+            meta["recovery_codes"] = "removed"
+        await _record(session, user, "auth.factor_removed", meta)
         await notices.tell(
             session, user, "factor_removed", vault=_vault(request), actor_id=user.id, factor="totp"
         )
 
 
 async def new_recovery_codes(request: Request, principal: SessionPrincipal) -> list[str]:
+    """A new set of recovery codes, the old set spent. A contact has them
+    only with an authenticator app (decision 3, B2-06): with none, 409
+    `method_unavailable` -- a passkey is a contact's way in, not a second
+    factor (operator decision C5), and codes back up a second factor."""
     async with _own_session(principal, request) as session:
         user = await signed_user(session, principal)
+        await lock_person(session, user.id)
+        if user.kind == CONTACT_KIND:
+            _has_passkey, has_totp, _codes = await summary(session, user.id)
+            if not has_totp:
+                raise AuthRefusal(
+                    status.HTTP_409_CONFLICT,
+                    code="method_unavailable",
+                    detail=tr("turn on an authenticator app before asking for recovery codes"),
+                )
         codes = await replace_codes(session, org_id=user.org_id, user_id=user.id)
         await _record(session, user, "auth.factor_added", {"factor": "recovery_codes"})
         await notices.tell(

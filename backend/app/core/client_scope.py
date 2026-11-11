@@ -150,7 +150,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     ),
     "app/core/auth/account.py::_own_session": (
         "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
-        "session the door admitted (P2 phase 1 design §2.4-§2.6)"
+        "session the door admitted (P2 phase 1 design §2.4-§2.6). Since phase 2 a client's "
+        "contact too (D26): their rows are C rows of their own client and the queries are "
+        "still by their own user id, so the every-client scope reaches nothing of another "
+        "client's (plan 2026-11-06, Task 7)"
     ),
     "app/core/auth/recover.py::issue_recovery_link": (
         "the server's own recovery command, never HTTP: one technician's recovery link, "

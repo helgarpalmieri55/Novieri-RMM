@@ -79,6 +79,8 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
         )
     ),
     ("PUT", "/api/v1/me/password"),
+    # Own authentication phase 2, Task 7: the first password of an account with none.
+    ("POST", "/api/v1/me/password"),
     ("POST", "/api/v1/me/recovery-codes"),
     # Task 8: an invitation's answer carries its one-time link when no mail did.
     ("POST", "/api/v1/users/invite"),
@@ -186,7 +188,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 37
+    assert len(NEVER_EXPOSED) == 38
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 
