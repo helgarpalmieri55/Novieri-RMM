@@ -2,6 +2,8 @@
 design §2, §6.4).
 
     POST   /auth/login                      the password       -> factor | enrol | signed in
+    POST   /auth/passkey/options            a passkey alone: the request options (contacts)
+    POST   /auth/passkey                    the assertion      -> signed in (contacts)
     POST   /auth/factor/{totp,recovery}     the second factor  -> signed in
     POST   /auth/factor/passkey/options     the WebAuthn request options
     POST   /auth/factor/passkey             the assertion      -> signed in
@@ -148,6 +150,11 @@ class PasskeyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     credential: dict[str, Any]
     remember_device: bool = False
+
+
+class PasskeySignInIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    credential: dict[str, Any]
 
 
 class StepUpCodeIn(BaseModel):
@@ -360,6 +367,25 @@ def _no_content() -> Response:
 async def login(body: LoginIn, request: Request, response: Response) -> SignInOut:
     """The address and the password. One answer for every refusal (design §2.3)."""
     step = await flows.login(request, email=body.email, password=body.password)
+    return _answer(response, step)
+
+
+@router.post("/passkey/options", dependencies=[Depends(_FACTOR)])
+async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
+    """The WebAuthn request options of a sign-in with a passkey alone: no
+    address and no list of credentials (a contact's discoverable passkey)."""
+    return await flows.passkey_sign_in_options(request)
+
+
+@router.post(
+    "/passkey",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_FACTOR)],
+)
+async def passkey_sign_in(body: PasskeySignInIn, request: Request, response: Response) -> SignInOut:
+    """A contact's passkey, alone: signed in. Any other answer is the one 401."""
+    step = await flows.passkey_sign_in(request, credential=body.credential)
     return _answer(response, step)
 
 

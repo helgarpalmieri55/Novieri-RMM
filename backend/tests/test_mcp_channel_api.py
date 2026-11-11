@@ -53,6 +53,9 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
         ("POST", f"/api/v1/auth/{path}")
         for path in (
             "login",
+            # Task 6 of phase 2: a contact's passkey alone.
+            "passkey/options",
+            "passkey",
             "factor/totp",
             "factor/recovery",
             "factor/passkey/options",
@@ -186,7 +189,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 37
+    assert len(NEVER_EXPOSED) == 39
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 

@@ -129,6 +129,13 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         # person to hold a code. Guarded by Task 6's CSRF rule, a per-IP limit
         # and the per-account counters (`flows.login`).
         ("POST", "/api/v1/auth/login"),
+        # A contact's passkey alone (P2 phase 2, D28): before there is a
+        # person; the CSRF rule, `_FACTOR` per address and the single-use
+        # challenge stand in for the gate.
+        ("POST", "/api/v1/auth/passkey/options"),
+        # Its assertion: the same, and only a contact's verified passkey
+        # signs anybody in (`flows.passkey_sign_in`).
+        ("POST", "/api/v1/auth/passkey"),
         # A pending session's second factor: `guards.session_of` + `require_pending`.
         ("POST", "/api/v1/auth/factor/totp"),
         # The same pending session, with a recovery code.
