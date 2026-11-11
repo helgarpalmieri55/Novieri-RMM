@@ -139,6 +139,8 @@ export const auth: Shape<typeof en> = {
     new: "Contraseña nueva",
     confirm: "La misma contraseña otra vez",
     rules: "Al menos {min} caracteres, los que quieras, espacios incluidos. Una frase que recuerdes funciona bien.",
+    rulesReset:
+      "Al menos 12 caracteres (15 para el portal de soporte), los que quieras, espacios incluidos. Una frase que recuerdes funciona bien.",
     mismatch: "Las dos contraseñas no son iguales.",
     too_short: "Usa al menos {min} caracteres.",
     too_long: "Usa como mucho 128 caracteres.",
@@ -170,7 +172,6 @@ export const auth: Shape<typeof en> = {
     notLinked:
       "Esta cuenta de Microsoft no está vinculada a nadie aquí. Entra de otra forma y vincúlala desde tu perfil, o usa tu invitación.",
     tenantRefused: "Las cuentas de esta organización de Microsoft no pueden entrar aquí.",
-    alreadyLinked: "Esa cuenta de Microsoft ya está vinculada: a otra persona, o ya tienes una. Desvincula la tuya primero.",
     lastMethod: "Es tu última forma de entrar. Añade antes una contraseña o una clave de acceso.",
     passwordFirst: "Un técnico solo vincula Microsoft junto a una contraseña propia, y esta cuenta no tiene ninguna.",
     // «Inicio de sesión y seguridad»: what `profile.security.title` calls the page in Spanish.

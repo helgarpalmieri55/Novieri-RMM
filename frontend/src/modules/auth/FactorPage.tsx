@@ -31,11 +31,11 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
-import { enterConsole } from "../../lib/session";
+import { enterConsole, signInPath } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard, AuthSection } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { carryNext, digitsOf, recoveryCodeOf, useNext } from "./flow";
+import { digitsOf, recoveryCodeOf, useNext } from "./flow";
 import { canUsePasskeys, describePasskeyError, passkeyHiddenAdvice, signWithPasskey } from "./passkey";
 import type { FactorMethod, SignedIn } from "./types";
 
@@ -203,8 +203,10 @@ export function FactorPage() {
       ) : null}
 
       <AuthAlert text={error} />
+      {/* Back to the sign-in page the person came from: the portal's for a
+          contact, whose `next` is a portal page (final review F, item 5). */}
       <p className="note" style={{ margin: 0 }}>
-        <Link to={carryNext("/sign-in", next)}>{t("auth.common.startOver")}</Link>
+        <Link to={signInPath(next ?? undefined)}>{t("auth.common.startOver")}</Link>
       </p>
     </AuthCard>
   );

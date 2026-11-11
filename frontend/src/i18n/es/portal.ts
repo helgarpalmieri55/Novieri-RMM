@@ -6,7 +6,9 @@ export const portal: Shape<typeof en> = {
   shell: {
     meFailed: "No se pudieron cargar tus datos.",
     brand: "Portal de soporte",
-    security: "Acceso y seguridad",
+    // «Inicio de sesión y seguridad», `profile.security.title`: the name the
+    // Microsoft and recovery-code sentences tell a contact to look for.
+    security: "Inicio de sesión y seguridad",
   },
   state: {
     groupIncident: "Informar de un problema",

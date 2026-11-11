@@ -9,6 +9,12 @@
  * never gets anyone past it (§2.8). A refused password says which rule
  * refused it (`./NewPasswordFields.tsx`).
  *
+ * THE LINK NAMES NO ACCOUNT, so the page cannot know whose rule applies: a
+ * technician's 12 characters or a client's contact's 15 (design §3). It
+ * states both, checks only the lower bound before asking, and the server's
+ * `password_rejected` says the 15 to a contact who chose fewer (final review
+ * F, item 1).
+ *
  * THE TOKEN IS READ FROM THE FRAGMENT AND SENT IN THE BODY (`./flow.ts`):
  * it never reaches an access log, a `Referer` or a URL of this console's own
  * requests.
@@ -95,7 +101,13 @@ export function ResetPasswordPage() {
           aria-hidden="true"
           style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
         />
-        <NewPasswordFields password={password} again={again} onPassword={setPassword} onAgain={setAgain} />
+        <NewPasswordFields
+          password={password}
+          again={again}
+          helpKey="auth.password.rulesReset"
+          onPassword={setPassword}
+          onAgain={setAgain}
+        />
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn

@@ -219,6 +219,50 @@ describe("the invitation's one guard", () => {
     expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
   });
 
+  // A technician's start accepted the invitation with the password before it
+  // answered (C3): the link is spent and a session waits for the first
+  // factor. Back from Microsoft restores the page from the browser's cache,
+  // and the invitation must not come back to life (final review F, item 4).
+  it("sends a technician who pressed Back at Microsoft on to their first factor, never to a dead invitation", async () => {
+    calls.getInvite.mockResolvedValue(STAFF_INVITE);
+    calls.microsoftStart.mockResolvedValue({ authorize_url: AUTHORIZE });
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-staff-1");
+    await user.type(await screen.findByLabelText("New password"), GOOD);
+    await user.type(screen.getByLabelText("The same password again"), GOOD);
+    await user.click(screen.getByRole("button", { name: "Accept with Microsoft" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    });
+    expect(where.location?.pathname).toBe("/invite");
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+    expect(screen.queryByText(INVALID)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept with Microsoft" })).not.toBeInTheDocument();
+    expect(calls.microsoftStart).toHaveBeenCalledOnce();
+    expect(calls.acceptInvite).not.toHaveBeenCalled();
+  });
+
+  it("turns a contact's invitation back on when they press Back at Microsoft: their start spent nothing", async () => {
+    calls.getInvite.mockResolvedValue(CONTACT_INVITE);
+    calls.microsoftStart.mockResolvedValue({ authorize_url: AUTHORIZE });
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-contact-1");
+    const microsoft = await screen.findByRole("button", { name: "Accept with Microsoft" });
+    await user.click(microsoft);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
+    expect(microsoft).toBeDisabled();
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    expect(microsoft).toBeEnabled();
+    expect(where.location?.pathname).toBe("/invite");
+    expect(screen.getByLabelText("New password")).toBeInTheDocument();
+  });
+
   it("does not ask Microsoft while a technician's password is being accepted", async () => {
     calls.getInvite.mockResolvedValue(STAFF_INVITE);
     let finish: (value: { state: "enroll_required" }) => void = () => undefined;
@@ -340,6 +384,23 @@ describe("the return page", () => {
       "Too long passed since you confirmed it was you. Link the account again from Sign-in and security.",
     );
     expect(screen.getByRole("link", { name: "Back to Sign-in and security" })).toHaveAttribute("href", "/profile/security");
+  });
+
+  // `microsoft_already_linked` is three different situations, and only the
+  // server knows which (`entra_flows._refuse_a_second_link`, `_insert_link`):
+  // its `detail` is shown as it came (final review F, item 3).
+  it.each([
+    ["link", "/profile/security", "this Microsoft account is already linked to your account"],
+    ["link", "/profile/security", "you already have a Microsoft account linked; remove it first"],
+    ["invite", "/portal", "this Microsoft account is already linked to somebody here"],
+  ] as const)("says the server's own sentence for an account already linked (%s, %s): %s", async (intent, back, detail) => {
+    rememberMicrosoftReturn({ intent, back });
+    calls.microsoftComplete.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ code: "microsoft_already_linked", detail })),
+    );
+    renderAuth("/sign-in/microsoft#code=abc&state=xyz");
+    expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+    expect(screen.queryByText(/Unlink yours first/)).not.toBeInTheDocument();
   });
 
   it("asks nothing after a reload, which has no code", async () => {

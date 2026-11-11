@@ -85,6 +85,12 @@ describe("the sign-in pages in Spanish", () => {
     await user.type(screen.getByLabelText("La misma contraseña otra vez"), "corta");
     await user.click(screen.getByRole("button", { name: "Cambiar la contraseña" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Usa al menos 12 caracteres.");
+    // The rule is true for a technician and for a contact (final review F, item 1).
+    expect(
+      screen.getByText(
+        "Al menos 12 caracteres (15 para el portal de soporte), los que quieras, espacios incluidos. Una frase que recuerdes funciona bien.",
+      ),
+    ).toBeInTheDocument();
     expectNoEnglish(container);
   });
 

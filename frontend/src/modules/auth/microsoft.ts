@@ -111,6 +111,14 @@ export function checkedAuthorizeUrl(raw: string): string | null {
  * is not one of its codes. `microsoft_unavailable` is one sentence whatever
  * lies behind it: switched off, not set up, or a configured organization that
  * does not exist (the server answers them alike, Task 9).
+ *
+ * `microsoft_already_linked` IS NOT ONE OF THEM, on purpose (final review F,
+ * item 3): it is three situations only the server tells apart -- this account
+ * is already yours (another tab linked it), you already have another one, or
+ * it belongs to somebody else here (`entra_flows._refuse_a_second_link`,
+ * `_insert_link`) -- and one sentence for all three was wrong for two. It
+ * falls through to `describeAuthError`, which shows the server's translated
+ * `detail` as it came.
  */
 export function describeMicrosoftError(error: unknown): string | null {
   if (!(error instanceof ApiError)) return null;
@@ -123,8 +131,6 @@ export function describeMicrosoftError(error: unknown): string | null {
       return translate("auth.microsoft.notLinked");
     case "microsoft_tenant_refused":
       return translate("auth.microsoft.tenantRefused");
-    case "microsoft_already_linked":
-      return translate("auth.microsoft.alreadyLinked");
     case "last_method":
       return translate("auth.microsoft.lastMethod");
     case "password_required":

@@ -138,6 +138,9 @@ export const auth = {
     new: "New password",
     confirm: "The same password again",
     rules: "At least {min} characters, any you like, spaces included. A phrase you can remember works well.",
+    // The reset link names no account: the rule for a technician and for a client's contact.
+    rulesReset:
+      "At least 12 characters (15 for the support portal), any you like, spaces included. A phrase you can remember works well.",
     mismatch: "The two passwords are not the same.",
     too_short: "Use at least {min} characters.",
     too_long: "Use at most 128 characters.",
@@ -172,7 +175,6 @@ export const auth = {
     notLinked:
       "This Microsoft account is not linked to anybody here. Sign in another way and link it from your profile, or use your invitation.",
     tenantRefused: "Accounts from this Microsoft organization may not sign in here.",
-    alreadyLinked: "That Microsoft account is already linked: to somebody else, or you already have one. Unlink yours first.",
     lastMethod: "That is your last way to sign in. Add a password or a passkey first.",
     passwordFirst: "A technician links Microsoft only beside a password of their own, and this account has none.",
     stepUpAgain: "Too long passed since you confirmed it was you. Link the account again from Sign-in and security.",
