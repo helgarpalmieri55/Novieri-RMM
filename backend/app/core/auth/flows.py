@@ -345,8 +345,11 @@ async def _consumed(
       `_cut_access`), a switch-off or an address change (`update_contact`'s
       UPDATE, then the links), and `services.contact_access._contact`;
     - a technician's: `user_admin.service.cancel_invite` and `delete_user`
-      (`_target(lock=True)`, fix round 2), and `set_enabled`, which writes
-      the row before it ends anything.
+      (`_target(lock=True)`, fix round 2), `reset_factors` and
+      `end_sessions` (Task 9b), and -- since the final review of phase 2 --
+      `set_enabled`, `assign_role`, `remove_role` and `resend_invite`, which
+      read their target unlocked until then and so acted on a row a deletion
+      was replacing. Every act there now takes the row first.
     A use that took the link first and wrote the person's row last
     (`users.last_login_at`, in `sessions.start_session`; a reset's sessions)
     waited on them while they waited on it: a 40P01, and a 500
@@ -393,8 +396,10 @@ async def _factor_done(
        and the organization allows it (Task 6 says whether);
     2. then, the chain last (the module docstring's lock order): the step's
        own audit rows (`recorded_first`: a recovery code's use, the
-       enrolment's codes), `auth.signed_in`, the remembered device's row and
-       its notice (design §2.6)."""
+       enrolment's codes), `auth.signed_in` -- the factor (`method`) and how
+       the session started (`first_step`, final review of phase 2, item 4)
+       --, the remembered device's row and its notice (design §2.6)."""
+    first_step = await _first_step(session, principal)
     try:
         token = await mark_factor(session, principal.session_id)
     except LookupError as exc:
@@ -408,7 +413,12 @@ async def _factor_done(
             device, device_token = None, None
     if recorded_first is not None:
         await recorded_first()
-    await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": False})
+    await _audit(
+        session,
+        user,
+        "auth.signed_in",
+        {"method": method, "trusted_device": False, "first_step": first_step},
+    )
     if device is not None:
         days = (device.expires_at - device.created_at).days
         await _audit(session, user, "auth.device_remembered", {"days": days})
@@ -629,10 +639,19 @@ async def _after_the_password(session: AsyncSession, principal: SessionPrincipal
     the password, the person's next Microsoft-and-code sign-in clears the
     mark, the administrator's reset goes through, and the mailed password
     takes the account."""
-    first = await session.scalar(
+    return await _first_step(session, principal) == "password"
+
+
+async def _first_step(session: AsyncSession, principal: SessionPrincipal) -> str | None:
+    """How this session started (`auth_sessions.first_step`, Task 9b item B):
+    what `_after_the_password` decides on, and what `auth.signed_in` after a
+    second factor records beside the factor (final review of phase 2, item
+    4): in the immutable audit, a sign-in Microsoft started is otherwise the
+    same row as one the password started."""
+    first: str | None = await session.scalar(
         select(AuthSession.first_step).where(AuthSession.id == principal.session_id)
     )
-    return first == "password"
+    return first
 
 
 async def factor_totp(

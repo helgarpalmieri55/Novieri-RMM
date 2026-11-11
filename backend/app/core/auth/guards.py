@@ -135,18 +135,58 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
     re-read (`populate_existing`), so what a writer committed while this
     waited -- a switch-off, a deletion -- is what the caller then checks.
 
-    THE LOCK ORDER of a person's account, kept by the administrators' acts on
-    a person (`contact_access._contact`, the archive's `_lock_contacts`,
-    `update_contact`, `user_admin.service._target(lock=True)`), by every use
-    of their links (`flows._consumed`) and by their own steps here: THE
-    PERSON'S ROW; then, when the transaction takes it, their advisory lock
-    (`factors.lock_person`); then their links, sessions, devices and
-    credentials -- `users.last_login_at` among them, already held -- and
-    LAST the organization's audit chain (`audit_service`'s advisory lock),
-    which every transaction of the organization that audits takes, so it is
-    never held while waiting on a row. Two transactions that both take the
-    row wait for each other here, before either holds anything the other
-    needs: no 40P01 (`tests/test_auth_sign_in_races.py`).
+    THE LOCK ORDER of a person's account: THE PERSON'S ROW; then, when the
+    transaction takes it, their advisory lock (`factors.lock_person`); then
+    their links, sessions, devices and credentials -- `users.last_login_at`
+    among them, already held -- and LAST the organization's audit chain
+    (`audit_service`'s advisory lock). BEWARE THE CHAIN'S STATEMENT:
+    `audit_service.record` takes it with a `text()` execute, which does NOT
+    autoflush, so a `User` attribute assigned before it is written only
+    after it, at the record's next ORM read -- an unlocked row assigned and
+    then audited is the chain before the row. Kept by:
+    - the administrators' acts on a contact (`contact_access._contact`, the
+      archive's `_lock_contacts`, `update_contact`, whose UPDATE is flushed
+      before its links and its audit);
+    - every act of `user_admin.service` on a technician
+      (`_target(lock=True)`: `resend_invite`, `cancel_invite`,
+      `assign_role`, `remove_role`, `set_enabled`, `reset_factors`,
+      `end_sessions`, `delete_user`). `set_enabled`, `assign_role`,
+      `remove_role` and `resend_invite` take it since the final review of
+      phase 2 (items 1-2);
+    - every use of their links (`flows._consumed`) and the mailing of a
+      reset link (`flows.send_reset_link`);
+    - their own steps: sign-in, step-up and sign-out (`locked_user`, here),
+      My security (`account`'s session) and Microsoft's (`entra_flows`);
+    - their own profile, `PATCH /me` (`own_profile.update_own_profile`,
+      the same locked statement written out there), since the final
+      review's round 2: it assigned its fields to an unlocked row and then
+      audited -- the chain before the row;
+    - the MCP door (`deps.admit`): its refresh of their address locks the
+      row first since the final review (item 3), having taken the chain
+      before the row until then; its `last_login_at` is an UPDATE of the
+      row and nothing after it in that transaction audits.
+    THESE WRITERS take the chain last, so none of them holds it while
+    waiting on a person's row; it is not a claim about every transaction
+    that audits. Two of them that both take the row wait for each other
+    here, before either holds anything the other needs: no 40P01
+    (`tests/test_auth_sign_in_races.py`, `tests/test_user_admin_races.py`).
+
+    The writers that take NO person's row, each with the chain last or not
+    at all, so none of them can close a cycle with the above:
+    - the retention sweep (`retention.py`), which deletes only rows long
+      dead that none of the above reads;
+    - the server's recovery command (`recover.py`), which issues its link
+      and then audits -- link before chain -- and whose link is checked
+      against the locked row when it is used (`flows._consumed`);
+    - the session door's renewal (`sessions.resolve`): one UPDATE of
+      `last_seen_at`, in a transaction of its own that holds nothing else
+      and audits nothing;
+    - the first edit of a global role (`rbac_admin._clone_into_org`), which
+      repoints the organization's `user_roles` to the copy and then audits;
+    - a new session's fixation sweep (`sessions.start_session`), which ends
+      the session the request's cookie names -- somebody else's, when a
+      cookie was planted -- in one UPDATE, under the row of the person
+      signing in and before their chain.
 
     NO KEY UPDATE, not UPDATE: a row inserted meanwhile that refers to the
     person (a session, a link) takes KEY SHARE on it, which this does not

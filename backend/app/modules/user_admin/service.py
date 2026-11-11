@@ -233,6 +233,16 @@ async def _target(
     first, or each holds what the other waits on -- a 40P01, and a 500 for
     the person following their link (`tests/test_user_admin_races.py`).
 
+    EVERY WRITER HERE PASSES `lock=True` (final review of phase 2, items 1
+    and 2): `resend_invite`, `cancel_invite`, `assign_role`, `remove_role`,
+    `set_enabled`, `reset_factors`, `end_sessions` and `delete_user`.
+    `invite_user` reads the row its own transaction has just inserted, which
+    nobody else can hold. An act that read the row unlocked passed its checks
+    (`_require_live`, a pending invitation) on what a deletion in flight was
+    replacing, and then wrote over or beside it once that committed: a
+    deleted account switched back on, given a grant, sent an invitation.
+    Only the reads (`list_users`, `effective_permissions`) leave it unlocked.
+
     `User.org_id == org_id` mirrors the RLS policy rather than relying on it.
     RLS is the backstop; a route with no predicate of its own passes every test
     that runs through a tenant session, which is why the tenancy tests drive
@@ -770,8 +780,15 @@ async def resend_invite(
 
     Only for a pending invitation (`_require_pending_invitation`), and never
     for a `super-admin`: an organization cannot grant that role, so it cannot
-    invite its holder either -- and the link is a password for the account."""
-    user = await _target(session, org_id, user_id)
+    invite its holder either -- and the link is a password for the account.
+
+    THE ROW FIRST (`_target(lock=True)`, final review of phase 2, item 2):
+    read unlocked, a cancel or a deletion in flight let the resend pass
+    `_require_live` and the pending check on the old rows, wait on the link
+    the cancel revoked, and then mail a new invitation to a deleted account;
+    an acceptance in flight, a link to somebody who already has a password.
+    Under the row, both are seen committed and refused."""
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     await _require_pending_invitation(session, org_id, user)
     await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_INVITED)
@@ -862,8 +879,15 @@ async def assign_role(
     (MSP clients spec §2.1).
 
     Roles are an ITMS concept, held in `user_roles` and nowhere else.
+
+    THE ROW FIRST (`_target(lock=True)`, final review of phase 2, item 2):
+    read unlocked, a grant made while a deletion was in flight passed
+    `_require_live` on the old row and inserted beside a deletion that had
+    already removed the grants -- nothing it wrote was held, so it never
+    waited: a deleted account holding a live grant. Under the row, the
+    deletion is seen committed and the grant refused.
     """
-    user = await _target(session, org_id, user_id)
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     role = await _visible_role(session, org_id, role_id)
     if client_id is not None:
@@ -911,8 +935,15 @@ async def remove_role(
     THE THIRD DOOR TO THE SAME END STATE. Disable, delete and this all end with
     an organization that has no administrator; a rail on two of the three is not
     a rail, so the last-`org-admin` check is here too.
+
+    THE ROW FIRST (`_target(lock=True)`, final review of phase 2): read
+    unlocked, a removal while a deletion was in flight found the grant the
+    deletion had not yet committed away, waited on that grant's row, deleted
+    nothing -- and audited a removal that never happened. Under the row, the
+    deletion is seen committed and there is no such grant: a 404, nothing
+    audited. The last-`org-admin` count is read under the row as well.
     """
-    user = await _target(session, org_id, user_id)
+    user = await _target(session, org_id, user_id, lock=True)
     row = (
         await session.execute(
             select(UserRole, Role.name)
@@ -1001,8 +1032,15 @@ async def set_enabled(
     a browser stops working too, and stays dead if the account is re-enabled.
     ON restores the status only: the person signs in again, with their second
     factor.
+
+    THE ROW FIRST (`_target(lock=True)`, final review of phase 2, item 1),
+    as every other writer of a person's rows: read unlocked, a toggle while a
+    deletion (or a cancelled invitation) was in flight passed `_require_live`
+    on the OLD status, waited on its own UPDATE, and then wrote `active` or
+    `disabled` over `deleted` -- a deleted account switched back on. Under
+    the row, the deletion is seen committed: 409.
     """
-    user = await _target(session, org_id, user_id)
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     if not enabled:
         _refuse_self(actor_id, user.id, DISABLE)
@@ -1075,11 +1113,16 @@ async def reset_factors(
 
     THE ROW FIRST (`_target(lock=True)`, own authentication phase 2, Task 9b
     fix round 1), then `factors.lock_person`, then the factors, sessions and
-    devices, and the audit chain last -- the order of every writer of a
-    person's rows and of their own sign-in steps (`guards.lock_user_row`). A
-    passkey step in flight read the passkey this deletes and waited to write
-    its counter on the deleted row: a StaleDataError, a 500. Now it waits on
-    the person's row and then finds its session ended."""
+    devices, and the audit chain last -- the order every writer of a
+    person's live rows keeps that takes the row at all: each act in this
+    module (`_target`, since the final review of phase 2), the acts on a
+    contact, each use of their links, their own sign-in steps and profile
+    (`PATCH /me`), and the MCP door (`guards.lock_user_row` lists them, and
+    the writers that take no person's row, each of which takes the chain
+    last or not at all). A passkey step in flight
+    read the passkey this deletes and waited to write its counter on the
+    deleted row: a StaleDataError, a 500. Now it waits on the person's row
+    and then finds its session ended."""
     user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     _refuse_self(actor_id, user.id, RESET_FACTORS)

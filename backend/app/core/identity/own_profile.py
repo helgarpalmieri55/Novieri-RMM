@@ -118,8 +118,14 @@ class OwnProfile:
         return frozenset(held)
 
 
-async def _own_row(session: AsyncSession, user_id: UUID) -> User:
-    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+async def _own_row(session: AsyncSession, user_id: UUID, *, lock: bool = False) -> User:
+    """The caller's own row. `lock`, for the write: FOR NO KEY UPDATE and
+    re-read (`populate_existing`) -- `guards.lock_user_row`'s statement,
+    written out here because `guards` imports `app.core.identity` (a cycle)."""
+    query = select(User).where(User.id == user_id)
+    if lock:
+        query = query.with_for_update(key_share=True).execution_options(populate_existing=True)
+    user = (await session.execute(query)).scalar_one_or_none()
     if user is None:
         raise OwnRowMissing(str(user_id))  # i18n-exempt: mapped to a translated 404
     return user
@@ -214,9 +220,19 @@ async def update_own_profile(
     included (phase 3 final review A3). Read after it, a failed read was a
     500 for a saved write, and the route never reached the Keycloak mirror;
     a retry then found the language already stored and skipped the mirror for
-    good. Now a failed read rolls the write back, so a retry is a first try."""
+    good. Now a failed read rolls the write back, so a retry is a first try.
+
+    THE PERSON'S ROW FIRST, THE AUDIT CHAIN LAST (final review of own
+    authentication phase 2, round 2; `guards.lock_user_row`). Read unlocked,
+    the fields were assigned and the chain taken by `audit_service.record`
+    -- a `text()` statement, which does not autoflush -- before the row was
+    written at the record's next ORM read: the chain held while waiting on
+    the row, against any writer of the person's rows that holds the row and
+    audits last (an administrator's act on them, the MCP door's address
+    refresh, their own sign-in steps): a 40P01, and a 500. So the row is
+    locked first (`tests/test_user_admin_races.py`)."""
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
-        user = await _own_row(session, user_id)
+        user = await _own_row(session, user_id, lock=True)
         previous_locale = user.locale
         # WRITTEN OUT, not `setattr(user, field, ...)` over `supplied`. The
         # reflective form is one model edit away from assigning to any User

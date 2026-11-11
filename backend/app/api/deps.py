@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import loopback
+from app.core.auth.guards import lock_user_row
 from app.core.auth.refusals import AUTH_REQUIRED, PORTAL_ONLY, STEP_UP_REQUIRED, AuthRefusal
 from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
@@ -374,6 +375,12 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
                 metadata={"first_seen": True, "email": claims.email},
             )
         else:
+            # An address to refresh writes the person's row: THE ROW FIRST
+            # (the refresh below says why), and before the status is read, so
+            # a switch-off committed while this waited is what is checked.
+            if claims.email and user.email != claims.email:
+                await lock_user_row(session, user.id)
+
             # `users.status`, the second admission rule, and the reason it is
             # checked here rather than trusted to Keycloak: disabling an
             # account there stops the NEXT token being issued, it does not
@@ -424,6 +431,19 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             # removed; it is evidence this token did not carry one, which is
             # true of any IdP or client scope that omits `email`. The refresh
             # exists to propagate a CHANGE, and "" is not a change.
+            #
+            # THE PERSON'S ROW FIRST, THE AUDIT CHAIN LAST (final review of
+            # own authentication phase 2, item 3; `guards.lock_user_row`).
+            # Audited straight away, the chain's advisory lock was taken here
+            # and the row written only later, at an autoflush: the door held
+            # the chain while waiting on the row, while an administrator's act
+            # on the same person (`end_sessions`, `reset_factors`, ...) or the
+            # person's own `PUT /me/password` held the row and then waited on
+            # the chain -- a 40P01, and a 500. So the row was locked and
+            # re-read above (`populate_existing` refreshes `user` in place),
+            # and the change is re-tested here on what it now says: two calls
+            # that both saw the old address queue on the row, and only the
+            # first records it (`tests/test_user_admin_races.py`).
             if claims.email and user.email != claims.email:
                 await audit_service.record(
                     session,

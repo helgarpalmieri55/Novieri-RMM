@@ -669,13 +669,19 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     changes nothing; a contact's acts are unchanged (inviting to the portal,
     cancelling it, deactivating). S5, pinned: renaming or re-describing a role
     changes nobody's access, and disabling stays as it was while enabling
-    again asks. Each with an eleven-minute-old confirmation."""
+    again asks. Each with an eleven-minute-old confirmation. Deleting a
+    person and archiving a client only take access away too (final review of
+    phase 2, item 5), and are pinned with the rest."""
     org, sub, admin = await _admin(env)
     ai_app = await _connected_ai_app(env, org, sub, admin)
     invited = await _invited(env, admin)
     disabled, signed_out = await _technician(env, org), await _technician(env, org)
+    deleted = await _technician(env, org)
     role = await _own_role(env, admin)
     client_id = await _customer(env, admin)
+    to_archive = await env.client.post("/api/v1/clients", headers=admin, json={"name": "Globex"})
+    assert to_archive.status_code == 201, to_archive.text
+    archived = to_archive.json()["id"]
     made = await env.client.post(
         f"/api/v1/clients/{client_id}/contacts",
         headers=admin,
@@ -714,6 +720,8 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
         "deactivate a contact": await client.patch(
             f"/api/v1/contacts/{contact}", headers=stale, json={"status": "disabled"}
         ),
+        "delete a person": await client.delete(f"/api/v1/users/{deleted}", headers=stale),
+        "archive a client": await client.post(f"/api/v1/clients/{archived}/archive", headers=stale),
     }
 
     asked = {
@@ -740,6 +748,9 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     assert answers["invite a contact"].status_code == 200
     assert answers["cancel a contact's invitation"].status_code == 204
     assert answers["deactivate a contact"].status_code == 200
+    assert answers["delete a person"].status_code == 204
+    assert answers["archive a client"].status_code == 200
+    assert answers["archive a client"].json()["status"] == "archived"
 
 
 # --------------------------------------------------------------------------- #

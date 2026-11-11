@@ -1496,7 +1496,7 @@ account's roles.
 
 **This replaces "3. Sign in with Microsoft — by hand, for now" above for the
 console and the portal.** That section now concerns MCP clients only, until
-phase 4 removes Keycloak (since phase 3 it signs nobody in).
+phase 4 removes Keycloak (from phase 3 on, it signs nobody in).
 
 In Microsoft Entra ID, register **one** application for this installation:
 
