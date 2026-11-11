@@ -192,8 +192,10 @@ the system.
   technician signs in only from Novieri's tenant -- not as a B2B guest in it
   -- always has a password as well, and is still asked for the platform's
   own second factor (the token does not say whether Microsoft asked for
-  one), which an idle session does not skip; a contact signs in only from a
-  tenant their client lists. Design §10's falsifier 8 -- an unknown
+  one) unless the browser is remembered (design §2.6), exactly as after the
+  password; Microsoft never resumes an idle session, which only the
+  password does (design §2.4). A contact signs in only from a tenant their
+  client lists. Design §10's falsifier 8 -- an unknown
   Microsoft account is refused, and no account and no link is made -- is
   `backend/tests/test_auth_entra_flows.py::test_falsifier_8_an_unknown_account_is_refused_and_nothing_is_made`.
 - **Retention:** sessions are deleted 90 days after they ended or expired;

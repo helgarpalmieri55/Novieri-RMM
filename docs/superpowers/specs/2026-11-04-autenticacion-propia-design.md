@@ -389,6 +389,17 @@ la rotación conserva la clave anterior durante la vida de los tokens. El pepper
 no cambian. El socket en vivo usa la cookie y comprueba `Origin` en el handshake; se mantiene la revisión cada 60 s.
 MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
 
+**El estado de la organización no es una función hoy** (nota del 2026-11-11, revisión final de la fase 2).
+`organizations.status` existe (por defecto `active`), pero nada lo escribe —ninguna ruta, ningún proceso ni ninguna
+migración lo cambia— y la fase 1 nunca lo hizo cumplir: ni `admit()` por sesión ni por token, ni los sockets, ni
+`its_auth_session` lo leen. Solo lo comprueba la entrada con una clave de acceso sin dirección (fase 2, Task 6,
+`flows.passkey_sign_in`), que lo añadió de paso. **Por qué se apunta:** quien lea esa comprobación puede creer que
+suspender una organización deja fuera a su gente, y no es así; una suspensión que solo esa ruta respetara dejaría
+entrar por contraseña, por Microsoft, por MCP y con toda sesión abierta. **Si algún día se suspende una organización**,
+la comprobación tiene que ir en `sessions.resolve` —que toda sesión de esa organización muera en su siguiente
+petición, consola, portal y sockets incluidos— y en la búsqueda de la organización por token de `admit()` (MCP); y en
+el mismo cambio, en el inicio de sesión (`flows.login`, `entra_flows`) para que no se abra ninguna sesión nueva.
+
 ---
 
 ## 7. Cuentas, correo y auditoría

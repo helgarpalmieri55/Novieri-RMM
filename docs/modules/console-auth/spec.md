@@ -14,8 +14,8 @@ with Microsoft" is the platform's own -- an application in Microsoft Entra
 ID configured in Settings -> Microsoft sign-in, proved with the platform's
 own certificate, the identity kept as `tid` + `oid` -- and §3.3's Keycloak
 identity provider no longer signs anybody in to the console or the portal.
-It concerns MCP clients only, until phase 4 removes Keycloak (since phase 3
-it signs nobody in).
+It concerns MCP clients only, until phase 4 removes Keycloak (from phase 3
+on, which moves MCP to the platform's own OAuth server, it signs nobody in).
 
 **Which falsifiers have tests.** 1, 2 (by proxy), 4 and 7 are in
 `backend/tests/test_console_auth_realm.py`. 5 and 6 -- the OIDC authority
