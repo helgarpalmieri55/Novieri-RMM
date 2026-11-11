@@ -115,6 +115,10 @@ export const auth: Shape<typeof en> = {
     intro: "Te invitaron a esta consola como <b>{email}</b>. Elige una contraseña; después añadirás tu segundo factor.",
     submit: "Guardar la contraseña y continuar",
     invalid: "Esta invitación caducó, ya se usó o se canceló. Pide una nueva a quien te invitó.",
+    introContact: "Te invitaron al portal de soporte como <b>{email}</b>. Elige una contraseña o usa una clave de acceso.",
+    usePasskey: "Usar una clave de acceso",
+    passkeyName: "Nombre de esta clave de acceso",
+    or: "o",
   },
   recover: {
     heading: "Recuperación de la cuenta",
@@ -132,9 +136,9 @@ export const auth: Shape<typeof en> = {
   password: {
     new: "Contraseña nueva",
     confirm: "La misma contraseña otra vez",
-    rules: "Al menos 12 caracteres, los que quieras, espacios incluidos. Una frase que recuerdes funciona bien.",
+    rules: "Al menos {min} caracteres, los que quieras, espacios incluidos. Una frase que recuerdes funciona bien.",
     mismatch: "Las dos contraseñas no son iguales.",
-    too_short: "Usa al menos 12 caracteres.",
+    too_short: "Usa al menos {min} caracteres.",
     too_long: "Usa como mucho 128 caracteres.",
   },
   passkey: {

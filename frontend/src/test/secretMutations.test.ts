@@ -51,6 +51,7 @@ const SRC = resolve(import.meta.dirname, "..");
 const SECRET_METHODS: Record<string, string> = {
   // A secret SENT, in the body.
   changePassword: "both passwords",
+  addPassword: "the first password",
   acceptRecovery: "the recovery link's token, and a new password: required while an emailed link set the current one, offered otherwise",
   enrollTotpConfirm: "a code from the authenticator app",
   updateEmailSettings: "the relay password, or the token client secret",
@@ -73,6 +74,8 @@ const SECRET_METHODS: Record<string, string> = {
   regenerateRecoveryCodes: "ten recovery codes",
   inviteUser: "the one-time invitation link, when no mail is configured",
   resendInvite: "the one-time invitation link, when no mail is configured",
+  inviteContact: "the one-time portal invitation link, when no mail is configured",
+  resetContactAccess: "the new one-time portal invitation link, when no mail is configured",
   revealLicenseKey: "the license key",
   createEnrollmentToken: "the enrollment token",
   mintAgentDeploymentToken: "the deployment's enrollment token",
@@ -148,6 +151,10 @@ const SECRET_SITES: Record<string, { reviewed?: string }> = {
   "modules/credentials/CredentialsPage.tsx checkoutCredential": { reviewed: "modules/credentials/CredentialsPage.test.tsx" },
   // `useSecretMutation`; its test reads the mutation cache after a refused new password.
   "modules/auth/RecoverPage.tsx acceptRecovery": { reviewed: "modules/auth/__tests__/recover.test.tsx" },
+  // `useSecretMutation`; their tests read the mutation cache after a link was shown.
+  "modules/clients/api.ts inviteContact": { reviewed: "modules/clients/__tests__/clients.test.tsx" },
+  "modules/clients/api.ts resetContactAccess": { reviewed: "modules/clients/__tests__/clients.test.tsx" },
+  "modules/profile/api.ts addPassword": {},
   "modules/settings/api.ts updateEmailSettings": {},
   "modules/settings/api.ts createNotificationChannel": {},
   "modules/settings/api.ts updateNotificationChannel": {},

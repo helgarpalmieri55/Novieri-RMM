@@ -75,10 +75,14 @@ export function isDeadLink(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 410 || apiErrorCode(error) === "invalid_link");
 }
 
-/** The new-password checks the console can make before asking (length in code points, design §2.1). */
-export function checkNewPassword(password: string, again: string): string | null {
+/**
+ * The new-password checks the console can make before asking (length in code
+ * points, design §2.1): at least `minimum` -- 12 for a technician, 15 for a
+ * client's contact (design §3) -- and at most 128.
+ */
+export function checkNewPassword(password: string, again: string, minimum: number = 12): string | null {
   const length = Array.from(password).length;
-  if (length < 12) return translate("auth.password.too_short");
+  if (length < minimum) return translate("auth.password.too_short", { min: minimum });
   if (length > 128) return translate("auth.password.too_long");
   if (password !== again) return translate("auth.password.mismatch");
   return null;

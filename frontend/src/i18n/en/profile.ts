@@ -35,6 +35,11 @@ export const profile = {
       submit: "Change password",
       changing: "Changing…",
       changed: "Your password was changed. Your other sessions were signed out, and devices you had remembered ask for your second factor again.",
+      subtitleContact: "At least 15 characters. A long phrase you can remember beats a short complicated one",
+      addSubtitle: "You sign in without one. Add one of at least {min} characters to have another way in",
+      add: "Add password",
+      adding: "Adding…",
+      added: "Your password was added.",
     },
     passkeys: {
       title: "Passkeys",
@@ -55,6 +60,8 @@ export const profile = {
       createNow: "Create the passkey",
       retry: "The passkey was not created. Press “Create the passkey” to try again.",
       onlyFactor: "This is your only second factor. Add another before you remove it.",
+      lastMethod: "This passkey is your only way to sign in. Add a password before you remove it.",
+      subtitleContact: "Another way to sign in, without your password",
     },
     totp: {
       title: "Authenticator app",
@@ -74,12 +81,16 @@ export const profile = {
       cancel: "Cancel",
       replaceNote: "The app you use now keeps working until the new one is turned on.",
       onlyFactor: "This is your only second factor. Add a passkey before you remove it.",
+      subtitleContact:
+        "Optional. When it is on, signing in with your password also asks for a code, and so do changes like this page's",
     },
     recovery: {
       title: "Recovery codes",
       subtitle: "For when you have neither your passkey nor your app. Each code works once",
       left: { one: "{count} of {total} left", other: "{count} of {total} left" },
       low: "Few codes left. Make new ones before you run out.",
+      subtitleContact: "For when you do not have your authenticator app. Each code works once",
+      none: "You have no recovery codes yet. Make them now: they get you in if you lose your app.",
       regenerate: "Make new codes",
       regenerating: "Making…",
       shownOnce: "These codes are shown only now. Keep them somewhere safe, away from this device. Your old codes no longer work.",

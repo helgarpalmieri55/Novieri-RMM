@@ -44,8 +44,26 @@ export const fixtures: FixtureMap = {
   }),
   forgotPassword: () => undefined,
   resetPassword: () => undefined,
-  getInvite: () => ({ email: "dana.okafor@toeshee.example", display_name: "Dana Okafor" }),
-  acceptInvite: () => undefined,
+  getInvite: () => ({
+    email: "dana.okafor@toeshee.example",
+    display_name: "Dana Okafor",
+    kind: "staff",
+    password_minimum: 12,
+    passkey: false,
+    microsoft: false,
+  }),
+  acceptInvite: () => ({ state: "enroll_required" as const }),
+  // A contact's invitation (own-auth phase 2): its first passkey, as the
+  // sign-in module's enrolment answers, and then signed in.
+  invitePasskeyOptions: () => ({
+    rp: { id: "localhost", name: "ITMS" },
+    user: { id: "dXNyLWNvbnRhY3Q", name: "ana.rojas@andeslogistics.example", displayName: "Ana Rojas" },
+    challenge,
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    authenticatorSelection: { residentKey: "required", userVerification: "required" },
+    attestation: "none",
+  }),
+  invitePasskey: () => ({ state: "signed_in" as const }),
   getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
   logoutEverywhere: () => undefined,

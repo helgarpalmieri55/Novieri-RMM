@@ -180,6 +180,7 @@ export const ROUTES = [
   "/portal",
   "/portal/new",
   "/portal/tickets/tkt-1",
+  "/portal/security",
   "/dashboard",
   "/audit",
   "/enrollment",

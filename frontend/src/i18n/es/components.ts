@@ -109,5 +109,8 @@ export const components: Shape<typeof en> = {
     passkeyOnly:
       "Este navegador no puede usar claves de acceso, y no tienes otro segundo factor con el que confirmar. Hazlo desde un navegador que admita claves de acceso.",
     cancelled: "No se cambió nada: se cerró la confirmación.",
+    password: "Tu contraseña",
+    confirmPassword: "Confirmar con tu contraseña",
+    noMethodContact: "Sal y vuelve a entrar, y haz este cambio en los 10 minutos siguientes.",
   },
 };

@@ -111,5 +111,9 @@ export const components = {
     passkeyOnly:
       "This browser cannot use passkeys, and you have no other second factor to confirm with. Do this from a browser that supports passkeys.",
     cancelled: "Nothing was changed: the confirmation was closed.",
+    // A client's contact without the authenticator app (own-auth phase 2, D29).
+    password: "Your password",
+    confirmPassword: "Confirm with your password",
+    noMethodContact: "Sign out and sign in again, then make this change within 10 minutes.",
   },
 } as const;

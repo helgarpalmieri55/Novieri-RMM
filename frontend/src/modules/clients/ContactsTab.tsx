@@ -1,9 +1,12 @@
 /**
  * A client's contacts (`GET/POST /clients/{id}/contacts`, `PATCH
  * /contacts/{id}`): list, add, edit, and switch off and on, with
- * `clients.manage` on this client. A contact uses the portal, never the
- * console; `/users` is staff-only, so this is where a contact's sign-in is
- * turned off and back on.
+ * `clients.manage` on this client. Portal access too (own-auth phase 2):
+ * invite, invite again, cancel an open invitation, and reset the access of a
+ * contact who signed in -- the last one after a confirmation and the
+ * technician's recent second factor, which the server asks for. A contact
+ * uses the portal, never the console; `/users` is staff-only, so this is
+ * where a contact's sign-in is turned off and back on.
  */
 import { useState } from "react";
 
@@ -11,14 +14,25 @@ import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import type { ClientOut, ContactOut } from "../../lib/api";
+import type { ClientOut, ContactInviteOut, ContactOut } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
-import { Btn, Panel, QueryState, StatusPill } from "../../shell/components";
+import { formatDateTime } from "../../lib/datetime";
+import { useOrgZone } from "../../lib/zone";
+import { Btn, KIND_ICON, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { useClientContacts, useCreateContactMutation, useUpdateContactMutation } from "./api";
+import { FOLDING_FORM_GRID } from "../settings/formGrid";
+import {
+  useCancelContactInviteMutation,
+  useClientContacts,
+  useCreateContactMutation,
+  useInviteContactMutation,
+  useResetContactAccessMutation,
+  useUpdateContactMutation,
+} from "./api";
 
 const contactRules = (): readonly FieldRule[] => [{ name: "email", label: translate("clients.contacts.email") }];
 
@@ -34,7 +48,37 @@ export function ContactsTab({ client }: { client: ClientOut }) {
   const change = useUpdateContactMutation(client.id);
   const [editing, setEditing] = useState<ContactOut | "new" | null>(null);
   const [turningOff, setTurningOff] = useState<ContactOut | null>(null);
+  const stepUp = useStepUp();
+  const zone = useOrgZone();
+  const invite = useInviteContactMutation(client.id);
+  const cancelInvite = useCancelContactInviteMutation(client.id);
+  const reset = useResetContactAccessMutation(client.id, stepUp.run);
+  const [resetting, setResetting] = useState<ContactOut | null>(null);
+  // THE ONE COPY OF A LINK NO MAIL CARRIED: here until the technician says
+  // they passed it on, and in no mutation (each is reset once it settles).
+  const [shownLink, setShownLink] = useState<{ email: string; link: string } | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  // What came of the last access act, held here: the two mutations whose
+  // answer can carry a link are reset as soon as they settle.
+  const [accessError, setAccessError] = useState<unknown>(null);
   const rows = contacts.data ?? [];
+
+  function sent(out: ContactInviteOut) {
+    if (out.invite_link) setShownLink({ email: out.contact.email, link: out.invite_link });
+    else setSentTo(out.contact.email);
+  }
+
+  function inviteOne(contact: ContactOut) {
+    setSentTo(null);
+    setAccessError(null);
+    invite.mutate(contact.id, {
+      onSuccess: sent,
+      onSettled: (_data, error) => {
+        setAccessError(error ?? null);
+        invite.reset();
+      },
+    });
+  }
 
   if (client.kind === "unassigned") {
     return (
@@ -65,6 +109,7 @@ export function ContactsTab({ client }: { client: ClientOut }) {
                 <Th>{t("clients.contacts.colContact")}</Th>
                 <Th>{t("clients.contacts.colPhone")}</Th>
                 <Th>{t("clients.contacts.colStatus")}</Th>
+                <Th>{t("clients.contacts.colAccess")}</Th>
                 <Th />
               </tr>
             </thead>
@@ -87,6 +132,21 @@ export function ContactsTab({ client }: { client: ClientOut }) {
                       />
                     </Td>
                     <Td>
+                      {contact.access === "active" ? (
+                        <StatusPill value="active" kind="ok" label={t("clients.contacts.access.active")} />
+                      ) : contact.access === "invited" ? (
+                        <StatusPill
+                          value="invited"
+                          kind="warn"
+                          label={t("clients.contacts.access.invited", {
+                            when: formatDateTime(contact.invite_expires_at, zone),
+                          })}
+                        />
+                      ) : (
+                        <StatusPill value="none" kind="mut" label={t("clients.contacts.access.none")} />
+                      )}
+                    </Td>
+                    <Td>
                       {canManage ? (
                         <>
                           <Btn
@@ -95,6 +155,58 @@ export function ContactsTab({ client }: { client: ClientOut }) {
                             ariaLabel={t("clients.contacts.editAria", { name })}
                             onClick={() => setEditing(contact)}
                           />{" "}
+                          {active && contact.access === "none" ? (
+                            <>
+                              <Btn
+                                small
+                                icon="mail"
+                                label={t("clients.contacts.invite")}
+                                ariaLabel={t("clients.contacts.inviteAria", { name })}
+                                disabled={invite.isPending}
+                                onClick={() => inviteOne(contact)}
+                              />{" "}
+                            </>
+                          ) : null}
+                          {active && contact.access === "invited" ? (
+                            <>
+                              <Btn
+                                small
+                                icon="mail"
+                                label={t("clients.contacts.inviteAgain")}
+                                ariaLabel={t("clients.contacts.inviteAgainAria", { name })}
+                                disabled={invite.isPending}
+                                onClick={() => inviteOne(contact)}
+                              />{" "}
+                              <Btn
+                                small
+                                label={t("clients.contacts.cancelInvite")}
+                                ariaLabel={t("clients.contacts.cancelInviteAria", { name })}
+                                disabled={cancelInvite.isPending}
+                                onClick={() => {
+                                  setSentTo(null);
+                                  setAccessError(null);
+                                  cancelInvite.mutate(contact.id, {
+                                    onSettled: (_data, error) => setAccessError(error ?? null),
+                                  });
+                                }}
+                              />{" "}
+                            </>
+                          ) : null}
+                          {active && contact.access === "active" ? (
+                            <>
+                              <Btn
+                                small
+                                variant="danger"
+                                label={t("clients.contacts.resetAccess")}
+                                ariaLabel={t("clients.contacts.resetAccessAria", { name })}
+                                disabled={reset.isPending}
+                                onClick={() => {
+                                  reset.reset();
+                                  setResetting(contact);
+                                }}
+                              />{" "}
+                            </>
+                          ) : null}
                           {active ? (
                             <Btn
                               small
@@ -131,7 +243,54 @@ export function ContactsTab({ client }: { client: ClientOut }) {
             {t("clients.contacts.changeFailed")} {describeSubmitError(change.error)}
           </p>
         ) : null}
+        {sentTo ? (
+          <p role="status" className="form-saved">
+            <Icon name={KIND_ICON.ok} size={13} />
+            {t("clients.contacts.inviteSent", { email: sentTo })}
+          </p>
+        ) : null}
+        {accessError ? (
+          <p role="alert" className="form-error">
+            {t("clients.contacts.accessFailed")} {describeSubmitError(accessError)}
+          </p>
+        ) : null}
       </Panel>
+
+      {shownLink ? (
+        // SHOWN ONCE: the server keeps only the link's hash.
+        <section aria-label={t("clients.contacts.link.title", { email: shownLink.email })}>
+          <Panel title={t("clients.contacts.link.title", { email: shownLink.email })}>
+            <div className="notice gold" role="status">
+              <Icon name={KIND_ICON.warn} size={16} />
+              <span>{t("clients.contacts.link.once", { email: shownLink.email })}</span>
+            </div>
+            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 12 }}>
+              <Field label={t("clients.contacts.link.label")}>
+                <input
+                  className={inputClass}
+                  data-secret
+                  readOnly
+                  value={shownLink.link}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              </Field>
+            </div>
+            <div className="form-actions">
+              <Btn
+                icon="copy"
+                label={t("clients.contacts.link.copy")}
+                onClick={() => void navigator.clipboard?.writeText(shownLink.link).catch(() => undefined)}
+              />
+              <Btn
+                variant="primary"
+                icon="check"
+                label={t("clients.contacts.link.done")}
+                onClick={() => setShownLink(null)}
+              />
+            </div>
+          </Panel>
+        </section>
+      ) : null}
 
       {editing !== null ? (
         <ContactFormDialog
@@ -154,6 +313,30 @@ export function ContactsTab({ client }: { client: ClientOut }) {
           if (contact) change.mutate({ contactId: contact.id, body: { status: "disabled" } });
         }}
       />
+      <ConfirmDialog
+        open={resetting !== null}
+        title={t("clients.contacts.resetTitle")}
+        subject={resetting ? resetting.display_name || resetting.email : ""}
+        body={t("clients.contacts.resetBody")}
+        confirmLabel={t("clients.contacts.resetConfirm")}
+        destructive
+        onCancel={() => setResetting(null)}
+        onConfirm={() => {
+          const contact = resetting;
+          setResetting(null);
+          if (!contact) return;
+          setSentTo(null);
+          setAccessError(null);
+          reset.mutate(contact.id, {
+            onSuccess: sent,
+            onSettled: (_data, error) => {
+              setAccessError(error ?? null);
+              reset.reset();
+            },
+          });
+        }}
+      />
+      {stepUp.dialog}
     </>
   );
 }

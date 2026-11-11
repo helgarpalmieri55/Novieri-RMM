@@ -405,6 +405,9 @@ export const ME_FIXTURE = {
  * and another).
  */
 export const MY_SECURITY_FIXTURE = {
+  kind: "staff",
+  has_password: true,
+  microsoft: null,
   has_totp: true,
   passkeys: [
     { id: "pk-1", name: "Work laptop", created_at: "2026-10-01T09:00:00Z", last_used_at: "2026-11-03T08:00:00Z", backup_state: false },
@@ -544,6 +547,9 @@ export const calls = {
   putSessionSettings: vi.fn(),
   getMcpConnections: vi.fn(),
   revokeMcpConnection: vi.fn(),
+  portalMe: vi.fn(),
+  addPassword: vi.fn(),
+  stepUpPassword: vi.fn(),
 };
 
 export function apiClient(): ApiClient {
@@ -646,6 +652,16 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   calls.putSessionSettings.mockResolvedValue(SESSION_SETTINGS_FIXTURE);
   calls.getMcpConnections.mockResolvedValue(MCP_CONNECTIONS_FIXTURE);
   calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 0 });
+  calls.portalMe.mockResolvedValue({
+    user_id: "contact-1",
+    kind: "contact",
+    email: "ana@acme.test",
+    display_name: "Ana Ruiz",
+    timezone: "America/Bogota",
+    permissions: ["portal.ticket.read", "portal.ticket.write"],
+  });
+  calls.addPassword.mockResolvedValue(undefined);
+  calls.stepUpPassword.mockResolvedValue(undefined);
 
   fetchMock.mockImplementation(() => Promise.reject(new Error("a settings test reached fetch()")));
 }

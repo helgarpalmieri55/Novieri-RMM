@@ -50,6 +50,10 @@ export function PortalShell({ children }: { children: ReactNode }) {
         <Link to="/portal" className="font-semibold">
           {t("portal.shell.brand")}
         </Link>
+        {/* The contact's own sign-in security (own-auth phase 2, Task 11). */}
+        <Link to="/portal/security" className="text-sm">
+          {t("portal.shell.security")}
+        </Link>
         <span className="ml-auto text-sm text-[var(--muted)]">
           {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}
         </span>

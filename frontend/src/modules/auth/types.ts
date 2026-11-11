@@ -65,11 +65,22 @@ export interface RecoveryCodes {
   recovery_codes: string[];
 }
 
-/** `POST /auth/invite/details {token}`: who the invitation is for. */
+/** `POST /auth/invite/details {token}`: who the invitation is for, and how it may be accepted. */
 export interface InviteDetails {
   email: string;
   display_name: string;
+  /** A technician or a client's contact (own-auth phase 2). */
+  kind: "staff" | "contact";
+  /** The shortest password this person may choose: 12 or 15. */
+  password_minimum: number;
+  /** The invitation may be accepted with a passkey (contacts). */
+  passkey: boolean;
+  /** The invitation may be accepted with Microsoft (Task 12). */
+  microsoft: boolean;
 }
+
+/** `POST /auth/invite/accept`: a technician still needs a factor; a contact is in. */
+export type InviteAccepted = { state: "enroll_required" } | SignedIn;
 
 /** `POST /auth/recover/details {token}`: whose account the server's recovery link is for. */
 export interface RecoveryLink {

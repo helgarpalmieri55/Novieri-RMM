@@ -41,8 +41,11 @@ const SITES: ClientSiteOut[] = [
   { id: "s-old", client_id: "c-andes", name: "Bodega vieja", address: "", description: "", egress_networks: [], archived_at: "2026-09-01T00:00:00Z", device_count: 0 },
 ];
 const CONTACTS: ContactOut[] = [
-  { id: "ct-1", client_id: "c-andes", kind: "contact", email: "ana@andes.example", display_name: "Ana Rojas", phone: null, status: "active" },
-  { id: "ct-2", client_id: "c-andes", kind: "contact", email: "compras@andes.example", display_name: "Compras", phone: null, status: "disabled" },
+  { id: "ct-1", client_id: "c-andes", kind: "contact", email: "ana@andes.example", display_name: "Ana Rojas", phone: null, status: "active", access: "active", invite_expires_at: null },
+  { id: "ct-2", client_id: "c-andes", kind: "contact", email: "compras@andes.example", display_name: "Compras", phone: null, status: "disabled", access: "none", invite_expires_at: null },
+  // Portal access in every state (own-auth phase 2, Task 11): invited, and none with the act it offers.
+  { id: "ct-3", client_id: "c-andes", kind: "contact", email: "luis@andes.example", display_name: "Luis Pardo", phone: null, status: "active", access: "invited", invite_expires_at: "2026-11-09T12:00:00Z" },
+  { id: "ct-4", client_id: "c-andes", kind: "contact", email: "marta@andes.example", display_name: "Marta Gil", phone: null, status: "active", access: "none", invite_expires_at: null },
 ];
 const CODES = ["clients.read", "clients.manage", "sites.manage", "health.read", "enrollment.link.manage"];
 
@@ -63,6 +66,8 @@ function renderAt(entry: string) {
     listClientSites: vi.fn().mockResolvedValue(SITES),
     listContacts: vi.fn().mockResolvedValue(CONTACTS),
     listHealthAssignments: vi.fn().mockResolvedValue([]),
+    // The zone an invitation's expiry is shown in (`useOrgZone`).
+    getCurrentOrg: vi.fn().mockResolvedValue({ id: "org-1", name: "Toeshee", settings: {} }),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderInSpanish(

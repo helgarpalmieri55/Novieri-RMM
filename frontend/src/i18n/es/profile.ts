@@ -37,6 +37,11 @@ export const profile: Shape<typeof en> = {
       submit: "Cambiar contraseña",
       changing: "Cambiando…",
       changed: "Se cambió tu contraseña. Se cerraron tus otras sesiones y los equipos que tenías recordados vuelven a pedir tu segundo factor.",
+      subtitleContact: "Al menos 15 caracteres. Una frase larga que puedas recordar es mejor que una corta y complicada",
+      addSubtitle: "Entras sin contraseña. Añade una de al menos {min} caracteres para tener otra forma de entrar",
+      add: "Añadir contraseña",
+      adding: "Añadiendo…",
+      added: "Se añadió tu contraseña.",
     },
     passkeys: {
       title: "Claves de acceso",
@@ -57,6 +62,8 @@ export const profile: Shape<typeof en> = {
       createNow: "Crear la clave de acceso",
       retry: "No se creó la clave de acceso. Pulsa «Crear la clave de acceso» para intentarlo de nuevo.",
       onlyFactor: "Es tu único segundo factor. Añade otro antes de quitarlo.",
+      lastMethod: "Esta clave de acceso es tu única forma de entrar. Añade una contraseña antes de quitarla.",
+      subtitleContact: "Otra forma de entrar, sin tu contraseña",
     },
     totp: {
       title: "Aplicación de autenticación",
@@ -76,12 +83,16 @@ export const profile: Shape<typeof en> = {
       cancel: "Cancelar",
       replaceNote: "La aplicación que usas ahora sigue funcionando hasta que actives la nueva.",
       onlyFactor: "Es tu único segundo factor. Añade una clave de acceso antes de quitarla.",
+      subtitleContact:
+        "Opcional. Si está activa, entrar con tu contraseña también pide un código, y también lo piden cambios como los de esta página",
     },
     recovery: {
       title: "Códigos de recuperación",
       subtitle: "Para cuando no tienes ni tu clave de acceso ni tu aplicación. Cada código funciona una sola vez",
       left: { one: "Queda {count} de {total}", other: "Quedan {count} de {total}" },
       low: "Te quedan pocos códigos. Genera otros nuevos antes de que se acaben.",
+      subtitleContact: "Para cuando no tengas tu app de autenticación. Cada código sirve una vez",
+      none: "Aún no tienes códigos de recuperación. Hazlos ahora: te dejan entrar si pierdes la app.",
       regenerate: "Generar códigos nuevos",
       regenerating: "Generando…",
       shownOnce: "Estos códigos solo se muestran ahora. Guárdalos en un lugar seguro, lejos de este dispositivo. Tus códigos anteriores ya no funcionan.",
