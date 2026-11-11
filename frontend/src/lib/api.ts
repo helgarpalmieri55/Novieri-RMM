@@ -786,6 +786,22 @@ export interface MeClient {
   permissions: string[];
 }
 
+/**
+ * `GET /portal/me` (own-auth phase 2): the person using the portal -- a
+ * client's contact, or a technician holding a portal code -- for the
+ * portal's own pages. A contact has no `GET /me`: the console's door answers
+ * them 403 `portal_only`.
+ */
+export interface PortalMe {
+  user_id: string;
+  kind: "staff" | "contact";
+  email: string;
+  display_name: string;
+  timezone: string | null;
+  /** Of `portal.ticket.read` and `portal.ticket.write`. */
+  permissions: string[];
+}
+
 export interface Me {
   user_id: string;
   org_id: string;
@@ -1808,6 +1824,20 @@ export class ApiClient {
     return this.request<SignedIn>("/auth/factor/passkey", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
   }
 
+  /** `POST /auth/passkey/options`: a challenge for a passkey alone, with no address (a contact's, D28). */
+  passkeySignInOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>("/auth/passkey/options", { method: "POST" }, { anonymous: true });
+  }
+
+  /** `POST /auth/passkey`: the browser's assertion; signed in, or the one 401. */
+  passkeySignIn(credential: AuthenticationResponseJSON): Promise<SignedIn> {
+    return this.request<SignedIn>(
+      "/auth/passkey",
+      { method: "POST", body: JSON.stringify({ credential }) },
+      { anonymous: true },
+    );
+  }
+
   /** `POST /auth/factor/recovery`: one of the ten codes. */
   factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
     return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
@@ -2220,6 +2250,11 @@ export class ApiClient {
   /** A recovery code. It works once: the server spends it. */
   stepUpRecovery(code: string): Promise<void> {
     return this.request<void>("/auth/step-up/recovery", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
+  }
+
+  /** A contact without an authenticator app confirms with the password (D29, C5, design §2.6); anybody else's answer is 409 `method_unavailable`. */
+  stepUpPassword(password: string): Promise<void> {
+    return this.request<void>("/auth/step-up/password", { method: "POST", body: JSON.stringify({ password }) }, { global: true });
   }
 
   // ------------------------------------------------------------------ email
@@ -5207,6 +5242,11 @@ export class ApiClient {
 
   getPortalHelpArticle(id: string): Promise<PortalHelpArticle> {
     return this.request<PortalHelpArticle>(`/portal/help/articles/${id}`);
+  }
+
+  /** `GET /portal/me`: the person using the portal -- the person, not a client's data, so no `X-Client-Id`. */
+  portalMe(): Promise<PortalMe> {
+    return this.request<PortalMe>("/portal/me", {}, { global: true });
   }
 
   listPortalCategories(): Promise<PortalCategoryOut[]> {

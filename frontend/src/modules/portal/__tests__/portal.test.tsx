@@ -19,6 +19,15 @@ import type {
   PortalTicketSummary,
 } from "../types";
 
+const portalMeOf = (me: { user_id: string; email: string; display_name: string; permissions: string[]; timezone?: string | null }) => ({
+  user_id: me.user_id,
+  kind: "staff" as const,
+  email: me.email,
+  display_name: me.display_name,
+  timezone: me.timezone ?? null,
+  permissions: me.permissions.filter((code) => code.startsWith("portal.")),
+});
+
 // The auth-backed API client is mocked so this is a pure component test: no
 // real fetch -- mirrors modules/service-desk/__tests__/serviceDesk.test.tsx.
 const mockUseApi = vi.fn();
@@ -105,6 +114,7 @@ describe("MyTicketsPage", () => {
   beforeEach(() => {
     api = {
       me: vi.fn().mockResolvedValue(ME_REQUESTER),
+      portalMe: vi.fn().mockResolvedValue(portalMeOf(ME_REQUESTER)),
       listPortalTickets: vi.fn().mockResolvedValue([TICKET_SUMMARY]),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
@@ -140,7 +150,7 @@ describe("MyTicketsPage", () => {
   });
 
   it("hides portal navigation entirely without portal.ticket.read", async () => {
-    api.me = vi.fn().mockResolvedValue({ ...ME_REQUESTER, permissions: [] });
+    api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: [] }));
     renderWithProviders(<MyTicketsPage />);
 
     await screen.findByText("My tickets", { selector: "h1" });
@@ -191,6 +201,7 @@ describe("NewTicketPage", () => {
   beforeEach(() => {
     api = {
       me: vi.fn().mockResolvedValue(ME_REQUESTER),
+      portalMe: vi.fn().mockResolvedValue(portalMeOf(ME_REQUESTER)),
       listPortalCategories: vi.fn().mockResolvedValue(CATEGORIES),
       createPortalTicket: vi.fn().mockResolvedValue(TICKET_DETAIL),
     };
@@ -607,6 +618,7 @@ describe("PortalTicketDetailPage", () => {
   beforeEach(() => {
     api = {
       me: vi.fn().mockResolvedValue(ME_REQUESTER),
+      portalMe: vi.fn().mockResolvedValue(portalMeOf(ME_REQUESTER)),
       getPortalTicket: vi.fn().mockResolvedValue(TICKET_DETAIL),
       createPortalComment: vi.fn().mockResolvedValue(COMMENTS[0]),
     };
@@ -722,7 +734,7 @@ describe("PortalTicketDetailPage", () => {
   });
 
   it("hides the reply box without portal.ticket.write", async () => {
-    api.me = vi.fn().mockResolvedValue({ ...ME_REQUESTER, permissions: ["portal.ticket.read"] });
+    api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: ["portal.ticket.read"] }));
     renderDetail("t1");
 
     await screen.findByText("INC-1: VPN");
@@ -780,7 +792,7 @@ describe("PortalTicketDetailPage", () => {
   // mirrors that discipline: the page still renders the ticket, just without
   // write affordances gated on permissions it could not confirm.
   it("degrades quietly when the permissions call fails, still rendering ticket data", async () => {
-    api.me = vi.fn().mockRejectedValue(new ApiError(403, "forbidden"));
+    api.portalMe = vi.fn().mockRejectedValue(new ApiError(403, "forbidden"));
     renderDetail("t1");
 
     expect(await screen.findByText("INC-1: VPN")).toBeInTheDocument();

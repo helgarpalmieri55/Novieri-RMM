@@ -1,11 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { EmptyState, NoValue } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
 import { Badge, Button, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { formatBytes } from "../../lib/format";
@@ -16,6 +14,7 @@ import {
   usePortalTicket,
   useUploadPortalAttachmentMutation,
 } from "./api";
+import { usePortalMe } from "./usePortalMe";
 import { PortalAssistantPanel } from "./PortalAssistantPanel";
 import { PortalNav } from "./PortalNav";
 import {
@@ -49,8 +48,7 @@ import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
 export function PortalTicketDetailPage() {
   const t = useT();
   const { ticketId } = useParams<{ ticketId: string }>();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const me = usePortalMe();
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("portal.ticket.read");
   const canWrite = permissions.includes("portal.ticket.write");

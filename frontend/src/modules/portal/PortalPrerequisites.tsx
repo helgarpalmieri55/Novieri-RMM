@@ -19,6 +19,7 @@
 // NOTHING HERE GATES ANYTHING (invariant 6).
 
 import { useQuery } from "@tanstack/react-query";
+import { useContext } from "react";
 
 import {
   prerequisiteFromQuery,
@@ -35,6 +36,7 @@ import { AI_STATUS_KEY } from "../ai-admin/api";
 import type { AiStatus } from "../ai-admin/types";
 import { useRoles } from "../settings/api";
 import { settingsHref } from "../settings/tabs";
+import { ContactFrameContext } from "./usePortalMe";
 
 const ROLES_READ = "roles.read";
 const DOCS_READ = "docs.read";
@@ -44,6 +46,18 @@ const AI_USE = "ai.use";
 export const REQUESTER_ROLE = "requester";
 
 export function PortalPrerequisites() {
+  // A client's contact has no `GET /me`: the console's door answers them 403,
+  // and a `["me"]` observer mounted under their frame refetches that 403 for
+  // ever. So under their frame (`PortalShell`) nothing is asked; everywhere
+  // else the session is a technician's -- the console's own frame drew it --
+  // and the panel does not depend on `/portal/me`, which a technician
+  // without `portal.ticket.read` is refused.
+  const inContactFrame = useContext(ContactFrameContext);
+  if (inContactFrame) return null;
+  return <StaffPortalPrerequisites />;
+}
+
+function StaffPortalPrerequisites() {
   const me = useMePermissions();
   if (me.status !== "ready" || isPortalOnly(me.codes)) return null;
   return <OperatorPortalPrerequisites me={me} />;

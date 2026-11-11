@@ -3,6 +3,10 @@ import type { portal as en } from "../en/portal";
 
 export const portal: Shape<typeof en> = {
   nav: { aria: "Portal", myTickets: "Mis tickets", newTicket: "Nuevo ticket" },
+  shell: {
+    meFailed: "No se pudieron cargar tus datos.",
+    brand: "Portal de soporte",
+  },
   state: {
     groupIncident: "Informar de un problema",
     groupRequest: "Pedir algo",

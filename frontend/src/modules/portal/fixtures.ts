@@ -167,7 +167,17 @@ const getPortalHelpArticle: FixtureMap["getPortalHelpArticle"] = (id) => {
   return found;
 };
 
+const portalMe: FixtureMap["portalMe"] = () => ({
+  user_id: "u-1",
+  kind: "staff" as const,
+  email: "ada@example.test",
+  display_name: "Ada Lovelace",
+  timezone: null,
+  permissions: ["portal.ticket.read", "portal.ticket.write"],
+});
+
 const fixtures: FixtureMap = {
+  portalMe,
   suggestPortalHelp,
   getPortalHelpArticle,
   listPortalTickets,

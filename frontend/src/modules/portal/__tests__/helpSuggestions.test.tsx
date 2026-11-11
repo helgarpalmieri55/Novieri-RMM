@@ -14,6 +14,15 @@ import { HELP_SUGGEST_DEBOUNCE_MS } from "../api";
 import { NewTicketPage } from "../NewTicketPage";
 import type { PortalCategoryOut, PortalHelpArticle, PortalTicketDetail } from "../types";
 
+const portalMeOf = (me: { user_id: string; email: string; display_name: string; permissions: string[]; timezone?: string | null }) => ({
+  user_id: me.user_id,
+  kind: "staff" as const,
+  email: me.email,
+  display_name: me.display_name,
+  timezone: me.timezone ?? null,
+  permissions: me.permissions.filter((code) => code.startsWith("portal.")),
+});
+
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
@@ -55,6 +64,7 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   api = {
     me: vi.fn().mockResolvedValue(ME),
+    portalMe: vi.fn().mockResolvedValue(portalMeOf(ME)),
     listPortalCategories: vi.fn().mockResolvedValue(CATEGORIES),
     createPortalTicket: vi.fn().mockResolvedValue(CREATED),
     suggestPortalHelp: vi.fn().mockResolvedValue([{ id: ARTICLE.id, title: ARTICLE.title }]),

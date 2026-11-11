@@ -27,7 +27,7 @@
  * is hidden and emptied by the guard at once (`App.tsx`'s `RequireAuth`,
  * operator decision 3, 2026-11-05).
  */
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useSyncExternalStore } from "react";
 
 import { ApiError, type ApiClient, type Me } from "./api";
@@ -70,6 +70,13 @@ export interface Session {
 /** The console's sign-in page. Task 11 of the own-auth plan mounts it. */
 export const SIGN_IN_PATH = "/sign-in";
 
+/** The portal's sign-in page (own-auth phase 2): a client's contact signs in here. */
+export const PORTAL_SIGN_IN_PATH = "/portal/sign-in";
+
+export function isPortalPage(path: string): boolean {
+  return path === "/portal" || path.startsWith("/portal/") || path.startsWith("/portal?");
+}
+
 /**
  * Where signing in lands when nothing better is known: the root, whose route
  * (`Landing` in `App.tsx`) picks the account's home.
@@ -84,7 +91,7 @@ export const DEFAULT_AFTER_SIGN_IN = "/";
  * prefix the edge sends elsewhere (`/api`, `/enroll`, `/i/`, `/mcp`,
  * `/.well-known`, `/realms`, `/resources`, `/js`; plan decision D19).
  */
-export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite", "/recover"];
+export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite", "/recover", "/portal/sign-in"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -152,10 +159,15 @@ function isEdgePath(pathname: string): boolean {
   return EDGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-/** `/sign-in`, with `?next=` when there is somewhere better than the root to come back to. */
+/**
+ * The sign-in page, with `?next=` when there is somewhere better than the
+ * root to come back to: the portal's when that somewhere is a portal page
+ * (own-auth phase 2, Task 10, decision 2), else the console's.
+ */
 export function signInPath(next?: string): string {
   const back = safeNext(next);
-  return back === DEFAULT_AFTER_SIGN_IN ? SIGN_IN_PATH : `${SIGN_IN_PATH}?next=${encodeURIComponent(back)}`;
+  const page = isPortalPage(back) ? PORTAL_SIGN_IN_PATH : SIGN_IN_PATH;
+  return back === DEFAULT_AFTER_SIGN_IN ? page : `${page}?next=${encodeURIComponent(back)}`;
 }
 
 /**
@@ -209,8 +221,10 @@ export function enterConsole(next: unknown): void {
  * (`sessionSignedOut`, operator decision 3), and the client chosen in the
  * top bar is forgotten (final review D1, Minor 9) -- the browser keeps the
  * old page on screen until the sign-in page has loaded.
+ *
+ * `to`: the console's sign-in page, or the portal's for a contact (`PortalShell`).
  */
-export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
+export async function signOut(api: Pick<ApiClient, "logout">, to: string = SIGN_IN_PATH): Promise<void> {
   try {
     await api.logout();
   } catch (error: unknown) {
@@ -218,7 +232,7 @@ export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
   }
   forgetStoredClient();
   sessionSignedOut();
-  navigation.assign(SIGN_IN_PATH);
+  navigation.assign(to);
 }
 
 /**
@@ -252,7 +266,25 @@ export function hasSession(queryClient: QueryClient): boolean {
 export function useSession(): Session {
   const api = useApi();
   const ended = useSyncExternalStore(subscribeSessionEnd, sessionEndReason, sessionEndReason);
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000, enabled: ended === null });
+  const queryClient = useQueryClient();
+  // A 403 from the console's door is an answer -- a client's contact,
+  // `portal_only` -- not a failure to try again: retried, every portal load
+  // waited a back-off for it (own-auth phase 2, Task 10, decision 6). Anything
+  // else follows the query client's own default (`App.tsx`: once, and
+  // nothing in fixture mode).
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    staleTime: 60_000,
+    enabled: ended === null,
+    retry: (failures, error) => {
+      if (error instanceof ApiError && error.status === 403) return false;
+      const base = queryClient.getDefaultOptions().queries?.retry;
+      if (typeof base === "function") return base(failures, error);
+      if (typeof base === "number") return failures < base;
+      return base ?? failures < 3;
+    },
+  });
   const userId = me.data?.user_id;
   useLayoutEffect(() => {
     if (userId !== undefined) sessionPerson(userId);

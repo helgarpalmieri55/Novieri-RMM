@@ -21,12 +21,32 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
-import { DEFAULT_AFTER_SIGN_IN, safeNext } from "../../lib/session";
+import { DEFAULT_AFTER_SIGN_IN, enterConsole, safeNext } from "../../lib/session";
+import type { LoginResult } from "./types";
 
 /** The raw `?next=` of the current step, filtered where it is used. */
 export function useNext(): string | null {
   const [params] = useSearchParams();
   return params.get("next");
+}
+
+/** What the server's answer to `POST /auth/login` decides: the next page, and nothing else does. */
+export function afterLogin(
+  result: LoginResult,
+  next: string | null,
+  navigate: (to: string, options?: { state?: unknown }) => void,
+): void {
+  if (result.state === "signed_in") {
+    enterConsole(next);
+    return;
+  }
+  if (result.state === "enroll_required") {
+    navigate(carryNext("/sign-in/enroll", next));
+    return;
+  }
+  navigate(carryNext("/sign-in/factor", next), {
+    state: { methods: result.methods, rememberDays: result.remember_device_days ?? null },
+  });
 }
 
 /** `path`, carrying `next` on to the following step when there is somewhere to go back to. */

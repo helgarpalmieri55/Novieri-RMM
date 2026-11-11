@@ -24,6 +24,12 @@ export const auth = {
     rejected: "That email address and password do not match an account here.",
     forgot: "Forgot your password?",
   },
+  portalSignIn: {
+    title: "Sign in to the portal",
+    intro: "Use a passkey, or your email address and password.",
+    usePasskey: "Sign in with a passkey",
+    passkeyRejected: "That passkey was not accepted. Try again, or use your email address and password.",
+  },
   factor: {
     title: "Confirm it is you",
     intro: "Use your second factor to finish signing in.",
