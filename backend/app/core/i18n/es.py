@@ -4708,6 +4708,40 @@ CATALOG: dict[str, str] = {
         "Abre este enlace en las próximas 72 horas para elegir cómo iniciarás sesión:\n{link}\n\n"
         "Si no lo esperabas, ignora este mensaje."
     ),
+    # Sign in with Microsoft, the flows (own authentication phase 2, Task 9).
+    "sign-in with Microsoft is not set up here": (
+        "el inicio de sesión con Microsoft no está configurado aquí"
+    ),
+    "the sign-in with Microsoft did not finish; start it again": (
+        "el inicio de sesión con Microsoft no terminó; empieza de nuevo"
+    ),
+    "this Microsoft account is not linked to anybody here; sign in another way and link it from "
+    "your profile, or use your invitation": (
+        "esta cuenta de Microsoft no está vinculada a nadie aquí; inicia sesión de otra forma y "
+        "vincúlala desde tu perfil, o usa tu invitación"
+    ),
+    "this Microsoft account's organization may not sign in here": (
+        "la organización de esta cuenta de Microsoft no puede iniciar sesión aquí"
+    ),
+    "this Microsoft account is already linked to somebody here": (
+        "esta cuenta de Microsoft ya está vinculada a otra persona aquí"
+    ),
+    "you already have a Microsoft account linked; remove it first": (
+        "ya tienes una cuenta de Microsoft vinculada; quítala primero"
+    ),
+    "no Microsoft account is linked": "no hay ninguna cuenta de Microsoft vinculada",
+    "a Microsoft account": "una cuenta de Microsoft",
+    "choose a password too: a technician never signs in with Microsoft alone": (
+        "elige también una contraseña: un técnico nunca entra solo con Microsoft"
+    ),
+    "a technician needs a password of their own before linking Microsoft": (
+        "un técnico necesita su propia contraseña antes de vincular Microsoft"
+    ),
+    "a contact who accepts with Microsoft sends no password; to choose one, accept with a "
+    "password instead": (
+        "un contacto que acepta con Microsoft no envía contraseña; para elegir una, acepta con "
+        "contraseña"
+    ),
     # --- user_admin ---
     "{role} is cross-org platform administration and cannot be granted from an organization": (
         "{role} es administración de la plataforma entre organizaciones y no se puede conceder "

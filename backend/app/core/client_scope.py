@@ -158,11 +158,24 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "which a per-client scope may read and not change. The technician's path only: a "
         "client's contact on the same routes (phase 2, D26) runs under the scope the door "
         "pinned to their own client, and every client is refused for one, as is any other "
-        "kind (plan 2026-11-06, Task 7 fix rounds 1-2, invariant 5a)"
+        "kind (plan 2026-11-06, Task 7 fix rounds 1-2, invariant 5a). Unlinking Microsoft "
+        "(`entra_flows.unlink`, `DELETE /me/microsoft`, phase 2 Task 9) opens this same session"
     ),
     "app/core/auth/recover.py::issue_recovery_link": (
         "the server's own recovery command, never HTTP: one technician's recovery link, "
         "issued by whoever holds the server (P2 phase 1 design §7)"
+    ),
+    "app/core/auth/entra_flows.py::_entra_session": (
+        "sign-in with Microsoft's own steps, which no door admits (`/auth/microsoft/start` "
+        "and `/complete`, as `flows._identity_session` holds the other `/auth/*` steps): the "
+        "sign-in before anybody is known, the start and the return of a link from My "
+        "security, and an invitation accepted with Microsoft -- one person's link (tid, oid), "
+        "users row and new session, a contact's portal role on their OWN client "
+        "(`contact_admitted`) and that client's Microsoft tenants (read), found before their "
+        "scope exists. The organization from the deployment's slug, the session or the "
+        "invitation (P2 phase 2 design §4). NOT unlinking: `DELETE /me/microsoft` acts for a "
+        "signed-in person under the scope the door established (`account._own_session`, "
+        "invariant 5a)"
     ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(

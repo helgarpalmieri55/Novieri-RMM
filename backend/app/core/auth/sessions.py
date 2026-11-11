@@ -69,6 +69,10 @@ logger = logging.getLogger("its.auth.sessions")
 
 SESSION_COOKIE = "__Host-itms_session"
 DEVICE_COOKIE = "__Host-itms_device"
+#: Sign in with Microsoft's transaction (own authentication phase 2, plan
+#: decision D30): its value is the PKCE code verifier, so the transaction is
+#: bound to the browser that started it. Ten minutes, then gone.
+ENTRA_COOKIE = "__Host-itms_entra"
 #: Sent by the console, as `X-ITMS-Background: 1`, on a request no person
 #: caused in the last 60 s (a poll, a refetch): `resolve` does not renew the
 #: session for it (fix round 2; design §2.4).
@@ -175,6 +179,15 @@ def set_device_cookie(response: Response, token: str, *, expires_at: datetime) -
 
 def clear_device_cookie(response: Response) -> None:
     _set(response, DEVICE_COOKIE, "", 0)
+
+
+def set_entra_cookie(response: Response, value: str, *, max_age: int) -> None:
+    """Sign in with Microsoft's cookie (D30), the same attributes as the others."""
+    _set(response, ENTRA_COOKIE, value, max_age)
+
+
+def clear_entra_cookie(response: Response) -> None:
+    _set(response, ENTRA_COOKIE, "", 0)
 
 
 def step_up_fresh(principal: SessionPrincipal, now: datetime) -> bool:

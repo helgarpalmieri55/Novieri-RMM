@@ -134,6 +134,10 @@ class SignIn:
     expires_at: datetime | None = None
     device_token: str | None = None
     device_expires_at: datetime | None = None
+    #: The session started, for a caller that must find it again (Task 9,
+    #: decision 4: a technician's invitation accepted at `/auth/microsoft/
+    #: start` keeps it in the transaction). Never sent to the browser.
+    session_id: UUID | None = None
 
 
 @asynccontextmanager
@@ -270,7 +274,10 @@ async def _consumed(
     NOT YET COVERED -- the person's OWN concurrent sign-in steps, which do
     not take their row first: `sessions.mark_factor` locks a session and
     then writes the row; `login` takes its failure rows and the audit chain
-    before `start_session` writes it. Any users-first writer above -- this
+    before `start_session` writes it; and a sign-in with Microsoft (phase 2
+    Task 9, `entra_flows._sign_in`) writes the link's `last_used_at` -- a row
+    a contact's access reset deletes after taking the person's -- before
+    `start_session` writes the person's row. Any users-first writer above -- this
     function's callers included, a reset of the person's own password among
     them -- can meet one of them the other way round, and one of the two is
     a 40P01. That class is a lock-order task of its own, after Task 9.
@@ -367,6 +374,7 @@ async def started(
         remember_device_days=remember_device_days,
         session_token=token,
         expires_at=record.expires_at,
+        session_id=record.id,
     )
 
 

@@ -26,6 +26,9 @@ design §2, §6.4).
     POST   /auth/invite/passkey             the attestation    -> signed in (contacts)
     POST   /auth/recover/details            who the server's recovery link is for
     POST   /auth/recover/accept             the factors go (a mailed password too) -> a new factor
+    POST   /auth/microsoft/start            Microsoft's sign-in URL (+ the transaction cookie)
+    POST   /auth/microsoft/complete         its code and state -> signed in | linked
+    DELETE /me/microsoft
     GET    /me/security                     the caller's factors, devices, sessions
     PUT    /me/password
     POST   /me/password                     the first password, for an account with none
@@ -57,13 +60,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, stat
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import AuthContext, bound_account_context, require_step_up
-from app.core.auth import account, flows
+from app.core.auth import account, entra_flows, flows
 from app.core.auth.guards import session_of
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import (
     SessionPrincipal,
+    clear_entra_cookie,
     clear_session_cookie,
     set_device_cookie,
+    set_entra_cookie,
     set_session_cookie,
 )
 from app.core.config import Settings
@@ -111,6 +116,10 @@ _LOGIN = _limit("auth-login", lambda settings: settings.auth_login_ip_limit, 600
 _FACTOR = _limit("auth-factor", lambda settings: settings.auth_factor_ip_limit, 600)
 _FORGOT = _limit("auth-forgot", 5, 3600)
 _LINK = _limit("auth-link", 20, 600)
+#: Sign in with Microsoft (P2 phase 2, Task 9, decision 7): the operator's
+#: `ITS_AUTH_LOGIN_IP_LIMIT`, in a bucket of its own; `/start` and
+#: `/complete` each count.
+_MICROSOFT = _limit("auth-microsoft", lambda settings: settings.auth_login_ip_limit, 600)
 
 
 # --------------------------------------------------------------------------- #
@@ -354,6 +363,38 @@ class PasswordAddIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     #: A secret: no Pydantic bound (decision 16); the rule bounds it.
     new: str
+
+
+class MicrosoftStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent: Literal["sign_in", "link", "invite"]
+    #: An invitation's token, for `invite`: a secret, no Pydantic bound.
+    token: str | None = None
+    #: A technician's new password, for `invite` (operator decision C3): a
+    #: secret, no Pydantic bound -- the rule bounds it.
+    password: str | None = None
+
+
+class MicrosoftStartOut(BaseModel):
+    """Where to send the browser. The transaction's key travels in the
+    `__Host-itms_entra` cookie, never here."""
+
+    authorize_url: str
+
+
+class MicrosoftCompleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Microsoft's one-time code and the state: secrets, no Pydantic bound.
+    code: str
+    state: str
+
+
+class MicrosoftCompleteOut(BaseModel):
+    """Where the sign-in with Microsoft stands; `linked` after linking from My security."""
+
+    state: Literal["factor_required", "enroll_required", "signed_in", "linked"]
+    methods: list[str] | None = None
+    remember_device_days: int | None = None
 
 
 def _answer(response: Response, step: flows.SignIn) -> SignInOut:
@@ -692,6 +733,50 @@ async def accept_recovery(
     return _answer(response, step)
 
 
+@router.post(
+    "/microsoft/start", response_model=MicrosoftStartOut, dependencies=[Depends(_MICROSOFT)]
+)
+async def microsoft_start(
+    body: MicrosoftStartIn, request: Request, response: Response
+) -> MicrosoftStartOut:
+    """Start a sign-in with Microsoft: to sign in, to link the caller's account
+    (a recent confirmation), or to accept an invitation -- a technician's
+    with their new password as well, which is stored now."""
+    started = await entra_flows.start(
+        request, intent=body.intent, token=body.token, password=body.password
+    )
+    if started.signed is not None:
+        _answer(response, started.signed)
+    set_entra_cookie(response, started.verifier, max_age=entra_flows.ENTRA_TTL_S)
+    return MicrosoftStartOut(authorize_url=started.authorize_url)
+
+
+@router.post(
+    "/microsoft/complete",
+    response_model=MicrosoftCompleteOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_MICROSOFT)],
+)
+async def microsoft_complete(
+    body: MicrosoftCompleteIn, request: Request, response: Response
+) -> MicrosoftCompleteOut:
+    """Finish it with the code and the state Microsoft handed the browser. An
+    unknown account is refused: nothing is created, nothing is linked by address."""
+    try:
+        step = await entra_flows.complete(request, code=body.code, state=body.state)
+    except AuthRefusal as refusal:
+        # A2-55: the transaction is over either way; its cookie goes with it.
+        gone = Response()
+        clear_entra_cookie(gone)
+        refusal.headers = {**(refusal.headers or {}), "set-cookie": gone.headers["set-cookie"]}
+        raise
+    clear_entra_cookie(response)
+    if step is None:
+        return MicrosoftCompleteOut(state="linked")
+    signed = _answer(response, step)
+    return MicrosoftCompleteOut(**signed.model_dump(exclude_unset=True))
+
+
 # --------------------------------------------------------------------------- #
 # /me -- my security
 # --------------------------------------------------------------------------- #
@@ -700,8 +785,10 @@ async def accept_recovery(
 async def _account_ctx(ctx: AuthContext = Depends(bound_account_context)) -> AuthContext:
     """My security's door (phase 2, D26): a technician's or a contact's own
     browser session; `bound_account_context` already refused anything else.
-    Every handler hands `ctx.clients` to `app.core.auth.account`, which runs a
-    contact's request in that scope -- their own client (invariant 5a)."""
+    Every handler hands `ctx.clients` to `app.core.auth.account` -- or, to
+    unlink Microsoft, to `entra_flows.unlink`, which opens `account`'s own
+    session -- which runs a contact's request in that scope: their own client
+    (invariant 5a)."""
     return ctx
 
 
@@ -799,4 +886,13 @@ async def end_my_session(
 ) -> Response:
     """End one of the caller's own sessions."""
     await account.end_my_session(request, _me(ctx), session_id, clients=ctx.clients)
+    return _no_content()
+
+
+@me_router.delete("/microsoft", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_microsoft(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> Response:
+    """Unlink the caller's Microsoft account, after a recent confirmation;
+    never the last way in (409 `last_method`)."""
+    require_step_up(ctx)
+    await entra_flows.unlink(request, _me(ctx), clients=ctx.clients)
     return _no_content()

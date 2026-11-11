@@ -101,6 +101,16 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
                 "invite/passkey",
                 "consumes an invitation link, binds a passkey and mints a session cookie",
             ),
+            (
+                "microsoft/start",
+                "starts a sign-in with Microsoft only the person's browser can finish; for a "
+                "technician's invitation it takes their new password and mints a session cookie",
+            ),
+            (
+                "microsoft/complete",
+                "redeems the code Microsoft's redirect gave the person's browser and mints a "
+                "session cookie",
+            ),
         )
     },
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
@@ -304,6 +314,8 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/trusted-devices/{device_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
+    # The person's own Microsoft link (phase 2, Task 9).
+    ("DELETE", "/api/v1/me/microsoft"): _MY_SECURITY,
     # The portal page's own account summary (own authentication phase 2): read
     # from the browser's session, which the MCP channel never has. An AI app
     # asks `GET /me`.
