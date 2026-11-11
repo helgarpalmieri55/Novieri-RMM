@@ -62,6 +62,8 @@ export const auditActions: Shape<typeof enActions> = {
   auth_device_remembered: "Equipo recordado",
   auth_device_revoked: "Equipo olvidado",
   auth_email_changed: "Correo electrónico modificado",
+  auth_entra_credential_used: "Clave de Microsoft usada al iniciar sesión",
+  auth_entra_settings_updated: "Ajustes de Microsoft modificados",
   auth_factor_added: "Segundo factor añadido",
   // Any method, the password included, locked after too many failures: the
   // notice's word for it ("Se bloqueó un método de inicio de sesión").

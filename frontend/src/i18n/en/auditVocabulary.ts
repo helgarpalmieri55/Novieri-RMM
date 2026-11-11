@@ -65,6 +65,8 @@ export const auditActions = {
   auth_device_remembered: "Auth device remembered",
   auth_device_revoked: "Auth device revoked",
   auth_email_changed: "Auth email changed",
+  auth_entra_credential_used: "Auth entra credential used",
+  auth_entra_settings_updated: "Auth entra settings updated",
   auth_factor_added: "Auth factor added",
   auth_factor_disabled: "Auth factor disabled",
   auth_factor_removed: "Auth factor removed",

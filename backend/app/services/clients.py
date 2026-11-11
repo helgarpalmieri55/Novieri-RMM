@@ -44,6 +44,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth.entra import CONSUMER_TENANT
 from app.core.i18n import tr
 from app.core.identity import CONTACT_KIND
 from app.models import Client, Device, Site, User
@@ -158,6 +159,21 @@ def _modules(modules: Sequence[str]) -> list[str]:
             ),
         )
     return sorted(set(modules))
+
+
+def _tenants(values: Sequence[UUID]) -> list[UUID]:
+    """Sorted, without repeats; never the personal-account tenant (plan D35)."""
+    tenants = sorted(set(values), key=str)
+    if CONSUMER_TENANT in tenants:
+        raise ClientError(422, tr("a personal Microsoft account tenant cannot sign anyone in here"))
+    return tenants
+
+
+def _plain(value: Any) -> Any:
+    """A value as the audit row keeps it: JSON has no UUID."""
+    if isinstance(value, list):
+        return [str(v) if isinstance(v, UUID) else v for v in value]
+    return value
 
 
 def _client_name(raw: str) -> str:
@@ -345,6 +361,7 @@ async def create_client(
 CLIENT_FIELDS = (
     "name",
     "email_domains",
+    "microsoft_tenants",
     "phone",
     "address",
     "website",
@@ -382,6 +399,8 @@ async def update_client(
             wanted[key] = _modules(value)
         elif key == "notes":
             wanted[key] = value
+        elif key == "microsoft_tenants":
+            wanted[key] = _tenants(value)
         else:
             wanted[key] = value.strip()
     # THE UNASSIGNED CLIENT (review 1, M6): unknown senders land there because
@@ -393,8 +412,10 @@ async def update_client(
             raise ClientError(422, tr("the unassigned client takes no email domains"))
         if wanted.get("enabled_modules"):
             raise ClientError(422, tr("the unassigned client has no optional modules"))
+        if wanted.get("microsoft_tenants"):
+            raise ClientError(422, tr("the unassigned client takes no Microsoft tenants"))
     changed = {
-        key: {"before": getattr(client, key), "after": value}
+        key: {"before": _plain(getattr(client, key)), "after": _plain(value)}
         for key, value in wanted.items()
         if getattr(client, key) != value
     }
@@ -404,8 +425,8 @@ async def update_client(
         raise _domain_refusal()
     if not changed:
         return client
-    for key, diff in changed.items():
-        setattr(client, key, diff["after"])
+    for key in changed:
+        setattr(client, key, wanted[key])
     await _flush_client(session)
     await audit_service.record(
         session,

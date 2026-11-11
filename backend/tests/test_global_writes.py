@@ -71,6 +71,8 @@ GLOBAL_WRITES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/settings/email/test"): "orgs.manage",
     # how long a sign-in lasts (`auth_org_settings`, P2 design §2.4)
     ("PUT", "/api/v1/settings/sessions"): "orgs.manage",
+    # sign in with Microsoft (`auth_entra_settings`, P2 phase 2 design §4)
+    ("PUT", "/api/v1/settings/microsoft-sign-in"): "orgs.manage",
     # the platform error monitor (`platform_error_group`)
     ("POST", "/api/v1/platform/errors/{group_id}/resolve"): "platform.errors.write",
     ("POST", "/api/v1/platform/errors/{group_id}/unresolve"): "platform.errors.write",

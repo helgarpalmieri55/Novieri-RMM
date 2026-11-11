@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_permission_with_step_up
 from app.core.audit import audit_service
+from app.core.auth.entra_settings import ENTRA_CREDENTIAL_TYPE
 from app.core.i18n import tr, tr_marked
 from app.core.mail import ACCOUNT_MAIL_CREDENTIAL_TYPE
 from app.core.tenancy import org_session
@@ -269,6 +270,18 @@ async def checkout_credential(
                     "and cannot be revealed."
                 ),
             )
+        # Sign-in with Microsoft's private key (own authentication phase 2,
+        # operator decision C4): opened only to sign a client assertion,
+        # audited there. Settings -> Microsoft sign-in replaces it; nothing
+        # reads it back.
+        if credential.type == ENTRA_CREDENTIAL_TYPE:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                tr(
+                    "This credential is used only to sign people in with Microsoft and cannot be "
+                    "revealed."
+                ),
+            )
         secret = await state.vault.checkout(
             session, org_id=ctx.org_id, credential_id=credential_id
         )
@@ -292,13 +305,22 @@ async def checkout_credential(
 def _refuse_account_mail(credential: Credential) -> None:
     """Account email's relay sign-in is changed and removed by Settings -> Email
     alone: rotating or deleting it here would leave that row pointing at a
-    secret that no longer works (or at nothing), bypassing its audit record."""
+    secret that no longer works (or at nothing), bypassing its audit record.
+    The same holds for sign-in with Microsoft's private key (Task 5)."""
     if credential.type == ACCOUNT_MAIL_CREDENTIAL_TYPE:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             tr(
                 "This credential belongs to this organization's account email; change it "
                 "in Settings, Email."
+            ),
+        )
+    if credential.type == ENTRA_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "This credential belongs to sign-in with Microsoft; ask for a new certificate in "
+                "Settings, Microsoft sign-in."
             ),
         )
 

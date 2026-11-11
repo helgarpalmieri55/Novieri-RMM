@@ -597,8 +597,13 @@ from tests.tool_surface import (
 # documented and not a list, so P3, P4 and P5 do not move; failing P2 it is in
 # neither "passing five" nor "passing six", so neither set nor
 # PENDING_TOOL_REVIEW moves either.
-EXPECTED_GET_ROUTES = 255
-EXPECTED_PASSING_FIVE = 52
+# +1 (2026-11-06, P2 phase 2 Task 5): GET /settings/microsoft-sign-in, gated
+# (orgs.manage), typed, described and closed: passing five +1. It passes all
+# six and waits in PENDING_TOOL_REVIEW beside /settings/email and
+# /settings/sessions: who may sign in with which Microsoft tenant is
+# reconnaissance about the organisation's sign-in posture.
+EXPECTED_GET_ROUTES = 256
+EXPECTED_PASSING_FIVE = 53
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
@@ -655,6 +660,8 @@ EXPECTED_PASSING_SIX = frozenset(
         # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/settings/sessions",
+        # Added 2026-11-06 (P2 phase 2 Task 5); reasoning above EXPECTED_GET_ROUTES.
+        "/api/v1/settings/microsoft-sign-in",
         # Added 2026-08-21 (patch approvals list). Eligible, and deliberately
         # not registered: the list names every patch cleared to reach a
         # machine, and hands out the ids `DELETE /approvals/{id}` takes.
@@ -998,6 +1005,8 @@ PENDING_TOOL_REVIEW = frozenset(
         # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/settings/sessions",
+        # Added 2026-11-06 (P2 phase 2 Task 5); reasoning above EXPECTED_GET_ROUTES.
+        "/api/v1/settings/microsoft-sign-in",
         # Added 2026-08-21 (patch approvals list); reasoning beside
         # EXPECTED_PASSING_SIX above.
         "/api/v1/patch/approvals",
