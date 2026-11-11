@@ -176,6 +176,9 @@ the system.
   invitation; without mail configured, that technician sees the new link
   and could use it themselves, as they already could by changing the
   contact's address and inviting -- the audit log records `link_shown`.
+  Design §10's falsifier 1 -- a contact's session passes no console door --
+  is held at every route under `/api/v1`, at both console sockets and in
+  the portal, by `backend/tests/test_auth_phase2_falsifiers.py`.
 - **Sign in with Microsoft (own authentication phase 2):** one multi-tenant
   application in Microsoft Entra ID, at the `organizations` authority. The
   platform proves itself to Microsoft with a certificate it made
@@ -190,11 +193,14 @@ the system.
   -- always has a password as well, and is still asked for the platform's
   own second factor (the token does not say whether Microsoft asked for
   one), which an idle session does not skip; a contact signs in only from a
-  tenant their client lists.
+  tenant their client lists. Design §10's falsifier 8 -- an unknown
+  Microsoft account is refused, and no account and no link is made -- is
+  `backend/tests/test_auth_entra_flows.py::test_falsifier_8_an_unknown_account_is_refused_and_nothing_is_made`.
 - **Retention:** sessions are deleted 90 days after they ended or expired;
-  remembered devices and one-time links 30 days after; WebAuthn challenges
-  after a day; each daily sweep that deletes anything is audited
-  (`auth.retention_applied`).
+  remembered devices and one-time links 30 days after (a technician's
+  unused invitation never is: it is the pending invitation Users shows);
+  WebAuthn challenges after a day; each daily sweep that deletes anything
+  is audited (`auth.retention_applied`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):

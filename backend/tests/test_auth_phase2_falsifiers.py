@@ -25,13 +25,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from fastapi.routing import APIRoute
-from sqlalchemy import update
+from fastapi.routing import APIRoute, APIWebSocketRoute
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
-from app.models import Ticket
+from app.models import Role, Ticket, UserRole
 from tests.auth_support import console_ready, contact
 from tests.session_support import CONSOLE, cookie_header, refusal_code, sign_in
 
@@ -39,6 +39,9 @@ _PARAM = re.compile(r"\{[^}]+\}")
 
 #: Doors of their own: the portal's, and the sign-in's before any door.
 EXCEPT_PREFIXES = ("/api/v1/portal/", "/api/v1/auth/", "/api/v1/setup/")
+#: The console's sockets under /api/v1, each driven by the socket falsifier
+#: below. A new one fails that test until it is added here and driven there.
+CONSOLE_SOCKETS = frozenset({"/api/v1/ws", "/api/v1/remote/sessions/{session_id}/screen"})
 #: The person's OWN account routes, which admit a contact (D26, Task 7).
 OWN_ACCOUNT: frozenset[tuple[str, str]] = frozenset(
     {
@@ -193,18 +196,58 @@ async def _socket(env: Any, path: str, cookie: str) -> list[int]:
     return [m.get("code", 1000) for m in sent if m["type"] == "websocket.close"]
 
 
+async def _grant(env: Any, who: Any, role_name: str) -> None:
+    """`role_name` on the contact's OWN client, written past the API: a grant
+    no screen offers a contact, which the refusal must outlast ("a contact who
+    somehow holds a role is still a contact", `identity.contact_refusal`)."""
+    async with AsyncSession(env.admin_engine) as s:
+        role = (
+            await s.execute(select(Role).where(Role.name == role_name, Role.org_id.is_(None)))
+        ).scalar_one()
+        s.add(
+            UserRole(
+                org_id=who.org_id, user_id=who.user_id, role_id=role.id, client_id=who.client_id
+            )
+        )
+        await s.commit()
+
+
 async def test_falsifier_1_no_console_socket_lets_a_contact_in(
     api_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The console's live socket and the remote screen's tunnel refuse a
-    contact through `read_session_identity` (`app/core/identity/door.py`);
-    nothing held that until now."""
+    contact (`identity.contact_refusal`, through `read_session_identity`).
+
+    `test_domain_gate_doors.py` already holds each door's contact refusal
+    through its log line. This holds what the BROWSER is answered, and makes
+    that answer mean the refusal: the contact holds `remote.control` on their
+    own client (the `technician` role), so without the refusal the console's
+    socket would accept them and the tunnel would go on to look the session
+    up -- 4404 for this random id, which is what a technician holding the same
+    grant is answered (the control at the end). Without the grant, the
+    tunnel's own 4403 "requires remote.control" would hide a missing refusal.
+
+    Every console socket under /api/v1 is one of the two driven here: the set
+    is read from the router, so a new one fails this test until it is added."""
     console_ready(api_env, monkeypatch)
-    _who, _headers, token = await _contact_session(api_env)
-    cookie = cookie_header(token)
-    assert await _socket(api_env, "/api/v1/ws", cookie) == [4403]
+    sockets = {
+        path
+        for path, route in flatten(api_env.app.router)
+        if isinstance(route, APIWebSocketRoute) and path.startswith("/api/v1/")
+    }
+    assert sockets == CONSOLE_SOCKETS
+
+    org = await api_env.create_org("f1-sockets")
+    who = await contact(api_env, org)
+    await _grant(api_env, who, "technician")
+    signed = await sign_in(api_env, org, who.sub)
+    cookie = cookie_header(signed.token)
     screen = f"/api/v1/remote/sessions/{uuid4()}/screen"
+    assert await _socket(api_env, "/api/v1/ws", cookie) == [4403]
     assert await _socket(api_env, screen, cookie) == [4403]
+
+    technician = await sign_in(api_env, org, await api_env.create_user(org, "technician"))
+    assert await _socket(api_env, screen, cookie_header(technician.token)) == [4404]
 
 
 async def test_falsifier_1_a_contacts_portal_reads_nobody_elses_ticket(
@@ -212,15 +255,22 @@ async def test_falsifier_1_a_contacts_portal_reads_nobody_elses_ticket(
 ) -> None:
     """A contact reads no ticket of another person IN THEIR OWN CLIENT -- the
     requester role's own rule, not only the client scope -- nor anything of
-    another organization."""
+    another organization. Their own ticket, beside it, reads and is listed:
+    without that control a portal that served nothing would pass."""
     org = await api_env.create_org("f1-portal")
     other_org = await api_env.create_org("f1-portal-other")
     who = await contact(api_env, org)
     signed = await sign_in(api_env, org, who.sub)
     neighbour = await a_ticket_for(org, "neighbour")
+    own = await a_ticket_for(org, "own")
     async with AsyncSession(api_env.admin_engine) as s:
         await s.execute(
             update(Ticket).where(Ticket.id == neighbour.id).values(client_id=who.client_id)
+        )
+        await s.execute(
+            update(Ticket)
+            .where(Ticket.id == own.id)
+            .values(client_id=who.client_id, requester_id=who.user_id)
         )
         await s.commit()
     stranger = await a_ticket_for(other_org, "stranger")
@@ -229,6 +279,9 @@ async def test_falsifier_1_a_contacts_portal_reads_nobody_elses_ticket(
         path = f"/api/v1/portal/tickets/{ticket.id}"
         one = await api_env.client.get(path, headers=signed.headers)
         assert one.status_code == 404, one.text
+    mine = await api_env.client.get(f"/api/v1/portal/tickets/{own.id}", headers=signed.headers)
+    assert mine.status_code == 200, mine.text
+    assert mine.json()["id"] == str(own.id)
     listed = await api_env.client.get("/api/v1/portal/tickets", headers=signed.headers)
     assert listed.status_code == 200, listed.text
-    assert listed.json() == []
+    assert [ticket["id"] for ticket in listed.json()] == [str(own.id)]

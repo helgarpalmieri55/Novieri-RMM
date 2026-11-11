@@ -33,7 +33,7 @@ Keycloak still signs MCP clients in until phase 3. The sections of this
 runbook that describe the console's sign-in through Keycloak -- the
 enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
 predate that change; the runbook is rewritten with the deployment project
-(design §9). Three things phase 1 changed, and two phase 2 changed, that every deployment needs:
+(design §9). Four things phase 1 changed, and two phase 2 changed, that every deployment needs:
 
 - **`ITS_PUBLIC_CONSOLE_URL` is required for any console sign-in**, and it must
   be exactly the `https://host[:port]` origin the browser's address bar shows
@@ -1834,9 +1834,9 @@ and then silently drops mail from an unknown sender is the common case.
 `deploy/keycloak/realm-it-suite.json` **cannot carry the SMTP password**, and
 must not be edited to. That file is in **git**: a secret committed there is a
 credential in every clone, every fork and every CI cache, rotatable only by
-rewriting history. It is the same argument the "Sign in with Microsoft" section
-above makes about `ENTRA_CLIENT_SECRET`, at the second field somebody reaches
-for.
+rewriting history. It is the same argument the
+"3. Sign in with Microsoft — by hand, for now" section above makes about
+`ENTRA_CLIENT_SECRET`, at the second field somebody reaches for.
 
 There is a second reason the file is the wrong place regardless of secrets:
 **realm import runs only against an empty database**, so editing the JSON on a

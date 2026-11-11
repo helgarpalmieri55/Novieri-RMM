@@ -224,8 +224,9 @@ S5, 2026-11-09).
 - Aplica a cualquier cuenta con segundo factor: técnicos y contactos que lo activaron.
 - **Límites:** la persona lo revoca en «Mis equipos de confianza» y un administrador también; se revoca solo al cambiar
   la contraseña, al restablecer los factores o al desactivar a la persona; las acciones de §2.5 siguen pidiendo el
-  segundo factor (un contacto con app TOTP lo da también con su clave de acceso, §3); cada equipo recordado se audita y
-  se avisa por correo.
+  segundo factor (un contacto con app TOTP lo da también con su clave de acceso, §3; *añadido el 2026-11-06, para que
+  §2.6 no contradiga a §3 tras la decisión C5 del operador; confirmado por el operador el 2026-11-08, decisión S2 del
+  plan de la fase 2*); cada equipo recordado se audita y se avisa por correo.
 
 ### 2.7 Avisos por correo
 
@@ -280,9 +281,9 @@ tiempo.
   (invariante 3). **El certificado es autofirmado porque así lo eligió el operador (C4), no porque no haya otra
   opción:** Microsoft prefiere uno de una CA (*«use a certificate from a trusted certificate authority (CA) instead of a
   self-signed certificate. Configure a policy to enforce that certificates come from trusted issuers. However, if using
-  a trusted CA isn't possible, self-signed certificates are still preferred over passwords.»*). Una política de gestión
-  de aplicaciones del tenant de Novieri —`trustedCertificateAuthority`, o `asymmetricKeyLifetime` por debajo de 360
-  días— rechazaría la subida, y la plataforma no importa certificados de una CA. **Renovar no deja hueco:** el
+  a trusted CA isn't possible, self-signed certificates are still preferred over passwords.»* [M8]). Una política de
+  gestión de aplicaciones del tenant de Novieri —`trustedCertificateAuthority`, o `asymmetricKeyLifetime` por debajo de
+  360 días— rechazaría la subida, y la plataforma no importa certificados de una CA. **Renovar no deja hueco:** el
   certificado nuevo espera junto al que está en uso, que sigue firmando, mientras el administrador lo sube a la app
   (Entra guarda varios), y solo cuando él dice «ya lo subí» pasa a firmar el nuevo y la clave vieja se destruye.
   *(Corregido el 2026-11-06: decía «Su secreto va a OpenBao»; decisiones del operador C4 y B2-35, plan de la fase 2, D33
