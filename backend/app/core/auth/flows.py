@@ -909,8 +909,6 @@ async def _deployment_org(request: Request) -> UUID | None:
     return await org_of_slug(_engine(request), slug)
 
 
-
-
 async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
     """A challenge that belongs to nobody yet, and no list of credentials:
     the browser offers the person's own discoverable passkeys (D28). Nothing
