@@ -23,6 +23,7 @@ import {
   calls,
   installDefaults,
   renderSettings,
+  stepUpRequired,
 } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
@@ -290,5 +291,75 @@ describe("Settings — Roles tab", () => {
     expect(
       within(dialog).getByText(/remove their access on the\s+Users tab first/i),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Own authentication phase 2, Task 14 (design §2.5, operator 2026-11-09, S5):
+ * creating a role, saving its permissions and deleting it need the
+ * administrator's second factor confirmed in the last 10 minutes. The server
+ * says when it is stale (403 `step_up_required`); the tab asks for it and
+ * sends the same act once more, and only then. Renaming is not asked, and
+ * this tab does not rename.
+ */
+describe("Settings — Roles tab, a recent second factor", () => {
+  async function confirm(user: ReturnType<typeof userEvent.setup>) {
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+  }
+
+  it("asks for it before a role is created, then creates the same role once more", async () => {
+    calls.createRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.type(await screen.findByLabelText("New role name"), "warehouse-technician");
+    await user.click(screen.getByRole("button", { name: "Create role" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.createRole).toHaveBeenCalledTimes(2));
+    expect(calls.createRole.mock.calls[1]).toEqual(calls.createRole.mock.calls[0]);
+    await waitFor(() => expect(screen.getByLabelText("New role name")).toHaveValue(""));
+  });
+
+  it("asks for it before a role's permissions are saved", async () => {
+    calls.setRolePermissions.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
+    await user.click(await screen.findByLabelText("devices.manage"));
+    await user.click(screen.getByRole("button", { name: "Save permissions" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.setRolePermissions).toHaveBeenCalledTimes(2));
+    expect(calls.setRolePermissions).toHaveBeenLastCalledWith(TECHNICIAN_ROLE.id, ["devices.manage", "devices.read"]);
+  });
+
+  it("asks for it before a role is deleted, over the confirmation, which then closes", async () => {
+    calls.deleteRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Delete role auditor" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete auditor" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.deleteRole).toHaveBeenCalledTimes(2));
+    expect(calls.deleteRole).toHaveBeenLastCalledWith(AUDITOR_ROLE.id);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
+    calls.createRole.mockRejectedValue(stepUpRequired());
+    const user = await openRoles();
+    await user.type(await screen.findByLabelText("New role name"), "warehouse-technician");
+    await user.click(screen.getByRole("button", { name: "Create role" }));
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(stepUp).getByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByText("Nothing was changed: the confirmation was closed.")).toBeInTheDocument();
+    expect(calls.createRole).toHaveBeenCalledTimes(1);
   });
 });

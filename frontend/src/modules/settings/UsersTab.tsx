@@ -56,11 +56,16 @@
 // with the link instead, ONCE, and this tab shows it for the operator to pass
 // on another way; resending shows a fresh one the same way.
 //
-// RESETTING SOMEONE'S SECOND FACTORS NEEDS YOUR OWN (§2.5, §7). The server
-// answers 403 `step_up_required` unless the operator confirmed their own
-// second factor in the last 10 minutes; `useStepUp` asks for it over the
-// confirmation and sends the reset once more only after the server accepted
-// it. There is no password reset here: a forgotten password is reset by the
+// RESETTING SOMEONE'S SECOND FACTORS NEEDS YOUR OWN (§2.5, §7), and so, since
+// the operator widened §2.5 on 2026-11-08 (S1), do inviting, sending an
+// invitation again, granting and removing a role -- and, since 2026-11-09
+// (S5), enabling a disabled person again. The server answers 403
+// `step_up_required` unless the operator confirmed their own second factor in
+// the last 10 minutes; `useStepUp` asks for it -- over the confirmation, where
+// there is one -- and sends the act once more only after the server accepted
+// it. Cancelling an invitation, disabling, signing out and deleting take
+// access away, and are never asked (S4).
+// There is no password reset here: a forgotten password is reset by the
 // person, by email (§2.8), and a second factor never is.
 //
 // THE MAIL BANNER IS HERE BECAUSE THIS IS WHERE IT BITES. Without mail an
@@ -251,13 +256,13 @@ export function UsersTab({
     [clients.data],
   );
 
-  const invite = useInviteUserMutation();
-  const assignRole = useAssignRoleMutation();
-  const removeRole = useRemoveRoleMutation();
-  const setEnabled = useSetUserEnabledMutation();
-  const resendInvite = useResendInviteMutation();
-  const cancelInvite = useCancelInviteMutation();
   const stepUp = useStepUp();
+  const invite = useInviteUserMutation(stepUp.run);
+  const assignRole = useAssignRoleMutation(stepUp.run);
+  const removeRole = useRemoveRoleMutation(stepUp.run);
+  const setEnabled = useSetUserEnabledMutation(stepUp.run);
+  const resendInvite = useResendInviteMutation(stepUp.run);
+  const cancelInvite = useCancelInviteMutation();
   const resetFactors = useResetUserFactorsMutation(stepUp.run);
   const endSessions = useEndUserSessionsMutation();
   const deleteUser = useDeleteUserMutation();

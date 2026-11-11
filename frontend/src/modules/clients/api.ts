@@ -19,7 +19,7 @@ import type {
   SiteCreate,
   SiteUpdate,
 } from "../../lib/api";
-import type { StepUpRun } from "../../components/stepUp";
+import { sendOnce, type StepUpRun } from "../../components/stepUp";
 import { useApi } from "../../lib/ApiContext";
 import { useSecretMutation } from "../../lib/secretMutation";
 import { CLIENTS_KEY } from "../settings/api";
@@ -94,12 +94,17 @@ export function useCreateClientMutation() {
  * the Modules tab's second switch sent the old `enabled_modules` and undid
  * the first on the server. So the server's answer goes into the record's
  * cache before anything is refreshed.
+ *
+ * `run` is the edit form's `useStepUp().run`: a change to the client's
+ * Microsoft tenants needs the second factor confirmed in the last 10 minutes
+ * (design §2.5, S1). The Modules tab sends only `enabled_modules`, which
+ * never does, and sends once.
  */
-export function useUpdateClientMutation(clientId: string) {
+export function useUpdateClientMutation(clientId: string, run: StepUpRun = sendOnce) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ClientOut, ApiError, ClientUpdate>({
-    mutationFn: (body) => api.updateClient(clientId, body),
+  return useMutation<ClientOut, Error, ClientUpdate>({
+    mutationFn: (body) => run(() => api.updateClient(clientId, body)),
     onSuccess: (saved) => {
       queryClient.setQueryData<ClientOut>([CLIENT_KEY, clientId], saved);
       afterClientChange(queryClient, clientId);

@@ -21,6 +21,7 @@
 
 import { useEffect, useState } from "react";
 
+import { useStepUp } from "../../components/stepUp";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -89,7 +90,9 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
   const t = useT();
   const reason = useGlobalWriteReason(SESSIONS_MANAGE);
   const settings = useSessionSettings(canRead);
-  const update = useUpdateSessionSettingsMutation();
+  // A save needs the second factor confirmed in the last 10 minutes (§2.5, S1).
+  const stepUp = useStepUp();
+  const update = useUpdateSessionSettingsMutation(stepUp.run);
 
   const seed = seedFrom(settings.data);
   const [form, setForm] = useState<SessionsForm>(seed);
@@ -146,7 +149,8 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
     );
   }
 
-  return (
+  // The panel, then the confirmation outside it (`components/stepUp.tsx`).
+  const panel = (
     <Panel title={t("settings.sessions.title")} subtitle={t("settings.sessions.subtitle")}>
       {settings.isLoading ? (
         <p className="note">{t("settings.sessions.loading")}</p>
@@ -209,5 +213,11 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
         </>
       )}
     </Panel>
+  );
+  return (
+    <>
+      {panel}
+      {stepUp.dialog}
+    </>
   );
 }

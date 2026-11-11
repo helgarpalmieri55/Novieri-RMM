@@ -1016,3 +1016,111 @@ describe("Settings — Users tab, duplicate role grants", () => {
     );
   });
 });
+
+/**
+ * Own authentication phase 2, Task 14 (design §2.5, operator 2026-11-08, S1,
+ * and 2026-11-09, S5): inviting, sending an invitation again, granting and
+ * removing a role and enabling a disabled person again need the
+ * administrator's second factor confirmed in the last 10 minutes. The server
+ * says when it is stale (403 `step_up_required`); the tab asks for it and
+ * sends the same act once more, and only then.
+ */
+describe("Settings — Users tab, a recent second factor", () => {
+  async function confirm(user: ReturnType<typeof userEvent.setup>) {
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+  }
+
+  it("asks for it before an invitation, then sends the same invitation once more", async () => {
+    calls.inviteUser.mockRejectedValueOnce(stepUpRequired()).mockResolvedValueOnce({ user_id: INVITED_USER.id, invite_link: null });
+    const user = await openUsers();
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.inviteUser).toHaveBeenCalledTimes(2));
+    expect(calls.inviteUser.mock.calls[1]).toEqual(calls.inviteUser.mock.calls[0]);
+    expect(await screen.findByRole("status")).toHaveTextContent("An invitation was emailed to newbie@example.com.");
+  });
+
+  it("asks for it before sending an invitation again", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockRejectedValueOnce(stepUpRequired()).mockResolvedValueOnce({ invite_link: null });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.resendInvite).toHaveBeenCalledTimes(2));
+    expect(calls.resendInvite).toHaveBeenLastCalledWith(INVITED_USER.id);
+    expect(await screen.findByRole("status")).toHaveTextContent("The invitation was emailed to invitee@example.com again.");
+  });
+
+  it("asks for it before a role is granted", async () => {
+    calls.assignUserRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openUsers();
+    await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
+    const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
+    await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
+    await user.click(within(panel).getByLabelText(/client/i));
+    await user.click(await within(panel).findByRole("option", { name: /Warehouse/ }));
+    await user.click(within(panel).getByRole("button", { name: "Assign role on Warehouse" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(2));
+    expect(calls.assignUserRole).toHaveBeenLastCalledWith(OPERATOR_USER.id, {
+      role_id: AUDITOR_ROLE.id,
+      client_id: WAREHOUSE_CLIENT.id,
+    });
+  });
+
+  it("asks for it before a role is removed, over the confirmation, which then closes", async () => {
+    calls.removeUserRole.mockRejectedValueOnce(stepUpRequired());
+    const user = await openUsers();
+    await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
+    const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
+    await user.click(within(panel).getByRole("button", { name: "Remove Technician (everywhere) from operator@example.com" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Remove role from operator@example.com" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.removeUserRole).toHaveBeenCalledTimes(2));
+    expect(calls.removeUserRole).toHaveBeenLastCalledWith(OPERATOR_USER.id, OPERATOR_USER.roles[0]?.assignment_id);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("asks for it before a disabled person is enabled again (S5)", async () => {
+    calls.setUserEnabled.mockRejectedValueOnce(stepUpRequired());
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /casey@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Enable casey@example.com" }));
+
+    await confirm(user);
+
+    await waitFor(() => expect(calls.setUserEnabled).toHaveBeenCalledTimes(2));
+    expect(calls.setUserEnabled).toHaveBeenLastCalledWith(CASEY_USER.id, true);
+  });
+
+  it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
+    calls.inviteUser.mockRejectedValue(stepUpRequired());
+    const user = await openUsers();
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(stepUp).getByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByText("Nothing was changed: the confirmation was closed.")).toBeInTheDocument();
+    expect(calls.inviteUser).toHaveBeenCalledTimes(1);
+  });
+});

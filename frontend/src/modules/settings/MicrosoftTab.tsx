@@ -14,6 +14,11 @@
 // it to Entra; "I uploaded it" switches to it. Switching before the upload is
 // the one way to break sign-in, which the tab says beside the button.
 //
+// EVERY SAVE NEEDS A RECENT SECOND FACTOR (design §2.5, operator 2026-11-08,
+// S1): a save, a new certificate and the switch to the waiting one. The server
+// answers 403 `step_up_required` without it, and `useStepUp` asks and sends
+// the same save once more.
+//
 // THE THUMBPRINT is the SHA-256 one each sign-in's assertion names
 // (`x5t#S256`), base64url. The tab does not say it is the one the Entra
 // portal shows, which may be another (f2-3 M6).
@@ -33,6 +38,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 
+import { useStepUp } from "../../components/stepUp";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { formatDate } from "../../lib/datetime";
@@ -91,7 +97,8 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
   const zone = useOrgZone();
   const reason = useGlobalWriteReason(MICROSOFT_MANAGE);
   const settings = useMicrosoftSettings(canRead);
-  const update = usePutMicrosoftSettingsMutation();
+  const stepUp = useStepUp();
+  const update = usePutMicrosoftSettingsMutation(stepUp.run);
   const seed = seedFrom(settings.data);
   const [form, setForm] = useState<MicrosoftForm>(seed);
   // Not part of the seed: a request, not a stored value.
@@ -138,7 +145,8 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
     });
   }
 
-  return (
+  // The panel, then the confirmation outside it (`components/stepUp.tsx`).
+  const panel = (
     <Panel title={t("settings.microsoft.title")} subtitle={t("settings.microsoft.subtitle")}>
       {settings.isLoading ? (
         <p className="note">{t("settings.microsoft.loading")}</p>
@@ -311,5 +319,11 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
         </>
       )}
     </Panel>
+  );
+  return (
+    <>
+      {panel}
+      {stepUp.dialog}
+    </>
   );
 }
