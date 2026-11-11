@@ -13,7 +13,14 @@ import { setActiveLanguage } from "../../../i18n/core";
 import { expectNoEnglish } from "../../../i18n/test-utils";
 import { ApiError } from "../../../lib/api";
 import { saveBlob } from "../../../lib/download";
-import { MICROSOFT_SETTINGS_FIXTURE, apiClient, calls, installDefaults, renderSettings } from "./harness";
+import {
+  MICROSOFT_SETTINGS_FIXTURE,
+  apiClient,
+  calls,
+  installDefaults,
+  renderSettings,
+  stepUpRequired,
+} from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 // jsdom follows no download: what is handed to the browser is what is checked.
@@ -276,5 +283,39 @@ describe("Microsoft sign-in", () => {
     await screen.findByRole("tab", { name: /Organization/ });
     expect(screen.queryByRole("tab", { name: /Microsoft sign-in/ })).not.toBeInTheDocument();
     expect(calls.getMicrosoftSettings).not.toHaveBeenCalled();
+  });
+
+  it("asks for the second factor when the server says it is stale, then saves once more (§2.5, S1)", async () => {
+    calls.putMicrosoftSettings.mockRejectedValueOnce(stepUpRequired());
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    await user.type(await within(tab).findByLabelText("Application (client) ID"), APP);
+    await user.click(within(tab).getByRole("checkbox", { name: "Make a new certificate when I save" }));
+    await user.click(within(tab).getByRole("button", { name: "Save changes" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.putMicrosoftSettings).toHaveBeenCalledTimes(2));
+    expect(calls.putMicrosoftSettings.mock.calls[1]).toEqual(calls.putMicrosoftSettings.mock.calls[0]);
+    expect(calls.putMicrosoftSettings.mock.calls[1]?.[0]).toMatchObject({ new_certificate: true });
+  });
+
+  it("asks for it before switching to the waiting certificate too", async () => {
+    calls.getMicrosoftSettings.mockResolvedValue(WAITING);
+    calls.putMicrosoftSettings.mockRejectedValueOnce(stepUpRequired());
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    await user.click(await within(tab).findByRole("button", { name: "I uploaded it: switch to the new certificate" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.putMicrosoftSettings).toHaveBeenCalledTimes(2));
+    expect(calls.putMicrosoftSettings.mock.calls[1]?.[0]).toMatchObject({ activate_certificate: true });
   });
 });

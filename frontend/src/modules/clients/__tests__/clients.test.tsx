@@ -795,4 +795,71 @@ describe("a client's Microsoft organizations", () => {
       expect(updateClient).toHaveBeenCalledWith("c-andes", expect.objectContaining({ microsoft_tenants: [tenant] })),
     );
   });
+
+  it("asks for the second factor when the server says it is stale, then sends the tenants once more (§2.5, S1)", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+      )
+      .mockResolvedValueOnce({ ...ANDES, microsoft_tenants: [tenant] });
+    const stepUpTotp = vi.fn().mockResolvedValue(undefined);
+    const getMySecurity = vi.fn().mockResolvedValue({
+      kind: "staff",
+      has_password: true,
+      microsoft: null,
+      has_totp: true,
+      passkeys: [],
+      recovery_codes_left: 0,
+      trusted_devices: [],
+      sessions: [],
+    });
+    mockUseApi.mockReturnValue(api({ updateClient, stepUpTotp, getMySecurity }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), tenant);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(updateClient).toHaveBeenCalledTimes(2));
+    expect(updateClient.mock.calls[1]).toEqual(updateClient.mock.calls[0]);
+    expect(stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+    // The second, confirmed save is the one the form answers: it closes.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit client" })).not.toBeInTheDocument());
+  });
+
+  // Fix round 1: the editor is not dismissible while the confirmation stands
+  // over it (`dismissible={!stepUp.open}`), so Escape answers the
+  // confirmation alone and the editor stays open with what was typed.
+  it("closes only the confirmation on Escape, and keeps the editor open with the tenants typed", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+      );
+    mockUseApi.mockReturnValue(api({ updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), tenant);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await screen.findByRole("dialog", { name: "Confirm it's you" });
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    const editor = screen.getByRole("dialog", { name: "Edit client" });
+    expect(within(editor).getByLabelText("Microsoft organizations (tenant IDs)")).toHaveValue(tenant);
+    expect(within(editor).getByLabelText("Name")).toHaveValue(ANDES.name);
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
+    expect(updateClient).toHaveBeenCalledTimes(1);
+  });
 });

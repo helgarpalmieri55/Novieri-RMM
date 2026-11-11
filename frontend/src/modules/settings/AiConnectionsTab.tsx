@@ -18,6 +18,11 @@
 // and nothing else: the server merges settings key by key, so the rest of the
 // org document — and the org name — are never re-sent from this tab.
 //
+// A RECENT SECOND FACTOR TO TURN IT ON (design §2.5, operator 2026-11-08, S3),
+// never to turn it off (S4): the server answers 403 `step_up_required`, and
+// `useStepUp` asks for the factor after the question below and sends the
+// switch once more.
+//
 // TURNING IT ON ASKS FIRST; TURNING IT OFF DOES NOT. On opens a remote path
 // into the organization (invariant 1c): from then on an AI app can act as any
 // person who connects it, within that person's permissions. Off only closes
@@ -43,6 +48,7 @@ import { useId, useState, type CSSProperties } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { Button, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { lazyLabels } from "../../i18n/lazy";
@@ -88,7 +94,8 @@ export function AiConnectionsTab({
   const reason = useGlobalWriteReason(ORGS_MANAGE);
   const me = useMe();
   const org = useCurrentOrg();
-  const update = useUpdateCurrentOrgMutation();
+  const stepUp = useStepUp();
+  const update = useUpdateCurrentOrgMutation(stepUp.run);
   const connections = useMcpConnections(canUse);
   const revoke = useRevokeMcpConnection();
   const guideId = useId();
@@ -239,6 +246,9 @@ export function AiConnectionsTab({
         }}
         onCancel={() => setConfirming(null)}
       />
+
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
     </>
   );
 }

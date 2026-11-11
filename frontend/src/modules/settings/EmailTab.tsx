@@ -50,6 +50,7 @@
 import { useEffect, useState } from "react";
 
 import { describeSubmitError } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { lazyFields } from "../../i18n/lazy";
@@ -178,7 +179,10 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
   const t = useT();
   const reason = useGlobalWriteReason(EMAIL_MANAGE);
   const settings = useEmailSettings(canManage);
-  const update = useUpdateEmailSettingsMutation();
+  // A save needs the second factor confirmed in the last 10 minutes (§2.5,
+  // S1); the test send does not (S4).
+  const stepUp = useStepUp();
+  const update = useUpdateEmailSettingsMutation(stepUp.run);
   const test = useTestEmailMutation();
   const suggestion = settings.data?.suggested_test_recipient || settings.data?.from_address || "";
   const [recipient, setRecipient] = useState(suggestion);
@@ -257,7 +261,9 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
     });
   }
 
-  return (
+  // The panel, then the confirmation outside it and outside every form
+  // (`components/stepUp.tsx`).
+  const panel = (
     <Panel
       title={t("settings.email.title")}
       subtitle={t("settings.email.subtitle")}
@@ -560,5 +566,11 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
         </>
       )}
     </Panel>
+  );
+  return (
+    <>
+      {panel}
+      {stepUp.dialog}
+    </>
   );
 }

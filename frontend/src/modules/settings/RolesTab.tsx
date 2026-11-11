@@ -33,10 +33,18 @@
 // `GET /roles`, computed over `user_roles` in the tenant session. Spec §1.4
 // requires it BEFORE applying, because "edit role" reads local and is not: it
 // redefines what some number of real people can do to the fleet.
+//
+// CREATING, CHANGING THE PERMISSIONS OF AND DELETING A ROLE NEED A RECENT
+// SECOND FACTOR (design §2.5, widened by the operator on 2026-11-09, S5). The
+// server answers 403 `step_up_required` unless the operator confirmed their
+// own second factor in the last 10 minutes; `useStepUp` asks for it -- over
+// the delete confirmation, for a delete -- and sends the same act once more
+// only after the server accepted it. Renaming a role is never asked.
 
 import { useMemo, useState, type CSSProperties } from "react";
 
 import { describeSubmitError } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { Btn, KIND_ICON, Panel, QueryState } from "../../shell/components";
@@ -70,9 +78,10 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
   const t = useT();
   const roles = useRoles(canRead);
   const catalogue = usePermissionCatalogue(canRead);
-  const createRole = useCreateRoleMutation();
-  const setPermissions = useSetRolePermissionsMutation();
-  const deleteRole = useDeleteRoleMutation();
+  const stepUp = useStepUp();
+  const createRole = useCreateRoleMutation(stepUp.run);
+  const setPermissions = useSetRolePermissionsMutation(stepUp.run);
+  const deleteRole = useDeleteRoleMutation(stepUp.run);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
@@ -343,6 +352,7 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
         open={pendingDelete != null}
         onClose={() => setPendingDelete(null)}
         title={t("settings.roles.deleteDialog.title")}
+        dismissible={!stepUp.open}
       >
         <p>
           {t("settings.roles.deleteDialog.body", {
@@ -380,6 +390,9 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
           </Button>
         </div>
       </Dialog>
+
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
     </>
   );
 }

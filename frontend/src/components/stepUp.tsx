@@ -3,7 +3,13 @@
  *
  * Changing your own password or second factors, resetting another person's
  * factors and checking a credential out of the vault need the second factor
- * confirmed in the last 10 minutes. The SERVER decides that, on every such
+ * confirmed in the last 10 minutes -- and, since the operator widened §2.5 on
+ * 2026-11-08 (S1, S3), saving the organization's Email, Sessions and Microsoft
+ * sign-in settings, changing a client's Microsoft tenants, inviting a
+ * technician or sending their invitation again, granting or removing a role,
+ * and switching AI access on -- and, since 2026-11-09 (S5), creating a role,
+ * changing a role's permissions, deleting a role and enabling a disabled
+ * person again. The SERVER decides that, on every such
  * request: one it refuses answers 403 `{"code": "step_up_required"}`, in the
  * body or in its `detail`. Nothing here is a check -- the console keeps no
  * clock of its own and never skips a request because it believes the
@@ -84,6 +90,14 @@ function describePasskeyFailure(error: unknown): string {
 
 /** Send `action`; on 403 `step_up_required`, confirm the second factor and send it once more. */
 export type StepUpRun = <T>(action: () => Promise<T>) => Promise<T>;
+
+/**
+ * A `StepUpRun` for a caller that renders no confirmation: the request once,
+ * and a refusal as it came. For the hooks one of whose callers sends only what
+ * the server never asks a confirmation for (`useUpdateCurrentOrgMutation` on
+ * the Organization tab, `useUpdateClientMutation` on the Modules tab).
+ */
+export const sendOnce: StepUpRun = (action) => action();
 
 export interface StepUp {
   run: StepUpRun;

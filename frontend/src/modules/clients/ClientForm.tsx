@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
@@ -31,7 +32,11 @@ export function ClientFormDialog({
 }) {
   const t = useT();
   const create = useCreateClientMutation();
-  const update = useUpdateClientMutation(client?.id ?? "");
+  // A change to the client's Microsoft tenants needs the second factor
+  // confirmed in the last 10 minutes (design §2.5, S1); the rest of the
+  // edit never does, and the server says which.
+  const stepUp = useStepUp();
+  const update = useUpdateClientMutation(client?.id ?? "", stepUp.run);
   const mutation = client ? update : create;
   const [name, setName] = useState(client?.name ?? "");
   const [domains, setDomains] = useState((client?.email_domains ?? []).join("\n"));
@@ -89,11 +94,14 @@ export function ClientFormDialog({
     }
   }
 
-  return (
+  // The form's dialog, then the confirmation outside it: it holds forms of
+  // its own, and Escape answers it alone while it is open.
+  const editor = (
     <Dialog
       open={open}
       onClose={onClose}
       title={client ? t("clients.form.editTitle") : t("clients.form.createTitle")}
+      dismissible={!stepUp.open}
     >
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -166,5 +174,11 @@ export function ClientFormDialog({
         </div>
       </Form>
     </Dialog>
+  );
+  return (
+    <>
+      {editor}
+      {stepUp.dialog}
+    </>
   );
 }

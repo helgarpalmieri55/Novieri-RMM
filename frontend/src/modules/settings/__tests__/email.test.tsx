@@ -43,6 +43,7 @@ import {
   installDefaults,
   mutationCacheText,
   renderSettings,
+  stepUpRequired,
 } from "./harness";
 
 // The OIDC client is not under test and builds a UserManager (with a
@@ -228,6 +229,24 @@ describe("Settings — Email tab", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("The relay refused that password.")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-relay-secret"));
+  });
+
+  it("asks for the second factor when the server says it is stale, saves once more, and keeps no password (§2.5, S1)", async () => {
+    calls.updateEmailSettings.mockRejectedValueOnce(stepUpRequired());
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings();
+    await user.click(await screen.findByRole("tab", { name: /^Email/ }));
+    await user.type(await screen.findByLabelText("Password"), "new-relay-secret");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.updateEmailSettings).toHaveBeenCalledTimes(2));
+    expect(calls.updateEmailSettings.mock.calls[1]?.[0]).toMatchObject({ password: "new-relay-secret" });
+    expect(await screen.findByRole("status")).toHaveTextContent(/Saved\./);
     await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-relay-secret"));
   });
 
