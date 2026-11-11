@@ -12,6 +12,10 @@
  * browser offers the person's own passkeys. Not offered where the browser
  * cannot use one. A refusal -- any refusal -- is one sentence, as on the
  * console's page (§2.3).
+ *
+ * SIGN IN WITH MICROSOFT (own-auth phase 2, Task 12, decision 1): below the
+ * form, always, as on the console's page; it comes back to `next`, which is
+ * the portal unless the link said otherwise.
  */
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -20,11 +24,12 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
-import { enterConsole } from "../../lib/session";
+import { enterConsole, safeNext } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { afterLogin, carryNext, useNext } from "./flow";
+import { MicrosoftButton } from "./MicrosoftButton";
 import { canUsePasskeys, describePasskeyError, signWithPasskey } from "./passkey";
 
 const PORTAL = "/portal";
@@ -125,6 +130,7 @@ export function PortalSignInPage() {
           />
         </div>
       </Form>
+      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/forgot-password", next)}>{t("auth.signIn.forgot")}</Link>
       </p>

@@ -39,6 +39,9 @@ export const clients: Shape<typeof en> = {
     name: "Nombre",
     emailDomains: "Dominios de correo",
     emailDomainsHelp: "Uno por línea. El correo que llega desde estos dominios se archiva en este cliente.",
+    microsoftTenants: "Organizaciones de Microsoft (id. de inquilino)",
+    microsoftTenantsHelp:
+      "Una por línea. Los contactos de este cliente solo pueden entrar con cuentas de Microsoft de estas organizaciones. Hasta 20.",
     phone: "Teléfono",
     address: "Dirección",
     website: "Sitio web",

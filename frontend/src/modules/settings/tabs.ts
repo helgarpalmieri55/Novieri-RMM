@@ -17,6 +17,7 @@ export const SETTINGS_TABS = [
   "roles",
   "users",
   "sessions",
+  "microsoft",
   "assistant",
   "ai-connections",
   "notifications",

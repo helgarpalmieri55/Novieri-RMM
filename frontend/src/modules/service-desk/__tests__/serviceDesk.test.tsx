@@ -1280,7 +1280,7 @@ describe("TicketDetailPage wiring", () => {
       // Archived: it takes nothing new, so a move there is only a 409.
       { id: "c-gone", name: "Gone Ltd", kind: "customer", status: "archived" },
     ].map((client) => ({
-      status: "active", email_domains: [], phone: "", address: "", website: "", notes: "",
+      status: "active", email_domains: [], microsoft_tenants: [], phone: "", address: "", website: "", notes: "",
       enabled_modules: [], device_count: 0, site_count: 0, ...client,
     })) as Awaited<ReturnType<ApiClient["listClients"]>>;
 

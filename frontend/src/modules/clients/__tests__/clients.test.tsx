@@ -50,6 +50,7 @@ const ANDES: ClientOut = {
   kind: "customer",
   status: "active",
   email_domains: ["andes.example"],
+  microsoft_tenants: [],
   phone: "+57 1 555 0100",
   address: "Calle 80 #10-20",
   website: "andes.example",
@@ -776,5 +777,22 @@ describe("a client's contacts' portal access", () => {
     renderAt("/clients/c-andes?tab=contacts");
     const luis = (await screen.findByText("Luis Pardo")).closest("tr") as HTMLElement;
     expect(within(luis).queryByRole("button", { name: /Invite/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("a client's Microsoft organizations", () => {
+  it("are edited one per line and sent as a list", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi.fn().mockResolvedValue({ ...ANDES, microsoft_tenants: [tenant] });
+    mockUseApi.mockReturnValue(api({ updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), ` ${tenant} \n\n`);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateClient).toHaveBeenCalledWith("c-andes", expect.objectContaining({ microsoft_tenants: [tenant] })),
+    );
   });
 });

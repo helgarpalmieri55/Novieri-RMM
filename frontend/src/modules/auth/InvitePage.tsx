@@ -18,6 +18,15 @@
  * SAMESITE=STRICT IS WHY THIS IS A PAGE AND NOT A SERVER LINK (plan decision
  * D19). The email link is a cross-site top-level navigation, which carries no
  * Strict cookie; this page's own requests are same-origin and do.
+ *
+ * ACCEPTING WITH MICROSOFT (own-auth phase 2, Task 12, decision 5) is offered
+ * only when the invitation says it can be (`microsoft`). A contact accepts
+ * with Microsoft alone. A technician never does (operator decision C3): the
+ * button sits under the password form and takes that password with it, which
+ * the server stores before Microsoft is asked -- their way back if Microsoft
+ * ever stops working. The password stays in this page's state: the button
+ * calls the API directly, as the password's own accept does, and no
+ * mutation cache holds it.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -34,6 +43,7 @@ import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
+import { MicrosoftButton } from "./MicrosoftButton";
 import { NewPasswordFields } from "./NewPasswordFields";
 import { canUsePasskeys, createPasskey, describePasskeyError } from "./passkey";
 
@@ -136,7 +146,7 @@ export function InvitePage() {
       </AuthCard>
     );
   }
-  const { email, display_name, kind, password_minimum, passkey } = invite.data;
+  const { email, display_name, kind, password_minimum, passkey, microsoft } = invite.data;
   const offerPasskey = kind === "contact" && passkey && canUsePasskeys();
   return (
     <AuthCard
@@ -173,6 +183,19 @@ export function InvitePage() {
           </p>
         </>
       ) : null}
+      {microsoft && kind === "contact" ? (
+        <>
+          <MicrosoftButton
+            start={{ intent: "invite", token }}
+            back="/portal"
+            labelKey="auth.microsoft.acceptInvite"
+            variant={offerPasskey ? "secondary" : "primary"}
+          />
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.invite.or")}
+          </p>
+        </>
+      ) : null}
       <Form onSubmit={() => submit(kind, password_minimum)}>
         {/* For the password manager: the account the new password belongs to. */}
         <Field label={t("auth.common.email")}>
@@ -196,6 +219,19 @@ export function InvitePage() {
           />
         </div>
       </Form>
+      {microsoft && kind === "staff" ? (
+        <>
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.invite.microsoftWithPassword")}
+          </p>
+          <MicrosoftButton
+            start={{ intent: "invite", token, password }}
+            back="/"
+            labelKey="auth.microsoft.acceptInvite"
+            check={() => checkNewPassword(password, again, password_minimum)}
+          />
+        </>
+      ) : null}
     </AuthCard>
   );
 }

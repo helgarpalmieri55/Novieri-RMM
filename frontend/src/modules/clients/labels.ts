@@ -70,6 +70,18 @@ export function parseDomains(text: string): string[] {
 }
 
 /**
+ * One Microsoft tenant ID per line or comma (own-auth phase 2); blanks
+ * dropped, lower case as Microsoft writes them. The server checks each is a
+ * GUID (422 otherwise), at most 20, and never the personal-accounts tenant.
+ */
+export function parseTenants(text: string): string[] {
+  return text
+    .split(/[\s,]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value !== "");
+}
+
+/**
  * The health profile a client's devices fall back to (design §5.1): its own
  * client default, and the organisation default that applies when there is
  * none. The resolution itself is the server's (`health/resolution.py`).

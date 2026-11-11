@@ -192,3 +192,17 @@ export function useEndMySessionMutation(run: StepUpRun) {
     onSuccess: refetch,
   });
 }
+
+/**
+ * Unlink the Microsoft account (own-auth phase 2): a recent confirmation,
+ * never the last way in (409 `last_method`). Linking is no mutation: it
+ * leaves for Microsoft (`modules/auth/MicrosoftButton.tsx`).
+ */
+export function useUnlinkMicrosoftMutation(run: StepUpRun) {
+  const api = useApi();
+  const refetch = useRefetchSecurity();
+  return useMutation<void, Error, void>({
+    mutationFn: () => run(() => api.unlinkMicrosoft()),
+    onSuccess: refetch,
+  });
+}

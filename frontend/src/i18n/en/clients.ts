@@ -36,6 +36,9 @@ export const clients = {
     name: "Name",
     emailDomains: "Email domains",
     emailDomainsHelp: "One per line. Mail from these domains is filed under this client.",
+    microsoftTenants: "Microsoft organizations (tenant IDs)",
+    microsoftTenantsHelp:
+      "One per line. Contacts of this client may sign in with Microsoft accounts from these organizations only. At most 20.",
     phone: "Phone",
     address: "Address",
     website: "Website",

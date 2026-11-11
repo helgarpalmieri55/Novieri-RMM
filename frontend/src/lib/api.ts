@@ -802,6 +802,58 @@ export interface PortalMe {
   permissions: string[];
 }
 
+/** `POST /auth/microsoft/start` (own-auth phase 2, design §4). Always the `organizations` authority: no page says whose sign-in it is. */
+export interface MicrosoftStartIn {
+  intent: "sign_in" | "link" | "invite";
+  /** The invitation's token, for `invite`: it travels in this body only. */
+  token?: string;
+  /** A technician's new password, for `invite` (operator decision C3): stored before Microsoft is asked. */
+  password?: string;
+}
+
+/** `POST /auth/microsoft/complete`: where the sign-in stands, or `linked`. */
+export type MicrosoftStep = LoginResult | { state: "linked" };
+
+/**
+ * `GET /settings/microsoft-sign-in` (operator decision C4): the platform's
+ * certificates -- public, to upload to the application in Entra -- and never
+ * a private key, which stays in the vault. `configured`: an application id,
+ * a key and its certificate are stored. A renewal waits in `next_*` beside the
+ * certificate in use until a person switches to it (Task 5, decision 5).
+ */
+export interface MicrosoftSettingsOut {
+  enabled: boolean;
+  app_client_id: string | null;
+  staff_tenant_id: string | null;
+  configured: boolean;
+  /** The certificate in use, PEM; `null` until one is asked for. */
+  certificate: string | null;
+  /** Base64url SHA-256 of the certificate (`x5t#S256`): what each sign-in's assertion names. */
+  certificate_thumbprint: string | null;
+  certificate_expires_at: string | null;
+  /** A new certificate waiting to be uploaded beside the one in use; `null` when none waits. */
+  next_certificate: string | null;
+  next_certificate_thumbprint: string | null;
+  next_certificate_expires_at: string | null;
+  /** To register in the Microsoft application; `null` while the console's address is not configured. */
+  redirect_uri: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+/**
+ * `PUT /settings/microsoft-sign-in`: every value, and at most one act.
+ * `new_certificate` makes a new key and certificate (the first goes into use,
+ * a later one waits); `activate_certificate` switches to the waiting one.
+ */
+export interface MicrosoftSettingsUpdate {
+  enabled: boolean;
+  app_client_id: string | null;
+  staff_tenant_id: string | null;
+  new_certificate: boolean;
+  activate_certificate: boolean;
+}
+
 export interface Me {
   user_id: string;
   org_id: string;
@@ -894,6 +946,8 @@ export interface ClientOut {
   /** `active` or `archived`: clients are archived, never deleted. */
   status: string;
   email_domains: string[];
+  /** Microsoft organisations (tenant IDs) whose accounts this client's contacts may sign in with (own-auth phase 2, at most 20). */
+  microsoft_tenants: string[];
   phone: string;
   address: string;
   website: string;
@@ -971,6 +1025,7 @@ export interface ClientCreate {
 export interface ClientUpdate {
   name?: string;
   email_domains?: string[];
+  microsoft_tenants?: string[];
   phone?: string;
   address?: string;
   website?: string;
@@ -1853,6 +1908,28 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Start a sign-in with Microsoft. `signedIn` for `link`, from Sign-in and
+   * security: there a 401 is the session ending, and a 403
+   * `step_up_required` goes through `useStepUp().run`.
+   */
+  microsoftStart(body: MicrosoftStartIn, { signedIn = false }: EnrollFrom = {}): Promise<{ authorize_url: string }> {
+    return this.request<{ authorize_url: string }>(
+      "/auth/microsoft/start",
+      { method: "POST", body: JSON.stringify(body) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** The code and the state Microsoft handed the browser, in the body; the transaction's cookie travels with it. */
+  microsoftComplete(body: { code: string; state: string }): Promise<MicrosoftStep> {
+    return this.request<MicrosoftStep>(
+      "/auth/microsoft/complete",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
+  }
+
   /** `POST /auth/factor/recovery`: one of the ten codes. */
   factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
     return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
@@ -2235,6 +2312,11 @@ export class ApiClient {
     return this.request<void>("/me/password", { method: "POST", body: JSON.stringify({ new: password }) }, { global: true });
   }
 
+  /** Unlink your Microsoft account: a recent confirmation; never the last way in (409 `last_method`). */
+  unlinkMicrosoft(): Promise<void> {
+    return this.request<void>("/me/microsoft", { method: "DELETE" }, { global: true });
+  }
+
   removePasskey(passkeyId: string): Promise<void> {
     return this.request<void>(
       `/me/passkeys/${encodeURIComponent(passkeyId)}`,
@@ -2366,6 +2448,26 @@ export class ApiClient {
   /** All seven values, never a part: the server stores what it is sent, within its CHECK bounds. */
   putSessionSettings(body: SessionSettingsUpdate): Promise<SessionSettingsOut> {
     return this.request<SessionSettingsOut>("/settings/sessions", { method: "PUT", body: JSON.stringify(body) });
+  }
+
+  /**
+   * Sign in with Microsoft (`GET /settings/microsoft-sign-in`, own-auth
+   * phase 2): `orgs.manage`. The private key is never in the answer; the
+   * certificate is public.
+   */
+  getMicrosoftSettings(): Promise<MicrosoftSettingsOut> {
+    return this.request<MicrosoftSettingsOut>("/settings/microsoft-sign-in");
+  }
+
+  /**
+   * `orgs.manage` on every client, so it is in `globalRoutes.json` and
+   * travels without `X-Client-Id`. No secret travels either way (C4).
+   */
+  putMicrosoftSettings(body: MicrosoftSettingsUpdate): Promise<MicrosoftSettingsOut> {
+    return this.request<MicrosoftSettingsOut>("/settings/microsoft-sign-in", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
   }
 
   // ------------------------------------------------------------------ roles

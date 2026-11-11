@@ -66,5 +66,11 @@ export const fixtures: FixtureMap = {
   invitePasskey: () => ({ state: "signed_in" as const }),
   getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
+  // Sign in with Microsoft (own-auth phase 2, Task 12): Microsoft's own
+  // address, which the button checks before leaving, and a return that
+  // signs in. Fixture mode never has a fragment to send, so the return page
+  // asks nothing.
+  microsoftStart: () => ({ authorize_url: "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize" }),
+  microsoftComplete: () => ({ state: "signed_in" as const }),
   logoutEverywhere: () => undefined,
 };

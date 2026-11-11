@@ -121,7 +121,7 @@ const ME: Me = {
 /** A client as `GET /clients` returns it, for the per-client report columns. */
 function clientOut(id: string, name: string): ClientOut {
   return {
-    id, name, kind: id === "o1" ? "internal" : "customer", status: "active", email_domains: [],
+    id, name, kind: id === "o1" ? "internal" : "customer", status: "active", email_domains: [], microsoft_tenants: [],
     phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0,
     site_count: 0,
   };

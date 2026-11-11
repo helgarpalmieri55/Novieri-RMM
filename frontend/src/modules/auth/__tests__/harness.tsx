@@ -9,11 +9,12 @@ import { render, type RenderResult } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
-import type { ApiClient } from "../../../lib/api";
+import { ApiError, type ApiClient } from "../../../lib/api";
 import { EnrollPage } from "../EnrollPage";
 import { FactorPage } from "../FactorPage";
 import { ForgotPasswordPage } from "../ForgotPasswordPage";
 import { InvitePage } from "../InvitePage";
+import { MicrosoftCallbackPage } from "../MicrosoftCallbackPage";
 import { PortalSignInPage } from "../PortalSignInPage";
 import { RecoverPage } from "../RecoverPage";
 import { RecoveryCodesPage } from "../RecoveryCodesPage";
@@ -41,6 +42,8 @@ export const calls = {
   invitePasskey: vi.fn(),
   getRecovery: vi.fn(),
   acceptRecovery: vi.fn(),
+  microsoftStart: vi.fn(),
+  microsoftComplete: vi.fn(),
 };
 
 export const TEN_CODES = [
@@ -79,6 +82,10 @@ export function installDefaults(): void {
   calls.acceptInvite.mockResolvedValue({ state: "enroll_required" });
   calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: false });
   calls.acceptRecovery.mockResolvedValue(undefined);
+  // Where Microsoft is not set up: the button is always on the sign-in pages
+  // (Task 12, decision 1), and a test that leaves for Microsoft says so.
+  calls.microsoftStart.mockRejectedValue(new ApiError(409, '{"code":"microsoft_unavailable"}'));
+  calls.microsoftComplete.mockResolvedValue({ state: "signed_in" });
 }
 
 export function authApi(): ApiClient {
@@ -94,7 +101,7 @@ function LocationProbe() {
 }
 
 /**
- * The eight pages, at `path` (fragment included), with router `state` when a
+ * The pages, at `path` (fragment included), with router `state` when a
  * step hands one over -- and the query client, for what a page leaves in it.
  */
 export function renderAuth(path: string, state?: unknown): RenderResult & { queryClient: QueryClient } {
@@ -113,6 +120,7 @@ export function renderAuth(path: string, state?: unknown): RenderResult & { quer
           <Route path="/invite" element={<InvitePage />} />
           <Route path="/recover" element={<RecoverPage />} />
           <Route path="/portal/sign-in" element={<PortalSignInPage />} />
+          <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
           <Route path="*" element={<p data-testid="elsewhere" />} />
         </Routes>
         <LocationProbe />

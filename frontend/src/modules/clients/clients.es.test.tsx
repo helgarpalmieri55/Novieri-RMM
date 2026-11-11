@@ -28,6 +28,7 @@ const CLIENT: ClientOut = {
   kind: "customer",
   status: "active",
   email_domains: ["andes.example"],
+  microsoft_tenants: [],
   phone: "",
   address: "Calle 80 #10-20",
   website: "",

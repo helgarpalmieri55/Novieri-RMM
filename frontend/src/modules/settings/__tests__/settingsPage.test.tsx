@@ -81,6 +81,7 @@ const ALL_TABS = [
   "Service levels",
   "Health",
   "Budget",
+  "Microsoft sign-in",
 ];
 
 // EVERY `{ name: label }` LOOKUP BELOW USES `new RegExp(label)`, NOT THE
@@ -200,13 +201,14 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("tab", { name: "Notifications" })).toBeInTheDocument();
     // The organization tab is always offered: every session belongs to an org.
     expect(screen.getByRole("tab", { name: "Organization" })).toBeInTheDocument();
-    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users", "Sessions"]) {
+    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users", "Sessions", "Microsoft sign-in"]) {
       expect(screen.queryByRole("tab", { name: new RegExp(label) })).not.toBeInTheDocument();
     }
     expect(calls.listRoles).not.toHaveBeenCalled();
     expect(calls.listPermissions).not.toHaveBeenCalled();
     expect(calls.listUsers).not.toHaveBeenCalled();
     expect(calls.getSessionSettings).not.toHaveBeenCalled();
+    expect(calls.getMicrosoftSettings).not.toHaveBeenCalled();
     expect(calls.getAiSettings).not.toHaveBeenCalled();
     expect(calls.getSlaSettings).not.toHaveBeenCalled();
     expect(calls.getHealthSettings).not.toHaveBeenCalled();

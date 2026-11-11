@@ -4,7 +4,7 @@
  * The operator's requirement is explicit: "Everything under the Settings menu
  * must be editable — all configurations will take place there and not directly
  * on the server files." The previous version of this file was a read-only
- * summary that linked out to five other editors; this one is eleven forms.
+ * summary that linked out to five other editors; this one is twelve forms.
  *
  * WHAT EACH TAB WRITES, AND THE ROUTE BEHIND IT:
  *
@@ -15,6 +15,7 @@
  * | Roles          | `GET /roles`, `/permissions`  | `POST`/`PATCH`/`DELETE /roles`, `PUT /roles/{id}/permissions` | `roles.read` / `roles.manage` |
  * | Users          | `GET /users`, `/users/{id}/effective-permissions` | `POST /users/invite`, role assign/revoke, disable/enable, resend/cancel an invitation, reset second factors, sign out everywhere, `DELETE` | `users.read` / `users.manage` |
  * | Sessions       | `GET /settings/sessions`      | `PUT /settings/sessions`           | `orgs.manage` / `orgs.manage`    |
+ * | Microsoft sign-in | `GET /settings/microsoft-sign-in` | `PUT /settings/microsoft-sign-in` | `orgs.manage` / `orgs.manage` |
  * | Assistant      | `GET /ai/settings`, `/ai/providers` | `PUT /ai/settings`           | `ai.admin` / `ai.admin`          |
  * | AI connections | `GET /orgs/current`, `GET /mcp/connections` | `PATCH /orgs/current` (`mcp_enabled` only), `POST /mcp/connections/{client_id}/revoke` | `mcp.use` OR `orgs.manage` / switch and "for everyone" `orgs.manage`, "for me" `mcp.use` |
  * | Notifications  | `GET /notifications/channels`, `/rules` | `POST`/`PATCH` both, `POST .../test` | `notification.read` / `notification.admin` |
@@ -87,6 +88,7 @@ import { AiConnectionsTab, MCP_USE } from "./AiConnectionsTab";
 import { BUDGET_MANAGE, BUDGET_READ, BudgetTab } from "./BudgetTab";
 import { EmailTab } from "./EmailTab";
 import { HEALTH_ADMIN, HEALTH_READ, HealthTab } from "./HealthTab";
+import { MicrosoftTab } from "./MicrosoftTab";
 import {
   NOTIFICATION_ADMIN,
   NOTIFICATION_READ,
@@ -324,6 +326,9 @@ export function SettingsPage() {
     // SESSIONS IS OFFERED WITH `orgs.manage`, like Email: its read is the
     // same code, and it is one setting for the whole organization.
     ...(canManageOrg ? [{ key: "sessions", label: t("settings.page.tabs.sessions") }] : []),
+    // MICROSOFT SIGN-IN IS OFFERED WITH `orgs.manage` too, like Sessions: its
+    // read is the same code, and it is one setting for the whole organization.
+    ...(canManageOrg ? [{ key: "microsoft", label: t("settings.page.tabs.microsoft") }] : []),
     ...(canAiAdmin ? [{ key: "assistant", label: t("settings.page.tabs.assistant") }] : []),
     // AI connections is offered for EITHER code: the switch is an org-admin's
     // whether or not they use an AI app, and a person who uses one owns their
@@ -410,6 +415,9 @@ export function SettingsPage() {
           ) : null}
           {current === "sessions" ? (
             <SessionsTab canRead={canManageOrg} canEdit={everywhere.has(ORGS_MANAGE)} />
+          ) : null}
+          {current === "microsoft" ? (
+            <MicrosoftTab canRead={canManageOrg} canEdit={everywhere.has(ORGS_MANAGE)} />
           ) : null}
           {current === "assistant" ? (
             <AssistantTab canAdmin={canAiAdmin} canEdit={everywhere.has(AI_ADMIN)} />
