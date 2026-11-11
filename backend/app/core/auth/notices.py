@@ -57,6 +57,8 @@ def _factor_name(factor: str | None) -> str:
         return tr("a new set of recovery codes")
     if factor == "recovery":
         return tr("your recovery codes")
+    if factor == "microsoft":
+        return tr("a Microsoft account")
     return tr("your password")
 
 

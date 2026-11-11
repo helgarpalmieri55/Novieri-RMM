@@ -189,6 +189,14 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/recover/details"),
         # The same link, consumed: the factors go, a pending session opens.
         ("POST", "/api/v1/auth/recover/accept"),
+        # Sign in with Microsoft (P2 phase 2, D30): before there is a person, or
+        # the caller's own session (`link`); the CSRF rule, `_MICROSOFT` per
+        # address and the transaction bound to the browser stand in for the gate.
+        ("POST", "/api/v1/auth/microsoft/start"),
+        # Its return: one use of the state, redeemed only with the verifier in
+        # the cookie of the browser that started it; a link, by the same live
+        # session, still recently confirmed (`entra_flows.complete`).
+        ("POST", "/api/v1/auth/microsoft/complete"),
         # MY SECURITY: `bound_account_context` (`auth.py::_account_ctx`), a
         # technician's or a contact's own browser session (phase 2, D26); the
         # caller's own rows only.
@@ -208,6 +216,9 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/v1/me/trusted-devices/{device_id}"),
         # One of the caller's own sessions, matched with their user id.
         ("DELETE", "/api/v1/me/sessions/{session_id}"),
+        # The caller's own Microsoft link (My security, D26), after a recent
+        # confirmation, in the scope `_account_ctx` established.
+        ("DELETE", "/api/v1/me/microsoft"),
     }
 )
 

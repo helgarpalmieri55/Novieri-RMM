@@ -82,6 +82,9 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             "invite/passkey",
             "recover/details",
             "recover/accept",
+            # Own authentication phase 2, Task 9: sign in with Microsoft.
+            "microsoft/start",
+            "microsoft/complete",
         )
     ),
     ("PUT", "/api/v1/me/password"),
@@ -198,7 +201,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 44
+    assert len(NEVER_EXPOSED) == 46
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 
