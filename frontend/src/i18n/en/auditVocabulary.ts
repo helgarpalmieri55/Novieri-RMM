@@ -75,6 +75,7 @@ export const auditActions = {
   auth_passkey_removed: "Auth passkey removed",
   auth_password_changed: "Auth password changed",
   auth_recovery_code_used: "Auth recovery code used",
+  auth_retention_applied: "Auth retention applied",
   auth_session_settings_updated: "Auth session settings updated",
   auth_sessions_ended: "Auth sessions ended",
   auth_signed_in: "Auth signed in",

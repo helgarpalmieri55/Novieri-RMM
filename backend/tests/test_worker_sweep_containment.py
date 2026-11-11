@@ -153,6 +153,15 @@ _DELEGATING_SHELLS = [
         number=int,
         boom=KeyError("retention_days"),
     ),
+    _Delegating(
+        # Looked up on the module at call time (`auth_retention_module.sweep_org`).
+        shell="auth_retention_all_orgs",
+        target_module="app.core.auth.retention",
+        target_attr="sweep_org",
+        healthy=1,
+        number=int,
+        boom=TimeoutError("canceling statement due to statement timeout"),
+    ),
 ]
 
 
@@ -645,6 +654,7 @@ _GUARDED_SHELLS = {
     "provision_enroll_dispatch_sweep_all_orgs",
     "provision_timeout_sweep_all_orgs",
     "licenses_compliance_sweep_all_orgs",
+    "auth_retention_all_orgs",
     # Patch restarts and scheduled scripts (2026-09-23): both dispatch signed
     # jobs per org, so one org's failure must not skip the rest.
     "patch_reboot_sweep_all_orgs",
