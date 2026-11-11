@@ -116,6 +116,15 @@ async def _seed(admin_engine: AsyncEngine, w: _World) -> dict[str, UUID]:
             ended=SESSION_OLD,
         )
         session("session_expired_old", w.contact_id, "contact", expires=SESSION_OLD)
+        # A later bulk act (sign out everywhere, a password change) stamps `ended_at`
+        # on rows that had already expired: the older of the two still counts.
+        session(
+            "session_expired_old_ended_recent",
+            w.staff_id,
+            "staff",
+            expires=SESSION_OLD,
+            ended=RECENT,
+        )
         # Ended 31 days ago: past the 30 days of the other rows, within the 90 of sessions.
         session("session_ended_month", w.staff_id, "staff", expires=OLD, ended=OLD)
         session("session_ended_recent", w.staff_id, "staff", expires=NOW, ended=RECENT)
@@ -188,6 +197,7 @@ GONE = {
     "device_old_free",
     "session_ended_old",
     "session_expired_old",
+    "session_expired_old_ended_recent",
     "contact_invite_expired_old",
     "reset_expired_old",
     "recover_used_old",
@@ -261,10 +271,11 @@ async def test_a_sweep_that_deleted_something_is_audited_and_one_that_did_not_is
         ).scalars().all()
     assert len(events) == 1
     [event] = events
+    assert retention.AUDIT_ACTION == event.action == "auth.retention_applied"
     assert (event.actor_type, event.actor_id) == ("system", None)
     assert event.meta == {
         "at": NOW.isoformat(),
-        "sessions": 2,
+        "sessions": 3,
         "devices": 1,
         "links": 4,
         "challenges": 1,
@@ -294,6 +305,15 @@ async def test_the_sweep_carries_its_own_org_predicate(
     await bypassrls_session.commit()
     assert swept.total == len(GONE)
     assert set(their_ids.values()) <= await _left(admin_engine, theirs.org_id)
+
+
+def test_the_operators_retention_periods_are_pinned() -> None:
+    """C7, 2026-11-06: sessions 90 days, devices and links 30, challenges 1."""
+    assert (
+        retention.SESSION_RETENTION,
+        retention.RETENTION,
+        retention.CHALLENGE_RETENTION,
+    ) == (timedelta(days=90), timedelta(days=30), timedelta(days=1))
 
 
 def test_the_registry_is_ordered_sessions_first() -> None:

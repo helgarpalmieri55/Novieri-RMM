@@ -60,7 +60,7 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
-from app.core.auth.action_tokens import INVITE
+from app.core.auth.action_tokens import INVITE, RECOVER, RESET
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
@@ -102,10 +102,10 @@ async def _sessions(session: AsyncSession, org_id: UUID, now: datetime) -> int:
         delete(AuthSession)
         .where(
             AuthSession.org_id == org_id,
-            or_(
-                AuthSession.ended_at < cutoff,
-                and_(AuthSession.ended_at.is_(None), AuthSession.expires_at < cutoff),
-            ),
+            # Whichever came first counts: a bulk act (sign out everywhere, a
+            # password change) stamps `ended_at` on rows that had long expired.
+            # `expires_at < cutoff` is a dead session, never a live one.
+            or_(AuthSession.ended_at < cutoff, AuthSession.expires_at < cutoff),
         )
         .returning(AuthSession.id),
     )
@@ -150,7 +150,7 @@ async def _links(session: AsyncSession, org_id: UUID, now: datetime) -> int:
             AuthActionToken.org_id == org_id,
             or_(
                 AuthActionToken.used_at < cutoff,
-                and_(expired_unused, AuthActionToken.purpose != INVITE),
+                and_(expired_unused, AuthActionToken.purpose.in_((RESET, RECOVER))),
                 and_(expired_unused, AuthActionToken.purpose == INVITE, of_a_contact),
             ),
         )
