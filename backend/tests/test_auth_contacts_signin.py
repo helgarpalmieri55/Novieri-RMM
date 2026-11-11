@@ -27,13 +27,21 @@ from uuid import uuid4
 import pyotp
 import pytest
 from argon2 import PasswordHasher
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.sessions import SESSION_COOKIE
 from app.core.auth.totp import step_of
 from app.models import AuditEvent
-from app.models.auth import ENTRA, AuthExternalIdentity, AuthFailure, AuthSession, AuthTotp
+from app.models.auth import (
+    ENTRA,
+    AuthExternalIdentity,
+    AuthFailure,
+    AuthPasskey,
+    AuthPassword,
+    AuthSession,
+    AuthTotp,
+)
 from tests.auth_support import (
     CONTACT_PASSWORD,
     PASSWORD,
@@ -180,6 +188,22 @@ async def test_a_contact_with_an_authenticator_app_is_asked_for_it(auth_env: Any
     assert factor.json() == {"state": "signed_in"}
 
 
+async def test_the_factor_step_does_not_offer_a_contacts_passkey(auth_env: Any) -> None:
+    """Operator decision C5 (plan decision 3): a contact with a passkey AND an
+    authenticator app is asked for the app alone. The passkey is another way
+    in, never offered as a second factor of the password."""
+    who = await _signed_in_contact(auth_env)
+    await add_passkey(auth_env, who)
+    await _with_totp(auth_env, who)
+    await auth_env.client.post("/api/v1/auth/logout", headers=who.headers())
+    who.session = None
+
+    again = await login(auth_env, who)
+    assert again.status_code == 200, again.text
+    assert again.json()["state"] == "factor_required"
+    assert again.json()["methods"] == ["totp"]
+
+
 async def test_a_contacts_wrong_password_is_the_generic_answer_and_is_counted(
     auth_env: Any,
 ) -> None:
@@ -271,6 +295,34 @@ async def test_a_passkey_only_contact_gets_a_password_that_signs_in_alone(
     assert done.status_code == 204, done.text
     answer = await login(auth_env, who, password="Another-Harbor-Kettle-8842")
     assert answer.json() == {"state": "signed_in"}
+
+
+async def test_a_contacts_link_is_dead_once_their_last_way_in_is_gone(auth_env: Any) -> None:
+    """Plan decision 4 at the link's use (`_may_still_reset`): a link sent to
+    a passkey-only contact, used after that passkey went, sets no password --
+    the same 410 as every dead link."""
+    who = await _signed_in_contact(auth_env, password=None)
+    await add_passkey(auth_env, who)
+    sent = await auth_env.client.post(
+        "/api/v1/auth/password/forgot", headers=who.network, json={"email": who.email}
+    )
+    assert sent.status_code == 202
+    [mail] = auth_env.mail.sent
+    async with AsyncSession(auth_env.admin_engine) as s:
+        await s.execute(delete(AuthPasskey).where(AuthPasskey.user_id == who.user_id))
+        await s.commit()
+    dead = await auth_env.client.post(
+        "/api/v1/auth/password/reset",
+        headers=who.network,
+        json={"token": link_token(mail.text), "password": "Another-Harbor-Kettle-8842"},
+    )
+    assert dead.status_code == 410
+    assert dead.json()["code"] == "invalid_link"
+    async with AsyncSession(auth_env.admin_engine) as s:
+        stored = await s.scalar(
+            select(AuthPassword.user_id).where(AuthPassword.user_id == who.user_id)
+        )
+    assert stored is None
 
 
 async def test_a_microsoft_only_contact_is_sent_nothing(auth_env: Any) -> None:

@@ -14,7 +14,7 @@ rows are global, a contact's are their client's, migration 0231).
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import AuthExternalIdentity, AuthPasskey, AuthPassword
@@ -58,3 +58,19 @@ async def microsoft_only(session: AsyncSession, user_id: UUID) -> bool:
         and not await has_password(session, user_id)
         and not await has_passkey(session, user_id)
     )
+
+
+async def contact_may_reset(session: AsyncSession, user_id: UUID) -> bool:
+    """A contact's password may be reset by mail -- the link sent, and later
+    used (plan decision 4, operator decision C6): any way in, EXCEPT
+    Microsoft alone. `has_sign_in_method and not microsoft_only` is exactly
+    "a password or a passkey", so that is what is read, in one query."""
+    found = await session.scalar(
+        select(
+            or_(
+                select(AuthPassword.user_id).where(AuthPassword.user_id == user_id).exists(),
+                select(AuthPasskey.user_id).where(AuthPasskey.user_id == user_id).exists(),
+            )
+        )
+    )
+    return bool(found)

@@ -63,7 +63,7 @@ from app.core.auth.guards import (
 )
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.lookup import find_person
-from app.core.auth.methods import has_sign_in_method, microsoft_only
+from app.core.auth.methods import contact_may_reset
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
@@ -820,8 +820,11 @@ async def step_up_password(request: Request, principal: SessionPrincipal, *, pas
     with a second factor (design §2.5); a contact who turned the app on, who
     confirms with it (design §2.6: "las acciones de §2.5 siguen pidiendo el
     segundo factor"; operator decision C5); and a contact without a
-    password. The password's own counters and wait (design §2.3), and the
-    rule of `login` for an over-long one (plan decision 16)."""
+    password. The password's own counters and wait (design §2.3). An empty
+    password, or one longer than `SUBMITTED_MAX` (plan decision 16), never
+    reaches the pepper or argon2 -- but unlike `login`, which refuses it before
+    looking anybody up, this person is known: it is a wrong password, counted
+    as a failure and answered 400 `factor_failed`."""
     require_full(principal)
     accepted = False
     async with _identity_session(principal.org_id, _engine(request)) as session:
@@ -907,11 +910,7 @@ async def _may_be_sent_a_reset(session: AsyncSession, user: User) -> bool:
         return await session.get(AuthPassword, user.id) is not None and await _has_second_factor(
             session, user
         )
-    return (
-        user.kind == CONTACT_KIND
-        and await has_sign_in_method(session, user.id)
-        and not await microsoft_only(session, user.id)
-    )
+    return user.kind == CONTACT_KIND and await contact_may_reset(session, user.id)
 
 
 async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
@@ -980,9 +979,7 @@ async def _may_still_reset(session: AsyncSession, user: User) -> bool:
     decision 4, C6)."""
     if user.kind == STAFF_KIND:
         return await _has_second_factor(session, user)
-    return await has_sign_in_method(session, user.id) and not await microsoft_only(
-        session, user.id
-    )
+    return await contact_may_reset(session, user.id)
 
 
 async def reset_password(request: Request, *, token: str, password: str) -> None:

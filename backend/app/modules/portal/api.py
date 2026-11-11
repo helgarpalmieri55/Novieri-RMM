@@ -227,8 +227,9 @@ async def _load_my_ticket_row(
 
 # --------------------------------------------------------------------------- #
 # GET /portal/me -- the person using the portal (own authentication phase 2,
-# Task 4, decision 8). No database read: the session that admitted the
-# request names the person, and `person_scope` gives the codes.
+# Task 4, decision 8). The person is not read here: the session that admitted
+# the request names them. The codes are: `portal_permissions` reads the
+# person's grants (`person_scope`, once per portal code), as the door does.
 # --------------------------------------------------------------------------- #
 
 

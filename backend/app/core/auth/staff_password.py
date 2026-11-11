@@ -1,12 +1,15 @@
 """A person's password: the rule of design §2.1 (§3 for a contact) and where the hash goes.
 
-THE RULE IS TASK 2's (`passwords.check_new_password`): twelve characters at
-least, 128 at most, whole against the shipped blocklist and against the
-words of the context -- the address and its parts, the organization's name,
-the person's name and the platform's names (`passwords.context_words`; Task
-2's decision 5). This module applies it to a technician and says the reason
-(NIST SP 800-63B-4 §3.1.1.2; plan decision 11): `PasswordRejected.message` is
-already in the request's language.
+THE RULE IS TASK 2's (`passwords.check_new_password`): at least the person's
+minimum (`minimum_for(kind)`: 12 for a technician, who always has a second
+factor, design §2.1; 15 for a contact, whose second factor is optional,
+design §3 -- `passwords.STAFF_MINIMUM` and `passwords.CONTACT_MINIMUM`), 128
+at most, whole against the shipped blocklist and against the words of the
+context -- the address and its parts, the organization's name, the person's
+name and the platform's names (`passwords.context_words`; Task 2's decision
+5). This module applies it to a technician or a contact (own authentication
+phase 2) and says the reason (NIST SP 800-63B-4 §3.1.1.2; plan decision 11):
+`PasswordRejected.message` is already in the request's language.
 
 A PASSWORD IN A REQUEST BODY HAS NO PYDANTIC BOUND (plan decision 16): a field
 failure repeats its INPUT in the 422, and the input is the password. A new
