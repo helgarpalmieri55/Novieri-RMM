@@ -157,8 +157,50 @@ the system.
   factor at sign-in only, never for a recent-confirmation action, and **does
   not meet AAL2** on that device -- the operator accepted this knowingly
   (design §0, S2b). Not built: SAML and on-premises Active Directory
-  federation (out of scope); sign-in with Microsoft and the contacts' portal
-  are phase 2. MCP clients still authenticate through Keycloak until phase 3.
+  federation (out of scope).
+  MCP clients still authenticate through Keycloak; phase 3 replaces that, and
+  phase 4 removes Keycloak.
+- **Clients' contacts (own authentication phase 2):** a contact is invited
+  from their client's Contacts tab by someone with `clients.manage` on that
+  client, with a single-use link that lives 72 hours, and on accepting holds
+  the portal role on **their** client and no other. They sign in to the
+  portal -- never the console, whose door answers them 403 `portal_only` --
+  with a passkey, a password of at least 15 characters checked against the
+  same blocklist, or a linked Microsoft account (design §3, NIST SP
+  800-63B-4 §3.1.1.2). A passkey is another way in, not a second factor; an
+  authenticator app, if they turn one on, is their second factor, and then
+  confirming a sensitive change asks for it or their passkey, never the
+  password alone (design §2.6, §3). Their sessions are their own (60
+  minutes idle, 7 days at most by default). Their client's technician can
+  reset their access, which ends every way they had in and sends a new
+  invitation; without mail configured, that technician sees the new link
+  and could use it themselves, as they already could by changing the
+  contact's address and inviting -- the audit log records `link_shown`.
+  Design §10's falsifier 1 -- a contact's session passes no console door --
+  is held at every route under `/api/v1`, at both console sockets and in
+  the portal, by `backend/tests/test_auth_phase2_falsifiers.py`.
+- **Sign in with Microsoft (own authentication phase 2):** one multi-tenant
+  application in Microsoft Entra ID, at the `organizations` authority. The
+  platform proves itself to Microsoft with a certificate it made
+  (`private_key_jwt`); the private key is a vault credential, decrypted only
+  to sign, and every use is audited. The authorization-code flow with PKCE,
+  `state` and `nonce`; the ID token is validated here (signature, the
+  signing key's issuer, audience, issuer, nonce, times, `idp`) and the person
+  is identified by the immutable `tid` + `oid`, **never by email**, as
+  Microsoft says to. Nobody gets an account by signing in with Microsoft: a
+  person links it from their invitation or their own security page. A
+  technician signs in only from Novieri's tenant -- not as a B2B guest in it
+  -- always has a password as well, and is still asked for the platform's
+  own second factor (the token does not say whether Microsoft asked for
+  one), which an idle session does not skip; a contact signs in only from a
+  tenant their client lists. Design §10's falsifier 8 -- an unknown
+  Microsoft account is refused, and no account and no link is made -- is
+  `backend/tests/test_auth_entra_flows.py::test_falsifier_8_an_unknown_account_is_refused_and_nothing_is_made`.
+- **Retention:** sessions are deleted 90 days after they ended or expired;
+  remembered devices and one-time links 30 days after (a technician's
+  unused invitation never is: it is the pending invitation Users shows);
+  WebAuthn challenges after a day; each daily sweep that deletes anything
+  is audited (`auth.retention_applied`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):

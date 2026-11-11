@@ -224,7 +224,9 @@ S5, 2026-11-09).
 - Aplica a cualquier cuenta con segundo factor: técnicos y contactos que lo activaron.
 - **Límites:** la persona lo revoca en «Mis equipos de confianza» y un administrador también; se revoca solo al cambiar
   la contraseña, al restablecer los factores o al desactivar a la persona; las acciones de §2.5 siguen pidiendo el
-  segundo factor; cada equipo recordado se audita y se avisa por correo.
+  segundo factor (un contacto con app TOTP lo da también con su clave de acceso, §3; *añadido el 2026-11-06, para que
+  §2.6 no contradiga a §3 tras la decisión C5 del operador; confirmado por el operador el 2026-11-08, decisión S2 del
+  plan de la fase 2*); cada equipo recordado se audita y se avisa por correo.
 
 ### 2.7 Avisos por correo
 
@@ -249,9 +251,20 @@ tiempo.
   aleatorio, de un solo uso, que caduca a las 72 h [S8]. Al aceptarla, el contacto recibe en **su** cliente el rol de
   portal (`portal.ticket.read` y `portal.ticket.write`), en ningún otro.
 - **Entrada:** llave de acceso o contraseña de **15+** caracteres (NIST, sin segundo factor [S1 §3.1.1.2]) con la misma
-  lista de bloqueo; segundo factor opcional.
+  lista de bloqueo; segundo factor opcional. **Para un contacto, una clave de acceso es otra forma de entrar, no un
+  segundo factor; solo una app TOTP activada hace de dos pasos la entrada con contraseña** (decisión del operador C5,
+  2026-11-06). Y solo un contacto sin app confirma las acciones de §2.5 con la contraseña: quien la activó confirma con
+  ella **o con su clave de acceso** (§2.6). La clave de acceso pide la verificación de la persona y el servidor la
+  comprueba (§2.2), así que es por sí sola un autenticador criptográfico multifactor: NIST SP 800-63B-4 §3.1.7.2, *«Some
+  multi-factor authenticators include flags to indicate whether an activation factor was used. If such a flag is present
+  and indicates that an activation factor was not used, the authentication SHALL be treated as single-factor. Otherwise,
+  verification of the output from a multi-factor cryptographic authenticator indicates that the activation factor was
+  used.»*, y §2.2.1, que lo admite en AAL2 (*«When a multi-factor authenticator is used, any of the following MAY be
+  used: … Multi-factor cryptographic authentication (Sec. 3.1.7)»*). *(Añadido el 2026-11-06; confirmado por el operador
+  el 2026-11-08, decisión S2 del plan de la fase 2, no la «S2 Sesiones» de §0.)*
 - **Olvidé mi contraseña:** enlace de un solo uso de 30 min; misma respuesta exista o no la cuenta; al cambiarla se
-  cierran sus otras sesiones [S8].
+  cierran sus otras sesiones [S8]. El enlace va a todo contacto que ya aceptó su invitación, salvo a quien solo entra
+  con Microsoft (decisión del operador C6, 2026-11-06).
 - **Sesión:** valores propios en «Sesiones»: inactividad 60 min, máximo 7 días (configurable hasta 30, el máximo de NIST
   para AAL1 [S1 §2]).
 - Un contacto nunca pasa la puerta de la consola; solo la del portal (`admit(contacts=True)`).
@@ -261,11 +274,26 @@ tiempo.
 
 ## 4. Entrar con Microsoft (Entra ID)
 
-- **Una app** registrada por Novieri, multi-tenant (autoridad `organizations` [S62]). Su secreto va a OpenBao
-  (invariante 3). Código de autorización con PKCE, `state` y `nonce` [S62].
+- **Una app** registrada por Novieri, multi-tenant (autoridad `organizations` [S62]). La plataforma se identifica ante
+  Microsoft con un certificado que ella misma genera —`private_key_jwt`, aserción PS256 [M9]—, que el administrador sube
+  a la app desde Ajustes → Microsoft, donde ve su caducidad. La clave privada va a la bóveda de la plataforma —una
+  credencial sellada con la clave de sobre que envuelve OpenBao, como la contraseña SMTP— y solo se descifra para firmar
+  (invariante 3). **El certificado es autofirmado porque así lo eligió el operador (C4), no porque no haya otra
+  opción:** Microsoft prefiere uno de una CA (*«use a certificate from a trusted certificate authority (CA) instead of a
+  self-signed certificate. Configure a policy to enforce that certificates come from trusted issuers. However, if using
+  a trusted CA isn't possible, self-signed certificates are still preferred over passwords.»* [M8]). Una política de
+  gestión de aplicaciones del tenant de Novieri —`trustedCertificateAuthority`, o `asymmetricKeyLifetime` por debajo de
+  360 días— rechazaría la subida, y la plataforma no importa certificados de una CA. **Renovar no deja hueco:** el
+  certificado nuevo espera junto al que está en uso, que sigue firmando, mientras el administrador lo sube a la app
+  (Entra guarda varios), y solo cuando él dice «ya lo subí» pasa a firmar el nuevo y la clave vieja se destruye.
+  *(Corregido el 2026-11-06: decía «Su secreto va a OpenBao»; decisiones del operador C4 y B2-35, plan de la fase 2, D33
+  y Task 5, decisión 5.)* Código de autorización con PKCE, `state` y `nonce` [S62].
 - **Técnicos:** solo el tenant de Novieri (configurado en Ajustes). La plataforma pide después su propio segundo factor
   (salvo equipo recordado), porque el token de Microsoft no trae el dato que diría si hubo doble factor: la tabla de
-  claims de Microsoft no incluye `amr` [S61].
+  claims de Microsoft no incluye `amr` [S61]. Un técnico que acepta su invitación con Microsoft elige también una
+  contraseña: Microsoft nunca es su única forma de entrar (decisión del operador C3, 2026-11-06). Siempre por la
+  autoridad `organizations` y `tid` igual al tenant de Novieri: un invitado B2B en ese tenant no entra como técnico con
+  Microsoft (B2-05).
 - **Contactos:** cada cliente lista en su ficha sus tenants permitidos.
 - **Nunca se crea una cuenta por entrar con Microsoft.** La persona tiene que estar invitada; el enlace se hace la
   primera vez desde la invitación o desde «Mi perfil» y guarda `tid` + `oid`, que Microsoft recomienda porque no cambian;
@@ -482,8 +510,9 @@ directamente a la sesión propia.
   exigido).
 - `CLAUDE.md` 1c(a) no cambia: ya está redactada sin nombrar proveedor y sigue siendo cierta con la plataforma como
   emisor.
-- OpenBao: rutas nuevas para el pepper, la clave de firma, la contraseña SMTP y el secreto de Entra; `openbao-init` las
-  crea.
+- OpenBao: rutas nuevas para el pepper y la clave de firma; `openbao-init` las crea. La contraseña SMTP (fase 1, D9) y
+  la clave privada de Entra (fase 2, D33) son credenciales de la bóveda de la plataforma, que OpenBao envuelve: ninguna
+  ruta nueva para ellas. *(Corregido el 2026-11-06.)*
 - El despliegue lo absorbe el proyecto 4.
 
 ## 10. Falsificadores
@@ -553,3 +582,10 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
 - [S63] OWASP Cross-Site Request Forgery Prevention Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - [S64] ChromeDevTools/devtools-protocol, `json/browser_protocol.json`, dominio WebAuthn. https://github.com/ChromeDevTools/devtools-protocol
 - [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies. https://community.owasp.org/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies (owasp.org/www-community/… redirige con 308). Cita comprobada contra la página el 2026-11-05.
+- [M8] Microsoft, Security best practices for application properties (actualizada 2026-10-02), «Certificates and
+  secrets»: la cita de §4 sobre los certificados de una CA. https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration
+- [M9] Microsoft, Microsoft identity platform application authentication certificate credentials (actualizada
+  2026-06-15). https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
+
+[M8] y [M9] se leyeron para el plan de la fase 2 (`docs/superpowers/plans/2026-11-06-autenticacion-propia-fase2.md`,
+Apéndice C, 2026-11-06) y entran aquí con la corrección de §4 del 2026-11-06.
