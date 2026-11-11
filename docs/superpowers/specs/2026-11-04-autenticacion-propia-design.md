@@ -349,8 +349,12 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     restablecimiento enviado por correo y desde entonces no se haya verificado ningún segundo factor (una llave, una
     app TOTP confirmada o un código de recuperación, al iniciar sesión o en una confirmación reciente). Sin ventana de
     tiempo. No cubre las contraseñas de una invitación: eso es el alta, por diseño. La marca
-    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después, un cambio de contraseña
-    con la sesión abierta y el enlace de recuperación, que sigue siendo el camino de vuelta. La comprobación del
+    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después **en una sesión que empezó
+    con la contraseña**, un cambio de contraseña con la sesión abierta y el enlace de recuperación, que sigue siendo el
+    camino de vuelta. Una sesión que empezó con Microsoft, con una llave de acceso sola o con el enlace de
+    recuperación no presentó la contraseña, así que su segundo factor no la borra (`auth_sessions.first_step`; fase 2,
+    Task 9b): si no, quien tiene el buzón restablece la contraseña, el siguiente inicio con Microsoft y código de la
+    persona borra la marca, el restablecimiento del administrador pasa y la contraseña del buzón se queda la cuenta. La comprobación del
     restablecimiento por correo («¿tiene segundo factor?») y la del administrador («¿la puso el buzón?») toman el
     mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de esas dos deja una cuenta sin
     factores con la contraseña del buzón. Y un segundo factor verificado no borra la marca en una sesión que el
