@@ -88,7 +88,24 @@ export function InvitePage() {
     inFlight.current = false;
     setBusy(false);
   }, []);
-  useBackFromMicrosoft(reset);
+  // A TECHNICIAN'S MICROSOFT STEP SPENDS THE INVITATION BEFORE IT LEAVES
+  // (final review F, item 4). The server accepts the invitation with their
+  // password, opens a session waiting for the first factor, and only then
+  // answers Microsoft's address (C3, `entra_flows.start`). Back at Microsoft
+  // restores this page from the browser's cache: turned back on, any click
+  // would answer 410 and say the invitation expired -- of an account that is
+  // active, with the password they chose, which nobody can invite again. So
+  // a restore after that step goes on to the first factor, where the waiting
+  // session continues (and, should it have run out, `/sign-in/enroll` says
+  // so and offers the sign-in page, where the password works). A contact's
+  // step spends nothing (`entra_flows.complete` consumes it), so their page
+  // simply comes back on. Page state only: a ref, nothing in storage.
+  const technicianLeft = useRef(false);
+  const backFromMicrosoft = useCallback(() => {
+    if (technicianLeft.current) navigate("/sign-in/enroll", { replace: true });
+    else reset();
+  }, [navigate, reset]);
+  useBackFromMicrosoft(backFromMicrosoft);
 
   function landed(kind: "staff" | "contact", state: "enroll_required" | "signed_in") {
     if (state === "signed_in") enterConsole(kind === "contact" ? "/portal" : null);
@@ -120,6 +137,17 @@ export function InvitePage() {
   }
 
   const microsoftGuard: MicrosoftGuard = { busy, run: (step) => void guarded(step) };
+  // A technician's step that has `LEFT` was answered by the server: the
+  // invitation is spent (above).
+  const technicianGuard: MicrosoftGuard = {
+    busy,
+    run: (step) =>
+      void guarded(async () => {
+        const left = await step();
+        technicianLeft.current = true;
+        return left;
+      }),
+  };
 
   function submit(kind: "staff" | "contact", minimum: number) {
     const problem = checkNewPassword(password, again, minimum);
@@ -250,7 +278,7 @@ export function InvitePage() {
             back="/"
             labelKey="auth.microsoft.acceptInvite"
             check={() => checkNewPassword(password, again, password_minimum)}
-            guard={microsoftGuard}
+            guard={technicianGuard}
           />
         </>
       ) : null}

@@ -7,14 +7,21 @@
  * server's to check: its `password_rejected` says which rule refused a
  * password, and this console shows that sentence
  * (`./errors.ts::passwordRefusal`).
+ *
+ * `helpKey`: the rule as a page that cannot know whose it is states it -- the
+ * reset link names no account, so `/reset-password` says both minimums
+ * (final review F, item 1). A key, not text: `i18n/coverage.test.ts` reads a
+ * `help` literal as English, the reason `MicrosoftButton` takes `labelKey`.
  */
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import type { MessageKey } from "../../i18n/core";
 
 export function NewPasswordFields({
   password,
   again,
   minimum = 12,
+  helpKey = "auth.password.rules",
   onPassword,
   onAgain,
 }: {
@@ -22,13 +29,15 @@ export function NewPasswordFields({
   again: string;
   /** The shortest password allowed: 12 for a technician, 15 for a client's contact. */
   minimum?: number;
+  /** The rule's sentence; `{min}` in it is `minimum`. */
+  helpKey?: MessageKey;
   onPassword: (value: string) => void;
   onAgain: (value: string) => void;
 }) {
   const t = useT();
   return (
     <>
-      <Field label={t("auth.password.new")} help={t("auth.password.rules", { min: minimum })}>
+      <Field label={t("auth.password.new")} help={t(helpKey, { min: minimum })}>
         <input
           className={inputClass}
           type="password"

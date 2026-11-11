@@ -83,3 +83,46 @@ describe("signing in to the portal", () => {
     expect(screen.queryByRole("button", { name: "Sign in with a passkey" })).not.toBeInTheDocument();
   });
 });
+
+// A contact who leaves the portal's sign-in page for a later step comes back
+// to the portal's page, not the console's (final review F, item 5): the step
+// carries `next=/portal`, and `signInPath` picks the page from it.
+describe("the way back from a later step", () => {
+  it("from the forgotten password, goes back to the portal's sign-in page", async () => {
+    const user = userEvent.setup();
+    renderAuth("/portal/sign-in");
+    await user.click(screen.getByRole("link", { name: "Forgot your password?" }));
+    await waitFor(() => expect(where.location?.pathname).toBe("/forgot-password"));
+    expect(screen.getByRole("link", { name: "Back to sign-in" })).toHaveAttribute(
+      "href",
+      "/portal/sign-in?next=%2Fportal",
+    );
+  });
+
+  it("from the second factor, starts again on the portal's sign-in page", async () => {
+    calls.login.mockResolvedValue({ state: "factor_required", methods: ["totp"], remember_device_days: 15 });
+    const user = userEvent.setup();
+    renderAuth("/portal/sign-in");
+    await user.type(screen.getByLabelText("Email address"), "ana@acme.test");
+    await user.type(screen.getByLabelText("Password"), "Ultramarine-Kettle-7319-Harbor");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/factor"));
+    expect(screen.getByRole("link", { name: "Start again" })).toHaveAttribute("href", "/portal/sign-in?next=%2Fportal");
+  });
+
+  it.each([
+    ["/forgot-password?next=%2Fdevices", "Back to sign-in"],
+    ["/sign-in/factor?next=%2Fdevices", "Start again"],
+  ])("from %s, a technician still goes back to the console's sign-in page", (path, name) => {
+    renderAuth(path);
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", "/sign-in?next=%2Fdevices");
+  });
+
+  it.each([
+    ["/forgot-password", "Back to sign-in"],
+    ["/sign-in/factor", "Start again"],
+  ])("from %s with nowhere to go back to, goes to the console's sign-in page", (path, name) => {
+    renderAuth(path);
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", "/sign-in");
+  });
+});

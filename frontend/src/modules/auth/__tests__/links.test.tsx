@@ -91,6 +91,32 @@ describe("resetting the password from the emailed link", () => {
     expect(screen.getByLabelText("New password")).toBeInTheDocument();
   });
 
+  // The link names no account, so the page cannot know whose rule applies:
+  // a technician's 12 or a client's contact's 15 (final review F, item 1). It
+  // says both, checks the lower bound, and the server judges the rest.
+  it("states a rule that is true for a technician and for a contact", async () => {
+    renderAuth("/reset-password#tok");
+    expect(
+      await screen.findByText(
+        "At least 12 characters (15 for the support portal), any you like, spaces included. A phrase you can remember works well.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^At least 12 characters, any you like/)).not.toBeInTheDocument();
+  });
+
+  it("sends a contact's 13-character password and shows the server's reason when it refuses it", async () => {
+    calls.resetPassword.mockRejectedValue(
+      new ApiError(422, JSON.stringify({ code: "password_rejected", detail: "Use at least 15 characters." })),
+    );
+    renderAuth("/reset-password#tok");
+    const thirteen = "thirteen char";
+    const user = await choose(thirteen);
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    await waitFor(() => expect(calls.resetPassword).toHaveBeenCalledWith({ token: "tok", password: thirteen }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use at least 15 characters.");
+    expect(screen.getByLabelText("New password")).toBeInTheDocument();
+  });
+
   it("takes the token off the address once it has read it", async () => {
     renderAuth("/reset-password#tok-reset-1");
     await waitFor(() => expect(where.location?.hash).toBe(""));

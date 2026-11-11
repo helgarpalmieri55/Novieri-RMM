@@ -16,10 +16,11 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
+import { signInPath } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard, AuthDone } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { carryNext, useNext } from "./flow";
+import { useNext } from "./flow";
 
 export function ForgotPasswordPage() {
   const t = useT();
@@ -75,8 +76,10 @@ export function ForgotPasswordPage() {
           </div>
         </Form>
       )}
+      {/* The sign-in page the person came from: the portal's for a contact,
+          whose `next` is a portal page (final review F, item 5). */}
       <p className="note" style={{ margin: 0 }}>
-        <Link to={carryNext("/sign-in", next)}>{t("auth.common.backToSignIn")}</Link>
+        <Link to={signInPath(next ?? undefined)}>{t("auth.common.backToSignIn")}</Link>
       </p>
     </AuthCard>
   );

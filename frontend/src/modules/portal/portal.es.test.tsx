@@ -14,7 +14,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setActiveLanguage } from "../../i18n/core";
+import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { describeSubmitError } from "../../components/form";
 import { ApiError } from "../../lib/api";
@@ -25,6 +25,7 @@ import { NewTicketPage } from "./NewTicketPage";
 import { PortalAssistantPanel } from "./PortalAssistantPanel";
 import { PortalNav } from "./PortalNav";
 import { PortalPrerequisites } from "./PortalPrerequisites";
+import { PortalShell } from "./PortalShell";
 import { PortalTicketDetailPage } from "./PortalTicketDetailPage";
 import {
   PORTAL_CATEGORY_GROUPS,
@@ -133,6 +134,34 @@ function baseApi(over: Partial<ApiClient> = {}): Partial<ApiClient> {
   mockUseApi.mockReturnValue(api as ApiClient);
   return api;
 }
+
+// ------------------------------------------------------- the contact's frame
+
+describe("the portal's frame in Spanish", () => {
+  // A contact is told, in the Microsoft and recovery-code sentences, to find
+  // «Inicio de sesión y seguridad» (`profile.security.title`): the header link
+  // has to carry that name (final review F, item 2).
+  it("names the security link as the sentences that send a contact there name it", async () => {
+    baseApi();
+    const { container } = renderAt(
+      <PortalShell>
+        <p>{ME.display_name}</p>
+      </PortalShell>,
+      "/portal",
+    );
+    const link = await screen.findByRole("link", { name: "Inicio de sesión y seguridad" });
+    expect(link).toHaveAttribute("href", "/portal/security");
+    expect(link).toHaveTextContent(translate("profile.security.title"));
+    for (const sentence of [
+      translate("auth.microsoft.stepUpAgain"),
+      translate("auth.microsoft.backToSecurity"),
+      translate("auth.codes.none"),
+    ]) {
+      expect(sentence).toContain(link.textContent ?? "");
+    }
+    expectNoEnglish(container, [ME.display_name]);
+  });
+});
 
 // ---------------------------------------------------------------- My tickets
 
