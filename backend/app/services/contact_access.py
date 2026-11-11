@@ -134,16 +134,11 @@ async def _contact(
 
     THE LOCK ORDER is the one every writer of a contact's access keeps: the
     client, the person's `users` row, their links and credentials, the audit
-    chain (`flows._consumed`; `tests/test_contact_access_races.py`).
-
-    NOT YET COVERED: the contact's own sign-in steps do not keep it --
-    `sessions.mark_factor` locks a session and then writes
-    `users.last_login_at`; `login` takes its failure rows and the audit chain
-    before `start_session` writes it -- so they can meet an act here the
-    other way round, as they can a reset of the person's own password
-    (`flows.reset_password`, users first for staff and contacts alike), and
-    one of the two is a 40P01. A lock-order task of its own, after Task 9;
-    `services.clients.archive_client` says the same."""
+    chain (`flows._consumed`; `tests/test_contact_access_races.py`). Since
+    own authentication phase 2 Task 9b the contact's own sign-in steps keep
+    it too -- their row first (`guards.lock_user_row`), the audit chain last
+    -- so a sign-in in flight and an act here wait for each other at the
+    person's row, and never in a cycle (`tests/test_auth_sign_in_races.py`)."""
     status = (
         await session.execute(
             select(Client.status)

@@ -401,6 +401,25 @@ def _request_options(
     return cast(dict[str, Any], json.loads(options_to_json(options)))
 
 
+async def credential_owner(session: AsyncSession, credential: dict[str, Any]) -> UUID | None:
+    """Whose passkey an assertion names (`rawId`), read WITHOUT A LOCK AND
+    VERIFYING NOTHING: never an answer to who signed. A sign-in without an
+    address learns from it which person's row to lock BEFORE
+    `verify_authentication` writes the passkey's counter -- the lock order
+    of a person's account, the person first (own authentication phase 2,
+    Task 9b; `guards.lock_user_row`) -- and then verifies everything as
+    before, under that lock. None for a malformed answer or a credential
+    nobody in the organization holds."""
+    try:
+        raw_id = base64url_to_bytes(credential["rawId"])
+    except _MALFORMED:
+        return None
+    owner: UUID | None = await session.scalar(
+        select(AuthPasskey.user_id).where(AuthPasskey.credential_id == raw_id)
+    )
+    return owner
+
+
 async def verify_authentication(
     session: AsyncSession,
     credential: dict[str, Any],

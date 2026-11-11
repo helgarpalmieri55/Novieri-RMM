@@ -145,14 +145,18 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # (the deployment's slug, phase 2), the session's own row or the link,
     # never from a request field naming it.
     "app/core/auth/flows.py::_identity_session": (
-        "sign-in before the door admits anybody: the password, a contact's passkey alone, the "
-        "second factor, the enrolment, the recent confirmation, the reset link -- a "
-        "technician's or a contact's own auth rows and users row (P2 design §6.2; phase 2, "
-        "D25, D28). Accepting a contact's invitation also writes their portal role on their "
-        "OWN client (`grant_portal`, D40) and reads that client's Microsoft tenants "
-        "(`microsoft_offered`, design §4)"
+        "sign-in where no signed-in contact is involved (P2 design §6.2; phase 2, D25, D28; "
+        "Task 9b item C): the steps before a session exists -- the password, a contact's "
+        "passkey alone -- and the use of a link -- reset, invitation, recovery -- over one "
+        "person's own auth rows and users row; a TECHNICIAN's own steps with a session (the "
+        "second factor, the enrolment, the recent confirmation, signing out: "
+        "`signed_in_session`), whose rows are global; and the one read keyed by the "
+        "session's own person that learns a signed-in CONTACT's client, whose steps then "
+        "run under that client alone, never here. Accepting a contact's invitation also "
+        "writes their portal role on their OWN client (`grant_portal`, D40) and reads that "
+        "client's Microsoft tenants (`microsoft_offered`, design §4)"
     ),
-    "app/core/auth/account.py::_own_session": (
+    "app/core/auth/account.py::own_session": (
         "My security is personal, like /me: a TECHNICIAN's own auth rows, by the user id of "
         "the session the door admitted (P2 phase 1 design §2.4-§2.6); their rows are global, "
         "which a per-client scope may read and not change. The technician's path only: a "
@@ -166,15 +170,17 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "issued by whoever holds the server (P2 phase 1 design §7)"
     ),
     "app/core/auth/entra_flows.py::_entra_session": (
-        "sign-in with Microsoft's own steps, which no door admits (`/auth/microsoft/start` "
-        "and `/complete`, as `flows._identity_session` holds the other `/auth/*` steps): the "
-        "sign-in before anybody is known, the start and the return of a link from My "
-        "security, and an invitation accepted with Microsoft -- one person's link (tid, oid), "
-        "users row and new session, a contact's portal role on their OWN client "
-        "(`contact_admitted`) and that client's Microsoft tenants (read), found before their "
-        "scope exists. The organization from the deployment's slug, the session or the "
-        "invitation (P2 phase 2 design §4). NOT unlinking: `DELETE /me/microsoft` acts for a "
-        "signed-in person under the scope the door established (`account._own_session`, "
+        "sign-in with Microsoft's own steps where no signed-in person is involved "
+        "(`/auth/microsoft/start` and `/complete`, which no door admits): the sign-in before "
+        "anybody is known, an invitation accepted with Microsoft -- a link's use: one "
+        "person's link (tid, oid), users row and new session, a contact's portal role on "
+        "their OWN client (`contact_admitted`) and that client's Microsoft tenants (read), "
+        "found before their scope exists -- and the return's checkout of the platform's own "
+        "key, which reads and writes no person's rows. The organization from the "
+        "deployment's slug, the session or the invitation (P2 phase 2 design §4). NOT a "
+        "signed-in person's link, start or return, which runs in the scope of their kind -- "
+        "a contact's own client (`flows.signed_in_session`, Task 9b item C) -- and NOT "
+        "unlinking, under the scope the door established (`account.own_session`, "
         "invariant 5a)"
     ),
     # -- (a) processes with no person behind them --------------------------

@@ -13,7 +13,7 @@ import json
 import secrets
 import time
 from typing import Any
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qs, parse_qsl, urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -22,6 +22,13 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jwt.algorithms import RSAAlgorithm
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth.sessions import ENTRA_COOKIE
+from app.models import Client
+from app.models.auth import ENTRA, AuthExternalIdentity
+from tests.auth_support import cookie, point_at
 
 #: Novieri's tenant and the application, in these tests.
 TENANT = UUID("11111111-2222-4333-8444-555555555555")
@@ -153,3 +160,111 @@ class FakeMicrosoft:
         monkeypatch.setattr("app.core.auth.entra.http_client", self.client)
         if app is not None and hasattr(app.state, "entra_keys"):
             del app.state.entra_keys
+
+
+# --------------------------------------------------------------------------- #
+# The flows' round trip, for the tests of `/auth/microsoft/*` (Task 9; moved
+# here from `tests/test_auth_entra_flows.py` in Task 9b's fix round 1, so that
+# no test module imports another's private helpers).
+# --------------------------------------------------------------------------- #
+
+#: A client's tenant, never Novieri's.
+OTHER_TENANT = UUID("22222222-3333-4444-8555-666666666666")
+SETTINGS = "/api/v1/settings/microsoft-sign-in"
+
+
+async def entra_org(env: Any) -> tuple[UUID, dict[str, str]]:
+    """An organization with sign-in with Microsoft switched on -- the
+    platform's certificate made and "uploaded" (C4) -- and an admin's
+    headers. `env.microsoft` is the `FakeMicrosoft` the fixture installed."""
+    org = await env.create_org("entra-flow")
+    await point_at(env, org)
+    admin = await env.create_user(org, "org-admin")
+    headers = await env.headers(org, admin)
+    saved = await env.client.put(
+        SETTINGS,
+        headers=headers,
+        json={
+            "enabled": True,
+            "app_client_id": str(APP),
+            "staff_tenant_id": str(TENANT),
+            "new_certificate": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    env.microsoft.trust(saved.json()["certificate"])
+    return org, headers
+
+
+def with_cookie(headers: dict[str, str], name: str, value: str) -> dict[str, str]:
+    jar = [part for part in headers.get("Cookie", "").split("; ") if part]
+    return {**headers, "Cookie": "; ".join([*jar, f"{name}={value}"])}
+
+
+async def start_microsoft(
+    env: Any, headers: dict[str, str], body: dict[str, Any]
+) -> httpx.Response:
+    return await env.client.post("/api/v1/auth/microsoft/start", headers=headers, json=body)
+
+
+async def finish_microsoft(
+    env: Any,
+    headers: dict[str, str],
+    start: httpx.Response,
+    *,
+    oid: UUID,
+    tid: UUID = TENANT,
+    nonce: str | None = None,
+) -> httpx.Response:
+    """Microsoft's answer to `start`, brought back to `/complete`."""
+    assert start.status_code == 200, start.text
+    verifier = cookie(start, ENTRA_COOKIE)
+    assert verifier is not None
+    query = parse_qs(urlsplit(start.json()["authorize_url"]).query)
+    code = env.microsoft.issue_code(nonce=nonce or query["nonce"][0], tid=tid, oid=oid)
+    return await env.client.post(
+        "/api/v1/auth/microsoft/complete",
+        headers=with_cookie(headers, ENTRA_COOKIE, verifier),
+        json={"code": code, "state": query["state"][0]},
+    )
+
+
+async def round_trip(
+    env: Any,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    *,
+    oid: UUID,
+    tid: UUID = TENANT,
+    nonce: str | None = None,
+) -> httpx.Response:
+    start = await start_microsoft(env, headers, body)
+    return await finish_microsoft(env, headers, start, oid=oid, tid=tid, nonce=nonce)
+
+
+async def list_other_tenant(
+    env: Any, client_id: UUID, tenants: list[UUID] | None = None
+) -> None:
+    """The contact's client lists `OTHER_TENANT` (D35), written past the API."""
+    async with AsyncSession(env.admin_engine) as s:
+        await s.execute(
+            update(Client)
+            .where(Client.id == client_id)
+            .values(microsoft_tenants=[OTHER_TENANT] if tenants is None else tenants)
+        )
+        await s.commit()
+
+
+async def seed_link(env: Any, who: Any, *, tenant: UUID, oid: UUID) -> None:
+    """A link written past the API: one the flows would refuse to make today."""
+    async with AsyncSession(env.admin_engine) as s:
+        s.add(
+            AuthExternalIdentity(
+                org_id=who.org_id,
+                user_id=who.user_id,
+                provider=ENTRA,
+                tenant_id=tenant,
+                subject=oid,
+            )
+        )
+        await s.commit()

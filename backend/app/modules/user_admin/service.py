@@ -1071,8 +1071,16 @@ async def reset_factors(
 
     No `super-admin` rail (plan decision 5, kept by the operator on
     2026-11-05). `_refuse_self` stays: one's own factors are changed under My
-    security."""
-    user = await _target(session, org_id, user_id)
+    security.
+
+    THE ROW FIRST (`_target(lock=True)`, own authentication phase 2, Task 9b
+    fix round 1), then `factors.lock_person`, then the factors, sessions and
+    devices, and the audit chain last -- the order of every writer of a
+    person's rows and of their own sign-in steps (`guards.lock_user_row`). A
+    passkey step in flight read the passkey this deletes and waited to write
+    its counter on the deleted row: a StaleDataError, a 500. Now it waits on
+    the person's row and then finds its session ended."""
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     _refuse_self(actor_id, user.id, RESET_FACTORS)
     await lock_person(session, user.id)
@@ -1110,8 +1118,14 @@ async def end_sessions(
     (a reset or a disable forgets those). A deleted account is refused
     (`_require_live`, final review C-M5): deleting ended its sessions, and a
     record of ending them again would be about nobody. No `super-admin` rail
-    (operator decision 2, 2026-11-05)."""
-    user = await _target(session, org_id, user_id)
+    (operator decision 2, 2026-11-05).
+
+    THE ROW FIRST (`_target(lock=True)`, own authentication phase 2, Task 9b
+    fix round 1): a Microsoft link's return checks its session is live under
+    the person's row and then links, so ending the sessions waits for a link
+    in flight and is waited for by one that arrives -- a link never lands in
+    a session ended before it committed."""
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     await end_all_for_user(session, user.id, "ended_by_admin")
     await audit_service.record(

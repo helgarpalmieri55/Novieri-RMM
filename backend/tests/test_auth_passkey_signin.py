@@ -20,11 +20,18 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import flows
-from app.core.auth.passkeys import CHALLENGE_BYTES, PasskeyRejected, user_handle
-from app.core.auth.sessions import SESSION_COOKIE
+from app.core.auth.passkeys import CHALLENGE_BYTES, PasskeyRejected
+from app.core.auth.sessions import SESSION_COOKIE, token_hash
 from app.models import AuditEvent, Organization, User
-from app.models.auth import AuthFailure, AuthPasskey, AuthPassword, AuthWebauthnChallenge
+from app.models.auth import (
+    AuthFailure,
+    AuthPasskey,
+    AuthPassword,
+    AuthSession,
+    AuthWebauthnChallenge,
+)
 from tests.auth_support import (
+    PASSKEY_RP_ID,
     add_passkey,
     capture_mail,
     console_ready,
@@ -33,12 +40,13 @@ from tests.auth_support import (
     link_token,
     login,
     point_at,
+    register_passkey,
     signed_in,
 )
 from tests.session_support import CONSOLE
-from tests.webauthn_authenticator import SoftPasskey, unb64url
+from tests.webauthn_authenticator import unb64url
 
-RP_ID = "itms.test"
+RP_ID = PASSKEY_RP_ID
 
 
 @pytest.fixture()
@@ -157,29 +165,6 @@ async def test_a_locked_passkey_signs_nobody_in(
     assert answer.json()["code"] == "passkey_rejected"
 
 
-async def _register(env: Any, who: Any) -> SoftPasskey:
-    """A real passkey of `who`: its public key on the server, its private key
-    in the software authenticator."""
-    authenticator = SoftPasskey(rp_id=RP_ID, user_handle=user_handle(who.user_id))
-    async with AsyncSession(env.admin_engine) as s:
-        s.add(
-            AuthPasskey(
-                org_id=who.org_id,
-                user_id=who.user_id,
-                credential_id=authenticator.credential_id,
-                public_key=authenticator.cose_public_key(),
-                sign_count=0,
-                transports=["internal"],
-                backup_eligible=True,
-                backup_state=True,
-                name="Phone",
-                created_at=datetime.now(UTC),
-            )
-        )
-        await s.commit()
-    return authenticator
-
-
 async def test_falsifier_4_no_user_verification_signs_nobody_in_and_spends_the_challenge(
     auth_env: Any,
 ) -> None:
@@ -187,7 +172,7 @@ async def test_falsifier_4_no_user_verification_signs_nobody_in_and_spends_the_c
     org = await auth_env.create_org("pk-uv")
     who = await contact(auth_env, org, password=None)
     await point_at(auth_env, org)
-    authenticator = await _register(auth_env, who)
+    authenticator = await register_passkey(auth_env, who)
 
     options = await auth_env.client.post("/api/v1/auth/passkey/options", headers=who.network)
     unverified = authenticator.get(options.json(), origin=CONSOLE, uv=False)
@@ -223,7 +208,7 @@ async def test_the_second_factor_refuses_a_challenge_that_is_nobodys(auth_env: A
     anonymous challenge of `/auth/passkey/options` is refused."""
     org = await auth_env.create_org("pk-owner")
     tech = await signed_in(auth_env, org, "technician")
-    authenticator = await _register(auth_env, tech)
+    authenticator = await register_passkey(auth_env, tech)
     await auth_env.client.post("/api/v1/auth/logout", headers=tech.headers())
     tech.session = None
     first = await login(auth_env, tech)
@@ -314,7 +299,7 @@ async def test_an_unknown_or_suspended_organization_is_answered_as_a_replayed_as
     org = await auth_env.create_org("pk-org-state")
     who = await contact(auth_env, org, password=None)
     await point_at(auth_env, org)
-    authenticator = await _register(auth_env, who)
+    authenticator = await register_passkey(auth_env, who)
     reasons = _rejections(monkeypatch)
 
     # The baseline: a replayed assertion, whose challenge is already spent.
@@ -490,3 +475,23 @@ async def test_a_passkey_alone_leaves_the_password_set_by_mail_mark(
     assert answer.status_code == 200, answer.text
     assert answer.json() == {"state": "signed_in"}
     assert await mark() is not None
+
+
+async def test_a_passkey_alone_session_records_that_it_started_with_a_passkey(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 9b, item B: `auth_sessions.first_step`, which no later factor of
+    this session can turn into a password presented."""
+    org = await auth_env.create_org("pk-first-step")
+    who = await contact(auth_env, org, password=None)
+    await point_at(auth_env, org)
+    _verifying(monkeypatch, await add_passkey(auth_env, who))
+    answer = await _post(auth_env, who)
+    assert answer.status_code == 200, answer.text
+    token = cookie(answer, SESSION_COOKIE)
+    assert token is not None
+    async with AsyncSession(auth_env.admin_engine) as s:
+        step = await s.scalar(
+            select(AuthSession.first_step).where(AuthSession.token_hash == token_hash(token))
+        )
+    assert step == "passkey"

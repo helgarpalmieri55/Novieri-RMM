@@ -508,16 +508,13 @@ async def archive_client(
     # THE PERSON'S ROW COMES FIRST, here and in every use of their links
     # (`flows._consumed`, fix round 1), so an acceptance or a reset link in
     # flight holds the contact's row and the archive waits above for it to
-    # commit; its link is then already spent, or still here to revoke. NOT
-    # YET COVERED: the contact's own sign-in steps, which do not take their
-    # row first -- `sessions.mark_factor` locks a session and then writes
-    # `users.last_login_at`; `login` takes its failure rows and the audit
-    # chain before `start_session` writes it. They can meet this archive the
-    # other way round, and so can they a reset of the person's own password
-    # (`flows.reset_password`, users first since fix round 1, for staff and
-    # contacts alike): one of the two is a 40P01. A lock-order task of its
-    # own, after Task 9. A refusal after this point rolls it back with
-    # everything else.
+    # commit; its link is then already spent, or still here to revoke. The
+    # contact's own sign-in steps take their row first too since own
+    # authentication phase 2 Task 9b (`guards.lock_user_row`), and write the
+    # audit chain last: one in flight is waited for above, one that starts
+    # now waits for this archive and then finds the contact switched off
+    # (`tests/test_auth_sign_in_races.py`). A refusal after this point rolls
+    # it back with everything else.
     for user in contacts:
         if user.status == "active":
             await _cut_access(session, user)

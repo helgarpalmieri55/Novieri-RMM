@@ -26,10 +26,16 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import notices, recover
-from app.core.auth.sessions import SESSION_COOKIE
+from app.core.auth.sessions import SESSION_COOKIE, token_hash
 from app.core.router_inspect import flatten
 from app.models import AuditEvent, User
-from app.models.auth import AuthPasskey, AuthRecoveryCode, AuthTotp, AuthTrustedDevice
+from app.models.auth import (
+    AuthPasskey,
+    AuthRecoveryCode,
+    AuthSession,
+    AuthTotp,
+    AuthTrustedDevice,
+)
 from tests.auth_support import (
     CONSOLE,
     Staff,
@@ -146,6 +152,27 @@ async def test_the_link_forgets_every_remembered_device(auth_env: Any) -> None:
     async with AsyncSession(auth_env.admin_engine) as session:
         device = await session.get(AuthTrustedDevice, device_id)
     assert device is not None and device.revoked_at is not None
+
+
+async def test_the_session_the_link_opens_records_that_it_started_with_it(
+    auth_env: Any,
+) -> None:
+    """Task 9b, item B: `auth_sessions.first_step` is `recovery`, so no factor
+    this session proves later reads as one proved after the password."""
+    org = await auth_env.create_org("recover-first-step")
+    who = await signed_in(auth_env, org, "org-admin")
+    link = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+    accepted = await auth_env.client.post(
+        "/api/v1/auth/recover/accept", headers=browser(), json={"token": link.split("#", 1)[1]}
+    )
+    assert accepted.status_code == 200, accepted.text
+    token = cookie(accepted, SESSION_COOKIE)
+    assert token is not None
+    async with AsyncSession(auth_env.admin_engine) as session:
+        step = await session.scalar(
+            select(AuthSession.first_step).where(AuthSession.token_hash == token_hash(token))
+        )
+    assert step == "recovery"
 
 
 async def test_a_second_link_replaces_the_first(auth_env: Any) -> None:

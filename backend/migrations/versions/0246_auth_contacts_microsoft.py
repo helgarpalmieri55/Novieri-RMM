@@ -37,6 +37,16 @@ THE TABLES.
 - Neither may hold Microsoft's personal-accounts tenant,
   9188040d-6c67-4c5b-b112-36a304b66dad ("For sign-ins to the personal
   Microsoft account tenant ... the value is 9188040d-..."), by a CHECK each.
+- `auth_sessions.first_step` (plan Task 9b, item B, added while 0246 is
+  unshipped): how the session started -- `password`, `passkey` (a contact's
+  passkey alone, or their invitation accepted with one), `microsoft`, or
+  `recovery` (the server's recovery link). A second factor proved in a
+  session clears the "password set by mail" mark only when its first step
+  was the password (`failures.record_success`). Every session the code
+  starts says which (`sessions.start_session` requires it); THE DEFAULT IS
+  `recovery`, one that never clears the mark, so a row written without a
+  value fails closed -- a phase 1 session left open across the upgrade is
+  asked for the password again before its factor clears anything.
 
 KNOWN GAP, CARRIED FROM 0245: `auth_external_identities.user_id` references
 `users.id` alone, so under scope all a user of another organization would be
@@ -103,6 +113,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$
 """
 ORG_SIGNATURE = "its_auth_org(text)"
+
+#: How a session started (Task 9b, item B), and the value of a row that does
+#: not say: one that never clears the "password set by mail" mark.
+FIRST_STEPS = ("password", "passkey", "microsoft", "recovery")
+FIRST_STEP_DEFAULT = "recovery"
 
 
 def _uuid(name: str, *args: object, nullable: bool = False, **kw: object) -> sa.Column:
@@ -241,8 +256,25 @@ def upgrade() -> None:
     op.execute(f"REVOKE ALL ON FUNCTION {ORG_SIGNATURE} FROM PUBLIC")
     op.execute(f"GRANT EXECUTE ON FUNCTION {ORG_SIGNATURE} TO app_user")
 
+    op.add_column(
+        "auth_sessions",
+        sa.Column(
+            "first_step",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text(f"'{FIRST_STEP_DEFAULT}'"),
+        ),
+    )
+    op.create_check_constraint(
+        "ck_auth_sessions_first_step",
+        "auth_sessions",
+        "first_step IN (" + ", ".join(f"'{step}'" for step in FIRST_STEPS) + ")",
+    )
+
 
 def downgrade() -> None:
+    op.drop_constraint("ck_auth_sessions_first_step", "auth_sessions", type_="check")
+    op.drop_column("auth_sessions", "first_step")
     op.execute(f"DROP FUNCTION {ORG_SIGNATURE}")
     op.drop_constraint("ck_clients_microsoft_tenants_no_consumers", "clients", type_="check")
     op.drop_constraint("ck_clients_microsoft_tenants", "clients", type_="check")

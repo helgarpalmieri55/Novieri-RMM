@@ -33,11 +33,13 @@ from app.core.auth.lookup import org_of_slug
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Client, Credential, Organization, User
-from app.models.auth import ENTRA, AuthEntraSettings, AuthExternalIdentity
+from app.models.auth import ENTRA, AuthEntraSettings, AuthExternalIdentity, AuthSession
 from tests.conftest import PgCluster, _psql
 from tests.test_remote_supervise_migration import _alembic
 
 TABLES = ("auth_external_identities", "auth_entra_settings")
+#: What `auth_sessions.first_step` may hold (Task 9b, item B).
+FIRST_STEPS = ("password", "passkey", "microsoft", "recovery")
 FUNCTION = "its_auth_org(text)"
 #: Microsoft's personal-accounts tenant ([M4]).
 CONSUMERS = UUID("9188040d-6c67-4c5b-b112-36a304b66dad")
@@ -83,11 +85,29 @@ async def _schema(engine: AsyncEngine) -> dict[str, object]:
                 )
             ).scalars()
         )
+        # Task 9b, item B: a session's first step, and its CHECK.
+        first_step = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_name = 'auth_sessions' AND column_name = 'first_step'"
+                )
+            )
+        ).scalar_one()
+        first_step_check = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_constraint "
+                    "WHERE conname = 'ck_auth_sessions_first_step'"
+                )
+            )
+        ).scalar_one()
     return {
         "tables": tables,
         "function": None if function is None else str(function),
         "column": column,
         "triggers": triggers,
+        "first_step": (first_step, first_step_check),
     }
 
 
@@ -98,8 +118,15 @@ async def test_0246_round_trips(db_at_0245: str) -> None:
         "function": "its_auth_org(text)",
         "column": 1,
         "triggers": {"its_client_to_auth_external_identities"},
+        "first_step": (1, 1),
     }
-    absent = {"tables": set(), "function": None, "column": 0, "triggers": set()}
+    absent = {
+        "tables": set(),
+        "function": None,
+        "column": 0,
+        "triggers": set(),
+        "first_step": (0, 0),
+    }
     try:
         _alembic(db_at_0245, "upgrade", "0246")
         assert await _schema(engine) == present
@@ -282,3 +309,36 @@ async def test_a_client_lists_at_most_twenty_tenants(admin_engine: AsyncEngine) 
             await session.execute(
                 update(Client).where(Client.id == acme).values(microsoft_tenants=[uuid4()] * 21)
             )
+
+
+async def test_a_sessions_first_step_is_one_the_code_names_and_fails_closed(
+    admin_engine: AsyncEngine,
+) -> None:
+    """Task 9b, item B. `auth_sessions.first_step` holds how the session
+    started: the four values the sign-in code writes, and nothing else. A row
+    written without one -- no path of the code does that, `start_session`
+    requires it -- reads `recovery`: a value that does not clear the "password
+    set by mail" mark, so a forgotten value never clears it."""
+    org_id, _slug = await _org(admin_engine)
+    _acme, ana = await _contact(admin_engine, org_id, "acme")
+
+    def row(**values: str) -> AuthSession:
+        return AuthSession(
+            org_id=org_id,
+            user_id=ana,
+            token_hash=secrets.token_bytes(32),
+            kind="contact",
+            expires_at=datetime.now(UTC),
+            **values,
+        )
+
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        unsaid = row()
+        session.add_all([unsaid, *(row(first_step=step) for step in FIRST_STEPS)])
+        await session.commit()
+        await session.refresh(unsaid)
+    assert unsaid.first_step == "recovery"
+    async with AsyncSession(admin_engine) as session:
+        session.add(row(first_step="sms"))
+        with pytest.raises(IntegrityError, match="ck_auth_sessions_first_step"):
+            await session.commit()
