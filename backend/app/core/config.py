@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     # pepper (transit HMAC key `auth-pepper`) and the token signing key (transit
     # `auth-signing`, ECDSA P-256). "openbao" in production -- neither private
     # half ever leaves OpenBao. "local" keeps two files in `auth_keys_dir`
-    # (default `ca_dir`) for development and tests, and in production refuses
-    # to start rather than invent a pepper no stored password was made with.
+    # (default `ca_dir`) for development and tests, and is refused in production
+    # whether or not the files exist (`LocalAuthKeysInProduction`, final review A-M2).
     auth_keys_backend: Literal["local", "openbao"] = "local"
     auth_keys_dir: Path | None = None
     openbao_addr: str | None = None

@@ -10,7 +10,9 @@ Task 2, decisions D6 and D7).
   bodies and the `vault:v<N>:` answers), reads the public keys once per TTL
   and again when a signature names a version it has not seen, and turns any
   failure into `AuthKeysUnavailable`;
-- the factory picks the backend, and production refuses to invent a key.
+- the factory picks the backend; production refuses the local one outright,
+  files or not (final review A-M2), and the local backend never invents a key
+  it was told not to.
 """
 
 import base64
@@ -39,6 +41,7 @@ from app.core.auth.keys import (
     AuthKeysNotConfigured,
     AuthKeysUnavailable,
     LocalAuthKeys,
+    LocalAuthKeysInProduction,
     MissingAuthKeyError,
     OpenBaoAuthKeys,
     UnknownKeyVersion,
@@ -358,10 +361,59 @@ def test_the_factory_selects_the_backend(tmp_path: Path) -> None:
         keys.build(_settings(tmp_path, auth_keys_backend="openbao"))
 
 
-def test_production_refuses_to_invent_a_pepper(tmp_path: Path) -> None:
-    with pytest.raises(MissingAuthKeyError):
+def test_production_refuses_the_local_backend_and_creates_no_file(tmp_path: Path) -> None:
+    """A-M2, the half phase 1 had: nothing is created. Re-pointed from
+    `MissingAuthKeyError` (plan 2026-11-06, Task 2, decision 1). What a test
+    can see is that no file appears; that no file was READ is the code's
+    order (`build` refuses before `from_dir`), not something asserted here."""
+    with pytest.raises(LocalAuthKeysInProduction):
         keys.build(_settings(tmp_path, environment="production"))
     assert not (tmp_path / keys.PEPPER_FILE).exists()
+    assert not (tmp_path / keys.SIGNING_FILE).exists()
+
+
+def test_the_local_backend_never_invents_a_key_it_was_told_not_to(tmp_path: Path) -> None:
+    """`from_dir(..., allow_generate=False)` on a missing file still raises
+    `MissingAuthKeyError`: after D38 no production path reaches it, and the
+    contract stays."""
+    with pytest.raises(MissingAuthKeyError):
+        LocalAuthKeys.from_dir(tmp_path, allow_generate=False)
+    assert not (tmp_path / keys.PEPPER_FILE).exists()
+
+
+def test_production_refuses_the_local_backend_even_with_its_files(tmp_path: Path) -> None:
+    """A-M2, the half it lacked: files a development start left on the same
+    volume do not make `local` acceptable in production."""
+    LocalAuthKeys.from_dir(tmp_path, allow_generate=True)
+    assert (tmp_path / keys.PEPPER_FILE).exists()
+    with pytest.raises(LocalAuthKeysInProduction) as refused:
+        keys.build(_settings(tmp_path, environment="production"))
+    assert "ITS_AUTH_KEYS_BACKEND=openbao" in str(refused.value)
+
+
+def test_production_refuses_a_separate_local_keys_directory_too(tmp_path: Path) -> None:
+    keys_dir = tmp_path / "auth-keys"
+    LocalAuthKeys.from_dir(keys_dir, allow_generate=True)
+    with pytest.raises(LocalAuthKeysInProduction):
+        keys.build(_settings(tmp_path, environment="production", auth_keys_dir=str(keys_dir)))
+
+
+def test_production_takes_openbao(tmp_path: Path) -> None:
+    bao = _settings(
+        tmp_path,
+        environment="production",
+        auth_keys_backend="openbao",
+        openbao_addr="https://bao.test",
+        openbao_token="t",
+    )
+    assert isinstance(keys.build(bao), OpenBaoAuthKeys)
+
+
+@pytest.mark.parametrize("environment", ["dev", "test"])
+def test_development_and_tests_keep_the_local_backend(tmp_path: Path, environment: str) -> None:
+    built = keys.build(_settings(tmp_path, environment=environment))
+    assert isinstance(built, LocalAuthKeys)
+    assert (tmp_path / keys.PEPPER_FILE).exists()
 
 
 async def test_the_local_files_are_private_and_reused(tmp_path: Path, installed: Any) -> None:
