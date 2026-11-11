@@ -124,9 +124,20 @@ async def _one(session: AsyncSession, org_id: UUID, user: User) -> ContactAccess
 async def _contact(
     session: AsyncSession, *, org_id: UUID, client_id: UUID, contact_id: UUID
 ) -> User:
-    """The contact of a visible, active client -- the client held FOR SHARE
-    first, as `services.clients.update_contact` does, so an archive in flight
-    is waited for and seen."""
+    """The contact of a visible, active client, LOCKED for the act (Task 8,
+    fix round 1). The client FOR SHARE first, as `services.clients.
+    update_contact` reads it, so an archive in flight is waited for and seen;
+    then the contact's own row FOR NO KEY UPDATE, so an address correction or
+    a switch-off in flight is waited for too, and what it wrote is what the
+    act checks and uses -- never a link mailed to the address of before
+    (decision 4, A2-44), nor one that outlives a switch-off (D43).
+
+    THE LOCK ORDER is the one every writer of a contact's access keeps: the
+    client, the person's `users` row, their links and credentials, the audit
+    chain (`flows._consumed`; `tests/test_contact_access_races.py`). The
+    contact's own sign-in steps do not keep it yet -- they write
+    `users.last_login_at` last -- and `services.clients.archive_client` says
+    what that leaves."""
     status = (
         await session.execute(
             select(Client.status)
@@ -136,12 +147,15 @@ async def _contact(
     ).scalar_one_or_none()
     user = (
         await session.execute(
-            select(User).where(
+            select(User)
+            .where(
                 User.id == contact_id,
                 User.org_id == org_id,
                 User.kind == CONTACT_KIND,
                 User.client_id == client_id,
             )
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if status is None or user is None:

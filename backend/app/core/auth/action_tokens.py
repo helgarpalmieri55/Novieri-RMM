@@ -62,7 +62,12 @@ def link(console_url: str, page: str, token: str) -> str:
 
 
 async def revoke_open(session: AsyncSession, *, user_id: UUID, purpose: str) -> int:
-    """Spend every unused link of `purpose` of a person, now; how many."""
+    """Spend every unused link of `purpose` of a person, now -- one that ran
+    out too, dead already -- and say how many were STILL LIVE: the ones that
+    could have been used (Task 8, fix round 1). The audit of a contact's
+    address change says a link was revoked only when one could still have
+    been followed (`services.clients._revoke_links`)."""
+    now = datetime.now(UTC)
     revoked = await session.execute(
         update(AuthActionToken)
         .where(
@@ -70,10 +75,10 @@ async def revoke_open(session: AsyncSession, *, user_id: UUID, purpose: str) -> 
             AuthActionToken.purpose == purpose,
             AuthActionToken.used_at.is_(None),
         )
-        .values(used_at=datetime.now(UTC))
-        .returning(AuthActionToken.id)
+        .values(used_at=now)
+        .returning(AuthActionToken.expires_at)
     )
-    return len(revoked.scalars().all())
+    return sum(1 for expires_at in revoked.scalars() if expires_at > now)
 
 
 async def issue(

@@ -105,7 +105,7 @@ from app.core.rbac_admin import SUPER_ADMIN
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
 from app.models import Client, Organization, Role, User, UserRole
-from app.models.auth import AuthPassword, AuthSession, AuthTrustedDevice
+from app.models.auth import AuthActionToken, AuthPassword, AuthSession, AuthTrustedDevice
 
 #: How long a pending session may take to finish enrolling (plan decision 6).
 ENROLLED_S = 900
@@ -245,6 +245,38 @@ async def _audit(
         metadata=meta,
         client_id=client_id,
     )
+
+
+async def _consumed(
+    session: AsyncSession, *, digest: bytes, purposes: tuple[str, ...]
+) -> AuthActionToken | None:
+    """A one-time link consumed IN THE LOCK ORDER (Task 8, fix round 1): THE
+    PERSON'S `users` ROW FIRST, FOR NO KEY UPDATE, THEN THE LINK'S ROW, then
+    -- whenever the caller audits -- the chain. Every writer that switches a
+    contact off, edits them or touches their links takes that order: the
+    archive (`services.clients._lock_contacts`, then `_cut_access`), a
+    switch-off or an address change (`update_contact`'s UPDATE, then the
+    links), and `services.contact_access._contact`. A use that took the link
+    first and wrote the person's row last (`users.last_login_at`, in
+    `sessions.start_session`; a reset's sessions, which `_cut_access` ends
+    too) waited on them while they waited on it: a 40P01, and a 500
+    (`tests/test_contact_access_races.py`).
+
+    The link is read unlocked, only to learn whose it is; the person is
+    locked, re-read (`populate_existing`: what a switch-off committed
+    meanwhile is what the caller then checks); and only then is the link
+    consumed, under its own row lock and re-read too -- one revoked meanwhile
+    is None. `session.get(User, row.user_id)` then answers the locked row."""
+    seen = await action_tokens.peek_digest(session, digest=digest, purposes=purposes)
+    if seen is None:
+        return None
+    await session.execute(
+        select(User)
+        .where(User.id == seen.user_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    return await action_tokens.consume_digest(session, digest=digest, purposes=purposes)
 
 
 async def _remember(
@@ -1134,8 +1166,9 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
         raise _invalid_link()
     spent_dead = False
     async with _identity_session(org_id, _engine(request)) as session:
-        row = await action_tokens.consume(
-            session, token=token, purposes=(action_tokens.RESET,)
+        # The person, then the link (`_consumed`, Task 8 fix round 1).
+        row = await _consumed(
+            session, digest=action_tokens.digest(token), purposes=(action_tokens.RESET,)
         )
         user = await session.get(User, row.user_id) if row is not None else None
         if (
@@ -1221,7 +1254,17 @@ class Invitation:
 
 async def invitee(session: AsyncSession, *, digest: bytes, consume: bool) -> User:
     """The person of a live, unaccepted invitation -- a technician or a
-    client's contact -- or `invalid_link`.
+    client's contact -- or `invalid_link`. With `consume`, the link is spent
+    in the lock order: the person, then the link (`_consumed`). See
+    `_invitation`."""
+    _row, user = await _invitation(session, digest=digest, consume=consume)
+    return user
+
+
+async def _invitation(
+    session: AsyncSession, *, digest: bytes, consume: bool
+) -> tuple[AuthActionToken, User]:
+    """`invitee`, and the link's row with it (`invite_passkey` puts it back).
 
     NEVER A SUPER-ADMIN (Task 8 review, phase 1). No organization can grant
     the role, so none invites its holder (`user_admin.service.resend_invite`
@@ -1235,7 +1278,7 @@ async def invitee(session: AsyncSession, *, digest: bytes, consume: bool) -> Use
     never a link to spend."""
     purposes = (action_tokens.INVITE,)
     if consume:
-        row = await action_tokens.consume_digest(session, digest=digest, purposes=purposes)
+        row = await _consumed(session, digest=digest, purposes=purposes)
     else:
         row = await action_tokens.peek_digest(session, digest=digest, purposes=purposes)
     user = await session.get(User, row.user_id) if row is not None else None
@@ -1248,7 +1291,7 @@ async def invitee(session: AsyncSession, *, digest: bytes, consume: bool) -> Use
         or (user.kind == STAFF_KIND and await _holds_super_admin(session, user.id))
     ):
         raise _invalid_link()
-    return user
+    return row, user
 
 
 async def microsoft_offered(session: AsyncSession, user: User) -> bool:
@@ -1362,14 +1405,13 @@ async def invite_passkey(
     digest = action_tokens.digest(token)
     result: SignIn | None = None
     async with _identity_session(org_id, _engine(request)) as session:
-        user = await invitee(session, digest=digest, consume=False)
-        if user.kind != CONTACT_KIND:
+        # The kind first, with the link left as it is: a technician's is a
+        # 409 that spends nothing.
+        if (await invitee(session, digest=digest, consume=False)).kind != CONTACT_KIND:
             raise _unavailable()
-        row = await action_tokens.consume_digest(
-            session, digest=digest, purposes=(action_tokens.INVITE,)
-        )
-        if row is None:
-            raise _invalid_link()
+        # Then consumed in the lock order -- the person, then the link
+        # (`_consumed`) -- with every check made again under the locks.
+        row, user = await _invitation(session, digest=digest, consume=True)
         try:
             await verify_registration(
                 session, user, credential, name=name, expected_origin=origin, rp_id=rp_id

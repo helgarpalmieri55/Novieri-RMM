@@ -500,11 +500,19 @@ async def archive_client(
                 count=active,
             ),
         )
-    # AND WHAT THEY HAD OPEN, BEFORE ANY AUDIT WRITE TOO (Task 8, D43), for
-    # the same reason: a sign-in step of a contact holds its session or its
-    # link row and then waits on the chain, so those rows are written here,
-    # while this transaction does not hold the chain yet. A refusal after
-    # this point rolls it back with everything else.
+    # AND WHAT THEY HAD OPEN (Task 8, D43), AFTER THEIR ROWS AND BEFORE ANY
+    # AUDIT WRITE. Before the chain: a contact's own transaction may hold one
+    # of their session or device rows and then wait on the chain -- signing
+    # out everywhere does (`flows.logout_everywhere`) -- and with the chain
+    # held here first, each would wait on the other. After `_lock_contacts`:
+    # THE PERSON'S ROW COMES FIRST, here and in every use of their links
+    # (`flows._consumed`, fix round 1), so an acceptance or a reset link in
+    # flight holds the contact's row and the archive waits above for it to
+    # commit; its link is then already spent, or still here to revoke. NOT
+    # YET COVERED: a sign-in step that holds a session row and writes
+    # `users.last_login_at` last (`sessions.mark_factor`, `start_session`)
+    # can still meet this the other way round, and one of the two is a 40P01.
+    # A refusal after this point rolls it back with everything else.
     for user in contacts:
         if user.status == "active":
             await _cut_access(session, user)
@@ -560,7 +568,8 @@ async def _lock_contacts(session: AsyncSession, org_id: UUID, client_id: UUID) -
 async def _revoke_links(session: AsyncSession, user: User) -> int:
     """A contact's open invitation and reset links die: they went to the
     mailbox of then (decision 4, A2-44) or to a person switched off (D43).
-    How many there were: the audit says a link died only when one did."""
+    How many were still live (`revoke_open`; one that had run out is spent
+    too, and not counted): the audit says a link died only when one did."""
     revoked = 0
     for purpose in (action_tokens.INVITE, action_tokens.RESET):
         revoked += await action_tokens.revoke_open(session, user_id=user.id, purpose=purpose)

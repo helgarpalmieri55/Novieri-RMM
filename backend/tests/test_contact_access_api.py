@@ -3,6 +3,7 @@ decisions D39, D40, D43; B2-11, B2-29, B2-30) -- every gate shown to refuse,
 not only to admit (A2-37), and every test one that fails without the code it
 names (A2-43)."""
 
+import json
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ from app.core.auth.methods import has_sign_in_method, with_sign_in_method
 from app.core.auth.passkeys import PasskeyRejected
 from app.core.auth.sessions import SESSION_COOKIE
 from app.core.client_scope import ClientScope
+from app.core.mail import MailSettingsInput, read_settings, save_settings
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Role, User, UserRole
 from app.models.auth import (
@@ -90,6 +92,17 @@ async def _grants(env: Any, who: Any) -> list[UUID]:
             .where(UserRole.user_id == who.user_id, Role.name == "requester")
         )
         return list(rows.scalars())
+
+
+async def _metas(env: Any, who: Any, action: str) -> list[dict[str, Any]]:
+    """The metadata of every `action` row about `who`, oldest first."""
+    async with AsyncSession(env.admin_engine) as s:
+        rows = await s.execute(
+            select(AuditEvent.meta)
+            .where(AuditEvent.action == action, AuditEvent.target_id == str(who.user_id))
+            .order_by(AuditEvent.ts, AuditEvent.id)
+        )
+        return [dict(meta) for meta in rows.scalars()]
 
 
 async def _stale_admin(env: Any, org_id: UUID) -> dict[str, str]:
@@ -192,6 +205,11 @@ async def test_the_answers_that_can_carry_a_link_are_never_cached(auth_env: Any)
     assert reset.json()["invite_link"] is not None
     assert reset.headers["Cache-Control"] == "no-store"
     assert reset.headers.get("Pragma") == "no-cache"
+    # Fix round 1: the audit says the link was SHOWN, both times.
+    assert [m["link_shown"] for m in await _metas(auth_env, who, "contact.invited")] == [True]
+    assert [m["link_shown"] for m in await _metas(auth_env, active, "contact.access_reset")] == [
+        True
+    ]
 
 
 async def test_a_contact_accepts_with_a_passkey_and_a_refused_one_leaves_the_link_alive(
@@ -476,8 +494,10 @@ async def test_switched_off_and_on_again_nothing_from_before_works(
 
 
 async def test_archiving_the_client_cuts_its_contacts_access(auth_env: Any) -> None:
-    """D43, A2-43: the archive path (`_disable_contacts`), which no other
-    test reaches. An archived client is not restored, so the rows say it."""
+    """D43, A2-43: the archive path (`archive_client`, which cuts its active
+    contacts' access right after locking them, before any audit write), which
+    no other test reaches. An archived client is not restored, so the rows
+    say it."""
     who, headers = await _world(auth_env, password=CONTACT_PASSWORD)
     await login(auth_env, who)
     async with org_session(who.org_id, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
@@ -531,11 +551,24 @@ async def test_the_contacts_list_reads_access_in_bulk_and_as_the_single_check_do
     keyed = await contact(auth_env, who.org_id, password=None)
     await add_passkey(auth_env, keyed)
     bare = await contact(auth_env, who.org_id, password=None, role=False)
-    ids = [who.user_id, keyed.user_id, bare.user_id]
+    # Fix round 1: a Microsoft link alone is a way in too (the third table).
+    linked = await contact(auth_env, who.org_id, password=None)
+    async with AsyncSession(auth_env.admin_engine) as s:
+        s.add(
+            AuthExternalIdentity(
+                org_id=linked.org_id,
+                user_id=linked.user_id,
+                provider=ENTRA,
+                tenant_id=uuid4(),
+                subject=uuid4(),
+            )
+        )
+        await s.commit()
+    ids = [who.user_id, keyed.user_id, bare.user_id, linked.user_id]
     async with org_session(who.org_id, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
         bulk = await with_sign_in_method(s, ids)
         single = {i for i in ids if await has_sign_in_method(s, i)}
-    assert bulk == single == {who.user_id, keyed.user_id}
+    assert bulk == single == {who.user_id, keyed.user_id, linked.user_id}
 
 
 async def test_a_technician_of_another_client_cannot_reach_this_contact(auth_env: Any) -> None:
@@ -678,3 +711,224 @@ async def test_an_invitation_admits_nobody_who_already_has_a_way_in(auth_env: An
     async with AsyncSession(auth_env.admin_engine) as s:
         assert await s.get(AuthPassword, who.user_id) is None
     assert await _grants(auth_env, who) == []
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_link_that_had_run_out_is_not_counted_as_revoked(auth_env: Any) -> None:
+    """Fix round 1, item 3: `contact.updated` says `links_revoked` only for
+    links that could still have been used. An invitation that ran out
+    unused is spent with the rest, and not counted; a live reset link is."""
+    who, headers = await _world(auth_env)
+
+    async def _links(*purposes: str) -> None:
+        async with org_session(
+            who.org_id, engine=auth_env.app_engine, clients=ClientScope.all()
+        ) as s:
+            for purpose in purposes:
+                await action_tokens.issue(
+                    s,
+                    org_id=who.org_id,
+                    user_id=who.user_id,
+                    purpose=purpose,
+                    ttl=action_tokens.INVITE_TTL,
+                    created_by=None,
+                )
+        async with AsyncSession(auth_env.admin_engine) as s:
+            await s.execute(
+                update(AuthActionToken)
+                .where(
+                    AuthActionToken.user_id == who.user_id,
+                    AuthActionToken.purpose == action_tokens.INVITE,
+                    AuthActionToken.used_at.is_(None),
+                )
+                .values(
+                    created_at=datetime.now(UTC) - timedelta(hours=73),
+                    expires_at=datetime.now(UTC) - timedelta(hours=1),
+                )
+            )
+            await s.commit()
+
+    await _links(action_tokens.INVITE, action_tokens.RESET)
+    first = await auth_env.client.patch(
+        f"/api/v1/contacts/{who.user_id}", headers=headers, json={"email": "ana@acme.test"}
+    )
+    assert first.status_code == 200, first.text
+    await _links(action_tokens.INVITE)
+    second = await auth_env.client.patch(
+        f"/api/v1/contacts/{who.user_id}", headers=headers, json={"email": "bea@acme.test"}
+    )
+    assert second.status_code == 200, second.text
+    metas = await _metas(auth_env, who, "contact.updated")
+    assert [m.get("links_revoked") for m in metas] == [1, None]
+    async with AsyncSession(auth_env.admin_engine) as s:
+        # Spent all the same: no unused row is left behind.
+        unused = await _count(s, AuthActionToken.user_id, who, AuthActionToken.used_at.is_(None))
+    assert unused == 0
+
+
+async def test_a_switched_off_contact_or_one_of_an_archived_client_is_neither_invited_nor_reset(
+    auth_env: Any,
+) -> None:
+    """Fix round 1, item 4: `contact_access._contact`'s two 409s, for each
+    act that issues a link. Nothing is mailed and no link is left."""
+    off, headers = await _world(auth_env, password=CONTACT_PASSWORD)
+    switched = await auth_env.client.patch(
+        f"/api/v1/contacts/{off.user_id}", headers=headers, json={"status": "disabled"}
+    )
+    assert switched.status_code == 200, switched.text
+    gone, admin = await _world(auth_env, password=CONTACT_PASSWORD)
+    archived = await auth_env.client.post(
+        f"/api/v1/clients/{gone.client_id}/archive", headers=admin
+    )
+    assert archived.status_code == 200, archived.text
+    for who, auth, detail in (
+        (off, headers, "switch the contact on first"),
+        (gone, admin, "that client is archived"),
+    ):
+        for url in (_invite_url(who), _reset_url(who)):
+            refused = await auth_env.client.post(url, headers=auth)
+            assert refused.status_code == 409, (url, refused.text)
+            assert refused.json()["detail"] == detail, url
+        async with AsyncSession(auth_env.admin_engine) as s:
+            assert await s.get(AuthPassword, who.user_id) is not None
+            assert await _count(s, AuthActionToken.user_id, who) == 0
+    assert auth_env.mail.sent == []
+
+
+async def test_the_audit_says_whether_the_link_was_shown_resent_and_what_ended(
+    auth_env: Any,
+) -> None:
+    """Fix round 1, item 4: `contact.invited` records `resent` and
+    `link_shown` (False when a mail carried the link, True when the page
+    showed it); `contact.access_reset` records `link_shown` and how many
+    sessions it ended."""
+    who, headers = await _world(auth_env)
+    await _invite(auth_env, who, headers)
+    auth_env.mail.configured = False
+    again = await auth_env.client.post(_invite_url(who), headers=headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["invite_link"] is not None
+    assert await _metas(auth_env, who, "contact.invited") == [
+        {"client_id": str(who.client_id), "email": who.email, "resent": False, "link_shown": False},
+        {"client_id": str(who.client_id), "email": who.email, "resent": True, "link_shown": True},
+    ]
+    auth_env.mail.configured = True
+    active, admin = await _world(auth_env, password=CONTACT_PASSWORD)
+    for _ in range(2):
+        await sign_in(auth_env, active.org_id, active.sub)
+    reset = await auth_env.client.post(_reset_url(active), headers=admin)
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["invite_link"] is None
+    assert await _metas(auth_env, active, "contact.access_reset") == [
+        {
+            "client_id": str(active.client_id),
+            "email": active.email,
+            "sessions_ended": 2,
+            "link_shown": False,
+        }
+    ]
+
+
+class _Relay:
+    """`smtplib.SMTP`, recording: what the account mail signed in with and
+    sent. Nothing opens a socket."""
+
+    logins: list[tuple[str, str]] = []
+    sent: list[str] = []
+
+    def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
+        self.host, self.port = host, port
+
+    def __enter__(self) -> "_Relay":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def starttls(self, context: Any = None) -> None:
+        return None
+
+    def login(self, username: str, password: str) -> None:
+        _Relay.logins.append((username, password))
+
+    def send_message(self, message: Any) -> None:
+        _Relay.sent.append(str(message["To"]))
+
+
+async def test_a_technician_of_one_client_mails_the_invitation_through_the_relay(
+    api_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix round 1, item 5. The relay's sign-in is a client-less
+    `credentials` row (migration 0231: a per-client scope may read it, never
+    change it), and every contact act runs in the technician's own scope. So
+    the checkout must work from a scope of ONE client: read directly with
+    `vault.checkout`, as `mail._sign_in` does, and end to end -- the
+    invitation of a technician who holds `clients.manage` on that client
+    alone goes through the real `send_account_mail`, signed in, audited, and
+    the link is not shown. No mail is captured here."""
+    console_ready(api_env, monkeypatch)
+    monkeypatch.setattr("smtplib.SMTP", _Relay)
+    _Relay.logins, _Relay.sent = [], []
+    org = await api_env.create_org("contact-relay")
+    who = await contact(api_env, org, password=None, role=False)
+    vault = api_env.app.state.vault
+    async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as s:
+        await save_settings(
+            s,
+            vault,
+            org_id=org,
+            actor_id=who.user_id,
+            values=MailSettingsInput(
+                host="smtp.internal",
+                port=587,
+                from_address="itms@toeshee.com",
+                from_display_name="ITMS",
+                reply_to="",
+                encryption="starttls",
+                username="itms",
+                auth_type="password",
+                token_url="",
+                token_scope="",
+                token_client_id="",
+            ),
+            password="relay-pass-SENTINEL",
+            client_secret=None,
+        )
+    one = ClientScope.only([who.client_id])
+    async with org_session(org, engine=api_env.app_engine, clients=one) as s:
+        settings = await read_settings(s, org)
+        assert settings is not None and settings.credential_id is not None
+        secret = await vault.checkout(s, org_id=org, credential_id=settings.credential_id)
+    assert json.loads(secret) == {"password": "relay-pass-SENTINEL"}
+
+    sub = await api_env.create_user(org)
+    async with AsyncSession(api_env.admin_engine) as s:
+        role_id = await s.scalar(
+            select(Role.id).where(Role.name == "org-admin", Role.org_id.is_(None))
+        )
+        user_id = await s.scalar(select(User.id).where(User.external_subject == sub))
+        s.add(UserRole(org_id=org, user_id=user_id, role_id=role_id, client_id=who.client_id))
+        await s.commit()
+    sent = await api_env.client.post(_invite_url(who), headers=await api_env.headers(org, sub))
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["invite_link"] is None
+    assert _Relay.logins == [("itms", "relay-pass-SENTINEL")]
+    assert _Relay.sent == [who.email]
+    async with AsyncSession(api_env.admin_engine) as s:
+        used = (
+            (
+                await s.execute(
+                    select(AuditEvent.actor_id).where(
+                        AuditEvent.org_id == org, AuditEvent.action == "email.credential_used"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert list(used) == [user_id]
+    assert [m["link_shown"] for m in await _metas(api_env, who, "contact.invited")] == [False]
