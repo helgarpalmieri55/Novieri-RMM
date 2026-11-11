@@ -3,11 +3,13 @@
 
 Most tests replace `flows.verify_authentication`, as
 `tests/auth_support.py::add_passkey` says, and hold the rule around it: who
-may enter this way, what a refusal says. Two run the real cryptography at
+may enter this way, what a refusal says. Three run the real cryptography at
 the route, with phase 1's software authenticator
 (`tests/webauthn_authenticator.py`): falsifier 4 -- an assertion without
-user verification signs nobody in, and leaves its challenge spent -- and
-decision 4, the second factor refusing the anonymous challenge."""
+user verification signs nobody in, and leaves its challenge spent --;
+decision 4, the second factor refusing the anonymous challenge; and the
+organization that is unknown or not active, answered as a spent challenge
+is."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -21,13 +23,14 @@ from app.core.auth import flows
 from app.core.auth.passkeys import CHALLENGE_BYTES, PasskeyRejected, user_handle
 from app.core.auth.sessions import SESSION_COOKIE
 from app.models import AuditEvent, Organization, User
-from app.models.auth import AuthFailure, AuthPasskey, AuthWebauthnChallenge
+from app.models.auth import AuthFailure, AuthPasskey, AuthPassword, AuthWebauthnChallenge
 from tests.auth_support import (
     add_passkey,
     capture_mail,
     console_ready,
     contact,
     cookie,
+    link_token,
     login,
     point_at,
     signed_in,
@@ -99,6 +102,11 @@ async def test_a_contacts_passkey_alone_signs_the_contact_in(
     who.session = cookie(answer, SESSION_COOKIE)
     me = await auth_env.client.get("/api/v1/portal/me", headers=who.headers())
     assert me.status_code == 200 and me.json()["kind"] == "contact"
+    # The session this entry point mints is a contact's: the console's door
+    # keeps it off every technician route (D42).
+    console = await auth_env.client.get("/api/v1/me", headers=who.headers())
+    assert console.status_code == 403
+    assert console.json()["code"] == "portal_only"
 
 
 async def test_a_technicians_passkey_signs_nobody_in_here(
@@ -288,30 +296,36 @@ async def _options(env: Any, who: Any) -> dict[str, Any]:
     return options
 
 
-async def test_an_unknown_or_suspended_organization_is_answered_as_an_unknown_credential(
+async def test_an_unknown_or_suspended_organization_is_answered_as_a_replayed_assertion(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Coordinator's review note: `lookup.org_of_slug` names an organization
     whatever its status. An organization that is not active, and a slug that
-    names none, get exactly an unknown credential's answer -- the same 401
-    body, after the same verification (a spent challenge's refusal is
-    `challenge`, and so is the unknown organization's, where no challenge
-    can live) -- and the options look like any other's."""
+    names none, get the one refusal every other assertion gets -- the same
+    401 body -- and options that look like any other's.
+
+    The baseline is a REPLAYED assertion: its challenge is already spent, so
+    the verification refuses it at the challenge (`challenge`). A suspended
+    organization's assertion is verified in full and refused for the
+    organization alone. A slug that names none is refused at the challenge
+    too, as the replay is: its options stored no challenge (no session, no
+    sweep, no insert -- quicker, and harmless, because the slug is the
+    server's configuration, never the request's)."""
     org = await auth_env.create_org("pk-org-state")
     who = await contact(auth_env, org, password=None)
     await point_at(auth_env, org)
     authenticator = await _register(auth_env, who)
     reasons = _rejections(monkeypatch)
 
-    # The baseline, an unknown credential: an answer to a challenge already spent.
+    # The baseline: a replayed assertion, whose challenge is already spent.
     issued = await _options(auth_env, who)
     assert (
         await _send(auth_env, who, authenticator.get(issued, origin=CONSOLE))
     ).status_code == 200
     replayed = await _send(auth_env, who, authenticator.get(issued, origin=CONSOLE))
     assert replayed.status_code == 401
-    unknown_credential = replayed.json()
-    assert unknown_credential["code"] == "passkey_rejected"
+    replay_refusal = replayed.json()
+    assert replay_refusal["code"] == "passkey_rejected"
     assert reasons == ["challenge"]
 
     # Suspended: the contact's own, genuine passkey -- verified, and refused alike.
@@ -325,7 +339,7 @@ async def test_an_unknown_or_suspended_organization_is_answered_as_an_unknown_cr
     assert suspended_options["allowCredentials"] == []
     suspended = await _send(auth_env, who, authenticator.get(suspended_options, origin=CONSOLE))
     assert suspended.status_code == 401
-    assert suspended.json() == unknown_credential
+    assert suspended.json() == replay_refusal
     assert cookie(suspended, SESSION_COOKIE) is None
     assert reasons == ["challenge"]  # it verified: refused for the organization alone
     async with AsyncSession(auth_env.admin_engine) as s:
@@ -339,7 +353,7 @@ async def test_an_unknown_or_suspended_organization_is_answered_as_an_unknown_cr
     assert live == []  # its challenge is spent, as a refused assertion's is
 
     # A slug that names no organization: options of the same shape, and the
-    # same refusal after the same verification.
+    # same refusal, at the same step as the replay -- the challenge.
     auth_env.settings.default_org_slug = f"no-such-org-{uuid4().hex[:8]}"
     nowhere = await _options(auth_env, who)
     assert set(nowhere) == set(issued)
@@ -347,7 +361,7 @@ async def test_an_unknown_or_suspended_organization_is_answered_as_an_unknown_cr
     assert nowhere["rpId"] == RP_ID and len(unb64url(nowhere["challenge"])) == CHALLENGE_BYTES
     unknown = await _send(auth_env, who, authenticator.get(nowhere, origin=CONSOLE))
     assert unknown.status_code == 401
-    assert unknown.json() == unknown_credential
+    assert unknown.json() == replay_refusal
     assert cookie(unknown, SESSION_COOKIE) is None
     assert reasons == ["challenge", "challenge"]
 
@@ -436,3 +450,43 @@ async def test_a_contacts_passkey_sign_in_is_audited(
     assert [(r.action, r.meta) for r in rows] == [
         ("auth.signed_in", {"method": "passkey", "trusted_device": False})
     ]
+
+
+async def test_a_passkey_alone_leaves_the_password_set_by_mail_mark(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coordinator decision (Task 6 fix round 1), a departure from the plan's
+    Step 4: `failures.record_success` clears the "password set by mail" mark
+    because whoever set that password then holds a factor too. Here no
+    password is presented, so that does not follow: a contact whose password
+    an emailed link set signs in with the passkey alone, and the mark stays
+    -- for a later contact access reset (Task 8) to read."""
+    org = await auth_env.create_org("pk-mail-mark")
+    who = await contact(auth_env, org)
+    await point_at(auth_env, org)
+    passkey = await add_passkey(auth_env, who)
+    sent = await auth_env.client.post(
+        "/api/v1/auth/password/forgot", headers=who.network, json={"email": who.email}
+    )
+    assert sent.status_code == 202
+    [mail] = auth_env.mail.sent
+    reset = await auth_env.client.post(
+        "/api/v1/auth/password/reset",
+        headers=who.network,
+        json={"token": link_token(mail.text), "password": "Cobalt-Lantern-4826-Meadow"},
+    )
+    assert reset.status_code == 204, reset.text
+
+    async def mark() -> datetime | None:
+        async with AsyncSession(auth_env.admin_engine) as s:
+            value: datetime | None = await s.scalar(
+                select(AuthPassword.mail_reset_at).where(AuthPassword.user_id == who.user_id)
+            )
+            return value
+
+    assert await mark() is not None
+    _verifying(monkeypatch, passkey)
+    answer = await _post(auth_env, who)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"state": "signed_in"}
+    assert await mark() is not None

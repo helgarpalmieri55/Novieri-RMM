@@ -187,6 +187,18 @@ def _factor_failed(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRefus
     )
 
 
+def _passkey_rejected(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRefusal:
+    """A passkey that is not accepted, whatever the reason (W3C: indistinguishable
+    from "no such credential"). 401 on the sign-in screen (`passkey_sign_in`);
+    400 where a session is open -- an enrolment -- because there a 401 ends it,
+    as `_factor_failed` says."""
+    return AuthRefusal(
+        status_code,
+        code="passkey_rejected",
+        detail=tr("the passkey was not accepted; try again"),
+    )
+
+
 def _unavailable() -> AuthRefusal:
     return AuthRefusal(
         status.HTTP_409_CONFLICT,
@@ -731,11 +743,7 @@ async def enroll_passkey(
                 factor="passkey",
             )
     if rejected:
-        raise AuthRefusal(
-            status.HTTP_400_BAD_REQUEST,
-            code="passkey_rejected",
-            detail=tr("the passkey was not accepted; try again"),
-        )
+        raise _passkey_rejected(status.HTTP_400_BAD_REQUEST)
     await _enrolled(request, principal)
 
 
@@ -901,21 +909,20 @@ async def _deployment_org(request: Request) -> UUID | None:
     return await org_of_slug(_engine(request), slug)
 
 
-def _passkey_rejected() -> AuthRefusal:
-    return AuthRefusal(
-        status.HTTP_401_UNAUTHORIZED,
-        code="passkey_rejected",
-        detail=tr("the passkey was not accepted; try again"),
-    )
 
 
 async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
     """A challenge that belongs to nobody yet, and no list of credentials:
     the browser offers the person's own discoverable passkeys (D28). Nothing
-    here says whether any address has an account -- nor whether the
+    in the answer says whether any address has an account -- nor whether the
     organization is active or exists: a suspended one is issued a challenge
     like an active one, and a slug that names none gets options of the same
-    shape whose challenge is stored nowhere (`unanswerable_options`)."""
+    shape whose challenge is stored nowhere (`unanswerable_options`).
+
+    THE TIME IS NOT THE SAME for a slug that names none: it opens no
+    session, sweeps nothing and inserts nothing, so it answers sooner. That
+    tells nobody anything they could choose to ask: the slug is the server's
+    configuration (`ITS_DEFAULT_ORG_SLUG`), never part of the request."""
     rp_id, _origin = relying_party(request.app.state.settings)
     org_id = await _deployment_org(request)
     if org_id is None:
@@ -937,13 +944,15 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
     this transaction, which commits before the refusal (`passkeys.py`, "THE
     CALLER'S TRANSACTION").
 
-    THE SAME WORK FOR EVERY REFUSAL OF ONE KIND. The assertion is verified
-    before anything about the organization is looked at: a suspended
-    organization's is verified as an active one's, and refused where a
-    rejected assertion is. A slug that names no organization runs the same
-    verification pinned to `_NO_ORG`, which holds no challenge, so it is
-    refused where an unknown or spent challenge is -- as `login` answers an
-    unknown organization after `verify_against_nobody`."""
+    WHERE EACH IS REFUSED. The assertion is verified before anything about
+    the organization is looked at: a suspended organization's is verified in
+    full, as an active one's, and then refused. A slug that names no
+    organization goes through the same verification call, pinned to
+    `_NO_ORG`, which holds no challenge: it is refused AT THE CHALLENGE, as a
+    replayed or expired assertion is -- sooner than one whose signature is
+    checked. Its answer is the same; its time may differ, and the slug is
+    the server's configuration, never the request's, so nobody can choose
+    to probe with it."""
     rp_id, origin = relying_party(request.app.state.settings)
     org_id = await _deployment_org(request) or _NO_ORG
     result: SignIn | None = None
@@ -965,7 +974,10 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
         ):
             state = await check_allowed(session, user.id, "passkey")
             if state.allowed:
-                await record_success(session, user.id, "passkey")
+                # No password was presented: the "password set by mail" mark
+                # stays (fix round 1, coordinator decision; not the plan's
+                # Step 4). The passkey's failures are cleared.
+                await record_success(session, user.id, "passkey", clear_mail_mark=False)
                 await _audit(
                     session, user, "auth.signed_in", {"method": "passkey", "trusted_device": False}
                 )

@@ -383,8 +383,8 @@ def unanswerable_options(*, rp_id: str) -> dict[str, Any]:
     (`_spend` finds no row, `PasskeyRejected("challenge")`). What a sign-in
     without an address is offered when the deployment's slug names no
     organization to keep a challenge in (plan 2026-11-06, Task 6): the same
-    answer as anywhere else, and the refusal comes where an unknown
-    credential's does."""
+    answer as anywhere else, and the response to it is refused at the
+    challenge, as a replayed one is."""
     return _request_options(rp_id=rp_id, challenge=secrets.token_bytes(CHALLENGE_BYTES), allowed=[])
 
 
