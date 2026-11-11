@@ -3,7 +3,7 @@
  * leaves only for Microsoft, the return page sends the code once in a body,
  * and every refusal is one sentence.
  */
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,7 @@ import { setActiveLanguage } from "../../../i18n/core";
 import { expectNoEnglish } from "../../../i18n/test-utils";
 import { ApiError } from "../../../lib/api";
 import { navigation } from "../../../lib/session";
-import { microsoftReturnOf, rememberMicrosoftReturn, takeMicrosoftReturn } from "../microsoft";
+import { checkedAuthorizeUrl, microsoftReturnOf, rememberMicrosoftReturn, takeMicrosoftReturn } from "../microsoft";
 import { authApi, calls, installDefaults, renderAuth, where } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => authApi() }));
@@ -91,6 +91,38 @@ describe("the button", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Signing in with Microsoft is not set up here.");
   });
 
+  it("leaves once: after a successful start it stays off, and a second click starts no second transaction", async () => {
+    calls.microsoftStart.mockResolvedValue({ authorize_url: AUTHORIZE });
+    const user = userEvent.setup();
+    renderAuth("/sign-in");
+    const button = screen.getByRole("button", { name: "Sign in with Microsoft" });
+    await user.click(button);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    await user.click(button);
+    expect(calls.microsoftStart).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledOnce();
+  });
+
+  it("comes back to life only when the browser restores the page from its cache (Back from Microsoft)", async () => {
+    calls.microsoftStart.mockResolvedValue({ authorize_url: AUTHORIZE });
+    const user = userEvent.setup();
+    renderAuth("/sign-in");
+    const button = screen.getByRole("button", { name: "Sign in with Microsoft" });
+    await user.click(button);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    });
+    expect(button).toBeDisabled();
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAccessibleName("Sign in with Microsoft");
+  });
+
   it("is offered on an invitation only when the invitation says so", async () => {
     calls.getInvite.mockResolvedValue({
       email: "ana@acme.test",
@@ -105,6 +137,8 @@ describe("the button", () => {
     renderAuth("/invite#tok-contact-1");
     await user.click(await screen.findByRole("button", { name: "Accept with Microsoft" }));
     expect(calls.microsoftStart).toHaveBeenCalledWith({ intent: "invite", token: "tok-contact-1" }, {});
+    // The return is kept just before leaving: read it once the page has left.
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
     expect(takeMicrosoftReturn()).toEqual({ intent: "invite", back: "/portal" });
   });
 
@@ -139,6 +173,113 @@ describe("the button", () => {
     expect(calls.microsoftStart).toHaveBeenCalledWith({ intent: "invite", token: "tok-staff-1", password: GOOD }, {});
     await waitFor(() => expect(assign).toHaveBeenCalledWith(AUTHORIZE));
     expect(takeMicrosoftReturn()).toEqual({ intent: "invite", back: "/" });
+  });
+});
+
+describe("the invitation's one guard", () => {
+  const CONTACT_INVITE = {
+    email: "ana@acme.test",
+    display_name: "Ana Ruiz",
+    kind: "contact",
+    password_minimum: 15,
+    passkey: false,
+    microsoft: true,
+  };
+  const STAFF_INVITE = {
+    email: "dana@example.test",
+    display_name: "Dana Okafor",
+    kind: "staff",
+    password_minimum: 12,
+    passkey: false,
+    microsoft: true,
+  };
+  const DEAD = new ApiError(410, '{"code":"invalid_link","detail":"this link is not valid"}');
+  const INVALID = "This invitation has expired, was already used, or was cancelled. Ask the person who invited you for a new one.";
+
+  it("turns a dead invitation into the invitation's own state, from the Microsoft button too (a contact)", async () => {
+    calls.getInvite.mockResolvedValue(CONTACT_INVITE);
+    calls.microsoftStart.mockRejectedValue(DEAD);
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-contact-1");
+    await user.click(await screen.findByRole("button", { name: "Accept with Microsoft" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(INVALID);
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept with Microsoft" })).not.toBeInTheDocument();
+  });
+
+  it("turns a dead invitation into the invitation's own state, from the Microsoft button too (a technician)", async () => {
+    calls.getInvite.mockResolvedValue(STAFF_INVITE);
+    calls.microsoftStart.mockRejectedValue(DEAD);
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-staff-1");
+    await user.type(await screen.findByLabelText("New password"), GOOD);
+    await user.type(screen.getByLabelText("The same password again"), GOOD);
+    await user.click(screen.getByRole("button", { name: "Accept with Microsoft" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(INVALID);
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+  });
+
+  it("does not ask Microsoft while a technician's password is being accepted", async () => {
+    calls.getInvite.mockResolvedValue(STAFF_INVITE);
+    let finish: (value: { state: "enroll_required" }) => void = () => undefined;
+    calls.acceptInvite.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-staff-1");
+    await user.type(await screen.findByLabelText("New password"), GOOD);
+    await user.type(screen.getByLabelText("The same password again"), GOOD);
+    const microsoft = screen.getByRole("button", { name: "Accept with Microsoft" });
+    await user.click(screen.getByRole("button", { name: "Set password and continue" }));
+    expect(calls.acceptInvite).toHaveBeenCalledOnce();
+    expect(microsoft).toBeDisabled();
+    fireEvent.click(microsoft);
+    expect(calls.microsoftStart).not.toHaveBeenCalled();
+    await act(async () => finish({ state: "enroll_required" }));
+  });
+
+  it("does not accept the password while Microsoft is being asked", async () => {
+    calls.getInvite.mockResolvedValue(STAFF_INVITE);
+    let finish: (value: { authorize_url: string }) => void = () => undefined;
+    calls.microsoftStart.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-staff-1");
+    await user.type(await screen.findByLabelText("New password"), GOOD);
+    await user.type(screen.getByLabelText("The same password again"), GOOD);
+    const submit = screen.getByRole("button", { name: "Set password and continue" });
+    await user.click(screen.getByRole("button", { name: "Accept with Microsoft" }));
+    expect(calls.microsoftStart).toHaveBeenCalledOnce();
+    expect(submit).toBeDisabled();
+    fireEvent.submit(submit.closest("form") as HTMLFormElement);
+    expect(calls.acceptInvite).not.toHaveBeenCalled();
+    await act(async () => finish({ authorize_url: AUTHORIZE }));
+    expect(assign).toHaveBeenCalledWith(AUTHORIZE);
+  });
+});
+
+describe("the origin barrier", () => {
+  it("lets Microsoft's own address through, and refuses every look-alike", () => {
+    expect(checkedAuthorizeUrl(AUTHORIZE)).toBe(AUTHORIZE);
+    for (const lookAlike of [
+      "http://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+      "https://login.microsoftonline.com@evil.example/organizations/oauth2/v2.0/authorize",
+      "https://login.microsoftonline.com.evil.example/organizations/oauth2/v2.0/authorize",
+      "https://login.microsoftonline.com:8443/organizations/oauth2/v2.0/authorize",
+      "//login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+      "not an address",
+    ]) {
+      expect(checkedAuthorizeUrl(lookAlike), lookAlike).toBeNull();
+    }
+  });
+
+  it("does not leave for a look-alike, and says the sign-in did not finish", async () => {
+    calls.microsoftStart.mockResolvedValue({
+      authorize_url: "https://login.microsoftonline.com@evil.example/organizations/oauth2/v2.0/authorize",
+    });
+    const user = userEvent.setup();
+    renderAuth("/sign-in");
+    await user.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The sign-in with Microsoft did not finish. Start it again.");
+    expect(assign).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem("itms.microsoft.return")).toBeNull();
   });
 });
 
@@ -214,6 +355,13 @@ describe("the return page", () => {
     await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
     expect(where.location?.search).toBe("");
     expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("sends the code once under StrictMode's double mount", async () => {
+    rememberMicrosoftReturn({ intent: "sign_in", back: "/devices" });
+    renderAuth("/sign-in/microsoft#code=abc&state=xyz", undefined, { strict: true });
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/devices"));
+    expect(calls.microsoftComplete).toHaveBeenCalledExactlyOnceWith({ code: "abc", state: "xyz" });
   });
 
   it("forgets where to go back once it has been read", async () => {

@@ -29,7 +29,7 @@
  * mutation cache holds it.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Form } from "../../components/form";
@@ -43,7 +43,8 @@ import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
-import { MicrosoftButton } from "./MicrosoftButton";
+import { describeMicrosoftError } from "./microsoft";
+import { LEFT, MicrosoftButton, useBackFromMicrosoft, type MicrosoftGuard } from "./MicrosoftButton";
 import { NewPasswordFields } from "./NewPasswordFields";
 import { canUsePasskeys, createPasskey, describePasskeyError } from "./passkey";
 
@@ -78,28 +79,47 @@ export function InvitePage() {
   const [dead, setDead] = useState(false);
   const [busy, setBusy] = useState(false);
   const [passkeyName, setPasskeyName] = useState(() => translate("auth.enroll.passkeyDefaultName"));
+  // ONE GUARD FOR EVERY WAY IN (fix round 1): the password, the passkey and
+  // Microsoft. One action is in flight at a time, so a technician's password
+  // cannot be accepted while the same password is on its way to Microsoft's
+  // start, and the other way round.
   const inFlight = useRef(false);
+  const reset = useCallback(() => {
+    inFlight.current = false;
+    setBusy(false);
+  }, []);
+  useBackFromMicrosoft(reset);
 
   function landed(kind: "staff" | "contact", state: "enroll_required" | "signed_in") {
     if (state === "signed_in") enterConsole(kind === "contact" ? "/portal" : null);
     else navigate("/sign-in/enroll", { replace: true });
   }
 
-  async function guarded(step: () => Promise<void>) {
+  /**
+   * Run one way in. A dead invitation (410), from any of them, is the page's
+   * own state; any other refusal is one sentence. A step that has `LEFT` for
+   * Microsoft keeps the page off: the document is unloading.
+   */
+  async function guarded(step: () => Promise<unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
+    let left = false;
     try {
-      await step();
+      left = (await step()) === LEFT;
     } catch (cause: unknown) {
       if (isDeadLink(cause)) setDead(true);
-      else setError(describePasskeyError(cause) ?? describeAuthError(cause, { canTimeOut: false }));
+      else
+        setError(
+          describeMicrosoftError(cause) ?? describePasskeyError(cause) ?? describeAuthError(cause, { canTimeOut: false }),
+        );
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      if (!left) reset();
     }
   }
+
+  const microsoftGuard: MicrosoftGuard = { busy, run: (step) => void guarded(step) };
 
   function submit(kind: "staff" | "contact", minimum: number) {
     const problem = checkNewPassword(password, again, minimum);
@@ -190,6 +210,7 @@ export function InvitePage() {
             back="/portal"
             labelKey="auth.microsoft.acceptInvite"
             variant={offerPasskey ? "secondary" : "primary"}
+            guard={microsoftGuard}
           />
           <p className="note" style={{ margin: 0 }}>
             {t("auth.invite.or")}
@@ -229,6 +250,7 @@ export function InvitePage() {
             back="/"
             labelKey="auth.microsoft.acceptInvite"
             check={() => checkNewPassword(password, again, password_minimum)}
+            guard={microsoftGuard}
           />
         </>
       ) : null}

@@ -368,6 +368,9 @@ export const settings: Shape<typeof en> = {
     expiresSoon: "El certificado caduca en menos de 30 días. Pide uno nuevo, súbelo y cambia a él antes.",
     expired:
       "El certificado caducó: nadie puede entrar con Microsoft hasta que pidas uno nuevo, lo subas y cambies a él.",
+    expiresSoonWaiting: "El certificado caduca en menos de 30 días. Sube el certificado nuevo que espera y cambia a él antes.",
+    expiredWaiting:
+      "El certificado caducó: nadie puede entrar con Microsoft hasta que subas el certificado nuevo que espera y cambies a él.",
     renew: "Hacer un certificado nuevo al guardar",
     renewWarning:
       "El certificado nuevo espera junto al que está en uso, que sigue dejando entrar. Súbelo a la aplicación en Entra y después cambia a él aquí.",

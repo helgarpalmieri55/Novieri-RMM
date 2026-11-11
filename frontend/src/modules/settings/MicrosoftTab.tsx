@@ -249,15 +249,17 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
                 </p>
               </div>
             ) : null}
+            {/* With a new certificate already waiting, the way out is to
+                upload it and switch, not to ask for another (fix round 1). */}
             {ending === "expired" ? (
               <p className="notice red" role="alert" style={{ marginTop: 10 }}>
                 <Icon name={KIND_ICON.crit} size={16} />
-                <span>{t("settings.microsoft.expired")}</span>
+                <span>{t(waiting ? "settings.microsoft.expiredWaiting" : "settings.microsoft.expired")}</span>
               </p>
             ) : ending === "soon" ? (
               <p className="notice gold" style={{ marginTop: 10 }}>
                 <Icon name={KIND_ICON.warn} size={16} />
-                <span>{t("settings.microsoft.expiresSoon")}</span>
+                <span>{t(waiting ? "settings.microsoft.expiresSoonWaiting" : "settings.microsoft.expiresSoon")}</span>
               </p>
             ) : null}
             <label className="flex items-start gap-2" style={{ marginTop: 10 }}>

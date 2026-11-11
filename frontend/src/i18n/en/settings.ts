@@ -385,6 +385,11 @@ export const settings = {
     expiresSoon: "The certificate expires within 30 days. Ask for a new one, upload it and switch to it before then.",
     expired:
       "The certificate has expired: nobody can sign in with Microsoft until you ask for a new one, upload it and switch to it.",
+    // The same two warnings while a new certificate already waits (fix round 1).
+    expiresSoonWaiting:
+      "The certificate expires within 30 days. Upload the new certificate that is waiting and switch to it before then.",
+    expiredWaiting:
+      "The certificate has expired: nobody can sign in with Microsoft until you upload the new certificate that is waiting and switch to it.",
     renew: "Make a new certificate when I save",
     renewWarning:
       "The new certificate waits beside the one in use, which keeps signing people in. Upload it to the application in Entra, then switch to it here.",

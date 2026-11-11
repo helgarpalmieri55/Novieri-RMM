@@ -6,6 +6,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
+import { Fragment, StrictMode } from "react";
 import { MemoryRouter, Route, Routes, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
@@ -103,29 +104,38 @@ function LocationProbe() {
 /**
  * The pages, at `path` (fragment included), with router `state` when a
  * step hands one over -- and the query client, for what a page leaves in it.
+ * `strict`: inside `<StrictMode>`, as `main.tsx` mounts the console, so
+ * effects run twice on mount.
  */
-export function renderAuth(path: string, state?: unknown): RenderResult & { queryClient: QueryClient } {
+export function renderAuth(
+  path: string,
+  state?: unknown,
+  { strict = false }: { strict?: boolean } = {},
+): RenderResult & { queryClient: QueryClient } {
   const url = new URL(path, "https://itms.example");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const Mode = strict ? StrictMode : Fragment;
   const rendered = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[{ pathname: url.pathname, search: url.search, hash: url.hash, state }]}>
-        <Routes>
-          <Route path="/sign-in" element={<SignInPage />} />
-          <Route path="/sign-in/factor" element={<FactorPage />} />
-          <Route path="/sign-in/enroll" element={<EnrollPage />} />
-          <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path="/recover" element={<RecoverPage />} />
-          <Route path="/portal/sign-in" element={<PortalSignInPage />} />
-          <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
-          <Route path="*" element={<p data-testid="elsewhere" />} />
-        </Routes>
-        <LocationProbe />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <Mode>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname: url.pathname, search: url.search, hash: url.hash, state }]}>
+          <Routes>
+            <Route path="/sign-in" element={<SignInPage />} />
+            <Route path="/sign-in/factor" element={<FactorPage />} />
+            <Route path="/sign-in/enroll" element={<EnrollPage />} />
+            <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/invite" element={<InvitePage />} />
+            <Route path="/recover" element={<RecoverPage />} />
+            <Route path="/portal/sign-in" element={<PortalSignInPage />} />
+            <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
+            <Route path="*" element={<p data-testid="elsewhere" />} />
+          </Routes>
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </Mode>,
   );
   return { ...rendered, queryClient };
 }

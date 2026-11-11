@@ -12,9 +12,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../../../i18n/core";
 import { expectNoEnglish } from "../../../i18n/test-utils";
 import { ApiError } from "../../../lib/api";
+import { saveBlob } from "../../../lib/download";
 import { MICROSOFT_SETTINGS_FIXTURE, apiClient, calls, installDefaults, renderSettings } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
+// jsdom follows no download: what is handed to the browser is what is checked.
+vi.mock("../../../lib/download", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/download")>()),
+  saveBlob: vi.fn(),
+}));
 
 const APP = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const TENANT = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
@@ -37,7 +43,18 @@ const WAITING = {
 
 beforeEach(() => {
   installDefaults();
+  vi.mocked(saveBlob).mockClear();
 });
+
+/** What a `Blob` holds, read the way a browser would (jsdom's `Blob` has no `text()`). */
+function blobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
 
 describe("Microsoft sign-in", () => {
   it("shows the address to register, and asks for no secret", async () => {
@@ -66,6 +83,56 @@ describe("Microsoft sign-in", () => {
         "The certificate has expired: nobody can sign in with Microsoft until you ask for a new one, upload it and switch to it.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("does not tell a person to ask for a new certificate when one is already waiting (expired)", async () => {
+    calls.getMicrosoftSettings.mockResolvedValue({ ...WAITING, certificate_expires_at: "2020-01-01T00:00:00Z" });
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    expect(
+      await within(tab).findByText(
+        "The certificate has expired: nobody can sign in with Microsoft until you upload the new certificate that is waiting and switch to it.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(tab).queryByText(/until you ask for a new one/)).not.toBeInTheDocument();
+  });
+
+  it("does not tell a person to ask for a new certificate when one is already waiting (expiring)", async () => {
+    const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    calls.getMicrosoftSettings.mockResolvedValue({ ...WAITING, certificate_expires_at: soon });
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    expect(
+      await within(tab).findByText(
+        "The certificate expires within 30 days. Upload the new certificate that is waiting and switch to it before then.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(tab).queryByText(/Ask for a new one/)).not.toBeInTheDocument();
+  });
+
+  it("hands each certificate to the browser under the file name Entra is given", async () => {
+    calls.getMicrosoftSettings.mockResolvedValue(WAITING);
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    await user.click(await within(tab).findByRole("button", { name: "Download the certificate" }));
+    await user.click(within(tab).getByRole("button", { name: "Download the new certificate" }));
+    const saved = vi.mocked(saveBlob).mock.calls;
+    expect(saved.map(([, name]) => name)).toEqual(["itms-sign-in.cer", "itms-sign-in-new.cer"]);
+    expect(await blobText(saved[0]![0])).toBe(PEM);
+    expect(await blobText(saved[1]![0])).toBe(NEXT_PEM);
+  });
+
+  it("says, before another new certificate is made, that it replaces the one waiting", async () => {
+    calls.getMicrosoftSettings.mockResolvedValue(WAITING);
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=microsoft");
+    const tab = await screen.findByRole("tabpanel");
+    await user.click(await within(tab).findByRole("checkbox", { name: "Make a new certificate when I save" }));
+    expect(
+      within(tab).getByText("This replaces the new certificate still waiting. Upload the one it makes instead."),
+    ).toBeInTheDocument();
+    expect(within(tab).queryByText(/The new certificate waits beside the one in use/)).not.toBeInTheDocument();
   });
 
   it("saves every value, with a first certificate asked for", async () => {

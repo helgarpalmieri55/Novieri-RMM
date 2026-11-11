@@ -12,6 +12,7 @@
  * imports this file (`src/test/preview.test.ts`).
  */
 import type { FixtureMap } from "../../fixtures/client";
+import { ApiError } from "../../lib/api";
 
 const challenge = "q1mEu2YhQUi3_fixture_challenge_b64url";
 
@@ -66,11 +67,17 @@ export const fixtures: FixtureMap = {
   invitePasskey: () => ({ state: "signed_in" as const }),
   getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
-  // Sign in with Microsoft (own-auth phase 2, Task 12): Microsoft's own
-  // address, which the button checks before leaving, and a return that
-  // signs in. Fixture mode never has a fragment to send, so the return page
-  // asks nothing.
-  microsoftStart: () => ({ authorize_url: "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize" }),
+  // Sign in with Microsoft (own-auth phase 2, Task 12): switched off, as the
+  // server answers when it is (409 `microsoft_unavailable`), so a click in a
+  // demo says one sentence instead of taking the whole page to Microsoft's
+  // real sign-in (fix round 1). A return that signs in; fixture mode never
+  // has a fragment to send, so the return page asks nothing.
+  microsoftStart: () => {
+    throw new ApiError(
+      409,
+      JSON.stringify({ code: "microsoft_unavailable", detail: "sign-in with Microsoft is not set up here" }),
+    );
+  },
   microsoftComplete: () => ({ state: "signed_in" as const }),
   logoutEverywhere: () => undefined,
 };
