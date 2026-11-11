@@ -87,6 +87,7 @@
   {"method": "PATCH", "path": "/service-desk/queues/{queue_id}"},
   {"method": "PUT", "path": "/settings/email"},
   {"method": "POST", "path": "/settings/email/test"},
+  {"method": "PUT", "path": "/settings/microsoft-sign-in"},
   {"method": "PUT", "path": "/settings/sessions"},
   {"method": "POST", "path": "/sla/calendars"},
   {"method": "DELETE", "path": "/sla/calendars/{calendar_id}"},

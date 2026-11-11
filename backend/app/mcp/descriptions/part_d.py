@@ -115,7 +115,8 @@ PART_D: dict[str, str] = {
     ),
     "PATCH /api/v1/clients/{client_id}": (
         "Edits a client's name, contact details, email domains or optional modules. An email "
-        "domain held by another client is a 409; an archived client is not edited."
+        "domain held by another client is a 409; an archived client is not edited. Also sets "
+        "the Microsoft tenants whose accounts its contacts may sign in with."
     ),
     "POST /api/v1/clients/{client_id}/archive": (
         "Archives a customer client, revoking its live enrollment tokens and switching off its "
@@ -453,6 +454,18 @@ PART_D: dict[str, str] = {
         "Saves this organization's outgoing mail relay settings and returns what is then stored. "
         "A password or client secret goes to the vault and is never returned. The audit log "
         "records changed field names only."
+    ),
+    "GET /api/v1/settings/microsoft-sign-in": (
+        "Returns how people sign in with Microsoft here: whether it is on, the app ID, "
+        "Novieri's tenant for technicians, the platform's public certificate in use and any "
+        "new one waiting, with their expiry, and the redirect URI to register. Never returns a "
+        "private key."
+    ),
+    "PUT /api/v1/settings/microsoft-sign-in": (
+        "Saves sign-in with Microsoft: the switch, the app ID and Novieri's tenant. "
+        "new_certificate makes a key (kept in the vault) and certificate; a renewal waits "
+        "beside the one in use. activate_certificate switches to it and destroys the old key, "
+        "only once it is in Entra. Needs every client. Audited."
     ),
     "POST /api/v1/settings/email/test": (
         "Sends a test email through the saved relay to the given address, or the sender address by "

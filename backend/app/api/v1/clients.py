@@ -81,6 +81,9 @@ class ClientOut(BaseModel):
     email_domains: list[str] = Field(
         description="Domains whose inbound mail is filed under this client; one client each"
     )
+    microsoft_tenants: list[UUID] = Field(
+        description="Microsoft tenants whose accounts this client's contacts may sign in with"
+    )
     phone: str = Field(description="Contact phone, free text")
     address: str = Field(description="Postal address, free text")
     website: str = Field(description="Website, free text")
@@ -113,6 +116,7 @@ class ClientUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     email_domains: list[Domain] | None = Field(default=None, max_length=MAX_DOMAINS)
+    microsoft_tenants: list[UUID] | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=40)
     address: str | None = Field(default=None, max_length=2000)
     website: str | None = Field(default=None, max_length=300)
@@ -200,6 +204,7 @@ def _client_out(row: svc.ClientRow) -> ClientOut:
         kind=c.kind,
         status=c.status,
         email_domains=list(c.email_domains),
+        microsoft_tenants=list(c.microsoft_tenants),
         phone=c.phone,
         address=c.address,
         website=c.website,

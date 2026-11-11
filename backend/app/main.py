@@ -333,6 +333,7 @@ def create_app(
     from app.api.v1.device_groups import router as device_groups_router
     from app.api.v1.devices import router as devices_router
     from app.api.v1.enrollment import agents_router, enroll_router, tokens_router
+    from app.api.v1.entra_settings import router as entra_settings_router
     from app.api.v1.errors import router as errors_router
     from app.api.v1.install_link import router as install_link_router
     from app.api.v1.jobs import router as jobs_router
@@ -379,6 +380,7 @@ def create_app(
     app.include_router(user_admin_router, prefix="/api/v1")
     app.include_router(realm_settings_router, prefix="/api/v1")
     app.include_router(session_settings_router, prefix="/api/v1")
+    app.include_router(entra_settings_router, prefix="/api/v1")
     # The platform's own sign-in (P2 phase 1): `/auth/*` answers before there
     # is a session; `/me/*` is the caller's own security. Both ungated by
     # design -- see app/api/v1/auth.py.
