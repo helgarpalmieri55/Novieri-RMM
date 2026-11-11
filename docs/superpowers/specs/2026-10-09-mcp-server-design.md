@@ -251,6 +251,17 @@ AI-reachable is therefore always a reviewed decision. This replaces, for MCP
 only, the in-app AI's §0.2 rule that every tool is hand-listed (Q1). The
 in-app AI's own registry is unchanged.
 
+### 5.5 Acts that need a recent second factor
+
+Some routes are refused on the `mcp` channel not because they hand out a secret
+or a file but because they need the administrator's own second factor confirmed
+in the last 10 minutes (auth design §2.5), and the channel carries no session
+to confirm. Those that need it as a whole (the organization's sign-in settings,
+a technician's access, what a role grants) are never exposed, like §5.1. The two
+that need it only in part, a client's Microsoft tenants (`clients_update`) and
+switching MCP on (`orgs_current_update`), stay tools and answer 403
+`step_up_required` for that part. See `app/mcp/exclusions.py`.
+
 ## 6. Who may connect
 
 - **New permission `mcp.use`**, seeded to org-admin by migration

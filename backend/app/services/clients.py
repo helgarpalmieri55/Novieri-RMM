@@ -35,7 +35,7 @@ may not rewrite `external_subject` to follow (`its_user_identity_guard`).
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -383,10 +383,16 @@ async def update_client(
     actor_id: UUID,
     client_id: UUID,
     changes: Mapping[str, Any],
+    confirm_tenants: Callable[[], None],
 ) -> Client:
     """A partial edit of one client (spec §3.2: name, contact details, domains,
     optional modules). Its kind and status are not fields: an archive is its
-    own act. An archived client is not edited (409)."""
+    own act. An archived client is not edited (409).
+
+    `confirm_tenants` is called before a change to `microsoft_tenants` is
+    written or audited, and raises to refuse it: the route's
+    `deps.require_step_up` (design §2.5; operator 2026-11-08, S1). A keyword
+    with no default, so no caller can forget it."""
     unknown = set(changes) - set(CLIENT_FIELDS)
     if unknown:
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
@@ -431,6 +437,12 @@ async def update_client(
         raise _domain_refusal()
     if not changed:
         return client
+    # WHO MAY SIGN IN FROM MICROSOFT FOR THIS CLIENT (design §2.5; operator
+    # 2026-11-08, S1): a change to the list needs the caller's second factor
+    # confirmed in the last ten minutes. Only a change -- the same tenants
+    # again, in any order, are not one -- and before anything is written.
+    if "microsoft_tenants" in changed:
+        confirm_tenants()
     for key in changed:
         setattr(client, key, wanted[key])
     await _flush_client(session)

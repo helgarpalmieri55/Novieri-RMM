@@ -116,7 +116,8 @@ PART_D: dict[str, str] = {
     "PATCH /api/v1/clients/{client_id}": (
         "Edits a client's name, contact details, email domains or optional modules. An email "
         "domain held by another client is a 409; an archived client is not edited. Also sets "
-        "the Microsoft tenants whose accounts its contacts may sign in with."
+        "the Microsoft tenants whose accounts its contacts may sign in with. Changing them needs "
+        "a second factor confirmed in the console."
     ),
     "POST /api/v1/clients/{client_id}/archive": (
         "Archives a customer client, revoking its live enrollment tokens and switching off its "
@@ -298,7 +299,8 @@ PART_D: dict[str, str] = {
     "PATCH /api/v1/orgs/current": (
         "Updates the organization's name and merges presentation settings, audited. Setting the "
         "console email domain restricts who can sign in; a change that would lock out the caller "
-        "is refused."
+        "is refused. Switching AI access (mcp_enabled) on needs a second factor confirmed in the "
+        "console."
     ),
     "GET /api/v1/orgs/current/console-domain-preview": (
         "Previews which users would be refused sign-in if the given console email domain were "
@@ -422,22 +424,9 @@ PART_D: dict[str, str] = {
         "Lists the roles the organization can assign, its own plus unshadowed platform-wide ones, "
         "each with its permission codes and how many users hold it. Super-admin is never listed."
     ),
-    "POST /api/v1/roles": (
-        "Creates a role in the organization with the given permission codes. Unknown codes and "
-        "duplicate names are refused."
-    ),
-    "DELETE /api/v1/roles/{role_id}": (
-        "Deletes one of the organization's own roles. Refused for platform-wide roles and for "
-        "roles users still hold, reporting the count."
-    ),
     "PATCH /api/v1/roles/{role_id}": (
         "Renames or re-describes a role. Editing a platform-wide role first copies it into the "
         "organization, so the returned id may differ."
-    ),
-    "PUT /api/v1/roles/{role_id}/permissions": (
-        "Replaces the role's entire permission set and reports how many users are affected. "
-        "Refused if it would remove your own access-control rights or leave nobody able to manage "
-        "the organization."
     ),
     # --- security-events ---
     "GET /api/v1/security-events": (
@@ -454,22 +443,11 @@ PART_D: dict[str, str] = {
         "Returns how the platform sends mail: relay host, port, sender, encryption and sign-in "
         "type. Never returns a password or secret, only whether one is configured."
     ),
-    "PUT /api/v1/settings/email": (
-        "Saves this organization's outgoing mail relay settings and returns what is then stored. "
-        "A password or client secret goes to the vault and is never returned. The audit log "
-        "records changed field names only."
-    ),
     "GET /api/v1/settings/microsoft-sign-in": (
         "Returns how people sign in with Microsoft here: whether it is on, the app ID, "
         "Novieri's tenant for technicians, the platform's public certificate in use and any "
         "new one waiting, with their expiry, and the redirect URI to register. Never returns a "
         "private key."
-    ),
-    "PUT /api/v1/settings/microsoft-sign-in": (
-        "Saves sign-in with Microsoft: the switch, the app ID and Novieri's tenant. "
-        "new_certificate makes a key (kept in the vault) and certificate; a renewal waits "
-        "beside the one in use. activate_certificate switches to it and destroys the old key, "
-        "only once it is in Entra. Needs every client. Audited."
     ),
     "POST /api/v1/settings/email/test": (
         "Sends a test email through the saved relay to the given address, or the sender address by "
@@ -480,12 +458,6 @@ PART_D: dict[str, str] = {
         "Returns how long a sign-in lasts for this organization: minutes of inactivity and the "
         "longest sign-in for technicians and for portal contacts, and whether and for how many "
         "days a device may be remembered."
-    ),
-    "PUT /api/v1/settings/sessions": (
-        "Saves every sign-in lifetime and returns what is in force. Inactivity limits and the "
-        "remember-device switch apply at once; maximum lengths and the device lifetime only to "
-        "sessions and devices created later. Needs every client. The audit log records each "
-        "changed value."
     ),
     # --- software ---
     "GET /api/v1/software": (
@@ -571,20 +543,8 @@ PART_D: dict[str, str] = {
         "Returns the permission codes a user holds, each annotated with the role that grants it "
         "and whether it is org-wide or limited to one device group."
     ),
-    "POST /api/v1/users/{user_id}/enable": (
-        "Re-enables a disabled user; they sign in again with their password and second factor. "
-        "Cannot revive a deleted user."
-    ),
     "DELETE /api/v1/users/{user_id}/sessions": (
         "Ends every console session of a user at once; their remembered browsers stay. Audited."
-    ),
-    "POST /api/v1/users/{user_id}/roles": (
-        "Grants a role to a user, organization-wide or limited to one device group. Takes effect "
-        "immediately and is audited."
-    ),
-    "DELETE /api/v1/users/{user_id}/roles/{assignment_id}": (
-        "Revokes one role assignment from a user. Refused if it would leave the organization with "
-        "no active org-admin, and for super-admin."
     ),
     # --- vendors ---
     "GET /api/v1/vendors": (

@@ -2397,6 +2397,19 @@ own route.** The API refuses a tool's request unless the router would send it
 to the exact route that tool was generated from (`app/mcp/guard.py`), so no
 tool can be steered at a route that is not one.
 
+**The acts that ask for your second factor again** (own authentication phase
+2): saving Settings → Email, Sessions or Microsoft sign-in, changing a
+client's Microsoft tenants, inviting a technician or sending the invitation
+again, granting or removing a role, re-enabling a disabled person, creating a
+role, changing a role's permissions or deleting a role, and switching AI
+connections on need the person's second factor confirmed in the console in
+the last ten minutes, and **an AI app connected over MCP cannot do any of
+them** -- the settings, the invitations, the grants, re-enabling and the
+role definitions are not tools and are refused on the channel; a client edit
+and the organization's settings stay tools and refuse that part. Cancelling
+an invitation, disabling a person, signing them out, switching MCP off,
+revoking an app and renaming a role never ask.
+
 Every result is also scanned for secret-looking field names, at every depth,
 and one hit blocks the whole result rather than redacting it.
 

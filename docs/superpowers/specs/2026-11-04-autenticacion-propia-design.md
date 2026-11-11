@@ -177,7 +177,44 @@ La persona no llega a la consola hasta registrar uno.
 ### 2.5 Confirmación reciente del segundo factor
 
 Exigida en los últimos 10 minutos para: cambiar la propia contraseña o los factores; que un administrador restablezca
-los factores de otro; sacar una credencial de la bóveda [S5, S7].
+los factores de otro; sacar una credencial de la bóveda [S5, S7]. **Ampliada el 2026-11-08** (decisiones del operador
+S1 y S3) **y el 2026-11-09** (decisión del operador S5; plan de la fase 2, Task 14), también para:
+
+- guardar **Ajustes → Correo** (`PUT /settings/email`), **Ajustes → Sesiones** (`PUT /settings/sessions`) y
+  **Ajustes → Microsoft** (`PUT /settings/microsoft-sign-in`, también al pedir un certificado nuevo y al cambiar al que
+  espera);
+- cambiar los **tenants de Microsoft de un cliente** (`PATCH /clients/{id}`, solo cuando la lista cambia; el resto de la
+  ficha, no);
+- **el acceso de un técnico:** invitarlo (`POST /users/invite`), reenviar su invitación
+  (`POST /users/{id}/invite/resend`), concederle un rol (`POST /users/{id}/roles`) y quitárselo
+  (`DELETE /users/{id}/roles/{assignment_id}`); **y, desde el 2026-11-09** (decisión del operador S5), reactivarlo
+  (`POST /users/{id}/enable`), que vuelve con los roles que tenía;
+- **la definición de los roles** (S5, 2026-11-09): crear uno (`POST /roles`), cambiar sus permisos
+  (`PUT /roles/{id}/permissions`), que cambia de una vez lo que puede cada persona que lo tiene, y borrarlo
+  (`DELETE /roles/{id}`);
+- **encender MCP** (`mcp_enabled` de apagado a encendido, `PATCH /orgs/current`).
+
+Por qué, con OWASP ASVS 5.0, V7.5 (https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md,
+leído el 2026-11-08). V7.5.3 (nivel 3): *«Verify that the application requires further authentication with at least one
+factor or secondary verification before performing highly sensitive transactions or operations.»* V7.5.1 (nivel 2):
+*«Verify that the application requires full re-authentication before allowing modifications to sensitive account
+attributes which may affect authentication such as email address, phone number, MFA configuration, or other
+information used in account recovery.»* —este habla de la cuenta de la propia persona; aquí son los ajustes que deciden
+cómo entra toda la organización y quién tiene acceso—. Lo que §2.5 pide es un factor reciente (V7.5.3), no la reautenticación completa de V7.5.1. Así, la cookie de una sesión de administrador inactiva, sin su
+segundo factor, ya no basta para apuntar el correo de las invitaciones y los enlaces a otro relé, alargar las sesiones
+o dejar que un equipo se salte el factor, cambiar la aplicación de Microsoft o su certificado, abrir la entrada a otro
+tenant, dar o quitar acceso a un técnico, devolvérselo a una persona desactivada, redefinir lo que puede un rol, ni abrir
+la organización a las aplicaciones de IA. Un equipo recordado no la da (§2.6). Una IA conectada por MCP no hace
+ninguno de estos actos: el canal no lleva sesión que confirmar, y las
+rutas que la piden enteras no son herramientas (`CLAUDE.md` 1c(e): los límites de la propia API se mantienen). Un
+contacto con app TOTP confirma con ella o con su clave de acceso (decisión del operador del 2026-11-08, «S2» del plan de la fase 2 —no la «S2 Sesiones» de §0—; §3).
+
+**Lo que esto deliberadamente no cubre** (decisión del operador S4, 2026-11-08). Los actos sobre un contacto no cambian:
+invitarlo al portal, reenviar, restablecer su acceso —que ya la pide— y desactivarlo. No la piden cancelar una
+invitación, desactivar a una persona, cerrar sus sesiones, apagar MCP ni revocar una aplicación de IA: solo quitan
+acceso, y son lo que se hace con prisa para parar a alguien. Ni el correo de prueba de Ajustes → Correo, que no cambia
+nada. Ni renombrar o redescribir un rol (`PATCH /roles/{id}`), que no cambia lo que nadie puede (decisión del operador
+S5, 2026-11-09).
 
 ### 2.6 Recordar este equipo (decisión S2b)
 

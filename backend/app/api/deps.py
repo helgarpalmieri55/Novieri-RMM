@@ -570,11 +570,14 @@ def require_step_up(ctx: AuthContext, *, now: datetime | None = None) -> None:
     console answers by asking for it (`/auth/step-up/*`, Task 7).
 
     A session on a remembered device starts without one, so the vault keeps
-    asking there (design §2.6, falsifier 5). A request with no session -- only
-    MCP enters without one since own authentication phase 1 -- is refused too:
-    the MCP channel never reaches these acts (`MCP_FORBIDDEN_CODES`, the
-    never-exposed table), and if it did, a refusal is the right way to be
-    wrong."""
+    asking there (design §2.6, falsifier 5).
+
+    A request with no session -- only MCP enters without one since own
+    authentication phase 1 -- is refused too. The MCP channel never performs
+    these acts: the routes that need the confirmation as a whole are no tools
+    (the never-exposed table, `NOT_FOR_MCP`, `MCP_FORBIDDEN_CODES`), and on
+    the two tools that need it only in part (a client's Microsoft tenants,
+    switching MCP on) this refusal is the bound (plan phase 2, Task 14)."""
     if ctx.principal is None or not step_up_fresh(ctx.principal, now or datetime.now(UTC)):
         raise AuthRefusal(
             status.HTTP_403_FORBIDDEN,
@@ -799,3 +802,27 @@ def require_permission_on_every_client(
         return ctx
 
     return on_every_client
+
+
+def require_permission_on_every_client_with_step_up(
+    code: str,
+) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
+    """`require_permission_on_every_client(code)`, then `require_step_up`.
+
+    For the global writes the operator put behind a recent second factor on
+    2026-11-08 and 2026-11-09 (design §2.5, decisions S1 and S5): the
+    organization's sign-in settings, who gets a technician's access and what a
+    role grants. (S3, switching MCP on, is asked in `orgs.py` itself.) A
+    DEPENDENCY, like the two it joins, so both refusals come before the body
+    is read -- the scope first: a per-client technician is told the act is not
+    theirs, never asked for a factor that could not make it so
+    (`tests/test_step_up_widened.py` pins the order). `route_permission` still
+    recovers `code` through both wrappers, and `tests/test_global_writes.py`
+    still finds `on_every_client` under this one."""
+    gate = require_permission_on_every_client(code)
+
+    async def on_every_client_with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
+        require_step_up(ctx)
+        return ctx
+
+    return on_every_client_with_step_up
