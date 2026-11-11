@@ -33,8 +33,9 @@ Verified against OpenBao 2.6.1, the version `deploy/docker-compose.yml` runs:
 THE LOCAL BACKEND has the same interface for development and tests: two files
 in `ITS_AUTH_KEYS_DIR` (default `ITS_CA_DIR`), `auth-pepper.key` (32 random
 bytes) and `auth-signing.key` (a P-256 key, PKCS#8 PEM), both 0600, each
-version 1. In production it refuses to create them -- a fresh pepper would make
-every stored password unverifiable -- and `ITS_AUTH_KEYS_BACKEND=openbao` is
+version 1. In production it is refused outright, whether or not the files exist
+(`LocalAuthKeysInProduction`, final review A-M2): a pepper on the api's own
+disk is not one "stored separately", and `ITS_AUTH_KEYS_BACKEND=openbao` is
 the deployment's setting (`deploy/.env.example`).
 
 `configure(settings)` installs the backend once, in `app.main.create_app`, the
@@ -96,6 +97,13 @@ class AuthKeysNotConfigured(RuntimeError):
 
 class UnknownKeyVersion(LookupError):
     """The local backend holds no key of the version asked for."""
+
+
+class LocalAuthKeysInProduction(RuntimeError):
+    """`ITS_AUTH_KEYS_BACKEND=local` with `ITS_ENVIRONMENT=production`
+    (final review A-M2): refused whether or not the two files exist, before
+    any of them is opened. The pepper's whole value is being off the app
+    host; two files on the api's own disk are not."""
 
 
 class AuthKeys(Protocol):
@@ -339,11 +347,22 @@ class OpenBaoAuthKeys:
 
 
 def build(settings: Settings) -> AuthKeys:
-    """The backend `settings` asks for (the `get_vault` / `get_signer` shape)."""
+    """The backend `settings` asks for (the `get_vault` / `get_signer` shape).
+
+    LOCAL IS NEVER PRODUCTION (final review A-M2, plan 2026-11-06 decision
+    D38). Before, production refused only MISSING files, so two files left on
+    the volume by one start without `ITS_ENVIRONMENT` made a production api
+    pepper with a key on its own disk. Now the rule is the setting itself,
+    refused before `LocalAuthKeys.from_dir` is called, so no file is created."""
     if settings.auth_keys_backend == "local":
+        if settings.environment == "production":
+            raise LocalAuthKeysInProduction(  # i18n-exempt: startup config error, logged
+                "ITS_AUTH_KEYS_BACKEND=local is refused with ITS_ENVIRONMENT=production: the "
+                "password pepper and the token signing key must stay in OpenBao; set "
+                "ITS_AUTH_KEYS_BACKEND=openbao"
+            )
         return LocalAuthKeys.from_dir(
-            settings.auth_keys_dir or settings.ca_dir,
-            allow_generate=settings.environment != "production",
+            settings.auth_keys_dir or settings.ca_dir, allow_generate=True
         )
     if not settings.openbao_addr or not settings.openbao_token:
         raise ValueError(  # i18n-exempt: startup config error, logged

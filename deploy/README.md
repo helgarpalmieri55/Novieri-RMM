@@ -520,8 +520,9 @@ OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
 the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
 API cannot verify a password. **And add `ITS_AUTH_KEYS_BACKEND=openbao` to an
 existing `.env`** (a new one copied from `.env.example` has it): without it the
-api uses the `local` backend, which with `ITS_ENVIRONMENT=production` refuses
-to start (`MissingAuthKeyError`), so the api restart-loops:
+api uses the `local` backend, which with `ITS_ENVIRONMENT=production` is
+refused at start (`LocalAuthKeysInProduction`), whether or not its files exist,
+so the api restart-loops:
 
 ```sh
 sed -i '/^ITS_AUTH_KEYS_BACKEND=/d' .env && echo 'ITS_AUTH_KEYS_BACKEND=openbao' >> .env
