@@ -4679,6 +4679,35 @@ CATALOG: dict[str, str] = {
         "elegir una contraseña y configurar tu segundo factor:\n{link}\n\nSi no lo esperabas, "
         "ignora este mensaje."
     ),
+    # A client's contact's portal access (own authentication phase 2, Task 8).
+    "switch the contact on first": "activa el contacto primero",
+    "that contact already signs in; reset their access instead": (
+        "ese contacto ya inicia sesión; restablece su acceso en su lugar"
+    ),
+    "that contact has no pending invitation": "ese contacto no tiene una invitación pendiente",
+    "that contact has not signed in yet; send an invitation instead": (
+        "ese contacto aún no ha iniciado sesión; envíale una invitación en su lugar"
+    ),
+    "Your access to the {product} portal was reset": (
+        "Se restableció tu acceso al portal de {product}"
+    ),
+    "{inviter} reset your access to the {product} portal: your previous password, passkeys and "
+    "linked accounts no longer work.\n\n"
+    "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+    "If you did not expect this, tell {inviter}.": (
+        "{inviter} restableció tu acceso al portal de {product}: tu contraseña, tus claves de "
+        "acceso y tus cuentas vinculadas anteriores ya no funcionan.\n\n"
+        "Abre este enlace en las próximas 72 horas para elegir cómo iniciarás sesión:\n{link}\n\n"
+        "Si no lo esperabas, díselo a {inviter}."
+    ),
+    "You are invited to the {product} portal": "Te han invitado al portal de {product}",
+    "{inviter} invited you to the {product} portal, where you can follow your requests.\n\n"
+    "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+    "If you did not expect this, ignore this message.": (
+        "{inviter} te invitó al portal de {product}, donde puedes seguir tus solicitudes.\n\n"
+        "Abre este enlace en las próximas 72 horas para elegir cómo iniciarás sesión:\n{link}\n\n"
+        "Si no lo esperabas, ignora este mensaje."
+    ),
     # --- user_admin ---
     "{role} is cross-org platform administration and cannot be granted from an organization": (
         "{role} es administración de la plataforma entre organizaciones y no se puede conceder "

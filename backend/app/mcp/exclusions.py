@@ -93,6 +93,14 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
                 "invite/accept",
                 "consumes an invitation link, sets a password and mints a session cookie",
             ),
+            (
+                "invite/passkey/options",
+                "issues a passkey registration challenge from an invitation",
+            ),
+            (
+                "invite/passkey",
+                "consumes an invitation link, binds a passkey and mints a session cookie",
+            ),
         )
     },
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
@@ -106,6 +114,15 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/v1/users/{user_id}/invite/resend"): (
         "returns a new one-time invitation link when no mail carried it, which lets a person in"
+    ),
+    # A client's contact's portal invitation (P2 phase 2, Task 8): the same
+    # link, into the portal.
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
+        "returns a one-time portal invitation link when no mail carried it, which lets a person in"
+    ),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"): (
+        "removes a contact's ways in and returns a new invitation link when no mail carried it; "
+        "needs the technician's own recent second-factor confirmation in the console"
     ),
 }
 

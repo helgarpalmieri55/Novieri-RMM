@@ -465,7 +465,9 @@ def _param_mismatches(source: str) -> list[tuple[int, str, list[str], list[str]]
         text = _literal(node)
         if text is None or any(k.arg is None for k in node.keywords):
             continue  # a ** splat cannot be checked statically; a literal is enforced elsewhere
-        fields, given = _fields(text), sorted(k.arg for k in node.keywords if k.arg)
+        # A field the template names twice (`tell {inviter}`) is one parameter.
+        fields = sorted(set(_fields(text)))
+        given = sorted(k.arg for k in node.keywords if k.arg)
         given += ["<positional>"] * (len(node.args) - 1)  # tr() takes the template only
         if fields != given:
             out.append((node.lineno, text, fields, given))
@@ -493,8 +495,10 @@ def test_the_tr_guards_see_what_they_are_meant_to_see():
         "tr('Run {x.y}.', x=1)\n"
         "tr('Run {x}.', **kw)\n"
         "tr(msg, x=1)\n"
+        "tr('Run {a} or {a}.', a=1)\n"
+        "tr('Run {a} or {a}.')\n"
     )
-    assert [m[0] for m in _param_mismatches(source)] == [2, 3, 4, 5, 6]
+    assert [m[0] for m in _param_mismatches(source)] == [2, 3, 4, 5, 6, 10]
     # Full names: `a.b` is not `a`.
     assert _fields("{a} {b.c} {d[0]} {} {0}") == ["", "0", "a", "b.c", "d[0]"]
     assert _fields("no fields, {{literal}}") == []

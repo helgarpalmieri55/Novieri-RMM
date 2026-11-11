@@ -12,6 +12,8 @@ EVERY ROUTE CARRIES A PERMISSION (spec §2.1), recovered from the router by
 | `POST /clients/{id}/sites`, `PATCH`/`DELETE /sites/{id}` | `sites.manage` on that client |
 | `GET /clients/{id}/contacts` | `clients.read` |
 | `POST /clients/{id}/contacts`, `PATCH /contacts/{id}` | `clients.manage` on that client |
+| `POST /clients/{id}/contacts/{cid}/invite`, `DELETE` the same | `clients.manage` on that client |
+| `POST /clients/{id}/contacts/{cid}/access/reset` | the same, and a recent second factor |
 
 "ON THAT CLIENT" IS RLS, NOT A CHECK HERE. `require_permission(code)` hands the
 route the scope of the clients where the person holds `code`, narrowed by
@@ -38,13 +40,22 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client,
+    require_permission_with_step_up,
+)
+from app.core.auth import notices
+from app.core.i18n import locale_var, tr, use_locale
 from app.core.tenancy import org_session
 from app.models import User
 from app.services import clients as svc
+from app.services import contact_access
 
 router = APIRouter(tags=["clients"])
 
@@ -173,10 +184,15 @@ class ContactOut(BaseModel):
     display_name: str = Field(description="Name shown for the contact")
     phone: str | None = Field(description="Phone, or null")
     status: str = Field(description="active or disabled")
+    access: Literal["none", "invited", "active"] = Field(
+        description="Portal access: none, invited (a link is open) or active (can sign in)"
+    )
+    invite_expires_at: datetime | None = Field(description="When the open invitation expires")
 
 
 class ContactCreate(BaseModel):
-    """A new contact of a client. Contacts cannot sign in yet."""
+    """A new contact of a client. They sign in to the portal once invited
+    (`POST .../invite`)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -229,7 +245,7 @@ def _site_out(row: svc.SiteRow) -> SiteOut:
     )
 
 
-def _contact_out(user: User) -> ContactOut:
+def _contact_out(user: User, access: contact_access.ContactAccess) -> ContactOut:
     assert user.client_id is not None  # a contact always has one (ck_users_kind_client)
     return ContactOut(
         id=user.id,
@@ -239,6 +255,8 @@ def _contact_out(user: User) -> ContactOut:
         display_name=user.display_name,
         phone=user.phone,
         status=user.status,
+        access=access.state,
+        invite_expires_at=access.invite_expires_at,
     )
 
 
@@ -489,7 +507,9 @@ async def list_contacts(
             ctx.org_id, clients=ctx.clients, engine=request.app.state.app_engine
         ) as session:
             users = await svc.list_contacts(session, org_id=ctx.org_id, client_id=client_id)
-            out = [_contact_out(user) for user in users]
+            # Two queries for the whole list (Task 8, decision 6).
+            access = await contact_access.access_of(session, org_id=ctx.org_id, users=users)
+            out = [_contact_out(user, access[user.id]) for user in users]
     except svc.ClientError as exc:
         raise _http(exc) from None
     return out
@@ -521,7 +541,8 @@ async def create_contact(
                 display_name=body.display_name,
                 phone=body.phone,
             )
-            out = _contact_out(user)
+            access = await contact_access.access_of(session, org_id=ctx.org_id, users=[user])
+            out = _contact_out(user, access[user.id])
     except svc.ClientError as exc:
         raise _http(exc) from None
     return out
@@ -546,7 +567,153 @@ async def update_contact(
                 contact_id=contact_id,
                 changes=_changes(body),
             )
-            out = _contact_out(user)
+            access = await contact_access.access_of(session, org_id=ctx.org_id, users=[user])
+            out = _contact_out(user, access[user.id])
+    except svc.ClientError as exc:
+        raise _http(exc) from None
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# A contact's portal access (own authentication phase 2, Task 8)
+# --------------------------------------------------------------------------- #
+
+
+class ContactInviteOut(BaseModel):
+    """A contact's invitation; its link only when no mail carried it, once."""
+
+    contact: ContactOut
+    invite_link: str | None = Field(description="The one-time link, when no mail carried it")
+
+
+def _console_url(request: Request) -> str:
+    """`ITS_PUBLIC_CONSOLE_URL`, never the Host header (`user_admin/api.py::_console_url`)."""
+    url = request.app.state.settings.public_console_url
+    if not url:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            tr(
+                "this installation's console address is not configured, so an invitation link "
+                "cannot be made. That is a server setting, not something this screen can fix."
+            ),
+        )
+    return str(url)
+
+
+def _mailer(session: AsyncSession, request: Request, ctx: AuthContext) -> contact_access.Deliver:
+    """The invitation from the technician who sent it, in the request's
+    session (the relay checkout is audited there). In the language of the
+    technician's request (B2-31): nothing sets a contact's `users.locale` --
+    `ContactCreate` and `ContactUpdate` carry none -- so it is None for every
+    contact today, and if a later cycle sets it, it wins."""
+    inviter = (ctx.principal.display_name if ctx.principal else "") or ctx.email
+
+    async def deliver(user: User, link: str, reset: bool) -> bool:
+        with use_locale(user.locale or locale_var.get()):
+            subject, text = notices.contact_invitation_mail(link, inviter=inviter, reset=reset)
+        return await notices.deliver(
+            session,
+            org_id=ctx.org_id,
+            to=user.email,
+            subject=subject,
+            text=text,
+            vault=request.app.state.vault,
+            actor_id=ctx.user_id,
+        )
+
+    return deliver
+
+
+def _invited_out(invited: contact_access.ContactInvited) -> ContactInviteOut:
+    return ContactInviteOut(
+        contact=_contact_out(invited.contact, invited.access),
+        invite_link=None if invited.delivered else invited.link,
+    )
+
+
+@router.post("/clients/{client_id}/contacts/{contact_id}/invite", response_model=ContactInviteOut)
+async def invite_contact(
+    client_id: UUID,
+    contact_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission("clients.manage")),
+) -> ContactInviteOut:
+    """Send a contact a one-time link to the portal, valid 72 hours, replacing
+    any open one. The link comes back only when no mail carried it."""
+    console = _console_url(request)
+    try:
+        async with org_session(
+            ctx.org_id, clients=ctx.clients, engine=request.app.state.app_engine
+        ) as session:
+            invited = await contact_access.invite(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=client_id,
+                contact_id=contact_id,
+                console_url=console,
+                deliver=_mailer(session, request, ctx),
+            )
+            out = _invited_out(invited)
+    except svc.ClientError as exc:
+        raise _http(exc) from None
+    return out
+
+
+@router.delete(
+    "/clients/{client_id}/contacts/{contact_id}/invite", status_code=status.HTTP_204_NO_CONTENT
+)
+async def cancel_contact_invite(
+    client_id: UUID,
+    contact_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission("clients.manage")),
+) -> Response:
+    """Cancel a contact's pending invitation: its link stops working; the
+    contact stays."""
+    try:
+        async with org_session(
+            ctx.org_id, clients=ctx.clients, engine=request.app.state.app_engine
+        ) as session:
+            await contact_access.cancel_invite(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=client_id,
+                contact_id=contact_id,
+            )
+    except svc.ClientError as exc:
+        raise _http(exc) from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/clients/{client_id}/contacts/{contact_id}/access/reset", response_model=ContactInviteOut
+)
+async def reset_contact_access(
+    client_id: UUID,
+    contact_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission_with_step_up("clients.manage")),
+) -> ContactInviteOut:
+    """Reset a contact's access: their password, passkeys, authenticator app,
+    Microsoft link, remembered devices and sessions go, and a new invitation
+    is sent. Needs a recent second-factor confirmation."""
+    console = _console_url(request)
+    try:
+        async with org_session(
+            ctx.org_id, clients=ctx.clients, engine=request.app.state.app_engine
+        ) as session:
+            invited = await contact_access.reset_access(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=client_id,
+                contact_id=contact_id,
+                console_url=console,
+                deliver=_mailer(session, request, ctx),
+            )
+            out = _invited_out(invited)
     except svc.ClientError as exc:
         raise _http(exc) from None
     return out

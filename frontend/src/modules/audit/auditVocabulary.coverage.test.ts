@@ -226,6 +226,7 @@ const DYNAMIC: Dynamic[] = [
       "auth.sessions_ended",
       "auth.password_changed",
       "user.recovery_link_used",
+      "contact.invite_accepted",
     ],
   },
   {

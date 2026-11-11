@@ -178,6 +178,12 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/invite/details"),
         # The same link, consumed with the invitee's password (`flows.accept_invite`).
         ("POST", "/api/v1/auth/invite/accept"),
+        # A contact's first passkey, from the invitation (P2 phase 2, D40):
+        # the 256-bit link, `_LINK` per address and the single-use challenge.
+        ("POST", "/api/v1/auth/invite/passkey/options"),
+        # The same link, consumed with the contact's first passkey
+        # (`flows.invite_passkey`); a refused passkey leaves it usable.
+        ("POST", "/api/v1/auth/invite/passkey"),
         # The server's recovery link is the credential, read and left unused
         # (`flows.recovery_details`); only the recovery command issues one.
         ("POST", "/api/v1/auth/recover/details"),
