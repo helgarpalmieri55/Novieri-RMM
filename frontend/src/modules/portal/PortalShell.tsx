@@ -23,7 +23,7 @@ import { sessionPerson } from "../../lib/sessionEnd";
 import { setSelectedClient } from "../../lib/clientChoice";
 import { Btn, KIND_ICON } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { usePortalMe } from "./usePortalMe";
+import { ContactFrameContext, usePortalMe } from "./usePortalMe";
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const t = useT();
@@ -75,7 +75,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
           <Btn small label={t("common.actions.retry")} onClick={() => void me.refetch()} />
         </div>
       ) : null}
-      <main className="px-6 py-6">{children}</main>
+      <main className="px-6 py-6">
+        <ContactFrameContext.Provider value={true}>{children}</ContactFrameContext.Provider>
+      </main>
     </div>
   );
 }

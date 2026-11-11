@@ -7,6 +7,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,7 +181,7 @@ describe("a contact on the real /portal page (fix round 1)", () => {
     appReal("/portal");
     await screen.findByText("Ana Ruiz");
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     });
     expect(calls(fetchMock, "/api/v1/me")).toHaveLength(1);
     expect(screen.getByTestId("portal-shell")).toBeInTheDocument();
@@ -200,7 +201,7 @@ describe("a contact on the real /portal page (fix round 1)", () => {
     stubServer(PORTAL_ONLY, () => (fail ? { status: 500, body: { detail: "boom" } } : { status: 200, body: PORTAL_ME }));
     const user = userEvent.setup();
     app("/portal");
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your details could not be loaded.");
     fail = false;
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Ana Ruiz")).toBeInTheDocument();
@@ -212,5 +213,79 @@ describe("a contact on the real /portal page (fix round 1)", () => {
     appReal("/portal");
     await screen.findByText("Ana Ruiz");
     await waitFor(() => expect(screen.getAllByRole("navigation", { name: "Portal" })).toHaveLength(1));
+  });
+});
+
+describe("the latch on a contact's frame (fix round 2)", () => {
+  let mounts = 0;
+  function Child() {
+    useEffect(() => {
+      mounts += 1;
+    }, []);
+    return <p>child</p>;
+  }
+
+  /** `/me` answers after 40 ms, so the refetch is seen pending. */
+  function slowServer(status: () => number): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/me")) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        const code = status();
+        return new Response(JSON.stringify(code === 403 ? PORTAL_ONLY.body : { detail: "no" }), { status: code });
+      }
+      if (url.endsWith("/api/v1/portal/me")) return new Response(JSON.stringify(PORTAL_ME), { status: 200 });
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function mount(): QueryClient {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider>
+          <MemoryRouter initialEntries={["/portal"]}>
+            <Routes>
+              <Route path="/portal" element={<RequireAuth><Child /></RequireAuth>} />
+            </Routes>
+          </MemoryRouter>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    return queryClient;
+  }
+
+  beforeEach(() => {
+    mounts = 0;
+  });
+
+  it("keeps the frame and the page mounted through a refetch of the console's /me", async () => {
+    const fetchMock = slowServer(() => 403);
+    const queryClient = mount();
+    await screen.findByText("Ana Ruiz");
+    expect(mounts).toBe(1);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+    });
+    await waitFor(() => expect(calls(fetchMock, "/api/v1/me")).toHaveLength(2));
+    expect(screen.getByTestId("portal-shell")).toBeInTheDocument();
+    expect(mounts).toBe(1);
+  });
+
+  it("still signs out when that refetch says 401", async () => {
+    let status = 403;
+    slowServer(() => status);
+    const queryClient = mount();
+    await screen.findByText("Ana Ruiz");
+    status = 401;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["me"] }).catch(() => {});
+    });
+    await waitFor(() => expect(screen.queryByTestId("portal-shell")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(assign.mock.calls.length > 0 || screen.queryByRole("heading", { name: "Your session has ended" }) !== null).toBe(true),
+    );
   });
 });

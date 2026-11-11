@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../lib/api";
 import { expectCta, expectNoPanel, meWith, renderPanel } from "../../test/prerequisiteHarness";
 import { PortalPrerequisites } from "./PortalPrerequisites";
+import { ContactFrameContext } from "./usePortalMe";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -18,7 +19,6 @@ const rule = (recipient_kind: string, active = true) => ({ id: recipient_kind, e
 function stub(overrides: Record<string, unknown> = {}, permissions = OPERATOR) {
   const api = {
     me: meWith(permissions),
-    portalMe: vi.fn().mockResolvedValue({ user_id: "u1", kind: "staff", email: "a@b.test", display_name: "A", timezone: null, permissions: [] }),
     listRoles: vi.fn().mockResolvedValue({ roles: [role("requester", 12), role("technician", 3)] }),
     listArticles: vi.fn().mockResolvedValue({ items: [article("a1", true)], total: 1 }),
     getAiStatus: vi.fn().mockResolvedValue({ enabled: true, reason: "" }),
@@ -87,5 +87,22 @@ describe("PortalPrerequisites", () => {
     expect((await screen.findAllByText(/cannot be checked from this account/)).length).toBeGreaterThan(0);
     expect(api.listRoles).not.toHaveBeenCalled();
     expect(screen.queryByRole("link", { name: "Invite requesters" })).toBeNull();
+  });
+
+  it("under a contact's frame renders nothing and never asks the console's /me", async () => {
+    const api = stub();
+    renderPanel(
+      <ContactFrameContext.Provider value={true}>
+        <PortalPrerequisites />
+      </ContactFrameContext.Provider>,
+    );
+    await expectNoPanel(TITLE, () => expect(api.listRoles).not.toHaveBeenCalled());
+    expect(api.me).not.toHaveBeenCalled();
+  });
+
+  it("still shows a technician the panel when /portal/me refuses them", async () => {
+    stub({ portalMe: vi.fn().mockRejectedValue(new Error("forbidden")), listRoles: vi.fn().mockResolvedValue({ roles: [role("requester", 0)] }) });
+    renderPanel(<PortalPrerequisites />);
+    expect(await screen.findByText(TITLE)).toBeInTheDocument();
   });
 });

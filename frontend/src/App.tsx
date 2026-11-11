@@ -469,8 +469,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const leaving = useRef(false);
   const [kept, setKept] = useState<readonly KeptText[]>([]);
   const [signOutFailed, setSignOutFailed] = useState(false);
-  // Latched: once the console's door said `portal_only`, a refetch of `["me"]` (which reads as
-  // loading) must not unmount the contact's frame.
+  // Latched for the life of this guard once the console's door said `portal_only`: a refetch of
+  // `["me"]` (which reads as loading) must not unmount the contact's frame or the page in it.
   const contact = useRef(false);
   const mustSignIn = session.status === "signed_out";
   const here = location.pathname + location.search;
@@ -544,8 +544,10 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     session.failure instanceof ApiError &&
     session.failure.status === 403 &&
     apiErrorCode(session.failure) === "portal_only";
+  // Writing the ref in render is safe: it is idempotent, set only from the answer in hand. It is
+  // never cleared: a technician returned above, and a sign-out or another person navigates the
+  // document, which discards it.
   if (portalOnlyNow) contact.current = true;
-  else if (session.me !== undefined) contact.current = false;
   if (portalOnlyNow || (contact.current && session.status === "loading" && session.failure === undefined)) {
     if (!isPortalPage(location.pathname)) {
       return <Navigate to="/portal" replace />;

@@ -3,6 +3,7 @@
 // read their permissions and time zone from here, never from `GET /me`,
 // which a contact does not have.
 import { useQuery } from "@tanstack/react-query";
+import { createContext } from "react";
 
 import type { ApiError, PortalMe } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
@@ -18,3 +19,9 @@ export function usePortalMe() {
     retry: false,
   });
 }
+
+/**
+ * True under `PortalShell`, the frame of a client's contact: no page there may
+ * mount a `["me"]` observer, which a contact is refused (fix round 1).
+ */
+export const ContactFrameContext = createContext(false);
