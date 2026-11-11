@@ -41,6 +41,7 @@ const PAGES = [
   "/sign-in/factor",
   "/sign-in/enroll",
   "/sign-in/recovery-codes",
+  "/sign-in/microsoft",
   "/forgot-password",
   "/reset-password",
   "/invite",

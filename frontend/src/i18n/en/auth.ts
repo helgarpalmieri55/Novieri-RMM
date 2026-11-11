@@ -115,6 +115,9 @@ export const auth = {
     usePasskey: "Use a passkey instead",
     passkeyName: "Name for this passkey",
     or: "or",
+    // A technician's invitation with Microsoft (operator decision C3).
+    microsoftWithPassword:
+      "Or accept with your Microsoft account. Choose the password above as well: it is your way back if Microsoft ever stops working.",
   },
   recover: {
     heading: "Account recovery",
@@ -156,5 +159,24 @@ export const auth = {
       "This passkey or device cannot confirm it is you with a fingerprint, face or PIN, which is required. Use another passkey or an authenticator app.",
     aborted: "Another passkey request replaced this one. Try again.",
     generic: "The passkey could not be used on this device. Try again, or use another method.",
+  },
+  // Sign in with Microsoft (own-auth phase 2, Task 12): the buttons, the
+  // return page, and each refusal in one sentence.
+  microsoft: {
+    signIn: "Sign in with Microsoft",
+    acceptInvite: "Accept with Microsoft",
+    returnTitle: "Signing in with Microsoft",
+    unavailable: "Signing in with Microsoft is not set up here.",
+    failed: "The sign-in with Microsoft did not finish. Start it again.",
+    refusedByMicrosoft: "Microsoft did not sign you in. Try again, or sign in another way.",
+    notLinked:
+      "This Microsoft account is not linked to anybody here. Sign in another way and link it from your profile, or use your invitation.",
+    tenantRefused: "Accounts from this Microsoft organization may not sign in here.",
+    alreadyLinked: "That Microsoft account is already linked: to somebody else, or you already have one. Unlink yours first.",
+    lastMethod: "That is your last way to sign in. Add a password or a passkey first.",
+    passwordFirst: "A technician links Microsoft only beside a password of their own, and this account has none.",
+    stepUpAgain: "Too long passed since you confirmed it was you. Link the account again from Sign-in and security.",
+    backToSignIn: "Back to sign in",
+    backToSecurity: "Back to Sign-in and security",
   },
 } as const;

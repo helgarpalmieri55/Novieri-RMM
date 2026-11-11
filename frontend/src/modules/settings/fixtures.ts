@@ -34,6 +34,7 @@ import type {
   EmailSettingsOut,
   PermissionOut,
   RoleAssignmentOut,
+  MicrosoftSettingsOut,
   RoleOut,
   SessionSettingsOut,
 } from "./types";
@@ -208,9 +209,9 @@ const ROLE_SEEDS: RoleSeed[] = [
  */
 const CLIENT_LOGISTICS = CUSTOMER_ID;
 const CLIENTS: ClientOut[] = [
-  { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
-  { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
-  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
+  { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
+  { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
+  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
 ];
 
 const listClients: FixtureMap["listClients"] = () => CLIENTS;
@@ -385,6 +386,79 @@ const putSessionSettings: FixtureMap["putSessionSettings"] = (body) => {
   return sessionSettings;
 };
 
+/* ------------------------------------------------------- Microsoft sign-in */
+
+/**
+ * `GET /settings/microsoft-sign-in` as it ships (the tests'
+ * `MICROSOFT_SETTINGS_FIXTURE`): nothing set up, no certificate. The PUT
+ * plays the server's two acts (Task 5, decision 5): a first certificate goes
+ * into use, a later one waits, and the switch swaps them. The certificates
+ * are INVENTED placeholders -- public material in the real API, and nothing
+ * here signs anything.
+ */
+let microsoftSettings: MicrosoftSettingsOut = {
+  enabled: false,
+  app_client_id: null,
+  staff_tenant_id: null,
+  configured: false,
+  certificate: null,
+  certificate_thumbprint: null,
+  certificate_expires_at: null,
+  next_certificate: null,
+  next_certificate_thumbprint: null,
+  next_certificate_expires_at: null,
+  redirect_uri: "https://itms.example.test/sign-in/microsoft",
+  updated_at: null,
+  updated_by: null,
+};
+
+let certificatesMade = 0;
+
+function inventedCertificate(): { pem: string; thumbprint: string; expires: string } {
+  certificatesMade += 1;
+  return {
+    pem: `-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUfixture${certificatesMade}placeholder\n-----END CERTIFICATE-----\n`,
+    thumbprint: `fixture-thumbprint-${certificatesMade}-q1w2e3r4t5y6u7i8o9p0a1s2d3`,
+    // 360 days ahead (`entra.CERTIFICATE_DAYS`).
+    expires: ago(-360 * 24 * 60),
+  };
+}
+
+const getMicrosoftSettings: FixtureMap["getMicrosoftSettings"] = () => microsoftSettings;
+
+const putMicrosoftSettings: FixtureMap["putMicrosoftSettings"] = (body) => {
+  const next: MicrosoftSettingsOut = {
+    ...microsoftSettings,
+    enabled: body.enabled,
+    app_client_id: body.app_client_id,
+    staff_tenant_id: body.staff_tenant_id,
+    updated_at: ago(0),
+  };
+  if (body.new_certificate) {
+    const made = inventedCertificate();
+    if (next.certificate === null) {
+      next.certificate = made.pem;
+      next.certificate_thumbprint = made.thumbprint;
+      next.certificate_expires_at = made.expires;
+    } else {
+      next.next_certificate = made.pem;
+      next.next_certificate_thumbprint = made.thumbprint;
+      next.next_certificate_expires_at = made.expires;
+    }
+  }
+  if (body.activate_certificate && next.next_certificate !== null) {
+    next.certificate = next.next_certificate;
+    next.certificate_thumbprint = next.next_certificate_thumbprint;
+    next.certificate_expires_at = next.next_certificate_expires_at;
+    next.next_certificate = null;
+    next.next_certificate_thumbprint = null;
+    next.next_certificate_expires_at = null;
+  }
+  next.configured = next.app_client_id !== null && next.certificate !== null;
+  microsoftSettings = next;
+  return microsoftSettings;
+};
+
 let assigned = 0;
 const assignUserRole: FixtureMap["assignUserRole"] = (userId, body) => {
   userById(userId);
@@ -492,6 +566,8 @@ const fixtures: FixtureMap = {
   endUserSessions,
   getSessionSettings,
   putSessionSettings,
+  getMicrosoftSettings,
+  putMicrosoftSettings,
   assignUserRole,
   removeUserRole,
   setUserEnabled,

@@ -13,7 +13,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { ClientOut } from "../../lib/api";
 import { useCreateClientMutation, useUpdateClientMutation } from "./api";
-import { OPTIONAL_MODULES, type OptionalModule, moduleLabel, parseDomains } from "./labels";
+import { OPTIONAL_MODULES, type OptionalModule, moduleLabel, parseDomains, parseTenants } from "./labels";
 
 const clientRules = (): readonly FieldRule[] => [{ name: "name", label: translate("clients.form.name") }];
 
@@ -35,6 +35,7 @@ export function ClientFormDialog({
   const mutation = client ? update : create;
   const [name, setName] = useState(client?.name ?? "");
   const [domains, setDomains] = useState((client?.email_domains ?? []).join("\n"));
+  const [tenants, setTenants] = useState((client?.microsoft_tenants ?? []).join("\n"));
   const [phone, setPhone] = useState(client?.phone ?? "");
   const [address, setAddress] = useState(client?.address ?? "");
   const [website, setWebsite] = useState(client?.website ?? "");
@@ -43,7 +44,8 @@ export function ClientFormDialog({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // THE UNASSIGNED CLIENT TAKES NO EMAIL DOMAINS (phase 3 final review C, T12
   // minor): a typed one is the server's 422. The field is not offered and the
-  // edit sends none.
+  // edit sends none. Nor Microsoft tenants (own-auth phase 2): it has no
+  // contacts to sign in.
   const takesDomains = client?.kind !== "unassigned";
 
   function toggle(module: OptionalModule) {
@@ -69,7 +71,12 @@ export function ClientFormDialog({
     };
     const emailDomains = parseDomains(domains);
     if (client) {
-      update.mutate(takesDomains ? { ...fields, email_domains: emailDomains } : fields, { onSuccess: onSaved });
+      update.mutate(
+        takesDomains
+          ? { ...fields, email_domains: emailDomains, microsoft_tenants: parseTenants(tenants) }
+          : fields,
+        { onSuccess: onSaved },
+      );
     } else {
       create.mutate(
         {
@@ -100,6 +107,18 @@ export function ClientFormDialog({
                 rows={3}
                 value={domains}
                 onChange={(event) => setDomains(event.target.value)}
+              />
+            </Field>
+          ) : null}
+          {/* Editing only: `ClientCreate` takes no tenants (own-auth phase 2, Task 5). */}
+          {client !== null && takesDomains ? (
+            <Field label={t("clients.form.microsoftTenants")} help={t("clients.form.microsoftTenantsHelp")} full>
+              <textarea
+                className={inputClass}
+                rows={2}
+                spellCheck={false}
+                value={tenants}
+                onChange={(event) => setTenants(event.target.value)}
               />
             </Field>
           ) : null}

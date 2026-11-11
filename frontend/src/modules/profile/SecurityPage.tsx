@@ -15,6 +15,7 @@
 //   POST   /me/recovery-codes                                  ten new codes, shown once
 //   DELETE /me/trusted-devices/{id}                            forget a remembered device
 //   DELETE /me/sessions/{id}                                   sign out another session
+//   POST   /auth/microsoft/start, DELETE /me/microsoft         link or unlink a Microsoft account (own-auth phase 2)
 //
 // A CLIENT'S CONTACT HAS THE SAME PAGE IN THE PORTAL (`PortalSecurityPage`,
 // `/portal/security`; own-auth phase 2, Task 11). `GET /me/security` says
@@ -75,6 +76,8 @@ import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { checkNewPassword } from "../auth/errors";
 import { setupKeyOf } from "../auth/flow";
+import { describeMicrosoftError } from "../auth/microsoft";
+import { MicrosoftButton } from "../auth/MicrosoftButton";
 import { describePasskeyError } from "../auth/passkey";
 import { usePortalMe } from "../portal/usePortalMe";
 import { FOLDING_FORM_GRID } from "../settings/formGrid";
@@ -90,6 +93,7 @@ import {
   useRemoveTotpMutation,
   useRevokeTrustedDeviceMutation,
   useStartTotpMutation,
+  useUnlinkMicrosoftMutation,
 } from "./api";
 import {
   RECOVERY_CODE_COUNT,
@@ -131,16 +135,17 @@ function Failure({ message }: { message: string }) {
 /** `/profile/security`, in the console's frame. */
 export function SecurityPage() {
   const zone = useOrgZone();
-  return <SecurityBody zone={zone} />;
+  return <SecurityBody zone={zone} back="/profile/security" />;
 }
 
 /** `/portal/security`, in the portal's: the zone of `/portal/me` (decision 3). */
 export function PortalSecurityPage() {
   const me = usePortalMe();
-  return <SecurityBody zone={me.data?.timezone ?? null} />;
+  return <SecurityBody zone={me.data?.timezone ?? null} back="/portal/security" />;
 }
 
-function SecurityBody({ zone }: { zone: string | null }) {
+/** `back`: this page's own address, where linking a Microsoft account comes back to. */
+function SecurityBody({ zone, back }: { zone: string | null; back: string }) {
   const t = useT();
   const security = useMySecurity();
   const stepUp = useStepUp();
@@ -181,6 +186,7 @@ function SecurityBody({ zone }: { zone: string | null }) {
             <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} onAdded={() => setPasswordAdded(true)} />
           )}
           <PasskeysPanel security={data} run={stepUp.run} zone={zone} />
+          <MicrosoftPanel security={data} run={stepUp.run} zone={zone} back={back} />
           <TotpPanel security={data} run={stepUp.run} />
           {!contact || secondFactor ? <RecoveryPanel security={data} run={stepUp.run} /> : null}
           <DevicesPanel security={data} run={stepUp.run} zone={zone} />
@@ -724,6 +730,87 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
           remove.mutate();
         }}
         onCancel={() => setAsking(false)}
+      />
+    </Panel>
+  );
+}
+
+/**
+ * The Microsoft account (design §4): linked the first time from here or from
+ * the invitation, by its `tid` + `oid`, never by address. Linking leaves for
+ * Microsoft after the server's recent confirmation and comes back to `back`,
+ * this page; unlinking is refused when it is the last way in (`last_method`),
+ * and this only says so first. A technician always keeps a password (operator
+ * decision C3); a contact keeps a password or a passkey.
+ */
+function MicrosoftPanel({
+  security,
+  run,
+  zone,
+  back,
+}: {
+  security: MySecurity;
+  run: StepUpRun;
+  zone: string | null;
+  back: string;
+}) {
+  const t = useT();
+  const unlink = useUnlinkMicrosoftMutation(run);
+  const [confirming, setConfirming] = useState(false);
+  const link = security.microsoft;
+  const lastWayIn =
+    security.kind === "contact" ? !security.has_password && security.passkeys.length === 0 : !security.has_password;
+
+  return (
+    <Panel title={t("profile.securityPage.microsoft.title")} subtitle={t("profile.securityPage.microsoft.subtitle")}>
+      {link ? (
+        <>
+          <div style={ROW}>
+            <div style={ROW_TEXT}>
+              <div className="cell-title" style={WRAP_ANYWHERE}>
+                {t("profile.securityPage.microsoft.linked", { tenant: link.tenant_id })}
+              </div>
+              <div className="cell-sub">
+                {`${t("profile.securityPage.microsoft.added", { when: describeWhen(link.created_at, undefined, zone) })} · ${
+                  link.last_used_at
+                    ? t("profile.securityPage.microsoft.lastUsed", { when: describeWhen(link.last_used_at, undefined, zone) })
+                    : t("profile.securityPage.microsoft.neverUsed")
+                }`}
+              </div>
+            </div>
+            <Btn
+              small
+              icon="trash"
+              label={t("profile.securityPage.microsoft.unlink")}
+              disabled={lastWayIn || unlink.isPending}
+              title={lastWayIn ? t("profile.securityPage.microsoft.lastWayIn") : undefined}
+              onClick={() => setConfirming(true)}
+            />
+          </div>
+          {lastWayIn ? (
+            <p className="note" style={{ marginTop: 10 }}>
+              {t("profile.securityPage.microsoft.lastWayIn")}
+            </p>
+          ) : null}
+          {unlink.error ? (
+            <Failure message={describeMicrosoftError(unlink.error) ?? describeSubmitError(unlink.error)} />
+          ) : null}
+        </>
+      ) : (
+        <MicrosoftButton start={{ intent: "link" }} back={back} labelKey="profile.securityPage.microsoft.link" run={run} />
+      )}
+      <ConfirmDialog
+        open={confirming}
+        title={t("profile.securityPage.microsoft.confirmTitle")}
+        body={t("profile.securityPage.microsoft.confirmBody")}
+        subject={link?.tenant_id ?? ""}
+        confirmLabel={t("profile.securityPage.microsoft.unlink")}
+        destructive
+        onConfirm={() => {
+          setConfirming(false);
+          unlink.mutate();
+        }}
+        onCancel={() => setConfirming(false)}
       />
     </Panel>
   );

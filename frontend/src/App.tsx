@@ -142,6 +142,7 @@ import { EnrollPage } from "./modules/auth/EnrollPage";
 import { FactorPage } from "./modules/auth/FactorPage";
 import { ForgotPasswordPage } from "./modules/auth/ForgotPasswordPage";
 import { InvitePage } from "./modules/auth/InvitePage";
+import { MicrosoftCallbackPage } from "./modules/auth/MicrosoftCallbackPage";
 import { PortalSignInPage } from "./modules/auth/PortalSignInPage";
 import { RecoverPage } from "./modules/auth/RecoverPage";
 import { RecoveryCodesPage } from "./modules/auth/RecoveryCodesPage";
@@ -744,6 +745,7 @@ export default function App() {
             <Route path="/sign-in/factor" element={<FactorPage />} />
             <Route path="/sign-in/enroll" element={<EnrollPage />} />
             <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
+            <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/invite" element={<InvitePage />} />

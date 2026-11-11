@@ -15,6 +15,7 @@ export const settings: Shape<typeof en> = {
       roles: "Roles",
       users: "Usuarios",
       sessions: "Sesiones",
+      microsoft: "Entrar con Microsoft",
       assistant: "Asistente",
       "ai-connections": "Conexiones de IA",
       notifications: "Notificaciones",
@@ -348,6 +349,50 @@ export const settings: Shape<typeof en> = {
     rangeDays: "Entre {min} y {max} días.",
     outOfRange: "Cada valor tiene que estar dentro del intervalo indicado debajo.",
     correct: "Corrige los valores fuera de su intervalo antes de guardar.",
+  },
+  microsoft: {
+    title: "Entrar con Microsoft",
+    subtitle: "Una aplicación registrada en Microsoft Entra ID, para técnicos y para los contactos de los clientes",
+    loading: "Cargando…",
+    forbidden: "Para leer esto hace falta {code}.",
+    enabled: "Se puede entrar con Microsoft",
+    groups: { application: "La aplicación", certificate: "El certificado de la plataforma", staff: "Técnicos" },
+    appId: "Id. de la aplicación (cliente)",
+    certificate: "Certificado para subir a la aplicación",
+    certificateHelp:
+      "En Microsoft Entra ID: la aplicación, Certificados y secretos, Certificados, Cargar certificado. Su clave privada nunca sale de esta plataforma.",
+    thumbprint: "Huella SHA-256",
+    expires: "Caduca el {when}",
+    download: "Descargar el certificado",
+    noCertificate: "Todavía no hay certificado. Escribe el id. de la aplicación y pide uno.",
+    expiresSoon: "El certificado caduca en menos de 30 días. Pide uno nuevo, súbelo y cambia a él antes.",
+    expired:
+      "El certificado caducó: nadie puede entrar con Microsoft hasta que pidas uno nuevo, lo subas y cambies a él.",
+    expiresSoonWaiting: "El certificado caduca en menos de 30 días. Sube el certificado nuevo que espera y cambia a él antes.",
+    expiredWaiting:
+      "El certificado caducó: nadie puede entrar con Microsoft hasta que subas el certificado nuevo que espera y cambies a él.",
+    renew: "Hacer un certificado nuevo al guardar",
+    renewWarning:
+      "El certificado nuevo espera junto al que está en uso, que sigue dejando entrar. Súbelo a la aplicación en Entra y después cambia a él aquí.",
+    renewReplaces: "Esto sustituye al certificado nuevo que aún espera. Sube el que haga en su lugar.",
+    appChangeWarning:
+      "Otra aplicación necesita su propio certificado: marca Hacer un certificado nuevo al guardar. Desde ese guardado, nadie entra con Microsoft hasta que lo subas a esa aplicación.",
+    waiting: "Certificado nuevo, en espera: súbelo junto al que está en uso",
+    waitingHelp:
+      "En Microsoft Entra ID, súbelo a la misma aplicación, junto al actual; Entra guarda varios a la vez. Después cambia a él aquí.",
+    downloadWaiting: "Descargar el certificado nuevo",
+    activate: "Ya lo subí: cambiar al certificado nuevo",
+    activateWarning:
+      "Cambia solo después de subirlo: desde ese momento la entrada se firma con el certificado nuevo, y Entra lo rechaza hasta tenerlo.",
+    redirect: "URI de redirección",
+    redirectHelp: "Registra esta dirección en la aplicación, como plataforma Web.",
+    noConsoleUrl: "La dirección de la consola no está configurada en el servidor (ITS_PUBLIC_CONSOLE_URL).",
+    staffTenant: "Organización de Microsoft de Novieri (id. de inquilino)",
+    staffTenantHelp: "Los técnicos solo pueden entrar con cuentas de ella. Vacío: los técnicos no entran con Microsoft.",
+    contactsNote:
+      "Los contactos de un cliente entran desde las organizaciones que lista su cliente (Clientes, Editar). El administrador de cada organización puede tener que aprobar la aplicación una vez.",
+    badId: "Cada identificador es un GUID, como lo muestra Microsoft: 8-4-4-4-12 dígitos hexadecimales.",
+    correct: "Corrige los identificadores para guardar.",
   },
   assistant: {
     title: "Asistente",

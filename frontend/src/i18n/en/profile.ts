@@ -63,6 +63,20 @@ export const profile = {
       lastMethod: "This passkey is your only way to sign in. Add a password before you remove it.",
       subtitleContact: "Another way to sign in, without your password",
     },
+    // The linked Microsoft account (own-auth phase 2, Task 12; design §4).
+    microsoft: {
+      title: "Microsoft account",
+      subtitle: "Sign in with your work or school Microsoft account",
+      link: "Link a Microsoft account",
+      linked: "Linked to an account of the Microsoft organization {tenant}",
+      added: "Linked {when}",
+      lastUsed: "last used {when}",
+      neverUsed: "not used yet",
+      unlink: "Unlink",
+      lastWayIn: "This is your only way to sign in. Add a password before you unlink it.",
+      confirmTitle: "Unlink your Microsoft account",
+      confirmBody: "You will no longer sign in with it. You can link it again later.",
+    },
     totp: {
       title: "Authenticator app",
       subtitle: "A six-digit code from an app on your phone, new every 30 seconds",

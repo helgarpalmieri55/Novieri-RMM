@@ -61,6 +61,8 @@ import type {
   InviteLinkOut,
   InviteOut,
   MeProfileUpdate,
+  MicrosoftSettingsOut,
+  MicrosoftSettingsUpdate,
   PermissionCatalogueOut,
   RoleAssign,
   RoleAssignmentOut,
@@ -95,6 +97,7 @@ export const BUDGET_SETTINGS_KEY = "budget-settings";
 export const EMAIL_SETTINGS_KEY = "email-settings";
 export const MCP_CONNECTIONS_KEY = "mcp-connections";
 export const SESSION_SETTINGS_KEY = "session-settings";
+export const MICROSOFT_SETTINGS_KEY = "microsoft-settings";
 
 // --------------------------------------------------------------------------
 // Organization profile — GET/PATCH /api/v1/orgs/current
@@ -533,6 +536,36 @@ export function useUpdateSessionSettingsMutation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [SESSION_SETTINGS_KEY] });
     },
+  });
+}
+
+// --------------------------------------------------------------------------
+// Sign in with Microsoft -- GET/PUT /api/v1/settings/microsoft-sign-in
+// (own-auth phase 2, Task 12; operator decision C4)
+// --------------------------------------------------------------------------
+
+export function useMicrosoftSettings(enabled: boolean) {
+  const api = useApi();
+  return useQuery<MicrosoftSettingsOut, ApiError>({
+    queryKey: [MICROSOFT_SETTINGS_KEY],
+    queryFn: () => api.getMicrosoftSettings(),
+    enabled,
+    ...NO_RETRY,
+  });
+}
+
+/**
+ * No secret either way (C4): the body is the application, Novieri's tenant,
+ * the switch and the two acts; the answer, public certificates. So a plain
+ * mutation, not `useSecretMutation` (`test/secretMutations.test.ts` reads
+ * none of these names as a secret's).
+ */
+export function usePutMicrosoftSettingsMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<MicrosoftSettingsOut, ApiError, MicrosoftSettingsUpdate>({
+    mutationFn: (body) => api.putMicrosoftSettings(body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [MICROSOFT_SETTINGS_KEY] }),
   });
 }
 

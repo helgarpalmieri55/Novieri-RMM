@@ -678,6 +678,14 @@ export const SESSION_BOUNDS: Readonly<Record<SessionNumberKey, readonly [number,
 };
 
 // ---------------------------------------------------------------------------
+// Sign in with Microsoft -- `GET/PUT /api/v1/settings/microsoft-sign-in`
+// (own-auth phase 2, Task 12; operator decision C4). The certificates are
+// public; no secret travels either way.
+// ---------------------------------------------------------------------------
+
+export type { MicrosoftSettingsOut, MicrosoftSettingsUpdate } from "../../lib/api";
+
+// ---------------------------------------------------------------------------
 // The account profile (`PATCH /api/v1/me`) — spec §7.3
 // ---------------------------------------------------------------------------
 

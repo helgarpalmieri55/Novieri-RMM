@@ -1,7 +1,7 @@
 /**
- * Settings: the section list and the eleven tabs (organization, email, roles,
- * users, sessions, assistant, AI connections, notifications, service levels,
- * health, budget), plus the
+ * Settings: the section list and the twelve tabs (organization, email, roles,
+ * users, sessions, Microsoft sign-in, assistant, AI connections,
+ * notifications, service levels, health, budget), plus the
  * pieces they share (the save bar, the "did not load" notice). Organization
  * names, hostnames, addresses, role and channel names, queue names and every
  * value an operator recorded read as recorded and are never catalogued; the
@@ -21,6 +21,7 @@ export const settings = {
       roles: "Roles",
       users: "Users",
       sessions: "Sessions",
+      microsoft: "Microsoft sign-in",
       assistant: "Assistant",
       "ai-connections": "AI connections",
       notifications: "Notifications",
@@ -363,6 +364,54 @@ export const settings = {
     rangeDays: "Between {min} and {max} days.",
     outOfRange: "Each value has to be within the range shown under it.",
     correct: "Correct the values outside their range before saving.",
+  },
+  // Sign in with Microsoft (own-auth phase 2, Task 12; operator decision C4):
+  // the application, the platform's certificate and Novieri's tenant.
+  microsoft: {
+    title: "Sign in with Microsoft",
+    subtitle: "One application registered in Microsoft Entra ID, for technicians and for clients' contacts",
+    loading: "Loading…",
+    forbidden: "Reading this needs {code}.",
+    enabled: "People may sign in with Microsoft",
+    groups: { application: "The application", certificate: "The platform's certificate", staff: "Technicians" },
+    appId: "Application (client) ID",
+    certificate: "Certificate to upload to the application",
+    certificateHelp:
+      "In Microsoft Entra ID: the application, Certificates & secrets, Certificates, Upload certificate. Its private key never leaves this platform.",
+    thumbprint: "SHA-256 thumbprint",
+    expires: "Expires {when}",
+    download: "Download the certificate",
+    noCertificate: "No certificate yet. Enter the application's ID and ask for one.",
+    expiresSoon: "The certificate expires within 30 days. Ask for a new one, upload it and switch to it before then.",
+    expired:
+      "The certificate has expired: nobody can sign in with Microsoft until you ask for a new one, upload it and switch to it.",
+    // The same two warnings while a new certificate already waits (fix round 1).
+    expiresSoonWaiting:
+      "The certificate expires within 30 days. Upload the new certificate that is waiting and switch to it before then.",
+    expiredWaiting:
+      "The certificate has expired: nobody can sign in with Microsoft until you upload the new certificate that is waiting and switch to it.",
+    renew: "Make a new certificate when I save",
+    renewWarning:
+      "The new certificate waits beside the one in use, which keeps signing people in. Upload it to the application in Entra, then switch to it here.",
+    renewReplaces: "This replaces the new certificate still waiting. Upload the one it makes instead.",
+    appChangeWarning:
+      "Another application needs a certificate of its own, so tick Make a new certificate when I save. From that save on, nobody signs in with Microsoft until you upload it to that application.",
+    waiting: "New certificate, waiting: upload it beside the one in use",
+    waitingHelp:
+      "In Microsoft Entra ID, upload it to the same application, next to the current one; Entra keeps several at once. Then switch to it here.",
+    downloadWaiting: "Download the new certificate",
+    activate: "I uploaded it: switch to the new certificate",
+    activateWarning:
+      "Switch only after uploading it: from then on sign-in signs with the new certificate, and Entra refuses it until it has it.",
+    redirect: "Redirect URI",
+    redirectHelp: "Register this address in the application, as a Web platform.",
+    noConsoleUrl: "The console's address is not configured on the server (ITS_PUBLIC_CONSOLE_URL).",
+    staffTenant: "Novieri's Microsoft organization (tenant ID)",
+    staffTenantHelp: "Technicians may sign in only with accounts from it. Empty: technicians do not sign in with Microsoft.",
+    contactsNote:
+      "A client's contacts sign in from the organizations their client lists (Clients, Edit). Each organization's administrator may have to approve the application once.",
+    badId: "Each identifier is a GUID, as Microsoft shows it: 8-4-4-4-12 hexadecimal digits.",
+    correct: "Correct the identifiers to save.",
   },
   assistant: {
     title: "Assistant",

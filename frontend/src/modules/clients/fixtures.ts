@@ -17,9 +17,9 @@ import type { ClientOut, ContactOut } from "../../lib/api";
 const HOUR = 60 * 60_000;
 
 const CLIENTS: ClientOut[] = [
-  { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
-  { id: CUSTOMER_ID, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], phone: "+57 1 555 0100", address: "Calle 80 #10-20, Bogotá", website: "andeslogistics.example", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
-  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
+  { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
+  { id: CUSTOMER_ID, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], microsoft_tenants: [], phone: "+57 1 555 0100", address: "Calle 80 #10-20, Bogotá", website: "andeslogistics.example", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
+  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
 ];
 
 const CONTACTS: ContactOut[] = [

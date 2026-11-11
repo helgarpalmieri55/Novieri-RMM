@@ -119,6 +119,8 @@ export const auth: Shape<typeof en> = {
     usePasskey: "Usar una clave de acceso",
     passkeyName: "Nombre de esta clave de acceso",
     or: "o",
+    microsoftWithPassword:
+      "O acepta con tu cuenta de Microsoft. Elige también la contraseña de arriba: es tu forma de volver si Microsoft deja de funcionar.",
   },
   recover: {
     heading: "Recuperación de la cuenta",
@@ -157,5 +159,24 @@ export const auth: Shape<typeof en> = {
       "Esta clave de acceso o este dispositivo no puede confirmar que eres tú con huella, rostro o PIN, y es obligatorio. Usa otra clave de acceso o una aplicación de autenticación.",
     aborted: "Otra solicitud de clave de acceso reemplazó a esta. Inténtalo de nuevo.",
     generic: "No se pudo usar la clave de acceso en este dispositivo. Inténtalo de nuevo o usa otro método.",
+  },
+  microsoft: {
+    signIn: "Entrar con Microsoft",
+    acceptInvite: "Aceptar con Microsoft",
+    returnTitle: "Entrando con Microsoft",
+    unavailable: "Entrar con Microsoft no está configurado aquí.",
+    failed: "No terminó la entrada con Microsoft. Empiézala de nuevo.",
+    refusedByMicrosoft: "Microsoft no te dejó entrar. Inténtalo de nuevo, o entra de otra forma.",
+    notLinked:
+      "Esta cuenta de Microsoft no está vinculada a nadie aquí. Entra de otra forma y vincúlala desde tu perfil, o usa tu invitación.",
+    tenantRefused: "Las cuentas de esta organización de Microsoft no pueden entrar aquí.",
+    alreadyLinked: "Esa cuenta de Microsoft ya está vinculada: a otra persona, o ya tienes una. Desvincula la tuya primero.",
+    lastMethod: "Es tu última forma de entrar. Añade antes una contraseña o una clave de acceso.",
+    passwordFirst: "Un técnico solo vincula Microsoft junto a una contraseña propia, y esta cuenta no tiene ninguna.",
+    // «Inicio de sesión y seguridad»: what `profile.security.title` calls the page in Spanish.
+    stepUpAgain:
+      "Pasó demasiado tiempo desde que confirmaste que eras tú. Vuelve a vincular la cuenta desde Inicio de sesión y seguridad.",
+    backToSignIn: "Volver a entrar",
+    backToSecurity: "Volver a Inicio de sesión y seguridad",
   },
 };

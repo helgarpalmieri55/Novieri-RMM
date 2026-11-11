@@ -18,9 +18,18 @@
  * SAMESITE=STRICT IS WHY THIS IS A PAGE AND NOT A SERVER LINK (plan decision
  * D19). The email link is a cross-site top-level navigation, which carries no
  * Strict cookie; this page's own requests are same-origin and do.
+ *
+ * ACCEPTING WITH MICROSOFT (own-auth phase 2, Task 12, decision 5) is offered
+ * only when the invitation says it can be (`microsoft`). A contact accepts
+ * with Microsoft alone. A technician never does (operator decision C3): the
+ * button sits under the password form and takes that password with it, which
+ * the server stores before Microsoft is asked -- their way back if Microsoft
+ * ever stops working. The password stays in this page's state: the button
+ * calls the API directly, as the password's own accept does, and no
+ * mutation cache holds it.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Form } from "../../components/form";
@@ -34,6 +43,8 @@ import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
+import { describeMicrosoftError } from "./microsoft";
+import { LEFT, MicrosoftButton, useBackFromMicrosoft, type MicrosoftGuard } from "./MicrosoftButton";
 import { NewPasswordFields } from "./NewPasswordFields";
 import { canUsePasskeys, createPasskey, describePasskeyError } from "./passkey";
 
@@ -68,28 +79,47 @@ export function InvitePage() {
   const [dead, setDead] = useState(false);
   const [busy, setBusy] = useState(false);
   const [passkeyName, setPasskeyName] = useState(() => translate("auth.enroll.passkeyDefaultName"));
+  // ONE GUARD FOR EVERY WAY IN (fix round 1): the password, the passkey and
+  // Microsoft. One action is in flight at a time, so a technician's password
+  // cannot be accepted while the same password is on its way to Microsoft's
+  // start, and the other way round.
   const inFlight = useRef(false);
+  const reset = useCallback(() => {
+    inFlight.current = false;
+    setBusy(false);
+  }, []);
+  useBackFromMicrosoft(reset);
 
   function landed(kind: "staff" | "contact", state: "enroll_required" | "signed_in") {
     if (state === "signed_in") enterConsole(kind === "contact" ? "/portal" : null);
     else navigate("/sign-in/enroll", { replace: true });
   }
 
-  async function guarded(step: () => Promise<void>) {
+  /**
+   * Run one way in. A dead invitation (410), from any of them, is the page's
+   * own state; any other refusal is one sentence. A step that has `LEFT` for
+   * Microsoft keeps the page off: the document is unloading.
+   */
+  async function guarded(step: () => Promise<unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
+    let left = false;
     try {
-      await step();
+      left = (await step()) === LEFT;
     } catch (cause: unknown) {
       if (isDeadLink(cause)) setDead(true);
-      else setError(describePasskeyError(cause) ?? describeAuthError(cause, { canTimeOut: false }));
+      else
+        setError(
+          describeMicrosoftError(cause) ?? describePasskeyError(cause) ?? describeAuthError(cause, { canTimeOut: false }),
+        );
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      if (!left) reset();
     }
   }
+
+  const microsoftGuard: MicrosoftGuard = { busy, run: (step) => void guarded(step) };
 
   function submit(kind: "staff" | "contact", minimum: number) {
     const problem = checkNewPassword(password, again, minimum);
@@ -136,7 +166,7 @@ export function InvitePage() {
       </AuthCard>
     );
   }
-  const { email, display_name, kind, password_minimum, passkey } = invite.data;
+  const { email, display_name, kind, password_minimum, passkey, microsoft } = invite.data;
   const offerPasskey = kind === "contact" && passkey && canUsePasskeys();
   return (
     <AuthCard
@@ -173,6 +203,20 @@ export function InvitePage() {
           </p>
         </>
       ) : null}
+      {microsoft && kind === "contact" ? (
+        <>
+          <MicrosoftButton
+            start={{ intent: "invite", token }}
+            back="/portal"
+            labelKey="auth.microsoft.acceptInvite"
+            variant={offerPasskey ? "secondary" : "primary"}
+            guard={microsoftGuard}
+          />
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.invite.or")}
+          </p>
+        </>
+      ) : null}
       <Form onSubmit={() => submit(kind, password_minimum)}>
         {/* For the password manager: the account the new password belongs to. */}
         <Field label={t("auth.common.email")}>
@@ -196,6 +240,20 @@ export function InvitePage() {
           />
         </div>
       </Form>
+      {microsoft && kind === "staff" ? (
+        <>
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.invite.microsoftWithPassword")}
+          </p>
+          <MicrosoftButton
+            start={{ intent: "invite", token, password }}
+            back="/"
+            labelKey="auth.microsoft.acceptInvite"
+            check={() => checkNewPassword(password, again, password_minimum)}
+            guard={microsoftGuard}
+          />
+        </>
+      ) : null}
     </AuthCard>
   );
 }
