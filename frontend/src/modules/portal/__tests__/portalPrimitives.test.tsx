@@ -35,6 +35,15 @@ import { PortalAssistantPanel } from "../PortalAssistantPanel";
 import { PortalTicketDetailPage } from "../PortalTicketDetailPage";
 import type { PortalTicketDetail, PortalTicketSummary } from "../types";
 
+const portalMeOf = (me: { user_id: string; email: string; display_name: string; permissions: string[]; timezone?: string | null }) => ({
+  user_id: me.user_id,
+  kind: "staff" as const,
+  email: me.email,
+  display_name: me.display_name,
+  timezone: me.timezone ?? null,
+  permissions: me.permissions.filter((code) => code.startsWith("portal.")),
+});
+
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
@@ -107,6 +116,7 @@ describe("portal renders every time in the profile's zone", () => {
   beforeEach(() => {
     api = {
       me: vi.fn().mockResolvedValue(ME_NEW_YORK),
+      portalMe: vi.fn().mockResolvedValue(portalMeOf(ME_NEW_YORK)),
       listPortalTickets: vi.fn().mockResolvedValue([TICKET_SUMMARY]),
       getPortalTicket: vi.fn().mockResolvedValue(TICKET_DETAIL),
     };
@@ -164,6 +174,7 @@ describe("portal reports every failure as an announced sentence", () => {
   beforeEach(() => {
     api = {
       me: vi.fn().mockResolvedValue(ME_NEW_YORK),
+      portalMe: vi.fn().mockResolvedValue(portalMeOf(ME_NEW_YORK)),
       getPortalTicket: vi.fn().mockResolvedValue(TICKET_DETAIL),
     };
     mockUseApi.mockReturnValue(api as ApiClient);

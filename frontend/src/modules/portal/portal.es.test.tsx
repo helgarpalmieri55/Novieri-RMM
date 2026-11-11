@@ -39,6 +39,15 @@ import {
 } from "./portalState";
 import type { PortalCategoryOut, PortalTicketDetail, PortalTicketSummary } from "./types";
 
+const portalMeOf = (me: { user_id: string; email: string; display_name: string; permissions: string[]; timezone?: string | null }) => ({
+  user_id: me.user_id,
+  kind: "staff" as const,
+  email: me.email,
+  display_name: me.display_name,
+  timezone: me.timezone ?? null,
+  permissions: me.permissions.filter((code) => code.startsWith("portal.")),
+});
+
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
@@ -109,6 +118,7 @@ const DETAIL: PortalTicketDetail = {
 function baseApi(over: Partial<ApiClient> = {}): Partial<ApiClient> {
   const api: Partial<ApiClient> = {
     me: vi.fn().mockResolvedValue(ME),
+    portalMe: vi.fn().mockResolvedValue(portalMeOf(ME)),
     listPortalTickets: vi.fn().mockResolvedValue(SUMMARIES),
     listPortalCategories: vi.fn().mockResolvedValue(CATEGORIES),
     getPortalTicket: vi.fn().mockResolvedValue(DETAIL),
@@ -300,6 +310,7 @@ describe("New ticket in Spanish", () => {
 function renderDetail(detail: PortalTicketDetail = DETAIL, permissions = ME.permissions) {
   baseApi({
     me: vi.fn().mockResolvedValue({ ...ME, permissions }),
+    portalMe: vi.fn().mockResolvedValue(portalMeOf({ ...ME, permissions })),
     getPortalTicket: vi.fn().mockResolvedValue(detail),
   });
   return renderAt(<PortalTicketDetailPage />, "/portal/tickets/:ticketId", `/portal/tickets/${detail.id}`);

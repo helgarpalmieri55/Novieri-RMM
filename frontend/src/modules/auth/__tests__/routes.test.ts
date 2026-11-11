@@ -45,6 +45,7 @@ const PAGES = [
   "/reset-password",
   "/invite",
   "/recover",
+  "/portal/sign-in",
 ];
 
 describe("the pages reached without a session", () => {
@@ -63,7 +64,10 @@ describe("the pages reached without a session", () => {
     for (const path of paths) {
       if (!PAGES.includes(path) && path !== "*") expect(isPublicPath(path), path).toBe(false);
     }
-    expect(new Set(PAGES.map((page) => `/${page.split("/")[1]}`))).toEqual(new Set(PUBLIC_PATHS));
+    // Each page is under one public prefix, and each prefix is some page's.
+    const under = (page: string, prefix: string) => page === prefix || page.startsWith(`${prefix}/`);
+    for (const page of PAGES) expect(PUBLIC_PATHS.some((prefix) => under(page, prefix)), page).toBe(true);
+    for (const prefix of PUBLIC_PATHS) expect(PAGES.some((page) => under(page, prefix)), prefix).toBe(true);
   });
 
   it("are walked by the harmony gate", () => {

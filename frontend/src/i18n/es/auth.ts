@@ -27,6 +27,12 @@ export const auth: Shape<typeof en> = {
     rejected: "Ese correo electrónico y esa contraseña no corresponden a ninguna cuenta de aquí.",
     forgot: "¿Olvidaste tu contraseña?",
   },
+  portalSignIn: {
+    title: "Entrar al portal",
+    intro: "Usa una clave de acceso, o tu correo y tu contraseña.",
+    usePasskey: "Entrar con una clave de acceso",
+    passkeyRejected: "No se aceptó esa clave de acceso. Inténtalo de nuevo, o usa tu correo y tu contraseña.",
+  },
   factor: {
     title: "Confirma que eres tú",
     intro: "Usa tu segundo factor para terminar de iniciar sesión.",

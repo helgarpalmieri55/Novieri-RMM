@@ -5,6 +5,9 @@
  */
 export const portal = {
   nav: { aria: "Portal", myTickets: "My tickets", newTicket: "New ticket" },
+  shell: {
+    brand: "Support portal",
+  },
   state: {
     groupIncident: "Report a problem",
     groupRequest: "Request something",

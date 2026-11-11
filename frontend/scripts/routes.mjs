@@ -93,6 +93,7 @@ export const ROUTES = [
   "/reset-password",
   "/invite",
   "/recover",
+  "/portal/sign-in",
   "/devices",
   "/devices/onboard",
   "/devices/push-runs",

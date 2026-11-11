@@ -14,6 +14,7 @@ import { EnrollPage } from "../EnrollPage";
 import { FactorPage } from "../FactorPage";
 import { ForgotPasswordPage } from "../ForgotPasswordPage";
 import { InvitePage } from "../InvitePage";
+import { PortalSignInPage } from "../PortalSignInPage";
 import { RecoverPage } from "../RecoverPage";
 import { RecoveryCodesPage } from "../RecoveryCodesPage";
 import { ResetPasswordPage } from "../ResetPasswordPage";
@@ -25,6 +26,8 @@ export const calls = {
   factorPasskeyOptions: vi.fn(),
   factorPasskey: vi.fn(),
   factorRecovery: vi.fn(),
+  passkeySignInOptions: vi.fn(),
+  passkeySignIn: vi.fn(),
   enrollTotpStart: vi.fn(),
   enrollTotpConfirm: vi.fn(),
   enrollPasskeyOptions: vi.fn(),
@@ -54,6 +57,8 @@ export function installDefaults(): void {
   calls.factorPasskeyOptions.mockResolvedValue({ challenge: "c2lnbi1pbg", userVerification: "required" });
   calls.factorPasskey.mockResolvedValue({ state: "signed_in" });
   calls.factorRecovery.mockResolvedValue({ state: "signed_in" });
+  calls.passkeySignInOptions.mockResolvedValue({ challenge: "cG9ydGFs", userVerification: "required", allowCredentials: [] });
+  calls.passkeySignIn.mockResolvedValue({ state: "signed_in" });
   calls.enrollTotpStart.mockResolvedValue({ otpauth_uri: OTPAUTH });
   calls.enrollTotpConfirm.mockResolvedValue(undefined);
   calls.enrollPasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
@@ -98,6 +103,7 @@ export function renderAuth(path: string, state?: unknown): RenderResult & { quer
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/invite" element={<InvitePage />} />
           <Route path="/recover" element={<RecoverPage />} />
+          <Route path="/portal/sign-in" element={<PortalSignInPage />} />
           <Route path="*" element={<p data-testid="elsewhere" />} />
         </Routes>
         <LocationProbe />

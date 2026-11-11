@@ -36,7 +36,7 @@ import {
 import { sessionEndReason, subscribeSessionEnd } from "./lib/sessionEnd";
 import { forgetStoredClient } from "./lib/clientChoice";
 import { watchTyping, type KeptText } from "./lib/unsavedText";
-import { ApiError } from "./lib/api";
+import { ApiError, apiErrorCode } from "./lib/api";
 import { describeSubmitError } from "./components/form";
 import { AuthAlert, AuthCard } from "./modules/auth/AuthCard";
 import { SessionEnded } from "./shell/SessionEnded";
@@ -141,12 +141,14 @@ import { EnrollPage } from "./modules/auth/EnrollPage";
 import { FactorPage } from "./modules/auth/FactorPage";
 import { ForgotPasswordPage } from "./modules/auth/ForgotPasswordPage";
 import { InvitePage } from "./modules/auth/InvitePage";
+import { PortalSignInPage } from "./modules/auth/PortalSignInPage";
 import { RecoverPage } from "./modules/auth/RecoverPage";
 import { RecoveryCodesPage } from "./modules/auth/RecoveryCodesPage";
 import { ResetPasswordPage } from "./modules/auth/ResetPasswordPage";
 import { SignInPage } from "./modules/auth/SignInPage";
 import { MyTicketsPage } from "./modules/portal/MyTicketsPage";
 import { NewTicketPage } from "./modules/portal/NewTicketPage";
+import { PortalShell } from "./modules/portal/PortalShell";
 import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage";
 
 // Exported so a test that renders `<App />` more than once can reset it. The
@@ -442,6 +444,9 @@ export function Landing() {
  * remembers that `/me` answered (`hadSession`). "Sign in again" is theirs to
  * press, once they have copied what they want.
  *
+ * A 403 `portal_only` is a client's contact (own-auth phase 2): the portal's
+ * frame on a portal page, the portal from anywhere else.
+ *
  * AN UNKNOWN PATH UNDER A PUBLIC PREFIX (`/sign-in/x`, a path-form
  * `/invite/<token>`) reaches this guard through the `*` route, and
  * `goToSignIn` refuses to leave a public path (D20), so it waited on
@@ -526,6 +531,20 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
         <Shell>{children}</Shell>
       </ClientScopeProvider>
     );
+  }
+  // A CLIENT'S CONTACT (own-auth phase 2, Task 10, decision 1): the
+  // console's door said `portal_only`. On a portal page, the portal's own
+  // frame, which asks `/portal/me`; anywhere else, the portal. Not a control:
+  // the server refused them already.
+  if (
+    session.failure instanceof ApiError &&
+    session.failure.status === 403 &&
+    apiErrorCode(session.failure) === "portal_only"
+  ) {
+    if (location.pathname !== "/portal" && !location.pathname.startsWith("/portal/")) {
+      return <Navigate to="/portal" replace />;
+    }
+    return <PortalShell>{children}</PortalShell>;
   }
   if (session.failure instanceof ApiError && session.failure.status === 403) {
     return (
@@ -721,6 +740,7 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/invite" element={<InvitePage />} />
             <Route path="/recover" element={<RecoverPage />} />
+            <Route path="/portal/sign-in" element={<PortalSignInPage />} />
             <Route
               path="/devices"
               element={
