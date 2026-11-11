@@ -235,6 +235,12 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "install_link_windows_signature",
     ),
     "app/core/ai/retention.py::sweep_all_orgs": "worker: AI transcript retention sweep",
+    "app/core/auth/retention.py::sweep_org": (
+        "worker: own authentication's retention (final review A-M6, operator decision C7) -- "
+        "one organization's old sessions, forgotten devices, spent links and old challenges, "
+        "whose technician rows only an every-client scope may delete; every step carries its "
+        "own org_id predicate, and the sweep is audited"
+    ),
     "app/modules/agent_update/reconcile.py::tick_all_orgs": "worker: agent-update rollout tick",
     "app/modules/email_intake/identity.py::_mint_email_token_committed": (
         "worker: mints a ticket's reply token for deliver_pending (send_test's synthetic "

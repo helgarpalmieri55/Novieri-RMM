@@ -74,6 +74,7 @@ export const auditActions: Shape<typeof enActions> = {
   auth_passkey_removed: "Clave de acceso eliminada",
   auth_password_changed: "Contraseña cambiada",
   auth_recovery_code_used: "Código de recuperación usado",
+  auth_retention_applied: "Retención de autenticación aplicada",
   auth_session_settings_updated: "Ajustes de sesión modificados",
   auth_sessions_ended: "Sesiones cerradas",
   auth_signed_in: "Sesión iniciada en la consola",
