@@ -54,6 +54,10 @@ CATALOG: dict[str, Entry] = {
     "auth_failures": O("users", "user_id"), "auth_action_tokens": O("users", "user_id"),
     "auth_webauthn_challenges": O("users", "user_id"), "auth_org_settings": G,
     "account_mail_settings": G,
+    # own authentication phase 2 (migration 0246): a person's Microsoft link
+    # follows their `users` row like every credential above; the application
+    # registration is the org's.
+    "auth_external_identities": O("users", "user_id"), "auth_entra_settings": G,
     # clients themselves
     "clients": G, "sites": C,
     # fleet
