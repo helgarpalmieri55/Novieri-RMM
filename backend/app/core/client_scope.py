@@ -145,8 +145,8 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # own row or the link, never from a request field naming it.
     "app/core/auth/flows.py::_identity_session": (
         "sign-in before the door admits anybody: the password, the second factor, the "
-        "enrolment, the recent confirmation, the reset link -- a technician's own auth rows "
-        "and users row only (P2 phase 1 design §6.2)"
+        "enrolment, the recent confirmation, the reset link -- a technician's or a contact's "
+        "own auth rows and users row only (P2 design §6.2; phase 2, D25)"
     ),
     "app/core/auth/account.py::_own_session": (
         "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "

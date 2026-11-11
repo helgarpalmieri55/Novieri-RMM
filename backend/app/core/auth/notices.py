@@ -144,17 +144,25 @@ def _compose(
     )
 
 
-def reset_mail(link: str) -> tuple[str, str]:
-    return (
-        tr("Reset your {product} password", product=PRODUCT),
-        tr(
+def reset_mail(link: str, *, second_factor: bool) -> tuple[str, str]:
+    """The reset link (design §2.8, §3). "You will still need your second
+    factor" only for somebody who has one (plan decision 3)."""
+    subject = tr("Reset your {product} password", product=PRODUCT)
+    if second_factor:
+        return subject, tr(
             "Someone asked to reset the password of your {product} account.\n\n"
             "Open this link within 30 minutes to choose a new one. You will still need your "
             "second factor to sign in.\n{link}\n\n"
             "If it was not you, ignore this message: your password has not changed.",
             product=PRODUCT,
             link=link,
-        ),
+        )
+    return subject, tr(
+        "Someone asked to reset the password of your {product} account.\n\n"
+        "Open this link within 30 minutes to choose a new one.\n{link}\n\n"
+        "If it was not you, ignore this message: your password has not changed.",
+        product=PRODUCT,
+        link=link,
     )
 
 

@@ -51,6 +51,9 @@ from app.core.i18n import tr
 MAX_LENGTH = 128
 #: A technician's minimum (design §2.1); a contact's is 15 (§3, phase 2).
 STAFF_MINIMUM = 12
+#: A contact's minimum (design §3): a contact's second factor is optional, and
+#: NIST SP 800-63B-4 §3.1.1.2 asks 15 of a password used alone [S1].
+CONTACT_MINIMUM = 15
 #: Context words shorter than this are not looked for: "ana" is inside too
 #: many unrelated words to say anything.
 CONTEXT_MIN_WORD = 4

@@ -6,10 +6,11 @@ organization's slug and an address and answers four facts -- the user, the
 organization, the kind and the status -- and nothing else; with them the
 caller pins the organization and reads the credentials under RLS as usual.
 
-ONLY THE TECHNICIAN. The function may answer two rows for one address (a
-technician and a contact of a client share it; staff first, Task 1). The
-console signs in technicians only, so the query keeps the staff row and a
-contact's address is "nobody" here -- the same answer, after the same work.
+TECHNICIAN FIRST. The function may answer two rows for one address (a
+technician and a contact of a client share it; staff first, 0245).
+`find_staff` keeps the staff row -- the recovery command is a technician's.
+`find_person` takes the first row of either kind (own authentication phase 2,
+plan decision D25): the one sign-in route for technicians and contacts.
 
 A RAW CONNECTION WITH NO GUC (Task 1's contract): the function needs no
 organization pinned, and none is.
@@ -33,6 +34,8 @@ class PreIdentity:
     user_id: UUID
     org_id: UUID
     status: str
+    #: `users.kind`: `staff` or `contact` (phase 2).
+    kind: str = STAFF_KIND
 
 
 async def find_staff(engine: AsyncEngine, *, org_slug: str, email: str) -> PreIdentity | None:
@@ -49,6 +52,25 @@ async def find_staff(engine: AsyncEngine, *, org_slug: str, email: str) -> PreId
     if row is None:
         return None
     return PreIdentity(user_id=row.user_id, org_id=row.org_id, status=row.status)
+
+
+async def find_person(engine: AsyncEngine, *, org_slug: str, email: str) -> PreIdentity | None:
+    """The person an address names in one organization: the technician when
+    there is one, else the contact (plan decision D25). The order is said
+    here, not left to the function's own ORDER BY."""
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT user_id, org_id, kind, status FROM its_auth_principal(:slug, :email) "
+                    "ORDER BY (kind = :staff) DESC, user_id LIMIT 1"
+                ),
+                {"slug": org_slug, "email": email.strip().lower(), "staff": STAFF_KIND},
+            )
+        ).first()
+    if row is None:
+        return None
+    return PreIdentity(user_id=row.user_id, org_id=row.org_id, status=row.status, kind=row.kind)
 
 
 async def org_of_slug(engine: AsyncEngine, slug: str) -> UUID | None:

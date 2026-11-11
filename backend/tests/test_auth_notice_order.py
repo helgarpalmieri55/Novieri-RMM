@@ -261,12 +261,12 @@ async def test_a_recovery_link_tells_only_once_its_session_is_made(
         )
     link = f"https://itms.test/recover#{token}"
     issued = len(_Relay.sent)
-    real_started = flows._started
+    real_started = flows.started
 
     async def failing(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("the session could not be made")
 
-    monkeypatch.setattr(flows, "_started", failing)
+    monkeypatch.setattr(flows, "started", failing)
     with pytest.raises(RuntimeError):
         await flows.accept_recovery(
             http_request(relay_env), token=link.split("#", 1)[1]
@@ -276,7 +276,7 @@ async def test_a_recovery_link_tells_only_once_its_session_is_made(
     assert await _count(relay_env, org, "user.recovery_link_used") == 0
     await _assert_mail_and_checkout_paired(relay_env, org)
 
-    monkeypatch.setattr(flows, "_started", real_started)
+    monkeypatch.setattr(flows, "started", real_started)
     accepted = await relay_env.client.post(
         "/api/v1/auth/recover/accept", headers=browser(), json={"token": link.split("#", 1)[1]}
     )
@@ -370,12 +370,12 @@ async def test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_ma
     await _set_mark(relay_env, who)
     token = await _recovery_token(relay_env, org, who)
     issued = len(_Relay.sent)
-    real_started = flows._started
+    real_started = flows.started
 
     async def failing(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("the session could not be made")
 
-    monkeypatch.setattr(flows, "_started", failing)
+    monkeypatch.setattr(flows, "started", failing)
     with pytest.raises(RuntimeError):
         await flows.accept_recovery(http_request(relay_env), token=token, password=RECOVERED)
     assert _Relay.sent[issued:] == []
@@ -385,7 +385,7 @@ async def test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_ma
     assert await _unused(relay_env, who) == 10
     await _assert_mail_and_checkout_paired(relay_env, org)
 
-    monkeypatch.setattr(flows, "_started", real_started)
+    monkeypatch.setattr(flows, "started", real_started)
     accepted = await relay_env.client.post(
         "/api/v1/auth/recover/accept",
         headers=browser(),

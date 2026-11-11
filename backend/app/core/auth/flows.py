@@ -62,7 +62,8 @@ from app.core.auth.guards import (
     signed_user,
 )
 from app.core.auth.keys import UnknownKeyVersion
-from app.core.auth.lookup import find_staff
+from app.core.auth.lookup import find_person
+from app.core.auth.methods import has_sign_in_method, microsoft_only
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
@@ -95,7 +96,7 @@ from app.core.auth.totp import (
 )
 from app.core.client_scope import ClientScope
 from app.core.i18n import tr, use_locale
-from app.core.identity import ACTIVE_STATUS, STAFF_KIND
+from app.core.identity import ACTIVE_STATUS, CONTACT_KIND, STAFF_KIND
 from app.core.rate_limit import hit
 from app.core.rbac_admin import SUPER_ADMIN
 from app.core.tenancy import org_session
@@ -253,7 +254,7 @@ async def _factor_done(
     )
 
 
-async def _started(
+async def started(
     session: AsyncSession,
     request: Request,
     user: User,
@@ -265,10 +266,13 @@ async def _started(
     methods: tuple[str, ...] = (),
     remember_device_days: int | None = None,
 ) -> SignIn:
+    """A new session for `user`, of the person's own kind: a contact's is a
+    contact session, which only the portal's door admits (design §3). Public
+    since phase 2 (plan decision 2): Microsoft's sign-in starts one too."""
     record, token = await start_session(
         session,
         user,
-        kind=STAFF_KIND,
+        kind=user.kind,
         request=request,
         factor_done=factor_done,
         trusted_device_id=device.id if device is not None else None,
@@ -322,7 +326,7 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
         # accepts is empty or this long, so this is a wrong one -- answered
         # alike whoever the address names, before the pepper sees it.
         raise _invalid_credentials()
-    found = await find_staff(_engine(request), org_slug=slug, email=email)
+    found = await find_person(_engine(request), org_slug=slug, email=email)
     if found is None or found.status != ACTIVE_STATUS:
         # Falsifier 2: the same argon2 work as a wrong password, so neither
         # the body nor the time says whether the address has an account.
@@ -350,7 +354,7 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
                 )
             elif matches:
                 await record_success(session, user.id, "password")
-                outcome = await _after_password(session, request, user)
+                outcome = await after_first_factor(session, request, user)
     if untried:
         # Falsifier 2: the same argon2 work as a wrong password. Done after
         # the block, so a refused attempt does not hold the account's lock
@@ -362,29 +366,45 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
     return outcome
 
 
-async def _after_password(session: AsyncSession, request: Request, user: User) -> SignIn:
-    """The password is right. In order: an idle session of this browser is
-    resumed with the password alone (design §2.4, Task 6's `resumable`); a
-    person with no second factor enrols one; a remembered device stands in for
-    the factor (§2.6); everybody else is asked for it."""
-    idle = await resumable(session, request, user.id)
-    if idle is not None:
-        await _audit(session, user, "auth.signed_in", {"method": "resume", "trusted_device": False})
-        return await _started(session, request, user, state="signed_in", resume=idle)
+async def after_first_factor(
+    session: AsyncSession, request: Request, user: User, *, method: str = "password"
+) -> SignIn:
+    """The first factor is right -- the password, or (phase 2, Task 9) a
+    linked Microsoft account, named by `method` in the audit. In order: an
+    idle session of this browser is resumed with THE PASSWORD alone (design
+    §2.4, Task 6's `resumable`; never with Microsoft, plan decision 5); a
+    person with no second factor enrols one -- or, a contact, whose second
+    factor is optional, is signed in (design §3, plan decision D27); a
+    remembered device stands in for the factor (§2.6); everybody else is
+    asked for it. A CONTACT'S SECOND FACTOR IS THE AUTHENTICATOR APP ALONE:
+    their passkey is another way in (operator decision C5, plan decision 3),
+    so it is neither asked for nor offered here."""
+    if method == "password":
+        idle = await resumable(session, request, user.id)
+        if idle is not None:
+            await _audit(
+                session, user, "auth.signed_in", {"method": "resume", "trusted_device": False}
+            )
+            return await started(session, request, user, state="signed_in", resume=idle)
     has_passkey, has_totp, codes = await summary(session, user.id)
-    if not (has_passkey or has_totp):
-        return await _started(session, request, user, state="enroll_required")
+    # C5: for a contact, a passkey is not a second factor of the password.
+    passkey_factor = has_passkey and user.kind == STAFF_KIND
+    if not (passkey_factor or has_totp):
+        if user.kind == CONTACT_KIND:
+            await _audit(
+                session, user, "auth.signed_in", {"method": method, "trusted_device": False}
+            )
+            return await started(session, request, user, state="signed_in", factor_done=True)
+        return await started(session, request, user, state="enroll_required")
     device = await recognised(session, user.id, request)
     if device is not None:
-        await _audit(
-            session, user, "auth.signed_in", {"method": "password", "trusted_device": True}
-        )
-        return await _started(
+        await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": True})
+        return await started(
             session, request, user, state="signed_in", factor_done=True, device=device
         )
-    offered = (("passkey", has_passkey), ("totp", has_totp), ("recovery", codes > 0))
+    offered = (("passkey", passkey_factor), ("totp", has_totp), ("recovery", codes > 0))
     policy = await read_policy(session, user.org_id)
-    return await _started(
+    return await started(
         session,
         request,
         user,
@@ -792,6 +812,46 @@ async def step_up_passkey(
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 
 
+async def step_up_password(request: Request, principal: SessionPrincipal, *, password: str) -> None:
+    """A contact WITHOUT A SECOND FACTOR confirms with the password (plan
+    decisions D29 and 6): their second factor is optional, and the password
+    is what one without it has. Everybody else gets 409 `method_unavailable`,
+    as for a factor the account does not have: a technician, who confirms
+    with a second factor (design §2.5); a contact who turned the app on, who
+    confirms with it (design §2.6: "las acciones de §2.5 siguen pidiendo el
+    segundo factor"; operator decision C5); and a contact without a
+    password. The password's own counters and wait (design §2.3), and the
+    rule of `login` for an over-long one (plan decision 16)."""
+    require_full(principal)
+    accepted = False
+    async with _identity_session(principal.org_id, _engine(request)) as session:
+        user = await signed_user(session, principal)
+        stored = await session.get(AuthPassword, user.id)
+        if (
+            user.kind != CONTACT_KIND
+            or stored is None
+            or await _has_second_factor(session, user)
+        ):
+            raise _unavailable()
+        device = await presented(session, user.id, request)
+        counter = device.id if device is not None else None
+        # Raised inside the block: nothing is written before it.
+        await gate(session, user.id, "password", device_id=counter)
+        matches: bool | None = False
+        if password and len(password) <= staff_password.SUBMITTED_MAX:
+            matches = await _password_matches(user.org_id, password, stored)
+        if matches:
+            await record_success(session, user.id, "password")
+            await _stepped_up(session, principal)
+            accepted = True
+        elif matches is False:
+            await count_failure(
+                session, user, "password", vault=_vault(request), device_id=counter
+            )
+    if not accepted:
+        raise _factor_failed(status.HTTP_400_BAD_REQUEST)
+
+
 # --------------------------------------------------------------------------- #
 # signing out
 # --------------------------------------------------------------------------- #
@@ -825,27 +885,45 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
 # --------------------------------------------------------------------------- #
 
 
-async def _has_second_factor(session: AsyncSession, user_id: UUID) -> bool:
-    """A passkey or a CONFIRMED authenticator app. Recovery codes alone do
-    not count: they are a fallback of a factor, not one (design §2.2)."""
-    has_passkey, has_totp, _codes = await summary(session, user_id)
+async def _has_second_factor(session: AsyncSession, user: User) -> bool:
+    """A SECOND FACTOR ACTIVATED, by the person's kind (plan decision 3). A
+    technician: a passkey or a CONFIRMED authenticator app. A contact: the
+    confirmed app alone -- a contact's passkey is another way in, not a second
+    factor (operator decision C5). Recovery codes alone never count: they are
+    a fallback of a factor, not one (design §2.2)."""
+    has_passkey, has_totp, _codes = await summary(session, user.id)
+    if user.kind == CONTACT_KIND:
+        return has_totp
     return has_passkey or has_totp
 
 
-async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
-    """Run AFTER the 202 (plan decision 8): nothing below changes the answer
-    or its time, so nothing tells whether the address has an account.
+async def _may_be_sent_a_reset(session: AsyncSession, user: User) -> bool:
+    """Plan decision 4. A technician: a password and a second factor (final
+    review C-I1, design §2.8). A contact: any way in, with or without a
+    password, EXCEPT Microsoft alone (operator decision C6): the mailbox does
+    not stand in for the client's own Microsoft policy. A second factor the
+    contact turned on is still asked for at the next sign-in."""
+    if user.kind == STAFF_KIND:
+        return await session.get(AuthPassword, user.id) is not None and await _has_second_factor(
+            session, user
+        )
+    return (
+        user.kind == CONTACT_KIND
+        and await has_sign_in_method(session, user.id)
+        and not await microsoft_only(session, user.id)
+    )
 
-    NEVER TO AN ACCOUNT WITHOUT A SECOND FACTOR (final review C-I1; design
-    §2.8, "después sigue pidiendo el segundo factor"; Q5, "nunca solo por
-    correo"). Such an account -- after an administrator's factor reset, an
-    invitation or a recovery link whose enrolment was abandoned, the
-    first-boot owner before their first sign-in -- would let the mailbox set
-    the password and then enrol ITS OWN factor: the mailbox alone, and a full
-    session. It is sent nothing, as an unknown address is; the person with the
-    password signs in and enrols, and one who has lost both uses the server's
-    recovery command. So the mail's "You will still need your second factor"
-    is true when it is sent."""
+
+async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
+    """Run AFTER the 202 (phase 1 plan decision 8): nothing below changes the
+    answer or its time, so nothing tells whether the address has an account
+    -- or which kind.
+
+    WHO IS SENT ONE is `_may_be_sent_a_reset`: never a technician without a
+    second factor (final review C-I1; Q5, "nunca solo por correo"), never a
+    contact who has not accepted an invitation or who signs in only with
+    Microsoft (C6). The mail promises the second factor only to somebody who
+    has one activated."""
     with use_locale(locale):
         settings = app.state.settings
         engine: AsyncEngine = app.state.app_engine
@@ -864,17 +942,14 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             fail_closed=True,
         ):
             return
-        found = await find_staff(engine, org_slug=settings.default_org_slug, email=address)
+        found = await find_person(engine, org_slug=settings.default_org_slug, email=address)
         if found is None or found.status != ACTIVE_STATUS:
             return
         async with _identity_session(found.org_id, engine) as session:
             user = await session.get(User, found.user_id)
-            if (
-                user is None
-                or await session.get(AuthPassword, user.id) is None
-                or not await _has_second_factor(session, user.id)
-            ):
+            if user is None or not await _may_be_sent_a_reset(session, user):
                 return
+            second_factor = await _has_second_factor(session, user)
             token = await action_tokens.issue(
                 session,
                 org_id=user.org_id,
@@ -885,7 +960,8 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             )
             with use_locale(user.locale or locale):
                 subject, text = notices.reset_mail(
-                    action_tokens.link(settings.public_console_url, "reset-password", token)
+                    action_tokens.link(settings.public_console_url, "reset-password", token),
+                    second_factor=second_factor,
                 )
             await notices.deliver(
                 session,
@@ -896,6 +972,17 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
                 vault=app.state.vault,
                 actor_id=None,
             )
+
+
+async def _may_still_reset(session: AsyncSession, user: User) -> bool:
+    """At the link's use, under `lock_person`: a technician still has a second
+    factor (§2.8); a contact still has a way in, and not Microsoft alone (plan
+    decision 4, C6)."""
+    if user.kind == STAFF_KIND:
+        return await _has_second_factor(session, user)
+    return await has_sign_in_method(session, user.id) and not await microsoft_only(
+        session, user.id
+    )
 
 
 async def reset_password(request: Request, *, token: str, password: str) -> None:
@@ -912,15 +999,21 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
             session, token=token, purposes=(action_tokens.RESET,)
         )
         user = await session.get(User, row.user_id) if row is not None else None
-        if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
+        if (
+            row is None
+            or user is None
+            or user.kind not in (STAFF_KIND, CONTACT_KIND)
+            or user.status != ACTIVE_STATUS
+        ):
             raise _invalid_link()
         # One lock with an administrator's factor reset (`factors.
         # lock_person`, item 8): the factors read below, and the mark the store
         # writes, cannot interleave with a reset that removes the factors.
         await lock_person(session, user.id)
-        if not await _has_second_factor(session, user.id):
-            # A link sent while the account had a factor, used after the
-            # factors went (an administrator's reset): the same mailbox-only
+        if not await _may_still_reset(session, user):
+            # A link sent while the account could be reset, used after that
+            # stopped being true (an administrator's factor reset; a contact's
+            # access reset by a technician, Task 8): the same mailbox-only
             # path as `send_reset_link`'s. It is SPENT, then refused like
             # every dead link (re-review Minor 5): nothing else is written,
             # the `consume` commits with the block, and the 410 is raised
@@ -934,6 +1027,7 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
                 email=user.email,
                 display_name=user.display_name,
                 org_name=await staff_password.organization_name(session, org_id),
+                minimum=staff_password.minimum_for(user.kind),
             )
             # `by_mail`: the mailbox chose this password, so an administrator's
             # factor reset is refused until a second factor is verified
@@ -1026,7 +1120,7 @@ async def accept_invite(request: Request, *, token: str, password: str) -> SignI
         )
         await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
         await _audit(session, user, "auth.password_changed", {"via": "invite"})
-        return await _started(session, request, user, state="enroll_required")
+        return await started(session, request, user, state="enroll_required")
 
 
 # --------------------------------------------------------------------------- #
@@ -1148,7 +1242,7 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "user.recovery_link_used", {"email": user.email})
-        started = await _started(session, request, user, state="enroll_required")
+        signed = await started(session, request, user, state="enroll_required")
         # The last acts (fix round 3): after the new session is made, so a
         # failure there cannot leave a mail -- and a relay checkout whose
         # audit row rolled back -- for a recovery that did not happen. The
@@ -1158,4 +1252,4 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
                 session, user, "password_changed", vault=_vault(request), actor_id=None
             )
         await notices.tell(session, user, "factors_reset", vault=_vault(request), actor_id=None)
-        return started
+        return signed

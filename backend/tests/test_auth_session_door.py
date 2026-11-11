@@ -154,6 +154,7 @@ async def test_a_contact_session_never_passes_the_console_door(api_env: Any) -> 
     response = await _me(api_env, signed.headers)
     assert response.status_code == 403
     assert response.json()["detail"] == "this account can only use the portal"
+    assert response.json()["code"] == "portal_only"
 
 
 async def test_the_console_domain_rule_holds_for_a_session(api_env: Any) -> None:

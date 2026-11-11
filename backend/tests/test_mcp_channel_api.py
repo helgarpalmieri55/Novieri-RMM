@@ -66,6 +66,7 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             "step-up/recovery",
             "step-up/passkey/options",
             "step-up/passkey",
+            "step-up/password",
             "logout",
             "logout-everywhere",
             "password/forgot",
@@ -185,7 +186,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 36
+    assert len(NEVER_EXPOSED) == 37
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 

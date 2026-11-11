@@ -331,6 +331,15 @@ before `{id}` parameters — the lesson from Phases 11/12 and the ticket core.
 | GET | `/portal/tickets/{id}/attachments/{attachment_id}` | `portal.ticket.read` |
 | GET | `/portal/help/suggest?q=` | `portal.ticket.read` |
 | GET | `/portal/help/articles/{id}` | `portal.ticket.read` |
+| GET | `/portal/me` | `portal.ticket.read` |
+
+**Who is using the portal (added 2026-11-06, own authentication phase 2).**
+`GET /portal/me` answers the person the session names -- `user_id`, `kind`
+(`staff` or `contact`), `email`, `display_name`, `timezone` -- and the portal
+codes they hold inside the request's scope, for the portal's own pages. It reads
+no table: the session that admitted the request names the person, and the codes
+come from the same grants the door reads. It is not an MCP tool (the MCP channel
+has no browser session).
 
 **Help articles (added 2026-09-23, operator-approved).** The two `help` routes
 serve documentation articles staff marked "visible in the portal"

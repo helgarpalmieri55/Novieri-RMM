@@ -4595,6 +4595,13 @@ CATALOG: dict[str, str] = {
         "para iniciar sesión.\n{link}\n\nSi no fuiste tú, ignora este mensaje: tu contraseña no "
         "ha cambiado."
     ),
+    "Someone asked to reset the password of your {product} account.\n\n"
+    "Open this link within 30 minutes to choose a new one.\n{link}\n\n"
+    "If it was not you, ignore this message: your password has not changed.": (
+        "Alguien pidió restablecer la contraseña de tu cuenta de {product}.\n\n"
+        "Abre este enlace en los próximos 30 minutos para elegir una nueva.\n{link}\n\n"
+        "Si no fuiste tú, ignora este mensaje: tu contraseña no ha cambiado."
+    ),
     "A recovery link was issued for your {product} account": (
         "Se emitió un enlace de recuperación para tu cuenta de {product}"
     ),

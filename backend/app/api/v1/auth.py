@@ -13,6 +13,8 @@ design §2, §6.4).
     POST   /auth/step-up/{totp,recovery}    the recent confirmation (design §2.5)
     POST   /auth/step-up/passkey/options
     POST   /auth/step-up/passkey
+    POST   /auth/step-up/password           a contact's password, without a second factor
+                                            (design §3, §2.6)
     POST   /auth/logout, /auth/logout-everywhere
     POST   /auth/password/forgot            202 for every address (429 per IP)
     POST   /auth/password/reset             a one-time link
@@ -156,6 +158,13 @@ class StepUpCodeIn(BaseModel):
 class StepUpRecoveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
+
+
+class StepUpPasswordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A secret: no Pydantic bound (decision 16); `flows.step_up_password`
+    #: holds it to `SUBMITTED_MAX`.
+    password: str
 
 
 class StepUpPasskeyIn(BaseModel):
@@ -488,6 +497,17 @@ async def step_up_passkey_options(request: Request) -> dict[str, Any]:
 async def step_up_passkey(body: StepUpPasskeyIn, request: Request) -> Response:
     """Confirm with a passkey, for ten minutes."""
     await flows.step_up_passkey(request, await session_of(request), credential=body.credential)
+    return _no_content()
+
+
+@router.post(
+    "/step-up/password", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(_FACTOR)]
+)
+async def step_up_password(body: StepUpPasswordIn, request: Request) -> Response:
+    """A contact without a second factor confirms with the password, for ten
+    minutes (plan decisions D29 and 6). A technician, or a contact who turned
+    the app on, confirms with the second factor (409 `method_unavailable`)."""
+    await flows.step_up_password(request, await session_of(request), password=body.password)
     return _no_content()
 
 
