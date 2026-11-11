@@ -9,7 +9,8 @@ The same evaluation yields the request's CLIENT SCOPE (MSP clients spec
 §2.1-2.2): the clients where the person holds the route's code, narrowed --
 never widened -- by `X-Client-Id`. `AuthContext.clients` carries it to every
 `org_session`, where RLS enforces it. A contact (`users.kind = 'contact'`) is
-refused here; the portal admits one through `admit(..., contacts=True)`.
+refused here; the portal admits one through `admit(..., contacts=True)`, and so
+do the person's own account routes (`bound_account_context`, phase 2 D26).
 """
 
 import dataclasses
@@ -621,6 +622,31 @@ async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:
     it uses `request.state` instead.
     """
     ctx = await auth_context(request)
+    with bind(org_id=str(ctx.org_id), user_id=str(ctx.user_id)):
+        yield ctx
+
+
+async def bound_account_context(request: Request) -> AsyncIterator[AuthContext]:
+    """The routes of a person's OWN account -- My security: `/me/security`,
+    `/me/password`, `/me/passkeys/*`, `/me/totp`, `/me/recovery-codes`,
+    `/me/trusted-devices/*`, `/me/sessions/*` -- for a technician or a client's
+    contact (own authentication phase 2, plan decision D26). The portal's
+    door (`admit(contacts=True)`), and only for a browser session: a token is
+    refused. These routes touch only the caller's own auth rows
+    (`app.core.auth.account`), never a client's data; `GET /me` and the rest
+    of the console keep `bound_auth_context`, which refuses a contact."""
+    person = await admit(request, contacts=True)
+    if person.principal is None:
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED, code=AUTH_REQUIRED, detail=tr("sign in to continue")
+        )
+    ctx = AuthContext(
+        org_id=person.org_id,
+        user_id=person.user_id,
+        claims=person.claims,
+        clients=person.clients.narrow(person.requested_client),
+        principal=person.principal,
+    )
     with bind(org_id=str(ctx.org_id), user_id=str(ctx.user_id)):
         yield ctx
 

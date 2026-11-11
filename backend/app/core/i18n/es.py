@@ -4577,6 +4577,16 @@ CATALOG: dict[str, str] = {
     "this is your only second factor; add another one before removing it": (
         "es tu único segundo factor; añade otro antes de quitarlo"
     ),
+    # My security for a contact (own authentication phase 2, Task 7).
+    "you already have a password; change it instead": (
+        "ya tienes una contraseña; cámbiala en su lugar"
+    ),
+    "this is your only way to sign in; add another one before removing it": (
+        "es tu única forma de iniciar sesión; añade otra antes de quitarla"
+    ),
+    "turn on an authenticator app before asking for recovery codes": (
+        "activa una app de autenticación antes de pedir códigos de recuperación"
+    ),
     "no such passkey": "no existe esa clave de acceso",
     "no such remembered device": "no existe ese equipo recordado",
     "a passkey": "una clave de acceso",

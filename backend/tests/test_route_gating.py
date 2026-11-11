@@ -183,11 +183,15 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/recover/details"),
         # The same link, consumed: the factors go, a pending session opens.
         ("POST", "/api/v1/auth/recover/accept"),
-        # MY SECURITY: `bound_auth_context` + the console session
-        # (`auth.py::_console_ctx`); the caller's own rows only.
+        # MY SECURITY: `bound_account_context` (`auth.py::_account_ctx`), a
+        # technician's or a contact's own browser session (phase 2, D26); the
+        # caller's own rows only.
         ("GET", "/api/v1/me/security"),
         # The caller's own password, after a recent confirmation (`require_step_up`).
         ("PUT", "/api/v1/me/password"),
+        # The first password of an account with none (P2 phase 2, D26): the
+        # caller's own account, `bound_account_context` + `require_step_up`.
+        ("POST", "/api/v1/me/password"),
         # One of the caller's own passkeys, matched with their user id.
         ("DELETE", "/api/v1/me/passkeys/{passkey_id}"),
         # The caller's own authenticator app, after a recent confirmation.

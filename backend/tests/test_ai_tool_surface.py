@@ -813,7 +813,8 @@ EXPECTED_UNGATED_PATHS = frozenset(
         "/api/v1/dashboard/layout",
         # Added 2026-11-04 (P2 phase 1, own sign-in). The caller's OWN second
         # factors, remembered browsers and sessions; ungated like `/me`, and
-        # it needs the console session (`app/api/v1/auth.py::_console_ctx`).
+        # it needs `app/api/v1/auth.py::_account_ctx`, a technician's or a
+        # contact's own browser session (phase 2, D26).
         # Not a tool (`NOT_FOR_MCP`).
         "/api/v1/me/security",
     }

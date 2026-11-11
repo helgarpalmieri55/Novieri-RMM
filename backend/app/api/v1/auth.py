@@ -26,6 +26,7 @@ design §2, §6.4).
     POST   /auth/recover/accept             the factors go (a mailed password too) -> a new factor
     GET    /me/security                     the caller's factors, devices, sessions
     PUT    /me/password
+    POST   /me/password                     the first password, for an account with none
     DELETE /me/passkeys/{id}, /me/totp, /me/trusted-devices/{id}, /me/sessions/{id}
     POST   /me/recovery-codes
 
@@ -53,9 +54,9 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, bound_auth_context, require_step_up
+from app.api.deps import AuthContext, bound_account_context, require_step_up
 from app.core.auth import account, flows
-from app.core.auth.guards import session_of, sign_in_again
+from app.core.auth.guards import session_of
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import (
     SessionPrincipal,
@@ -321,14 +322,32 @@ class SessionOut(BaseModel):
     current: bool = Field(description="True for the session making this request.")
 
 
-class MySecurityOut(BaseModel):
-    """The caller's own second factors, remembered browsers and sessions."""
+class MicrosoftLinkOut(BaseModel):
+    """The Microsoft account linked to the caller (design §4): its tenant and
+    when it was linked and last used. Never the account's own id."""
 
+    tenant_id: UUID
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class MySecurityOut(BaseModel):
+    """The caller's own ways in, second factors, remembered browsers and sessions."""
+
+    kind: Literal["staff", "contact"] = Field(description="Technician or a client's contact.")
+    has_password: bool
     has_totp: bool
     passkeys: list[PasskeyOut]
     recovery_codes_left: int
     trusted_devices: list[TrustedDeviceOut]
     sessions: list[SessionOut]
+    microsoft: MicrosoftLinkOut | None = Field(description="The linked Microsoft account, or null.")
+
+
+class PasswordAddIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A secret: no Pydantic bound (decision 16); the rule bounds it.
+    new: str
 
 
 def _answer(response: Response, step: flows.SignIn) -> SignInOut:
@@ -635,41 +654,44 @@ async def accept_recovery(
 # --------------------------------------------------------------------------- #
 
 
-async def _console_ctx(ctx: AuthContext = Depends(bound_auth_context)) -> AuthContext:
-    """The door admitted somebody; these routes need it to have been the
-    console session (`ctx.principal`, Task 6), not a token."""
-    if ctx.principal is None:
-        raise sign_in_again()
+async def _account_ctx(ctx: AuthContext = Depends(bound_account_context)) -> AuthContext:
+    """My security's door (phase 2, D26): a technician's or a contact's own
+    browser session; `bound_account_context` already refused anything else.
+    Every handler hands `ctx.clients` to `app.core.auth.account`, which runs a
+    contact's request in that scope -- their own client (invariant 5a)."""
     return ctx
 
 
 def _me(ctx: AuthContext) -> SessionPrincipal:
-    assert ctx.principal is not None  # `_console_ctx` refused it otherwise
+    assert ctx.principal is not None  # `_account_ctx` refused it otherwise
     return ctx.principal
 
 
 @me_router.get("/security", response_model=MySecurityOut)
-async def my_security(request: Request, ctx: AuthContext = Depends(_console_ctx)) -> MySecurityOut:
+async def my_security(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> MySecurityOut:
     """The caller's second factors, remembered browsers and open sessions."""
-    mine = await account.my_security(request, _me(ctx))
+    mine = await account.my_security(request, _me(ctx), clients=ctx.clients)
     return MySecurityOut(
+        kind=mine.kind,
+        has_password=mine.has_password,
         has_totp=mine.has_totp,
         passkeys=[PasskeyOut(**vars(p)) for p in mine.passkeys],
         recovery_codes_left=mine.recovery_codes_left,
         trusted_devices=[TrustedDeviceOut(**vars(d)) for d in mine.trusted_devices],
         sessions=[SessionOut(**vars(s)) for s in mine.sessions],
+        microsoft=None if mine.microsoft is None else MicrosoftLinkOut(**vars(mine.microsoft)),
     )
 
 
 @me_router.put("/password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
-    body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """The current password and a new one, after a recent confirmation. The
     caller's session stays under a new cookie; every other session ends."""
     require_step_up(ctx)
     token, expires_at = await account.change_password(
-        request, _me(ctx), current=body.current, new=body.new
+        request, _me(ctx), current=body.current, new=body.new, clients=ctx.clients
     )
     response = _no_content()
     # The new identifier, expiring with the session as the change capped it.
@@ -677,46 +699,61 @@ async def change_password(
     return response
 
 
+@me_router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def add_password(
+    body: PasswordAddIn, request: Request, ctx: AuthContext = Depends(_account_ctx)
+) -> Response:
+    """The first password of an account that has none, after a recent
+    confirmation (409 `password_exists` when there is one)."""
+    require_step_up(ctx)
+    await account.add_password(request, _me(ctx), new=body.new, clients=ctx.clients)
+    return _no_content()
+
+
 @me_router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_passkey(
-    passkey_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    passkey_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
-    """Remove one of the caller's passkeys; never the last second factor."""
+    """Remove one of the caller's passkeys; never a technician's last second
+    factor (`last_factor`) nor a contact's last way in (`last_method`)."""
     require_step_up(ctx)
-    await account.remove_passkey(request, _me(ctx), passkey_id)
+    await account.remove_passkey(request, _me(ctx), passkey_id, clients=ctx.clients)
     return _no_content()
 
 
 @me_router.delete("/totp", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_totp(request: Request, ctx: AuthContext = Depends(_console_ctx)) -> Response:
-    """Remove the caller's authenticator app; never the last second factor."""
+async def remove_totp(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> Response:
+    """Remove the caller's authenticator app; never a technician's last second
+    factor. A contact's is optional, and their recovery codes go with it."""
     require_step_up(ctx)
-    await account.remove_totp(request, _me(ctx))
+    await account.remove_totp(request, _me(ctx), clients=ctx.clients)
     return _no_content()
 
 
 @me_router.post("/recovery-codes", response_model=RecoveryCodesOut)
 async def new_recovery_codes(
-    request: Request, ctx: AuthContext = Depends(_console_ctx)
+    request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> RecoveryCodesOut:
-    """Ten new recovery codes, once; the old ones stop working."""
+    """Ten new recovery codes, once; the old ones stop working. A contact has
+    them only with an authenticator app (409 `method_unavailable`)."""
     require_step_up(ctx)
-    return RecoveryCodesOut(recovery_codes=await account.new_recovery_codes(request, _me(ctx)))
+    codes = await account.new_recovery_codes(request, _me(ctx), clients=ctx.clients)
+    return RecoveryCodesOut(recovery_codes=codes)
 
 
 @me_router.delete("/trusted-devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def forget_device(
-    device_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    device_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """Stop remembering one browser."""
-    await account.forget_device(request, _me(ctx), device_id)
+    await account.forget_device(request, _me(ctx), device_id, clients=ctx.clients)
     return _no_content()
 
 
 @me_router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def end_my_session(
-    session_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    session_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """End one of the caller's own sessions."""
-    await account.end_my_session(request, _me(ctx), session_id)
+    await account.end_my_session(request, _me(ctx), session_id, clients=ctx.clients)
     return _no_content()
