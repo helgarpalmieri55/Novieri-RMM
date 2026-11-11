@@ -100,6 +100,23 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
     ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"),
 }
 
+# Own authentication phase 2, Task 14 (design §2.5, widened by the operator on
+# 2026-11-08, S1, and on 2026-11-09, S5): the acts that need a recent second
+# factor as a whole. The channel has none to confirm. `POST /users/invite` and
+# its resend need one too, and are above already: they can answer a one-time
+# link.
+RECENT_FACTOR_NEVER_EXPOSED = {
+    ("PUT", "/api/v1/settings/email"),
+    ("PUT", "/api/v1/settings/sessions"),
+    ("PUT", "/api/v1/settings/microsoft-sign-in"),
+    ("POST", "/api/v1/users/{user_id}/roles"),
+    ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"),
+    ("POST", "/api/v1/roles"),
+    ("PUT", "/api/v1/roles/{role_id}/permissions"),
+    ("DELETE", "/api/v1/roles/{role_id}"),
+    ("POST", "/api/v1/users/{user_id}/enable"),
+}
+
 
 @pytest.fixture()
 async def mcp_env(api_env):
@@ -201,8 +218,10 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 46
-    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
+    assert len(NEVER_EXPOSED) == 55
+    assert set(NEVER_EXPOSED) == (
+        GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED | RECENT_FACTOR_NEVER_EXPOSED
+    )
 
 
 def test_never_exposed_names_only_real_routes(api_env) -> None:

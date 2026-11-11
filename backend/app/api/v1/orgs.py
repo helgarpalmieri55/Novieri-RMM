@@ -120,7 +120,10 @@ is the org's switch for connecting AI apps over MCP, and it is off by default.
 It meets the same bar as `console_email_domain` rather than bending it: its
 enforcement is wired and tested in `app/mcp/server.py` and
 `tests/test_mcp_server.py`, where it is read on every request, so a value here
-is never inert.
+is never inert. Turning it ON needs a second factor confirmed in the last ten
+minutes (design §2.5, widened by the operator on 2026-11-08, S3): it opens a
+path an AI app acts on as any person who connects one. Turning it off, and
+every other key, need nothing more than `orgs.manage` (S4).
 
 AN EMPTY VALUE IS REFUSED; `null` IS THE CLEAR. `domain_refusal` reads an
 empty base as NO RESTRICTION -- correctly, and that is not changed -- so
@@ -173,6 +176,7 @@ from app.api.deps import (
     bound_auth_context,
     require_permission,
     require_permission_on_every_client,
+    require_step_up,
 )
 from app.core.audit import audit_service
 from app.core.i18n import tr
@@ -563,6 +567,18 @@ async def update_current_org(
         ).scalar_one_or_none()
         if org is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such organization"))
+
+        # LETTING AI APPS IN NEEDS A RECENT SECOND FACTOR (design §2.5;
+        # operator 2026-11-08, S3): the switch moving from off to on, read as
+        # the block below reads it -- stored `is True` before, supplied `is
+        # True` after -- and asked here, before anything is changed or
+        # audited. Off, a re-save of on, and every other key: no question.
+        if (
+            body.settings is not None
+            and body.settings.get(MCP_SWITCH_KEY) is True
+            and dict(org.settings).get(MCP_SWITCH_KEY) is not True
+        ):
+            require_step_up(ctx)
 
         metadata: dict[str, Any] = {"fields": sorted(supplied)}
         mcp_switch_changed_to: bool | None = None

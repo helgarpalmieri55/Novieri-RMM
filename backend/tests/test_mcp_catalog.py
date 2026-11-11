@@ -188,8 +188,10 @@ def test_a_get_without_a_trailing_param_is_get_unless_it_returns_a_collection(
 
 def test_a_post_on_a_thing_is_create_only_when_it_answers_201(app: FastAPI) -> None:
     names = _names(app)
-    # 201: a new member of a sub-collection.
-    assert names[("POST", "/api/v1/users/{user_id}/roles")] == "users_roles_create"
+    # 201: a new member of a sub-collection. (`POST /users/{user_id}/roles`
+    # was the first example until it left the tools on 2026-11-08: it needs a
+    # recent second factor, which the channel cannot confirm.)
+    assert names[("POST", "/api/v1/clients/{client_id}/sites")] == "clients_sites_create"
     assert names[("POST", "/api/v1/people/{person_id}/logins")] == "people_logins_create"
     # 200: an action on the thing, no suffix.
     approve = ("POST", "/api/v1/devices/{device_id}/review/approve")

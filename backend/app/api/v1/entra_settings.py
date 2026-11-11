@@ -2,9 +2,12 @@
 
 `GET` needs `orgs.manage`; `PUT` needs it on EVERY client
 (`require_permission_on_every_client`, `tests/test_global_writes.py`), as
-Settings → Email and → Sessions. The platform makes the certificate the
-application proves itself with; its private key goes to the vault and never
-out (`app/core/auth/entra_settings.py`), and the certificate -- public -- is
+Settings → Email and → Sessions, and -- for every save, a new certificate and
+the switch to it included -- a second factor confirmed in the last ten minutes
+(design §2.5, widened by the operator on 2026-11-08, S1); it is no MCP tool
+(`app/mcp/exclusions.py`). The platform makes the certificate the application
+proves itself with; its private key goes to the vault and never out
+(`app/core/auth/entra_settings.py`), and the certificate -- public -- is
 returned to be uploaded to Entra. A renewal waits beside the certificate in
 use until a person switches to it (`activate_certificate`, decision 5), in
 the same `PUT`, under the same permission, audit and MCP rules.
@@ -23,7 +26,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client_with_step_up,
+)
 from app.core.auth import entra, entra_settings
 from app.core.i18n import tr
 from app.core.tenancy import org_session
@@ -135,12 +142,13 @@ async def read_entra_settings(
 async def write_entra_settings(
     body: EntraSettingsIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client_with_step_up("orgs.manage")),
 ) -> EntraSettingsOut:
     """Save the application, Novieri's tenant and the switch; with
     `new_certificate`, make a new key and certificate (the key into the
     vault); with `activate_certificate`, switch to the waiting one. Audited,
-    the keys never."""
+    the keys never. Every save needs a second factor confirmed in the last
+    ten minutes (design §2.5, S1)."""
     try:
         async with org_session(
             ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients

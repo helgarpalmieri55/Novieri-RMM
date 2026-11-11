@@ -277,17 +277,21 @@ async def test_a_technician_does_not_see_or_call_an_org_admin_tool(mcp_env) -> N
     token = mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         catalog = mcp_env.app.state.mcp_catalog
-        assert catalog["roles_create"].permission == "roles.manage"
+        # `roles_update`, not `roles_create`: creating a role is no tool since
+        # 2026-11-09 (design §2.5, S5); renaming one still is, on the same code.
+        assert catalog["roles_update"].permission == "roles.manage"
         names = {t.name for t in (await session.list_tools()).tools}
         assert "devices_list" in names  # non-vacuity: the technician sees tools
-        assert "roles_create" not in names
-        result = await session.call_tool("roles_create", {"body": {"name": "x"}})
+        assert "roles_update" not in names
+        result = await session.call_tool(
+            "roles_update", {"role_id": str(uuid4()), "body": {"name": "x"}}
+        )
     assert "requires roles.manage" in _error_text(result)
-    # Refused before the route: no role was created, and the refusal is audited.
+    # Refused before the route: no role was renamed, and the refusal is audited.
     (event,) = await _events(mcp_env, org_id, "mcp.tool_called")
-    assert event.meta["tool"] == "roles_create"
+    assert event.meta["tool"] == "roles_update"
     assert event.meta["status"] == 403
-    assert not await _events(mcp_env, org_id, "role.created")
+    assert not await _events(mcp_env, org_id, "role.updated")
 
 
 async def test_areas_narrow_the_list_and_what_is_callable(mcp_env) -> None:
@@ -436,15 +440,21 @@ async def test_a_404_is_not_found_with_the_apis_detail(mcp_env) -> None:
 
 
 async def test_a_409_is_the_apis_detail(mcp_env) -> None:
+    # A rename onto a name the organization already has: `roles_create` was the
+    # example until creating a role left the tools on 2026-11-09 (S5).
     org_id, sub, token = await _admin(mcp_env)
-    console = await mcp_env.client.post(
-        "/api/v1/roles",
-        json={"name": "technician"},
-        headers=await mcp_env.headers(org_id, sub),
+    headers = await mcp_env.headers(org_id, sub)
+    made = await mcp_env.client.post("/api/v1/roles", json={"name": "night-shift"}, headers=headers)
+    assert made.status_code == 201, made.text
+    role_id = made.json()["id"]
+    console = await mcp_env.client.patch(
+        f"/api/v1/roles/{role_id}", json={"name": "technician"}, headers=headers
     )
     assert console.status_code == 409
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
-        result = await session.call_tool("roles_create", {"body": {"name": "technician"}})
+        result = await session.call_tool(
+            "roles_update", {"role_id": role_id, "body": {"name": "technician"}}
+        )
     assert _error_text(result) == console.json()["detail"]
     assert _error_text(result).startswith("a role named 'technician' already exists")
 

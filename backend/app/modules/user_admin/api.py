@@ -6,16 +6,25 @@ invitations, factor resets and ended sessions since P2 phase 1
 
     GET    /api/v1/users                              users.read
     GET    /api/v1/users/{id}/effective-permissions   users.read
-    POST   /api/v1/users/invite                       users.manage
-    POST   /api/v1/users/{id}/invite/resend           users.manage
+    POST   /api/v1/users/invite                       users.manage, and a recent second factor
+    POST   /api/v1/users/{id}/invite/resend           users.manage, and a recent second factor
     DELETE /api/v1/users/{id}/invite                  users.manage
-    POST   /api/v1/users/{id}/roles                   users.manage
-    DELETE /api/v1/users/{id}/roles/{assignment_id}   users.manage
+    POST   /api/v1/users/{id}/roles                   users.manage, and a recent second factor
+    DELETE /api/v1/users/{id}/roles/{assignment_id}   users.manage, and a recent second factor
     POST   /api/v1/users/{id}/disable                 users.manage
-    POST   /api/v1/users/{id}/enable                  users.manage
+    POST   /api/v1/users/{id}/enable                  users.manage, and a recent second factor
     POST   /api/v1/users/{id}/factors/reset           users.manage, and a recent second factor
     DELETE /api/v1/users/{id}/sessions                users.manage
     DELETE /api/v1/users/{id}                         users.manage
+
+A TECHNICIAN'S ACCESS NEEDS A RECENT SECOND FACTOR (design §2.5, widened by
+the operator on 2026-11-08, S1, and on 2026-11-09, S5): inviting, a new
+invitation link, granting and removing a role and enabling a disabled person
+again -- who comes back with every role they held -- each ask, like resetting
+somebody's factors, for the administrator's own second factor confirmed in
+the last ten minutes (`_MANAGE_CONFIRMED`, before the body is read).
+Cancelling an invitation, disabling a person and ending their sessions, what
+is done in a hurry to stop somebody, never do (S4).
 
 TWO CODES, NOT ONE, and deliberately NOT `orgs.manage`. `users.read` answers
 "who has access here"; `users.manage` GRANTS it. `orgs.manage`'s description has
@@ -60,6 +69,7 @@ from app.api.deps import (
     AuthContext,
     require_permission,
     require_permission_on_every_client,
+    require_permission_on_every_client_with_step_up,
     require_step_up,
 )
 from app.core.auth import notices
@@ -78,6 +88,11 @@ from app.modules.user_admin.service import UserAdminError
 #: a colleague -- a role on all of them, or disable the administrators who do
 #: hold every client. Reads stay open to any scope.
 _MANAGE = require_permission_on_every_client("users.manage")
+#: `_MANAGE`, and the caller's own second factor confirmed in the last ten
+#: minutes (design §2.5; operator 2026-11-08, S1, and 2026-11-09, S5): the
+#: acts that give a technician access -- enabling a disabled one again among
+#: them -- or take a role away.
+_MANAGE_CONFIRMED = require_permission_on_every_client_with_step_up("users.manage")
 
 router = APIRouter(tags=["users"])
 
@@ -369,10 +384,11 @@ async def effective_permissions(
 async def invite_user(
     body: UserInvite,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> InvitedOut:
     """Create a technician with their grants and send them a one-time link,
     valid 72 hours, to choose a password and set up their second factor.
+    Needs your own second factor confirmed in the last ten minutes.
 
     The email domain is checked against the org's console email-domain
     setting, resolved by the same function the doors use.
@@ -406,10 +422,11 @@ async def invite_user(
 async def resend_invite(
     user_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> InviteLinkOut:
     """A new invitation link for somebody who has not accepted yet; the old
-    link stops working. Refused once they have chosen a password."""
+    link stops working. Refused once they have chosen a password. Needs your
+    own second factor confirmed in the last ten minutes."""
     console = _console_url(request)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -464,9 +481,10 @@ async def assign_role(
     user_id: UUID,
     body: RoleAssign,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> RoleAssignmentOut:
-    """Grant a role for every client, or for one client (MSP clients spec §2.1)."""
+    """Grant a role for every client, or for one client (MSP clients spec §2.1).
+    Needs your own second factor confirmed in the last ten minutes."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -496,9 +514,10 @@ async def remove_role(
     user_id: UUID,
     assignment_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> Response:
-    """Revoke one assignment.
+    """Revoke one assignment. Needs your own second factor confirmed in the
+    last ten minutes.
 
     Refused when it would leave the organization with no active `org-admin`,
     and refused outright for `super-admin`: no console surface can grant that
@@ -567,9 +586,11 @@ async def disable_user(
 async def enable_user(
     user_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> UserOut:
-    """Undo a disable. A deleted user is not re-enabled here."""
+    """Undo a disable: the person signs in again, with every role they held.
+    A deleted user is not re-enabled here. Needs your own second factor
+    confirmed in the last ten minutes."""
     return await _set_enabled(request, ctx, user_id, enabled=True)
 
 

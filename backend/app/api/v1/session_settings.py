@@ -17,8 +17,11 @@ is created (`expires_at`): a change applies to the ones created after it.
 Configuration that serves every client, so reading it needs `orgs.manage` and
 changing it needs `orgs.manage` on EVERY client
 (`require_permission_on_every_client`, `tests/test_global_writes.py`), as for
-Settings → Email. The bounds are the table's CHECKs, repeated here so a value
-out of range is a 422 that names the field rather than a database error.
+Settings → Email, and a second factor confirmed in the last ten minutes
+(design §2.5, widened by the operator on 2026-11-08, S1): a save decides
+whether a device may skip the second factor. The bounds are the table's
+CHECKs, repeated here so a value out of range is a 422 that names the field
+rather than a database error.
 """
 
 from datetime import UTC, datetime
@@ -28,7 +31,11 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client_with_step_up,
+)
 from app.core.audit import audit_service
 from app.core.auth.session_policy import POLICY_FIELDS, SessionPolicy, policy_of
 from app.core.i18n import tr
@@ -107,7 +114,7 @@ async def read_session_settings(
 async def write_session_settings(
     body: SessionSettingsIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client_with_step_up("orgs.manage")),
 ) -> SessionSettingsOut:
     """Save every value; what then holds is returned. The inactivity limits
     govern every open session from its next request, and the remember-device

@@ -14,7 +14,23 @@ were (`app/mcp/guard.py`, and `auth_context`'s route-identity check in
 credential that would. Invariant 3 is not amended. `app/main.py` refuses to
 boot if a pair stops naming a real route, because a renamed route would
 otherwise silently fall out of the guard.
+
+SINCE 2026-11-08, ALSO EVERY ACT THAT NEEDS A RECENT SECOND FACTOR AS A WHOLE
+(design §2.5, widened by the operator, S1, and on 2026-11-09, S5): the
+organization's sign-in settings, the grants of a technician's access, the
+definition of a role and enabling a person again. The channel carries no
+session, so `deps.require_step_up` refuses each of them anyway; listing them
+here keeps them off the tool list rather than offering a tool that can only
+fail, and refuses them twice, like the rest (`deps.require_step_up`'s
+docstring). A route gated only for part of its requests keeps its tool, and
+its description says which part needs the console.
 """
+
+#: Why a route that needs a recent second factor as a whole is never a tool.
+_RECENT_FACTOR = (
+    "needs the administrator's own recent second-factor confirmation in the console "
+    "(design §2.5, as the operator widened it on 2026-11-08 and 2026-11-09)"
+)
 
 NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     # Stored credentials and license keys: the decrypted secret is the response.
@@ -116,6 +132,33 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
     ("POST", "/api/v1/me/password"): "takes the first password of an account that has none",
     ("POST", "/api/v1/me/recovery-codes"): "returns new recovery codes for the account",
+    # Sign-in settings and technicians' access (design §2.5, widened by the
+    # operator on 2026-11-08, S1): each needs a recent second factor, which the
+    # MCP channel cannot confirm.
+    ("PUT", "/api/v1/settings/email"): (
+        f"sets the relay every invitation and reset link goes through; {_RECENT_FACTOR}"
+    ),
+    ("PUT", "/api/v1/settings/sessions"): (
+        "sets how long sign-ins last and whether a device skips the second factor; "
+        f"{_RECENT_FACTOR}"
+    ),
+    ("PUT", "/api/v1/settings/microsoft-sign-in"): (
+        f"sets which Microsoft application and tenant sign people in; {_RECENT_FACTOR}"
+    ),
+    ("POST", "/api/v1/users/{user_id}/roles"): f"grants a technician a role; {_RECENT_FACTOR}",
+    ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"): (
+        f"revokes a technician's role; {_RECENT_FACTOR}"
+    ),
+    # The definition of a role and enabling a person again (design §2.5,
+    # widened by the operator on 2026-11-09, S5): the same.
+    ("POST", "/api/v1/roles"): f"defines a new role and its permissions; {_RECENT_FACTOR}",
+    ("PUT", "/api/v1/roles/{role_id}/permissions"): (
+        f"changes what every holder of a role may do; {_RECENT_FACTOR}"
+    ),
+    ("DELETE", "/api/v1/roles/{role_id}"): f"deletes a role; {_RECENT_FACTOR}",
+    ("POST", "/api/v1/users/{user_id}/enable"): (
+        f"gives a disabled person their access back, with the roles they held; {_RECENT_FACTOR}"
+    ),
     # An invitation's answer carries its one-time link when no mail did: a
     # link that lets a person into the organization (1c(c), like an
     # enrollment token).

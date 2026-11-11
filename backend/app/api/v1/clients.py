@@ -7,7 +7,7 @@ EVERY ROUTE CARRIES A PERMISSION (spec §2.1), recovered from the router by
 |---|---|
 | `GET /clients`, `GET /clients/{id}` | `clients.read` |
 | `POST /clients`, `POST /clients/{id}/archive` | `clients.manage` on EVERY client |
-| `PATCH /clients/{id}` | `clients.manage` on that client |
+| `PATCH /clients/{id}` | `clients.manage` on that client (its tenants: and a recent factor) |
 | `GET /clients/{id}/sites` | `clients.read` |
 | `POST /clients/{id}/sites`, `PATCH`/`DELETE /sites/{id}` | `sites.manage` on that client |
 | `GET /clients/{id}/contacts` | `clients.read` |
@@ -49,6 +49,7 @@ from app.api.deps import (
     require_permission,
     require_permission_on_every_client,
     require_permission_with_step_up,
+    require_step_up,
 )
 from app.core.auth import notices
 from app.core.i18n import locale_var, tr, use_locale
@@ -336,8 +337,10 @@ async def update_client(
     request: Request,
     ctx: AuthContext = Depends(require_permission("clients.manage")),
 ) -> ClientOut:
-    """Edit a client's name, contact details, email domains or optional
-    modules. An email domain already held by another client is a 409."""
+    """Edit a client's name, contact details, email domains, Microsoft
+    tenants or optional modules. An email domain already held by another
+    client is a 409. A change to the tenants needs your second factor
+    confirmed in the last ten minutes (design §2.5, S1); the rest does not."""
     try:
         async with org_session(
             ctx.org_id, clients=ctx.clients, engine=request.app.state.app_engine
@@ -348,6 +351,7 @@ async def update_client(
                 actor_id=ctx.user_id,
                 client_id=client_id,
                 changes=_changes(body),
+                confirm_tenants=lambda: require_step_up(ctx),
             )
             out = _client_out(await svc.get_client(session, org_id=ctx.org_id, client_id=client_id))
     except svc.ClientError as exc:
