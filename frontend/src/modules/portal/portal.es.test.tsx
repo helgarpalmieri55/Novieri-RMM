@@ -460,6 +460,7 @@ const article = (id: string, portal_visible: boolean) => ({ id, title: id, archi
 function panelApi(over: Record<string, unknown> = {}, permissions = OPERATOR) {
   const api = {
     me: meWith(permissions),
+    portalMe: vi.fn().mockResolvedValue({ user_id: "u1", kind: "staff", email: "a@b.test", display_name: "A", timezone: null, permissions: [] }),
     listRoles: vi.fn().mockResolvedValue({ roles: [role("requester", 0)] }),
     listArticles: vi.fn().mockResolvedValue({ items: [article("a1", false)], total: 1 }),
     getAiStatus: vi.fn().mockResolvedValue({ enabled: false, reason: "No hay ningún proveedor de modelos configurado." }),

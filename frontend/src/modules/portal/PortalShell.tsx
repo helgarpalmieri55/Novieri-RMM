@@ -50,12 +50,8 @@ export function PortalShell({ children }: { children: ReactNode }) {
         <Link to="/portal" className="font-semibold">
           {t("portal.shell.brand")}
         </Link>
-        <nav aria-label={t("portal.nav.aria")} className="flex gap-4">
-          <Link to="/portal">{t("portal.nav.myTickets")}</Link>
-          <Link to="/portal/new">{t("portal.nav.newTicket")}</Link>
-        </nav>
         <span className="ml-auto text-sm text-[var(--muted)]">
-          {me.data ? me.data.display_name || me.data.email : "…"}
+          {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}
         </span>
         <Btn
           small
@@ -71,6 +67,13 @@ export function PortalShell({ children }: { children: ReactNode }) {
           <Icon name={KIND_ICON.crit} size={16} />
           <span>{t("shell.app.signOutFailed")}</span>
         </p>
+      ) : null}
+      {me.isError ? (
+        <div role="alert" className="notice red">
+          <Icon name={KIND_ICON.crit} size={16} />
+          <span>{t("portal.shell.meFailed")}</span>
+          <Btn small label={t("common.actions.retry")} onClick={() => void me.refetch()} />
+        </div>
       ) : null}
       <main className="px-6 py-6">{children}</main>
     </div>

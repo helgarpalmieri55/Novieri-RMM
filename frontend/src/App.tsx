@@ -28,6 +28,7 @@ import {
   SIGN_IN_PATH,
   goToSignIn,
   hasSession,
+  isPortalPage,
   isPublicPath,
   navigation,
   signOut,
@@ -468,6 +469,9 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const leaving = useRef(false);
   const [kept, setKept] = useState<readonly KeptText[]>([]);
   const [signOutFailed, setSignOutFailed] = useState(false);
+  // Latched: once the console's door said `portal_only`, a refetch of `["me"]` (which reads as
+  // loading) must not unmount the contact's frame.
+  const contact = useRef(false);
   const mustSignIn = session.status === "signed_out";
   const here = location.pathname + location.search;
   const publicPath = isPublicPath(location.pathname);
@@ -536,12 +540,14 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   // console's door said `portal_only`. On a portal page, the portal's own
   // frame, which asks `/portal/me`; anywhere else, the portal. Not a control:
   // the server refused them already.
-  if (
+  const portalOnlyNow =
     session.failure instanceof ApiError &&
     session.failure.status === 403 &&
-    apiErrorCode(session.failure) === "portal_only"
-  ) {
-    if (location.pathname !== "/portal" && !location.pathname.startsWith("/portal/")) {
+    apiErrorCode(session.failure) === "portal_only";
+  if (portalOnlyNow) contact.current = true;
+  else if (session.me !== undefined) contact.current = false;
+  if (portalOnlyNow || (contact.current && session.status === "loading" && session.failure === undefined)) {
+    if (!isPortalPage(location.pathname)) {
       return <Navigate to="/portal" replace />;
     }
     return <PortalShell>{children}</PortalShell>;

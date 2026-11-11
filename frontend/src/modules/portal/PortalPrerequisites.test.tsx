@@ -18,6 +18,7 @@ const rule = (recipient_kind: string, active = true) => ({ id: recipient_kind, e
 function stub(overrides: Record<string, unknown> = {}, permissions = OPERATOR) {
   const api = {
     me: meWith(permissions),
+    portalMe: vi.fn().mockResolvedValue({ user_id: "u1", kind: "staff", email: "a@b.test", display_name: "A", timezone: null, permissions: [] }),
     listRoles: vi.fn().mockResolvedValue({ roles: [role("requester", 12), role("technician", 3)] }),
     listArticles: vi.fn().mockResolvedValue({ items: [article("a1", true)], total: 1 }),
     getAiStatus: vi.fn().mockResolvedValue({ enabled: true, reason: "" }),

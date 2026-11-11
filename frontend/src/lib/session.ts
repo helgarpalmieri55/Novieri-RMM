@@ -73,7 +73,7 @@ export const SIGN_IN_PATH = "/sign-in";
 /** The portal's sign-in page (own-auth phase 2): a client's contact signs in here. */
 export const PORTAL_SIGN_IN_PATH = "/portal/sign-in";
 
-function isPortalPage(path: string): boolean {
+export function isPortalPage(path: string): boolean {
   return path === "/portal" || path.startsWith("/portal/") || path.startsWith("/portal?");
 }
 

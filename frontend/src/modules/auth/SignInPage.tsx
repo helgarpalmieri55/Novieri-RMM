@@ -23,11 +23,10 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
-import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, useNext } from "./flow";
 
 export function SignInPage() {
   const t = useT();
@@ -49,17 +48,7 @@ export function SignInPage() {
     setError(null);
     try {
       const result = await api.login({ email: email.trim(), password });
-      if (result.state === "signed_in") {
-        enterConsole(next);
-        return;
-      }
-      if (result.state === "enroll_required") {
-        navigate(carryNext("/sign-in/enroll", next));
-        return;
-      }
-      navigate(carryNext("/sign-in/factor", next), {
-        state: { methods: result.methods, rememberDays: result.remember_device_days ?? null },
-      });
+      afterLogin(result, next, navigate);
     } catch (cause: unknown) {
       setPassword("");
       setError(describeAuthError(cause, { rejected: "auth.signIn.rejected", canTimeOut: false }));

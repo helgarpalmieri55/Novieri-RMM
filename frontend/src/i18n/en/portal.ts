@@ -6,6 +6,7 @@
 export const portal = {
   nav: { aria: "Portal", myTickets: "My tickets", newTicket: "New ticket" },
   shell: {
+    meFailed: "Your details could not be loaded.",
     brand: "Support portal",
   },
   state: {

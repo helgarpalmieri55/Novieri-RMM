@@ -24,7 +24,7 @@ import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, useNext } from "./flow";
 import { canUsePasskeys, describePasskeyError, signWithPasskey } from "./passkey";
 
 const PORTAL = "/portal";
@@ -58,17 +58,7 @@ export function PortalSignInPage() {
     void guarded(async () => {
       try {
         const result = await api.login({ email: email.trim(), password });
-        if (result.state === "signed_in") {
-          enterConsole(next);
-          return;
-        }
-        if (result.state === "enroll_required") {
-          navigate(carryNext("/sign-in/enroll", next));
-          return;
-        }
-        navigate(carryNext("/sign-in/factor", next), {
-          state: { methods: result.methods, rememberDays: result.remember_device_days ?? null },
-        });
+        afterLogin(result, next, navigate);
       } catch (cause: unknown) {
         setPassword("");
         setError(describeAuthError(cause, { rejected: "auth.signIn.rejected", canTimeOut: false }));

@@ -16,7 +16,7 @@
  *   - an answer for the same person: it did not -- the request that was
  *     refused stays refused, and TanStack's retry asks a query again;
  *   - no answer at all (the network, an outage): nothing is decided.
-
+ *
  * A client's contact is answered 403 `portal_only` by `/me`; for them, and
  * only then, `/portal/me` is asked instead (own-auth phase 2, Task 10).
  *

@@ -15,6 +15,7 @@ import { selectedClient, setSelectedClient } from "./lib/clientChoice";
 import { navigation } from "./lib/session";
 import { sessionEnded } from "./lib/sessionEnd";
 import { usePortalTickets } from "./modules/portal/api";
+import { MyTicketsPage } from "./modules/portal/MyTicketsPage";
 
 const { ApiProvider } = await import("./lib/ApiContext");
 const { RequireAuth } = await import("./App");
@@ -40,13 +41,16 @@ const PORTAL_ME = {
   permissions: ["portal.ticket.read", "portal.ticket.write"],
 };
 
-function stubServer(me: { status: number; body: unknown }): ReturnType<typeof vi.fn> {
+function stubServer(
+  me: { status: number; body: unknown },
+  portalMe: () => { status: number; body: unknown } = () => ({ status: 200, body: PORTAL_ME }),
+): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
     const answer = url.endsWith("/api/v1/me")
       ? me
       : url.endsWith("/api/v1/portal/me")
-        ? { status: 200, body: PORTAL_ME }
+        ? portalMe()
         : url.endsWith("/api/v1/portal/tickets")
           ? { status: 200, body: [] }
           : url.endsWith("/api/v1/auth/logout")
@@ -152,5 +156,61 @@ describe("a technician on a portal page", () => {
     app("/portal");
     expect(await screen.findByText("my tickets")).toBeInTheDocument();
     expect(screen.queryByTestId("portal-shell")).not.toBeInTheDocument();
+  });
+});
+
+describe("a contact on the real /portal page (fix round 1)", () => {
+  function appReal(path: string): void {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/portal" element={<RequireAuth><MyTicketsPage /></RequireAuth>} />
+            </Routes>
+          </MemoryRouter>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("asks the console's /me once and keeps the portal frame drawn", async () => {
+    const fetchMock = stubServer(PORTAL_ONLY);
+    appReal("/portal");
+    await screen.findByText("Ana Ruiz");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(calls(fetchMock, "/api/v1/me")).toHaveLength(1);
+    expect(screen.getByTestId("portal-shell")).toBeInTheDocument();
+  });
+
+  it("signs out to the portal's sign-in page", async () => {
+    stubServer(PORTAL_ONLY);
+    const user = userEvent.setup();
+    app("/portal");
+    await screen.findByText("Ana Ruiz");
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/portal/sign-in"));
+  });
+
+  it("says so, with a retry, when /portal/me fails", async () => {
+    let fail = true;
+    stubServer(PORTAL_ONLY, () => (fail ? { status: 500, body: { detail: "boom" } } : { status: 200, body: PORTAL_ME }));
+    const user = userEvent.setup();
+    app("/portal");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Ana Ruiz")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("has one navigation landmark named Portal, the page's own", async () => {
+    stubServer(PORTAL_ONLY);
+    appReal("/portal");
+    await screen.findByText("Ana Ruiz");
+    await waitFor(() => expect(screen.getAllByRole("navigation", { name: "Portal" })).toHaveLength(1));
   });
 });
