@@ -54,8 +54,7 @@ from app.core.client_scope import ClientScope
 from app.core.rbac import clients_holding, scopes_by_code, user_role_names
 from app.core.tenancy import org_session
 from app.models import Client, User
-from app.models.clients import CLIENT_KIND_UNASSIGNED
-from app.services.client_sites import CLIENT_ARCHIVED
+from app.models.clients import CLIENT_ARCHIVED, CLIENT_KIND_UNASSIGNED
 
 
 class OwnRowMissing(LookupError):
@@ -165,8 +164,7 @@ async def _own_clients(
     )
 
 
-async def _profile(user: User, grants: OwnGrants, *, engine: AsyncEngine) -> OwnProfile:
-    clients = await _own_clients(user.org_id, grants.scope, engine=engine)
+def _profile(user: User, grants: OwnGrants, clients: tuple[OwnClient, ...]) -> OwnProfile:
     return OwnProfile(
         user_id=user.id,
         org_id=user.org_id,
@@ -194,13 +192,8 @@ async def read_own_profile(*, org_id: UUID, user_id: UUID, engine: AsyncEngine) 
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         user = await _own_row(session, user_id)
         grants = await _own_grants(session, user_id)
-    return await _profile(user, grants, engine=engine)
-
-
-async def read_own_locale(*, org_id: UUID, user_id: UUID, engine: AsyncEngine) -> str | None:
-    """The caller's saved language, read again after a mirror (`PATCH /me`)."""
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
-        return (await _own_row(session, user_id)).locale
+    clients = await _own_clients(org_id, grants.scope, engine=engine)
+    return _profile(user, grants, clients)
 
 
 async def update_own_profile(
@@ -215,7 +208,13 @@ async def update_own_profile(
     locale: str | None,
 ) -> tuple[OwnProfile, str | None]:
     """`PATCH /me`: write the SUPPLIED presentation fields of the caller's own
-    row, audited (keys only), and return the profile and the locale it had."""
+    row, audited (keys only), and return the profile and the locale it had.
+
+    EVERYTHING THE ANSWER NEEDS IS READ BEFORE THE COMMIT, the client map
+    included (phase 3 final review A3). Read after it, a failed read was a
+    500 for a saved write, and the route never reached the Keycloak mirror;
+    a retry then found the language already stored and skipped the mirror for
+    good. Now a failed read rolls the write back, so a retry is a first try."""
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         user = await _own_row(session, user_id)
         previous_locale = user.locale
@@ -250,5 +249,11 @@ async def update_own_profile(
         )
         grants = await _own_grants(session, user_id)
         await session.flush()
-    # AFTER THE COMMIT, so the answer is the row as saved.
-    return await _profile(user, grants, engine=engine), previous_locale
+        # ON ITS OWN CONNECTION, under the person's own scope (module
+        # docstring), and still inside this transaction: if it fails, the
+        # block exits on the exception and nothing above is committed. The
+        # write changes neither grants nor clients, so the map read here is
+        # the map after the commit.
+        clients = await _own_clients(org_id, grants.scope, engine=engine)
+    # The block has committed: the answer is the row as saved.
+    return _profile(user, grants, clients), previous_locale

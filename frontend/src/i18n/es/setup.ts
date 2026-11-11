@@ -12,15 +12,7 @@ export const setup: Shape<typeof en> = {
     organizationName: "Nombre de la organización",
     settingUp: "Configurando…",
     finish: "Finalizar configuración",
-    passwordHint: "Recibirás un enlace para elegir una contraseña. Aquí no se introduce ninguna contraseña.",
+    passwordHint: "El primer administrador inicia sesión con este correo y esta contraseña, y añade un segundo factor al entrar por primera vez.",
     unreachable: "No se pudo contactar con el servidor, así que no se creó nada. {reason}",
-  },
-  claim: {
-    title: "Configuración completada",
-    belongsTo: "Esta instalación ahora pertenece a tu organización, y <b>{email}</b> es su administrador.",
-    checkInbox: "Revisa esa bandeja de entrada: encontrarás un enlace para elegir una contraseña. Después, inicia sesión.",
-    invitationFailed: "No se pudo enviar el correo de invitación, así que no ha llegado ningún enlace de inicio de sesión.",
-    goToSignIn: "Ir a iniciar sesión",
-    signInFailed: "No se pudo iniciar sesión. {reason}",
   },
 };

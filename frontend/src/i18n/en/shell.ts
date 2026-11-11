@@ -1,6 +1,7 @@
 export const shell = {
   accountMenu: {
     yourProfile: "Your profile",
+    yourSecurity: "Your security",
     settings: "Settings",
     language: "Language: {language}",
     signOut: "Sign out",
@@ -53,10 +54,12 @@ export const shell = {
       platformStatus: "Platform status",
       errorMonitor: "Error monitor",
       settings: "Settings",
+      clients: "Clients",
       myTickets: "My tickets",
       newTicket: "New ticket",
     },
     section: {
+      organization: "Organization",
       serviceDesk: "Service desk",
       computers: "Computers",
       automation: "Automation",
@@ -81,7 +84,6 @@ export const shell = {
       pushInstall: "Which networks may receive a pushed install, and with which credential.",
       deviceGroups: "Groups that policies, deployments and access are aimed at.",
       siteServers: "Devices that sweep and wake machines on their own network.",
-      imaging: "Operating system images and build profiles.",
       aiAutomation: "How much the assistant may do on its own.",
       jobHistory: "Every job sent to a device, and what came back.",
       credentials: "Stored passwords for unattended sessions and imaging.",
@@ -90,6 +92,7 @@ export const shell = {
       platformStatus: "Whether this server's own services are healthy.",
       errorMonitor: "Errors the console and its server have raised.",
       settings: "Organization, users, roles, email and defaults.",
+      clients: "The companies you serve, their sites, contacts and modules.",
     },
     adminDescription: "Set up how the console works for your organization.",
     // Real routes that no rail entry lists, named for the breadcrumb and the tab title.
@@ -114,21 +117,37 @@ export const shell = {
     dismissNavigation: "Dismiss navigation",
     closeNavigation: "Close navigation",
     openNavigation: "Open navigation",
+    // The drawer toggle on a phone while a client is chosen: it carries the
+    // client's initials, and its name says the client in full.
+    openNavigationClient: "Open navigation — client: {client}",
+    closeNavigationClient: "Close navigation — client: {client}",
     addComputer: "Add a computer",
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",
-    sessionExpired:
-      "Your session has expired. Anything unsaved is still on this page — finish and save, then sign in again to send it.",
     signInAgain: "Sign in again",
     breadcrumb: "Breadcrumb",
     signInUnavailable: "Sign-in is unavailable",
-    identityProviderUnreachable: "The console could not reach its identity provider at <mono>{authority}</mono>.",
+    serverUnreachable: "The console could not ask the server whether you are signed in. {reason}",
+    // `/me` answered 403: signed in, but this account may not use the console now.
+    refused: "This account cannot use the console",
     redirecting: "Redirecting to sign-in…",
     starting: "Starting…",
-    completingSignIn: "Completing sign-in…",
-    signInFailed: "Sign-in failed: {error}",
+    signingOut: "Signing out…",
+    signOutFailed: "Sign-out did not reach the server, so your session is still open. Try again.",
     pageType: "Page",
+  },
+  // In place of the shell and the page once the session has ended
+  // (`shell/SessionEnded.tsx`): nothing of the page is left on screen.
+  sessionEnded: {
+    title: "Your session has ended",
+    body: "The page you were on was closed and its data cleared, so nobody else can read it on this computer. Sign in again to carry on.",
+    bodyKept:
+      "The page you were on was closed and its data cleared, so nobody else can read it on this computer. What you had typed is below: copy what you want to keep, then sign in again.",
+    keptTitle: "What you were typing",
+    keptHint:
+      "Read-only, and not saved anywhere: it is gone when you leave this page. Only longer text, such as replies and notes, is kept; never a password or a code.",
+    keptField: "Text {n}",
   },
   health: {
     base: "Health and alerts",

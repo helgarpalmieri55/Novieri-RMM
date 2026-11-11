@@ -289,7 +289,7 @@ describe("PersonPage", () => {
     // Not Settings: `/users` is staff-only, and a contact is turned back on as a contact.
     expect(
       within(dialog).getByText(
-        "They can no longer use the portal. Until the console can edit a client's contacts, turning it back on is done through the API or an AI connection (MCP).",
+        "They can no longer use the portal. You can turn it back on in Clients, on the client's Contacts tab.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText(/Settings/)).toBeNull();

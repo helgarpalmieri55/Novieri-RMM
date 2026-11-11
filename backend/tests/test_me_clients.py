@@ -22,6 +22,8 @@ among others; `read-only` holds only read codes (`devices.read`,
 tests read each role's codes from the database rather than restate them.
 """
 
+import ast
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -233,6 +235,17 @@ async def test_an_archived_client_is_left_out(api_env: Any) -> None:
     assert me["permissions"] == sorted(await _codes_of(env, "read-only"))
     assert str(c["Acme"]) not in {x["id"] for x in (await _me(env, everywhere))["clients"]}
 
+    # A header naming the archived client is a client outside the map, even
+    # for a person who still holds a role there (on it, or on every client):
+    # no code at all, not the role's codes (final review A4, F3T1-4).
+    # FALSIFIER: `OwnProfile.codes_in` (`own_profile.py`) short-cutting an
+    # all-clients grant ("it counts everywhere") instead of counting only
+    # the clients in the map -- every other test here still passes then.
+    for holder in (limited, everywhere):
+        narrowed = await _me(env, {**holder, "X-Client-Id": str(c["Acme"])})
+        assert narrowed["permissions"] == []
+        assert str(c["Acme"]) not in {x["id"] for x in narrowed["clients"]}
+
 
 async def test_the_map_needs_no_clients_read(api_env: Any) -> None:
     """The names come from the person's own grants, not from `GET /clients`:
@@ -290,3 +303,29 @@ async def test_patch_me_answers_with_the_same_map(api_env: Any) -> None:
     assert body["clients"] == (await _me(env, headers))["clients"]
     assert body["permissions"] == sorted(await _codes_of(env, "read-only"))
     assert body["permissions_everywhere"] == []
+
+
+def test_the_kernel_imports_no_service_module() -> None:
+    """`app/core` is what the services are built on, never the other way:
+    the `/me` profile (`app/core/identity/own_profile.py`) was the one kernel
+    module importing `app.services`, for the archived-client word, which now
+    lives with the `clients` table it constrains (`app/models/clients.py`,
+    next to `ck_clients_status`). Final review A3.
+    FALSIFIER: any `from app.services ...` or `import app.services...` under
+    `app/core`."""
+    core = Path(__file__).resolve().parents[1] / "app" / "core"
+    offenders = []
+    for path in sorted(core.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            else:
+                continue
+            offenders += [
+                f"{path.relative_to(core.parent.parent)}:{node.lineno} {name}"
+                for name in names
+                if name == "app.services" or name.startswith("app.services.")
+            ]
+    assert offenders == []

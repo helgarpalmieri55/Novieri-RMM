@@ -260,6 +260,13 @@ async def list_groups(
         default=False,
         description="Include archived groups, which are excluded by default",
     ),
+    client_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Only this client's groups, and the ungrouped count of its devices. It "
+            "narrows as X-Client-Id does: a client outside your scope lists nothing"
+        ),
+    ),
 ) -> DeviceGroupListResponse:
     """This org's device groups, in the `(precedence, name)` order that decides
     which membership rule wins.
@@ -279,9 +286,18 @@ async def list_groups(
     strictly less about any device than `GET /devices` already does. A new
     code would need a migration and a decision about which seeded roles hold
     it, to gate a smaller fact than the route beside it.
+
+    `client_id` NARROWS AND NEVER WIDENS (phase 3 final review A6: the BCP
+    and group-member pickers need one client's groups, not one page of
+    everyone's). The session's scope is narrowed exactly as `X-Client-Id`
+    narrows it, so RLS keeps every other client out -- one outside the
+    caller's scope is the empty scope, and lists nothing -- and the service
+    filters on it as well.
     """
     async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ctx.org_id,
+        engine=request.app.state.app_engine,
+        clients=ctx.clients.narrow(client_id),
     ) as session:
         page = await list_device_groups(
             session,
@@ -289,6 +305,7 @@ async def list_groups(
             limit=limit,
             offset=offset,
             include_archived=include_archived,
+            client_id=client_id,
         )
         return DeviceGroupListResponse(
             items=[

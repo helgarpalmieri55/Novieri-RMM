@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiClient, ClientSiteOut } from "../lib/api";
+import { ApiError, type ApiClient, type ClientSiteOut } from "../lib/api";
 import { SiteField } from "./SiteField";
 
 const mockUseApi = vi.fn();
@@ -73,6 +73,37 @@ describe("SiteField", () => {
   it("drops a site that is not the client's", async () => {
     const { onChange } = renderSite(ACME, [site("s1", "Bogotá"), site("s2", "Medellín")], "s-other");
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(""));
+  });
+
+  it("says why the sites could not be loaded, in the server's words", async () => {
+    // Phase 3 final review C, Minor: a 403 for want of `clients.read` in that
+    // client read as a bare "could not be loaded", which left the form with no
+    // way forward and nothing saying why.
+    const listClientSites = vi
+      .fn()
+      .mockRejectedValue(new ApiError(403, "You need the clients.read permission in this client."));
+    mockUseApi.mockReturnValue({ listClientSites } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <SiteField clientId={ACME} value="" onChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(
+      await screen.findByText(
+        "The sites could not be loaded. You need the clients.read permission in this client.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says the sites could not be loaded even when the server said nothing", async () => {
+    const listClientSites = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    mockUseApi.mockReturnValue({ listClientSites } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <SiteField clientId={ACME} value="" onChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/^The sites could not be loaded\. \S/)).toBeInTheDocument();
   });
 
   it("says when the client has no site", async () => {

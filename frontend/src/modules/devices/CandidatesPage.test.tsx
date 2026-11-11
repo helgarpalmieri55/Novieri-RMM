@@ -404,6 +404,11 @@ describe("CandidatesPage", () => {
   });
 
   it("lists the same address of two clients as two rows, selected apart", async () => {
+    // The top bar lists the clients /me does: names are read from that list.
+    selectClient(SCOPE_INTERNAL.id, [
+      SCOPE_INTERNAL,
+      { id: "c-y", name: "Yonder", kind: "customer", enabled_modules: [], permissions: [] },
+    ]);
     renderPage(() =>
       Promise.resolve(
         page({ items: [candidate(), candidate({ client_id: "c-y" })], total: 2 }),

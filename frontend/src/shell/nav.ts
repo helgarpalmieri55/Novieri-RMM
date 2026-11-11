@@ -169,6 +169,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         to: "/admin",
         icon: "adjustments",
         sections: [
+          // MSP clients phase 3 (design §4.1): the companies served, their
+          // sites, contacts and optional modules.
+          section("shell.nav.section.organization", [
+            page("/clients", "shell.nav.item.clients", "building", "clients.read", { hint: "shell.nav.hint.clients" }),
+          ]),
           section("shell.nav.section.serviceDesk", [
             page("/notifications", "shell.nav.item.notifications", "bell", "notification.read", { hint: "shell.nav.hint.notifications" }),
             page("/email-intake", "shell.nav.item.emailIntake", "mail", "email_intake.read", { hint: "shell.nav.hint.emailIntake" }),
@@ -249,8 +254,10 @@ export const NAV_UNLISTED: readonly NavUnlisted[] = [
   unlisted("/discovered", "shell.nav.page.discovered", "/devices"),
   unlisted("/agent-push", "shell.nav.item.pushInstall", "/admin"),
   // IMAGING LEFT THE RAIL AND THE SEARCH (phase 3 design §2, project decision
-  // P3: it depends on PXE, which is not built). Its pages stay reachable by a
-  // link -- a device's Imaging tab -- and keep their place under Admin.
+  // P3: it depends on PXE, which is not built). Nothing outside its own pages
+  // links to them any more -- a device's Imaging tab shows that device's
+  // imaging and links nowhere -- so they are reached by their address, and
+  // keep their place under Admin for the crumb and the tab title.
   unlisted("/provisioning", "shell.nav.item.imaging", "/admin"),
   // PEOPLE LEFT THE RAIL ON 2026-09-23: the operator read it as a second
   // Settings -> Users, and a device's holder is now set on the device. The
@@ -266,10 +273,13 @@ export const ADD_COMPUTER_TO = "/devices/onboard";
 
 /**
  * A ROUTE THAT BELONGS TO NO SECTION AT ALL, and is not a defect: `/profile`
- * is reached from the account menu, and there is no page behind "Your
- * account" to link to.
+ * and `/profile/security` are reached from the account menu, and there is no
+ * page behind "Your account" to link to.
  */
-export const ORPHAN_SECTION: Readonly<Record<string, string>> = named({}, { "/profile": "shell.nav.yourAccount" });
+export const ORPHAN_SECTION: Readonly<Record<string, string>> = named(
+  {},
+  { "/profile": "shell.nav.yourAccount", "/profile/security": "shell.nav.yourAccount" },
+);
 
 /** What the shell's breadcrumb and the tab title are made of, for one route. */
 export interface Crumb {

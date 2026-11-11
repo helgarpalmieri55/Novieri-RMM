@@ -11,11 +11,12 @@ not expressed here: it is `ProposeBinding.ticket_device_id`, set per turn by thi
 persona's router from `ticket.device_id`, and checked as step 6 of `propose`. It
 cannot be expressed on a frozen profile because it is a fact about one ticket.
 
-`executor` is the STAFF loopback: a technician has a real `AuthContext` and a
-real bearer token, so `require_permission` and RLS re-run verbatim and the
-copilot has no power the technician does not. (The end-user resolver is the one
-that cannot use this executor -- §0.2 -- because a portal principal is
-deliberately not an `AuthContext`.)
+`executor` is the STAFF loopback: a technician has a real `AuthContext`, and
+the turn's calls carry the internal token minted from the technician's own
+session (autenticación propia design §5.6), so `require_permission` and RLS
+re-run verbatim and the copilot has no power the technician does not. (The
+end-user resolver is the one that cannot use this executor -- §0.2 -- because
+a portal principal is deliberately not an `AuthContext`.)
 """
 
 from app.core.ai import PersonaProfile, register_persona

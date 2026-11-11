@@ -221,6 +221,20 @@ describe("the audit action labels", () => {
     expect(auditActionLabel("job.dispatch")).toBe("Job sent");
     expect(auditActionLabel("remote.session.credential_used")).toBe("Credential used for a remote session");
   });
+
+  it("name each sign-in thing in Spanish with the one word Tu seguridad uses for it (D2, Minor 7)", () => {
+    setActiveLanguage("es");
+    // "segundo factor" and "equipos recordados ... Olvidar", as on Tu seguridad;
+    // a locked method may be the password, so it is the notice's "método de
+    // inicio de sesión", never a second word for the same factor.
+    expect(auditActionLabel("auth.factor_added")).toBe("Segundo factor añadido");
+    expect(auditActionLabel("auth.factor_removed")).toBe("Segundo factor quitado");
+    expect(auditActionLabel("auth.factor_disabled")).toBe("Método de inicio de sesión bloqueado");
+    expect(auditActionLabel("auth.device_remembered")).toBe("Equipo recordado");
+    expect(auditActionLabel("auth.device_revoked")).toBe("Equipo olvidado");
+    const words = Object.values(es.enums.AuditAction as Record<string, string>).join("\n");
+    expect(words).not.toMatch(/Factor de autenticación|Factor de inicio de sesión|Equipo de confianza/);
+  });
 });
 
 // --------------------------------------------------------------------------

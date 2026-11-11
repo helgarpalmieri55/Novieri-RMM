@@ -393,6 +393,127 @@ async def test_a_limited_technician_cannot_create_an_sla_policy(api_env: Any) ->
     assert _refused(response), (response.status_code, response.text)
 
 
+# --------------------------------------------------------------------------- #
+# The organisation defaults the console writes (phase 3 last fix round)
+# --------------------------------------------------------------------------- #
+
+
+async def _audited(engine: AsyncEngine, org_id: UUID, action: str) -> int:
+    """How many `action` events the org has, whatever their target: a refused
+    create has no row whose id could name one."""
+    async with AsyncSession(engine) as session:
+        return len(
+            (
+                await session.execute(
+                    select(AuditEvent.id).where(
+                        AuditEvent.org_id == org_id, AuditEvent.action == action
+                    )
+                )
+            ).all()
+        )
+
+
+async def test_a_narrowed_request_cannot_set_or_remove_the_every_device_change_gate(
+    api_env: Any,
+) -> None:
+    """The console's "Every device" gate is the GLOBAL row (no group, so no
+    client). Narrowed by X-Client-Id the set is refused before anything is
+    written (`refuse_unless_every_client`), and so is the remove (the flush
+    guard): 403, nothing written, nothing audited. The same person sent
+    without the header does both -- which is what the console now sends."""
+    from app.modules.change_mgmt.models import ChangeGate
+
+    env = api_env
+    org = await env.create_org("g-last")
+    every = await _actor(env, org, None)
+    narrowed = {**every, "X-Client-Id": str(org)}
+    body = {"device_group_id": None, "applies_to_patches": True, "applies_to_deployments": True}
+
+    response = await env.client.put("/api/v1/changes/gates", headers=narrowed, json=body)
+    assert _refused(response), (response.status_code, response.text)
+    assert await _audited(env.admin_engine, org, "change.gate_set") == 0
+
+    response = await env.client.put("/api/v1/changes/gates", headers=every, json=body)
+    assert response.status_code == 200, response.text
+    gate = UUID(response.json()["id"])
+
+    response = await env.client.delete(f"/api/v1/changes/gates/{gate}", headers=narrowed)
+    assert _refused(response), (response.status_code, response.text)
+    assert await _exists(env.admin_engine, ChangeGate, gate)
+    assert await _actions(env.admin_engine, org, "change.gate_removed", gate) == 0
+
+    response = await env.client.delete(f"/api/v1/changes/gates/{gate}", headers=every)
+    assert response.status_code == 204, response.text
+    assert not await _exists(env.admin_engine, ChangeGate, gate)
+
+
+@pytest.mark.parametrize(
+    ("path", "action", "body", "change"),
+    [
+        (
+            "/api/v1/patch/policies",
+            "patch.policy.changed",
+            {"ring_name": "broad", "scan_interval_hours": 24},
+            {"ring_name": "pilot"},
+        ),
+        (
+            "/api/v1/remote/policies",
+            "remote.policy.changed",
+            {"allow_unattended": False, "consent_timeout_s": 30},
+            {"consent_timeout_s": 60},
+        ),
+    ],
+)
+async def test_a_narrowed_request_cannot_write_the_org_default_policy_even_unchanged(
+    api_env: Any, path: str, action: str, body: dict[str, Any], change: dict[str, Any]
+) -> None:
+    """The org default (no group) is the GLOBAL row of `patch_policies` and
+    `remote_policies`. Narrowed by X-Client-Id a CHANGE to it is refused by the
+    flush guard -- but a body IDENTICAL to what it holds changed no attribute,
+    so nothing was flushed, the guard never saw a write, and the route answered
+    200 and audited `*.policy.changed` for an act the actor may not perform
+    (invariant 4). Both are now the same refusal, decided by whose row it is
+    and never by what it holds; the person with every client, not narrowed,
+    still writes it."""
+    env = api_env
+    org = await env.create_org("g-last")
+    every = await _actor(env, org, None)
+    narrowed = {**every, "X-Client-Id": str(org)}
+
+    response = await env.client.put(path, headers=every, json=body)
+    assert response.status_code == 200, response.text
+    assert await _audited(env.admin_engine, org, action) == 1
+
+    response = await env.client.put(path, headers=narrowed, json={**body, **change})
+    assert _refused(response), (response.status_code, response.text)
+    response = await env.client.put(path, headers=narrowed, json=body)
+    assert _refused(response), (response.status_code, response.text)
+    assert await _audited(env.admin_engine, org, action) == 1
+
+    response = await env.client.put(path, headers=every, json=body)
+    assert response.status_code == 200, response.text
+    assert await _audited(env.admin_engine, org, action) == 2
+
+
+async def test_a_narrowed_request_still_writes_its_own_groups_patch_policy(
+    api_env: Any,
+) -> None:
+    """The negative control: the refusal is the org default's alone. A group's
+    policy is its group's client's, and narrowed to that client it is written
+    and audited as before."""
+    env = api_env
+    org = await env.create_org("g-last")
+    group = DeviceGroup(org_id=org, client_id=org, name="servers")
+    await _seed(env.admin_engine, group)
+    narrowed = {**await _actor(env, org, None), "X-Client-Id": str(org)}
+    body = {"device_group_id": str(group.id), "ring_name": "pilot"}
+
+    for _ in range(2):  # created, then an identical write: both its client's to make
+        response = await env.client.put("/api/v1/patch/policies", headers=narrowed, json=body)
+        assert response.status_code == 200, response.text
+    assert await _audited(env.admin_engine, org, "patch.policy.changed") == 2
+
+
 async def test_a_limited_scope_cannot_approve_a_patch(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:

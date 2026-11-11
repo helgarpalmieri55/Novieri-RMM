@@ -520,6 +520,45 @@ describe("SubscriptionsPage", () => {
     });
   });
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every subscription whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files a new subscription under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Service name"), "Globex CRM");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSubscription).toHaveBeenCalledTimes(1));
+    expect(api.createSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" }),
+    );
+  });
+
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // new row would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says so instead of offering Save", async () => {
+    selectClient("c-unassigned", [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(api.createSubscription).not.toHaveBeenCalled();
+  });
+
   it("with every client chosen, asks for the subscription's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
@@ -538,6 +577,27 @@ describe("SubscriptionsPage", () => {
     await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.createSubscription).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" })));
+  });
+
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may MANAGE subscriptions, not every one they can read.
+  it("with every client chosen, offers only the clients holding subscriptions.manage, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["subscriptions.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
   });
 
   // Design §3.4: with one client chosen every row is that client's.
@@ -1083,7 +1143,11 @@ describe("SpendDashboard", () => {
   // row is one client's -- never summed across clients -- and says whose
   // (with every client chosen, the only choice that lists two clients' rows).
   it("names each spend row's client, never adding two clients together", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does (below): names are read from that list.
+    selectClient(null, [
+      SCOPE_INTERNAL,
+      { id: "c2", name: "Globex", kind: "customer", enabled_modules: [], permissions: ME.permissions },
+    ]);
     const client = (id: string, name: string): ClientOut => ({
       id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
       website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,

@@ -66,11 +66,13 @@ class ToolResult:
 class TurnContext:
     """Everything one turn's tool calls need, and nothing that outlives the turn.
 
-    `bearer` IS EXCLUDED FROM THE REPR. §0.1 keeps the caller's token off
-    `AuthContext` because that dataclass is passed into every module and a token
-    on it is one careless `logger.debug(ctx)` from living in a log file forever.
-    `TurnContext` is module-private and per-turn, but the same accident is one
-    line away, so the repr redacts and a test asserts it.
+    `bearer` IS EXCLUDED FROM THE REPR. It is the `Authorization` value of the
+    turn's loopback calls: the internal token the route minted from the
+    caller's session (autenticación propia design §5.6). §0.1 keeps it off
+    `AuthContext` because that dataclass is passed into every module and a
+    token on it is one careless `logger.debug(ctx)` from living in a log file
+    forever. `TurnContext` is module-private and per-turn, but the same
+    accident is one line away, so the repr redacts and a test asserts it.
     """
 
     app: Any

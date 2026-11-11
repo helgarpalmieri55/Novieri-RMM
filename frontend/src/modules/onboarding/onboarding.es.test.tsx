@@ -18,6 +18,16 @@ import { OnboardPage } from "./OnboardPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+vi.mock("../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: null, select: vi.fn(), clients: [], ready: true }),
+}));
+vi.mock("../../components/ClientField", () => ({
+  ClientField: () => <select aria-label="Cliente" defaultValue="" />,
+}));
+vi.mock("../../components/SiteField", () => ({
+  SiteField: () => <select aria-label="Sede" defaultValue="" />,
+}));
 
 const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
   client_id: "o1",
@@ -87,7 +97,10 @@ function renderPage({
         display_name: "Operador",
         permissions,
         timezone: null,
+        clients: [],
+        permissions_everywhere: [],
       }),
+    listClientSites: () => Promise.resolve([]),
     listIpamSubnets: () => Promise.resolve(subnets),
     listIpamScanAuthorizations: () => Promise.resolve(scopes),
     listIpamSweepRuns: () => Promise.resolve(runs),
@@ -171,6 +184,15 @@ describe("the add-a-computer page in Spanish", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Obtener un comando de instalación" })).toBeInTheDocument();
     expect(screen.getByText(/Ninguna versión publicada tiene un artefacto cargado\./)).toBeInTheDocument();
+    expectNoEnglish(container, ALLOW);
+  });
+
+  it("words the client and site panel", async () => {
+    const { container } = renderPage();
+    expect(await screen.findByText("Para qué cliente y sede")).toBeInTheDocument();
+    expect(
+      screen.getByText("Elige primero el cliente y la sede; después los enlaces de abajo los llevan."),
+    ).toBeInTheDocument();
     expectNoEnglish(container, ALLOW);
   });
 });

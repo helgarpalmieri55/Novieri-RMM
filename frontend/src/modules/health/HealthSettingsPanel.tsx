@@ -10,6 +10,7 @@ import { ApiError } from "../../lib/api";
 import { Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
+import { useEveryClientReason } from "../settings/api";
 import { settingsHref } from "../settings/tabs";
 import { useHealthSettings, useUpdateHealthSettingsMutation } from "./api";
 import { NUMERIC_FIELDS } from "./fields";
@@ -110,6 +111,9 @@ export function HealthSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
   const t = useT();
   const settings = useHealthSettings();
   const update = useUpdateHealthSettingsMutation();
+  // Every client shares these settings: someone holding `health.admin` on some
+  // clients is told it is needed on every one, not that they lack it.
+  const everyClient = useEveryClientReason("health.admin");
   // A key present here is a field the admin has touched — including one they
   // have deliberately cleared, which must stay cleared rather than snapping
   // back to the server's value mid-edit.
@@ -306,7 +310,7 @@ export function HealthSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
               saved={update.isSuccess && !dirty}
               problems={attemptProblems(attempt)}
               savedMessage={t("health.settings.saved")}
-              disabledReason={canAdmin ? undefined : t("health.settings.noPermission")}
+              disabledReason={canAdmin ? undefined : (everyClient ?? t("health.settings.noPermission"))}
             />
           </Form>
         </>

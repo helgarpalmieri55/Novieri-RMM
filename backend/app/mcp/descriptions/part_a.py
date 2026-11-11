@@ -126,8 +126,8 @@ PART_A: dict[str, str] = {
     # --- docs ---
     "GET /api/v1/docs/articles": (
         "Lists knowledge-base articles with title, category, portal visibility and link "
-        "count. Filter by category or linked entity; archived articles are hidden by "
-        "default."
+        "count. Filter by category, linked entity or client (that client's articles and "
+        "those for every client); archived articles are hidden by default."
     ),
     "POST /api/v1/docs/articles": (
         "Creates a knowledge-base article from a title, body and category and returns it. "

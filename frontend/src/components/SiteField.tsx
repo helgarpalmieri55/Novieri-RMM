@@ -17,6 +17,7 @@ import { useEffect } from "react";
 
 import { useT } from "../i18n/context";
 import { useClientSites } from "../lib/clientSites";
+import { describeSubmitError } from "./form";
 import { Field, inputClass } from "./ui";
 
 export function SiteField({
@@ -51,7 +52,11 @@ export function SiteField({
       : sites.isLoading
         ? undefined
         : sites.isError
-          ? t("components.siteField.failed")
+          ? // THE SERVER'S WORDS (phase 3 final review C, Minor): the route
+            // answers 403 to someone without `clients.read` in that client,
+            // and "could not be loaded" alone left the form at a dead end
+            // with nothing saying why.
+            t("components.siteField.failed", { reason: describeSubmitError(sites.error) })
           : live.length === 0
             ? t("components.siteField.none")
             : undefined;

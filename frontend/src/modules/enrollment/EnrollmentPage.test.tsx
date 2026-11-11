@@ -30,7 +30,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device, MeClient } from "../../lib/api";
+import type { ApiClient, ClientSiteOut, Device, MeClient } from "../../lib/api";
 import { ENROLLMENT_TOKENS_PAGE_SIZE } from "./api";
 import { EnrollmentPage } from "./EnrollmentPage";
 import type { EnrollmentTokenListItem, EnrollmentTokenPage } from "./types";
@@ -56,6 +56,11 @@ function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTE
 }
 
 beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
+/** The internal client's only site: the one a new token enrols into here. */
+const PRINCIPAL_SITE: ClientSiteOut = {
+  id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0,
+};
 
 const listEnrollmentTokens = vi.fn();
 const createEnrollmentToken = vi.fn();
@@ -85,6 +90,9 @@ function token(overrides: Partial<EnrollmentTokenListItem> = {}): EnrollmentToke
     expires_at: FUTURE,
     max_uses: 50,
     use_count: 4,
+    // Where it enrols (MSP clients spec §1.5): the internal client's site.
+    client_id: "o",
+    site_id: "s-1",
     revoked: false,
     ...overrides,
   };
@@ -197,12 +205,13 @@ function renderPage(options: {
             timezone: options.timezone ?? null,
           }),
     listDevices,
-    listClientSites: () =>
-      Promise.resolve([
-        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
-      ]),
+    listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+  // C5): the Site field's read is in the cache before the first render, so
+  // it picks the only site at once rather than one async hop later.
+  queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE]);
   const ui: ReactElement = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[options.entry ?? "/enrollment"]}>
@@ -210,7 +219,7 @@ function renderPage(options: {
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return render(ui);
+  return { ...render(ui), queryClient };
 }
 
 /** The three deliberate steps, as a helper, so each test can assert about the
@@ -423,6 +432,28 @@ describe("EnrollmentPage", () => {
       // site of the client chosen at the top.
       site_id: "s-1",
     });
+  });
+
+  it("shows the token once, from the page's own state, and keeps none of it in the mutation cache (D2, Minor 1)", async () => {
+    createEnrollmentToken.mockResolvedValue({
+      id: "new",
+      token: "ENR-SECRET-VALUE",
+      name: "Bogota rollout",
+      expires_at: FUTURE,
+      max_uses: 1,
+    });
+    const { queryClient } = renderPage();
+    await screen.findByText("Bogota HQ workstations");
+    await issueToken({ name: "Bogota rollout" });
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+
+    expect(await screen.findByText("ENR-SECRET-VALUE")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        JSON.stringify(queryClient.getMutationCache().getAll().map((m) => [m.state.data, m.state.variables])),
+      ).not.toContain("ENR-SECRET-VALUE"),
+    );
+    expect(screen.getByText("ENR-SECRET-VALUE")).toBeInTheDocument();
   });
 
   it("issues nothing when the confirmation is cancelled", async () => {

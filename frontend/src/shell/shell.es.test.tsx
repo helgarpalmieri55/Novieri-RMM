@@ -82,7 +82,7 @@ const shell = (path: string, props: Partial<React.ComponentProps<typeof AppShell
 
 describe("the shell in Spanish", () => {
   it("draws the whole chrome, with the Admin area open, in Spanish", () => {
-    const { container } = renderInSpanish(shell("/jobs", { sessionExpiring: true, onSignIn: vi.fn() }));
+    const { container } = renderInSpanish(shell("/jobs"));
 
     const rail = screen.getByRole("navigation", { name: "Principal" });
     expect(within(rail).getByText("Día a día")).toBeInTheDocument();
@@ -96,8 +96,9 @@ describe("the shell in Spanish", () => {
     expect(screen.getByRole("link", { name: "Añadir un equipo" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Preguntar al Asistente" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Ruta de navegación" })).toHaveTextContent("Administración");
-    expect(screen.getByRole("status")).toHaveTextContent("Tu sesión ha caducado");
-    expect(screen.getByRole("button", { name: "Iniciar sesión de nuevo" })).toBeInTheDocument();
+    // RE-POINTED: the session notice left the chrome (operator decision 3);
+    // its Spanish is held by `./SessionEnded.test.tsx`.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Contraer la barra lateral" })).toBeInTheDocument();
     expect(document.title).toBe("Historial de tareas · ITMS");
     expectNoEnglish(container, ALLOW);

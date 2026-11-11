@@ -100,8 +100,12 @@ export function MsiDownload({
             label={t("agentReleases.msi.linkLabel")}
             help={t("agentReleases.msi.linkHelp")}
           >
+            {/* `data-secret`: the link's code enrols a machine, and it is
+                pasted in clear -- never kept when the session ends
+                (`lib/unsavedText.ts`). */}
             <input
               className={inputClass}
+              data-secret
               value={link}
               autoComplete="off"
               spellCheck={false}

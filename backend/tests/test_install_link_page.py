@@ -121,6 +121,11 @@ async def test_every_route_answers_the_same_404(api_env, releases, suffix: str, 
 async def test_the_page_offers_the_windows_download_and_the_command(api_env, releases) -> None:
     org_id = await api_env.create_org("pg")
     code = await switch_on(api_env, org_id, ["10.50.0.0/16"])
+    # No console configured: the page names the host it was reached at (the
+    # Host header, `itms.example.test`). `api_env` has a console since own
+    # authentication Task 13, so this is said here; the switch-on above, a
+    # cookie write, needed it.
+    api_env.settings.public_console_url = None
     response = await _get(api_env, f"/i/{code}")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
@@ -174,6 +179,11 @@ async def test_the_windows_download_is_a_15_minute_grant_named_for_the_code(
     api_env.app.state.object_store = store
     org_id = await api_env.create_org("pg")
     code = await switch_on(api_env, org_id, ["10.50.0.0/16"])
+    # No console configured: the page names the host it was reached at (the
+    # Host header, `itms.example.test`). `api_env` has a console since own
+    # authentication Task 13, so this is said here; the switch-on above, a
+    # cookie write, needed it.
+    api_env.settings.public_console_url = None
     response = await _get(api_env, f"/i/{code}/windows?arch=arm64")
     assert response.status_code == 302
     assert response.headers["location"].startswith("https://minio.test/agent-releases/1.6.2/")
@@ -256,6 +266,11 @@ async def test_install_sh_is_valid_sh_and_carries_the_code_only_as_data(api_env,
     api_env.app.state.object_store = _StubStore()
     org_id = await api_env.create_org("pg")
     code = await switch_on(api_env, org_id, ["10.50.0.0/16"])
+    # No console configured: the page names the host it was reached at (the
+    # Host header, `itms.example.test`). `api_env` has a console since own
+    # authentication Task 13, so this is said here; the switch-on above, a
+    # cookie write, needed it.
+    api_env.settings.public_console_url = None
     response = await _get(api_env, f"/i/{code}/install.sh")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")

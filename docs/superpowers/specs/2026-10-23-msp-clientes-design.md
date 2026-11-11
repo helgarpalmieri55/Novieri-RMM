@@ -260,15 +260,17 @@ cero filas y no puede escribir, igual que hoy pasa sin `app.current_org`
     solo para resolver la identidad (§2.2).
 - *Precisado al implementar (§7):* la lista es **por función**, no por archivo
   (`ALL_SCOPE_ALLOWLIST`, `backend/app/core/client_scope.py`), y estas son
-  todas las puertas que convierten un token en una persona y su alcance. Cada
+  todas las puertas que convierten una credencial en una persona y su alcance. Cada
   una lee la identidad y las asignaciones con `ClientScope.all()`, porque el
   alcance se calcula justamente a partir de esas filas:
   - `app/api/deps.py::admit`: la puerta 1, para las peticiones HTTP de la
     consola y de MCP, y para el inicio de sesión del portal. La consola rechaza
     a un contacto; el portal lo admite.
-  - `app/core/identity/door.py::read_door_identity`: las puertas 2 y 3, el
+  - `app/core/identity/door.py::read_session_identity`: las puertas 2 y 3, el
     WebSocket de la consola (`app/api/v1/ws.py`) y el túnel de control remoto
-    (`app/modules/remote/tunnel.py`). Las dos rechazan a un contacto.
+    (`app/modules/remote/tunnel.py`). Las dos rechazan a un contacto. *(Hasta
+    la fase 1 de la autenticación propia, 2026-11, las dos leían un token con
+    `read_door_identity`; se quitó con el token de la consola.)*
   - `app/core/identity/door.py::person_scope` y `app/core/rbac.py::clients_holding`:
     dónde tiene una persona ya admitida un permiso concreto. Los usan
     `require_permission`, la puerta del portal y el servidor MCP, y su
@@ -276,6 +278,14 @@ cero filas y no puede escribir, igual que hoy pasa sin `app.current_org`
   - `app/core/identity/own_profile.py`: `GET` y `PATCH /me`. El perfil es de la
     persona, no de un cliente, y solo toca su propia fila de `users` y tablas
     G (asignaciones, roles, auditoría).
+  - *Añadidas por la autenticación propia, fase 1 (2026-11):* las tres que leen
+    la sesión de la consola antes de que exista un alcance.
+    `app/core/auth/sessions.py::resolve` encuentra la sesión que nombra la
+    cookie y lee y renueva su fila (un técnico no tiene cliente).
+    `app/api/deps.py::_admit_session` convierte esa sesión, o la del token
+    interno del asistente, en la persona y sus asignaciones, como `admit`.
+    `app/core/auth/loopback.py::_live_session` comprueba que la sesión que nombra
+    el token interno sigue viva y es de esa persona.
 
   `app/modules/portal/principal.py` no necesita el alcance "todos": usa `admit`
   y `person_scope`. El servidor MCP reenvía `X-Client-Id` en cada llamada

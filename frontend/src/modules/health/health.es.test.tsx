@@ -65,6 +65,10 @@ import type {
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+vi.mock("../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: null, select: vi.fn(), clients: [], ready: true }),
+}));
 
 // ------------------------------------------------------------------ fixtures
 
@@ -993,6 +997,14 @@ describe("the settings panel, in Spanish", () => {
     renderUi(<HealthSettingsPanel canAdmin={false} />);
     expect(await screen.findByText("No tienes permiso para cambiar la configuración de salud.")).toBeInTheDocument();
   });
+
+  it("words the every-client reason for someone holding health.admin on only some clients", async () => {
+    stubApi({ me: vi.fn().mockResolvedValue({ ...ME, permissions_everywhere: ["health.read"] }) });
+    renderUi(<HealthSettingsPanel canAdmin={false} />);
+    expect(
+      await screen.findByText(/requiere el permiso health\.admin en todos los clientes/),
+    ).toBeInTheDocument();
+  });
 });
 
 // ------------------------------------------------------------ device panel
@@ -1025,6 +1037,10 @@ describe("a device's health panel, in Spanish", () => {
     const { container } = renderUi(<DeviceHealthPanel deviceId="d1" canCheckNow={false} />);
     expect(await screen.findByText("Sin perfil de estado")).toBeInTheDocument();
     expect(screen.getByText("Ningún perfil de estado se aplica a este dispositivo.")).toBeInTheDocument();
+    // The client's default is one of the levels (phase 3 final review C, T14 7).
+    expect(
+      screen.getByText("No se comprueba nada en él. Asigna un perfil al dispositivo, a su grupo, a su cliente o a la organización."),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Último contacto nunca, fuera de la ventana de desconexión de 15 min\./)).toBeInTheDocument();
     expect(screen.getByText("No hay alertas abiertas, pero este dispositivo no está informando, así que eso no prueba que esté bien.")).toBeInTheDocument();
     expectNoEnglish(container, STORED);

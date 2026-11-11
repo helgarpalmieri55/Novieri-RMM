@@ -586,8 +586,19 @@ from tests.tool_surface import (
 # `GET /ipam/sites` is gone. It answered a bare, undescribed list, so P4 93 ->
 # 92 and P5 177 -> 176; it passed neither five nor six, so neither set moves.
 # Its replacement for the console is `GET /clients/{client_id}/sites`, above.
-EXPECTED_GET_ROUTES = 253
-EXPECTED_PASSING_FIVE = 51
+# 253 -> 254 (2026-11-04): own authentication (P2 phase 1, Task 6) adds
+# `GET /settings/sessions`, gated (`orgs.manage`), typed, described and
+# closed: passing five 51 -> 52. It passes all six and waits in
+# PENDING_TOOL_REVIEW, as `/settings/email` does: how long a sign-in lasts
+# and whether a device may skip the second factor is reconnaissance about the
+# organisation's sign-in posture, and reading it is the AI module's decision.
+# 254 -> 255 (2026-11-04, P2 phase 1 Task 7): `GET /me/security`, the caller's
+# own sign-in factors and sessions. Ungated by design ("P2 gated" +1), typed,
+# documented and not a list, so P3, P4 and P5 do not move; failing P2 it is in
+# neither "passing five" nor "passing six", so neither set nor
+# PENDING_TOOL_REVIEW moves either.
+EXPECTED_GET_ROUTES = 255
+EXPECTED_PASSING_FIVE = 52
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
@@ -628,7 +639,7 @@ EXPECTED_PASSING_SIX = frozenset(
         # Added 2026-08-20 (invisible identity layer). Eligible on all six and
         # deliberately unregistered.
         #
-        # `/settings/email` returns the realm's mail configuration — host, port,
+        # `/settings/email` returns the organization's mail configuration — host, port,
         # sender, and whether a password is set. Never the password itself
         # (`test_realm_settings_api.py` asserts the literal is absent from the
         # body), but an AI persona reading a deployment's mail relay and sender
@@ -641,6 +652,9 @@ EXPECTED_PASSING_SIX = frozenset(
         # one GET.
         "/api/v1/orgs/current/console-domain-preview",
         "/api/v1/settings/email",
+        # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/settings/sessions",
         # Added 2026-08-21 (patch approvals list). Eligible, and deliberately
         # not registered: the list names every patch cleared to reach a
         # machine, and hands out the ids `DELETE /approvals/{id}` takes.
@@ -728,7 +742,8 @@ EXPECTED_PASSING_SIX = frozenset(
 # here: a number quoted in a document and measured nowhere is the exact thing
 # this file exists to stop.
 EXPECTED_FAILING_BY_PROPERTY = {
-    "P2 gated": 6,
+    # +1 (2026-11-04): `GET /me/security` (P2 phase 1 Task 7).
+    "P2 gated": 7,
     "P3 typed": 27,
     # 80 -> 81 (2026-09-08): `GET /api/v1/agent-push/host-keys` answers a bare
     # list, like the two agent-push routes already counted here. See the note
@@ -774,6 +789,11 @@ EXPECTED_UNGATED_PATHS = frozenset(
         # layout grants nothing either -- every widget renders from a module
         # query gated on its own.
         "/api/v1/dashboard/layout",
+        # Added 2026-11-04 (P2 phase 1, own sign-in). The caller's OWN second
+        # factors, remembered browsers and sessions; ungated like `/me`, and
+        # it needs the console session (`app/api/v1/auth.py::_console_ctx`).
+        # Not a tool (`NOT_FOR_MCP`).
+        "/api/v1/me/security",
     }
 )
 
@@ -975,6 +995,9 @@ PENDING_TOOL_REVIEW = frozenset(
         # EXPECTED_PASSING_SIX above.
         "/api/v1/orgs/current/console-domain-preview",
         "/api/v1/settings/email",
+        # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/settings/sessions",
         # Added 2026-08-21 (patch approvals list); reasoning beside
         # EXPECTED_PASSING_SIX above.
         "/api/v1/patch/approvals",

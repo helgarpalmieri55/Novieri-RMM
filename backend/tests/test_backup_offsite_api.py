@@ -9,8 +9,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditEvent, BackupOffsiteTarget, Credential
+from app.models import AuditEvent, BackupOffsiteTarget, BackupRecoveryKey, Credential
 from tests.backup_offsite_fixtures import load_recover_tool
+from tests.client_scope_support import EVERY_CLIENT, client_with_site
+from tests.test_client_record_checks import _holder
 
 SECRET = "wJalrXUtnFEMI-offsite-secret"
 
@@ -182,6 +184,95 @@ async def test_changing_the_bucket_or_the_key_requires_a_new_test(api_env: Any) 
     assert resp.status_code == 200, resp.text
     assert resp.json()["state"] == "untested"
     _no_secret(resp)
+
+
+async def _offsite_state(api_env: Any, org_id: UUID) -> Any:
+    """Every target and key as stored, the credentials behind them, and the
+    backup and credential audit rows: what a refused write must leave."""
+    async with AsyncSession(api_env.admin_engine) as s:
+        targets = (await s.execute(select(
+            BackupOffsiteTarget.id, BackupOffsiteTarget.name, BackupOffsiteTarget.bucket,
+            BackupOffsiteTarget.state, BackupOffsiteTarget.client_id,
+        ).where(BackupOffsiteTarget.org_id == org_id).order_by(BackupOffsiteTarget.id))).all()
+        keys = (await s.execute(select(
+            BackupRecoveryKey.id, BackupRecoveryKey.challenge_sha256,
+            BackupRecoveryKey.proven_at, BackupRecoveryKey.client_id,
+        ).where(BackupRecoveryKey.org_id == org_id).order_by(BackupRecoveryKey.id))).all()
+        credentials = (await s.execute(select(Credential.id).where(
+            Credential.org_id == org_id).order_by(Credential.id))).scalars().all()
+        audits = (await s.execute(select(AuditEvent.action).where(
+            AuditEvent.org_id == org_id,
+            AuditEvent.action.like("backup.%") | AuditEvent.action.like("credential.%"),
+        ).order_by(AuditEvent.id))).scalars().all()
+    return targets, keys, credentials, audits
+
+
+async def test_every_target_and_key_write_needs_a_scope_of_every_client(
+    api_env: Any,
+) -> None:
+    """No route writes a client on an off-site target or a recovery key, and
+    none changes one, so every target and key is a global row (an O table,
+    no client) and every write of one is a write of every client: refused
+    with the every-client sentence to a per-client holder of the code and
+    to an every-client holder narrowed by `X-Client-Id`, leaving every row
+    and audit as it was; let through un-narrowed. That is why these six are
+    in `GLOBAL_WRITES` and the console never sends the header on them
+    (final review A7; review C Important 2).
+    FALSIFIER: a target or key route writing a client (a narrowed holder of
+    that client then gets through), or any of the six losing
+    `require_permission_on_every_client` (`offsite_api.py`): `prove` with a
+    wrong answer writes no row, so only the gate refuses it."""
+    tool = load_recover_tool()
+    org_id, every = await _admin(api_env)
+    x, _ = await client_with_site(api_env, org_id)
+    _, per_client = await _holder(
+        api_env, org_id, {x: ("backup.read", "backup.offsite.manage", "backup.recovery.manage")}
+    )
+    narrowed = {**every, "X-Client-Id": str(x)}
+
+    target = await api_env.client.post(
+        "/api/v1/backup/offsite-targets", json=_TARGET, headers=every
+    )
+    assert target.status_code == 201, target.text
+    target_id = target.json()["id"]
+    private_text, public_text = tool.keygen()
+    registered = await api_env.client.post(
+        "/api/v1/backup/recovery-keys",
+        json={"public_key": public_text, "stored_confirmed": True},
+        headers=every,
+    )
+    assert registered.status_code == 201, registered.text
+    key_id = registered.json()["key"]["id"]
+    answer = tool.prove(tool.load_private_key(private_text), registered.json()["challenge"])
+    _, other_public = tool.keygen()
+    keep_key = {k: v for k, v in _TARGET.items() if k not in ("access_key_id", "secret_access_key")}
+    writes: list[tuple[str, str, Any]] = [
+        ("POST", "/api/v1/backup/offsite-targets", {**_TARGET, "name": "Another"}),
+        ("PUT", f"/api/v1/backup/offsite-targets/{target_id}", {**keep_key, "bucket": "moved"}),
+        ("POST", f"/api/v1/backup/offsite-targets/{target_id}/test", None),
+        (
+            "POST", "/api/v1/backup/recovery-keys",
+            {"public_key": other_public, "stored_confirmed": True},
+        ),
+        ("POST", f"/api/v1/backup/recovery-keys/{key_id}/prove", {"answer": "AAAA"}),
+        ("POST", f"/api/v1/backup/recovery-keys/{key_id}/prove", {"answer": answer}),
+        ("POST", f"/api/v1/backup/recovery-keys/{key_id}/challenge", None),
+    ]
+    before = await _offsite_state(api_env, org_id)
+    assert {row.client_id for row in before[0] + before[1]} == {None}
+
+    for who, headers in (("per-client", per_client), ("narrowed", narrowed)):
+        for method, url, body in writes:
+            r = await api_env.client.request(method, url, json=body, headers=headers)
+            assert (r.status_code, r.json()) == (403, {"detail": EVERY_CLIENT}), (
+                who, method, url, r.text
+            )
+    assert await _offsite_state(api_env, org_id) == before
+
+    expected = [201, 200, 202, 201, 422, 200, 200]
+    for (method, url, body), status in zip(writes, expected, strict=True):
+        r = await api_env.client.request(method, url, json=body, headers=every)
+        assert r.status_code == status, (method, url, r.text)
 
 
 async def test_a_bad_endpoint_and_an_over_long_lock_are_refused(api_env: Any) -> None:

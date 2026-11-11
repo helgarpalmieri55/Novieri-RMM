@@ -7,7 +7,7 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import {
   useCreatePlanMutation,
   useProcedureArticles,
@@ -26,6 +26,7 @@ import {
   scopeGroupPickerOptions,
 } from "./pickerOptions";
 import type { PlanOut, PlanScopeEntry } from "./types";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
 import { KIND_ICON } from "../../shell/viz";
@@ -143,15 +144,23 @@ export function PlanEditor({
   const t = useT();
   // A plan is one client's (MSP clients phase 2), and that client must use
   // continuity. An edit keeps its own; a new one is the client chosen at the
-  // top, or with every client the form's Client field (design §3.1).
-  const target = useNewRowClient("bcp.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
+  // top, or with every client the form's Client field (design §3.1), through
+  // the shared hook (operator decision 2). Another client's pick drops the
+  // scope and the procedures chosen so far: they were the last one's.
+  const clientField = useNewRowClientField("bcp.manage", undefined, {
+    onPick: () => {
+      setScope([]);
+      setProcedureRefs([]);
+    },
+  });
   const create = useCreatePlanMutation();
   const update = useUpdatePlanMutation();
 
   const existing = plan === "new" || plan == null ? null : plan;
-  const planClient = existing ? existing.client_id : target.needsField ? pickedClient || null : target.clientId;
+  // An edit keeps the plan's own client, outside the hook (review B "(A)").
+  const planClient = existing ? existing.client_id : clientField.clientId;
+  // Unassigned chosen at the top files no new plan.
+  const refused = !existing && clientField.refused !== null;
 
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -179,11 +188,14 @@ export function PlanEditor({
   // makes a procedure reference possible at all.
   const open = plan != null;
   const zone = useUserTimezone();
-  // The plan's client's devices, asked of the server: nothing before the
-  // client is known (see ./api).
+  // The plan's client's devices, groups and articles, asked of the server:
+  // nothing before the client is known (see ./api).
   const devices = useScopeDevices(open, planClient);
-  const groups = useScopeGroups(open);
-  const articles = useProcedureArticles(open);
+  const groups = useScopeGroups(open, planClient);
+  const articles = useProcedureArticles(open, planClient);
+  // Before the client is chosen an empty picker is not "nothing to scope to
+  // yet": it says what to do first (phase 3 final review C, minor).
+  const awaitingClient = planClient === null;
   // Built at render, never memoised: the sublabels hold translated words.
   // Only the plan's client's devices, groups and articles may be named
   // (§3.3); an article for every client may too, and says so.
@@ -231,7 +243,7 @@ export function PlanEditor({
     setProcedureRefs([]);
     setProcedurePick("");
     setReviewIntervalDays("365");
-    setPickedClient("");
+    clientField.setPicked("");
     setAttempt(null);
   }
 
@@ -247,11 +259,12 @@ export function PlanEditor({
   }
 
   function submit() {
+    if (refused) return;
     const rto = rtoMinutes;
     const rpo = rpoMinutes;
     const scopeSnapshot = scope;
     // Only a new plan asks for its client: an edit keeps its own.
-    const askClient = !existing && target.needsField;
+    const askClient = !existing && clientField.needsField;
     const next: Attempt = {
       rules: () => [
         ...planRules(rto, rpo),
@@ -329,19 +342,7 @@ export function PlanEditor({
             convention once has learned it everywhere. */}
         <p className="note mb-3">{t("bcp.editor.requiredNote")}</p>
         <div className="form-grid">
-          {!existing && target.needsField ? (
-            <ClientField
-              code="bcp.manage"
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                // Another client's devices, groups and articles: the scope and
-                // the procedures chosen so far were this one's.
-                setScope([]);
-                setProcedureRefs([]);
-              }}
-            />
-          ) : null}
+          {!existing && clientField.needsField ? <ClientField field={clientField} /> : null}
           <Field label={t("bcp.editor.nameRequired")} full>
             {/* `required` states the same fact for assistive tech. It blocks
                 nothing: <Form> is `noValidate`, because a native bubble that
@@ -395,7 +396,7 @@ export function PlanEditor({
                     label={t("bcp.editor.scopeDevice", { n: index + 1 })}
                     options={deviceOptions}
                     loading={devices.isLoading}
-                    emptyHint={scopeDevicePickerEmptyHint()}
+                    emptyHint={awaitingClient ? t("bcp.picker.deviceChooseClient") : scopeDevicePickerEmptyHint()}
                     placeholder={t("bcp.editor.searchDevices")}
                     value={row.id}
                     onChange={(id) => updateScopeRow(index, { id })}
@@ -405,7 +406,7 @@ export function PlanEditor({
                     label={t("bcp.editor.scopeGroup", { n: index + 1 })}
                     options={groupOptions}
                     loading={groups.isLoading}
-                    emptyHint={scopeGroupPickerEmptyHint()}
+                    emptyHint={awaitingClient ? t("bcp.picker.groupChooseClient") : scopeGroupPickerEmptyHint()}
                     placeholder={t("bcp.editor.searchGroups")}
                     value={row.id}
                     onChange={(id) => updateScopeRow(index, { id })}
@@ -500,7 +501,7 @@ export function PlanEditor({
               label={t("bcp.editor.addProcedure")}
               options={articleOptions.filter((option) => !procedureRefs.includes(option.id))}
               loading={articles.isLoading}
-              emptyHint={procedurePickerEmptyHint()}
+              emptyHint={awaitingClient ? t("bcp.picker.procedureChooseClient") : procedurePickerEmptyHint()}
               placeholder={t("bcp.editor.searchDocs")}
               value={procedurePick}
               onChange={(id) => {
@@ -540,12 +541,16 @@ export function PlanEditor({
               The server failure comes from here too, so a bodyless 503 still
               produces a sentence and `role="alert"` announces it, replacing
               the `{String(mutation.error)}` line that rendered a raw object. */}
-          <FormActions
-            label={t("bcp.editor.save")}
-            pending={mutation.isPending}
-            error={mutation.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("bcp.editor.save")}
+              pending={mutation.isPending}
+              error={mutation.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

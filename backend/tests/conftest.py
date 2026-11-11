@@ -287,36 +287,47 @@ class ApiEnv:
         return sub
 
     async def headers(self, org_id: UUID, sub: str) -> dict[str, str]:
-        """Auth headers for a user `create_user` seeded.
+        """What a browser signed in to the console sends, for a user `create_user`
+        seeded (own authentication design §2.4, §6.4).
 
-        THE EMAIL CLAIM MATCHES THE SEEDED ROW, and it has to. `create_user`
-        writes `{sub}@test.local`; the fake IdP's default claim is
-        `user@example.com`, so every token minted here used to assert an
-        address the row did not hold. That was invisible until design §7.2
-        (`docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md`)
-        made `app/api/deps.py` refresh `users.email` from the claim on
-        admission -- at which point the harness's own inconsistency became a
-        genuine identity-change event, and an `auth.email_changed` row landed
-        at the head of the audit chain in every test that asserts the complete
-        list of actions its module wrote.
+        A NEW, COMPLETE SESSION PER CALL, with a recent confirmation of the second
+        factor, made by the real `start_session` (`tests/session_support.py::sign_in`):
+        the cookie as an explicit `Cookie` header -- httpx's jar will not send a
+        `Secure` / `__Host-` cookie to `http://api.test` --, `X-ITMS-Request: 1`
+        and the console's `Origin`, which the CSRF rule requires on every write.
+        The client of `api_env` keeps that Origin pointed at whatever console the
+        test has configured (`_browser_origin` below).
 
-        Fixing it here rather than in those tests: the mismatch was a fixture
-        telling a small lie, and pinning `auth.email_changed` into a reporting
-        or SLA test would have taught two unrelated suites to expect it. Tests
-        for which the divergence IS the subject mint their own token with an
-        explicit `email=` (see `tests/test_me_profile.py`).
+        Until own authentication phase 1 this minted a Keycloak token whose email
+        claim had to match the seeded row (see git history); the session carries
+        no claim, so the row is the only address there is.
         """
-        slug = await self.org_slug(org_id)
-        token = self.idp.token(sub, slug, email=f"{sub}@test.local")
-        return {"Authorization": f"Bearer {token}"}
+        from tests.session_support import sign_in
+
+        return (await sign_in(self, org_id, sub, step_up=True)).headers
+
+    async def loopback_bearer(self, org_id: UUID, sub: str) -> str:
+        """The `Authorization` an assistant turn of this person carries: a token
+        minted from a new session of theirs (design §5.6). For tests that build a
+        `TurnContext` or call an executor directly."""
+        from app.core.auth.loopback import mint_loopback
+        from tests.session_support import principal_for, sign_in
+
+        signed = await sign_in(self, org_id, sub)
+        return f"Bearer {await mint_loopback(await principal_for(self, signed.session_id))}"
 
 
 @pytest.fixture()
 async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
+    from urllib.parse import urlsplit
+
     from app.core.config import Settings
     from app.main import create_app
     from tests.fake_idp import ISSUER, JWKS_URL, FakeIdp, jwks_client
+    from tests.session_support import CONSOLE
 
+    # `idp` and `jwks_client(idp)` stay: MCP still signs in at Keycloak until
+    # own authentication phase 3 (coordinator D12).
     idp = FakeIdp()
     settings = Settings(
         database_url=pg_cluster.app_url,
@@ -327,11 +338,41 @@ async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
+        # The console the session cookie's CSRF rule compares `Origin` with
+        # (own authentication Task 6): a deployment the console signs in to
+        # has one. `use_console` (tests/session_support.py) sets the same value.
+        public_console_url=CONSOLE,
     )
+
+    async def _browser_origin(request: httpx.Request) -> None:
+        """A browser sends the origin of the page it is on, and the page is the
+        console the deployment is configured at. So an `Origin` the harness put
+        there (`CONSOLE`) follows `settings.public_console_url` when a test
+        changes it; a different one (`null`, another site) or none at all is
+        left exactly as the test wrote it. With no console configured there is
+        no origin to follow, and the CSRF rule refuses -- as in production.
+
+        Serialised as a browser serialises an origin (RFC 6454 §6.1): scheme
+        and host lower-cased, an IPv6 host in brackets, the scheme's default
+        port left out, no path. Written out here rather than borrowed from
+        `app.core.auth.csrf.console_origin`, so the harness models the browser
+        and does not mirror the rule it exercises."""
+        if request.headers.get("Origin") != CONSOLE:
+            return
+        parts = urlsplit((settings.public_console_url or "").strip())
+        if not parts.scheme or not parts.hostname:
+            return
+        host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        default = {"https": 443, "http": 80}.get(parts.scheme.lower())
+        port = "" if parts.port in (None, default) else f":{parts.port}"
+        request.headers["Origin"] = f"{parts.scheme.lower()}://{host}{port}"
+
     app = create_app(settings, jwks_http_client=jwks_client(idp))
     try:
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://api.test"
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://api.test",
+            event_hooks={"request": [_browser_origin]},
         ) as client:
             yield ApiEnv(app, client, idp, settings, admin_engine, app_engine)
     finally:

@@ -1,4 +1,5 @@
 export const devices = {
+  // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   page: {
     title: "Devices",
     description: "Every computer and device you manage, with or without an agent.",
@@ -40,6 +41,8 @@ export const devices = {
     clear: "Clear search",
     provenanceAria: "Filter by how the record came to exist",
     provenanceAny: "Recorded by anyone",
+    siteAria: "Filter by site",
+    siteAny: "Every site",
     selected: {
       one: "{count} of at most {max} machines selected for push install.",
       other: "{count} of at most {max} machines selected for push install.",
@@ -58,6 +61,8 @@ export const devices = {
     device: "Device",
     agent: "Agent",
     lastSeen: "Last seen",
+    client: "Client",
+    site: "Site",
     assignedTo: "Assigned to",
     certificate: "Certificate",
     os: "Operating system",
@@ -74,6 +79,8 @@ export const devices = {
     noCert: "No certificate recorded",
     noOs: "No operating system recorded",
     noArch: "No architecture recorded",
+    noClient: "Client not known",
+    noSite: "Site not known",
     runJob: "Run job",
     runJobAria: "Run job on {name}",
     waitingForApprover: "Waiting for someone who can approve or reject new computers",
@@ -396,11 +403,18 @@ export const devices = {
       none: "No devices in this group.",
       remove: "Remove",
       add: "Add a device",
-      addEmpty: "Every device the inventory holds is already in this group.",
+      addEmpty: "Every device of this group's client is already in it.",
       addToGroup: "Add to group",
       orgDefault: "organisation default",
       otherGroup: "currently in another group",
       fallback: "A device leaving a group does not lose policy: it falls back to the organisation default.",
+      // The server answers per device (`moved: false` and its reason).
+      notMoved: "{name} was not added: {reason}.",
+      reason: {
+        otherClient: "it belongs to another client",
+        alreadyMember: "it is already a member",
+        noDevice: "that device no longer exists",
+      },
     },
     archiveDialog: {
       title: "Archive device group",

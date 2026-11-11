@@ -9,15 +9,7 @@ export const setup = {
     organizationName: "Organization name",
     settingUp: "Setting up…",
     finish: "Finish setup",
-    passwordHint: "You will be sent a link to choose a password. No password is entered here.",
+    passwordHint: "The first administrator signs in with this address and this password, and adds a second factor at the first sign-in.",
     unreachable: "The server could not be reached, so nothing was created. {reason}",
-  },
-  claim: {
-    title: "Setup complete",
-    belongsTo: "This installation now belongs to your organization, and <b>{email}</b> is its administrator.",
-    checkInbox: "Check that inbox for a link to choose a password, then sign in.",
-    invitationFailed: "The invitation email could not be sent, so no sign-in link has arrived.",
-    goToSignIn: "Go to sign in",
-    signInFailed: "Sign-in could not be started. {reason}",
   },
 } as const;

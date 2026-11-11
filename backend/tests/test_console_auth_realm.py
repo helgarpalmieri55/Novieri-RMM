@@ -1924,14 +1924,38 @@ def test_no_client_carries_a_field_keycloak_will_reject() -> None:
 # in without ever setting a credential.
 # --------------------------------------------------------------------------- #
 
+#: The module that started Keycloak's account actions from the console. Own-auth
+#: Task 10 deleted it with `oidc-client-ts`; it stays named so the re-pointed
+#: tests below can say it is gone.
 FRONTEND_AUTH = REPO / "frontend/src/lib/auth.ts"
+FRONTEND_SRC = REPO / "frontend/src"
+
+
+def _console_sources() -> list[Path]:
+    """Every non-test source file of the console."""
+    return [
+        path
+        for path in sorted(FRONTEND_SRC.rglob("*"))
+        if path.suffix in {".ts", ".tsx"}
+        and ".test." not in path.name
+        and "__tests__" not in path.parts
+    ]
 
 
 def _actions_the_console_starts() -> set[str]:
-    """The `kc_action` values the browser sends, read from the closed union."""
-    block = re.search(r"const ACCOUNT_ACTIONS:[^=]*=\s*\[(.*?)\]", FRONTEND_AUTH.read_text(), re.S)
-    assert block, f"{FRONTEND_AUTH} no longer declares ACCOUNT_ACTIONS"
-    return set(re.findall(r'"([^"]+)"', block.group(1)))
+    """The `kc_action` values the browser sends.
+
+    RE-POINTED (own-auth Task 10, plan decision D24). This read the closed
+    union `ACCOUNT_ACTIONS` in `lib/auth.ts`, which started each credential
+    step at Keycloak. The console changes credentials on its own pages now and
+    that file is gone, so the set is read from EVERY console source: a
+    `kc_action` anywhere is a step started at Keycloak again, and it lands in
+    the realm checks below like the three that were there.
+    """
+    found: set[str] = set()
+    for path in _console_sources():
+        found.update(re.findall(r"kc_action\W{1,6}([A-Za-z_-]+)", path.read_text()))
+    return found
 
 
 def _actions_the_backend_mails() -> set[str]:
@@ -1973,11 +1997,18 @@ def _enabled_actions(realm: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def test_the_action_sets_are_read_from_both_sides_and_are_not_empty() -> None:
     """Non-vacuity, first: the two extractors above are regex and `ast` over
     files that move. An empty set makes the guard below assert nothing over
-    nothing, twice."""
+    nothing, twice.
+
+    RE-POINTED (own-auth Task 10, D24): the console's set is EMPTY on purpose
+    now -- it starts no Keycloak step -- so its non-vacuity is that the scan
+    read the real console, and that `lib/auth.ts` is gone rather than moved.
+    The backend's set is unchanged: `kc_client` still mails Keycloak's actions
+    until the invitation of own-auth Task 8 replaces it."""
     console, mailed = _actions_the_console_starts(), _actions_the_backend_mails()
     assert "UPDATE_PASSWORD" in mailed, sorted(mailed)
-    assert "UPDATE_PASSWORD" in console, sorted(console)
-    assert len(console) == 3, sorted(console)
+    assert len(_console_sources()) > 300, len(_console_sources())
+    assert not FRONTEND_AUTH.exists(), f"{FRONTEND_AUTH} is back"
+    assert console == set(), sorted(console)
 
 
 def test_every_credential_step_itms_asks_for_exists_in_the_realm() -> None:
@@ -2176,8 +2207,18 @@ def _web_client() -> dict[str, Any]:
     return next(c for c in REALM["clients"] if c["clientId"] == "it-suite-web")
 
 
-def test_the_post_logout_uri_the_browser_asks_for_is_one_the_realm_accepts() -> None:
+def test_the_console_no_longer_asks_the_realm_to_sign_it_out() -> None:
     """AUDITOR A'S FIRST BLOCKER, AS A TEST ACROSS THE TWO FILES THAT DISAGREED.
+
+    RE-POINTED (own-auth Task 10, D24) from
+    `test_the_post_logout_uri_the_browser_asks_for_is_one_the_realm_accepts`.
+    The console signs out at its own server (`POST /api/v1/auth/logout`) and
+    never sends the browser to Keycloak's end-session endpoint, so there is no
+    post-logout URI left for the realm to refuse -- which is the blocker below
+    made impossible rather than fixed. What still holds, and is still checked:
+    the realm's own value is not `+` (the `it-suite-web` client stays in the
+    realm until Keycloak leaves, own-auth phase 4), and no console source asks
+    for a Keycloak sign-out again. The history, as it was:
 
     Signing out dead-ended on Keycloak's "Invalid redirect uri" -- a full-screen
     error page with, in the auditor's words, no link, no button and no
@@ -2203,18 +2244,14 @@ def test_the_post_logout_uri_the_browser_asks_for_is_one_the_realm_accepts() -> 
         "cannot match the origin the console asks to be returned to"
     )
 
-    requested = re.search(r"post_logout_redirect_uri:\s*(.+?),\n", FRONTEND_AUTH.read_text())
-    assert requested, f"{FRONTEND_AUTH} no longer sets post_logout_redirect_uri"
-
-    # The browser builds it from `window.location.origin`; what has to agree
-    # with the realm is the PATH it appends, since the origin is the same one
-    # Keycloak is served from (the `kc` router, same host).
-    path = re.sub(r"\$\{[^}]*window\.location\.origin[^}]*\}", "", requested.group(1))
-    path = path.strip("`\"' ")
-    assert path in registered.split("##"), (
-        f"the console asks to return to {path!r} and the realm registers "
-        f"{registered!r}; Keycloak refuses every sign-out this way"
-    )
+    asking = [
+        str(path.relative_to(REPO))
+        for path in _console_sources()
+        if re.search(
+            r"post_logout_redirect_uri|signoutRedirect|end_session_endpoint", path.read_text()
+        )
+    ]
+    assert asking == [], f"the console asks Keycloak to sign it out again: {asking}"
 
 
 def test_the_post_logout_uri_is_a_path_and_not_a_hostname() -> None:

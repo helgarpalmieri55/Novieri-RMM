@@ -505,8 +505,15 @@ async def test_a_proposal_needs_ai_act_propose_on_the_machine_s_client(
     world = await _ai_world(api_env, "cfg-ai-propose")
 
     async def as_person(grants: dict[UUID | None, tuple[str, ...]]) -> tuple[Any, Any]:
-        user, headers = await _holder(api_env, world.org_id, grants)
-        ctx = TurnContext(app=api_env.app, bearer=headers["Authorization"],
+        user, _headers = await _holder(api_env, world.org_id, grants)
+        # The turn's internal token, minted from a session of this person
+        # (own authentication design §5.6).
+        async with AsyncSession(api_env.admin_engine) as s:
+            sub = (
+                await s.execute(select(User.external_subject).where(User.id == user))
+            ).scalar_one()
+        bearer = await api_env.loopback_bearer(world.org_id, sub)
+        ctx = TurnContext(app=api_env.app, bearer=bearer,
                           deadline=world.ctx.deadline, org_id=world.org_id, user_id=user)
         binding = ProposeBinding(persona="admin", ai_session_id=world.ai_session_id,
                                  message_seq=1, actor_id=user)
@@ -615,7 +622,10 @@ async def _remote_session(env: ApiEnv, org: UUID, device: UUID, technician: UUID
 
 async def _user(env: ApiEnv, org: UUID) -> UUID:
     async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
-        u = User(org_id=org, external_subject=f"u-{uuid4().hex[:8]}", email="u@x.y")
+        # A technician's address is unique in an organisation (0245,
+        # ux_users_org_lower_email_staff), so each person gets their own.
+        tag = uuid4().hex[:8]
+        u = User(org_id=org, external_subject=f"u-{tag}", email=f"u-{tag}@x.y")
         s.add(u)
         await s.commit()
         return u.id

@@ -133,7 +133,10 @@ services:
       # the whole sign-in on the SPA's 200 `index.html`, which is what `web`
       # would answer. The realm's own documents begin `/realms` and stay on
       # `kc`. backend/tests/test_deploy_mcp_route.py holds all of this.
-      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`)
+      # `/.well-known/jwks.json` (own authentication, plan 2026-11-04 Task 2):
+      # the public halves of the platform's token signing key. An exact
+      # `Path`, so nothing else under `/.well-known/` moves.
+      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`)
       traefik.http.routers.api.entrypoints: websecure
       traefik.http.routers.api.tls: "true"
       traefik.http.services.api.loadbalancer.server.port: "8000"

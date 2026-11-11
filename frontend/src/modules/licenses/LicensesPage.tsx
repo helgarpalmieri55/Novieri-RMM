@@ -41,7 +41,8 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
 import { ClientField } from "../../components/ClientField";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { humaniseEnum } from "../../lib/labels";
 import {
@@ -437,11 +438,12 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const vendors = useVendors();
   const create = useCreateLicenseMutation();
   // A license is one client's (MSP clients phase 2): the client chosen at the
-  // top, or with every client the dialog's Client field (design §3.1).
-  const target = useNewRowClient("licenses.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const licenseClient = target.needsField ? pickedClient || null : target.clientId;
+  // top, or with every client the dialog's Client field (design §3.1),
+  // through the shared hook (operator decision 2). Unassigned chosen at the
+  // top files no new license.
+  const clientField = useNewRowClientField("licenses.manage");
+  const licenseClient = clientField.clientId;
+  const refused = clientField.refused !== null;
 
   // Not memoised: the sublabels are worded, and a held list would keep the
   // language it was built in.
@@ -480,7 +482,7 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setKeyVisible(false);
     setCost("");
     setCurrency("");
-    setPickedClient("");
+    clientField.setPicked("");
     setAttempt(null);
   }
 
@@ -494,7 +496,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   function submit() {
-    const askClient = target.needsField;
+    if (refused) return;
+    const askClient = clientField.needsField;
     const values = { product_id: productId, entitlements, cost, currency, client: licenseClient };
     const next: Attempt = {
       rules: () => [
@@ -539,9 +542,7 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         <div className="form-grid">
           {/* With every client chosen, the person says whose license this is
               (design §3.1): never the internal client by default. */}
-          {target.needsField ? (
-            <ClientField code="licenses.manage" value={pickedClient} onChange={setPickedClient} />
-          ) : null}
+          {clientField.needsField ? <ClientField field={clientField} /> : null}
           {/* THE BLOCKED FLOW. Auditor B, [HIGH]: the Product select held exactly
               one option -- "Select a product…" -- on a fresh install, so no
               license could ever be created, and "the modal neither says so nor
@@ -643,7 +644,10 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 makes a transcription error undetectable until the vendor
                 refuses the activation. The toggle says which state it is in, so
                 nobody has to infer it from the dots. */}
-            <div className="flex items-center gap-2">
+            {/* `data-secret`: shown, it is a secret typed in clear, and the
+                watch that keeps typed text when a session ends
+                (`lib/unsavedText.ts`) must never keep it. */}
+            <div className="flex items-center gap-2" data-secret>
               <input
                 className={inputClass}
                 type={keyVisible ? "text" : "password"}
@@ -666,12 +670,16 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
           {/* Enabled with no product selected ON PURPOSE. `disabled={... ||
               !productId}` was the silent no-op the audit found: the click
               moved nothing and named no field. Now the click says which. */}
-          <FormActions
-            label={t("licenses.common.save")}
-            pending={create.isPending}
-            error={create.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("licenses.common.save")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

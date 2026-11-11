@@ -88,6 +88,33 @@ def test_auth_body_round_trip_and_rejects_garbage() -> None:
         rsp.parse_auth(rsp.decode(rsp.encode(rsp.TILE, 1, b"{}")), secret_field="token")
 
 
+def test_the_viewer_leg_alone_names_its_viewer() -> None:
+    """The viewer leg's AUTH may name the person the api admitted
+    (`viewer`). Left out, the frame is byte for byte the one both legs sent
+    before, so nothing the agent sends or reads changes; an older api's
+    frame reads as no viewer; anything but a string is refused."""
+    frames = {v["name"]: v for v in json.loads(VECTORS.read_text())["frames"]}
+    for name, field, secret in (("auth_agent", "token", "tok"), ("auth_viewer", "ticket", "tic")):
+        vector = rsp.decode(bytes.fromhex(frames[name]["hex"]))
+        assert rsp.parse_viewer(vector) is None, name
+        session_id, _ = rsp.parse_auth(vector, secret_field=field)
+        rebuilt = rsp.auth_frame(
+            session_id=session_id, secret_field=field, secret=secret, seq=vector.seq
+        )
+        before = json.dumps({"session_id": session_id, field: secret}).encode()
+        assert rebuilt == rsp.encode(rsp.AUTH, vector.seq, before), name
+        assert json.loads(rsp.decode(rebuilt).body) == json.loads(vector.body), name
+
+    named = rsp.decode(
+        rsp.auth_frame(session_id="abc", secret_field="ticket", secret="tic", viewer="u-1")
+    )
+    assert rsp.parse_auth(named, secret_field="ticket") == ("abc", "tic")
+    assert rsp.parse_viewer(named) == "u-1"
+    body = json.dumps({"session_id": "abc", "ticket": "tic", "viewer": 7}).encode()
+    with pytest.raises(rsp.FrameError):
+        rsp.parse_viewer(rsp.decode(rsp.encode(rsp.AUTH, 1, body)))
+
+
 def test_state_body_parses_and_ignores_unknown_members() -> None:
     body = json.dumps({"state": "ended", "reason": "ended_by_user", "future": 1}).encode()
     state = rsp.parse_state(rsp.decode(rsp.encode(rsp.STATE, 3, body)))

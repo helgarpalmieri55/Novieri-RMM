@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import tr
 from app.models import Client
-from app.models.clients import CLIENT_KIND_UNASSIGNED
+from app.models.clients import CLIENT_ARCHIVED, CLIENT_KIND_UNASSIGNED
 from app.modules.budget.errors import (
     BudgetClientError,
     BudgetConflictError,
@@ -39,7 +39,6 @@ from app.modules.budget.errors import (
 )
 from app.services.client_modules import module_enabled, require_module
 from app.services.client_sites import (
-    CLIENT_ARCHIVED,
     ClientNotFound,
     NotAcceptingNewRows,
     client_for_new_rows,

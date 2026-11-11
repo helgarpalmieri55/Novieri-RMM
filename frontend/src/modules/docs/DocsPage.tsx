@@ -13,10 +13,11 @@ import type { MessageKey } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import type { DocArticleInput, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
-import { DocumentsSection, DocumentView, tooLong, UploadDocumentDialog } from "./documents";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
+import { clientRule, DocumentsSection, DocumentView, tooLong, UploadDocumentDialog } from "./documents";
 import { renderMarkdown } from "./markdown";
 import { RowButton } from "./RowButton";
 import { groupHits } from "./searchGroups";
@@ -247,11 +248,14 @@ export function DocsPage() {
   // Task 14). Set at creation only: an article's client never changes.
   const [forEveryClient, setForEveryClient] = useState(false);
   // A NEW ARTICLE IS ONE CLIENT'S unless it is for every client (§3.5): the
-  // client chosen at the top, or with every client the editor's Client field.
-  const target = useNewRowClient("docs.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const articleClient = target.needsField ? pickedClient || null : target.clientId;
+  // client chosen at the top, or with every client the editor's Client field
+  // (`useNewRowClientField`, operator decision 2). A refusal of the last Save
+  // describes the request that was sent, so a new pick clears it.
+  const articleClient = useNewRowClientField("docs.manage", undefined, {
+    onPick: () => {
+      if (save.isError) save.reset();
+    },
+  });
   const [showVersions, setShowVersions] = useState(false);
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -312,10 +316,15 @@ export function DocsPage() {
   const save = useMutation({
     mutationFn: async () => {
       if (selectedId && editing && article.data) {
-        return api.updateArticle(selectedId, draft);
+        // Every client's article is written without the top bar's client
+        // (`ApiClient.updateArticle`): narrowed, the server refuses it.
+        return api.updateArticle(selectedId, draft, { global: article.data.client_id === null });
       }
       // A new article is the client's above, or, when asked, every client's.
-      return api.createArticle({ ...draft, ...(forEveryClient ? {} : { client_id: requireKnown(articleClient) }) });
+      return api.createArticle({
+        ...draft,
+        ...(forEveryClient ? {} : { client_id: requireKnown(articleClient.clientId) }),
+      });
     },
     onSuccess: (saved) => {
       invalidate();
@@ -331,7 +340,7 @@ export function DocsPage() {
   // control below; there is no `onError` swallowing it and no optimistic
   // removal, so the article disappears only when the server said it did.
   const archive = useMutation({
-    mutationFn: () => api.archiveArticle(selectedId as string),
+    mutationFn: () => api.archiveArticle(selectedId as string, { global: article.data?.client_id === null }),
     onSuccess: () => {
       invalidate();
       setSelectedId(null);
@@ -371,7 +380,7 @@ export function DocsPage() {
     setSelectedId(null);
     setDraft({ title: "", body: "", category: "General" });
     setForEveryClient(false);
-    setPickedClient("");
+    articleClient.setPicked("");
     setAttempt(null);
     save.reset();
     setEditing(true);
@@ -413,10 +422,20 @@ export function DocsPage() {
     if (attempt) setAttempt(null);
   };
 
+  // A NEW article only: an edit keeps its client and asks nothing.
+  const creating = selectedId == null;
+  // Unassigned chosen at the top files nothing new; every client's is not
+  // filed under it, so the toggle lifts the refusal.
+  const refusedNew = creating && !forEveryClient && articleClient.refused !== null;
+
   const submitArticle = () => {
+    if (refusedNew) return;
+    // With every client chosen the Client field is required, and named like
+    // any other field before anything is built (phase 3 final review D2).
+    const askClient = creating && !forEveryClient && articleClient.needsField;
     const next: Attempt = {
-      rules: articleRules,
-      values: { title: draft.title, category: draft.category },
+      rules: () => [...articleRules(), ...(askClient ? [clientRule()] : [])],
+      values: { title: draft.title, category: draft.category, client: articleClient.clientId },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -884,16 +903,7 @@ export function DocsPage() {
                         if (save.isError) save.reset();
                       }}
                     />
-                    {!forEveryClient && target.needsField ? (
-                      <ClientField
-                        code="docs.manage"
-                        value={pickedClient}
-                        onChange={(id) => {
-                          setPickedClient(id);
-                          if (save.isError) save.reset();
-                        }}
-                      />
-                    ) : null}
+                    {!forEveryClient && articleClient.needsField ? <ClientField field={articleClient} /> : null}
                   </div>
                 ) : null}
                 <div className="mt-3 flex justify-end gap-2">
@@ -908,12 +918,16 @@ export function DocsPage() {
                    * silent no-op — a click that moved nothing and named no
                    * field. Submitting now says what is wrong, in one alert,
                    * whether the reason is a missing field or the server's. */}
-                  <FormActions
-                    label={t("docs.editor.save")}
-                    pending={save.isPending}
-                    error={save.isError ? save.error : undefined}
-                    problems={attemptProblems(attempt)}
-                  />
+                  {refusedNew ? (
+                    <UnassignedRefusal />
+                  ) : (
+                    <FormActions
+                      label={t("docs.editor.save")}
+                      pending={save.isPending}
+                      error={save.isError ? save.error : undefined}
+                      problems={attemptProblems(attempt)}
+                    />
+                  )}
                 </div>
               </Form>
             </Panel>
@@ -1071,11 +1085,13 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [forEveryClient, setForEveryClient] = useState(false);
   // A NEW RECORD IS ONE CLIENT'S unless it is for every client (§3.5): the
-  // client chosen at the top, or with every client the dialog's Client field.
-  const target = useNewRowClient("docs.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const recordClient = target.needsField ? pickedClient || null : target.clientId;
+  // client chosen at the top, or with every client the dialog's Client field
+  // (`useNewRowClientField`). A new pick clears a stale refusal.
+  const recordClient = useNewRowClientField("docs.manage", undefined, {
+    onPick: () => clearStaleFeedback(),
+  });
+  // Unassigned chosen at the top files nothing new, unless for every client.
+  const refused = !forEveryClient && recordClient.refused !== null;
   const create = useMutation({
     // The parsed object is the mutation's input, so no `JSON.parse` runs on
     // the dispatch path: a throw there surfaced as a raw `SyntaxError` (or as
@@ -1086,7 +1102,7 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
         name,
         fields,
         // The client's above, or, when asked, every client's.
-        ...(forEveryClient ? {} : { client_id: requireKnown(recordClient) }),
+        ...(forEveryClient ? {} : { client_id: requireKnown(recordClient.clientId) }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-records"] });
@@ -1102,7 +1118,13 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
   };
 
   const submit = () => {
-    const next: Attempt = { rules: recordRules, values: { name, fields: fieldsJson } };
+    if (refused) return;
+    // The Client field is required, and named before anything is built.
+    const askClient = !forEveryClient && recordClient.needsField;
+    const next: Attempt = {
+      rules: () => [...recordRules(), ...(askClient ? [clientRule()] : [])],
+      values: { name, fields: fieldsJson, client: recordClient.clientId },
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     // Safe: the rule above already proved this parses to an object.
@@ -1165,28 +1187,23 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
             clearStaleFeedback();
           }}
         />
-        {!forEveryClient && target.needsField ? (
-          <ClientField
-            code="docs.manage"
-            value={pickedClient}
-            onChange={(id) => {
-              setPickedClient(id);
-              clearStaleFeedback();
-            }}
-          />
-        ) : null}
+        {!forEveryClient && recordClient.needsField ? <ClientField field={recordClient} /> : null}
         <div className="flex justify-end gap-2">
           {/* See the article editor: an untyped Button inside a <form>
            * submits, and Cancel must not create the record. */}
           <Button type="button" variant="ghost" onClick={onClose}>
             {t("docs.record.cancel")}
           </Button>
-          <FormActions
-            label={t("docs.record.create")}
-            pending={create.isPending}
-            error={create.isError ? create.error : undefined}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("docs.record.create")}
+              pending={create.isPending}
+              error={create.isError ? create.error : undefined}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

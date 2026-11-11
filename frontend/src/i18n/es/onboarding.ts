@@ -30,6 +30,13 @@ export const onboarding: Shape<typeof en> = {
       checkAria: "Revisar {prefix}",
     },
   },
+  target: {
+    title: "Para qué cliente y sede",
+    subtitle: "Lo que añadas desde las páginas de abajo queda en este cliente y en esta sede.",
+    client: "Cliente: {client}",
+    oneSite: "Sede: {site}, la única del cliente.",
+    pickFirst: "Elige primero el cliente y la sede; después los enlaces de abajo los llevan.",
+  },
   state: {
     done: "Hecho",
     partial: "Hecho en parte",

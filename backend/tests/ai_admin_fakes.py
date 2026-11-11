@@ -41,6 +41,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.auth.loopback import loopback_app
+
 
 async def ai_user(api_env: Any, org_id: UUID, *codes: str) -> tuple[UUID, str]:
     """A user in `org_id` holding exactly `codes` and nothing else.
@@ -76,10 +78,18 @@ class RecordingTransport(httpx.AsyncBaseTransport):
     tool name and a failed argument validation must produce a tool error and NO
     HTTP TRAFFIC, and "the response was an error" cannot tell those apart from
     "the request was made and the route rejected it".
+
+    OVER THE APP MARKED AS THE ASSISTANT'S OWN CALL (`loopback_app`), as the
+    executors build it. `install_spy` ignores the app the executor hands its
+    transport seam, so without the mark here the executor's would be lost and
+    every loopback read refused (`verify_loopback`: "not an in-process call").
+    The mark admits nothing by itself -- the door also wants the header and a
+    verified internal token, which the EXECUTOR adds; `tests/test_loopback.py`
+    holds that it does.
     """
 
     def __init__(self, app: Any) -> None:
-        self._inner = httpx.ASGITransport(app=app)
+        self._inner = httpx.ASGITransport(app=loopback_app(app))
         self.requests: list[httpx.Request] = []
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:

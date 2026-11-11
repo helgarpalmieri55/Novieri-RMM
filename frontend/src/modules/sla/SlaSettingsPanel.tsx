@@ -6,6 +6,7 @@ import { Panel } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
+import { useEveryClientReason } from "../settings/api";
 import { useSlaSettings, useUpdateSlaSettingsMutation } from "./api";
 import { DEFAULT_AUTO_CLOSE_AFTER_DAYS, MAX_AUTO_CLOSE_AFTER_DAYS } from "./types";
 
@@ -51,6 +52,9 @@ export function SlaSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
   const t = useT();
   const settings = useSlaSettings();
   const update = useUpdateSlaSettingsMutation();
+  // Every client shares these settings: someone holding `sla.admin` on some
+  // clients is told it is needed on every one, not that they lack it.
+  const everyClient = useEveryClientReason("sla.admin");
   // `null` means "untouched, show what the server has" -- distinct from "",
   // which is a field the admin has deliberately cleared and which must stay
   // cleared rather than snapping back to the stored value mid-edit.
@@ -120,7 +124,7 @@ export function SlaSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
 
           {!canAdmin ? (
             <p className="note">
-              {t("sla.settings.needsAdmin")}
+              {everyClient ?? t("sla.settings.needsAdmin")}
             </p>
           ) : (
           <Form onSubmit={submit}>

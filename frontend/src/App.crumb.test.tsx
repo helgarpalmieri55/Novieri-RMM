@@ -20,24 +20,6 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The identity provider, stubbed at the module boundary `App.auth.test.tsx`
-// already uses. `Shell` subscribes to the session-expiry notice on mount, so
-// a mock missing those exports fails at render.
-vi.mock("./lib/auth", () => ({
-  safeReturnTo: () => "/devices",
-  signIn: () => Promise.resolve(),
-  completeSignIn: () => Promise.resolve(null),
-  isAuthenticated: () => true,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  isSessionExpiring: () => false,
-  onSessionExpiring: () => () => {},
-  startAccountAction: () => Promise.resolve(),
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
-
 // The API, likewise. `Shell` calls `me()` and `getCurrentOrg()` itself, and
 // `useHealthReading` calls the two status endpoints; nothing else here has a
 // page mounted under it to make a request.

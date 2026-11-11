@@ -22,8 +22,9 @@ the resolver's tools as "the portal's existing routes, invoked in-process under
 `portal_session` with the requester pinned", while §12 gates the surface with
 `require_portal_permission`. Those are two different mechanisms. This build
 chooses the loopback, matching the staff executor: an `httpx.ASGITransport`
-against the portal's own routes carrying the portal principal's own bearer token,
-so `resolve_portal_principal` and `require_portal_permission` RE-RUN VERBATIM and
+against the portal's own routes carrying the turn's internal token -- minted from
+the portal principal's own session (autenticación propia design §5.6) -- so
+`resolve_portal_principal` and `require_portal_permission` RE-RUN VERBATIM and
 `portal_session` is opened by the route rather than by this layer.
 
 Direct service calls would make the AI layer decide which GUCs get pinned, and
@@ -32,15 +33,18 @@ Direct service calls would make the AI layer decide which GUCs get pinned, and
 a layer that has re-implemented tenancy, badly, for the persona that reads the
 most attacker-controlled text on the platform.
 
-**THE PREMISE, VERIFIED, AND WHAT WOULD BREAK IT.** v1 portal principals
-authenticate through `auth_context`, so a bearer token exists and this works.
-`principal.py`'s own docstring says external end users will need a SECOND
-implementation of `resolve_portal_principal`. **If that implementation lands
-without a bearer token, this executor stops working, and the correct move is to
-report it -- never to mint a service token for the AI layer.** That is the
-privilege-escalation primitive `executor_staff.py`'s docstring warns about, and
-it would be worse here: the resolver serves a principal with almost no
-permissions, so a service token would hand it every permission it lacks.
+**THE PREMISE, AND WHAT WOULD BREAK IT.** The portal principal reaches this
+executor through `admit()` -- by its session cookie since autenticación propia
+phase 1 -- and its turn route mints the internal token
+(`app.core.auth.loopback`) from THAT session: it names the person and the
+session, lives five minutes, reads only, and carries no permission of its own,
+so `resolve_portal_principal` and `require_portal_permission` decide every call
+exactly as they would for the person. **That is not a service token, and one
+must never be minted for the AI layer**: a token whose authority is not one
+live person's session is the privilege-escalation primitive
+`executor_staff.py`'s docstring warns about, and it would be worse here: the
+resolver serves a principal with almost no permissions, so a service token
+would hand it every permission it lacks.
 """
 
 import logging
@@ -65,6 +69,7 @@ from app.core.ai.executor_staff import (
 )
 from app.core.ai.scrub import Blocked, scrub
 from app.core.ai.types import ReadTool, ToolResult
+from app.core.auth.loopback import LoopbackMarked, loopback_app, loopback_headers
 
 logger = logging.getLogger("its.ai.executor_portal")
 
@@ -85,7 +90,7 @@ PORTAL_PATH_PREFIX = "/api/v1/portal/"
 PORTAL_GATE_PREFIX = "portal."
 
 
-def _transport(app: FastAPI) -> httpx.AsyncBaseTransport:
+def _transport(app: FastAPI | LoopbackMarked) -> httpx.AsyncBaseTransport:
     """The in-process transport. A named seam, mirroring the staff executor's,
     so a test can wrap it with a spy that records the exact request this module
     built -- and, more importantly, can assert that NO request was built at all
@@ -190,17 +195,19 @@ async def invoke_portal_tool(
 
     # **THE THIRD AND LAST HTTP-CLIENT CONSTRUCTION SITE IN `app/core/ai/`**, and
     # `tests/test_ai_boundaries.py` asserts that count as an EQUALITY so a fourth
-    # is a decision somebody makes rather than a thing that happens. Exactly one
-    # header is set, and it carries the PORTAL principal's own token unmodified,
-    # so `resolve_portal_principal` and `require_portal_permission` re-run and
-    # `portal_session` pins both GUCs inside the route.
+    # is a decision somebody makes rather than a thing that happens. Exactly the
+    # loopback headers are set: the PORTAL principal's own internal token
+    # (design §5.6) and `X-ITMS-Loopback: 1`, with the in-process mark on the
+    # app (`loopback_app`), so `resolve_portal_principal` and
+    # `require_portal_permission` re-run and `portal_session` pins both GUCs
+    # inside the route.
     try:
         async with httpx.AsyncClient(
-            transport=_transport(app),
+            transport=_transport(loopback_app(app)),
             base_url=LOOPBACK_BASE_URL,
             timeout=min(MAX_TOOL_CALL_SECONDS, remaining),
         ) as client:
-            response = await client.get(url, params=query, headers={"Authorization": bearer})
+            response = await client.get(url, params=query, headers=loopback_headers(bearer))
     except httpx.TimeoutException:
         return ToolError(  # i18n-exempt: model-facing, tool result read by the model
             tool=tool_name,

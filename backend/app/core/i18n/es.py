@@ -159,7 +159,6 @@ CATALOG: dict[str, str] = {
     "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
     "token has no kid header": "el token no tiene encabezado kid",
     "this token is not an access token": "este token no es un token de acceso",
-    "this token was not issued to the console": "este token no se emitió para la consola",
     "token missing required {oidc_org_claim} claim in multi-tenant mode": (
         "al token le falta el claim obligatorio {oidc_org_claim} en el modo multiorganización"
     ),
@@ -1024,6 +1023,7 @@ CATALOG: dict[str, str] = {
     ),
     # --- api ---
     "missing bearer token": "falta el token de portador",
+    "the assistant's internal token was refused": "se rechazó el token interno del asistente",
     "unknown organization": "organización desconocida",
     "requires {code}": "requiere {code}",
     "X-Client-Id must be one client id": "X-Client-Id debe ser el id de un solo cliente",
@@ -1157,15 +1157,6 @@ CATALOG: dict[str, str] = {
     "settings cannot be null; send {{}} to change nothing": (
         "settings no puede ser null; envía {{}} para no cambiar nada"
     ),
-    "The identity provider refused that (HTTP {status_code}).": (
-        "El proveedor de identidad lo rechazó (HTTP {status_code})."
-    ),
-    "email settings cannot be changed on this installation yet: its identity provisioning is "
-    "not configured. That is a server setting, not something this screen can fix.": (
-        "la configuración del correo todavía no se puede cambiar en esta instalación: su "
-        "aprovisionamiento de identidad no está configurado. Es un ajuste del servidor, no "
-        "algo que esta pantalla pueda arreglar."
-    ),
     "a relay password needs a sign-in username; leave both blank for a relay that needs no "
     "sign-in": (
         "una contraseña del servidor de correo necesita un nombre de usuario para iniciar "
@@ -1198,36 +1189,62 @@ CATALOG: dict[str, str] = {
     "the client secret may be at most {max_client_secret} characters": (
         "el secreto de cliente puede tener como máximo {max_client_secret} caracteres"
     ),
+    "The mail relay refused the message.": "El servidor de correo rechazó el mensaje.",
+    "The mail relay refused the recipient address.": (
+        "El servidor de correo rechazó la dirección del destinatario."
+    ),
+    "The mail relay could not be reached.": "No se pudo contactar con el servidor de correo.",
+    "The mail relay's certificate could not be verified.": (
+        "No se pudo verificar el certificado del servidor de correo."
+    ),
+    "The mail relay or Microsoft 365 refused the sign-in.": (
+        "El servidor de correo o Microsoft 365 rechazó el inicio de sesión."
+    ),
+    "Microsoft 365 sign-in could not be reached.": (
+        "No se pudo contactar con el inicio de sesión de Microsoft 365."
+    ),
+    "The saved sign-in is missing or unreadable; enter it again.": (
+        "El inicio de sesión guardado falta o no se puede leer; introdúcelo de nuevo."
+    ),
+    "The message could not be built from these settings; check the sender, the display name "
+    "and the reply-to address.": (
+        "No se pudo construir el mensaje con esta configuración; revisa el remitente, el nombre "
+        "visible y la dirección de respuesta."
+    ),
+    "a Microsoft sign-in's token URL must be Microsoft's own: "
+    "https://login.microsoftonline.com/<directory>/oauth2/v2.0/token": (
+        "la URL de token de un inicio de sesión de Microsoft 365 debe ser la de Microsoft: "
+        "https://login.microsoftonline.com/<directorio>/oauth2/v2.0/token"
+    ),
+    "too many test messages for this organization; try again in a minute": (
+        "demasiados mensajes de prueba para esta organización; inténtalo de nuevo en un minuto"
+    ),
+    "ITMS test message": "Mensaje de prueba de ITMS",
+    "the relay password may only contain ASCII characters": (
+        "la contraseña del servidor de correo solo puede contener caracteres ASCII"
+    ),
+    "This credential belongs to this organization's account email; change it in Settings, "
+    "Email.": (
+        "Esta credencial pertenece al correo de cuentas de esta organización; cámbiala en "
+        "Ajustes, Correo."
+    ),
+    "This is a test message from ITMS. It reached you, so this organization's account email "
+    "(invitations and password resets) is working.": (
+        "Este es un mensaje de prueba de ITMS. Te ha llegado, así que el correo de cuentas de "
+        "esta organización (invitaciones y restablecimientos de contraseña) funciona."
+    ),
+    "This credential is used only to send this organization's account email and cannot be "
+    "revealed.": (
+        "Esta credencial solo se usa para enviar el correo de cuentas de esta organización y no "
+        "se puede revelar."
+    ),
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"
-    ),
-    "the identity provider could not create the first administrator. Nothing was created; the "
-    "server log has the detail.": (
-        "el proveedor de identidad no pudo crear al primer administrador. No se creó nada; el "
-        "registro del servidor tiene el detalle."
-    ),
-    "The invitation email could not be sent, so no sign-in link has arrived. Email delivery is "
-    "most likely not set up on this installation yet.": (
-        "No se pudo enviar el correo de invitación, así que no ha llegado ningún enlace de "
-        "acceso. Lo más probable es que el envío de correo aún no esté configurado en esta "
-        "instalación."
     ),
     "that install code is not correct. It is printed in the server log at first start and "
     "stored beside this installation's other secrets.": (
         "ese código de instalación no es correcto. Se imprime en el registro del servidor en "
         "el primer arranque y se guarda junto a los demás secretos de esta instalación."
-    ),
-    "this installation cannot create accounts yet: its identity provisioning is not "
-    "configured. That is a server setting, not something this screen can fix.": (
-        "esta instalación todavía no puede crear cuentas: su aprovisionamiento de identidad no "
-        "está configurado. Es un ajuste del servidor, no algo que esta pantalla pueda arreglar."
-    ),
-    "this installation is still starting up, so it cannot create accounts yet. Wait a moment "
-    "and try again. If it says this for more than a few minutes, the installation did not "
-    "finish preparing itself and needs attention from whoever set it up.": (
-        "esta instalación todavía se está iniciando, así que aún no puede crear cuentas. "
-        "Espera un momento e inténtalo de nuevo. Si sigue diciendo esto pasados unos minutos, "
-        "la instalación no terminó de prepararse y necesita la atención de quien la configuró."
     ),
     "this installation has already been set up. Sign in, or ask one of its administrators to "
     "add you.": (
@@ -4442,14 +4459,160 @@ CATALOG: dict[str, str] = {
         "no se pueden reducir los puestos a {seats}: ahora hay {active} puesto(s) asignado(s)"
     ),
     "no such subscription": "no existe esa suscripción",
+    # --- auth (P2 phase 1: the platform's own sign-in) ---
+    "signing in is not available right now; try again in a moment": (
+        "el inicio de sesión no está disponible ahora mismo; vuelve a intentarlo en un momento"
+    ),
+    "signing in is not set up on this installation: its console address is not configured": (
+        "el inicio de sesión no está configurado en esta instalación: falta la dirección de su "
+        "consola"
+    ),
+    "signing in is not set up on this installation: it names no organization to sign in to": (
+        "el inicio de sesión no está configurado en esta instalación: no indica en qué "
+        "organización iniciar sesión"
+    ),
+    "sign in to do this": "inicia sesión para hacer esto",
+    "you are already signed in": "ya has iniciado sesión",
+    "confirm your second factor first": "confirma primero tu segundo factor",
+    "This person's password was set with an emailed reset link, and no second factor has been "
+    "used since. Resetting their sign-in methods now would hand the account to whoever holds "
+    "that mailbox. Use the server's recovery command instead, and hand the link to the person "
+    "directly.": (
+        "La contraseña de esta persona se puso con un enlace de restablecimiento enviado por "
+        "correo y desde entonces no se ha usado ningún segundo factor. Restablecer ahora sus "
+        "métodos de inicio de sesión entregaría la cuenta a quien tenga ese buzón. Use el "
+        "comando de recuperación del servidor y entregue el enlace a la persona en mano."
+    ),
+    "Your password was last set with an emailed link. Choose a new password to finish "
+    "recovering your account.": (
+        "Su contraseña se puso por última vez con un enlace enviado por correo. Elija una "
+        "contraseña nueva para terminar de recuperar su cuenta."
+    ),
+    "your password is locked after too many failed attempts; set a new one with the link on "
+    "the sign-in page, or ask an administrator to reset your sign-in methods": (
+        "tu contraseña quedó bloqueada tras demasiados intentos fallidos; elige una nueva con el "
+        "enlace de la página de inicio de sesión, o pide a un administrador que restablezca tus "
+        "métodos de inicio de sesión"
+    ),
+    "this second factor is locked after too many failed attempts; an administrator can reset "
+    "your factors": (
+        "este segundo factor quedó bloqueado tras demasiados intentos fallidos; un administrador "
+        "puede restablecer tus factores"
+    ),
+    "too many failed attempts; try again in {seconds} seconds": (
+        "demasiados intentos fallidos; vuelve a intentarlo dentro de {seconds} segundos"
+    ),
+    "the email address or the password is not right": (
+        "la dirección de correo electrónico o la contraseña no son correctas"
+    ),
+    "the second factor was not accepted; try again": (
+        "no se aceptó el segundo factor; inténtalo de nuevo"
+    ),
+    "that sign-in method is not set up on this account": (
+        "ese método de inicio de sesión no está configurado en esta cuenta"
+    ),
+    "this link is not valid: it has expired, was already used or was replaced by a newer one": (
+        "este enlace no es válido: caducó, ya se usó o se sustituyó por uno más reciente"
+    ),
+    "the passkey was not accepted; try again": (
+        "no se aceptó la clave de acceso; inténtalo de nuevo"
+    ),
+    "set up a passkey or an authenticator app first": (
+        "configura primero una clave de acceso o una app de autenticación"
+    ),
+    "too many attempts from this network; try again in a few minutes": (
+        "demasiados intentos desde esta red; vuelve a intentarlo en unos minutos"
+    ),
+    "the current password is not right": "la contraseña actual no es correcta",
+    "this is your only second factor; add another one before removing it": (
+        "es tu único segundo factor; añade otro antes de quitarlo"
+    ),
+    "no such passkey": "no existe esa clave de acceso",
+    "no such remembered device": "no existe ese equipo recordado",
+    "a passkey": "una clave de acceso",
+    "an authenticator app": "una app de autenticación",
+    "a new set of recovery codes": "un juego nuevo de códigos de recuperación",
+    "your recovery codes": "tus códigos de recuperación",
+    "your password": "tu contraseña",
+    "Your {product} password was changed": "Se cambió la contraseña de tu cuenta de {product}",
+    "The password of your {product} account was changed on {when}.\n\nIf it was not you, tell "
+    "your administrator now.": (
+        "La contraseña de tu cuenta de {product} se cambió el {when}.\n\nSi no fuiste tú, avisa "
+        "ahora a tu administrador."
+    ),
+    "A sign-in method was added to your {product} account": (
+        "Se añadió un método de inicio de sesión a tu cuenta de {product}"
+    ),
+    "Added on {when}: {factor}.\n\nIf it was not you, tell your administrator now.": (
+        "Añadido el {when}: {factor}.\n\nSi no fuiste tú, avisa ahora a tu administrador."
+    ),
+    "A sign-in method was removed from your {product} account": (
+        "Se quitó un método de inicio de sesión de tu cuenta de {product}"
+    ),
+    "Removed on {when}: {factor}.\n\nIf it was not you, tell your administrator now.": (
+        "Quitado el {when}: {factor}.\n\nSi no fuiste tú, avisa ahora a tu administrador."
+    ),
+    "A sign-in method on your {product} account was locked": (
+        "Se bloqueó un método de inicio de sesión de tu cuenta de {product}"
+    ),
+    "After too many failed attempts, {factor} was locked on {when}. An administrator can reset "
+    "your sign-in methods.": (
+        "Tras demasiados intentos fallidos, se bloqueó {factor} el {when}. Un administrador "
+        "puede restablecer tus métodos de inicio de sesión."
+    ),
+    "A device will be remembered for your {product} account": (
+        "Se recordará un equipo para tu cuenta de {product}"
+    ),
+    "On {when} a browser was remembered: for {days} days it will not ask for your second "
+    "factor.\n\nIf it was not you, remove it under My security and tell your administrator.": (
+        "El {when} se recordó un navegador: durante {days} días no te pedirá el segundo factor."
+        "\n\nSi no fuiste tú, quítalo en Mi seguridad y avisa a tu administrador."
+    ),
+    "A recovery code was used on your {product} account": (
+        "Se usó un código de recuperación en tu cuenta de {product}"
+    ),
+    "A recovery code was used on {when}. {left} codes remain.\n\nIf it was not you, tell your "
+    "administrator now.": (
+        "Se usó un código de recuperación el {when}. Quedan {left} códigos.\n\nSi no fuiste tú, "
+        "avisa ahora a tu administrador."
+    ),
+    "Your {product} sign-in methods were reset": (
+        "Se restablecieron los métodos de inicio de sesión de tu cuenta de {product}"
+    ),
+    "Your passkeys, authenticator app and recovery codes were removed on {when}. You will set "
+    "up a new second factor the next time you sign in.\n\nIf you did not ask for this, tell "
+    "your administrator now.": (
+        "El {when} se quitaron tus claves de acceso, tu app de autenticación y tus códigos de "
+        "recuperación. La próxima vez que inicies sesión configurarás un segundo factor nuevo."
+        "\n\nSi no lo pediste, avisa ahora a tu administrador."
+    ),
+    "Reset your {product} password": "Restablece la contraseña de tu cuenta de {product}",
+    "Someone asked to reset the password of your {product} account.\n\nOpen this link within "
+    "30 minutes to choose a new one. You will still need your second factor to sign in.\n"
+    "{link}\n\nIf it was not you, ignore this message: your password has not changed.": (
+        "Alguien pidió restablecer la contraseña de tu cuenta de {product}.\n\nAbre este enlace "
+        "en los próximos 30 minutos para elegir una nueva. Seguirás necesitando tu segundo factor "
+        "para iniciar sesión.\n{link}\n\nSi no fuiste tú, ignora este mensaje: tu contraseña no "
+        "ha cambiado."
+    ),
+    "A recovery link was issued for your {product} account": (
+        "Se emitió un enlace de recuperación para tu cuenta de {product}"
+    ),
+    "On {when} someone with access to the server issued a one-time recovery link for your "
+    "account. It works for 15 minutes.\n\nIf you did not ask for this, tell whoever runs this "
+    "installation now.": (
+        "El {when} alguien con acceso al servidor emitió un enlace de recuperación de un solo uso "
+        "para tu cuenta. Sirve durante 15 minutos.\n\nSi no lo pediste, avisa ahora a quien "
+        "administra esta instalación."
+    ),
+    "You are invited to {product}": "Te invitaron a {product}",
+    "{inviter} invited you to {product}.\n\nOpen this link within 72 hours to choose a password "
+    "and set up your second factor:\n{link}\n\nIf you did not expect this, ignore this message.": (
+        "{inviter} te invitó a {product}.\n\nAbre este enlace en las próximas 72 horas para "
+        "elegir una contraseña y configurar tu segundo factor:\n{link}\n\nSi no lo esperabas, "
+        "ignora este mensaje."
+    ),
     # --- user_admin ---
-    "the identity provider refused to {what} (HTTP {status_code})": (
-        "el proveedor de identidad se negó a {what} (HTTP {status_code})"
-    ),
-    "the identity provider could not {what}": "el proveedor de identidad no pudo {what}",
-    "the identity provider was unreachable while trying to {what} ({error_type})": (
-        "no se pudo contactar con el proveedor de identidad al intentar {what} ({error_type})"
-    ),
     "{role} is cross-org platform administration and cannot be granted from an organization": (
         "{role} es administración de la plataforma entre organizaciones y no se puede conceder "
         "desde una organización"
@@ -4472,9 +4635,6 @@ CATALOG: dict[str, str] = {
     "a user with that email address already exists here": (
         "aquí ya existe un usuario con esa dirección de correo electrónico"
     ),
-    "the identity was created but the local record conflicts with an existing one": (
-        "la identidad se creó, pero el registro local entra en conflicto con uno existente"
-    ),
     "this user already holds that role at that scope": (
         "este usuario ya tiene ese rol en ese ámbito"
     ),
@@ -4486,11 +4646,16 @@ CATALOG: dict[str, str] = {
         "{role} es administración de la plataforma entre organizaciones; no se puede conceder "
         "desde una organización y por eso tampoco se revoca desde una"
     ),
-    "this installation cannot manage accounts yet: its identity provisioning is not "
-    "configured. That is a server setting, not something this screen can fix.": (
-        "esta instalación todavía no puede administrar cuentas: su aprovisionamiento de "
-        "identidad no está configurado. Es un ajuste del servidor, no algo que esta pantalla "
-        "pueda arreglar."
+    "this person has already accepted their invitation": "esta persona ya aceptó su invitación",
+    "this person has no pending invitation": "esta persona no tiene ninguna invitación pendiente",
+    "the same role is listed twice for the same client": (
+        "el mismo rol aparece dos veces para el mismo cliente"
+    ),
+    "this installation's console address is not configured, so an invitation link cannot be "
+    "made. That is a server setting, not something this screen can fix.": (
+        "la dirección de la consola de esta instalación no está configurada, así que no se puede "
+        "crear un enlace de invitación. Es un ajuste del servidor, no algo que esta pantalla pueda "
+        "arreglar."
     ),
     "the identity provider did not return this platform's service account, so a test message "
     "has no sender to go out as": (
@@ -4522,16 +4687,13 @@ CATALOG: dict[str, str] = {
     ),
     "user admin, you cannot ... your own account: disable": "deshabilitar",
     "user admin, you cannot ... your own account: delete": "eliminar",
+    "user admin, you cannot ... your own account: reset the sign-in methods of": (
+        "restablecer los métodos de inicio de sesión de"
+    ),
     "user admin, cannot be ...: disabled": "deshabilitar",
     "user admin, cannot be ...: deleted": "eliminar",
     "user admin, cannot be ...: stripped of the role": "dejar sin ese rol",
-    "identity provider action: create the user": "crear el usuario",
-    "identity provider action: update the user": "actualizar el usuario",
-    "identity provider action: delete the user": "eliminar el usuario",
-    "identity provider action: send the enrolment email": "enviar el correo de invitación",
-    "identity provider action: send the password-reset email": (
-        "enviar el correo de restablecimiento de contraseña"
-    ),
+    "user admin, cannot be ...: invited": "invitar",
     # --- provisioning ---
     "no such image": "no existe esa imagen",
     "no such profile": "no existe ese perfil",
@@ -4883,9 +5045,6 @@ CATALOG: dict[str, str] = {
     "MCP access must be granted by a person signing in": (
         "el acceso por MCP debe concederlo una persona al iniciar sesión"
     ),
-    "this token is for the MCP server and is accepted only through it": (
-        "este token es para el servidor MCP y solo se acepta a través de él"
-    ),
     # MCP server (app/mcp/server.py)
     "MCP is turned off for this organization. An org-admin turns it on in "
     "Settings → AI connections.": (
@@ -4951,4 +5110,37 @@ CATALOG: dict[str, str] = {
         "se ocultaron los detalles del error porque contenían un campo que parece secreto"
     ),
     "this tool cannot reach that route": "esta herramienta no puede llegar a esa ruta",
+    # --- core/auth: contraseñas y claves (autenticación propia, Task 2) ---
+    "Use at least {minimum} characters.": "Usa al menos {minimum} caracteres.",
+    "Use at most {maximum} characters.": "Usa como máximo {maximum} caracteres.",
+    "This password is on a list of common or leaked passwords. Choose another one: "
+    "several unrelated words together work well.": (
+        "Esta contraseña está en una lista de contraseñas comunes o filtradas. Elige otra: "
+        "varias palabras sin relación entre sí funcionan bien."
+    ),
+    "This password is too close to your email address or to the platform's name. "
+    "Choose one that does not build on them.": (
+        "Esta contraseña se parece demasiado a tu correo o al nombre de la plataforma. "
+        "Elige una que no parta de ellos."
+    ),
+    "The signing keys are not available right now; try again in a moment.": (
+        "Las claves de firma no están disponibles ahora mismo; vuelve a intentarlo en un "
+        "momento."
+    ),
+    # --- auth: sessions, cookies and recent confirmation (P2 Task 6) ---
+    "this request was refused because it did not come from the console": (
+        "se rechazó esta petición porque no vino de la consola"
+    ),
+    "finish signing in: confirm your second factor first": (
+        "termina de iniciar sesión: confirma primero tu segundo factor"
+    ),
+    # The console's door with no session (own authentication Task 13).
+    "sign in to continue": "inicia sesión para continuar",
+    "your session has ended; sign in again": "tu sesión terminó; inicia sesión de nuevo",
+    "confirm your second factor again to do this": (
+        "confirma de nuevo tu segundo factor para hacer esto"
+    ),
+    "the inactivity limit cannot be longer than the longest sign-in": (
+        "el límite de inactividad no puede ser mayor que la duración máxima de la sesión"
+    ),
 }

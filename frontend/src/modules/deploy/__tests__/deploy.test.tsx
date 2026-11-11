@@ -810,6 +810,45 @@ describe("CreateDeploymentDialog", () => {
     return { user, dialog };
   }
 
+  // Phase 3 final review C, Important 4 (the same pattern in deploy/api.ts): a
+  // deployment is its target's client's, and the server links it only to a
+  // change of that client (`authorizing_change`, "no such change" otherwise).
+  // With every client chosen `GET /changes` holds every client's, so the
+  // picker offers the target's client's alone -- none before a target -- and
+  // a change chosen for another target's client is never sent.
+  it("offers only the changes of the target's client, and drops one of another", async () => {
+    api.listDevices = vi.fn().mockResolvedValue({
+      items: [
+        device({ id: "dev1", hostname: "WKS-042", os_family: "windows", client_id: "o1" }),
+        device({ id: "dev2", hostname: "ACME-01", os_family: "windows", client_id: "c-acme" }),
+      ],
+      total: 2,
+    });
+    const change = { type: "normal", description: "", risk: "low", affected: [], window_start: null, window_end: null, rollback_plan: null, created_by: "u1", created_at: "2026-01-01T00:00:00Z" };
+    api.listChanges = vi.fn().mockResolvedValue([
+      { ...change, id: "ch-own", client_id: "o1", title: "Own window", state: "approved" },
+      { ...change, id: "ch-acme", client_id: "c-acme", title: "Acme window", state: "approved" },
+    ]);
+    const { user, dialog } = await openDialog();
+    const offered = () =>
+      within(within(dialog).getByLabelText("Change request"))
+        .getAllByRole("option")
+        .map((option) => option.textContent);
+
+    expect(within(dialog).queryByLabelText("Change request")).toBeNull();
+    await pickEntity(user, "Package", /Notepad\+\+ 8\.6/);
+    await pickEntity(user, "Target", /WKS-042/);
+    expect(offered()).toEqual(["No change request", "Own window"]);
+    await user.selectOptions(within(dialog).getByLabelText("Change request"), "ch-own");
+
+    await pickEntity(user, "Target", /ACME-01/);
+    expect(offered()).toEqual(["No change request", "Acme window"]);
+    expect(within(dialog).getByLabelText("Change request")).toHaveValue("");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await vi.waitFor(() => expect(api.createDeployment).toHaveBeenCalledTimes(1));
+    expect((api.createDeployment as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).not.toHaveProperty("change_id");
+  });
+
   it("leaves Create enabled with nothing filled in", async () => {
     // THE RULE: a disabled button that never says why IS the silent no-op.
     // Disabled is for a request in flight, not for input not yet supplied.

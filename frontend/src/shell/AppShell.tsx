@@ -63,9 +63,6 @@ export interface AppShellProps {
   health?: HealthReading;
   user: { name: string; email?: string; role: string };
   onSignOut: () => void;
-  /** True once a silent renewal has failed: the session is genuinely ending. */
-  sessionExpiring?: boolean;
-  onSignIn?: () => void;
   /** What the palette can jump to. Supplied by the app, never invented here. */
   searchItems?: readonly CommandPaletteItem[];
   /** Told each query so the app can look records up for it. */
@@ -85,6 +82,15 @@ export interface AppShellProps {
    * there is none -- its own tests and `/__preview`.
    */
   clientSelector?: ReactNode;
+  /**
+   * The client chosen in the top bar, for a phone (operator decision 4,
+   * 2026-11-02): there the selector is in the drawer, so the drawer toggle
+   * carries the client's initials (`short`) and says its `name` in full.
+   * Absent with every client chosen -- the toggle is then the plain icon --
+   * and ignored wider than a handset, where the selector is in the bar. A
+   * slot filled by `Shell` (`useClientMark`), for the selector's reason.
+   */
+  clientMark?: { short: string; name: string };
   children: ReactNode;
 }
 
@@ -217,8 +223,6 @@ export function AppShell({
   health,
   user,
   onSignOut,
-  sessionExpiring = false,
-  onSignIn,
   searchItems = [],
   onSearchQueryChange,
   searchPending,
@@ -226,6 +230,7 @@ export function AppShell({
   searchHint,
   onAsk,
   clientSelector,
+  clientMark,
   children,
 }: AppShellProps) {
   const t = useT();
@@ -269,6 +274,12 @@ export function AppShell({
   const paletteField = useRef<HTMLInputElement>(null);
   const navToggleRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  // THE CHOSEN CLIENT ON A PHONE, in the one control the bar has room for:
+  // the drawer toggle, which already opens the drawer the selector heads.
+  const marked = handset ? clientMark : undefined;
+  const navToggleName = marked
+    ? t(navOpen ? "shell.app.closeNavigationClient" : "shell.app.openNavigationClient", { client: marked.name })
+    : t(navOpen ? "shell.app.closeNavigation" : "shell.app.openNavigation");
 
   const closePalette = useCallback((reason: PaletteCloseReason) => {
     const opener = paletteOpener.current;
@@ -449,16 +460,28 @@ export function AppShell({
               44x44 target rather than the 30x30 chevron the audit measured.
               Hidden by the stylesheet at desktop widths, where the sidebar is
               always on screen and a second control for it would be noise. */}
+          {/* ON A PHONE, WITH A CLIENT CHOSEN, IT ALSO SAYS WHICH (operator
+              decision 4): the selector is in the drawer there, so this is
+              the one place in the bar the client can be seen. Its initials
+              are a picture of the name -- `aria-hidden` -- and the name
+              itself is in the button's name and `title` (SC 2.5.3). With
+              every client, or wider than a handset, it is today's icon. */}
           <button
             type="button"
             className="nav-toggle"
             ref={navToggleRef}
-            aria-label={navOpen ? t("shell.app.closeNavigation") : t("shell.app.openNavigation")}
+            aria-label={navToggleName}
+            title={marked ? navToggleName : undefined}
             aria-expanded={navOpen}
             aria-controls="sidebar"
             onClick={() => setNavOpen((open) => !open)}
           >
             <Icon name={navOpen ? "x" : "menu-2"} size={18} />
+            {marked ? (
+              <span className="client-mark" aria-hidden="true">
+                {marked.short}
+              </span>
+            ) : null}
           </button>
 
           {/* THE BREADCRUMB AND THE PAGE TITLE ARE NOT IN THE BAR ANY MORE.
@@ -571,27 +594,12 @@ export function AppShell({
           </div>
         </header>
 
-        {/* SAY IT BEFORE THE USER FINDS OUT BY LOSING SOMETHING. The console
-            learns that a silent renewal failed about a minute before the next
-            request 401s; until this existed it kept that to itself, and the
-            audit's finding is the consequence -- "the session drops mid-task
-            during continuous active use, with no warning, no expiry notice,
-            and total loss of context."
-
-            A BANNER, NOT A DIALOG, and not an automatic redirect. Interrupting
-            someone mid-form to announce that they are about to be interrupted
-            is the same defect in politer clothing, and a redirect would throw
-            away the unsaved work this warning exists to save. `role="status"`
-            is polite by definition: assistive technology announces it at the
-            next pause rather than cutting across what the user is doing. */}
-        {sessionExpiring ? (
-          <div className="session-notice" role="status">
-            <span>{t("shell.app.sessionExpired")}</span>
-            <button type="button" className="session-notice-action" onClick={onSignIn}>
-              {t("shell.app.signInAgain")}
-            </button>
-          </div>
-        ) : null}
+        {/* NO SESSION BANNER HERE ANY MORE. It said "your session has
+            expired" over the page and left the page drawn. A session that
+            ends now takes the shell with it: the guard empties the cache and
+            draws `SessionEnded` in its place, with what the person had typed
+            kept to copy (`App.tsx`'s `RequireAuth`, operator decision 3,
+            2026-11-05). */}
 
         {/* The skip link's target, and `tabIndex={-1}` is what makes it work:
             without it the browser moves the viewport but not the focus, so a

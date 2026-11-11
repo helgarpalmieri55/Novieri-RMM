@@ -543,3 +543,45 @@ async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
     with pytest.raises(DeviceGroupError) as refused:
         await racing
     assert refused.value.status_code == 409
+
+
+async def test_the_group_list_filters_by_client_and_never_widens(api_env) -> None:
+    """`GET /device-groups?client_id=X` is the list a scope narrowed to X
+    reads, as `X-Client-Id` narrows it: X's groups, and the ungrouped count
+    of X's machines. A client outside the caller's scope lists nothing --
+    never its groups -- and a value that is not an id is a 422. Final review
+    A6: the BCP and member pickers read one page of every client's groups.
+    FALSIFIER: `list_groups` (`app/api/v1/device_groups.py`) ignoring
+    `client_id`, or reading under the caller's whole scope with it."""
+    from tests.test_client_record_checks import _device, _holder
+
+    org = await api_env.create_org("cdg-filter")
+    x, x_site = await client_with_site(api_env, org)
+    y, y_site = await client_with_site(api_env, org)
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
+        x_group = DeviceGroup(org_id=org, client_id=x, name="x-servers")
+        y_group = DeviceGroup(org_id=org, client_id=y, name="y-servers")
+        s.add_all([x_group, y_group])
+        await s.commit()
+    await _device(api_env, org, x, x_site)
+    for _ in range(2):
+        await _device(api_env, org, y, y_site)
+    admin = await _admin(api_env, org)
+    _, x_reader = await _holder(api_env, org, {x: ("devices.read",)})
+
+    async def listed(headers: dict[str, str], **params: str) -> tuple[set[str], int, int]:
+        r = await api_env.client.get(GROUPS, headers=headers, params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        names = {g["name"] for g in body["items"]}
+        assert len(names) == body["total"], body
+        return names, body["total"], body["ungrouped_device_count"]
+
+    assert await listed(admin) == ({"x-servers", "y-servers"}, 2, 3)
+    assert await listed(admin, client_id=str(x)) == ({"x-servers"}, 1, 1)
+    assert await listed(admin, client_id=str(y)) == ({"y-servers"}, 1, 2)
+    assert await listed(x_reader, client_id=str(x)) == ({"x-servers"}, 1, 1)
+    assert await listed(x_reader, client_id=str(y)) == (set(), 0, 0)
+    assert await listed(x_reader, client_id=str(uuid4())) == (set(), 0, 0)
+    bad = await api_env.client.get(GROUPS, headers=admin, params={"client_id": "nope"})
+    assert bad.status_code == 422, bad.text

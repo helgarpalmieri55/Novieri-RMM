@@ -16,20 +16,13 @@ import {
   calls,
   describeControl,
   installDefaults,
+  mutationCacheText,
   renderSettings,
 } from "./harness";
 
 // The OIDC client is not under test and constructs a UserManager (with a
 // silent-renew timer) at import time. `../api.ts`'s org request only needs the
 // bearer token, so the token source is stubbed.
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  // The Profile tab deep-links into Keycloak's account console, so the
-  // authority is now part of what `SettingsPage` needs from this module.
-  // A factory mock is a strict namespace: a missing export throws.
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // `apiClient` is referenced LAZILY — inside the returned closure, never while
 // the factory runs. Importing the harness from within the factory instead
 // deadlocks: the harness imports `SettingsPage`, which imports the very module
@@ -230,6 +223,20 @@ describe("Settings — Notifications tab", () => {
       active: true,
       secret: "new-token",
     });
+  });
+
+  it("keeps no replacement credential in the mutation cache once the save settles (D2, Minor 1)", async () => {
+    const user = userEvent.setup();
+    calls.listNotificationChannels.mockResolvedValue([WEBHOOK_CHANNEL_FIXTURE]);
+    const { queryClient } = renderSettings();
+    await openTab();
+
+    const secret = await screen.findByLabelText<HTMLInputElement>("New token for Ops chat");
+    await user.type(secret, "new-token-xyz");
+    await user.click(within(secret.closest("tr") as HTMLElement).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(calls.updateNotificationChannel).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-token-xyz"));
   });
 
   it("a failed save is unmistakable: the server's error is shown and success is not claimed", async () => {

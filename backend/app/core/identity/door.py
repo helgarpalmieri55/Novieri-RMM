@@ -1,18 +1,24 @@
-"""What a token door reads about a person before any client scope exists.
+"""What a door reads about a person before any client scope exists.
 
 Doors 2 and 3 -- the console WebSocket (``app/api/v1/ws.py``) and the
-remote-control tunnel (``app/modules/remote/tunnel.py``) -- turn a validated
-token into a person by the same two admission reads: the org's email-domain
-rule and the ``users`` row's status. Both reads happen BEFORE the person's
-client scope can be known, because that scope is computed from the very rows
-being read (MSP clients spec §2.2), so they run under ``ClientScope.all()``.
-That makes this module, not the doors, the reviewed place that does it
-(``ALL_SCOPE_ALLOWLIST``, spec §2.3): a route file never holds the "every
-client" scope itself.
+remote-control tunnel (``app/modules/remote/tunnel.py``) -- turn a console
+session into a person by the same two admission reads
+(``read_session_identity``): the org's email-domain rule and the ``users``
+row's status. Both reads happen BEFORE the person's client scope can be known,
+because that scope is computed from the very rows being read (MSP clients spec
+§2.2), so they run under ``ClientScope.all()``. That makes this module, not the
+doors, the reviewed place that does it (``ALL_SCOPE_ALLOWLIST``, spec §2.3): a
+route file never holds the "every client" scope itself.
 
-Door 1 (``app/api/deps.py::admit``) does the same reads inline, because it
+Until own authentication phase 1 (Task 13) the two doors read a validated
+TOKEN's person (``read_door_identity``). It was removed with the console's
+bearer: no door called it any more, and a reviewed every-client reader that
+nothing calls would pre-approve whatever called it next.
+
+Door 1 (``app/api/deps.py::admit``) does the same reads inline -- for a
+session in ``_admit_session``, and on the MCP channel for a token, where it
 also self-heals a missing ``users`` row and records the first-seen
-``auth.login`` -- neither of which the other two doors do.
+``auth.login``, which no other door does.
 
 A CONTACT IS REFUSED HERE TOO (spec §1.3): both doors are the console's, and a
 contact never enters the console. Read with ``users.status``, from the same row.
@@ -44,7 +50,6 @@ from app.core.identity import contact_refusal, log_admission_refusal, status_ref
 from app.core.identity.email_domain import domain_refusal
 from app.core.identity.policy import resolve_console_domain
 from app.core.rbac import clients_holding
-from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import User
 
@@ -53,12 +58,11 @@ from app.models import User
 class DoorIdentity:
     """The outcome of the admission reads.
 
-    ``refusal`` is the admission refusal reason (the domain rule's or
-    ``users.status``'s), already logged under the door's name, or ``None``.
-    ``user_id`` is ``None`` when this ``sub`` has no ``users`` row; what that
-    means is the door's decision (the WebSocket admits it, the tunnel does
-    not). ``clients`` is the person's client scope -- where they hold any role,
-    or the door's ``code`` -- and is EMPTY for anybody refused or unknown.
+    ``refusal`` is the admission refusal reason (the domain rule's, or
+    ``users.status``'s / ``users.kind``'s), already logged under the door's
+    name, or ``None``. ``user_id`` is ``None`` when the person's ``users`` row
+    is gone. ``clients`` is the person's client scope -- where they hold any
+    role, or the door's ``code`` -- and is EMPTY for anybody refused or unknown.
     """
 
     refusal: str | None
@@ -66,49 +70,48 @@ class DoorIdentity:
     clients: ClientScope
 
 
-async def read_door_identity(
+async def read_session_identity(
     *,
     door: str,
     org_id: UUID,
-    claims: TokenClaims,
+    user_id: UUID,
     settings: Settings,
     engine: AsyncEngine,
     code: str | None = None,
 ) -> DoorIdentity:
-    """The domain rule, then the ``users`` row, its status and its kind, for
-    ``claims``; then the person's scope.
+    """The domain rule, then the person's ``users`` row -- its status and its
+    kind -- for a console session's person (P2 design §6.5); then their scope.
 
     ``door`` names the door in the refusal log line (``console-ws``,
-    ``remote-tunnel``), exactly as each door named itself before this was
-    shared. ``code`` is the permission the door guards: the scope is then the
-    clients where the person holds it, as ``require_permission(code)`` makes it
-    for a route. ``None`` (the console WebSocket, which needs no permission) is
-    every client where they hold any role. Nothing is written.
-    """
+    ``remote-tunnel``). ``code`` is the permission the door guards: the scope
+    is then the clients where the person holds it, as
+    ``require_permission(code)`` makes it for a route. ``None`` (the console
+    WebSocket, which needs no permission) is every client where they hold any
+    role.
+
+    The domain rule is read against the ROW's address, which is the one the
+    platform verifies now that it owns sign-in. ``user_id`` is ``None`` in the
+    answer only when the row is gone. Nothing is written."""
     nobody = ClientScope.only([])
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
-        domain_reason = domain_refusal(
-            claims.email, await resolve_console_domain(session, org_id, settings)
-        )
-        if domain_reason is not None:
-            log_admission_refusal(door, sub=claims.sub, email=claims.email, reason=domain_reason)
-            return DoorIdentity(refusal=domain_reason, user_id=None, clients=nobody)
         row = (
             await session.execute(
-                select(User.id, User.status, User.kind).where(
-                    User.external_subject == claims.sub
-                )
+                select(User.email, User.status, User.kind).where(User.id == user_id)
             )
         ).one_or_none()
         if row is None:
             return DoorIdentity(refusal=None, user_id=None, clients=nobody)
-        user_id, user_status, user_kind = row
-        # `users.status`: a disabled or deleted account is refused at once, not
-        # when its access token happens to expire. Then `users.kind`: a contact
-        # never enters the console.
+        email, user_status, user_kind = row
+        who = f"user:{user_id}"
+        domain_reason = domain_refusal(
+            email, await resolve_console_domain(session, org_id, settings)
+        )
+        if domain_reason is not None:
+            log_admission_refusal(door, sub=who, email=email, reason=domain_reason)
+            return DoorIdentity(refusal=domain_reason, user_id=user_id, clients=nobody)
         reason = status_refusal(user_status) or contact_refusal(user_kind)
         if reason is not None:
-            log_admission_refusal(door, sub=claims.sub, email=claims.email, reason=reason)
+            log_admission_refusal(door, sub=who, email=email, reason=reason)
             return DoorIdentity(refusal=reason, user_id=user_id, clients=nobody)
         scope = await clients_holding(session, user_id, code)
     return DoorIdentity(refusal=None, user_id=user_id, clients=scope)

@@ -36,7 +36,7 @@ import app.modules.notification.delivery as delivery_module
 from app.core.client_scope import ClientScope
 from app.core.i18n import locale_var, use_locale
 from app.core.vault import LocalVaultService
-from app.models import DomainEvent, NotificationChannel, NotificationDelivery, User
+from app.models import Client, DomainEvent, NotificationChannel, NotificationDelivery, User
 from app.modules.notification.channels import create_channel
 from app.modules.notification.delivery import (
     _recipient_language,
@@ -116,15 +116,30 @@ async def _org_and_admin(api_env, slug: str) -> tuple[UUID, UUID]:
 
 
 async def _add_user(
-    api_env, org_id: UUID, *, email: str, locale: str | None, status: str = "active"
+    api_env,
+    org_id: UUID,
+    *,
+    email: str,
+    locale: str | None,
+    status: str = "active",
+    contact: bool = False,
 ) -> UUID:
+    """A technician, or with `contact=True` a contact of a new customer client."""
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        client_id = None
+        if contact:
+            client = Client(org_id=org_id, name=f"Cliente {uuid7().hex[:6]}", kind="customer")
+            session.add(client)
+            await session.flush()
+            client_id = client.id
         user = User(
             org_id=org_id,
             external_subject=f"sub-{uuid7().hex[:12]}",
             email=email,
             locale=locale,
             status=status,
+            kind="contact" if contact else "staff",
+            client_id=client_id,
         )
         session.add(user)
         await session.commit()
@@ -289,18 +304,20 @@ async def test_recipient_language_under_row_level_security(api_env) -> None:
 
 
 async def test_two_users_with_one_address_resolve_to_the_oldest(api_env) -> None:
-    """Which should not happen (the index on (org_id, lower(email)) is not
-    unique). The answer is deterministic -- the earliest-created user (uuid7 ids
-    sort by creation time) -- not whichever row the planner returns first."""
+    """Rare, and still possible: two TECHNICIANS of one organization never
+    share an address since migration 0245, but a technician created after a
+    contact may hold the contact's. The answer is deterministic -- the
+    earliest-created user (uuid7 ids sort by creation time) -- not whichever
+    row the planner returns first."""
     org_id, _ = await _org_and_admin(api_env, "mail-lang-dup")
-    await _add_user(api_env, org_id, email="dup@example.com", locale="es")
+    await _add_user(api_env, org_id, email="dup@example.com", locale="es", contact=True)
     await _add_user(api_env, org_id, email="DUP@example.com", locale=None)
     async with AsyncSession(api_env.admin_engine) as session:
         for _ in range(5):
             assert await _recipient_language(session, org_id, "dup@example.com") == "es"
 
     org_id2, _ = await _org_and_admin(api_env, "mail-lang-dup2")
-    await _add_user(api_env, org_id2, email="dup@example.com", locale=None)
+    await _add_user(api_env, org_id2, email="dup@example.com", locale=None, contact=True)
     await _add_user(api_env, org_id2, email="dup@example.com", locale="es")
     async with AsyncSession(api_env.admin_engine) as session:
         for _ in range(5):

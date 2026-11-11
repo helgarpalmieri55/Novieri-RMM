@@ -13,6 +13,7 @@ export const ipam = {
     scanAuthorizations: "Scan authorizations",
     importExport: "Import / export",
   },
+  // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   // Words shared by several screens: a field's label is also its column's header.
   fields: {
     name: "Name",
@@ -776,9 +777,9 @@ export const ipam = {
     routeDistinguisher: "Route distinguisher",
     addVrf: "Add VRF",
     sitesTitle: "Sites",
-    // No console page manages a client's sites yet (phase 3) -- final review E.
     sitesSubtitle:
-      "The client's offices. VLANs and subnets name them; until the console can manage a client, they are added and edited through the API or an AI connection (MCP).",
+      "The client's offices. VLANs and subnets name them; they are added and edited on the Clients page.",
+    manageSites: "Manage sites",
     sitesEmpty: "This client has no sites yet.",
     vlansTitle: "VLANs",
     vlansSubtitle: "A VLAN with no site is the whole client's, not one whose site is missing.",

@@ -4,6 +4,7 @@ import type { shell as en } from "../en/shell";
 export const shell: Shape<typeof en> = {
   accountMenu: {
     yourProfile: "Tu perfil",
+    yourSecurity: "Tu seguridad",
     settings: "Configuración",
     language: "Idioma: {language}",
     signOut: "Cerrar sesión",
@@ -54,10 +55,12 @@ export const shell: Shape<typeof en> = {
       platformStatus: "Estado de la plataforma",
       errorMonitor: "Monitor de errores",
       settings: "Configuración",
+      clients: "Clientes",
       myTickets: "Mis tickets",
       newTicket: "Nuevo ticket",
     },
     section: {
+      organization: "Organización",
       serviceDesk: "Mesa de ayuda",
       computers: "Equipos",
       automation: "Automatización",
@@ -82,7 +85,6 @@ export const shell: Shape<typeof en> = {
       pushInstall: "Qué redes pueden recibir una instalación remota y con qué credencial.",
       deviceGroups: "Grupos a los que se dirigen las políticas, los despliegues y el acceso.",
       siteServers: "Dispositivos que hacen barridos y encienden equipos de su propia red.",
-      imaging: "Imágenes de sistema operativo y perfiles de compilación.",
       aiAutomation: "Cuánto puede hacer el asistente por su cuenta.",
       jobHistory: "Cada tarea enviada a un dispositivo y lo que respondió.",
       credentials: "Contraseñas guardadas para sesiones desatendidas y para la creación de imágenes.",
@@ -91,6 +93,7 @@ export const shell: Shape<typeof en> = {
       platformStatus: "Si los servicios propios de este servidor están en buen estado.",
       errorMonitor: "Errores que han producido la consola y su servidor.",
       settings: "Organización, usuarios, roles, correo y valores predeterminados.",
+      clients: "Las empresas a las que das servicio, sus sedes, contactos y módulos.",
     },
     adminDescription: "Configura cómo funciona la consola para tu organización.",
     page: {
@@ -114,20 +117,31 @@ export const shell: Shape<typeof en> = {
     dismissNavigation: "Ocultar la navegación",
     closeNavigation: "Cerrar la navegación",
     openNavigation: "Abrir la navegación",
+    openNavigationClient: "Abrir la navegación — cliente: {client}",
+    closeNavigationClient: "Cerrar la navegación — cliente: {client}",
     addComputer: "Añadir un equipo",
     askAssistant: "Preguntar al Asistente",
     assistantObject: "al Asistente",
-    sessionExpired:
-      "Tu sesión ha caducado. Lo que no hayas guardado sigue en esta página: termina y guarda, y luego vuelve a iniciar sesión para enviarlo.",
     signInAgain: "Iniciar sesión de nuevo",
     breadcrumb: "Ruta de navegación",
     signInUnavailable: "El inicio de sesión no está disponible",
-    identityProviderUnreachable: "La consola no pudo conectar con su proveedor de identidad en <mono>{authority}</mono>.",
+    serverUnreachable: "La consola no pudo preguntar al servidor si has iniciado sesión. {reason}",
+    refused: "Esta cuenta no puede usar la consola",
     redirecting: "Redirigiendo al inicio de sesión…",
     starting: "Iniciando…",
-    completingSignIn: "Completando el inicio de sesión…",
-    signInFailed: "Error al iniciar sesión: {error}",
+    signingOut: "Cerrando sesión…",
+    signOutFailed: "El cierre de sesión no llegó al servidor, así que tu sesión sigue abierta. Inténtalo de nuevo.",
     pageType: "Página",
+  },
+  sessionEnded: {
+    title: "Tu sesión ha terminado",
+    body: "La página en la que estabas se cerró y sus datos se borraron, para que nadie más pueda leerlos en este equipo. Vuelve a iniciar sesión para continuar.",
+    bodyKept:
+      "La página en la que estabas se cerró y sus datos se borraron, para que nadie más pueda leerlos en este equipo. Lo que habías escrito está abajo: copia lo que quieras conservar y vuelve a iniciar sesión.",
+    keptTitle: "Lo que estabas escribiendo",
+    keptHint:
+      "Solo lectura y sin guardar en ningún sitio: desaparece cuando sales de esta página. Solo se conserva el texto más largo, como respuestas y notas; nunca una contraseña ni un código.",
+    keptField: "Texto {n}",
   },
   health: {
     base: "Estado de salud y alertas",

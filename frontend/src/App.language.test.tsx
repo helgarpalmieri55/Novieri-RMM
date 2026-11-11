@@ -5,25 +5,10 @@
  */
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("./lib/auth", () => ({
-  safeReturnTo: () => "/",
-  signIn: () => Promise.resolve(),
-  completeSignIn: () => Promise.resolve(null),
-  isAuthenticated: () => true,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  isSessionExpiring: () => false,
-  onSessionExpiring: () => () => {},
-  startAccountAction: () => Promise.resolve(),
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
 
 const apiRef = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("./lib/ApiContext", () => ({
@@ -32,10 +17,19 @@ vi.mock("./lib/ApiContext", () => ({
 }));
 
 const { LanguageBridge, Shell } = await import("./App");
+const { sessionEnded } = await import("./lib/sessionEnd");
 const { useLanguage } = await import("./i18n/context");
 const { getLanguage, setActiveLanguage } = await import("./i18n/core");
 
-function withClient(node: React.ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+/**
+ * The tree inside a query client, SIGNED IN unless told otherwise: the bridge
+ * saves a language to the account only while `/me` is known and no 401 has
+ * been seen (`lib/session.ts::hasSession`, plan decision D20). Seeded with
+ * the profile `MeProbe` reads first, so its first answer is the same one.
+ */
+function withClient(node: React.ReactNode, { signedIn = true }: { signedIn?: boolean } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (signedIn) client.setQueryData(["me"], { locale: "en" });
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
@@ -74,31 +68,68 @@ describe("LanguageBridge", () => {
   });
 });
 
-describe("LanguageBridge: the sign-in pages", () => {
-  it("says so, without an error tone, when the save worked but the sign-in pages did not follow", async () => {
-    apiRef.current = {
-      updateMe: vi.fn().mockResolvedValue({ locale: "es", identity_locale_synced: false }),
-      me: vi.fn().mockResolvedValue({ locale: "es" }),
-    };
-    render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+describe("LanguageBridge without a session (D20)", () => {
+  /**
+   * THE BRIDGE IS ALSO ON THE SIGN-IN PAGES: it sits outside `RequireAuth`.
+   * There, a switch used to `PATCH /me` with no session; the 401 sent the
+   * browser to sign in, from the sign-in page, which loaded the page again.
+   * The choice stays in this browser (`itms.lang`) and nothing is sent.
+   */
+  it("saves nothing to an account on a page reached without one", async () => {
+    const updateMe = vi.fn().mockResolvedValue({});
+    apiRef.current = { updateMe };
+    render(withClient(<LanguageBridge><Picker /></LanguageBridge>, { signedIn: false }));
     await userEvent.click(screen.getByRole("button", { name: "current en" }));
-    const toast = await screen.findByText(/Guardado\. Las páginas de inicio de sesión no se pudieron cambiar/);
-    expect(toast).toBeInTheDocument();
-    expect(screen.queryByText("No se pudo guardar el idioma.")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
     expect(getLanguage()).toBe("es");
+    expect(updateMe).not.toHaveBeenCalled();
   });
 
-  it.each([true, null, undefined])("is silent when identity_locale_synced is %s", async (flag) => {
-    const updateMe = vi.fn().mockResolvedValue({ locale: "es", identity_locale_synced: flag });
+  it("saves nothing once the session has ended, though /me is still cached", async () => {
+    const updateMe = vi.fn().mockResolvedValue({});
+    apiRef.current = { updateMe };
+    render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+    act(() => sessionEnded());
+    await userEvent.click(screen.getByRole("button", { name: "current en" }));
+    expect(getLanguage()).toBe("es");
+    expect(updateMe).not.toHaveBeenCalled();
+  });
+});
+
+describe("LanguageBridge: the sign-in pages", () => {
+  // RE-POINTED (own authentication phase 1): these pinned a note for a
+  // language the identity provider's sign-in pages did not take (a flag
+  // `PATCH /me` used to carry). Those pages are this console's own now and
+  // the flag is gone (Task 8), so a save that worked says nothing at all --
+  // which is what is pinned now.
+  it("says nothing after a save that worked: the sign-in pages are the console's own", async () => {
+    const updateMe = vi.fn().mockResolvedValue({ locale: "es" });
     apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
     render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
     await userEvent.click(screen.getByRole("button", { name: "current en" }));
     await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
     // Let the promise chain behind the click settle before asserting an absence.
     await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
+    // Kept from the test this re-points: a save that worked is not a failure.
+    expect(screen.queryByText("No se pudo guardar el idioma.")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(getLanguage()).toBe("es");
   });
+
+  it.each([{ locale: "es" }, { locale: "es", display_name: "Ada" }, {}])(
+    "is silent whatever the saved profile carries (%o)",
+    async (answer) => {
+      const updateMe = vi.fn().mockResolvedValue(answer);
+      apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
+      render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+      await userEvent.click(screen.getByRole("button", { name: "current en" }));
+      await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
+      // Let the promise chain behind the click settle before asserting an absence.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(screen.queryByRole("status")).toBeNull();
+    },
+  );
 });
 
 describe("LanguageBridge: the cached /me", () => {

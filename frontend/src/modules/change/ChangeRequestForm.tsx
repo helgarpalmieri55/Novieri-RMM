@@ -5,8 +5,9 @@ import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDateTime, toInstant } from "../../lib/datetime";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useCreateChangeMutation, useUpdateChangeMutation, useUserTimezone } from "./api";
 import { riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
@@ -95,11 +96,10 @@ export function ChangeRequestForm({
   const t = useT();
   // A change is one client's (MSP clients phase 2), and that client must use
   // change management: the client chosen at the top, or with every client the
-  // form's Client field (design §3.1; plan Task 11 D11.2).
-  const target = useNewRowClient("change.request");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const changeClient = target.needsField ? pickedClient || null : target.clientId;
+  // form's Client field (design §3.1; plan Task 11 D11.2), through the
+  // shared hook (operator decision 2).
+  const clientField = useNewRowClientField("change.request");
+  const changeClient = clientField.clientId;
   const create = useCreateChangeMutation();
   const update = useUpdateChangeMutation();
   const zone = useUserTimezone();
@@ -120,6 +120,8 @@ export function ChangeRequestForm({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const mutation = existing ? update : create;
+  // Unassigned chosen at the top files no new change; an edit keeps its own.
+  const refused = !existing && clientField.refused !== null;
 
   // The zone every instant on this form is read and written in. `null` on the
   // profile means the browser's, which is what `lib/datetime` falls back to --
@@ -135,7 +137,7 @@ export function ChangeRequestForm({
     setWindowStart("");
     setWindowEnd("");
     setRollbackPlan("");
-    setPickedClient("");
+    clientField.setPicked("");
     setAttempt(null);
   }
 
@@ -151,10 +153,11 @@ export function ChangeRequestForm({
   }
 
   function submit() {
+    if (refused) return;
     // The rules close over the values of THIS submission (constants of this
     // render), never over live state.
     // Only a new change asks for its client: an edit keeps its own.
-    const askClient = !existing && target.needsField;
+    const askClient = !existing && clientField.needsField;
     const next: Attempt = {
       rules: () => [
         ...changeRules(windowStart, windowEnd, zone),
@@ -220,9 +223,7 @@ export function ChangeRequestForm({
           {/* With every client chosen, a new change says whose it is (design
               §3.1). A client without change management is the server's 404,
               shown as it is (plan Task 11 D11.2). */}
-          {!existing && target.needsField ? (
-            <ClientField code="change.request" value={pickedClient} onChange={setPickedClient} />
-          ) : null}
+          {!existing && clientField.needsField ? <ClientField field={clientField} /> : null}
           <Field label={t("change.form.type")} full>
             <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
               <option value="standard">{t("change.form.typeStandard")}</option>
@@ -238,6 +239,8 @@ export function ChangeRequestForm({
           <Field label={t("change.form.titleRequired")} full>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -307,12 +310,16 @@ export function ChangeRequestForm({
               server failure comes from here too, so a bodyless 503 still
               produces a sentence and `role="alert"` announces it, replacing the
               `{String(mutation.error)}` line that rendered a raw object. */}
-          <FormActions
-            label={t("change.form.save")}
-            pending={mutation.isPending}
-            error={mutation.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("change.form.save")}
+              pending={mutation.isPending}
+              error={mutation.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

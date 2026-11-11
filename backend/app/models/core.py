@@ -50,6 +50,17 @@ class User(TimestampMixin, Base):
         # `email_intake/identity.py::resolve_sender` matches on `lower(email)`
         # and needs this to be an index scan.
         Index("ix_users_org_lower_email", "org_id", text("lower(email)")),
+        # Migration 0245 (own authentication, plan decision D2): sign-in finds
+        # a technician by (organization, address), so two technicians of one
+        # organization never share one. Contacts are held apart by 0232's
+        # `its_contact_email_unique` trigger.
+        Index(
+            "ux_users_org_lower_email_staff",
+            "org_id",
+            text("lower(email)"),
+            unique=True,
+            postgresql_where=text("kind = 'staff'"),
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()

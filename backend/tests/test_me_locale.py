@@ -1,28 +1,23 @@
-"""`PATCH /me` locale: validation, and the mirror to Keycloak's `locale` attribute.
+"""`PATCH /me` locale (spec 2026-10-09 §3.5, §4), and the identity-provider
+write it no longer makes (P2 phase 1 Task 8; design §1.3 retires "el espejo del
+idioma en Keycloak (`me.py`)").
 
-Spec `docs/superpowers/specs/2026-10-09-spanish-language-design.md` §3.5 and §4.
+TWO HALVES.
 
-THREE CLAIMS, AND THE SECOND IS THE ONE THAT CAN DO DAMAGE.
+1. The route: the format check (unchanged), and the language staying in the
+   platform. `PATCH /me` calls no identity provider whatever is configured,
+   and its answer carries no `identity_locale_synced`. The sign-in pages and
+   the account mails are the platform's own now and read `users.locale`.
+2. `kc_client.set_locale_attribute`, which keeps no caller until phase 4
+   retires `kc_client.py` with Keycloak: its read-modify-write is still held
+   here, driven directly, so the function cannot rot while it exists.
 
-1. The format check. `en-GB` (stored before the console wrote only `en`/`es`)
-   stays valid; markup and one-letter tags do not.
-2. The Keycloak write is a READ-MODIFY-WRITE of the full user representation.
-   Under Keycloak's declarative user profile a PUT that omits `email`,
-   `firstName` or `lastName` can clear them, and a PUT of `attributes` replaces
-   the whole map -- so a partial body would erase `org`, which is the claim
-   every tenancy decision in this platform reads. The tests below assert that
-   what goes back is what came out, plus exactly one changed key.
-3. Keycloak is never allowed to fail the save. The console value is committed
-   first; a Keycloak error becomes `identity_locale_synced: false`.
-
-WHAT THIS CANNOT SHOW: `httpx.MockTransport` proves the requests this code
-sends, not what a real Keycloak does with them. Whether `locale` is accepted
-depends on the realm having internationalization enabled (Task 20).
+WHAT THIS CANNOT SHOW: `httpx.MockTransport` proves the requests the function
+sends, not what a real Keycloak does with them.
 """
 
 import copy
 import json
-import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -139,8 +134,7 @@ async def env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(
         KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: CONFIG)
     )
-    slug = await api_env.org_slug(org_id)
-    headers = {"Authorization": f"Bearer {api_env.idp.token(sub, slug, email=f'{sub}@test.local')}"}
+    headers = await api_env.headers(org_id, sub)
     return SimpleNamespace(api=api_env, org_id=org_id, sub=sub, kc=kc, headers=headers)
 
 
@@ -165,26 +159,31 @@ async def _patch(env: Any, body: dict[str, Any]) -> httpx.Response:
     return await env.api.client.patch("/api/v1/me", headers=env.headers, json=body)
 
 
+async def _write(env: Any, locale: str | None) -> None:
+    """The client function on its own, against the fake, for this user."""
+    await set_locale_attribute(CONFIG, user_id=env.sub, locale=locale)
+
+
 # --------------------------------------------------------------------------- #
-# validation
+# the route
 # --------------------------------------------------------------------------- #
 
 
-async def test_es_is_stored_and_mirrored(env: Any) -> None:
+async def test_es_is_stored_and_no_identity_provider_is_told(env: Any) -> None:
     response = await _patch(env, {"locale": "es"})
     assert response.status_code == 200
     body = response.json()
     assert body["locale"] == "es"
-    assert body["identity_locale_synced"] is True
+    assert "identity_locale_synced" not in body
     assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
+    assert env.kc.seen == []
 
 
 async def test_a_regional_value_stored_earlier_stays_valid(env: Any) -> None:
     response = await _patch(env, {"locale": "en-GB"})
     assert response.status_code == 200
     assert response.json()["locale"] == "en-GB"
-    # Mirrored exactly as stored; Keycloak falls back to its default for it.
-    assert env.kc.bodies[0]["attributes"]["locale"] == ["en-GB"]
+    assert env.kc.seen == []
 
 
 @pytest.mark.parametrize("bad", ["<script>", "e", "en_GB", "english-", "es es", "1234"])
@@ -195,8 +194,82 @@ async def test_a_malformed_tag_is_refused_and_writes_nothing(env: Any, bad: str)
     assert env.kc.seen == []
 
 
+async def test_no_identity_shaped_field_reaches_anything(env: Any) -> None:
+    other = "00000000-0000-0000-0000-00000000dead"
+    for field in ("user_id", "external_subject", "sub", "keycloak_id"):
+        response = await _patch(env, {"locale": "es", field: other})
+        assert response.status_code == 422
+    assert env.kc.seen == []
+
+
+async def test_a_changed_or_cleared_language_is_kept_here_only(env: Any) -> None:
+    """The cases the mirror used to treat differently -- a change, a clear,
+    null over null, the same value again -- all just save."""
+    await _store(env, "es")
+    assert (await _patch(env, {"locale": "en"})).status_code == 200
+    assert (await _patch(env, {"locale": None})).status_code == 200
+    assert (await _patch(env, {"locale": None, "phone": "0101"})).status_code == 200
+    assert (await _patch(env, {"locale": "es"})).status_code == 200
+    assert (await _patch(env, {"locale": "es"})).status_code == 200
+    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
+    assert env.kc.seen == []
+
+
+async def test_a_broken_provisioning_setting_cannot_touch_the_save(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was: a misconfigured secret file or an unconfigured Keycloak is skipped.
+    Now nothing reads the setting at all on this route."""
+
+    def broken(cls: Any, settings: Any) -> Any:
+        raise FileNotFoundError("secret path missing")
+
+    monkeypatch.setattr(KeycloakAdminConfig, "from_settings", classmethod(broken))
+    response = await _patch(env, {"locale": "es"})
+    assert response.status_code == 200
+    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
+
+
+async def test_get_me_does_not_claim_a_sync_state(env: Any) -> None:
+    response = await env.api.client.get("/api/v1/me", headers=env.headers)
+    assert "identity_locale_synced" not in response.json()
+
+
+async def test_a_failed_client_map_read_saves_nothing_and_the_retry_saves(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`PATCH /me` answers with the client map (phase 3 design §1.3), read
+    before the commit: a failed read saves nothing, so a retry is a first try.
+    FALSIFIER: `update_own_profile` reading the map after its `org_session`."""
+    from app.core.identity import own_profile
+
+    real = own_profile._own_clients
+    calls: list[int] = []
+
+    async def unreachable_once(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionError("the client map could not be read")
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(own_profile, "_own_clients", unreachable_once)
+
+    try:
+        failed = await _patch(env, {"locale": "es"})
+    except ConnectionError:
+        pass  # the test transport re-raises what the 500 was made of
+    else:
+        assert failed.status_code == 500, failed.text
+    assert (await _row(env.api.admin_engine, env.sub)).locale is None
+
+    retried = await _patch(env, {"locale": "es"})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["locale"] == "es"
+    assert env.kc.seen == []
+
+
 # --------------------------------------------------------------------------- #
-# the Keycloak write is read-modify-write
+# kc_client.set_locale_attribute on its own (no caller until phase 4)
 # --------------------------------------------------------------------------- #
 
 
@@ -204,8 +277,7 @@ async def test_the_attribute_update_is_a_get_put_get_with_only_the_profile_field
     env: Any,
 ) -> None:
     before = copy.deepcopy(env.kc.user)
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
+    await _write(env, "es")
 
     # GET, PUT, then a GET that checks Keycloak kept it.
     assert env.kc.methods == ["GET", "PUT", "GET"]
@@ -217,7 +289,6 @@ async def test_the_attribute_update_is_a_get_put_get_with_only_the_profile_field
     for kept in ("email", "firstName", "lastName", "username"):
         assert sent[kept] == before[kept]
     assert sent["attributes"] == {"org": ["acme"], "locale": ["es"]}
-    # And the fields it did not send are untouched on the fake's side too.
     assert env.kc.user["enabled"] is True
     assert env.kc.user["requiredActions"] == []
 
@@ -234,58 +305,34 @@ async def test_a_concurrent_disable_is_not_undone(env: Any) -> None:
         return response
 
     env.kc.handler = handler  # type: ignore[method-assign]
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
+    await _write(env, "es")
     assert env.kc.user["enabled"] is False
 
 
 async def test_a_null_locale_removes_the_attribute_and_keeps_the_rest(env: Any) -> None:
     env.kc.user["attributes"]["locale"] = ["es"]
-    await _store(env, "es")
-
-    response = await _patch(env, {"locale": None})
-
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is True
+    await _write(env, None)
     sent = env.kc.bodies[0]
     assert set(sent) == PUT_KEYS
     assert sent["attributes"] == {"org": ["acme"]}
 
 
-async def test_the_target_is_the_callers_own_subject_and_no_field_redirects_it(
-    env: Any,
-) -> None:
-    other = "00000000-0000-0000-0000-00000000dead"
-    # The request model is closed: an identity-shaped field is a 422, and
-    # nothing at all reaches Keycloak.
-    for field in ("user_id", "external_subject", "sub", "keycloak_id"):
-        response = await _patch(env, {"locale": "es", field: other})
-        assert response.status_code == 422
-    assert env.kc.seen == []
-    # And the one legitimate call addresses `external_subject` of the caller
-    # (the fake asserts the path ends with this user's id).
-    assert (await _patch(env, {"locale": "es"})).status_code == 200
+async def test_the_target_is_the_subject_given(env: Any) -> None:
+    await _write(env, "es")
     assert {r.url.path.rpartition("/")[2] for r in env.kc.seen} == {env.sub}
 
 
-async def test_a_write_keycloak_accepted_but_did_not_keep_is_reported_as_not_synced(
-    env: Any,
-) -> None:
+async def test_a_write_keycloak_accepted_but_did_not_keep_raises(env: Any) -> None:
     """A realm without internationalization answers the PUT 204 and drops
-    `locale`. The flag must not say `true` for that."""
+    `locale`; the verifying GET notices."""
     env.kc.drop_locale = True
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is False
-    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
+    with pytest.raises(KeycloakAdminError):
+        await _write(env, "es")
     assert env.kc.methods == ["GET", "PUT", "GET"]
 
 
 async def test_clearing_is_verified_too(env: Any) -> None:
     env.kc.user["attributes"]["locale"] = ["es"]
-    await _store(env, "es")
-
-    # Keycloak that keeps the old attribute despite the PUT.
     original = env.kc.handler
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -295,66 +342,14 @@ async def test_clearing_is_verified_too(env: Any) -> None:
         return response
 
     env.kc.handler = handler  # type: ignore[method-assign]
-    response = await _patch(env, {"locale": None})
-    assert response.json()["identity_locale_synced"] is False
-
-
-async def test_the_same_language_as_stored_is_not_mirrored(env: Any) -> None:
-    await _store(env, "es")
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is None
-    assert env.kc.seen == []
-
-
-async def test_null_over_null_is_not_mirrored_and_cannot_delete_an_admin_set_value(
-    env: Any,
-) -> None:
-    # The console has nothing stored; an admin set a Keycloak locale by hand.
-    env.kc.user["attributes"]["locale"] = ["fr"]
-    response = await _patch(env, {"locale": None, "phone": "0101"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is None
-    assert env.kc.seen == []
-    assert env.kc.user["attributes"]["locale"] == ["fr"]
-
-
-async def test_a_changed_language_is_mirrored(env: Any) -> None:
-    await _store(env, "es")
-    response = await _patch(env, {"locale": "en"})
-    assert response.json()["identity_locale_synced"] is True
-    assert env.kc.bodies[0]["attributes"]["locale"] == ["en"]
-
-
-async def test_a_wedged_keycloak_is_cut_off_and_the_save_stands(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import asyncio
-
-    from app.api.v1 import me as me_module
-
-    assert me_module._MIRROR_TIMEOUT_SECONDS == 5
-
-    async def never(*args: Any, **kwargs: Any) -> None:
-        await asyncio.sleep(3600)
-
-    monkeypatch.setattr(me_module, "set_locale_attribute", never)
-    monkeypatch.setattr(me_module, "_MIRROR_TIMEOUT_SECONDS", 0.05)
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is False
-    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
+    with pytest.raises(KeycloakAdminError):
+        await _write(env, None)
 
 
 async def test_a_user_with_no_attributes_map_gets_one(env: Any) -> None:
     del env.kc.user["attributes"]
-    assert (await _patch(env, {"locale": "es"})).status_code == 200
+    await _write(env, "es")
     assert env.kc.bodies[0]["attributes"] == {"locale": ["es"]}
-
-
-# --------------------------------------------------------------------------- #
-# Keycloak never fails the save
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -367,68 +362,14 @@ async def test_a_user_with_no_attributes_map_gets_one(env: Any) -> None:
         ("raise_connect", True),
     ],
 )
-async def test_a_keycloak_failure_still_saves_and_says_so(
-    env: Any, caplog: pytest.LogCaptureFixture, knob: tuple[str, Any]
+async def test_a_keycloak_failure_raises_and_carries_no_secret(
+    env: Any, knob: tuple[str, Any]
 ) -> None:
     setattr(env.kc, knob[0], knob[1])
-    caplog.set_level(logging.DEBUG)
-
-    response = await _patch(env, {"locale": "es"})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["locale"] == "es"
-    assert body["identity_locale_synced"] is False
-    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
-    # No secret and no user representation in any log line.
-    text = "\n".join(
-        f"{r.getMessage()} {r.exc_text or ''} {getattr(r, 'extra', '')}" for r in caplog.records
-    )
-    for forbidden in (TOKEN, "ada@example.test", "Lovelace", "not-a-real-secret"):
-        assert forbidden not in text
-
-
-async def test_a_misconfigured_secret_file_does_not_fail_the_save(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def broken(cls: Any, settings: Any) -> Any:
-        raise FileNotFoundError("secret path missing")
-
-    monkeypatch.setattr(KeycloakAdminConfig, "from_settings", classmethod(broken))
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is False
-    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
-
-
-async def test_keycloak_is_not_called_when_locale_was_not_supplied(env: Any) -> None:
-    response = await _patch(env, {"phone": "0101"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is None
-    assert env.kc.seen == []
-
-
-async def test_an_unconfigured_keycloak_is_skipped_not_failed(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: None)
-    )
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert response.json()["identity_locale_synced"] is None
-    assert env.kc.seen == []
-    assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
-
-
-async def test_get_me_does_not_claim_a_sync_state(env: Any) -> None:
-    response = await env.api.client.get("/api/v1/me", headers=env.headers)
-    assert response.json()["identity_locale_synced"] is None
-
-
-# --------------------------------------------------------------------------- #
-# the client function on its own
-# --------------------------------------------------------------------------- #
+    with pytest.raises((httpx.HTTPError, KeycloakAdminError)) as caught:
+        await _write(env, "es")
+    for forbidden in (TOKEN, "not-a-real-secret"):
+        assert forbidden not in str(caught.value)
 
 
 async def test_set_locale_attribute_raises_on_a_non_object_user(
@@ -441,49 +382,3 @@ async def test_set_locale_attribute_raises_on_a_non_object_user(
     with pytest.raises(KeycloakAdminError):
         await set_locale_attribute(CONFIG, user_id="abc", locale="es")
     assert kc.bodies == []
-
-
-async def test_an_overlapping_save_leaves_keycloak_on_the_latest_language(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Two quick switches each commit, then mirror; the earlier mirror can land
-    after the later one. Simulated here: while this request's mirror runs,
-    another save commits "en". The route reads the saved value again after its
-    own write and puts Keycloak on that, so Keycloak never ends on a stale one."""
-    import app.api.v1.me as me_route
-
-    real = me_route.set_locale_attribute
-    calls: list[str | None] = []
-
-    async def racing(config: Any, *, user_id: str, locale: str | None) -> None:
-        calls.append(locale)
-        await real(config, user_id=user_id, locale=locale)
-        if len(calls) == 1:
-            await _store(env, "en")  # a later save committed meanwhile
-
-    monkeypatch.setattr(me_route, "set_locale_attribute", racing)
-    await _store(env, None)
-    response = await _patch(env, {"locale": "es"})
-    assert response.status_code == 200
-    assert calls == ["es", "en"]
-    assert env.kc.user["attributes"]["locale"] == ["en"]
-    assert env.kc.user["attributes"]["org"] == ["acme"]
-    assert response.json()["identity_locale_synced"] is True
-
-
-async def test_no_second_write_when_the_saved_value_did_not_move(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import app.api.v1.me as me_route
-
-    real = me_route.set_locale_attribute
-    calls: list[str | None] = []
-
-    async def counting(config: Any, *, user_id: str, locale: str | None) -> None:
-        calls.append(locale)
-        await real(config, user_id=user_id, locale=locale)
-
-    monkeypatch.setattr(me_route, "set_locale_attribute", counting)
-    await _store(env, None)
-    await _patch(env, {"locale": "es"})
-    assert calls == ["es"]

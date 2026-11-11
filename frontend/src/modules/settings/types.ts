@@ -574,20 +574,17 @@ export interface UserOut {
   /** `active`, `disabled` or `deleted`. A deleted row is RETAINED, so it is listed. */
   status: string;
   roles: RoleAssignmentOut[];
+  /**
+   * Invited and not yet accepted (own authentication design §7): the row
+   * offers "Resend invitation" and "Cancel invitation" instead of the actions
+   * of an account in use. Absent from a server older than the invitation,
+   * which means `false`.
+   */
+  invite_pending?: boolean;
 }
 
 export interface UserListOut {
   users: UserOut[];
-}
-
-export interface CreatedUserOut extends UserOut {
-  /**
-   * The shipped realm has no `smtpServer` (spec §2.3), so this is regularly
-   * false on a real deployment and the account is unusable until it is fixed.
-   * Rendering it as an alert is the whole reason the field exists.
-   */
-  enrolment_email_sent: boolean;
-  enrolment_email_error: string | null;
 }
 
 export interface CodeGrantOut {
@@ -602,12 +599,6 @@ export interface EffectivePermissionsOut {
   codes: CodeGrantOut[];
 }
 
-export interface UserCreate {
-  email: string;
-  display_name: string;
-  role_ids: string[];
-}
-
 /**
  * `POST /users/{id}/roles`. `client_id` scopes the grant to one client, `null`
  * grants it on every client (MSP clients spec §2.1). The server's model is
@@ -618,10 +609,73 @@ export interface RoleAssign {
   client_id: string | null;
 }
 
-/** A mail this platform asked Keycloak to send. Carries no credential. */
-export interface MailResultOut {
-  sent: boolean;
+/**
+ * One grant an invitation carries: a role on one client, or on every client
+ * (`client_id: null`, MSP clients spec §2.1) -- the same pair `RoleAssign` sends.
+ */
+export interface InviteGrant {
+  role_id: string;
+  client_id: string | null;
 }
+
+/** `POST /users/invite` (own authentication design §7). No password: the person chooses it from the link. */
+export interface UserInvite {
+  email: string;
+  display_name: string;
+  grants: InviteGrant[];
+}
+
+/**
+ * What came of an invitation. `invite_link` is `null` when the server emailed
+ * it; the link itself when no mail is configured, in THIS answer only -- the
+ * server keeps its hash, never the link, so the console shows it once and
+ * keeps it nowhere but the screen.
+ */
+export interface InviteOut {
+  user_id: string;
+  invite_link: string | null;
+}
+
+/** `POST /users/{id}/invite/resend`: a fresh link, emailed or shown once like the first. */
+export interface InviteLinkOut {
+  invite_link: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions -- `GET/PUT /api/v1/settings/sessions` (own authentication design §2.4, §2.6, §3)
+// ---------------------------------------------------------------------------
+
+/** How long a sign-in lasts, for the whole organization (`auth_org_settings`). */
+export interface SessionSettingsOut {
+  staff_idle_minutes: number;
+  staff_max_hours: number;
+  remember_device_enabled: boolean;
+  remember_device_days: number;
+  remembered_max_hours: number;
+  contact_idle_minutes: number;
+  contact_max_days: number;
+  /** When it was last saved. Absent until the first save. */
+  updated_at?: string | null;
+}
+
+/** The PUT carries all seven, never a part: the form shows all seven. */
+export type SessionSettingsUpdate = Omit<SessionSettingsOut, "updated_at">;
+
+export type SessionNumberKey = Exclude<keyof SessionSettingsUpdate, "remember_device_enabled">;
+
+/**
+ * The CHECK bounds of `auth_org_settings` (migration 0245, Task 1 of the
+ * P2 phase 1 plan), restated so a value out of range is refused before the round trip. The
+ * server's constraint is what holds.
+ */
+export const SESSION_BOUNDS: Readonly<Record<SessionNumberKey, readonly [number, number]>> = {
+  staff_idle_minutes: [5, 480],
+  staff_max_hours: [1, 24],
+  remember_device_days: [1, 30],
+  remembered_max_hours: [1, 720],
+  contact_idle_minutes: [5, 480],
+  contact_max_days: [1, 30],
+};
 
 // ---------------------------------------------------------------------------
 // The account profile (`PATCH /api/v1/me`) — spec §7.3
@@ -630,8 +684,8 @@ export interface MailResultOut {
 /**
  * What the profile form writes, and the complete list of it.
  *
- * NOT `email` (Keycloak owns it, and changing it there is a re-authenticated,
- * verified flow this console must not reimplement), NOT `status`, and nothing
+ * NOT `email` (a sign-in address changes through a re-authenticated, verified
+ * flow this console does not offer), NOT `status`, and nothing
  * role-shaped — spec falsifier 12 calls a self-service form that writes those
  * a privilege-escalation path. The route takes no `user_id` either: the target
  * is the calling token's own user.
@@ -656,7 +710,7 @@ export interface EmailSettingsOut {
   /** False until a relay is set — the state this platform ships in. */
   configured: boolean;
   host: string;
-  /** As the identity provider stores it: a string, empty when unset. */
+  /** A string, empty when unset. */
   port: string;
   from_address: string;
   from_display_name: string;
@@ -672,9 +726,10 @@ export interface EmailSettingsOut {
    */
   authenticated: boolean;
   /**
-   * `password` or `token`. `token` is a Microsoft 365 sign-in: the realm's
-   * sign-in service fetches the token itself, so the console never sees one.
-   * Absent from a server older than this field, which means `password`.
+   * `password` or `token`. `token` is a Microsoft 365 sign-in: the server
+   * fetches a token at Microsoft's own address for each message, so the
+   * console never sees one. Absent from a server older than this field, which
+   * means `password`.
    */
   auth_type?: string;
   /** The Microsoft application (client) ID. Its secret has no field here. */
@@ -685,9 +740,8 @@ export interface EmailSettingsOut {
   microsoft_scope?: string;
   /**
    * The caller's own address with `+itms-test` before the @ — where the
-   * console proposes sending a test. The identity provider will not send a
-   * test to a sign-in account's own address; a tagged one reaches the same
-   * inbox. Empty or absent when there is nothing to suggest.
+   * console proposes sending a test; a tagged address reaches the same inbox.
+   * Empty or absent when there is nothing to suggest.
    */
   suggested_test_recipient?: string;
 }
@@ -720,10 +774,10 @@ export interface EmailSettingsUpdate {
   token_client_secret?: string;
 }
 
-/** What came of asking the identity provider to send a test message. */
+/** What came of asking the server to send a test message. */
 export interface TestSendOut {
   /**
-   * The identity provider ACCEPTED the message. Acceptance is not delivery —
+   * The mail server ACCEPTED the message. Acceptance is not delivery —
    * a relay can take a message from an unknown sender and drop it silently —
    * so nothing in this console renders this as a green tick.
    */

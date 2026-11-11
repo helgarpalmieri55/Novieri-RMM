@@ -58,6 +58,7 @@ from app.core.storage import ObjectStore
 from app.core.vault import VaultService
 from app.jobs.engine import DeviceAwaitingReview, JobEngine
 from app.models import Client, Device, Job, Site
+from app.models.clients import CLIENT_ARCHIVED
 from app.models.core import AgentRelease
 from app.modules.agent_push import credential_realm
 from app.modules.agent_push import host_key as host_key_service
@@ -85,7 +86,7 @@ from app.modules.agent_push.preflight import (
     transport_for_os_family,
 )
 from app.modules.agent_push.run_contract import RunTargetDispatch, RunTargetDispatchError
-from app.services.client_sites import CLIENT_ARCHIVED, NotAcceptingNewRows, SiteNotFound
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 from app.services.dns_name import InvalidDnsName, normalise_dns_name
 from app.services.enrollment import create_token
 

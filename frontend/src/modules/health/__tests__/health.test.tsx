@@ -36,6 +36,10 @@ import type {
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+vi.mock("../../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: null, select: vi.fn(), clients: [], ready: true }),
+}));
 
 function renderWithProviders(node: React.ReactNode, at = "/health") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -753,6 +757,13 @@ describe("DeviceHealthPanel", () => {
     expect(await screen.findByText("No health profile")).toBeInTheDocument();
     expect(
       screen.getByText(/No health profile resolves to this device/),
+    ).toBeInTheDocument();
+    // Every level that can give it one, the client's default among them
+    // (phase 3 design §5.1; final review C, T14 7).
+    expect(
+      screen.getByText(
+        "Nothing is being checked on it. Assign a profile to the device, its group, its client, or the organisation.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Healthy")).toBeNull();
   });
@@ -1728,6 +1739,19 @@ describe("HealthSettingsPanel", () => {
 
     expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText(/do not have permission to change health settings/)).toBeInTheDocument();
+  });
+
+  it("tells someone holding health.admin on some clients that it is needed on every client", async () => {
+    // Every client shares these settings (GLOBAL_WRITES): "you do not have
+    // permission" would be false for someone who holds it, only not everywhere.
+    stubSettings({
+      me: vi.fn().mockResolvedValue({ ...me(), permissions: ["health.admin"], permissions_everywhere: [] }),
+    });
+    renderWithProviders(<HealthSettingsPanel canAdmin={false} />);
+
+    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await screen.findByText(/requires the health\.admin permission on every client/)).toBeInTheDocument();
+    expect(screen.queryByText(/do not have permission to change health settings/)).toBeNull();
   });
 });
 

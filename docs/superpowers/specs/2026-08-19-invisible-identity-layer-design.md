@@ -1,7 +1,7 @@
 # The invisible identity layer — Design
 
 **Date:** 2026-08-19
-**Status:** approved direction (operator chose "A now, revisit B later"); spec pending operator review
+**Status:** approved direction (operator chose "A now, revisit B later"); **superseded on 2026-11-04**: the operator chose B (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`)
 **Amends:** `docs/modules/console-auth/spec.md` (§3.4's launcher-removal logic now extends to every identity surface), `docs/00-vision.md` commercial-readiness list
 
 ## 0. The decision, and the test it must pass
@@ -21,7 +21,7 @@ never need to.
 
 ### Options considered
 
-- **A — keep Keycloak, make it an invisible appliance component.** CHOSEN.
+- **A — keep Keycloak, make it an invisible appliance component.** Chosen 2026-08-19; superseded 2026-11-04.
   Weeks of UI/config surface; both deployment models served by one stack;
   console-auth §1's security model (credentials never enter the ITMS process)
   survives intact.
@@ -32,6 +32,15 @@ never need to.
   hashing, brute-force protection, sessions, TOTP, a WebAuthn server, and
   SAML/OIDC brokering forever. Nobody buys an RMM for its login form; B is a
   last resort, not a roadmap item.
+
+  **CHOSEN on 2026-11-04** by the operator, section by section between
+  2026-11-02 and 2026-11-04: `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`.
+  The cost list above is exactly what that design builds -- password hashing
+  (argon2id with a pepper in OpenBao), brute-force protection per account and
+  factor, server-side sessions, TOTP, a WebAuthn server -- except brokering,
+  which is limited to Microsoft (Entra ID). SAML and on-premises Active
+  Directory federation are out of scope. The buyer test above still holds; it
+  is now met by having no second identity product at all.
 - **C — rented IdP (Auth0/WorkOS/Cognito) for cloud, Keycloak for self-host.**
   REJECTED: two auth stacks breaks the vision doc's "commercialization is a
   deployment change, not a rewrite", and the self-hosted half cannot depend on

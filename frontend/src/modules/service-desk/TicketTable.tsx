@@ -8,6 +8,8 @@ import { describeAge } from "../jobs/jobState";
 import { formatDateTime } from "../../lib/datetime";
 import { nameForOption } from "./pickerOptions";
 import { initialsOf, personIndex } from "../../lib/people";
+import { useClientScope } from "../../lib/clientScope";
+import { useClientName } from "../settings/api";
 import {
   describeDue,
   ticketPriorityLabel,
@@ -37,11 +39,17 @@ export function TicketTable({
   now: number;
 }) {
   const t = useT();
+  // THE CLIENT COLUMN (design §3.4, §4.5): while every client is shown, the
+  // same column as every other list; with one client chosen it says nothing.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
   return (
     <Table>
       <thead>
         <tr>
           <Th>{t("serviceDesk.table.ticket")}</Th>
+          {showClient ? <Th>{t("serviceDesk.table.client")}</Th> : null}
           <Th>{t("serviceDesk.table.due")}</Th>
           <Th>{t("serviceDesk.table.type")}</Th>
           <Th>{t("serviceDesk.table.status")}</Th>
@@ -77,6 +85,7 @@ export function TicketTable({
                   {queueName(ticket.queue_id)}
                 </div>
               </Td>
+              {showClient ? <Td>{clientName(ticket.client_id)}</Td> : null}
               <Td>
                 <DueCell ticket={ticket} now={now} />
               </Td>

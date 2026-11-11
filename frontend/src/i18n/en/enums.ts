@@ -592,7 +592,7 @@ export const enums = {
   /** A backup repository's state (modules/backup). */
   RepositoryState: {
     active: "Active",
-    disabled: "Disabled",
+    retired: "Retired",
   },
   /** What kind of continuity test a plan schedules (modules/bcp). */
   TestType: {

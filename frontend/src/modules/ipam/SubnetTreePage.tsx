@@ -8,7 +8,7 @@ import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
-import { useNewRowClient } from "../../lib/clientSelection";
+import { parentClientOf, useNewRowClientField } from "../../lib/clientSelection";
 import { humaniseEnum } from "../../lib/labels";
 import { Icon } from "../../shell/icons";
 import { useClientName } from "../settings/api";
@@ -25,6 +25,8 @@ import {
 } from "./api";
 import { IpamNav } from "./IpamNav";
 import { IpamReadiness } from "./IpamReadiness";
+import { clientRule } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   buildSubnetTree,
   flattenSubnetTree,
@@ -36,6 +38,7 @@ import {
 import { UtilizationBar } from "./UtilizationBar";
 import type { SubnetFilters, SubnetKind, SubnetOut } from "./types";
 import { IPAM_MANAGE, SUBNET_KINDS } from "./types";
+import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 
 // The subnet tree (spec §12): the DERIVED hierarchy, per-node utilisation,
@@ -101,6 +104,8 @@ const VIEWS: ReadonlyArray<{ key: string; label: MessageKey }> = [
 ];
 
 export function SubnetTreePage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const permissions = useIpamPermissions();
   const [filters, setFilters] = useState<SubnetFilters>({});
@@ -586,11 +591,14 @@ function CreateSubnetForm() {
   // top or the Client field's, whose `global` VRF it goes into. The sites and
   // VLANs offered are that client's -- the server refuses any other's (final
   // review E). `null` while the Client field is empty, or while the chosen VRF
-  // is not in the list yet.
-  const vrfClient = vrfId ? vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id : undefined;
-  const target = useNewRowClient(IPAM_MANAGE, vrfClient);
-  const [pickedClient, setPickedClient] = useState("");
-  const client = vrfId ? (vrfClient ?? null) : target.needsField ? pickedClient || null : target.clientId;
+  // is not in the list yet (`parentClientOf`).
+  const newRow = useNewRowClientField(IPAM_MANAGE, parentClientOf(vrfId, vrfs.data), {
+    onPick: () => {
+      setSiteId("");
+      setVlanId("");
+    },
+  });
+  const client = newRow.clientId;
   const sites = useIpamSites(client);
   const clientVlans = (vlans.data ?? []).filter((vlan) => vlan.client_id === client);
   const [gateway, setGateway] = useState("");
@@ -602,8 +610,9 @@ function CreateSubnetForm() {
 
   function submit() {
     // A rule reads only the snapshot: the gateway as it was when Register was pressed.
-    const values = { prefix, gateway };
-    const next: Attempt = { rules: () => subnetRules(values.gateway), values };
+    // The Client first, as the form shows it (with every client and no VRF).
+    const values = { prefix, gateway, client };
+    const next: Attempt = { rules: () => [...clientRule(newRow), ...subnetRules(values.gateway)], values };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     create.mutate(
@@ -686,17 +695,7 @@ function CreateSubnetForm() {
               ))}
             </select>
           </Field>
-          {!vrfId && target.needsField ? (
-            <ClientField
-              code={IPAM_MANAGE}
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                setSiteId("");
-                setVlanId("");
-              }}
-            />
-          ) : null}
+          {newRow.needsField ? <ClientField field={newRow} /> : null}
           <Field label={t("ipam.fields.site")}>
             <select
               className={inputClass}
@@ -736,15 +735,21 @@ function CreateSubnetForm() {
         </div>
         {/* Enabled with an empty or impossible Prefix ON PURPOSE. The disabled
             button WAS the silent no-op the auditor hit: the click moved
-            nothing and named no field. Now the click produces the reason. */}
-        <FormActions
-          label={t("ipam.tree.register")}
-          pending={create.isPending}
-          error={create.error}
-          saved={create.isSuccess}
-          problems={attemptProblems(attempt)}
-          savedMessage={t("ipam.tree.registered")}
-        />
+            nothing and named no field. Now the click produces the reason.
+            With Unassigned chosen at the top and no VRF to decide, nothing
+            new can be filed: the form says so instead (a VRF still can). */}
+        {newRow.refused === "unassigned" ? (
+          <UnassignedRefusal />
+        ) : (
+          <FormActions
+            label={t("ipam.tree.register")}
+            pending={create.isPending}
+            error={create.error}
+            saved={create.isSuccess}
+            problems={attemptProblems(attempt)}
+            savedMessage={t("ipam.tree.registered")}
+          />
+        )}
       </Form>
     </>
   );

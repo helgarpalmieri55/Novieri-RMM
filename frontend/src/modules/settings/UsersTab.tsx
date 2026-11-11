@@ -1,9 +1,10 @@
 // Users — the identity directory and its full lifecycle.
 //
 //   read   `GET /api/v1/users`, `GET /api/v1/users/{id}/effective-permissions`   `users.read`
-//   write  `POST /api/v1/users`, `POST|DELETE /users/{id}/roles[...]`,
-//          `POST /users/{id}/disable|enable|reset-password|resend-enrolment`,
-//          `DELETE /users/{id}`                                                  `users.manage`
+//   write  `POST /api/v1/users/invite`, `POST|DELETE /users/{id}/roles[...]`,
+//          `POST /users/{id}/disable|enable`, `POST /users/{id}/invite/resend`,
+//          `DELETE /users/{id}/invite`, `POST /users/{id}/factors/reset`,
+//          `DELETE /users/{id}/sessions`, `DELETE /users/{id}`   `users.manage` on every client
 //
 // THE SECOND AXIS OF "WHAT LEVEL" IS THE SCOPE, and the assign control takes
 // it. It was a device group (`user_roles.device_group_id`, NULL org-wide) until
@@ -30,29 +31,44 @@
 //
 // EVERY DESTRUCTIVE ACTION CONFIRMS, AND THE CONFIRMATION NAMES THE PERSON.
 // "Are you sure?" over a table of nine people is not a confirmation — it is a
-// dialog that gets clicked through. Disable, delete, password reset and role
+// dialog that gets clicked through. Disable, delete, resetting the second
+// factors, signing someone out everywhere, cancelling an invitation and role
 // removal each name the email address in the prompt and in the confirm button.
-// Enable and resend-enrolment do not confirm: neither takes anything away.
+// Enable and resending an invitation do not confirm: neither takes anything
+// away.
 //
 // NO CREDENTIAL IS RENDERED, EVER (invariant 3). `UserOut` carries none, and
 // this file renders named fields only — never the response object — so a
 // server that starts returning something credential-shaped does not put it on
 // a screen. `users.test.tsx` plants a secret in the directory fixture and
-// asserts the DOM never contains it.
+// asserts the DOM never contains it. The one value this tab shows that opens
+// an account -- an invitation link, when no mail is configured -- is held in
+// this component's state only: the mutation that brought it is reset at once
+// and, with `gcTime: 0` (`./api.ts`), dropped from the mutation cache with it,
+// and the link is gone when the operator says it was passed on.
 //
-// A PASSWORD RESET IS AN EMAIL AND NOTHING ELSE (spec §2.2). ITMS never
-// generates, stores, displays or returns a password; the button asks the
-// identity provider to send an `UPDATE_PASSWORD` link and the response says
-// only `sent`.
+// AN ACCOUNT STARTS AS AN INVITATION (own authentication design §7). The form
+// names the person and what they may reach on which client -- the same
+// (role, client) pairs the roles panel grants -- and the server creates the
+// account with no password and a single-use link that expires after 72
+// hours, from which the person chooses a password and registers a second
+// factor. No password is ever typed here. Without mail, the server answers
+// with the link instead, ONCE, and this tab shows it for the operator to pass
+// on another way; resending shows a fresh one the same way.
 //
-// EVERY ACTION ON THIS TAB IS AN EMAIL, WHICH IS WHY THE BANNER IS HERE.
-// Creating a user sends an invitation; without one the account exists, is
-// enabled, and NOBODY CAN EVER SIGN IN TO IT — there is no admin API that
-// hands the link back for an operator to pass on by hand. So an unconfigured
-// relay is announced HERE, where the damage is done, and before the button is
-// pressed rather than after. It is the same rule the unconfigured states
-// elsewhere in this platform follow: visible where it bites, not discovered
-// from a failure.
+// RESETTING SOMEONE'S SECOND FACTORS NEEDS YOUR OWN (§2.5, §7). The server
+// answers 403 `step_up_required` unless the operator confirmed their own
+// second factor in the last 10 minutes; `useStepUp` asks for it over the
+// confirmation and sends the reset once more only after the server accepted
+// it. There is no password reset here: a forgotten password is reset by the
+// person, by email (§2.8), and a second factor never is.
+//
+// THE MAIL BANNER IS HERE BECAUSE THIS IS WHERE IT BITES. Without mail an
+// invitation still works -- its link is shown once -- but it reaches nobody
+// on its own, and nobody can reset a forgotten password by email. So an
+// unconfigured relay is announced HERE, before the button is pressed rather
+// than after. It is the same rule the unconfigured states elsewhere in this
+// platform follow: visible where it bites, not discovered from a failure.
 //
 // The banner needs `orgs.manage` to know anything, because that is what reads
 // the email settings — so `canReadEmail` gates the query. An operator who
@@ -68,27 +84,33 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
 import { describeSubmitError } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
+import type { MessageKey } from "../../i18n/core";
+import { Trans } from "../../i18n/Trans";
 import { EntityPicker } from "../../components/picker";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
-import { Btn, KIND_ICON, Panel, QueryState } from "../../shell/components";
+import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Person } from "../../shell/viz";
 import { initialsOf, personIndex } from "../../lib/people";
 import {
   useAssignRoleMutation,
-  useCreateUserMutation,
+  useCancelInviteMutation,
   useClients,
   useEmailSettings,
   useDeleteUserMutation,
   useEffectivePermissions,
+  useEndUserSessionsMutation,
+  useInviteUserMutation,
   useRemoveRoleMutation,
-  useResendEnrolmentMutation,
-  useResetPasswordMutation,
+  useResendInviteMutation,
+  useResetUserFactorsMutation,
   useSetUserEnabledMutation,
   useRoles,
   useUsers,
   useGlobalWriteReason,
+  useMe,
 } from "./api";
 import {
   EVERY_CLIENT_CHOICE,
@@ -105,9 +127,10 @@ import {
   summariseRoleGrants,
   userStatusLabel,
 } from "./types";
-import type { RoleAssignmentOut, UserOut } from "./types";
+import type { InviteGrant, RoleAssignmentOut, UserOut } from "./types";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { settingsHref } from "./tabs";
+import { groupGrantsByClient } from "./grantGroups";
 
 export const USERS_READ = "users.read";
 export const USERS_MANAGE = "users.manage";
@@ -115,8 +138,43 @@ export const USERS_MANAGE = "users.manage";
 type Confirmable =
   | { kind: "disable"; user: UserOut }
   | { kind: "delete"; user: UserOut }
-  | { kind: "reset"; user: UserOut }
+  | { kind: "resetFactors"; user: UserOut }
+  | { kind: "endSessions"; user: UserOut }
+  | { kind: "cancelInvite"; user: UserOut }
   | { kind: "revoke"; user: UserOut; assignment: RoleAssignmentOut };
+
+/** An invitation link the server handed back because no mail is configured: shown once, here. */
+interface ShownLink {
+  email: string;
+  link: string;
+}
+
+/** What an action did, held as data so a change of language re-words it. */
+interface Done {
+  key: "inviteEmailed" | "inviteResent" | "factorsReset" | "sessionsEnded";
+  email: string;
+}
+
+const DONE: Record<Done["key"], MessageKey> = {
+  inviteEmailed: "settings.users.done.inviteEmailed",
+  inviteResent: "settings.users.done.inviteResent",
+  factorsReset: "settings.users.done.factorsReset",
+  sessionsEnded: "settings.users.done.sessionsEnded",
+};
+
+/**
+ * Copying without swallowing the failure (`enrollment/EnrollmentPage.tsx:254-270`):
+ * a copy that fails silently would let an operator dismiss the only copy of
+ * an invitation link believing it was on the clipboard.
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function statusTone(status: string): "success" | "warning" | "muted" {
   if (status === "active") return "success";
@@ -162,6 +220,8 @@ export function UsersTab({
 }) {
   const t = useT();
   const users = useUsers(canRead);
+  // The caller, whose own row offers no second-factor reset.
+  const selfId = useMe().data?.user_id;
   // Shares the Email tab's cache key, so saving a relay clears this banner
   // without a reload.
   const emailSettings = useEmailSettings(canReadEmail);
@@ -188,17 +248,28 @@ export function UsersTab({
     [clients.data],
   );
 
-  const createUser = useCreateUserMutation();
+  const invite = useInviteUserMutation();
   const assignRole = useAssignRoleMutation();
   const removeRole = useRemoveRoleMutation();
   const setEnabled = useSetUserEnabledMutation();
-  const resetPassword = useResetPasswordMutation();
-  const resendEnrolment = useResendEnrolmentMutation();
+  const resendInvite = useResendInviteMutation();
+  const cancelInvite = useCancelInviteMutation();
+  const stepUp = useStepUp();
+  const resetFactors = useResetUserFactorsMutation(stepUp.run);
+  const endSessions = useEndUserSessionsMutation();
   const deleteUser = useDeleteUserMutation();
 
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [newRoleIds, setNewRoleIds] = useState<ReadonlySet<string>>(new Set());
+  // What the invitation grants: (role, client) pairs, the roles panel's shape.
+  const [inviteGrants, setInviteGrants] = useState<readonly InviteGrant[]>([]);
+  // The pair being chosen, before "Add this access" puts it in the list.
+  const [draftRoleId, setDraftRoleId] = useState("");
+  const [draftClientId, setDraftClientId] = useState("");
+  const [draftTyping, setDraftTyping] = useState(false);
+  const [shownLink, setShownLink] = useState<ShownLink | null>(null);
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
 
   const [rolesForId, setRolesForId] = useState<string | null>(null);
   const [permissionsForId, setPermissionsForId] = useState<string | null>(null);
@@ -218,7 +289,8 @@ export function UsersTab({
 
   const forbidden = isForbidden(users.error);
   const reason = useGlobalWriteReason(USERS_MANAGE);
-  const created = createUser.data;
+  // A pair chosen and not added would not be sent; the send waits for it.
+  const draftPending = draftRoleId !== "" || draftClientId !== "" || draftTyping;
 
   if (forbidden) {
     return (
@@ -230,12 +302,66 @@ export function UsersTab({
     );
   }
 
-  function toggleNewRole(roleId: string) {
-    setNewRoleIds((current) => {
-      const next = new Set(current);
-      if (next.has(roleId)) next.delete(roleId);
-      else next.add(roleId);
-      return next;
+  const roleNameOf = (roleId: string): string => grantable.find((role) => role.id === roleId)?.name ?? roleId;
+
+  /** The chosen pair joins the invitation; the same pair twice is one grant. */
+  function addGrant() {
+    if (draftRoleId === "" || draftClientId === "" || draftTyping) return;
+    const grant: InviteGrant = { role_id: draftRoleId, client_id: grantClientIdFor(draftClientId) };
+    setInviteGrants((current) =>
+      current.some((held) => held.role_id === grant.role_id && held.client_id === grant.client_id)
+        ? current
+        : [...current, grant],
+    );
+    setDraftRoleId("");
+    setDraftClientId("");
+  }
+
+  function removeGrant(index: number) {
+    setInviteGrants((current) => current.filter((_, at) => at !== index));
+  }
+
+  /**
+   * THE LINK IS MOVED INTO THIS COMPONENT'S STATE AND THE MUTATION EMPTIED,
+   * so the one value that opens an account is held in exactly one place, and
+   * "Done" is what removes it.
+   */
+  function sendInvite() {
+    const address = email.trim();
+    invite.mutate(
+      { email: address, display_name: displayName.trim(), grants: [...inviteGrants] },
+      {
+        onSuccess: (out) => {
+          if (out.invite_link) {
+            setShownLink({ email: address, link: out.invite_link });
+            setCopied(null);
+            setDone(null);
+          } else {
+            setDone({ key: "inviteEmailed", email: address });
+          }
+          setEmail("");
+          setDisplayName("");
+          setInviteGrants([]);
+          setDraftRoleId("");
+          setDraftClientId("");
+          invite.reset();
+        },
+      },
+    );
+  }
+
+  function resend(target: UserOut) {
+    resendInvite.mutate(target.id, {
+      onSuccess: (out) => {
+        if (out.invite_link) {
+          setShownLink({ email: target.email, link: out.invite_link });
+          setCopied(null);
+          setDone(null);
+        } else {
+          setDone({ key: "inviteResent", email: target.email });
+        }
+        resendInvite.reset();
+      },
     });
   }
 
@@ -247,7 +373,9 @@ export function UsersTab({
   const confirmMutation = {
     disable: setEnabled,
     delete: deleteUser,
-    reset: resetPassword,
+    resetFactors,
+    endSessions,
+    cancelInvite,
     revoke: removeRole,
   } as const;
 
@@ -271,8 +399,22 @@ export function UsersTab({
       setEnabled.mutate({ userId: target.user.id, enabled: false }, close);
     } else if (target.kind === "delete") {
       deleteUser.mutate(target.user.id, close);
-    } else if (target.kind === "reset") {
-      resetPassword.mutate(target.user.id, close);
+    } else if (target.kind === "resetFactors") {
+      resetFactors.mutate(target.user.id, {
+        onSuccess: () => {
+          setConfirming(null);
+          setDone({ key: "factorsReset", email: target.user.email });
+        },
+      });
+    } else if (target.kind === "endSessions") {
+      endSessions.mutate(target.user.id, {
+        onSuccess: () => {
+          setConfirming(null);
+          setDone({ key: "sessionsEnded", email: target.user.email });
+        },
+      });
+    } else if (target.kind === "cancelInvite") {
+      cancelInvite.mutate(target.user.id, close);
     } else {
       removeRole.mutate(
         { userId: target.user.id, assignmentId: target.assignment.assignment_id },
@@ -306,12 +448,26 @@ export function UsersTab({
       body: t("settings.users.confirm.delete.body"),
       destructive: true,
     },
-    reset: {
-      title: t("settings.users.confirm.reset.title"),
-      question: (email) => t("settings.users.confirm.reset.question", { email }),
-      action: (email) => t("settings.users.confirm.reset.action", { email }),
-      body: t("settings.users.confirm.reset.body"),
-      destructive: false,
+    resetFactors: {
+      title: t("settings.users.confirm.resetFactors.title"),
+      question: (email) => t("settings.users.confirm.resetFactors.question", { email }),
+      action: (email) => t("settings.users.confirm.resetFactors.action", { email }),
+      body: t("settings.users.confirm.resetFactors.body"),
+      destructive: true,
+    },
+    endSessions: {
+      title: t("settings.users.confirm.endSessions.title"),
+      question: (email) => t("settings.users.confirm.endSessions.question", { email }),
+      action: (email) => t("settings.users.confirm.endSessions.action", { email }),
+      body: t("settings.users.confirm.endSessions.body"),
+      destructive: true,
+    },
+    cancelInvite: {
+      title: t("settings.users.confirm.cancelInvite.title"),
+      question: (email) => t("settings.users.confirm.cancelInvite.question", { email }),
+      action: (email) => t("settings.users.confirm.cancelInvite.action", { email }),
+      body: t("settings.users.confirm.cancelInvite.body"),
+      destructive: true,
     },
     revoke: {
       title: t("settings.users.confirm.revoke.title"),
@@ -348,6 +504,58 @@ export function UsersTab({
           </span>
         </div>
       ) : null}
+      {shownLink ? (
+        // SHOWN ONCE: the server keeps only the link's hash, so this is the
+        // one copy there is. It stays until the operator says it was passed on.
+        <section aria-label={t("settings.users.link.title", { email: shownLink.email })}>
+          <Panel title={t("settings.users.link.title", { email: shownLink.email })}>
+            <div className="notice gold" role="status">
+              <Icon name={KIND_ICON.warn} size={16} />
+              <span>{t("settings.users.link.once", { email: shownLink.email })}</span>
+            </div>
+            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 12 }}>
+              <Field label={t("settings.users.link.label")}>
+                <input
+                  className={inputClass}
+                  readOnly
+                  value={shownLink.link}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              </Field>
+            </div>
+            <div className="form-actions">
+              <Btn
+                icon="copy"
+                label={t("settings.users.link.copy")}
+                onClick={() =>
+                  void copyToClipboard(shownLink.link).then((ok) => setCopied(ok ? "copied" : "failed"))
+                }
+              />
+              <Btn
+                variant="primary"
+                icon="check"
+                label={t("settings.users.link.done")}
+                onClick={() => {
+                  setShownLink(null);
+                  setCopied(null);
+                }}
+              />
+              {copied === "copied" ? (
+                <span className="form-saved">
+                  <Icon name={KIND_ICON.ok} size={13} />
+                  {t("settings.users.link.copied")}
+                </span>
+              ) : null}
+              {copied === "failed" ? (
+                <span role="alert" className="form-error">
+                  <Icon name={KIND_ICON.crit} size={13} />
+                  {t("settings.users.link.copyFailed")}
+                </span>
+              ) : null}
+            </div>
+          </Panel>
+        </section>
+      ) : null}
       <Panel
         title={t("settings.users.title")}
         subtitle={t("settings.users.subtitle")}
@@ -380,6 +588,12 @@ export function UsersTab({
                   </Td>
                   <Td>
                     <Badge variant={statusTone(user.status)}>{userStatusLabel(user.status)}</Badge>
+                    {user.invite_pending === true ? (
+                      <>
+                        {" "}
+                        <Badge variant="info">{t("settings.users.invitePending")}</Badge>
+                      </>
+                    ) : null}
                   </Td>
                   <Td>
                     {user.roles.length === 0 ? (
@@ -424,8 +638,10 @@ export function UsersTab({
                         on for, and narrow enough at two buttons to fit
                         without wrapping the row tall.
 
-                        Enable/Disable, Reset password, Resend enrolment and
-                        Delete move inside a native `<details>`, closed by
+                        The lifecycle actions -- Disable, Reset second
+                        factors and Sign out everywhere for an account in use;
+                        Enable for a disabled one; Resend and Cancel for an
+                        invitation -- and Delete move inside a native `<details>`, closed by
                         default. Not an invented overflow menu -- there is no
                         menu or popover component in this kit -- a `<details>`
                         needs no floating panel, no positioning and no focus
@@ -436,9 +652,9 @@ export function UsersTab({
 
                         QUIETER MUST NOT MEAN EASIER TO HIT: closed is not
                         hidden-forever, and nothing about what any of the four
-                        DO changed -- Disable, Reset password and Delete still
-                        open the same named, confirming dialog; Resend
-                        enrolment still fires without one. `DANGER_SEPARATOR`
+                        DO changed -- every one that takes something away
+                        opens the same named, confirming dialog; Enable and
+                        Resend fire without one. `DANGER_SEPARATOR`
                         still sets Delete apart with a hairline inside the
                         disclosure, so it is never mistaken for the ghost
                         button beside it. */}
@@ -474,17 +690,88 @@ export function UsersTab({
                         {t("settings.users.moreActions")}
                       </summary>
                       <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 6 }}>
-                        {user.status === "active" ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            aria-label={t("settings.users.disableAria", { email: user.email })}
-                            disabled={!canManage}
-                            title={canManage ? undefined : reason}
-                            onClick={() => openConfirm({ kind: "disable", user })}
-                          >
-                            {t("settings.users.disable")}
-                          </Button>
+                        {user.invite_pending === true ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              aria-label={t("settings.users.resendAria", { email: user.email })}
+                              disabled={!canManage || resendInvite.isPending}
+                              title={canManage ? undefined : reason}
+                              onClick={() => resend(user)}
+                            >
+                              {t("settings.users.resend")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              aria-label={t("settings.users.cancelInviteAria", { email: user.email })}
+                              disabled={!canManage}
+                              title={canManage ? undefined : reason}
+                              onClick={() => openConfirm({ kind: "cancelInvite", user })}
+                            >
+                              {t("settings.users.cancelInvite")}
+                            </Button>
+                          </>
+                        ) : user.status === "active" ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              aria-label={t("settings.users.disableAria", { email: user.email })}
+                              disabled={!canManage}
+                              title={canManage ? undefined : reason}
+                              onClick={() => openConfirm({ kind: "disable", user })}
+                            >
+                              {t("settings.users.disable")}
+                            </Button>
+                            {/* NOT ON YOUR OWN ROW (final review D2, Minor 2).
+                                The server refuses it (`_refuse_self`) -- but
+                                only after the step-up, which may spend a
+                                single-use recovery code first. One's own
+                                factors are changed in Your security. */}
+                            {user.id === selfId ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                  aria-describedby={`own-factors-${user.id}`}
+                                  disabled
+                                >
+                                  {t("settings.users.resetFactors")}
+                                </Button>
+                                <span id={`own-factors-${user.id}`} className="note">
+                                  <Trans
+                                    k="settings.users.resetOwnFactors"
+                                    // Underlined: a link inside a sentence is told apart by more than its colour (SC 1.4.1).
+                                    components={{ link: <Link className="underline" to="/profile/security" /> }}
+                                  />
+                                </span>
+                              </>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                disabled={!canManage}
+                                title={canManage ? undefined : reason}
+                                onClick={() => openConfirm({ kind: "resetFactors", user })}
+                              >
+                                {t("settings.users.resetFactors")}
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              aria-label={t("settings.users.endSessionsAria", { email: user.email })}
+                              disabled={!canManage}
+                              title={canManage ? undefined : reason}
+                              onClick={() => openConfirm({ kind: "endSessions", user })}
+                            >
+                              {t("settings.users.endSessions")}
+                            </Button>
+                          </>
                         ) : (
                           <Button
                             type="button"
@@ -499,26 +786,6 @@ export function UsersTab({
                             {t("settings.users.enable")}
                           </Button>
                         )}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          aria-label={t("settings.users.resetAria", { email: user.email })}
-                          disabled={!canManage}
-                          title={canManage ? undefined : reason}
-                          onClick={() => openConfirm({ kind: "reset", user })}
-                        >
-                          {t("settings.users.reset")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          aria-label={t("settings.users.resendAria", { email: user.email })}
-                          disabled={!canManage}
-                          title={canManage ? undefined : reason}
-                          onClick={() => resendEnrolment.mutate(user.id)}
-                        >
-                          {t("settings.users.resend")}
-                        </Button>
                         <span style={DANGER_SEPARATOR}>
                           <Button
                             type="button"
@@ -544,19 +811,17 @@ export function UsersTab({
         {!canManage ? (
           <p className="note" style={UNDER_TABLE}>{reason}</p>
         ) : null}
-        {setEnabled.error || resendEnrolment.error || resetPassword.error || deleteUser.error ? (
+        {setEnabled.error || resendInvite.error || deleteUser.error ? (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
             <Icon name={KIND_ICON.crit} size={16} />
             <span>
-              {describeSubmitError(
-                setEnabled.error ?? resendEnrolment.error ?? resetPassword.error ?? deleteUser.error,
-              )}
+              {describeSubmitError(setEnabled.error ?? resendInvite.error ?? deleteUser.error)}
             </span>
           </p>
         ) : null}
-        {resendEnrolment.isSuccess || resetPassword.isSuccess ? (
+        {done ? (
           <p role="status" className="form-saved" style={UNDER_TABLE}>
-            <Icon name={KIND_ICON.ok} size={13} /> {t("settings.users.mailHanded")}
+            <Icon name={KIND_ICON.ok} size={13} /> {t(DONE[done.key], { email: done.email })}
           </p>
         ) : null}
       </Panel>
@@ -753,140 +1018,175 @@ export function UsersTab({
               emptyLabel={t("settings.users.effectiveEmpty")}
               emptyIcon="certificate"
             >
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>{t("settings.users.effectiveColumns.permission")}</Th>
-                    <Th>{t("settings.users.effectiveColumns.grantedBy")}</Th>
-                    <Th>{t("settings.users.effectiveColumns.appliesTo")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(effective.data?.codes ?? []).map((grant) => (
-                    <tr key={`${grant.code}:${grant.via_role}:${grant.client_id ?? ""}`}>
-                      <Td>
-                        <span className="mono">{grant.code}</span>
-                      </Td>
-                      <Td>{roleDisplayName(grant.via_role)}</Td>
-                      <Td>{describeGrantScope(grant.client_id, clientNames)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+              {/* BY CLIENT (MSP clients phase 3, design §4.2): what holds on
+                  every client first, then one table per client, by name. */}
+              {groupGrantsByClient(effective.data?.codes ?? [], (id) => clientNames.get(id) ?? id).map((group) => {
+                const label =
+                  group.clientId === null
+                    ? t("settings.users.effectiveEveryClient")
+                    : (clientNames.get(group.clientId) ?? group.clientId);
+                return (
+                  <FieldGroup key={group.clientId ?? "every"} title={label} icon={group.clientId === null ? "world" : "building"}>
+                    <Table label={label}>
+                      <thead>
+                        <tr>
+                          <Th>{t("settings.users.effectiveColumns.permission")}</Th>
+                          <Th>{t("settings.users.effectiveColumns.grantedBy")}</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.grants.map((grant) => (
+                          <tr key={`${grant.code}:${grant.via_role}`}>
+                            <Td>
+                              <span className="mono">{grant.code}</span>
+                            </Td>
+                            <Td>{roleDisplayName(grant.via_role)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </FieldGroup>
+                );
+              })}
             </QueryState>
           </Panel>
         </section>
       ) : null}
 
-      <Panel
-        title={t("settings.users.create.title")}
-        subtitle={t("settings.users.create.subtitle")}
-      >
-        <div className="form-grid" style={FOLDING_FORM_GRID}>
-          <Field label={t("settings.users.create.email")}>
-            <input
-              className={inputClass}
-              type="email"
-              value={email}
-              disabled={!canManage}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </Field>
-          <Field label={t("settings.users.create.displayName")}>
-            <input
-              className={inputClass}
-              value={displayName}
-              disabled={!canManage}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </Field>
-        </div>
+      <section aria-label={t("settings.users.invite.title")}>
+        <Panel
+          title={t("settings.users.invite.title")}
+          subtitle={t("settings.users.invite.subtitle")}
+        >
+          <div className="form-grid" style={FOLDING_FORM_GRID}>
+            <Field label={t("settings.users.invite.email")}>
+              <input
+                className={inputClass}
+                type="email"
+                value={email}
+                disabled={!canManage}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </Field>
+            <Field label={t("settings.users.invite.displayName")}>
+              <input
+                className={inputClass}
+                value={displayName}
+                disabled={!canManage}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+            </Field>
+          </div>
 
-        <fieldset style={GROUP}>
-          <legend style={GROUP_LEGEND}>{t("settings.users.create.access")}</legend>
-          {grantable.length === 0 ? (
-            <p className="note">
-              {t("settings.users.create.noRoles")}
-            </p>
-          ) : (
-            grantable.map((role) => (
-              <label key={role.id} className="flex items-center gap-2" style={{ padding: "3px 0" }}>
-                <input
-                  type="checkbox"
-                  checked={newRoleIds.has(role.id)}
+          <fieldset style={GROUP}>
+            <legend style={GROUP_LEGEND}>{t("settings.users.invite.access")}</legend>
+            {inviteGrants.length === 0 ? (
+              <p className="note">{t("settings.users.invite.noGrants")}</p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+                {inviteGrants.map((grant, index) => (
+                  <li key={`${grant.role_id}:${grant.client_id ?? "every"}`} className="flex items-center gap-3">
+                    {/* The roles panel's own `·` suffix and the same two
+                        transforms: a pair reads the same before and after it
+                        is granted. */}
+                    <span>
+                      {roleDisplayName(roleNameOf(grant.role_id))}
+                      <span className="note">{` · ${describeGrantScope(grant.client_id, clientNames)}`}</span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-label={t("settings.users.invite.removeGrantAria", {
+                        role: roleDisplayName(roleNameOf(grant.role_id)),
+                        scope: describeGrantScope(grant.client_id, clientNames),
+                      })}
+                      disabled={!canManage}
+                      onClick={() => removeGrant(index)}
+                    >
+                      {t("settings.users.remove")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {grantable.length === 0 ? (
+              <p className="note" style={{ marginTop: 10 }}>{t("settings.users.invite.noRoles")}</p>
+            ) : (
+              <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 10 }}>
+                <Field label={t("settings.users.role")}>
+                  <select
+                    className="select-field"
+                    value={draftRoleId}
+                    disabled={!canManage}
+                    onChange={(event) => setDraftRoleId(event.target.value)}
+                  >
+                    <option value="">{t("settings.users.selectRole")}</option>
+                    {grantable.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {roleDisplayName(role.name)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <EntityPicker
+                  label={t("settings.users.clientLabel")}
+                  options={clientOptions}
+                  value={draftClientId}
+                  onChange={setDraftClientId}
+                  loading={clients.isLoading}
+                  emptyHint={clientPickerEmptyHint()}
+                  placeholder={t("settings.users.clientPlaceholder")}
                   disabled={!canManage}
-                  onChange={() => toggleNewRole(role.id)}
+                  onPendingChange={setDraftTyping}
                 />
-                {/* Humanized (`roleDisplayName`) -- the checkbox's own
-                    value is still `role.id`, sent as `role_ids` on create;
-                    this is the label a person reads, not what is sent. */}
-                <span>{roleDisplayName(role.name)}</span>
-              </label>
-            ))
-          )}
-        </fieldset>
+              </div>
+            )}
+            <div className="form-actions">
+              {/* Disabled until a role and a scope are CHOSEN, and while the
+                  picker holds typed text that is not a choice -- the same rule
+                  as "Assign role" (final review, T11R-I1). */}
+              <Btn
+                label={t("settings.users.invite.addGrant")}
+                icon="plus"
+                disabled={!canManage || draftRoleId === "" || draftClientId === "" || draftTyping}
+                onClick={addGrant}
+              />
+            </div>
+          </fieldset>
 
-        <p className="note" style={{ marginTop: 10 }}>
-          {t("settings.users.create.noPassword")}
-        </p>
-
-        <div className="form-actions">
-          <Btn
-            label={createUser.isPending ? t("settings.users.create.creating") : t("settings.users.create.submit")}
-            icon="plus"
-            variant="primary"
-            disabled={!canManage || email.trim() === "" || createUser.isPending}
-            onClick={() =>
-              createUser.mutate(
-                {
-                  email: email.trim(),
-                  display_name: displayName.trim(),
-                  role_ids: [...newRoleIds],
-                },
-                {
-                  onSuccess: () => {
-                    setEmail("");
-                    setDisplayName("");
-                    setNewRoleIds(new Set());
-                  },
-                },
-              )
-            }
-          />
-          {!canManage ? <span className="form-hint">{reason}</span> : null}
-          {createUser.error ? (
-            <span role="alert" className="form-error">
-              <Icon name={KIND_ICON.crit} size={13} />
-              {describeSubmitError(createUser.error)}
-            </span>
-          ) : null}
-        </div>
-
-        {created && created.enrolment_email_sent ? (
-          <p role="status" className="form-saved" style={{ marginTop: 12 }}>
-            <Icon name={KIND_ICON.ok} size={13} />{" "}
-            {t("settings.users.create.created", { email: created.email })}
+          <p className="note" style={{ marginTop: 10 }}>
+            {t("settings.users.invite.noPassword")}
           </p>
-        ) : null}
-        {created && !created.enrolment_email_sent ? (
-          // Spec §2.3: the account exists either way, and the shipped realm has
-          // no SMTP server. Reporting "created" and staying quiet about the mail
-          // produces an account nobody can ever sign into.
-          <p role="alert" className="notice red" style={{ marginTop: 12 }}>
-            <Icon name={KIND_ICON.crit} size={16} />
-            <span>
-              {t("settings.users.create.notSent", { email: created.email })}
-              {created.enrolment_email_error ? `: ${created.enrolment_email_error}` : "."}
-              {` ${t("settings.users.create.notSentTail")}`}
-            </span>
-          </p>
-        ) : null}
-      </Panel>
+
+          <div className="form-actions">
+            <Btn
+              label={invite.isPending ? t("settings.users.invite.sending") : t("settings.users.invite.submit")}
+              icon="mail"
+              variant="primary"
+              disabled={!canManage || email.trim() === "" || draftPending || invite.isPending}
+              onClick={sendInvite}
+            />
+            {!canManage ? <span className="form-hint">{reason}</span> : null}
+            {canManage && draftPending ? (
+              <span className="form-hint">{t("settings.users.invite.draftPending")}</span>
+            ) : null}
+            {invite.error ? (
+              <span role="alert" className="form-error">
+                <Icon name={KIND_ICON.crit} size={13} />
+                {describeSubmitError(invite.error)}
+              </span>
+            ) : null}
+          </div>
+        </Panel>
+      </section>
 
       <Dialog
         open={confirming != null}
         onClose={() => setConfirming(null)}
         title={confirming ? confirmCopy[confirming.kind].title : ""}
+        // The recent confirmation can stand over this one (resetting someone's
+        // factors): Escape then answers that dialog only.
+        dismissible={!stepUp.open}
       >
         {confirming ? (
           <>
@@ -898,7 +1198,7 @@ export function UsersTab({
               {confirmCopy[confirming.kind].body}
             </p>
             {/* THE FAILURE IS SAID INSIDE THE DIALOG, which is the fix for a
-                destructive action that could fail invisibly. These four
+                destructive action that could fail invisibly. These
                 mutations rendered their error into the Panel BEHIND this
                 modal: on a 503 the dialog simply stayed open with its button
                 still offered, the operator clicked "Delete casey@example.com"
@@ -906,8 +1206,9 @@ export function UsersTab({
                 the overlay. The dialog is what the operator is looking at, so
                 the dialog is where the refusal goes — `role="alert"`, so it is
                 announced rather than merely appearing. `RolesTab`'s delete
-                dialog already did this; this is that rule applied to the other
-                four destructive paths. */}
+                dialog already did this; this is that rule applied to the
+                other destructive paths -- a recent confirmation that was
+                closed says so here too. */}
             {confirmMutation[confirming.kind].error ? (
               <p role="alert" className="notice red" style={{ marginTop: 12 }}>
                 <Icon name={KIND_ICON.crit} size={16} />
@@ -916,14 +1217,14 @@ export function UsersTab({
             ) : null}
             <div className="form-actions">
               {/* Disabled while in flight, so a slow delete cannot be fired
-                  twice by an operator who thinks the first click missed. The
-                  destructive verbs take the critical edge; the reset, which
-                  only sends an email, stays the plain commit. */}
+                  twice by an operator who thinks the first click missed --
+                  and while the recent confirmation waits over it. Every verb
+                  here takes something away, so each takes the critical edge. */}
               <Button
                 type="button"
                 variant={confirmCopy[confirming.kind].destructive ? "outline" : "default"}
                 className={confirmCopy[confirming.kind].destructive ? "danger" : undefined}
-                disabled={confirmMutation[confirming.kind].isPending}
+                disabled={confirmMutation[confirming.kind].isPending || stepUp.open}
                 onClick={runConfirmed}
               >
                 {confirmCopy[confirming.kind].action(confirming.user.email)}
@@ -935,6 +1236,8 @@ export function UsersTab({
           </>
         ) : null}
       </Dialog>
+      {/* After the dialog it may stand over, and outside every form. */}
+      {stepUp.dialog}
     </>
   );
 }

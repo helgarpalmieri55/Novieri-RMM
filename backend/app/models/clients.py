@@ -36,6 +36,11 @@ CLIENT_KIND_INTERNAL = "internal"
 CLIENT_KIND_UNASSIGNED = "unassigned"
 CLIENT_KINDS = (CLIENT_KIND_CUSTOMER, CLIENT_KIND_INTERNAL, CLIENT_KIND_UNASSIGNED)
 
+# `status` of an archived client (`ck_clients_status` below). Here, with the
+# table it constrains, so the kernel (`app/core`) can name it without
+# importing a service; `app.services.client_sites` re-exports it.
+CLIENT_ARCHIVED = "archived"
+
 OPTIONAL_MODULES = ("budget", "bcp", "change")
 
 

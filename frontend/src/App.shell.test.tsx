@@ -11,21 +11,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./lib/auth", () => ({
-  safeReturnTo: () => "/",
-  signIn: () => Promise.resolve(),
-  completeSignIn: () => Promise.resolve(null),
-  isAuthenticated: () => true,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  isSessionExpiring: () => false,
-  onSessionExpiring: () => () => {},
-  startAccountAction: () => Promise.resolve(),
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
-
 const apiRef = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("./lib/ApiContext", () => ({
   useApi: () => apiRef.current,
@@ -33,6 +18,7 @@ vi.mock("./lib/ApiContext", () => ({
 }));
 
 const { Landing, Shell, homeFor } = await import("./App");
+const { setSelectedClient } = await import("./lib/clientChoice");
 
 const user = userEvent.setup();
 
@@ -259,6 +245,46 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
     );
     const selector = await screen.findByRole("combobox", { name: "Client" });
     expect(within(selector).getByRole("option", { name: "Toeshee" })).toBeInTheDocument();
+  });
+
+  it("marks the chosen client in a phone's top bar, where the selector is in the drawer (operator decision 4)", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 640px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    try {
+      const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+      setSelectedClient(ANDES);
+      const api = fakeApi(OPERATOR);
+      api.me = vi.fn().mockResolvedValue({
+        user_id: "u1",
+        display_name: "Ada",
+        email: "ada@example.test",
+        org_id: "org-1",
+        roles: [],
+        permissions: OPERATOR,
+        clients: [
+          { id: "org-1", name: "Toeshee", kind: "internal", enabled_modules: [], permissions: OPERATOR },
+          { id: ANDES, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: OPERATOR },
+        ],
+      });
+      apiRef.current = api;
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={["/devices"]}>
+            <Shell>
+              <Where />
+            </Shell>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const toggle = await screen.findByRole("button", { name: "Open navigation — client: Andes Logistics" });
+      expect(toggle).toHaveTextContent("AL");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows IT budget only when a client of the choice uses the budget module (phase 3 design §2)", async () => {

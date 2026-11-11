@@ -21,6 +21,7 @@ import type {
   RuleCreate,
   RuleUpdate,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // --------------------------------------------------------------------------
 // Channels
@@ -41,7 +42,8 @@ export function useNotificationChannels() {
 export function useCreateNotificationChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: ChannelCreate) => api.createNotificationChannel(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
@@ -52,7 +54,8 @@ export function useCreateNotificationChannelMutation() {
 export function useUpdateNotificationChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: ChannelUpdate }) =>
       api.updateNotificationChannel(id, body),
     onSuccess: () => {

@@ -42,6 +42,9 @@ class ActWorld:
     headers: dict[str, str]
     ctx: TurnContext
     binding: ProposeBinding
+    # The person's OIDC subject, for a test that mints another of their
+    # assistant tokens (`ApiEnv.loopback_bearer`).
+    sub: str
 
     executor: Any = invoke_tool
 
@@ -106,7 +109,7 @@ async def build_world(
 
     ctx = TurnContext(
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=await api_env.loopback_bearer(org.org_id, sub),
         deadline=time.monotonic() + 30.0,
         org_id=org.org_id,
         user_id=user_id,
@@ -128,4 +131,5 @@ async def build_world(
         headers=headers,
         ctx=ctx,
         binding=binding,
+        sub=sub,
     )

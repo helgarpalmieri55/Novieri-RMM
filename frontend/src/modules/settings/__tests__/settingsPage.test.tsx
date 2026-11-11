@@ -37,14 +37,6 @@ import type { MeClient } from "../../../lib/api";
 // The OIDC client is not under test and constructs a UserManager (with a
 // silent-renew timer) at import time. `../api.ts`'s org request only needs the
 // bearer token, so the token source is stubbed.
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  // A factory mock is a strict namespace: a missing export throws. This one
-  // stayed after Profile moved to its own route, because other tabs still
-  // reach for the authority when they name the identity provider.
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // `apiClient` is referenced LAZILY — inside the returned closure, never while
 // the factory runs. Importing the harness from within the factory instead
 // deadlocks: the harness imports `SettingsPage`, which imports the very module
@@ -83,6 +75,7 @@ const ALL_TABS = [
   "Organization",
   "Roles",
   "Users",
+  "Sessions",
   "Assistant",
   "Notifications",
   "Service levels",
@@ -192,8 +185,10 @@ describe("SettingsPage", () => {
       await user.click(await screen.findByRole("tab", { name: new RegExp(label) }));
       const controls = document.querySelectorAll("input, select, textarea");
       expect(controls.length, `${label} must be editable`).toBeGreaterThan(0);
+      // RE-POINTED (own authentication design §7): the Users tab writes with
+      // "Send invitation" now, not "Create user".
       expect(
-        screen.getAllByRole("button", { name: /save|create/i }).length,
+        screen.getAllByRole("button", { name: /save|create|invitation/i }).length,
         `${label} must be able to write`,
       ).toBeGreaterThan(0);
     }
@@ -205,12 +200,13 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("tab", { name: "Notifications" })).toBeInTheDocument();
     // The organization tab is always offered: every session belongs to an org.
     expect(screen.getByRole("tab", { name: "Organization" })).toBeInTheDocument();
-    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users"]) {
+    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users", "Sessions"]) {
       expect(screen.queryByRole("tab", { name: new RegExp(label) })).not.toBeInTheDocument();
     }
     expect(calls.listRoles).not.toHaveBeenCalled();
     expect(calls.listPermissions).not.toHaveBeenCalled();
     expect(calls.listUsers).not.toHaveBeenCalled();
+    expect(calls.getSessionSettings).not.toHaveBeenCalled();
     expect(calls.getAiSettings).not.toHaveBeenCalled();
     expect(calls.getSlaSettings).not.toHaveBeenCalled();
     expect(calls.getHealthSettings).not.toHaveBeenCalled();

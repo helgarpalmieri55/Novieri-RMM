@@ -2,11 +2,14 @@ import { useState } from "react";
 import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError } from "../../components/form";
+import type { Attempt, FieldRule } from "../../components/form";
 import { useT } from "../../i18n/context";
+import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { Btn } from "../../shell/components";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
 import {
@@ -21,6 +24,11 @@ import {
   selectionSummary,
 } from "./patchCopy";
 import { BULK_APPROVAL_MAX, type MatchingSelection } from "./selection";
+
+/** The bar's Client field, named like any required field (worded when read). */
+const clientRules = (): readonly FieldRule[] => [
+  { name: "client", label: translate("components.clientField.label") },
+];
 
 /** A ring an approval can go into, and how many machines it holds. */
 export interface RingOption {
@@ -117,7 +125,6 @@ export function DecisionBar({
 }) {
   const t = useT();
   const approve = usePatchBulkApproveMutation();
-  const changes = useAuthorizingChanges();
   const [ring, setRing] = useState<string>(ringOptions[0]?.name ?? "test");
   const [changeId, setChangeId] = useState<string>("");
   // AN APPROVAL IS ONE CLIENT'S unless the person asks for every client's
@@ -127,6 +134,9 @@ export function DecisionBar({
   // The client was not chosen when the approval was confirmed: nothing was
   // sent, and the bar says why (`ClientNotChosen`).
   const [ownerError, setOwnerError] = useState<unknown>(null);
+  // An Approve refused before the confirmation, held as data (the rule and
+  // the value it judged) and worded at render: the empty Client field.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
   // TRUE only while the confirmation is open; nothing is sent until it is
   // answered.
   const [confirming, setConfirming] = useState(false);
@@ -146,11 +156,30 @@ export function DecisionBar({
   // Client field (design §3.1).
   const clientName = useClientName();
   const { clients } = useClientScope();
-  const target = useNewRowClient("patch.approve", rowClientId ?? undefined);
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const rowOwner = target.needsField ? pickedClient || null : target.clientId;
+  // The shared hook (operator decision 2): the row's client, else the top
+  // bar's, else the bar's own Client field. A new pick clears what the last
+  // one left on screen.
+  const clientField = useNewRowClientField("patch.approve", rowClientId ?? undefined, {
+    onPick: () => {
+      setOwnerError(null);
+      setAttempt(null);
+      approve.reset();
+    },
+  });
+  const rowOwner = clientField.clientId;
   const ownerId = forEveryClient ? null : rowOwner;
+  // Unassigned chosen at the top files no approval; every client's is not
+  // Unassigned's, so the toggle lifts the refusal.
+  const refused = !forEveryClient && clientField.refused !== null;
+  // THE CHANGE IT MAY IMPLEMENT IS ITS OWNER'S: the client's, or the internal
+  // client's for an approval of every client (C8; final review C,
+  // Important 4). One chosen for another owner is never sent: the value is
+  // read only while it is still offered.
+  const changeClient = forEveryClient
+    ? (clients.find((client) => client.kind === "internal")?.id ?? null)
+    : rowOwner;
+  const changes = useAuthorizingChanges(changeClient);
+  const linkedChange = (changes.data ?? []).some((change) => change.id === changeId) ? changeId : "";
   // The organisation's own client keeps its words; another is named; one not
   // chosen yet is "the client you choose" (plan Task 11 D11.3).
   const nameOf = (id: string | null): string =>
@@ -204,21 +233,11 @@ export function DecisionBar({
             options={ringOptions}
             scopeName={scopeName}
           />
-          {!forEveryClient && target.needsField ? (
-            <ClientField
-              code="patch.approve"
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                setOwnerError(null);
-                approve.reset();
-              }}
-            />
-          ) : null}
+          {!forEveryClient && clientField.needsField ? <ClientField field={clientField} /> : null}
           {changes.data && changes.data.length > 0 ? (
             <select
               className="select-field"
-              value={changeId}
+              value={linkedChange}
               onChange={(event) => setChangeId(event.target.value)}
               aria-label={t("patch.decision.changeAria", { scope: scopeName })}
             >
@@ -230,29 +249,44 @@ export function DecisionBar({
               ))}
             </select>
           ) : null}
-          <Btn
-            label={t("patch.decision.approve", { count: selectedCount })}
-            ariaLabel={t("patch.decision.approveAria", {
-              count: selectedCount,
-              ring,
-              chosen: scopeHostname
-                ? t("patch.decision.chosenFrom", { count: selectedCount, hostname: scopeHostname })
-                : "",
-            })}
-            variant="primary"
-            small
-            disabled={approve.isPending}
-            onClick={() => {
-              approve.reset();
-              setConfirming(true);
-            }}
-          />
+          {refused ? (
+            <UnassignedRefusal className="w-full" />
+          ) : (
+            <Btn
+              label={t("patch.decision.approve", { count: selectedCount })}
+              ariaLabel={t("patch.decision.approveAria", {
+                count: selectedCount,
+                ring,
+                chosen: scopeHostname
+                  ? t("patch.decision.chosenFrom", { count: selectedCount, hostname: scopeHostname })
+                  : "",
+              })}
+              variant="primary"
+              small
+              disabled={approve.isPending}
+              onClick={() => {
+                approve.reset();
+                // With every client chosen the bar's Client field is
+                // required: named here, before the confirmation, like any
+                // required field (phase 3 final review D2).
+                const askClient = !forEveryClient && clientField.needsField;
+                const next: Attempt = {
+                  rules: () => (askClient ? clientRules() : []),
+                  values: { client: rowOwner },
+                };
+                setAttempt(next);
+                if (attemptProblems(next).length > 0) return;
+                setConfirming(true);
+              }}
+            />
+          )}
           <ForEveryClientToggle
             code="patch.approve"
             hint={t("patch.decision.forEveryClientHint", { ring, client: untickedName })}
             checked={forEveryClient}
             onChange={(checked) => {
               setForEveryClient(checked);
+              setAttempt(null);
               approve.reset();
             }}
           />
@@ -263,6 +297,7 @@ export function DecisionBar({
             small
             onClick={() => {
               setLastResolved(null);
+              setAttempt(null);
               onSelectionChange([]);
             }}
           />
@@ -331,6 +366,14 @@ export function DecisionBar({
       {/* `String(approve.error)` rendered "Error: " for a bodyless 503 and was
           announced to nobody, so an approval the server refused looked like one
           it took. */}
+      {attemptProblems(attempt).length > 0 ? (
+        <span role="alert" className="form-error w-full">
+          {attemptProblems(attempt)
+            .map((problem) => problem.message)
+            .join(" ")}
+        </span>
+      ) : null}
+
       {approve.isError || ownerError ? (
         <span role="alert" className="form-error w-full">
           {describeSubmitError(approve.isError ? approve.error : ownerError)}
@@ -368,7 +411,7 @@ export function DecisionBar({
           }${t("patch.decision.bodyIntro", {
             count: selectedCount,
             target: approvalTarget(owner, ring, ownerCount),
-          })}${changeId ? "" : ` ${t("patch.decision.noChangeNote")}`}`
+          })}${linkedChange ? "" : ` ${t("patch.decision.noChangeNote")}`}`
         }
         confirmLabel={t("patch.decision.confirmLabel")}
         destructive
@@ -391,7 +434,7 @@ export function DecisionBar({
             {
               patch_ids: [...selectedIds],
               ring_name: ring,
-              ...(changeId ? { change_id: changeId } : {}),
+              ...(linkedChange ? { change_id: linkedChange } : {}),
               ...filedUnder,
             },
             // Cleared ONLY on a 2xx. A failed batch keeps the selection, so the

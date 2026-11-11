@@ -983,6 +983,24 @@ describe("NewTicketDialog: the client of a ticket with no device", () => {
     expect(api.createTicket).not.toHaveBeenCalled();
   });
 
+  it("drops the refusal about the client once a device is chosen: the device's client is the ticket's", async () => {
+    // "Client is required" was checked against a form that asked for a client.
+    // Choosing a device takes the question away, so the sentence would refer
+    // to a field that is no longer on screen.
+    const user = userEvent.setup();
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    await screen.findByLabelText("Client");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(screen.queryByText(/Client is required/)).toBeNull();
+    expect(api.createTicket).not.toHaveBeenCalled();
+  });
+
   it("asks nothing once a device is chosen, and sends no client: the device's is the ticket's", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
@@ -995,6 +1013,25 @@ describe("NewTicketDialog: the client of a ticket with no device", () => {
     await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
     expect(sentBody()).toMatchObject({ device_id: "dev-2" });
     expect(sentBody()).not.toHaveProperty("client_id");
+  });
+
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // ticket with no device would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  // A device decides the client, so with one the form is not refused.
+  it("with Unassigned chosen at the top and no device, says so instead of offering Save", async () => {
+    const user = userEvent.setup();
+    setSelectedClient("c-unassigned");
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    expect(screen.getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(api.createTicket).not.toHaveBeenCalled();
+
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+    expect(screen.queryByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
   it("asks nothing with a client chosen in the top bar, and files it there", async () => {

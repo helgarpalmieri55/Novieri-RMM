@@ -2,6 +2,10 @@ import type { Shape } from "../types";
 import type { components as en } from "../en/components";
 
 export const components: Shape<typeof en> = {
+  // The notice a new-row form shows in place of Save while Unassigned is
+  // chosen at the top (components/UnassignedRefusal.tsx).
+  unassignedRefusal:
+    "El cliente elegido arriba es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   ui: {
     actions: "Acciones",
     scrollForMore: "Desplázate para ver más columnas",
@@ -48,7 +52,7 @@ export const components: Shape<typeof en> = {
     choose: "Elige una sede",
     chooseClientFirst: "Elige primero el cliente.",
     loading: "Cargando sedes…",
-    failed: "No se pudieron cargar las sedes.",
+    failed: "No se pudieron cargar las sedes. {reason}",
     none: "Este cliente no tiene sedes. Añade una en la página Clientes.",
   },
   prerequisites: {
@@ -86,5 +90,24 @@ export const components: Shape<typeof en> = {
     cronExpression: "Expresión cron",
     cronHelp:
       "Cinco campos: minuto, hora, día del mes, mes y día de la semana. La cuadrícula dibuja las expresiones cuyo minuto es 0 y cuyo día del mes y mes son ambos *.",
+  },
+  stepUp: {
+    title: "Confirma que eres tú",
+    body: "Confirma tu segundo factor para continuar.",
+    loading: "Cargando tus segundos factores…",
+    usePasskey: "Usar una clave de acceso",
+    code: "Código de tu aplicación de autenticación",
+    confirm: "Confirmar",
+    useRecovery: "Usar un código de recuperación",
+    recoveryCode: "Código de recuperación",
+    recoveryHelp: {
+      one: "Te queda {count} código. Funciona una sola vez.",
+      other: "Te quedan {count} códigos. Cada uno funciona una sola vez.",
+    },
+    confirmRecovery: "Usar este código",
+    noMethod: "Tu cuenta no tiene ningún segundo factor, así que este cambio no se puede confirmar. Pide a un administrador que restablezca tus segundos factores.",
+    passkeyOnly:
+      "Este navegador no puede usar claves de acceso, y no tienes otro segundo factor con el que confirmar. Hazlo desde un navegador que admita claves de acceso.",
+    cancelled: "No se cambió nada: se cerró la confirmación.",
   },
 };

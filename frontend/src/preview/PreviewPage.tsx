@@ -29,6 +29,7 @@ import { EntityPicker } from "../components/picker";
 import { Badge, Table, Td, Th } from "../components/ui";
 import { WeekPainter } from "../components/weekpainter";
 import { AppShell, HealthGlyph } from "../shell/AppShell";
+import { SessionEnded } from "../shell/SessionEnded";
 import {
   Avatar,
   Chips,
@@ -1009,6 +1010,10 @@ export function PreviewPage() {
          green, amber or red. One reading here paints the real top bar; the
          panel below draws all four side by side. */
       health={HEALTH_AMBER}
+      /* A CLIENT CHOSEN, so the browser pass grades the phone's client mark
+         in the drawer toggle (operator decision 4) as it grades the rest of
+         the chrome: at 390px it is drawn, at 320px it wraps out of sight. */
+      clientMark={{ short: "AL", name: "Andes Logistics" }}
       user={{ name: "Alex Morgan", role: "Administrator" }}
       onSignOut={() => undefined}
     >
@@ -1616,6 +1621,19 @@ export function PreviewPage() {
         <QueryClientProvider client={docsClient}>
           <DocumentsPreview />
         </QueryClientProvider>
+      </div>
+
+      {/* THE SESSION-ENDED NOTICE (final re-review, M2): the screen that
+          replaces every guarded page once a session ends, with one kept
+          field, so this browser pass runs axe and the composited-contrast
+          sweep over it at every width. `embedded`: a region inside this page,
+          not a second `<main>`. */}
+      <div style={{ marginTop: 24 }}>
+        <SessionEnded
+          kept={[{ label: "Reply to the requester", text: "Restarted the print spooler.\nAsk Bob to try again." }]}
+          onSignIn={() => {}}
+          embedded
+        />
       </div>
 
       <ConfirmDialog

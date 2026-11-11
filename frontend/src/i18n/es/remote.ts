@@ -95,7 +95,7 @@ export const remote: Shape<typeof en> = {
     quality: { auto: "Automática", low: "Baja", medium: "Media", high: "Alta" },
     qualityOption: "Calidad: {label}",
     noCredential:
-      "Esta consola no tiene ningún token de acceso, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
+      "Tu sesión en esta consola terminó, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
     titleFallback: "Sesión remota",
     description: "La pantalla del dispositivo, en directo.",
     ending: "Finalizando…",

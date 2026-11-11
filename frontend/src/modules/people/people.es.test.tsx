@@ -499,7 +499,7 @@ describe("the person page in Spanish", () => {
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByText(
-        "La persona ya no podrá usar el portal. Hasta que la consola pueda editar los contactos de un cliente, se vuelve a activar mediante la API o una conexión de IA (MCP).",
+        "La persona ya no podrá usar el portal. Puedes volver a activarlo en Clientes, en la pestaña Contactos del cliente.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText(/Configuración/)).toBeNull();

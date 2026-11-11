@@ -56,8 +56,9 @@ class LoopbackExecutor(Protocol):
     """The signature both loopback executors satisfy (§0.2).
 
     There are two, and there is deliberately NO "principal kind" branch inside
-    one: the staff executor carries the caller's own bearer token back through
-    the whole ASGI stack so `require_permission` re-runs verbatim, and a portal
+    one: the staff executor carries the turn's internal token (minted from the
+    caller's session, design §5.6) back through the whole ASGI stack so
+    `require_permission` re-runs verbatim, and a portal
     principal has no `AuthContext` to build such a request from. A branch is how
     the staff path and the portal path end up sharing a code path only one of
     them was audited for.

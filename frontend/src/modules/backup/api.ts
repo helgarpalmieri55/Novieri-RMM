@@ -5,14 +5,17 @@
 // (mirrors modules/deploy/api.ts's rationale).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import type {
   OffsiteTargetCreate,
   OffsiteTargetUpdate,
   PolicyUpsertRequest,
+  Repository,
   RepositoryCreateRequest,
   RestoreRequest,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /**
  * The endpoints a backup can be targeted at (cycle 6).
@@ -59,17 +62,33 @@ export function useBackupRepositories() {
 }
 
 /**
- * Both writes below take a BODY BUILDER, not a body: each names a client
- * (MSP clients phase 2, Task 13), and one that cannot be named yet
- * (`requireKnown` while the client is not chosen, `lib/clientSelection.ts`)
- * then fails as this mutation's error, shown by the form, rather than as an
- * exception in a click handler.
+ * The create below and the policy upsert take a BODY BUILDER, not a body:
+ * each names a client (MSP clients phase 2, Task 13), and one that cannot be
+ * named yet (`requireKnown` while the client is not chosen,
+ * `lib/clientSelection.ts`) then fails as this mutation's error, shown by the
+ * form, rather than as an exception in a click handler.
  */
 export function useCreateBackupRepositoryMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (build: () => RepositoryCreateRequest) => api.createBackupRepository(build()),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["backup-repositories"] });
+    },
+  });
+}
+
+/**
+ * Retire a repository by id (MSP clients phase 3, design §5.5). It names an
+ * existing row, whose client the server takes from the row, so there is no
+ * body to build.
+ */
+export function useRetireBackupRepositoryMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<Repository, ApiError, string>({
+    mutationFn: (repositoryId) => api.retireBackupRepository(repositoryId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["backup-repositories"] });
     },
@@ -174,7 +193,8 @@ export function useOffsiteTargets() {
 export function useCreateOffsiteTargetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: OffsiteTargetCreate) => api.createOffsiteTarget(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["backup-offsite-targets"] });
@@ -185,7 +205,8 @@ export function useCreateOffsiteTargetMutation() {
 export function useUpdateOffsiteTargetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: OffsiteTargetUpdate }) =>
       api.updateOffsiteTarget(id, body),
     onSuccess: () => {

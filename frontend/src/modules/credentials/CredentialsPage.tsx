@@ -5,6 +5,8 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { ConfirmDialog } from "../../components/confirm";
+import { useStepUp } from "../../components/stepUp";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
@@ -15,8 +17,9 @@ import { RelTime } from "../../components/reltime";
 import { RowMenu } from "../../components/rowmenu";
 import { useOrgZone } from "../../lib/zone";
 import { ClientField } from "../../components/ClientField";
+import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import { PUSHABLE_CREDENTIAL_TYPES } from "../agent-push/types";
 import { CredentialPrerequisites } from "./CredentialPrerequisites";
@@ -51,10 +54,12 @@ import {
 // is never written to a log, and is never returned by an ordinary API
 // response. The checkout secret below is the one deliberate exception -- the
 // operator asked for it, gave a reason that is audited server-side, and sees
-// it exactly once. It is held ONLY in local component state (`reveal`),
-// never placed in the react-query cache (which would persist it across
-// re-renders and remain inspectable in devtools), and is cleared the moment
-// the "Done" dialog closes. Nothing here calls `console.*` with it, and no
+// it exactly once. It is held ONLY in local component state (`reveal`), and
+// is cleared the moment the "Done" dialog closes. It does not stay in the
+// react-query cache (which would keep it inspectable in devtools): the
+// checkout mutation that brought it is reset as soon as it is in `reveal`,
+// and its `gcTime: 0` drops it from the mutation cache then -- `reset()`
+// alone only detaches it, and TanStack would keep it five more minutes. Nothing here calls `console.*` with it, and no
 // list/table column renders `credential.secret` -- there is no such field on
 // `Credential` (see `lib/api.ts`) because the API never sends the value back
 // on a read.
@@ -124,6 +129,11 @@ export function CredentialsPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
+  // A CHECKOUT MAY NEED THE SECOND FACTOR AGAIN (own authentication design
+  // §2.5): the server answers 403 `step_up_required` when it was not confirmed
+  // in the last 10 minutes, and `run` asks for it and sends the checkout once
+  // more. The secret still arrives only in the accepted answer.
+  const stepUp = useStepUp();
   const [createOpen, setCreateOpen] = useState(false);
   const [reveal, setReveal] = useState<{ name: string; secret: string } | null>(null);
   const [reasonFor, setReasonFor] = useState<Credential | null>(null);
@@ -149,14 +159,19 @@ export function CredentialsPage() {
   });
 
   const checkout = useMutation({
+    // The row's client decides `X-Client-Id`: every client's goes without it.
     mutationFn: (payload: { credential: Credential; reason: string }) =>
-      api.checkoutCredential(payload.credential.id, payload.reason),
+      stepUp.run(() =>
+        api.checkoutCredential(payload.credential.id, payload.reason, payload.credential.client_id),
+      ),
     onSuccess: (data, payload) => {
       setReveal({ name: payload.credential.name, secret: data.secret });
       setReasonFor(null);
       setReason("");
       setReasonAttempt(null);
     },
+    // Its answer is the secret: dropped from the mutation cache once reset.
+    gcTime: 0,
   });
 
   function openCheckout(credential: Credential) {
@@ -175,7 +190,11 @@ export function CredentialsPage() {
       checkout.reset();
       return;
     }
-    if (reasonFor) checkout.mutate({ credential: reasonFor, reason: reason.trim() });
+    // Reset once the secret is in `reveal` (the hook's `onSuccess` above runs
+    // first): the page's state is the one place it is held.
+    if (reasonFor) {
+      checkout.mutate({ credential: reasonFor, reason: reason.trim() }, { onSuccess: () => checkout.reset() });
+    }
   }
   // AUDIT CLASS, /credentials → Delete: the mutation had NO `onError` and no
   // call site rendered `remove.error`. A refused delete -- a 403 from RBAC, a
@@ -185,7 +204,8 @@ export function CredentialsPage() {
   // audited; "it is still there because the request failed" and "it is still
   // there because the table is stale" must not look the same.
   const remove = useMutation({
-    mutationFn: (id: string) => api.deleteCredential(id),
+    // The row's client decides `X-Client-Id`: every client's goes without it.
+    mutationFn: (credential: Credential) => api.deleteCredential(credential.id, credential.client_id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["credentials"] }),
   });
 
@@ -423,7 +443,7 @@ export function CredentialsPage() {
         onConfirm={() => {
           const credential = pendingDelete;
           setPendingDelete(null);
-          if (credential) remove.mutate(credential.id);
+          if (credential) remove.mutate(credential);
         }}
       />
 
@@ -472,6 +492,7 @@ export function CredentialsPage() {
         open={reasonFor != null}
         onClose={() => setReasonFor(null)}
         title={t("credentials.checkout.title", { name: reasonFor?.name ?? "" })}
+        dismissible={!stepUp.open}
       >
         <p className="cell-sub" style={{ marginBottom: 12 }}>
           {t("credentials.checkout.intro")}
@@ -532,6 +553,8 @@ export function CredentialsPage() {
           <Btn variant="primary" label={t("credentials.reveal.done")} onClick={() => setReveal(null)} />
         </div>
       </Dialog>
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
     </>
   );
 }
@@ -559,14 +582,20 @@ function CreateCredentialDialog({
   const [caPem, setCaPem] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const isWindowsDomain = type === "windows_domain";
-  // A PUSH CREDENTIAL HAS EXACTLY ONE CLIENT (MSP clients phase 2, Task 12):
-  // every push made with it is made in that client -- the one chosen at the
-  // top, or with every client the Client field's (design §3.1). Any other
-  // type is sent without one and serves every client, as before.
+  // A CREDENTIAL GOES TO A CLIENT (design §3.1): the one chosen at the top,
+  // or with every client the Client field's. A PUSH CREDENTIAL HAS EXACTLY
+  // ONE (MSP clients phase 2, Task 12): every push made with it is made in
+  // that client. Any other type MAY instead be every client's, ticked "For
+  // every client" by someone holding the code on every client; it is then
+  // sent with no client, and without `X-Client-Id` (`api.createCredential`).
+  // Before the final review those types were always every client's, which a
+  // chosen client's header made a 403 (phase 3 final review C, Important 2).
   const pushable = PUSHABLE_CREDENTIAL_TYPES.includes(type);
-  const target = useNewRowClient("credentials.manage");
-  const [pickedClient, setPickedClient] = useState("");
-  const credentialClient = target.needsField ? pickedClient || null : target.clientId;
+  const client = useNewRowClientField("credentials.manage");
+  const [forEveryClient, setForEveryClient] = useState(false);
+  const everyClient = !pushable && forEveryClient;
+  const credentialClient = everyClient ? null : client.clientId;
+  const asksClient = !everyClient && client.needsField;
 
   const create = useMutation({
     // `name` is trimmed on the way out; `secret` DELIBERATELY IS NOT. Trailing
@@ -582,7 +611,7 @@ function CreateCredentialDialog({
       api.createCredential({
         name: name.trim(),
         type,
-        ...(pushable ? { client_id: requireKnown(credentialClient) } : {}),
+        ...(everyClient ? {} : { client_id: requireKnown(credentialClient) }),
         secret: isWindowsDomain
           ? JSON.stringify({
               username: account.trim(),
@@ -615,6 +644,9 @@ function CreateCredentialDialog({
     if (!open) return;
     create.reset();
     setAttempt(null);
+    // Every client's is never carried over from the last opening: it is a
+    // choice made for this credential, and a global one is the wider row.
+    setForEveryClient(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the
     // dialog opening; `create` is a fresh object every render.
   }, [open]);
@@ -634,7 +666,7 @@ function CreateCredentialDialog({
     const next: Attempt = {
       rules: () => [
         ...(isWindowsDomain ? windowsDomainRules : createRules)(),
-        ...(pushable && target.needsField ? [{ name: "client", label: translate("credentials.create.client") }] : []),
+        ...(asksClient ? [{ name: "client", label: translate("credentials.create.client") }] : []),
       ],
       values,
     };
@@ -698,9 +730,15 @@ function CreateCredentialDialog({
               ))}
             </select>
           </Field>
-          {pushable && target.needsField ? (
-            <ClientField code="credentials.manage" value={pickedClient} onChange={setPickedClient} />
+          {!pushable ? (
+            <ForEveryClientToggle
+              code="credentials.manage"
+              hint={t("credentials.create.forEveryClientHint")}
+              checked={forEveryClient}
+              onChange={setForEveryClient}
+            />
           ) : null}
+          {asksClient ? <ClientField field={client} /> : null}
           {/* The half of the enum finding the auditor called the one that
               matters: "an operator choosing between 'ssh_key' and 'domain_join'
               gets no explanation of what each type implies for how the secret is
@@ -800,12 +838,20 @@ function CreateCredentialDialog({
               appears behind it. The alert here is the failure path, which
               `String(create.error)` rendered as an empty string for the
               bodyless 503. */}
-          <FormActions
-            label={t("credentials.create.store")}
-            pending={create.isPending}
-            error={create.error}
-            problems={attemptProblems(attempt)}
-          />
+          {/* With Unassigned chosen at the top, nothing can be filed for a
+              client there: the dialog says so instead of offering a Store
+              that can only fail. Every client's is no client's, so ticking
+              "For every client" (where offered) still stores one. */}
+          {client.refused === "unassigned" && !everyClient ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("credentials.create.store")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

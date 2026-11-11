@@ -112,7 +112,7 @@ function renderPage(overrides: Partial<ApiClient> = {}, entry = "/credentials") 
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return { ...render(ui), api };
+  return { ...render(ui), api, queryClient };
 }
 
 beforeEach(() => {
@@ -220,9 +220,13 @@ describe("CredentialsPage", () => {
     await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
     await user.click(screen.getByRole("button", { name: "Reveal" }));
 
+    // The row's client (`null`: every client's) is the third argument: it
+    // decides whether the request carries X-Client-Id (phase 3 final review B,
+    // Critical 1).
     expect(checkoutCredential).toHaveBeenCalledExactlyOnceWith(
       credential().id,
       "helpdesk ticket 4821",
+      null,
     );
     // Now, and only now, the secret is on the page -- inside the dialog that
     // says it is shown once.
@@ -336,9 +340,12 @@ describe("CredentialsPage's New credential form", () => {
     await user.type(screen.getByLabelText("Secret"), " hunter2 ");
     await user.click(screen.getByRole("button", { name: "Store" }));
 
+    // Under the client chosen at the top, `o1` (design §3.1): before the final
+    // review a non-push type was always every client's and named none.
     expect(createCredential).toHaveBeenCalledExactlyOnceWith({
       name: "Domain support admin",
       type: "windows_admin",
+      client_id: "o1",
       secret: " hunter2 ",
     });
   });
@@ -604,7 +611,8 @@ describe("CredentialsPage — deleting a stored credential", () => {
 
     await deleteCredentialNamed(user, "Linux support key");
 
-    expect(deleteCredential).toHaveBeenCalledExactlyOnceWith("keep-me");
+    // With the row's client (`null`: every client's), which decides X-Client-Id.
+    expect(deleteCredential).toHaveBeenCalledExactlyOnceWith("keep-me", null);
   });
 
   // No `requireTyping` here, deliberately: the blast radius is one credential
@@ -716,13 +724,17 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     expect(createCredential).toHaveBeenCalledExactlyOnceWith({
       name: "Linux support key",
       type: "ssh_key",
+      // The client chosen at the top (design §3.1; phase 3 final review C,
+      // Important 2): every type is a client's unless ticked for every client.
+      client_id: "o1",
       secret: "-----BEGIN KEY-----",
     });
   });
 
-  it("files a push install credential under the client chosen at the top, and only a push credential", async () => {
+  it("files a push install credential under the client chosen at the top", async () => {
     // MSP clients phase 2, Task 12: a push credential has exactly one client.
-    // The ssh_key above is sent with none and serves every client, as before.
+    // Since the final review the ssh_key above goes to that client too; only
+    // a non-push type may instead be every client's ("For every client").
     const user = userEvent.setup();
     const createCredential = vi.fn().mockResolvedValue(credential({ type: "push_install" }));
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
@@ -989,4 +1001,132 @@ describe("CredentialsPage — a Windows domain account", () => {
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(/Account must be user@domain/);
     },
   );
+});
+
+/**
+ * THE VAULT ASKS FOR THE SECOND FACTOR AGAIN (own authentication design §2.5,
+ * falsifier 5). A checkout whose second factor was not confirmed in the last
+ * 10 minutes is the server's 403 `step_up_required`; the page asks for it and
+ * sends the checkout once more only after the server accepted it. The secret
+ * appears only in the answer to that second, accepted checkout.
+ */
+describe("CredentialsPage — a checkout asks for the second factor again when the server says so", () => {
+  const SECURITY = { has_totp: true, passkeys: [], recovery_codes_left: 0, trusted_devices: [], sessions: [] };
+  // The server's own shape (`core/auth/refusals.py`; final review D2, Minor 4).
+  const STALE = () => new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
+
+  async function askToReveal(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByText("Domain support admin");
+    await user.click(screen.getByRole("button", { name: /check out/i }));
+    await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
+    await user.click(screen.getByRole("button", { name: "Reveal" }));
+  }
+
+  it("confirms the factor, then reveals", async () => {
+    const user = userEvent.setup();
+    const checkoutCredential = vi
+      .fn()
+      .mockRejectedValueOnce(STALE())
+      .mockResolvedValueOnce({ secret: "sup3r-s3cr3t-value" });
+    const stepUpTotp = vi.fn().mockResolvedValue(undefined);
+    renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential,
+      getMySecurity: vi.fn().mockResolvedValue(SECURITY),
+      stepUpTotp,
+    });
+    await askToReveal(user);
+
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    expect(screen.queryByText("sup3r-s3cr3t-value")).not.toBeInTheDocument();
+    await user.type(await within(confirm).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByText("sup3r-s3cr3t-value")).toBeInTheDocument();
+    expect(stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+    expect(checkoutCredential).toHaveBeenCalledTimes(2);
+    expect(checkoutCredential).toHaveBeenLastCalledWith(credential().id, "helpdesk ticket 4821", null);
+  });
+
+  it("reveals nothing when the confirmation is closed, and says nothing changed", async () => {
+    const user = userEvent.setup();
+    const checkoutCredential = vi.fn().mockRejectedValue(STALE());
+    renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential,
+      getMySecurity: vi.fn().mockResolvedValue(SECURITY),
+      stepUpTotp: vi.fn(),
+    });
+    await askToReveal(user);
+
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    const checkout = screen.getByRole("dialog", { name: "Check out Domain support admin" });
+    expect(await within(checkout).findByText(/Nothing was changed: the confirmation was closed\./)).toBeInTheDocument();
+    expect(checkoutCredential).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("sup3r-s3cr3t-value")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * FIX ROUND 2 (Task 12 re-review). The revealed secret is held in the page's
+ * own state (`reveal`) and nowhere else: `reset()` alone only detaches the
+ * checkout from the page, and TanStack keeps a detached mutation -- its answer
+ * is the secret -- in the mutation cache for its `gcTime`, five minutes by
+ * default; one never reset keeps it until the next checkout.
+ */
+describe("CredentialsPage — a revealed secret is in no cache", () => {
+  /** Every cached mutation's answer and body, as one string. */
+  function mutationCacheText(queryClient: QueryClient): string {
+    return JSON.stringify(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
+    );
+  }
+
+  it("keeps the secret out of the mutation cache while it is on screen", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential: vi.fn().mockResolvedValue({ secret: "sup3r-s3cr3t-value" }),
+    });
+    await screen.findByText("Domain support admin");
+    await user.click(screen.getByRole("button", { name: /check out/i }));
+    await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
+    await user.click(screen.getByRole("button", { name: "Reveal" }));
+
+    expect(await screen.findByText("sup3r-s3cr3t-value")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("sup3r-s3cr3t-value"));
+    // The page's own state still holds it, for as long as the dialog is open.
+    expect(screen.getByText("sup3r-s3cr3t-value")).toBeInTheDocument();
+  });
+
+  it("keeps it out after a checkout that needed the second factor again, too", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential: vi
+        .fn()
+        // The server's own shape (`core/auth/refusals.py`; final review D2, Minor 4).
+        .mockRejectedValueOnce(
+          new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+        )
+        .mockResolvedValueOnce({ secret: "sup3r-s3cr3t-value" }),
+      getMySecurity: vi.fn().mockResolvedValue({ has_totp: true, passkeys: [], recovery_codes_left: 0, trusted_devices: [], sessions: [] }),
+      stepUpTotp: vi.fn().mockResolvedValue(undefined),
+    });
+    await screen.findByText("Domain support admin");
+    await user.click(screen.getByRole("button", { name: /check out/i }));
+    await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
+    await user.click(screen.getByRole("button", { name: "Reveal" }));
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(confirm).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByText("sup3r-s3cr3t-value")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("sup3r-s3cr3t-value"));
+  });
 });

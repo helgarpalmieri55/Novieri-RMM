@@ -97,8 +97,8 @@ export function devicePickerOptions(devices: readonly Device[]): PickerOption[] 
  * The storage ref is the distinguishing fact — two repositories named for
  * their intent ("primary", "offsite") differ by the bucket they write to, and
  * pointing a policy at the wrong one is a backup that exists somewhere nobody
- * looks. `state` is the second: a `disabled` repository is one somebody
- * retired, and binding a policy to it is a schedule that writes nowhere.
+ * looks. `state` is the second: a `retired` repository takes no new backups,
+ * and binding a policy to it is a schedule that writes nowhere.
  */
 export function repositoryPickerOptions(repositories: readonly Repository[]): PickerOption[] {
   return repositories.map((repository) => ({
@@ -108,8 +108,8 @@ export function repositoryPickerOptions(repositories: readonly Repository[]): Pi
       repository.storage_ref,
       repository.state === "active"
         ? translate("backup.picker.repoActive")
-        : repository.state === "disabled"
-          ? translate("backup.picker.repoDisabled")
+        : repository.state === "retired"
+          ? translate("backup.picker.repoRetired")
           : repository.state,
     ]
       .filter(Boolean)
@@ -163,10 +163,18 @@ export function policyClient(
   return fallback;
 }
 
-/** The repositories a policy of `client` may name: that client's, and only those. */
+/**
+ * The repositories a policy of `client` may name: that client's ACTIVE ones.
+ * A retired repository takes no new backups (MSP clients phase 3, design
+ * §5.5), so the policy editor never offers it -- and `state` is free text
+ * server-side, so a state this console does not know is refused by default
+ * rather than offered (`=== "active"`, phase 3 final review C, Minor).
+ */
 export function repositoriesOfClient(
   repositories: readonly Repository[],
   client: string | null,
 ): Repository[] {
-  return client === null ? [] : repositories.filter((repository) => repository.client_id === client);
+  return client === null
+    ? []
+    : repositories.filter((repository) => repository.client_id === client && repository.state === "active");
 }

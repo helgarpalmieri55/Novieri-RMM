@@ -12,6 +12,7 @@ import type {
   ApplyRequest,
   ApprovalListFilters,
   BulkApprovalCreateRequest,
+  PatchApproval,
   PatchDeviceRollupFilters,
   PatchPolicyInput,
   PatchUpdateFilters,
@@ -210,13 +211,22 @@ export const PATCH_RESTARTS_QUERY_KEY = "patch-restarts";
 
 /** Changes an approval can be linked to: approved, or being implemented. An
  *  operator who may not read changes gets none, and the approval proceeds
- *  without one (the server records it, or refuses under a gate). */
-export function useAuthorizingChanges() {
+ *  without one (the server records it, or refuses under a gate).
+ *
+ *  ONLY `clientId`'s (phase 3 final review C, Important 4). The server links
+ *  an approval only to a change of the approval's own client -- the internal
+ *  client's for an approval of every client -- and answers "no such change"
+ *  for any other (`change_mgmt/gates.py::authorizing_change`), even one the
+ *  picker showed. With every client chosen `GET /changes` holds every
+ *  client's, so they are filtered here (the route is not paginated); `null`,
+ *  a client not known yet, offers none. */
+export function useAuthorizingChanges(clientId: string | null) {
   const api = useApi();
   return useQuery({
     queryKey: ["patch-authorizing-changes"],
     queryFn: async () =>
       (await api.listChanges()).filter((c) => c.state === "approved" || c.state === "implementing"),
+    select: (changes) => changes.filter((change) => clientId !== null && change.client_id === clientId),
     retry: false,
     staleTime: 30_000,
   });
@@ -424,7 +434,10 @@ export function usePatchRevokeApprovalMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (approvalId: string) => api.revokePatchApproval(approvalId),
+    // An approval for every client is revoked without the top bar's client
+    // (`ApiClient.revokePatchApproval`): narrowed, the server refuses it.
+    mutationFn: (approval: Pick<PatchApproval, "id" | "client_id">) =>
+      api.revokePatchApproval(approval.id, { global: approval.client_id === null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PATCH_APPROVALS_QUERY_KEY] });
       void queryClient.invalidateQueries({ queryKey: ["patch-fleet"] });

@@ -33,13 +33,13 @@ class Settings(BaseSettings):
     oidc_audience: str = "it-suite"
     oidc_jwks_url: str
     oidc_org_claim: str = "org"
-    # The OIDC client the console's own SPA signs in with: every non-MCP door
-    # admits only a token whose `azp` is this client
-    # (`app.core.security.require_console_token`), and `/mcp` refuses one that
-    # is. Optional: the default is the frontend's own default client id
-    # (`VITE_OIDC_CLIENT_ID ?? "it-suite-web"` in frontend/src/lib/auth.ts),
-    # and nothing under deploy/ overrides either, so no `.env` change is needed.
-    # Set ITS_OIDC_CONSOLE_CLIENT_ID only alongside a changed VITE_OIDC_CLIENT_ID.
+    # The OIDC client the console's SPA signed in with at Keycloak until own
+    # authentication phase 1: `/mcp` refuses a token whose `azp` is this client
+    # (`app.core.security.require_person_mcp_token`), so a grant consented to
+    # for the console is never an MCP one. No non-MCP door reads a bearer at
+    # all since phase 1's Task 13 -- the console signs in with the platform's
+    # own session. Optional: nothing under deploy/ overrides the default, so
+    # no `.env` change is needed.
     oidc_console_client_id: str = "it-suite-web"
     default_org_slug: str | None = None  # single-org on-prem fallback when the claim is absent
     # When true (multi-tenant deployments), a token missing the org claim is
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     audit_hmac_key_path: Path | None = None
     vault_backend: Literal["local", "openbao"] = "local"
     vault_root_key_path: Path | None = None
+    # Own authentication's key material (`app/core/auth/keys.py`): the password
+    # pepper (transit HMAC key `auth-pepper`) and the token signing key (transit
+    # `auth-signing`, ECDSA P-256). "openbao" in production -- neither private
+    # half ever leaves OpenBao. "local" keeps two files in `auth_keys_dir`
+    # (default `ca_dir`) for development and tests, and in production refuses
+    # to start rather than invent a pepper no stored password was made with.
+    auth_keys_backend: Literal["local", "openbao"] = "local"
+    auth_keys_dir: Path | None = None
     openbao_addr: str | None = None
     openbao_token: str | None = None
 
@@ -155,6 +163,17 @@ class Settings(BaseSettings):
     # the TCP peer is the source address. Parsed and validated at startup by
     # app/core/client_address.py so a typo fails the process, not a request.
     trusted_proxy_cidrs: str = "172.19.240.0/24"
+
+    # The per-address sign-in limits (`app/api/v1/auth.py::_LOGIN`, `_FACTOR`):
+    # requests to the password step, and to the second-factor steps, from one
+    # address in 10 minutes. EVERY request counts, successes included, and the
+    # address is the one `trusted_proxy_cidrs` above lets through -- so an office
+    # behind one NAT address shares one budget, which is why the operator may
+    # raise them (decision of 2026-11-06, design §2.3). The floor of 5 keeps them
+    # from being switched off; out of range, the process does not start. The
+    # per-account counters (`app/core/auth/failures.py`) are a separate control.
+    auth_login_ip_limit: int = Field(default=30, ge=5, le=1000)
+    auth_factor_ip_limit: int = Field(default=30, ge=5, le=1000)
 
     gateway_url: str = "wss://localhost:8443/agent"
     # Relay endpoint the agent dials for remote-control media tunnels. Handed to

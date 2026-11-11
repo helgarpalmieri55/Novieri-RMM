@@ -76,16 +76,11 @@ RAW_SESSIONS_BY_DESIGN: dict[str, str] = {
     "api/deps.py::admit": (
         "admin_engine, and it is the ONE pre-tenant step in the request path "
         "(`auth_context` and the portal principal both admit through it): "
-        "the org is looked up BY SLUG from the validated token, so there is no "
+        "on the MCP channel -- the only one that still carries a token -- the "
+        "org is looked up BY SLUG from the validated token, so there is no "
         "org_id to pin a tenant session with yet. Read-only, one column, and "
         "the very next statement opens `org_session(org_id)` for everything "
         "else the dependency does."
-    ),
-    "api/v1/ws.py::ui_websocket": (
-        "admin_engine, the same pre-tenant org-slug lookup as `auth_context`, "
-        "for the same reason: a socket carries its token in the subprotocol "
-        "header and the org is not known until that token is validated. "
-        "Read-only; the handler moves onto tenant-scoped reads afterwards."
     ),
     "api/v1/errors.py::list_error_groups": (
         "app_engine WITHOUT a tenant GUC, deliberately: `platform_error_group` "

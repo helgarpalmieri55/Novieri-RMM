@@ -390,6 +390,11 @@ async def list_devices(
     #: A filter like the others, never a widening: RLS still decides what the
     #: caller may see, so another client's id answers an empty page.
     client_id: UUID | None = Query(default=None),
+    #: One site's machines -- the console's site filter (MSP clients phase 3,
+    #: design §4.3). A filter like the others, never a widening: RLS still
+    #: decides what the caller may see, so a site of a client outside the
+    #: scope answers an empty page.
+    site_id: UUID | None = Query(default=None),
     #: The tab strip: `all | online | offline | assets | certs | review`.
     #: `review` is the machines that joined through the install link and wait
     #: for a person. NOT the same
@@ -437,6 +442,7 @@ async def list_devices(
             provenance=provenance,
             q=q,
             client_id=client_id,
+            site_id=site_id,
             state=state,
             limit=limit,
             offset=offset,

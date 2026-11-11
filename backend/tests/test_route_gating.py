@@ -125,6 +125,69 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         # cover a route that runs after setup: the reason it is safe expires the
         # moment the platform has an owner.
         ("POST", "/api/v1/setup/claim"),
+        # SIGN-IN (P2 phase 1, app/api/v1/auth.py): answers before there is a
+        # person to hold a code. Guarded by Task 6's CSRF rule, a per-IP limit
+        # and the per-account counters (`flows.login`).
+        ("POST", "/api/v1/auth/login"),
+        # A pending session's second factor: `guards.session_of` + `require_pending`.
+        ("POST", "/api/v1/auth/factor/totp"),
+        # The same pending session, with a recovery code.
+        ("POST", "/api/v1/auth/factor/recovery"),
+        # The same pending session's passkey challenge.
+        ("POST", "/api/v1/auth/factor/passkey/options"),
+        # The same pending session's passkey assertion.
+        ("POST", "/api/v1/auth/factor/passkey"),
+        # Enrolment: a pending session with no factor, or a fresh full one (`flows._enrollable`).
+        ("POST", "/api/v1/auth/enroll/totp/start"),
+        # The same `_enrollable` rule, confirming the code.
+        ("POST", "/api/v1/auth/enroll/totp/confirm"),
+        # The same `_enrollable` rule, the passkey creation options.
+        ("POST", "/api/v1/auth/enroll/passkey/options"),
+        # The same `_enrollable` rule, the attestation.
+        ("POST", "/api/v1/auth/enroll/passkey"),
+        # Only the pending session that enrolled (`auth:enrolled:` flag, plan decision 6).
+        ("POST", "/api/v1/auth/enroll/finish"),
+        # A full session's recent confirmation: `guards.require_full`.
+        ("POST", "/api/v1/auth/step-up/totp"),
+        # The same, with a recovery code.
+        ("POST", "/api/v1/auth/step-up/recovery"),
+        # The same, the passkey challenge.
+        ("POST", "/api/v1/auth/step-up/passkey/options"),
+        # The same, the passkey assertion.
+        ("POST", "/api/v1/auth/step-up/passkey"),
+        # Ends only the session the caller's own cookie names.
+        ("POST", "/api/v1/auth/logout"),
+        # The caller's full session, ending the caller's own sessions.
+        ("POST", "/api/v1/auth/logout-everywhere"),
+        # Always 202, the same for any address; the mail goes after the answer.
+        ("POST", "/api/v1/auth/password/forgot"),
+        # A one-time link is the credential (`action_tokens.consume`).
+        ("POST", "/api/v1/auth/password/reset"),
+        # An invitation's page: a one-time link is the credential, read and
+        # left unused (`flows.invite_details`).
+        ("POST", "/api/v1/auth/invite/details"),
+        # The same link, consumed with the invitee's password (`flows.accept_invite`).
+        ("POST", "/api/v1/auth/invite/accept"),
+        # The server's recovery link is the credential, read and left unused
+        # (`flows.recovery_details`); only the recovery command issues one.
+        ("POST", "/api/v1/auth/recover/details"),
+        # The same link, consumed: the factors go, a pending session opens.
+        ("POST", "/api/v1/auth/recover/accept"),
+        # MY SECURITY: `bound_auth_context` + the console session
+        # (`auth.py::_console_ctx`); the caller's own rows only.
+        ("GET", "/api/v1/me/security"),
+        # The caller's own password, after a recent confirmation (`require_step_up`).
+        ("PUT", "/api/v1/me/password"),
+        # One of the caller's own passkeys, matched with their user id.
+        ("DELETE", "/api/v1/me/passkeys/{passkey_id}"),
+        # The caller's own authenticator app, after a recent confirmation.
+        ("DELETE", "/api/v1/me/totp"),
+        # The caller's own recovery codes, after a recent confirmation.
+        ("POST", "/api/v1/me/recovery-codes"),
+        # One of the caller's own remembered browsers, matched with their user id.
+        ("DELETE", "/api/v1/me/trusted-devices/{device_id}"),
+        # One of the caller's own sessions, matched with their user id.
+        ("DELETE", "/api/v1/me/sessions/{session_id}"),
     }
 )
 

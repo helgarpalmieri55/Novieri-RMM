@@ -2,6 +2,7 @@
 
 import { getLanguage } from "../i18n/core";
 import { isGlobalRoute } from "./globalRoutes";
+import { backgroundRequest } from "./personInput";
 import type {
   DashboardLayoutResponse,
   WidgetPlacement,
@@ -527,6 +528,8 @@ export interface DeviceListParams {
   osFamily?: Device["os_family"];
   /** One client's machines (`?client_id=`): what IPAM's sweeper picker lists. */
   clientId?: string;
+  /** One site's machines (`?site_id=`): the fleet list's site filter (MSP clients phase 3). */
+  siteId?: string;
   limit?: number;
   offset?: number;
 }
@@ -838,25 +841,20 @@ export interface Me {
    * They are read with `?? ""` at the one place they are rendered, so an
    * absent value is an empty box and never the string "undefined".
    *
-   * `email` is NOT in that set — Keycloak owns the address, and this console
-   * shows it rather than editing it.
+   * `email` is NOT in that set — a sign-in address changes through a
+   * re-authenticated, verified flow this console does not offer, so it shows
+   * it rather than editing it.
    */
   phone?: string | null;
   timezone?: string | null;
   locale?: string | null;
-  /**
-   * Present only on the `PATCH /me` response, and only when `locale` was sent.
-   * `false`: the language was saved here but could not be written to the
-   * sign-in pages. `true` or absent/null: nothing for the person to be told.
-   */
-  identity_locale_synced?: boolean | null;
 }
 
 /**
  * The caller's own organization (`GET /orgs/current`).
  *
  * There is no by-id variant and there is not going to be one: the backend
- * resolves the org from the bearer token, so the client cannot name a target.
+ * resolves the org from the session, so the client cannot name a target.
  */
 export interface CurrentOrg {
   id: string;
@@ -926,6 +924,49 @@ export interface ContactUpdate {
   display_name?: string;
   phone?: string | null;
   status?: "active" | "disabled";
+}
+
+/** `POST /clients` (`ClientCreate`): a customer client, born with a site called Principal. */
+export interface ClientCreate {
+  name: string;
+  email_domains: string[];
+  phone: string;
+  address: string;
+  website: string;
+  notes: string;
+  enabled_modules: ("budget" | "bcp" | "change")[];
+}
+
+/** `PATCH /clients/{id}` (`ClientUpdate`): only the fields present are written. */
+export interface ClientUpdate {
+  name?: string;
+  email_domains?: string[];
+  phone?: string;
+  address?: string;
+  website?: string;
+  notes?: string;
+  enabled_modules?: ("budget" | "bcp" | "change")[];
+}
+
+/** `POST /clients/{id}/sites` (`SiteCreate`). */
+export interface SiteCreate {
+  name: string;
+  address: string;
+  description: string;
+}
+
+/** `PATCH /sites/{id}` (`SiteUpdate`): name, address and description only. */
+export interface SiteUpdate {
+  name?: string;
+  address?: string;
+  description?: string;
+}
+
+/** `POST /clients/{id}/contacts` (`ContactCreate`). A contact cannot sign in to the console. */
+export interface ContactCreate {
+  email: string;
+  display_name: string;
+  phone: string | null;
 }
 
 /**
@@ -1040,6 +1081,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The fields of a refusal's JSON body, the door's `{"code": ...}` and
+ * FastAPI's `{"detail": {...}}` read as one -- or `{}` for anything else (an
+ * HTML error page, plain text, a network failure).
+ */
+export function errorBody(error: unknown): Record<string, unknown> {
+  if (!(error instanceof ApiError)) return {};
+  try {
+    const parsed: unknown = JSON.parse(error.message);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const top = parsed as Record<string, unknown>;
+    const detail = top.detail;
+    return detail !== null && typeof detail === "object" && !Array.isArray(detail)
+      ? { ...top, ...(detail as Record<string, unknown>) }
+      : top;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The door's refusal code (own-auth Task 6), for a caller that acts on it:
+ * `step_up_required` (403) asks for the second factor again -- the prompt is
+ * own-auth Task 12's -- and `csrf` (403) is an ordinary failure, never a
+ * reason to send anyone to sign in. `auth_required` (401) never reaches a
+ * caller: `request()` turns it into the session ending (`onUnauthorized`).
+ */
+export function apiErrorCode(error: unknown): string | null {
+  const code = errorBody(error).code;
+  return typeof code === "string" ? code : null;
+}
+
 import type {
   SegmentCheckOut,
   SiteServerCreate,
@@ -1050,11 +1123,25 @@ import type {
   SiteWakeRequest,
 } from "../modules/site-servers/types";
 import type {
-  CreatedUserOut,
+  AuthenticationResponseJSON,
+  EnrollFrom,
+  InviteDetails,
+  LoginResult,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RecoveryAccept,
+  RecoveryCodes,
+  RecoveryLink,
+  RegistrationResponseJSON,
+  SignedIn,
+  TotpEnrollment,
+} from "../modules/auth/types";
+import type {
   EffectivePermissionsOut,
   EmailSettingsOut,
   EmailSettingsUpdate,
-  MailResultOut,
+  InviteLinkOut,
+  InviteOut,
   MeProfileUpdate,
   PermissionCatalogueOut,
   RoleAssign,
@@ -1064,12 +1151,15 @@ import type {
   RoleOut,
   RolePermissionsOut,
   RoleUpdate,
+  SessionSettingsOut,
+  SessionSettingsUpdate,
   TestSendIn,
   TestSendOut,
-  UserCreate,
+  UserInvite,
   UserListOut,
   UserOut,
 } from "../modules/settings/types";
+import type { MySecurity, PasswordChange } from "../modules/profile/types";
 import type { PlatformStatus } from "../modules/platform-status/types";
 import type { ErrorGroup, ErrorGroupDetail, ErrorGroupList } from "../modules/error-monitor/types";
 
@@ -1530,7 +1620,7 @@ export interface DeviceGroupMemberResult {
 
 /**
  * Where a request goes, for the one thing `requestHeaders` decides beyond the
- * bearer and the language: whether it carries `X-Client-Id`.
+ * language and the console's request mark: whether it carries `X-Client-Id`.
  */
 export interface RequestRoute {
   /** `GET`, `POST`, … */
@@ -1552,12 +1642,38 @@ export interface RequestRoute {
 }
 
 /**
- * The one place request headers are built: bearer, language and client.
+ * The header that marks a request as the console's own (own-auth design §6.4).
+ * The server refuses a write carried by the session cookie without it (403
+ * `{"code": "csrf"}`, `backend/app/core/auth/csrf.py::CSRF_HEADER`). A page on
+ * another site can make the browser send the cookie; it cannot add a header
+ * of its own without a CORS preflight, and this platform answers none.
+ */
+export const CSRF_HEADER = "X-ITMS-Request";
+
+/**
+ * The header that marks a request NO PERSON CAUSED: a poll, a refetch on
+ * focus or on a language switch, a socket's re-check -- anything made when
+ * nobody gave input in the last 60 s (`./personInput.ts`). The server does
+ * not renew the session for it, so a console left open goes idle (final
+ * re-review, P1; NIST SP 800-63B-4 §5.2).
+ */
+export const BACKGROUND_HEADER = "X-ITMS-Background";
+
+/**
+ * The one place request headers are built: the console's request mark,
+ * language and client.
  *
  * EVERY fetch in the console goes through this, including the raw ones that
  * bypass `request()` for binary bodies. A path that builds its own `Headers`
  * sends no `Accept-Language`, so the server answers it in English whatever the
- * person chose; `api.language.test.ts` fails the build on such a path.
+ * person chose; `api.language.test.ts` fails the build on such a path. And it
+ * sends no `X-ITMS-Request`, so the server refuses it as a forged write
+ * (`api.session.test.ts`).
+ *
+ * NO `Authorization`. The console holds no token: the session is the
+ * `__Host-itms_session` cookie, which the browser adds itself to a
+ * same-origin request (`credentials: "same-origin"`, set on every `fetch` in
+ * this file) and which no script here can read.
  *
  * `X-Client-Id` (phase 3 design §1.2) names the client chosen in the top bar,
  * EXCEPT on a route of global configuration (`globalRoutes.json`, generated
@@ -1566,15 +1682,17 @@ export interface RequestRoute {
  * because a second copy is a 400 and one on a global route a 403.
  * `api.clientScope.test.ts` fails the build on an `ApiClient` call that does
  * not say where it goes.
+ *
+ * `X-ITMS-Background: 1` (`BACKGROUND_HEADER`) on every request made when no
+ * person gave input in the last 60 s: the server does not renew the session
+ * for it. Decided here too, so no fetch can forget it.
  */
-export function requestHeaders(
-  token: string | null | undefined,
-  extra?: HeadersInit,
-  route?: RequestRoute,
-): Headers {
+export function requestHeaders(extra?: HeadersInit, route?: RequestRoute): Headers {
   const headers = new Headers(extra);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set(CSRF_HEADER, "1");
   headers.set("Accept-Language", getLanguage());
+  if (backgroundRequest()) headers.set(BACKGROUND_HEADER, "1");
+  else headers.delete(BACKGROUND_HEADER);
   headers.delete("X-Client-Id");
   if (route?.client && route.global !== true) {
     const path = route.path.split("?")[0] ?? route.path;
@@ -1585,7 +1703,11 @@ export function requestHeaders(
 
 export class ApiClient {
   constructor(
-    private readonly getToken: () => string | null,
+    /**
+     * Told about every 401 on a request made with the session: the session
+     * has ended (`lib/sessionEnd.ts`). Not a navigation -- the guard and the
+     * shell decide what the person sees (`lib/session.ts`).
+     */
     private readonly onUnauthorized: () => void,
     private readonly base: string = "/api/v1",
     /**
@@ -1606,15 +1728,26 @@ export class ApiClient {
     return { method: (method ?? "GET").toUpperCase(), path, client: this.getClient(), global };
   }
 
+  /**
+   * One JSON request.
+   *
+   * `anonymous`: a route of signing in or out (`/auth/*`), called with no
+   * session or with one that is not complete yet. Its 401 is that route's
+   * own answer ("this code was not accepted", "start again"), so it does not
+   * tell `onUnauthorized` the session ended, and it keeps the server's body
+   * for the page to read. It never carries `X-Client-Id`: signing in belongs
+   * to no client. Its body may be empty on a success (a 202 that says only
+   * "accepted"), which reads as `undefined`.
+   */
   private async request<T>(
     path: string,
     init: RequestInit = {},
-    { global = false }: { global?: boolean } = {},
+    { global = false, anonymous = false }: { global?: boolean; anonymous?: boolean } = {},
   ): Promise<T> {
-    const headers = requestHeaders(this.getToken(), init.headers, this.route(init.method, path, global));
+    const headers = requestHeaders(init.headers, this.route(init.method, path, global || anonymous));
     headers.set("Content-Type", "application/json");
-    const response = await fetch(`${this.base}${path}`, { ...init, headers });
-    if (response.status === 401) {
+    const response = await fetch(`${this.base}${path}`, { ...init, headers, credentials: "same-origin" });
+    if (response.status === 401 && !anonymous) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
     }
@@ -1624,7 +1757,160 @@ export class ApiClient {
     if (response.status === 204) {
       return undefined as T;
     }
+    if (anonymous) {
+      const text = await response.text();
+      return (text === "" ? undefined : JSON.parse(text)) as T;
+    }
     return (await response.json()) as T;
+  }
+
+  /* --------------------------------------------------------------- session */
+
+  /**
+   * End this browser's session (`POST /auth/logout`, own-auth design §2.4).
+   * `anonymous`: a session that had already ended answers 401, which is the
+   * outcome asked for (`lib/session.ts::signOut`), not news to announce.
+   */
+  logout(): Promise<void> {
+    return this.request<void>("/auth/logout", { method: "POST" }, { anonymous: true });
+  }
+
+  /* ------------------------------------------- signing in (own-auth Task 11) */
+
+  // Every one of these is `anonymous` (`request()`): called with no session or
+  // with one that has no factor yet, so a 401 is the step's own answer -- a
+  // wrong code, a sign-in that timed out -- with the server's body kept for
+  // the page, and never a "session ended". None carries `X-Client-Id`. A
+  // secret the person types (a password, a code) or must see once (a setup
+  // key, the recovery codes) travels in a body, never in a URL.
+
+  /** `POST /auth/login`: the first step (own-auth design §2.1, §2.3). */
+  login(body: { email: string; password: string }): Promise<LoginResult> {
+    return this.request<LoginResult>("/auth/login", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/totp`: a code from the authenticator app. */
+  factorTotp(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/totp", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/passkey/options`: the challenge for `startAuthentication`, untouched. */
+  factorPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>(
+      "/auth/factor/passkey/options",
+      { method: "POST" },
+      { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/factor/passkey`: the browser's answer, untouched. */
+  factorPasskey(body: { credential: AuthenticationResponseJSON; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/passkey", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/recovery`: one of the ten codes. */
+  factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  // The four enrol routes serve two sessions (`EnrollFrom`): without an
+  // argument they are the first-factor page's (`anonymous`, as above); with
+  // `{ signedIn: true }` they are My security's (own-auth Task 12), whose
+  // session is complete, so a 401 is that session ending and reaches
+  // `onUnauthorized`. `global` keeps `X-Client-Id` off either way.
+
+  /** `POST /auth/enroll/totp/start`: a new secret, once, as an `otpauth://` URI. */
+  enrollTotpStart({ signedIn = false }: EnrollFrom = {}): Promise<TotpEnrollment> {
+    return this.request<TotpEnrollment>(
+      "/auth/enroll/totp/start",
+      { method: "POST" },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/totp/confirm`: the first code, which proves the app holds the secret. */
+  enrollTotpConfirm(code: string, { signedIn = false }: EnrollFrom = {}): Promise<void> {
+    return this.request<void>(
+      "/auth/enroll/totp/confirm",
+      { method: "POST", body: JSON.stringify({ code }) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/passkey/options`: the options for `startRegistration`, untouched. */
+  enrollPasskeyOptions({ signedIn = false }: EnrollFrom = {}): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    return this.request<PublicKeyCredentialCreationOptionsJSON>(
+      "/auth/enroll/passkey/options",
+      { method: "POST" },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/passkey`: the new credential, and the name the person gave it. */
+  enrollPasskey(
+    credential: RegistrationResponseJSON,
+    name: string,
+    { signedIn = false }: EnrollFrom = {},
+  ): Promise<void> {
+    return this.request<void>(
+      "/auth/enroll/passkey",
+      { method: "POST", body: JSON.stringify({ credential, name }) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/finish`: the ten recovery codes, the only time they exist in the clear. */
+  enrollFinish(): Promise<RecoveryCodes> {
+    return this.request<RecoveryCodes>("/auth/enroll/finish", { method: "POST" }, { anonymous: true });
+  }
+
+  /** `POST /auth/password/forgot`: always 202, whether or not the address has an account. */
+  forgotPassword(body: { email: string }): Promise<void> {
+    return this.request<void>("/auth/password/forgot", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/password/reset`: the emailed token, in the body. */
+  resetPassword(body: { token: string; password: string }): Promise<void> {
+    return this.request<void>("/auth/password/reset", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/invite/details`: who an invitation is for. The token travels in the body. */
+  getInvite(token: string): Promise<InviteDetails> {
+    return this.request<InviteDetails>(
+      "/auth/invite/details",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/invite/accept`: the password; answers `{"state": "enroll_required"}` and a session that still needs a factor. */
+  acceptInvite(body: { token: string; password: string }): Promise<void> {
+    return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/recover/details`: whose account the server's recovery link (`recover` command) is for. */
+  getRecovery(token: string): Promise<RecoveryLink> {
+    return this.request<RecoveryLink>(
+      "/auth/recover/details",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /**
+   * `POST /auth/recover/accept`: the server removes the account's second
+   * factors and recovery codes, and leaves a session that has none -- the
+   * next page is the first factor. A `password` sent is applied; while an
+   * emailed link set the current one it is needed, or the answer is 409
+   * `recovery_needs_password`.
+   */
+  acceptRecovery(body: RecoveryAccept): Promise<void> {
+    return this.request<void>("/auth/recover/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */
+  logoutEverywhere(): Promise<void> {
+    return this.request<void>("/auth/logout-everywhere", { method: "POST" }, { anonymous: true });
   }
 
   /* ---------------------------------------------------------- device groups */
@@ -1638,10 +1924,14 @@ export class ApiClient {
    * `localeCompare` can disagree with the evaluator about which rule claims a
    * device -- which is the console answering a question the server decides
    * differently.
+   *
+   * `client_id` asks for one client's groups (phase 3 final review A6): it
+   * only narrows, and a client outside the caller's scope is an empty list.
    */
-  listDeviceGroups(params: { include_archived?: boolean } = {}): Promise<DeviceGroupPage> {
+  listDeviceGroups(params: { include_archived?: boolean; client_id?: string } = {}): Promise<DeviceGroupPage> {
     const query = new URLSearchParams();
     if (params.include_archived) query.set("include_archived", "true");
+    if (params.client_id) query.set("client_id", params.client_id);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<DeviceGroupPage>(`/device-groups${suffix}`);
   }
@@ -1736,8 +2026,9 @@ export class ApiClient {
   }
 
   /**
-   * The clients of the request's scope, archived ones left out
-   * (`clients.read`). The Users tab's grant scope picks from these.
+   * The clients of the request's scope, archived ones left out unless asked
+   * (`clients.read`). The Users tab's grant scope and the Clients page read
+   * these.
    */
   listClients(params: { include_archived?: boolean } = {}): Promise<ClientOut[]> {
     return this.request<ClientOut[]>(
@@ -1745,9 +2036,74 @@ export class ApiClient {
     );
   }
 
-  /** A client's sites, archived ones left out (`clients.read`): IPAM's site pickers. */
-  listClientSites(clientId: string): Promise<ClientSiteOut[]> {
-    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites`);
+  /**
+   * A client's sites (`clients.read`): archived ones left out unless
+   * `include_archived` -- the Clients page's Sites tab asks for them; the site
+   * pickers (IPAM, `SiteField`) call it with one argument.
+   */
+  listClientSites(
+    clientId: string,
+    params: { include_archived?: boolean } = {},
+  ): Promise<ClientSiteOut[]> {
+    const suffix = params.include_archived ? "?include_archived=true" : "";
+    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites${suffix}`);
+  }
+
+  /** One client of the request's scope, archived or not (`clients.read`). */
+  getClientRecord(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`);
+  }
+
+  /**
+   * A new customer client and its Principal site. `clients.manage` on EVERY
+   * client: a global route (`lib/globalRoutes.json`), so it never carries
+   * `X-Client-Id`.
+   */
+  createClient(body: ClientCreate): Promise<ClientOut> {
+    return this.request<ClientOut>("/clients", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /** `clients.manage` on that client. An email domain another client holds is a 409. */
+  updateClient(clientId: string, body: ClientUpdate): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a customer client. `clients.manage` on EVERY client (a global
+   * route). 409 while it has active devices, and always for the internal and
+   * unassigned clients; the server's sentence says which.
+   */
+  archiveClient(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}/archive`, {
+      method: "POST",
+    });
+  }
+
+  /** `sites.manage` on that client. The unassigned client has no sites (422). */
+  createClientSite(clientId: string, body: SiteCreate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/clients/${encodeURIComponent(clientId)}/sites`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** `sites.manage` on the site's client. */
+  updateSite(siteId: string, body: SiteUpdate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a site (`DELETE /sites/{id}`, never a hard delete; `sites.manage`).
+   * 409 while it holds devices, and for the internal client's Principal site.
+   */
+  archiveSite(siteId: string): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, { method: "DELETE" });
   }
 
   /**
@@ -1774,6 +2130,98 @@ export class ApiClient {
     return this.request<Me>("/me", { method: "PATCH", body: JSON.stringify(body) });
   }
 
+  // ----------------------------------------------------------- your security
+
+  /**
+   * Your own sign-in security (`GET /me/security`, own authentication design
+   * §2.2-§2.6): the factors you have, the recovery codes left, your
+   * remembered devices and your sessions. No secret is in it.
+   *
+   * EVERY REQUEST IN THIS SECTION GOES WITHOUT `X-Client-Id` (`global`):
+   * these are the person's own rows, not a client's, and a client chosen in
+   * the top bar says nothing about them. Like `updateMe`, none takes a user
+   * id: the server answers for the session's own person.
+   *
+   * THE ONES THAT CHANGE A FACTOR may answer 403 `step_up_required` (§2.5);
+   * callers send them through `useStepUp().run` (`components/stepUp.tsx`),
+   * which asks for the second factor and sends the request once more.
+   */
+  getMySecurity(): Promise<MySecurity> {
+    return this.request<MySecurity>("/me/security", {}, { global: true });
+  }
+
+  /** `PUT /me/password`. Both passwords travel once, in the body, and come back in nothing. */
+  changePassword(body: PasswordChange): Promise<void> {
+    return this.request<void>("/me/password", { method: "PUT", body: JSON.stringify(body) }, { global: true });
+  }
+
+  removePasskey(passkeyId: string): Promise<void> {
+    return this.request<void>(
+      `/me/passkeys/${encodeURIComponent(passkeyId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  removeTotp(): Promise<void> {
+    return this.request<void>("/me/totp", { method: "DELETE" }, { global: true });
+  }
+
+  /**
+   * Ten new codes; the old ones stop working. This answer is the one place
+   * they exist in the clear: show it once and keep it nowhere.
+   */
+  regenerateRecoveryCodes(): Promise<RecoveryCodes> {
+    return this.request<RecoveryCodes>("/me/recovery-codes", { method: "POST" }, { global: true });
+  }
+
+  revokeTrustedDevice(deviceId: string): Promise<void> {
+    return this.request<void>(
+      `/me/trusted-devices/${encodeURIComponent(deviceId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  /** Another of your sessions. The current one ends by signing out. */
+  endMySession(sessionId: string): Promise<void> {
+    return this.request<void>(
+      `/me/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  // ------------------------------------------------- the recent confirmation
+
+  /** `POST /auth/step-up/totp` (design §2.5): a code from your app confirms your second factor for 10 minutes. */
+  stepUpTotp(code: string): Promise<void> {
+    return this.request<void>("/auth/step-up/totp", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
+  }
+
+  /** A single-use challenge for `startAuthentication`, as W3C JSON (py_webauthn's `options_to_json`). */
+  stepUpPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>(
+      "/auth/step-up/passkey/options",
+      { method: "POST" },
+      { global: true },
+    );
+  }
+
+  /** The browser's signed answer to that challenge, exactly as `startAuthentication` returned it. */
+  stepUpPasskey(credential: AuthenticationResponseJSON): Promise<void> {
+    return this.request<void>(
+      "/auth/step-up/passkey",
+      { method: "POST", body: JSON.stringify({ credential }) },
+      { global: true },
+    );
+  }
+
+  /** A recovery code. It works once: the server spends it. */
+  stepUpRecovery(code: string): Promise<void> {
+    return this.request<void>("/auth/step-up/recovery", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
+  }
+
   // ------------------------------------------------------------------ email
 
   /**
@@ -1789,10 +2237,10 @@ export class ApiClient {
   /**
    * Save the relay settings.
    *
-   * THE ONE REQUEST IN THIS CLIENT THAT CARRIES A PASSWORD, and only when the
-   * operator typed one. It is written straight through to the identity
-   * provider and is never stored by this platform or returned by any response —
-   * so `EmailSettingsOut` has no field that could echo it back.
+   * CARRIES A PASSWORD (or a Microsoft client secret) ONLY WHEN THE OPERATOR
+   * TYPED ONE. The server keeps it encrypted in the vault (invariant 3) and
+   * returns it in no response -- so `EmailSettingsOut` has no field that could
+   * echo it back.
    */
   updateEmailSettings(body: EmailSettingsUpdate): Promise<EmailSettingsOut> {
     return this.request<EmailSettingsOut>("/settings/email", {
@@ -1815,6 +2263,24 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(body),
     });
+  }
+
+  // --------------------------------------------------------------- sessions
+
+  /**
+   * How long a sign-in lasts (`GET /settings/sessions`, own authentication
+   * design §2.4, §2.6, §3): inactivity and longest session for technicians
+   * and for portal contacts, and "remember this device". The PUT needs
+   * `orgs.manage` on every client, so it is in `globalRoutes.json` and
+   * travels without `X-Client-Id`.
+   */
+  getSessionSettings(): Promise<SessionSettingsOut> {
+    return this.request<SessionSettingsOut>("/settings/sessions");
+  }
+
+  /** All seven values, never a part: the server stores what it is sent, within its CHECK bounds. */
+  putSessionSettings(body: SessionSettingsUpdate): Promise<SessionSettingsOut> {
+    return this.request<SessionSettingsOut>("/settings/sessions", { method: "PUT", body: JSON.stringify(body) });
   }
 
   // ------------------------------------------------------------------ roles
@@ -1873,13 +2339,6 @@ export class ApiClient {
     return this.request<EffectivePermissionsOut>(`/users/${userId}/effective-permissions`);
   }
 
-  createUser(body: UserCreate): Promise<CreatedUserOut> {
-    return this.request<CreatedUserOut>("/users", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
   assignUserRole(userId: string, body: RoleAssign): Promise<RoleAssignmentOut> {
     return this.request<RoleAssignmentOut>(`/users/${userId}/roles`, {
       method: "POST",
@@ -1892,10 +2351,65 @@ export class ApiClient {
     return this.request<void>(`/users/${userId}/roles/${assignmentId}`, { method: "DELETE" });
   }
 
-  /** Two routes, one method: `/disable` and `/enable` differ only in direction. */
+  /**
+   * Two routes, one method: `/disable` and `/enable` differ only in
+   * direction. Disabling ends the person's sessions and forgets their
+   * remembered devices at once (own authentication design §2.4).
+   */
   setUserEnabled(userId: string, enabled: boolean): Promise<UserOut> {
     return this.request<UserOut>(`/users/${userId}/${enabled ? "enable" : "disable"}`, {
       method: "POST",
+    });
+  }
+
+  /**
+   * Invite a technician (`POST /users/invite`, own authentication design §7):
+   * the address, the name and what they may reach on which client. NO
+   * PASSWORD: the person chooses one from a single-use link that expires
+   * after 72 hours. `invite_link` is that link only when no mail is
+   * configured, in this answer only -- the caller shows it once and keeps it
+   * nowhere else.
+   */
+  inviteUser(body: UserInvite): Promise<InviteOut> {
+    return this.request<InviteOut>("/users/invite", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /** A fresh link (the old one stops working), emailed -- or, without mail, in `invite_link`, once. */
+  resendInvite(userId: string): Promise<InviteLinkOut> {
+    return this.request<InviteLinkOut>(`/users/${encodeURIComponent(userId)}/invite/resend`, { method: "POST" });
+  }
+
+  /** The invitation's link stops working at once. */
+  cancelInvite(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/invite`, { method: "DELETE" });
+  }
+
+  /**
+   * Reset another technician's second factors (design §7): their passkeys,
+   * app and recovery codes stop working and their remembered devices are
+   * forgotten; they register a new factor at their next sign-in. The server
+   * answers 403 `step_up_required` unless YOUR OWN second factor was
+   * confirmed in the last 10 minutes (§2.5): send it through `useStepUp().run`.
+   */
+  resetUserFactors(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/factors/reset`, { method: "POST" });
+  }
+
+  /** End every session the person has open. Their account stays active. */
+  endUserSessions(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/sessions`, { method: "DELETE" });
+  }
+
+  /** A client's contacts, disabled ones included (`clients.read`). */
+  listContacts(clientId: string): Promise<ContactOut[]> {
+    return this.request<ContactOut[]>(`/clients/${encodeURIComponent(clientId)}/contacts`);
+  }
+
+  /** `clients.manage` on that client. One email address per organisation (409). */
+  createContact(clientId: string, body: ContactCreate): Promise<ContactOut> {
+    return this.request<ContactOut>(`/clients/${encodeURIComponent(clientId)}/contacts`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 
@@ -1911,22 +2425,7 @@ export class ApiClient {
     });
   }
 
-  /**
-   * Ask Keycloak to email an `UPDATE_PASSWORD` link.
-   *
-   * NO PASSWORD TRANSITS ITMS (invariant 3, spec §2.2). There is no argument to
-   * this method and no credential in its result — the response carries `sent`
-   * and nothing else.
-   */
-  resetUserPassword(userId: string): Promise<MailResultOut> {
-    return this.request<MailResultOut>(`/users/${userId}/reset-password`, { method: "POST" });
-  }
-
-  resendUserEnrolment(userId: string): Promise<MailResultOut> {
-    return this.request<MailResultOut>(`/users/${userId}/resend-enrolment`, { method: "POST" });
-  }
-
-  /** Removes the Keycloak identity. The ITMS row is retained, marked `deleted`. */
+  /** `DELETE /users/{id}`. The row is RETAINED, marked `deleted`, so the audit log can still say who did what. */
   deleteUser(userId: string): Promise<void> {
     return this.request<void>(`/users/${userId}`, { method: "DELETE" });
   }
@@ -1953,6 +2452,7 @@ export class ApiClient {
     if (params.provenance) query.set("provenance", params.provenance);
     if (params.osFamily) query.set("os_family", params.osFamily);
     if (params.clientId) query.set("client_id", params.clientId);
+    if (params.siteId) query.set("site_id", params.siteId);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -2040,6 +2540,19 @@ export class ApiClient {
   }
 
   /**
+   * Move a device to another site of ITS client (`PATCH /devices/{id}` with
+   * `site_id`, `assets.manage`; MSP clients phase 3, design §4.3). Another
+   * client's site is a 422, an archived one a 409, one the request cannot see
+   * a 404. Audited `device.site_changed`. A device never changes client.
+   */
+  changeDeviceSite(deviceId: string, siteId: string): Promise<Device> {
+    return this.request<Device>(`/devices/${deviceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ site_id: siteId }),
+    });
+  }
+
+  /**
    * One page of the job queue, in a stated order.
    *
    * This sent no query string at all, so the console took the server's
@@ -2117,10 +2630,12 @@ export class ApiClient {
    * NOT ROUTED THROUGH `request` -- the body is a binary `.xlsx`, not JSON --
    * and A FETCH RATHER THAN A LINK, which is the entire point of the method.
    * Both export buttons in this console were `<a href="/api/v1/export/…"
-   * download>`, and a browser following a link of its own accord sends no
-   * `Authorization` header: the route answered 401 and the browser saved the
-   * refusal body under the name the URL ended in. "Export inventory exports a
-   * .json instead of an .xlsx" is that, reported from the deployed console.
+   * download>`, and under the bearer token a browser following a link of its
+   * own accord sent none: the route answered 401 and the browser saved the
+   * refusal body under the name the URL ended in ("Export inventory exports a
+   * .json instead of an .xlsx", reported from the deployed console). A link
+   * would carry the session cookie now, but still not `X-Client-Id`, so it
+   * would export every client instead of the one chosen (`lib/download.ts`).
    *
    * Mirrors `exportPatchReport`/`exportReport`, which had already reached the
    * same conclusion on their own routes.
@@ -2159,8 +2674,8 @@ export class ApiClient {
    * which is precisely what the anchors this replaces produced.
    */
   private async fetchFile(path: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
-    const response = await fetch(`${this.base}${path}`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", path));
+    const response = await fetch(`${this.base}${path}`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -2184,11 +2699,17 @@ export class ApiClient {
     return this.request<SecurityEventDetail>(`/security-events/${id}`);
   }
 
+  /**
+   * `client_id` asks for that client's articles AND every client's -- what a
+   * record of that client may link (phase 3 final review A6). It only
+   * narrows: a client outside the caller's scope is an empty list.
+   */
   listArticles(params: {
     category?: string;
     target_type?: string;
     target_id?: string;
     include_archived?: boolean;
+    client_id?: string;
   } = {}): Promise<Page<DocArticleListItem>> {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -2202,48 +2723,79 @@ export class ApiClient {
     return this.request<DocArticle>(`/docs/articles/${id}`);
   }
 
+  /**
+   * A new article. WITHOUT A CLIENT IT IS EVERY CLIENT'S, a global row, and so
+   * global BY ITS BODY (`RequestRoute.global`): narrowed by `X-Client-Id` the
+   * server refuses it (403, `core/global_rows.py`) even to someone with every
+   * client who simply has one chosen in the top bar. The server still requires
+   * `docs.manage` on every client for it.
+   */
   createArticle(body: DocArticleInput & NewDocClient): Promise<DocArticle> {
-    return this.request<DocArticle>("/docs/articles", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<DocArticle>(
+      "/docs/articles",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
-  updateArticle(id: string, body: DocArticleInput): Promise<DocArticle> {
-    return this.request<DocArticle>(`/docs/articles/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  /**
+   * The writes to an EXISTING article (and the document writes below) say
+   * whether the row is every client's: `global` is the row's `client_id ===
+   * null`, which only the caller holding the row knows. A global row's write
+   * goes without `X-Client-Id`, for the reason `createArticle` gives.
+   */
+  updateArticle(id: string, body: DocArticleInput, { global }: { global: boolean }): Promise<DocArticle> {
+    return this.request<DocArticle>(
+      `/docs/articles/${id}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  archiveArticle(id: string): Promise<{ archived: boolean }> {
-    return this.request<{ archived: boolean }>(`/docs/articles/${id}/archive`, {
-      method: "POST",
-    });
+  archiveArticle(id: string, { global }: { global: boolean }): Promise<{ archived: boolean }> {
+    return this.request<{ archived: boolean }>(`/docs/articles/${id}/archive`, { method: "POST" }, { global });
   }
 
-  setArticlePortalVisibility(id: string, portalVisible: boolean): Promise<{ portal_visible: boolean }> {
-    return this.request<{ portal_visible: boolean }>(`/docs/articles/${id}/portal-visibility`, {
-      method: "PUT",
-      body: JSON.stringify({ portal_visible: portalVisible }),
-    });
+  setArticlePortalVisibility(
+    id: string,
+    portalVisible: boolean,
+    { global }: { global: boolean },
+  ): Promise<{ portal_visible: boolean }> {
+    return this.request<{ portal_visible: boolean }>(
+      `/docs/articles/${id}/portal-visibility`,
+      { method: "PUT", body: JSON.stringify({ portal_visible: portalVisible }) },
+      { global },
+    );
   }
 
   articleVersions(id: string): Promise<DocVersion[]> {
     return this.request<DocVersion[]>(`/docs/articles/${id}/versions`);
   }
 
-  addArticleLink(id: string, link: { target_type: string; target_id: string }): Promise<DocLink> {
-    return this.request<DocLink>(`/docs/articles/${id}/links`, {
-      method: "POST",
-      body: JSON.stringify(link),
-    });
+  /**
+   * `global`: the ARTICLE is every client's (see `updateArticle`). A link
+   * takes its article's client (`doc_links`), so a global article's link is a
+   * global row and goes without `X-Client-Id`.
+   */
+  addArticleLink(
+    id: string,
+    link: { target_type: string; target_id: string },
+    { global }: { global: boolean },
+  ): Promise<DocLink> {
+    return this.request<DocLink>(
+      `/docs/articles/${id}/links`,
+      { method: "POST", body: JSON.stringify(link) },
+      { global },
+    );
   }
 
-  removeArticleLink(id: string, linkId: string): Promise<{ removed: boolean }> {
-    return this.request<{ removed: boolean }>(`/docs/articles/${id}/links/${linkId}`, {
-      method: "DELETE",
-    });
+  /** `global`: the article is every client's (see `addArticleLink`). */
+  removeArticleLink(id: string, linkId: string, { global }: { global: boolean }): Promise<{ removed: boolean }> {
+    return this.request<{ removed: boolean }>(
+      `/docs/articles/${id}/links/${linkId}`,
+      { method: "DELETE" },
+      { global },
+    );
   }
 
   listDocRecords(recordType?: string): Promise<Page<DocRecordOut>> {
@@ -2258,10 +2810,12 @@ export class ApiClient {
       fields: Record<string, unknown>;
     } & NewDocClient,
   ): Promise<DocRecordOut> {
-    return this.request<DocRecordOut>("/docs/records", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    // Without a client, every client's: global by its body (`createArticle`).
+    return this.request<DocRecordOut>(
+      "/docs/records",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   searchDocs(q: string): Promise<DocSearchHit[]> {
@@ -2312,23 +2866,25 @@ export class ApiClient {
   }
 
   createDocument(body: DocDocumentInput & NewDocClient): Promise<DocDocument> {
-    return this.request<DocDocument>("/docs/documents", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    // Without a client, every client's: global by its body (`createArticle`).
+    return this.request<DocDocument>(
+      "/docs/documents",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
-  updateDocument(id: string, body: DocDocumentInput): Promise<DocDocument> {
-    return this.request<DocDocument>(`/docs/documents/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  /** `global`: the document is every client's (see `updateArticle`). */
+  updateDocument(id: string, body: DocDocumentInput, { global }: { global: boolean }): Promise<DocDocument> {
+    return this.request<DocDocument>(
+      `/docs/documents/${id}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  archiveDocument(id: string): Promise<{ archived: boolean }> {
-    return this.request<{ archived: boolean }>(`/docs/documents/${id}/archive`, {
-      method: "POST",
-    });
+  archiveDocument(id: string, { global }: { global: boolean }): Promise<{ archived: boolean }> {
+    return this.request<{ archived: boolean }>(`/docs/documents/${id}/archive`, { method: "POST" }, { global });
   }
 
   documentVersions(id: string): Promise<DocDocumentVersion[]> {
@@ -2347,12 +2903,15 @@ export class ApiClient {
   // every header (`filetypes.py::sniff`); "a file whose content-type lies" is
   // a sentence that cannot be formed against this route (§0.5). It is set
   // only so proxies do not attempt a transformation on the body.
-  async uploadDocumentVersion(id: string, file: File): Promise<DocDocumentVersion> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/docs/documents/${id}/versions`));
+  //
+  // `global`: the document is every client's (see `updateArticle`); a version
+  // is a row under it, refused narrowed like the document itself.
+  async uploadDocumentVersion(id: string, file: File, { global }: { global: boolean }): Promise<DocDocumentVersion> {
+    const headers = requestHeaders(undefined, this.route("POST", `/docs/documents/${id}/versions`, global));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2378,10 +2937,10 @@ export class ApiClient {
   // opening the viewer writes `docs.document_downloaded` exactly as saving the
   // file does. Nothing in this console may imply otherwise.
   async downloadDocumentVersion(id: string, version: number): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/docs/documents/${id}/versions/${version}/content`));
+    const headers = requestHeaders(undefined, this.route("GET", `/docs/documents/${id}/versions/${version}/content`));
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions/${version}/content`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2393,27 +2952,32 @@ export class ApiClient {
     return response.blob();
   }
 
-  purgeDocumentVersion(id: string, version: number): Promise<{ purged: boolean }> {
+  purgeDocumentVersion(id: string, version: number, { global }: { global: boolean }): Promise<{ purged: boolean }> {
     return this.request<{ purged: boolean }>(
       `/docs/documents/${id}/versions/${version}/purge`,
       { method: "POST" },
+      { global },
     );
   }
 
   addDocumentLink(
     id: string,
     link: { target_type: string; target_id: string },
+    { global }: { global: boolean },
   ): Promise<DocLink> {
-    return this.request<DocLink>(`/docs/documents/${id}/links`, {
-      method: "POST",
-      body: JSON.stringify(link),
-    });
+    return this.request<DocLink>(
+      `/docs/documents/${id}/links`,
+      { method: "POST", body: JSON.stringify(link) },
+      { global },
+    );
   }
 
-  removeDocumentLink(id: string, linkId: string): Promise<{ removed: boolean }> {
-    return this.request<{ removed: boolean }>(`/docs/documents/${id}/links/${linkId}`, {
-      method: "DELETE",
-    });
+  removeDocumentLink(id: string, linkId: string, { global }: { global: boolean }): Promise<{ removed: boolean }> {
+    return this.request<{ removed: boolean }>(
+      `/docs/documents/${id}/links/${linkId}`,
+      { method: "DELETE" },
+      { global },
+    );
   }
 
   listCredentials(): Promise<Credential[]> {
@@ -2548,29 +3112,50 @@ export class ApiClient {
     return this.request<PushRunOut>(`/agent-push/runs/${id}/cancel`, { method: "POST" });
   }
 
+  /**
+   * A CREDENTIAL WITH NO CLIENT IS EVERY CLIENT'S, a global row (`credentials`
+   * is an O table), and the server refuses writing one narrowed by
+   * `X-Client-Id` (403, `app/core/global_rows.py`). So each write below is
+   * global BY ITS BODY OR ITS ROW (`RequestRoute.global`, as
+   * `revokeMcpConnection` is): a body that names no client, or a row whose
+   * `client_id` is null, goes without the header. The server still requires
+   * the code on every client (phase 3 final review B, Critical 1).
+   */
   createCredential(body: {
     name: string;
     type: string;
     secret: string;
-    /** Required for a push credential (`push_install`, `windows_domain`): it has exactly one client. */
+    /**
+     * The client it serves. Required for a push credential (`push_install`,
+     * `windows_domain`): it has exactly one. Absent, every client's (global).
+     */
     client_id?: string;
   }): Promise<Credential> {
-    return this.request<Credential>("/credentials", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<Credential>(
+      "/credentials",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id === undefined },
+    );
   }
 
   // Returns the plaintext to the caller once; never cache this in query state.
-  checkoutCredential(id: string, reason: string): Promise<{ secret: string }> {
-    return this.request<{ secret: string }>(`/credentials/${id}/checkout`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    });
+  // A WRITE TOO: the checkout stamps the row's `last_used_at`, so every
+  // client's credential (`clientId` null) is checked out without the header.
+  checkoutCredential(id: string, reason: string, clientId: string | null): Promise<{ secret: string }> {
+    return this.request<{ secret: string }>(
+      `/credentials/${id}/checkout`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+      { global: clientId === null },
+    );
   }
 
-  deleteCredential(id: string): Promise<{ deleted: boolean }> {
-    return this.request<{ deleted: boolean }>(`/credentials/${id}`, { method: "DELETE" });
+  /** `clientId` is the row's: `null` (every client's) is deleted without the header. */
+  deleteCredential(id: string, clientId: string | null): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(
+      `/credentials/${id}`,
+      { method: "DELETE" },
+      { global: clientId === null },
+    );
   }
 
   listRemoteSessions(params: RemoteSessionFilters = {}): Promise<Page<RemoteSession>> {
@@ -2600,8 +3185,8 @@ export class ApiClient {
   // Streams the raw recording bytes; not routed through `request` since the
   // body is binary, not JSON. Never cached in query state as text.
   async getRemoteRecording(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/remote/sessions/${id}/recording`));
-    const response = await fetch(`${this.base}/remote/sessions/${id}/recording`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", `/remote/sessions/${id}/recording`));
+    const response = await fetch(`${this.base}/remote/sessions/${id}/recording`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -2767,11 +3352,16 @@ export class ApiClient {
     });
   }
 
+  /**
+   * One patch into one ring. Without a client it is every client's, global
+   * BY ITS BODY, for the reason `bulkApprovePatches` gives.
+   */
   approvePatch(body: ApprovalCreateRequest): Promise<PatchApproval> {
-    return this.request<PatchApproval>("/patch/approvals", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<PatchApproval>(
+      "/patch/approvals",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   /**
@@ -2786,12 +3376,19 @@ export class ApiClient {
    *
    * A patch id that is not this org's refuses the WHOLE batch with 404, so a
    * refused call leaves nothing partly cleared.
+   *
+   * WITHOUT A CLIENT THE APPROVALS ARE EVERY CLIENT'S ("For every client"), a
+   * global row, so the request is global BY ITS BODY (`RequestRoute.global`):
+   * narrowed by `X-Client-Id` the server refuses it (403) even to someone with
+   * every client who has one chosen in the top bar. It still requires
+   * `patch.approve` on every client.
    */
   bulkApprovePatches(body: BulkApprovalCreateRequest): Promise<BulkApprovalResponse> {
-    return this.request<BulkApprovalResponse>("/patch/approvals/bulk", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<BulkApprovalResponse>(
+      "/patch/approvals/bulk",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   /**
@@ -2830,20 +3427,32 @@ export class ApiClient {
    * The id this takes was unobtainable until `listPatchApprovals` existed —
    * the route has been in the module since it shipped and had never been
    * callable.
+   *
+   * `global`: the approval is every client's (`client_id` null), so the
+   * revoke goes without `X-Client-Id`, for the reason `bulkApprovePatches`
+   * gives.
    */
-  revokePatchApproval(approvalId: string): Promise<void> {
-    return this.request<void>(`/patch/approvals/${approvalId}`, { method: "DELETE" });
+  revokePatchApproval(approvalId: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/patch/approvals/${approvalId}`, { method: "DELETE" }, { global });
   }
 
   listPatchPolicies(): Promise<PatchPolicy[]> {
     return this.request<PatchPolicy[]>("/patch/policies");
   }
 
+  /**
+   * One group's policy, or WITH NO GROUP the organisation default: a group's
+   * policy is its group's client's, the default every client's -- a global
+   * row, and so global BY ITS BODY (`RequestRoute.global`): narrowed by
+   * `X-Client-Id` the server refuses it (403, `patch/api.py`
+   * `upsert_policy`). It still requires `patch.policy.manage` on every client.
+   */
   upsertPatchPolicy(body: PatchPolicyInput): Promise<PatchPolicy> {
-    return this.request<PatchPolicy>("/patch/policies", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return this.request<PatchPolicy>(
+      "/patch/policies",
+      { method: "PUT", body: JSON.stringify(body) },
+      { global: body.device_group_id == null },
+    );
   }
 
   getPatchFleetReport(): Promise<FleetReport> {
@@ -2853,8 +3462,8 @@ export class ApiClient {
   // Streams the CSV export; not routed through `request` since the body is
   // text/csv, not JSON. Mirrors getRemoteRecording's binary-download pattern.
   async exportPatchReport(): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", "/patch/report/export"));
-    const response = await fetch(`${this.base}/patch/report/export`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", "/patch/report/export"));
+    const response = await fetch(`${this.base}/patch/report/export`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -2882,11 +3491,12 @@ export class ApiClient {
   // Content-Type handling, mirroring getRemoteRecording's binary pattern but
   // for an upload instead of a download.
   async uploadPackageArtifact(packageId: string, file: File): Promise<Package> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/deploy/packages/${packageId}/artifact`));
+    const headers = requestHeaders(undefined, this.route("POST", `/deploy/packages/${packageId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/deploy/packages/${packageId}/artifact`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: file,
     });
     if (response.status === 401) {
@@ -2987,6 +3597,19 @@ export class ApiClient {
     return this.request<Repository>("/backup/repositories", {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Retire a repository (`POST /backup/repositories/{id}/retire`,
+   * `backup.policy.manage` in the repository's client; MSP clients phase 3,
+   * design §5.5). Refused (409) while an active policy names it. A retired
+   * repository takes no new backups; its points stay and can be restored, so
+   * the space stays used. There is no way back to active.
+   */
+  retireBackupRepository(repositoryId: string): Promise<Repository> {
+    return this.request<Repository>(`/backup/repositories/${encodeURIComponent(repositoryId)}/retire`, {
+      method: "POST",
     });
   }
 
@@ -3160,12 +3783,25 @@ export class ApiClient {
     return this.request<ChangeGate[]>("/changes/gates");
   }
 
+  /**
+   * The gate of one group, or WITH NO GROUP the "Every device" gate: a group's
+   * gate is its group's client's, the group-less one every client's -- a
+   * global row, and so global BY ITS BODY (`RequestRoute.global`): narrowed by
+   * `X-Client-Id` the server refuses it (403, `change_mgmt/gates.py`
+   * `refuse_unless_every_client`). It still requires `change.gate.manage` on
+   * every client.
+   */
   setChangeGate(body: ChangeGateSetRequest): Promise<ChangeGate> {
-    return this.request<ChangeGate>("/changes/gates", { method: "PUT", body: JSON.stringify(body) });
+    return this.request<ChangeGate>(
+      "/changes/gates",
+      { method: "PUT", body: JSON.stringify(body) },
+      { global: body.device_group_id == null },
+    );
   }
 
-  removeChangeGate(id: string): Promise<void> {
-    return this.request<void>(`/changes/gates/${id}`, { method: "DELETE" });
+  /** `global`: the gate is the every-device one (no group); see `setChangeGate`. */
+  removeChangeGate(id: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/changes/gates/${id}`, { method: "DELETE" }, { global });
   }
 
   createChange(body: ChangeCreateRequest): Promise<ChangeRequest> {
@@ -3270,11 +3906,12 @@ export class ApiClient {
   // digest of what it stored, which is what a release signature is compared
   // against before it is sent.
   async uploadAgentReleaseArtifact(releaseId: string, file: Blob): Promise<AgentRelease> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/agent/releases/${releaseId}/artifact`));
+    const headers = requestHeaders(undefined, this.route("POST", `/agent/releases/${releaseId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/agent/releases/${releaseId}/artifact`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: file,
     });
     if (response.status === 401) {
@@ -3430,10 +4067,11 @@ export class ApiClient {
     siteId: string,
     body: { code: string; arch: MsiArch },
   ): Promise<InstallLinkMsi> {
-    const headers = requestHeaders(this.getToken(), { "Content-Type": "application/json" }, this.route("POST", `/sites/${siteId}/install-link/msi`));
+    const headers = requestHeaders({ "Content-Type": "application/json" }, this.route("POST", `/sites/${siteId}/install-link/msi`));
     const response = await fetch(`${this.base}/sites/${siteId}/install-link/msi`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: JSON.stringify(body),
     });
     if (response.status === 401) {
@@ -3725,11 +4363,18 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Stop reconciling a discovered title: for one client's computers
+   * (`client_id`), or WITHOUT ONE for every client's, a global row and so
+   * global BY ITS BODY (`RequestRoute.global`): narrowed by `X-Client-Id` the
+   * server refuses it (403, `core/global_rows.py`).
+   */
   ignoreSoftware(body: ReviewIgnoreRequest): Promise<ReviewIgnoreOut> {
-    return this.request<ReviewIgnoreOut>("/licenses/review-queue/ignore", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<ReviewIgnoreOut>(
+      "/licenses/review-queue/ignore",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   licenseRenewals(withinDays?: number): Promise<RenewalRow[]> {
@@ -4095,11 +4740,11 @@ export class ApiClient {
   // uploadPackageArtifact's binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadExpenseAttachment(id: string, file: File): Promise<ExpenseOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/budget/expenses/${id}/attachment`));
+    const headers = requestHeaders(undefined, this.route("POST", `/budget/expenses/${id}/attachment`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/budget/expenses/${id}/attachment?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4115,8 +4760,8 @@ export class ApiClient {
   // body is binary, not JSON. Mirrors getRemoteRecording's binary-download
   // pattern.
   async downloadExpenseAttachment(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/budget/expenses/${id}/attachment`));
-    const response = await fetch(`${this.base}/budget/expenses/${id}/attachment`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", `/budget/expenses/${id}/attachment`));
+    const response = await fetch(`${this.base}/budget/expenses/${id}/attachment`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -4312,11 +4957,11 @@ export class ApiClient {
   // `uploadExpenseAttachment`'s binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadTicketAttachment(id: string, file: File): Promise<AttachmentOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/service-desk/tickets/${id}/attachments`));
+    const headers = requestHeaders(undefined, this.route("POST", `/service-desk/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/service-desk/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4333,9 +4978,10 @@ export class ApiClient {
   // Note the route is keyed by ATTACHMENT id, not ticket id (api.py's
   // `GET /service-desk/attachments/{attachment_id}`).
   async downloadTicketAttachment(attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/service-desk/attachments/${attachmentId}`));
+    const headers = requestHeaders(undefined, this.route("GET", `/service-desk/attachments/${attachmentId}`));
     const response = await fetch(`${this.base}/service-desk/attachments/${attachmentId}`, {
       headers,
+      credentials: "same-origin",
     });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4601,11 +5247,11 @@ export class ApiClient {
   // is a query parameter, sanitized server-side before it ever reaches the
   // object key.
   async uploadPortalAttachment(id: string, file: File): Promise<PortalAttachmentOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/portal/tickets/${id}/attachments`));
+    const headers = requestHeaders(undefined, this.route("POST", `/portal/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/portal/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4625,10 +5271,10 @@ export class ApiClient {
   // ownership check is scoped through the ticket (module docstring:
   // `_load_my_ticket_row`).
   async downloadPortalAttachment(ticketId: string, attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/portal/tickets/${ticketId}/attachments/${attachmentId}`));
+    const headers = requestHeaders(undefined, this.route("GET", `/portal/tickets/${ticketId}/attachments/${attachmentId}`));
     const response = await fetch(
       `${this.base}/portal/tickets/${ticketId}/attachments/${attachmentId}`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4711,26 +5357,35 @@ export class ApiClient {
     return this.request<SlaPolicyOut[]>("/sla/policies");
   }
 
+  /**
+   * A new SLA policy: one client's (`client_id`), or WITHOUT ONE every
+   * client's, a global row and so global BY ITS BODY (`RequestRoute.global`):
+   * narrowed by `X-Client-Id` the server refuses it (403,
+   * `core/global_rows.py`). It still requires `sla.admin` on every client.
+   */
   createSlaPolicy(body: SlaPolicyCreate): Promise<SlaPolicyOut> {
-    return this.request<SlaPolicyOut>("/sla/policies", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<SlaPolicyOut>(
+      "/sla/policies",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   getSlaPolicy(id: string): Promise<SlaPolicyOut> {
     return this.request<SlaPolicyOut>(`/sla/policies/${id}`);
   }
 
-  updateSlaPolicy(id: string, body: SlaPolicyUpdate): Promise<SlaPolicyOut> {
-    return this.request<SlaPolicyOut>(`/sla/policies/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+  /** `global`: the policy is every client's (`client_id` null); see `createSlaPolicy`. */
+  updateSlaPolicy(id: string, body: SlaPolicyUpdate, { global }: { global: boolean }): Promise<SlaPolicyOut> {
+    return this.request<SlaPolicyOut>(
+      `/sla/policies/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  deleteSlaPolicy(id: string): Promise<void> {
-    return this.request<void>(`/sla/policies/${id}`, { method: "DELETE" });
+  deleteSlaPolicy(id: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/sla/policies/${id}`, { method: "DELETE" }, { global });
   }
 
   getSlaSettings(): Promise<SlaSettingsOut> {
@@ -5245,9 +5900,9 @@ export class ApiClient {
   // as multipart: this codebase has no multipart parser and the shipped route
   // takes raw bytes, mirroring uploadExpenseAttachment's pattern.
   private async ipamImportRequest<T>(path: string, file: File): Promise<T> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", path));
+    const headers = requestHeaders(undefined, this.route("POST", path));
     headers.set("Content-Type", "text/csv");
-    const response = await fetch(`${this.base}${path}`, { method: "POST", headers, body: file });
+    const response = await fetch(`${this.base}${path}`, { method: "POST", headers, credentials: "same-origin", body: file });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -5286,8 +5941,8 @@ export class ApiClient {
   // text/csv, not JSON — bypasses `request<T>` for the same reason the binary
   // downloads above do.
   private async ipamCsv(path: string): Promise<string> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
-    const response = await fetch(`${this.base}${path}`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", path));
+    const response = await fetch(`${this.base}${path}`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -5472,16 +6127,18 @@ export class ApiClient {
   }
 
   // Streams the CSV export. Not routed through `request` (the body is
-  // text/csv, not JSON), and it CARRIES THE SAME `Authorization` HEADER as
-  // every other call -- mirrors `exportPatchReport`/`getRemoteRecording`. A
-  // bare `<a href>` to the export path would send no bearer token at all and
-  // land on a 401, which is why this is a fetch and not a link.
+  // text/csv, not JSON), and it CARRIES THE SAME HEADERS as every other call
+  // (`requestHeaders`: `X-Client-Id`, `Accept-Language`, the CSRF header) --
+  // mirrors `exportPatchReport`/`getRemoteRecording`. A bare `<a href>` to the
+  // export path would carry the session cookie but none of those, so it
+  // would export every client rather than the one chosen, and a 401 would be
+  // saved as a file instead of ending the session: a fetch, not a link.
   async exportReport(key: string, params: ReportParams = {}): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/reports/${key}/export.csv`));
+    const headers = requestHeaders(undefined, this.route("GET", `/reports/${key}/export.csv`));
     const query = new URLSearchParams(params).toString();
     const response = await fetch(
       `${this.base}/reports/${key}/export.csv${query ? `?${query}` : ""}`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();

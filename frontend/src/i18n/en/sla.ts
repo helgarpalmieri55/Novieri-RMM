@@ -267,8 +267,11 @@ export const sla = {
     add: "Add policy",
     forbidden: "Policies not available (insufficient permissions).",
     failed: "Policies did not load. {reason}",
+    colClient: "Client",
     colOnBreach: "On breach",
     colActive: "Active",
+    forEveryClientHint:
+      "Ticked, it measures the tickets of every client that has no active policy of its own. Unticked, only the tickets of the client it is filed under.",
     empty: "No policies yet — with none configured, no ticket gets an SLA at all.",
     deleteTitle: "Delete SLA policy",
     deleteBody:

@@ -74,7 +74,7 @@ async def _estate(api_env: Any, *, codes: tuple[str, ...] = ("devices.read", "he
         opened_policy_version=1,
     )
     _, sub = await ai_user(api_env, org.org_id, "ai.use", *codes)
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
     return org, bearer
 
 

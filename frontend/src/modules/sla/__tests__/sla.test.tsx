@@ -198,6 +198,29 @@ describe("SLA administration", () => {
     expect(screen.getByRole("button", { name: /save settings/i })).toBeInTheDocument();
   });
 
+  it("tells someone who lacks sla.admin that changing the settings needs it", async () => {
+    mockUseApi.mockReturnValue(baseApi(ME_READ_ONLY) as ApiClient);
+    renderWithProviders(<SlaAdminPage />);
+
+    expect(
+      await screen.findByText("Changing SLA settings needs the SLA administrator permission."),
+    ).toBeInTheDocument();
+  });
+
+  it("tells someone holding sla.admin on some clients that the settings need it on every client", async () => {
+    // Every client shares the SLA settings (GLOBAL_WRITES), so "you lack the
+    // permission" would be false for them: they hold it, only not everywhere.
+    const someClients: Me = { ...ME_ADMIN, permissions_everywhere: ["sla.read", "ticket.read"] };
+    mockUseApi.mockReturnValue(baseApi(someClients) as ApiClient);
+    renderWithProviders(<SlaAdminPage />);
+
+    expect(
+      await screen.findByText(/requires the sla\.admin permission on every client/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Changing SLA settings needs the SLA administrator permission.")).toBeNull();
+    expect(screen.queryByRole("button", { name: /save settings/i })).toBeNull();
+  });
+
   it("names the timezone and the fault on a calendar that cannot produce a deadline", async () => {
     mockUseApi.mockReturnValue(baseApi(ME_READ_ONLY) as ApiClient);
     renderWithProviders(<SlaAdminPage />);

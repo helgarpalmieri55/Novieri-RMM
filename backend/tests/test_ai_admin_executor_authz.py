@@ -80,14 +80,13 @@ async def test_ai_use_alone_is_forbidden_from_every_tool(api_env: Any, name: str
     """
     org, _ = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, org.org_id, "ai.use")
-    headers = await api_env.headers(org.org_id, sub)
 
     outcome = await invoke_tool(
         registry=REGISTRY,
         tool_name=name,
         raw_args=await _args_for(name, org),
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=await api_env.loopback_bearer(org.org_id, sub),
         deadline=_deadline(),
     )
 
@@ -115,7 +114,7 @@ async def test_one_permission_allows_one_tool_and_denies_the_other(api_env: Any)
     """
     org, alert_id = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "health.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
 
     allowed = await invoke_tool(
         registry=REGISTRY,
@@ -161,7 +160,7 @@ async def test_the_gate_runs_even_when_the_tool_is_invoked_directly(api_env: Any
     """
     org, _ = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "health.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
 
     outcome = await invoke_tool(
         registry=REGISTRY,
@@ -179,7 +178,7 @@ async def test_a_holder_of_the_permission_gets_the_data(api_env: Any) -> None:
     EVERYONE would pass the whole file."""
     org, _ = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "devices.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
 
     outcome = await invoke_tool(
         registry=REGISTRY,
@@ -229,7 +228,7 @@ async def test_a_device_id_from_another_org_is_404_never_another_orgs_row(
     mine, _ = await _seed_estate(api_env)
     theirs, _ = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, mine.org_id, "ai.use", "devices.read")
-    bearer = (await api_env.headers(mine.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(mine.org_id, sub)
 
     spy = RecordingTransport(api_env.app)
     install_spy(monkeypatch, spy)
@@ -265,7 +264,7 @@ async def test_an_unknown_device_id_is_404_and_not_a_crash(api_env: Any) -> None
     an existence oracle by another route."""
     org, _ = await _seed_estate(api_env)
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "devices.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
 
     outcome = await invoke_tool(
         registry=REGISTRY,

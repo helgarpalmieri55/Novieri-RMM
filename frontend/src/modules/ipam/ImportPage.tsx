@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 import { ClientField } from "../../components/ClientField";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
 import { useClientScope } from "../../lib/clientScope";
-import { useNewRowClient } from "../../lib/clientSelection";
+import { useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import {
   useApplyIpamImportMutation,
@@ -18,6 +18,8 @@ import {
 import { IpamNav } from "./IpamNav";
 import { DetailFacts } from "./DetailFacts";
 import { ErrorLine } from "./ErrorLine";
+import { clientRule, ProblemLine } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   describeImportDetail,
   importActionPresentation,
@@ -101,21 +103,32 @@ function CsvImportPanel() {
   // for someone holding `clients.read`, its id otherwise.
   const vrfs = useIpamVrfs();
   const { selected } = useClientScope();
+  // The digest AND the identity of the file it belongs to. Storing the digest
+  // alone would let it outlive the file it describes.
+  const [previewed, setPreviewed] = useState<PreviewedFile | null>(null);
   // With no VRF listed, the import names a client: the one chosen at the top,
-  // or with every client the Client field's (design §3.1).
-  const newRow = useNewRowClient(IPAM_MANAGE);
-  const [pickedClient, setPickedClient] = useState("");
-  const client = newRow.needsField ? pickedClient || null : newRow.clientId;
+  // or with every client the Client field's (design §3.1). Another client is
+  // another import: the verdict was not about it.
+  const newRow = useNewRowClientField(IPAM_MANAGE, undefined, {
+    onPick: () => {
+      setPreviewed(null);
+      apply.reset();
+      preview.reset();
+    },
+  });
+  const client = newRow.clientId;
   const clientName = useClientName();
   const [vrfChoice, setVrfChoice] = useState<string | null>(null);
   const vrfId = vrfChoice ?? defaultImportVrf(vrfs.data ?? [], selected);
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  // The digest AND the identity of the file it belongs to. Storing the digest
-  // alone would let it outlive the file it describes.
-  const [previewed, setPreviewed] = useState<PreviewedFile | null>(null);
+  // Populated on Preview, never while choosing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Once the VRF read has settled, not while it loads: the list may yet name
+  // a VRF, which decides.
+  const namesClient = !vrfs.isPending && (vrfs.data?.length ?? 0) === 0;
 
   async function chooseFile(chosen: File | null): Promise<void> {
     setFile(chosen);
@@ -182,21 +195,11 @@ function CsvImportPanel() {
           </select>
         </Field>
       )}
-      {/* Once the VRF read has settled, not while it loads: the list may yet
-          name a VRF, which decides. */}
-      {!vrfs.isPending && (vrfs.data?.length ?? 0) === 0 && newRow.needsField ? (
-        <ClientField
-          code={IPAM_MANAGE}
-          value={pickedClient}
-          onChange={(id) => {
-            setPickedClient(id);
-            // Another client is another import: the verdict was not about it.
-            setPreviewed(null);
-            apply.reset();
-            preview.reset();
-          }}
-        />
-      ) : null}
+      {namesClient && newRow.needsField ? <ClientField field={newRow} /> : null}
+      {/* With Unassigned chosen at the top and no VRF to import into, nothing
+          new can be filed: the panel says so instead of offering a preview
+          that can only be refused. */}
+      {namesClient && newRow.refused === "unassigned" ? <UnassignedRefusal /> : null}
 
       <Field label={t("ipam.importExport.csvFile")}>
         {/* THE NATIVE CONTROL STAYS -- it is what the browser's picker and the
@@ -286,56 +289,66 @@ function CsvImportPanel() {
         </div>
       )}
 
-      <div className="form-actions" style={{ marginTop: 0 }}>
-        <Btn
-          label={preview.isPending ? t("ipam.importExport.previewing") : t("ipam.importExport.preview")}
-          icon="eye"
-          variant="primary"
-          disabled={preview.isPending || file === null || !mappingNamesAddress}
-          onClick={() => {
-            if (file === null) return;
-            // THE TARGET IS TAKEN ONCE, HERE. `vrfId` is recomputed on every
-            // render from the choice or the default, and a default can move
-            // when the VRF list is read again; what was previewed is what is
-            // applied, and the picker is pinned to it so it says so.
-            const target = vrfId;
-            const targetClient = client;
-            preview.mutate(
-              { file, mapping, vrfId: target, clientId: targetClient },
-              {
-                onSuccess: (result) => {
-                  setVrfChoice(target);
-                  setPreviewed({
-                    name: file.name,
-                    size: file.size,
-                    lastModified: file.lastModified,
-                    digest: result.digest,
-                    vrfId: target,
-                    clientId: targetClient,
-                  });
+      {namesClient && newRow.refused === "unassigned" ? null : (
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <Btn
+            label={preview.isPending ? t("ipam.importExport.previewing") : t("ipam.importExport.preview")}
+            icon="eye"
+            variant="primary"
+            disabled={preview.isPending || file === null || !mappingNamesAddress}
+            onClick={() => {
+              if (file === null) return;
+              // The Client field, when the import names a client (no VRF listed).
+              const next: Attempt = { rules: () => (namesClient ? clientRule(newRow) : []), values: { client } };
+              setAttempt(next);
+              if (attemptProblems(next).length > 0) {
+                preview.reset();
+                return;
+              }
+              // THE TARGET IS TAKEN ONCE, HERE. `vrfId` is recomputed on every
+              // render from the choice or the default, and a default can move
+              // when the VRF list is read again; what was previewed is what is
+              // applied, and the picker is pinned to it so it says so.
+              const target = vrfId;
+              const targetClient = client;
+              preview.mutate(
+                { file, mapping, vrfId: target, clientId: targetClient },
+                {
+                  onSuccess: (result) => {
+                    setVrfChoice(target);
+                    setPreviewed({
+                      name: file.name,
+                      size: file.size,
+                      lastModified: file.lastModified,
+                      digest: result.digest,
+                      vrfId: target,
+                      clientId: targetClient,
+                    });
+                  },
                 },
-              },
-            );
-          }}
-        />
-        <Btn
-          label={apply.isPending ? t("ipam.importExport.applying") : t("ipam.importExport.apply")}
-          icon="check"
-          disabled={apply.isPending || blockReason !== null}
-          onClick={() => {
-            if (file === null || previewed === null) return;
-            apply.mutate({
-              file,
-              mapping,
-              digest: previewed.digest,
-              vrfId: previewed.vrfId,
-              clientId: previewed.clientId,
-            });
-          }}
-        />
-        {blockReason !== null && <span className="form-hint">{blockReason}</span>}
-      </div>
+              );
+            }}
+          />
+          <Btn
+            label={apply.isPending ? t("ipam.importExport.applying") : t("ipam.importExport.apply")}
+            icon="check"
+            disabled={apply.isPending || blockReason !== null}
+            onClick={() => {
+              if (file === null || previewed === null) return;
+              apply.mutate({
+                file,
+                mapping,
+                digest: previewed.digest,
+                vrfId: previewed.vrfId,
+                clientId: previewed.clientId,
+              });
+            }}
+          />
+          {blockReason !== null && <span className="form-hint">{blockReason}</span>}
+        </div>
+      )}
 
+      <ProblemLine problems={attemptProblems(attempt)} />
       {preview.isError && <ErrorLine error={preview.error} />}
       {apply.isError && <ErrorLine error={apply.error} />}
 

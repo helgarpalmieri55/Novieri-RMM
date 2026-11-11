@@ -77,14 +77,14 @@ async def test_jobs_cancelling_a_job_that_does_not_exist(
 
 
 async def test_api_a_request_without_credentials(api_env: Any) -> None:
-    """api/deps.py: the dependency every route shares."""
+    """api/deps.py: the dependency every route shares, off the MCP channel."""
     await _both_languages(
         api_env,
         "GET",
         "/api/v1/devices",
         {},
         status=401,
-        english="missing bearer token",
+        english="sign in to continue",
     )
 
 

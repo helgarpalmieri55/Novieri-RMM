@@ -165,6 +165,13 @@ def _python_files() -> list[Path]:
     return sorted(p for p in APP.rglob("*.py") if "__pycache__" not in p.parts)
 
 
+def test_the_walk_reaches_the_platforms_own_sign_in() -> None:
+    """Own authentication design §10.10: the sign-in's own refusals are text a
+    buyer reads, so the guard must be seen to read them."""
+    files = {path.relative_to(APP).as_posix() for path in _python_files()}
+    assert {"api/v1/auth.py", "core/auth/sessions.py", "core/auth/loopback.py"} <= files
+
+
 # --------------------------------------------------------------------------- #
 # the extractor the guard is built on
 # --------------------------------------------------------------------------- #
@@ -307,42 +314,16 @@ def test_every_probe_has_a_display_label_and_none_names_the_vendor() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_refusal_never_forwards_the_admin_clients_own_wording() -> None:
-    """`_translating` used to interpolate the upstream exception INTO the
-    detail (`f"... {exc}"`), and `app/modules/user_admin/kc_client.py` raises
-    `KeycloakAdminError("Keycloak accepted the user but returned no Location
-    header ...")`. That sentence therefore reached a 502 body -- and, through
-    `CreatedUser.enrolment_email_error`, a 201 body -- with the vendor's name
-    in it, assembled at runtime where no scan of literals could see it.
+def test_the_user_lifecycle_has_no_identity_provider_wording_to_forward() -> None:
+    """`_translating` used to turn the admin client's failures into refusals,
+    and its first version interpolated the upstream exception -- "Keycloak
+    accepted the user but returned no Location header" -- into a 502 and a 201
+    body, assembled at runtime where no scan of literals could see it.
 
-    `kc_client.py` is right to name the vendor: it is the module that talks to
-    it. The rule is that its wording stops at the boundary.
-    """
-    import httpx
-
-    from app.modules.user_admin.kc_client import KeycloakAdminError
-    from app.modules.user_admin.service import UserAdminError, _translating
-
-    with pytest.raises(UserAdminError) as caught:
-        with _translating("send the enrolment email"):
-            raise KeycloakAdminError(
-                "Keycloak accepted the user but returned no Location header"
-            )
-    assert not FORBIDDEN.search(caught.value.detail), caught.value.detail
-    assert "send the enrolment email" in caught.value.detail
-
-    request = httpx.Request("POST", "https://identity.invalid/admin")
-    with pytest.raises(UserAdminError) as caught:
-        with _translating("create the account"):
-            raise httpx.HTTPStatusError(
-                "Keycloak said no",
-                request=request,
-                response=httpx.Response(409, request=request),
-            )
-    assert not FORBIDDEN.search(caught.value.detail), caught.value.detail
-    assert "409" in caught.value.detail
-
-    with pytest.raises(UserAdminError) as caught:
-        with _translating("create the account"):
-            raise httpx.ConnectError("Keycloak is down")
-    assert not FORBIDDEN.search(caught.value.detail), caught.value.detail
+    Since P2 phase 1 Task 8 the lifecycle calls no identity provider at all,
+    so there is no upstream wording left to forward: the service imports
+    neither the admin client nor an HTTP client. Should either come back, the
+    rule above comes back with it, and so must a test like the old one."""
+    source = (Path(__file__).resolve().parents[1] / "app/modules/user_admin/service.py").read_text()
+    assert "kc_client" not in source
+    assert "import httpx" not in source

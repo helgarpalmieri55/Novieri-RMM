@@ -30,16 +30,14 @@ EVERY ASSERTION ABOUT WHAT THE DATABASE HOLDS READS THROUGH THE ADMIN
 read through a tenant session would be answered by RLS -- returning "no users"
 for a populated platform, which is the exact bug these tests exist to catch.
 
-THE KEYCLOAK HALF IS A MOCK TRANSPORT, imported from `test_user_admin_api` so
-the two surfaces cannot be tested against two different fakes. Nothing here has
-run against a live identity provider; the spec says so and says where that is
-exercised instead.
+NO IDENTITY PROVIDER IS CALLED. The fake from `test_user_admin_api` stays on
+`httpx` so that a call would be seen; `kc.seen == []` holds it.
 """
 
+import os
 import secrets as _secrets
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
@@ -49,17 +47,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.pool import NullPool
 
 from app.core.audit import audit_service
+from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected
+from app.core.client_address import parse_trusted_proxies
 from app.core.setup_code import SETUP_CODE_PATH_ENV, ensure_setup_code
 from app.models import AuditEvent, Organization, Role, User, UserRole
-from app.modules.user_admin.kc_client import KeycloakAdminConfig
+from app.models.auth import AuthPassword
+from tests.auth_support import CONSOLE, browser
 from tests.conftest import PgCluster, _psql, _run_migrations
-
-# The init job's own module, borrowed from the suite that already imports it by
-# path -- `deploy/` is not a package and `init-clients.py` is not an identifier.
-# Borrowed rather than re-imported for the same reason the fake identity
-# provider below is: two loaders would be two copies of `DESIRED_CLIENTS`, and
-# the whole value of this cross-check is that there is exactly one.
-from tests.test_keycloak_init_job import init as _init_clients_module
 from tests.test_user_admin_api import _REAL_CLIENT, FakeKeycloak
 
 REPO = Path(__file__).resolve().parents[2]
@@ -171,9 +165,6 @@ async def setup_env(
     code_path = tmp_path / "secrets" / "setup-code"
     monkeypatch.setenv(SETUP_CODE_PATH_ENV, str(code_path))
 
-    secret_file = tmp_path / "provisioning-secret"
-    secret_file.write_text("not-a-real-secret")
-
     settings = Settings(
         database_url=_rebase(pg_cluster.app_url, dbname),
         database_admin_url=_rebase(pg_cluster.admin_url, dbname),
@@ -182,9 +173,10 @@ async def setup_env(
         oidc_jwks_url=JWKS_URL,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        keycloak_admin_url="https://identity.test",
-        keycloak_admin_secret_path=secret_file,
         default_org_slug="toeshee",
+        # The sign-in test below reaches the per-IP limiter: the suite's Redis
+        # database, as `tests/conftest.py::api_env` uses, never the default.
+        redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
     )
     app = create_app(settings, jwks_http_client=jwks_client(FakeIdp()))
     _include_setup_router(app)
@@ -236,6 +228,10 @@ async def setup_env(
     await admin_engine.dispose()
     await app.state.app_engine.dispose()
     await app.state.admin_engine.dispose()
+    # The sign-in test opens the app's Redis pool; release it as `api_env` does.
+    aclose = getattr(app.state.redis, "aclose", None)
+    if aclose is not None:
+        await aclose()
     _psql(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
 
 
@@ -261,6 +257,7 @@ def _body(name: str = "Toeshee IT", **overrides: Any) -> dict[str, Any]:
         "email": "owner@toeshee.test",
         "display_name": "The Owner",
         "organization_name": name,
+        "password": "Owner-Passphrase-2026",
     }
     payload.update(overrides)
     return payload
@@ -336,10 +333,12 @@ async def test_the_right_code_on_an_empty_platform_claims_it(setup_env: Any) -> 
     assert payload["organization_id"] == str(orgs[0].id)
     assert payload["user_id"] == str(users[0].id)
     assert users[0].display_name == "The Owner"
-    # The identity was created in the identity provider FIRST, and the row
-    # carries the subject it returned -- otherwise the first sign-in provisions
-    # a second user row.
-    assert users[0].external_subject == setup_env.kc.issued[0]
+    # No identity provider was asked for anything (P2 phase 1): the row's
+    # subject is the platform's own placeholder, and the password is stored.
+    assert users[0].external_subject.startswith("itms-local:")
+    assert setup_env.kc.seen == []
+    async with AsyncSession(setup_env.admin_engine) as session:
+        assert await session.get(AuthPassword, users[0].id) is not None
 
 
 async def test_the_claim_closes_the_door_behind_itself(setup_env: Any) -> None:
@@ -408,23 +407,21 @@ async def test_no_response_on_this_surface_names_the_identity_vendor(
 ) -> None:
     """THE BUYER TEST, on the first screen a buyer ever sees.
 
-    The interesting bodies are the FAILURES: the service layer's own refusals
-    name the vendor ("... could not create the user"), and forwarding one of
-    those verbatim would put the word on the setup screen of a product whose
-    buyer has never heard it.
+    The interesting bodies are the FAILURES: a refusal forwarded verbatim from a
+    lower layer is how the word would reach the setup screen.
     """
     bodies = [(await setup_env.client.get("/api/v1/setup/status")).text]
     bodies.append(
         (await setup_env.client.post("/api/v1/setup/claim", json=_body(code="WRONG"))).text
     )
-    setup_env.kc.create_status = 500
     bodies.append(
         (
-            await setup_env.client.post("/api/v1/setup/claim", json=_body(code=setup_env.code))
+            await setup_env.client.post(
+                "/api/v1/setup/claim", json=_body(code=setup_env.code, password="short")
+            )
         ).text
     )
-    setup_env.kc.create_status = 201
-    setup_env.kc.mail_status = 500
+    # And the success, which the old version drove too.
     bodies.append(
         (
             await setup_env.client.post("/api/v1/setup/claim", json=_body(code=setup_env.code))
@@ -512,122 +509,82 @@ async def test_a_deleted_user_does_not_reopen_the_setup_screen(setup_env: Any) -
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_deployment_without_provisioning_refuses_before_creating_anything(
-    setup_env: Any,
-) -> None:
-    """The init job that creates the provisioning client may not have run yet.
-
-    A 500 on the first screen of a new product is indistinguishable from a
-    broken install. A 503 that names what is missing is a message an installer
-    can act on -- and, critically, it must arrive BEFORE the organization row,
-    or the retry hits "this platform is already claimed" and the appliance is
-    bricked with no administrator and no way to make one.
-    """
-    setup_env.app.state.settings.keycloak_admin_url = None
+async def test_the_claim_needs_no_identity_provider_settings(setup_env: Any) -> None:
+    """P2 phase 1: there is no provisioning credential to wait for. With no
+    `ITS_KEYCLOAK_ADMIN_*` at all the claim makes the owner."""
+    assert setup_env.app.state.settings.keycloak_admin_url is None
 
     response = await setup_env.client.post(
         "/api/v1/setup/claim", json=_body(code=setup_env.code)
     )
 
-    assert response.status_code == 503
-    assert await setup_env.orgs() == []
-    assert await setup_env.users() == []
-    assert (await setup_env.client.get("/api/v1/setup/status")).json() == {"needed": True}
+    assert response.status_code == 201, response.text
+    assert setup_env.kc.seen == []
 
 
-    # And it says so as a SETTING that is missing, not as a wait -- because
-    # waiting will never fix it. The pair with the test below is the whole
-    # point: two different states, two different next actions.
-    assert "not configured" in response.json()["detail"].lower()
-
-
-@pytest.mark.parametrize("how", ["absent", "empty"])
-async def test_a_secret_the_init_job_has_not_written_yet_reads_as_still_starting(
-    setup_env: Any, how: str
+@pytest.mark.parametrize(
+    ("password", "reason"),
+    [("Short-1", "too_short"), ("owner@toeshee.test-is-mine", "context")],
+)
+async def test_a_password_the_rule_refuses_leaves_nothing_behind(
+    setup_env: Any, password: str, reason: Literal["too_short", "context"]
 ) -> None:
-    """THE FRESH-INSTALL WINDOW, which is the only window setup ever runs in.
-
-    `deploy/.env.example` now ships both `ITS_KEYCLOAK_ADMIN_URL` and
-    `ITS_KEYCLOAK_ADMIN_SECRET_PATH` set, because `keycloak-init` writes that
-    file on every `docker compose up`. Nothing gates `api` on that job finishing
-    (`docker-compose.yml`: making it a dependency would turn an init failure
-    into a product that does not start), so on a cold host there is a window
-    where the path is set and the file is not there yet.
-
-    `KeycloakAdminConfig.from_settings` RAISES in that state, deliberately and
-    correctly -- "configured, secret missing" must not degrade to "not
-    configured" for the lifecycle routes, whose operator believes provisioning
-    is running. But on THIS route the same state has a different meaning and a
-    different next action: nobody has misconfigured anything, the stack is
-    thirty seconds old, and the answer is "try again", not "go and fix a
-    setting". Both cases the window produces are covered: the file not created
-    yet, and created but not yet written.
-    """
-    secret = Path(str(setup_env.settings.keycloak_admin_secret_path))
-    if how == "absent":
-        secret.unlink()
-    else:
-        secret.write_text("   \n")
-    assert setup_env.settings.keycloak_admin_url, "the URL must stay set, or this tests nothing"
-
+    """Design §2.1, checked after the code and before the first write: the
+    retry the 422 asks for actually works, and the reason is said (Task 2's
+    `PasswordRejected.message`, in the request's language -- English here)."""
     response = await setup_env.client.post(
-        "/api/v1/setup/claim", json=_body(code=setup_env.code)
+        "/api/v1/setup/claim", json=_body(code=setup_env.code, password=password)
     )
 
-    assert response.status_code == 503, response.text
-    detail = response.json()["detail"].lower()
-    assert "still starting" in detail and "try again" in detail
-    # The refusal above says "not configured" and means it. Saying it here too
-    # sends an installer off to edit a setting that is already correct, thirty
-    # seconds before the job that finishes the install writes the file.
-    assert "not configured" not in detail
-    # Same rule as everywhere else on this surface, and worth pinning on the
-    # branch that exists to carry a filesystem error's wording.
-    assert "keycloak" not in detail and str(secret) not in response.text
-
-    # Nothing was created, so the retry the message asks for actually works.
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason=reason, minimum=STAFF_MINIMUM).message,
+    }
     assert await setup_env.orgs() == []
     assert await setup_env.users() == []
     assert (await setup_env.client.get("/api/v1/setup/status")).json() == {"needed": True}
 
 
-async def test_an_identity_that_cannot_be_created_leaves_no_organization(
+async def test_an_account_that_cannot_be_created_leaves_no_organization(
     setup_env: Any,
 ) -> None:
     """The org row and the first user are ONE transaction or they are a broken
-    install: an organization with no members still counts as "claimed" for the
-    operator staring at a 502, and nothing in the product can undo it."""
-    setup_env.kc.create_status = 500
-
+    install: an address the service refuses rolls the organization back."""
     response = await setup_env.client.post(
-        "/api/v1/setup/claim", json=_body(code=setup_env.code)
+        "/api/v1/setup/claim", json=_body(code=setup_env.code, email="not@an@address")
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert await setup_env.orgs() == []
     assert await setup_env.users() == []
     assert (await setup_env.client.get("/api/v1/setup/status")).json() == {"needed": True}
 
 
-async def test_an_invitation_that_could_not_be_sent_is_reported_not_hidden(
-    setup_env: Any,
-) -> None:
-    """A fresh install has no email configured (Settings -> Email is the next
-    cycle's work), so the enrolment mail failing is the EXPECTED first
-    experience. Reporting success while silently sending nothing produces an
-    administrator account nobody can ever sign into, with every status green.
-    """
-    setup_env.kc.mail_status = 500
-
+async def test_the_claim_answers_with_the_way_in_not_an_invitation(setup_env: Any) -> None:
+    """The owner chose their password in the form: there is no invitation to
+    report, and the answer says what was made and nothing else."""
     response = await setup_env.client.post(
         "/api/v1/setup/claim", json=_body(code=setup_env.code)
     )
 
     assert response.status_code == 201
-    payload = response.json()
-    assert payload["invitation_sent"] is False
-    assert payload["invitation_error"]
-    assert len(await setup_env.users()) == 1
+    assert set(response.json()) == {"organization_id", "organization_slug", "user_id", "email"}
+
+
+async def test_the_owner_signs_in_with_the_password_the_claim_set(setup_env: Any) -> None:
+    await setup_env.client.post("/api/v1/setup/claim", json=_body(code=setup_env.code))
+    setup_env.settings.public_console_url = CONSOLE
+    setup_env.app.state.trusted_proxies = parse_trusted_proxies("127.0.0.1/32")
+
+    response = await setup_env.client.post(
+        "/api/v1/auth/login",
+        headers=browser(),
+        json={"email": "owner@toeshee.test", "password": "Owner-Passphrase-2026"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"state": "enroll_required"}
 
 
 # --------------------------------------------------------------------------- #
@@ -640,10 +597,9 @@ async def test_the_claim_goes_through_the_same_service_the_users_tab_uses(
 ) -> None:
     """FALSIFIER 6. Two ways of creating an administrator is two sets of rails.
 
-    `user_admin.service.create_user` is where the ordering (identity first, row
-    second), the domain rule, the audit record and the enrolment mail live. A
-    claim route that wrote its own `User(...)` would pass every other test in
-    this file and quietly skip all four.
+    `user_admin.service.create_user` is where the domain rule, the role rails
+    and the audit record live. A claim route that wrote its own `User(...)`
+    would pass every other test in this file and quietly skip all three.
 
     The spy DELEGATES, so the claim still really happens and the assertions
     about its result stay true.
@@ -667,7 +623,7 @@ async def test_the_claim_goes_through_the_same_service_the_users_tab_uses(
     assert len(seen) == 1, "the claim did not go through the shared create path"
     assert seen[0]["email"] == "owner@toeshee.test"
     assert seen[0]["display_name"] == "The Owner"
-    assert len(seen[0]["role_ids"]) == 1
+    assert [g.client_id for g in seen[0]["grants"]] == [None]
 
 
 def test_the_claim_route_does_not_build_users_of_its_own() -> None:
@@ -683,6 +639,9 @@ def test_the_claim_route_does_not_build_users_of_its_own() -> None:
     assert "httpx" not in source, "the claim route talks to the identity provider itself"
     assert "kc_client.create_user" not in source, (
         "the claim route reaches past the service layer into the identity client"
+    )
+    assert "AuthPassword(" not in source, (
+        "the claim route stores a password of its own instead of `staff_password.store`"
     )
 
 
@@ -717,6 +676,7 @@ async def test_everything_the_claim_did_is_in_the_hash_chain(setup_env: Any) -> 
         "health.settings_updated",
         "health.baseline_seeded",
         "user.created",
+        "auth.password_changed",
         "setup.claimed",
     ]
     claimed = events[-1]
@@ -800,84 +760,85 @@ def _shipped_env() -> dict[str, str]:
     return values
 
 
-def test_the_shipped_defaults_can_actually_create_the_first_administrator(
-    tmp_path: Path,
-) -> None:
-    """SETUP RUNS ONCE PER INSTALLATION, AND ONLY ON THE SHIPPED DEFAULTS.
-
-    Every other surface in this platform gets configured by somebody who has
-    already signed in. This one does not: it is the thing that produces the
-    first person who can sign in. So `deploy/.env.example` shipping provisioning
-    unset is not "an operator step left for later" -- it is `_provisioning()`
-    answering 503 on the single occasion this route is ever called, and a
-    buyer's first action failing on a correctly installed product.
-
-    The values are checked against the job that now produces them rather than
-    typed out here. `keycloak-init` creates the client and writes its secret on
-    every `docker compose up`, so the filename in the shipped path and the
-    filename that job writes are ONE fact; a rename touching only one side is
-    what this catches.
-    """
+def test_the_shipped_defaults_name_the_organization_the_console_signs_in_to() -> None:
+    """SETUP RUNS ONCE, ON THE SHIPPED DEFAULTS, and then the owner signs in.
+    `POST /auth/login` looks the address up in `ITS_DEFAULT_ORG_SLUG`'s
+    organization (P2 phase 1 plan decision 5), and the claim names the
+    organization with that same slug (`_org_slug`); a `.env.example` without
+    it ships a product whose owner cannot sign in after setting it up."""
     env = _shipped_env()
-    url = env.get("ITS_KEYCLOAK_ADMIN_URL", "")
-    secret_path = env.get("ITS_KEYCLOAK_ADMIN_SECRET_PATH", "")
-
-    assert url, (
-        "ITS_KEYCLOAK_ADMIN_URL ships empty, so a fresh install refuses its own "
-        "setup screen: POST /setup/claim answers 503 and the buyer's first action fails"
-    )
-    assert secret_path, (
-        "ITS_KEYCLOAK_ADMIN_SECRET_PATH ships unset or commented out, so a fresh "
-        "install refuses its own setup screen"
+    assert env.get("ITS_DEFAULT_ORG_SLUG"), (
+        "ITS_DEFAULT_ORG_SLUG ships empty: the first administrator could not sign in"
     )
 
-    init = _init_clients_module
-    client_id = env["ITS_KEYCLOAK_ADMIN_CLIENT_ID"]
-    spec = next(c for c in init.DESIRED_CLIENTS if c.client_id == client_id)
-    assert Path(secret_path).name == spec.secret_filename, (
-        "the shipped path is not the file the init job writes"
-    )
-    assert Path(secret_path).parent == init.DEFAULT_SECRETS_DIR, (
-        "the shipped path is not on the volume the init job writes to"
-    )
 
-    # NON-VACUITY: the two names being right is not the claim. The claim is that
-    # these values, with the file the job writes present, are enough -- that no
-    # third setting was left commented out beside them.
-    written = tmp_path / spec.secret_filename
-    written.write_text("whatever-the-init-job-wrote\n")
-    config = KeycloakAdminConfig.from_settings(
-        SimpleNamespace(
-            keycloak_admin_url=url,
-            keycloak_admin_secret_path=written,
-            keycloak_realm=env["ITS_KEYCLOAK_REALM"],
-            keycloak_admin_client_id=client_id,
-        )
-    )
-
-    assert config is not None, "the shipped values do not configure provisioning"
-    assert config.client_id == spec.client_id
-
-
-async def test_a_refused_claim_is_logged_in_english_whatever_the_language(
+async def test_a_refused_claim_answers_in_the_requests_language_and_logs_nothing(
     setup_env: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The 5xx refusal is answered with a fixed sentence in the request's language
-    and logged with its English cause. `exc.detail` is worded for the person, so a
-    Spanish request must not put Spanish in the operator's log."""
+    """The refusals left are about the request, so they are said in its
+    language; none of them is a server fault worth a log line."""
     import logging
 
-    setup_env.kc.create_status = 500
     with caplog.at_level(logging.WARNING, logger="app.api.v1.setup"):
         response = await setup_env.client.post(
             "/api/v1/setup/claim",
-            json=_body(code=setup_env.code),
+            json=_body(code=setup_env.code, password="short"),
             headers={"Accept-Language": "es"},
         )
 
-    assert response.status_code == 502
-    assert response.json()["detail"].startswith("el proveedor de identidad no pudo crear")
-    refused = [r for r in caplog.records if r.name == "app.api.v1.setup"]
-    assert [r.getMessage() for r in refused] == ["setup claim failed (status 502)"]
-    assert refused[0].exc_info is not None
-    assert "el proveedor" not in caplog.text
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Usa al menos 12 caracteres."
+    assert [r for r in caplog.records if r.name == "app.api.v1.setup"] == []
+
+
+async def test_an_over_long_password_is_refused_without_repeating_it(setup_env: Any) -> None:
+    """P2 Task 7's decision 16: `SetupClaim.password` has no Pydantic bound,
+    because a field failure repeats its INPUT in the 422 and the input is the
+    owner's password. The rule's `too_long` refuses it after the install code,
+    the body never repeats it, and nothing is made. A `max_length` back on the
+    field turns this red."""
+    long_password = "Owner-Passphrase-2026" * 100
+
+    response = await setup_env.client.post(
+        "/api/v1/setup/claim", json=_body(code=setup_env.code, password=long_password)
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="too_long", minimum=STAFF_MINIMUM).message,
+    }
+    assert long_password not in response.text
+    assert await setup_env.orgs() == []
+    assert await setup_env.users() == []
+
+
+async def test_a_password_built_on_the_organizations_name_is_refused(setup_env: Any) -> None:
+    """Task 2's decision 5: the organization being set up is context. Drop
+    `org_name=` from `claim_platform` and this password -- 16 characters, on
+    no list, built on nothing but that name -- is taken: red."""
+    response = await setup_env.client.post(
+        "/api/v1/setup/claim",
+        json=_body(name="Quokkaworks Ltd", code=setup_env.code, password="Quokkaworks 2026"),
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="context", minimum=STAFF_MINIMUM).message,
+    }
+    assert await setup_env.orgs() == []
+
+
+async def test_the_password_rule_is_not_learnt_without_the_install_code(
+    setup_env: Any,
+) -> None:
+    """The order of the refusals (`claim_platform`'s docstring): the install
+    code first, so a caller without it never learns even the password rule. A
+    weak password with a wrong code is the 403, not the 422."""
+    response = await setup_env.client.post(
+        "/api/v1/setup/claim", json=_body(code="NOTTHECODE", password="short")
+    )
+
+    assert response.status_code == 403, response.text
+    assert "password_rejected" not in response.text

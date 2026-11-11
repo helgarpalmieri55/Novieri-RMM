@@ -58,9 +58,11 @@ async def _enable_ai(api_env: Any, org_id: UUID) -> None:
         await session.commit()
 
 
-async def _requester(api_env: Any, org_id: UUID) -> dict[str, str]:
+async def _requester(api_env: Any, org_id: UUID) -> str:
+    """A new requester's assistant-turn `Authorization`: the internal token
+    minted from a session of theirs (own authentication design §5.6)."""
     sub = await api_env.create_user(org_id, "requester")
-    return await api_env.headers(org_id, sub)
+    return await api_env.loopback_bearer(org_id, sub)
 
 
 # --------------------------------------------------------------------------- #
@@ -345,13 +347,13 @@ async def test_a_staff_tool_in_the_resolvers_registry_makes_no_http_request(
     spy = RecordingTransport(api_env.app)
     install_portal_spy(monkeypatch, spy)
     org_id = await api_env.create_org("resolver-offsurface")
-    headers = await _requester(api_env, org_id)
+    bearer = await _requester(api_env, org_id)
 
     outcome = await invoke_portal_tool(
         tool_name="devices.health",
         raw_args={"device_id": str(uuid4())},
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=bearer,
         deadline=_time.monotonic() + 30.0,
         registry={"devices.health": _A_STAFF_TOOL},
     )
@@ -374,13 +376,13 @@ async def test_the_act_tool_is_unknown_here_and_makes_no_request(
     spy = RecordingTransport(api_env.app)
     install_portal_spy(monkeypatch, spy)
     org_id = await api_env.create_org("resolver-noact")
-    headers = await _requester(api_env, org_id)
+    bearer = await _requester(api_env, org_id)
 
     outcome = await invoke_portal_tool(
         tool_name="actions.propose",
         raw_args={"action_key": "anything", "device_id": str(uuid4())},
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=bearer,
         deadline=_time.monotonic() + 30.0,
         registry=RESOLVER_PROFILE.tools,
     )
@@ -415,13 +417,14 @@ async def test_a_requester_never_sees_another_requesters_ticket_through_the_reso
         my_number = (await session.get(Ticket, mine.id)).number  # type: ignore[union-attr]
         their_number = (await session.get(Ticket, theirs.id)).number  # type: ignore[union-attr]
 
-    headers = await api_env.headers(org_id, await _sub_for(api_env, org_id, mine.requester_id))
-
+    bearer = await api_env.loopback_bearer(
+        org_id, await _sub_for(api_env, org_id, mine.requester_id)
+    )
     outcome = await invoke_portal_tool(
         tool_name="portal.my_tickets",
         raw_args={},
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=bearer,
         deadline=_time.monotonic() + 30.0,
         registry=RESOLVER_PROFILE.tools,
     )
@@ -451,14 +454,14 @@ async def test_the_resolver_reads_only_help_articles_marked_for_the_portal(
                 json={"portal_visible": True},
                 headers=tech,
             )
-    headers = await _requester(api_env, org_id)
+    bearer = await _requester(api_env, org_id)
 
     async def call(tool_name: str, raw_args: dict[str, Any]) -> Any:
         return await invoke_portal_tool(
             tool_name=tool_name,
             raw_args=raw_args,
             app=api_env.app,
-            bearer=headers["Authorization"],
+            bearer=bearer,
             deadline=_time.monotonic() + 30.0,
             registry=RESOLVER_PROFILE.tools,
         )

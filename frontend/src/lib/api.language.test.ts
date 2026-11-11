@@ -18,7 +18,7 @@ describe("Accept-Language", () => {
   it("is sent on every request, in the active language", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
     setActiveLanguage("es");
-    await new ApiClient(() => "tok", () => {}).me();
+    await new ApiClient(() => {}).me();
     const headers = new Headers(fetchMock.mock.calls[0]![1]!.headers);
     expect(headers.get("Accept-Language")).toBe("es");
   });

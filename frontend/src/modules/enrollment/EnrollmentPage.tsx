@@ -113,6 +113,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
@@ -123,7 +124,10 @@ import type { Device, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { ClientField } from "../../components/ClientField";
 import { SiteField } from "../../components/SiteField";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { useSitesOf } from "../devices/siteNames";
+import { useClientName } from "../settings/api";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
@@ -148,6 +152,8 @@ import type {
   EnrollmentTokenState,
 } from "./types";
 import { EnrollmentPrerequisites } from "./EnrollmentPrerequisites";
+import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /** The codes `shell/nav.ts` uses, and the codes the routes enforce server-side. */
 const DEVICES_READ = "devices.read";
@@ -273,6 +279,8 @@ type PendingRevoke =
 type TokenDraft = Omit<EnrollmentTokenCreateRequest, "site_id">;
 
 export function EnrollmentPage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
@@ -403,13 +411,21 @@ export function EnrollmentPage() {
   const [pendingIssue, setPendingIssue] = useState<TokenDraft | null>(null);
   // A token enrols machines into ONE SITE (MSP clients spec §1.5, design §3.2):
   // the one the form names, among the sites of the client chosen at the top
-  // -- or, with every client, of the form's Client field.
-  const target = useNewRowClient("enrollment.manage");
-  const [pickedClient, setPickedClient] = useState("");
-  const tokenClient = target.needsField ? pickedClient || null : target.clientId;
+  // -- or, with every client, of the form's Client field. Another client is
+  // another set of sites.
   const [siteId, setSiteId] = useState("");
+  const client = useNewRowClientField("enrollment.manage", undefined, { onPick: () => setSiteId("") });
+  const tokenClient = client.clientId;
+  // THE JOURNEY'S SITE FIRST (design §4.4): a page opened from the
+  // add-a-computer journey starts on the site chosen there.
+  const [journeySite] = useJourneySiteState();
+  useEffect(() => {
+    if (journeySite !== null && siteId === "") setSiteId(journeySite);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
+  }, [journeySite]);
 
-  const create = useMutation({
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const create = useSecretMutation({
     mutationFn: (body: TokenDraft) =>
       createEnrollmentToken(api, {
         ...body,
@@ -473,7 +489,7 @@ export function EnrollmentPage() {
       rules: () => [
         ...nameAndLifetime(),
         maxUsesRule(),
-        ...(target.needsField ? [{ name: "client", label: translate("enrollment.form.client") }] : []),
+        ...(client.needsField ? [{ name: "client", label: translate("enrollment.form.client") }] : []),
         { name: "site", label: translate("enrollment.form.site") },
       ],
       values: { ...form, client: tokenClient, site: siteId },
@@ -512,6 +528,15 @@ export function EnrollmentPage() {
     () => tokens.data?.items ?? [],
     [tokens.data],
   );
+  // WHERE EACH TOKEN ENROLS (design §3.4; phase 3 final review C, Important
+  // 6). A person revoking a bootstrap credential needs to know whose fleet it
+  // lets machines into: the Client column with every client chosen (hidden
+  // with one, as on every list), and the Site always -- a client has several.
+  // Site names are each client's own sites, read where `clients.read` is held.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showTokenClient = selected === null;
+  const tokenSites = useSitesOf(tokenItems.map((token) => token.client_id));
   /** Served whether or not they are in `items`, so the toggle can name what it
    *  is offering before the operator clicks it. */
   const revokedTokenCount = tokens.data?.revoked_count ?? 0;
@@ -761,18 +786,13 @@ export function EnrollmentPage() {
             title={t("enrollment.form.title")}
             subtitle={t("enrollment.form.subtitle")}
           >
-            {formOpen ? (
+            {formOpen && client.refused === "unassigned" ? (
+              // Unassigned has no site and files nothing new: the form says so
+              // instead of offering an Issue that can only fail.
+              <UnassignedRefusal />
+            ) : formOpen ? (
               <Form onSubmit={submitIssue}>
-                {target.needsField ? (
-                  <ClientField
-                    code="enrollment.manage"
-                    value={pickedClient}
-                    onChange={(id) => {
-                      setPickedClient(id);
-                      setSiteId("");
-                    }}
-                  />
-                ) : null}
+                {client.needsField ? <ClientField field={client} /> : null}
                 <SiteField clientId={tokenClient} value={siteId} onChange={setSiteId} />
                 <Field label={t("enrollment.form.name")}>
                   <input
@@ -1004,6 +1024,8 @@ export function EnrollmentPage() {
                   <thead>
                     <tr>
                       <th scope="col">{t("enrollment.tokens.token")}</th>
+                      {showTokenClient ? <th scope="col">{t("enrollment.tokens.client")}</th> : null}
+                      <th scope="col">{t("enrollment.tokens.site")}</th>
                       <th scope="col">{t("enrollment.tokens.expires")}</th>
                       <th scope="col">{t("enrollment.tokens.uses")}</th>
                       <th scope="col">{t("enrollment.tokens.state")}</th>
@@ -1022,6 +1044,12 @@ export function EnrollmentPage() {
                             <div className="cell-title">{token.name || t("enrollment.tokens.unnamed")}</div>
                             <div className="cell-sub mono">{token.id}</div>
                           </Td>
+                          {showTokenClient ? <td>{clientName(token.client_id)}</td> : null}
+                          <td>
+                            {tokenSites.siteName(token.site_id) ?? (
+                              <NoValue label={t("enrollment.tokens.siteUnknown")} />
+                            )}
+                          </td>
                           <td className="mono">{formatDateTime(token.expires_at, zone)}</td>
                           <td>
                             {/* v3's "Used" cell: the mono fraction over the
