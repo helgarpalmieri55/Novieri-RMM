@@ -52,6 +52,62 @@ async def test_tenants_are_kept_sorted_unique_and_audited_as_text(api_env: Any) 
     assert stored == [one, two]
 
 
+async def _patched(
+    env: Any, org: Any, headers: dict[str, str], client_id: str, tenants: list[Any]
+) -> tuple[list[str], list[Any], dict[str, Any]]:
+    """One PATCH of the list: what it answered, what is stored, and what the
+    newest `client.updated` row says changed."""
+    patched = await env.client.patch(
+        f"/api/v1/clients/{client_id}",
+        headers=headers,
+        json={"microsoft_tenants": [str(t) for t in tenants]},
+    )
+    assert patched.status_code == 200, patched.text
+    async with AsyncSession(env.admin_engine) as s:
+        meta = (
+            (
+                await s.execute(
+                    select(AuditEvent.meta)
+                    .where(AuditEvent.org_id == org, AuditEvent.action == "client.updated")
+                    .order_by(AuditEvent.id.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        stored = await s.scalar(select(Client.microsoft_tenants).where(Client.id == client_id))
+    assert meta is not None
+    return patched.json()["microsoft_tenants"], list(stored or []), meta
+
+
+async def test_a_list_is_replaced_and_audited_before_and_after(api_env: Any) -> None:
+    """Fix round 1, item 5: a non-empty list changed to another."""
+    org, headers, client_id = await _client(api_env)
+    one, two, three = sorted([uuid4(), uuid4(), uuid4()], key=str)
+    await _patched(api_env, org, headers, client_id, [one, two])
+    answered, stored, meta = await _patched(api_env, org, headers, client_id, [three, one])
+    assert answered == [str(one), str(three)]
+    assert stored == [one, three]
+    assert meta["changed"]["microsoft_tenants"] == {
+        "before": [str(one), str(two)],
+        "after": [str(one), str(three)],
+    }
+
+
+async def test_a_list_is_cleared_and_audited_before_and_after(api_env: Any) -> None:
+    """Fix round 1, item 5: a non-empty list cleared to `[]` (an empty list is
+    a value, not "leave it out")."""
+    org, headers, client_id = await _client(api_env)
+    one, two = sorted([uuid4(), uuid4()], key=str)
+    await _patched(api_env, org, headers, client_id, [one, two])
+    answered, stored, meta = await _patched(api_env, org, headers, client_id, [])
+    assert (answered, stored) == ([], [])
+    assert meta["changed"]["microsoft_tenants"] == {
+        "before": [str(one), str(two)],
+        "after": [],
+    }
+
+
 async def test_a_personal_account_tenant_is_refused_by_name(api_env: Any) -> None:
     """The refusal's own sentence, not `extra="forbid"`'s: before the field
     exists the PATCH is a 422 too, so the `detail` is what tells them apart."""

@@ -48,7 +48,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
@@ -138,7 +138,9 @@ class NewCertificate:
     """What `new_certificate` makes. `private_pem` goes to the vault and
     nowhere else; the rest is public (decision 5)."""
 
-    private_pem: str
+    #: Left out of `repr`, so no log line or traceback that formats the
+    #: object carries the key (invariant 3).
+    private_pem: str = field(repr=False)
     certificate_pem: str
     #: `x5t#S256`: base64url SHA-256 of the certificate's DER [M9].
     thumbprint: str

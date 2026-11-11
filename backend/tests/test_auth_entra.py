@@ -115,9 +115,11 @@ async def test_an_idp_naming_the_tokens_own_tenant_is_a_member(microsoft: FakeMi
 
 
 def _forged_hs256(fake: FakeMicrosoft) -> str:
+    # 32 bytes, so PyJWT does not warn; the refusal comes on `alg`, before any
+    # key is looked at.
     return jwt.encode(
         {"aud": str(APP), "tid": str(TENANT), "oid": str(uuid4()), "nonce": NONCE},
-        "secret",
+        "s" * 32,
         algorithm="HS256",
         headers={"kid": fake.kid},
     )
@@ -229,6 +231,15 @@ def test_the_platform_makes_its_own_certificate() -> None:
     assert certificate.issuer == certificate.subject
     assert "BEGIN PRIVATE KEY" in made.private_pem
     assert "PRIVATE" not in made.certificate_pem
+
+
+def test_a_new_certificate_never_prints_its_private_key() -> None:
+    """Invariant 3: a log line or a traceback that formats the object shows
+    the public half only."""
+    made = entra.new_certificate(app_client_id=APP, now=datetime.now(UTC))
+    shown = repr(made)
+    assert made.private_pem not in shown and "PRIVATE" not in shown
+    assert made.thumbprint in shown
 
 
 def test_the_client_assertion_is_the_one_entra_describes() -> None:

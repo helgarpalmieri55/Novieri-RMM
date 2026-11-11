@@ -10,6 +10,10 @@ use until a person switches to it (`activate_certificate`, decision 5), in
 the same `PUT`, under the same permission, audit and MCP rules.
 `redirect_uri` is what to register in the Microsoft application, from
 `ITS_PUBLIC_CONSOLE_URL`.
+
+Two FIRST saves at the same moment both find no row to lock, and the second
+INSERT meets the first's primary key: that one conflict is a 409 asking for a
+reload, not a 500. Any other integrity error is still an error.
 """
 
 from datetime import datetime
@@ -17,12 +21,23 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.auth import entra, entra_settings
+from app.core.i18n import tr
 from app.core.tenancy import org_session
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+#: The settings row's primary key (`org_id`): what the second of two first
+#: saves meets (`entra_settings.save`).
+_ROW_KEY = "auth_entra_settings_pkey"
+
+
+def _constraint(exc: IntegrityError) -> str | None:
+    """The constraint asyncpg names (`app/services/clients.py::_constraint`)."""
+    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
 
 
 class EntraSettingsOut(BaseModel):
@@ -143,4 +158,11 @@ async def write_entra_settings(
             )
     except entra_settings.EntraSettingsInvalid as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    except IntegrityError as exc:
+        if _constraint(exc) != _ROW_KEY:
+            raise
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr("another save happened at the same time; reload and try again"),
+        ) from None
     return _out(request, config)

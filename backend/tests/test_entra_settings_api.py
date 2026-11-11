@@ -511,6 +511,99 @@ async def test_a_credential_that_is_not_a_sign_in_key_is_not_opened(api_env: Any
     assert await _used(api_env, org) == []
 
 
+@pytest.mark.parametrize(
+    ("slot", "act"),
+    [
+        # Another application: its first certificate replaces the key in use in place.
+        ("credential_id", {**ON, "app_client_id": str(uuid4()), "new_certificate": True}),
+        # A renewal replaces the waiting key in place.
+        ("next_credential_id", {**ON, "new_certificate": True}),
+        # Switching destroys the key that was in use.
+        ("credential_id", {**ON, "activate_certificate": True}),
+        # Clearing the application destroys both.
+        ("credential_id", OFF),
+        ("next_credential_id", OFF),
+    ],
+)
+async def test_a_save_never_overwrites_or_deletes_another_credential(
+    api_env: Any, slot: str, act: dict[str, Any]
+) -> None:
+    """Fix round 1, item 1: `save` rewrites a key in place and destroys a
+    retired one by organization AND type, so a row naming one of this
+    organization's other secrets -- here a stored password -- leaves it
+    exactly as it was, whichever act reaches it."""
+    org, headers = await _admin(api_env)
+    await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
+    await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
+    made = await api_env.client.post(
+        "/api/v1/credentials",
+        headers=headers,
+        json={"name": "router", "type": "password", "secret": "not-a-key"},
+    )
+    assert made.status_code == 201, made.text
+    password = made.json()["id"]
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(
+            update(AuthEntraSettings)
+            .where(AuthEntraSettings.org_id == org)
+            .values({slot: password})
+        )
+        await s.commit()
+        before = (
+            await s.execute(
+                select(Credential.type, Credential.ciphertext, Credential.wrapped_dek).where(
+                    Credential.id == password
+                )
+            )
+        ).one()
+    saved = await api_env.client.put(API, headers=headers, json=act)
+    assert saved.status_code == 200, saved.text
+    async with AsyncSession(api_env.admin_engine) as s:
+        after = (
+            await s.execute(
+                select(Credential.type, Credential.ciphertext, Credential.wrapped_dek).where(
+                    Credential.id == password
+                )
+            )
+        ).one_or_none()
+    assert after == before
+
+
+async def test_two_first_saves_at_once_answer_409_not_500(api_env: Any) -> None:
+    """Fix round 1, item 7: two FIRST saves have no row to lock, so the
+    second's INSERT waits for the first's and then meets its primary key.
+    That is a 409 asking for a reload, not a 500; the first save stands."""
+    org, headers = await _admin(api_env)
+    async with AsyncSession(api_env.admin_engine) as s:
+        actor = await s.scalar(select(User.id).where(User.org_id == org).limit(1))
+    vault = api_env.app.state.vault
+    async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as first:
+        mine = await entra_settings.save(
+            first,
+            vault,
+            org_id=org,
+            actor_id=actor,
+            enabled=False,
+            app_client_id=APP,
+            staff_tenant_id=TENANT,
+            new_certificate=True,
+        )
+        second = asyncio.create_task(
+            api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
+        )
+        await asyncio.sleep(0.5)
+        assert not second.done(), "the second INSERT waits for the first"
+    answer = await second
+    assert answer.status_code == 409, answer.text
+    assert answer.json()["detail"] == (
+        "another save happened at the same time; reload and try again"
+    )
+    stored = (await api_env.client.get(API, headers=headers)).json()
+    assert stored["certificate_thumbprint"] == mine.certificate_thumbprint
+    assert stored["enabled"] is False
+    assert len(await _keys(api_env, org)) == 1
+
+
 async def test_a_session_that_is_not_the_organizations_is_refused(api_env: Any) -> None:
     """Never through the admin (RLS-bypassing) engine: a session that is not
     an `org_session` is refused before anything is read; another

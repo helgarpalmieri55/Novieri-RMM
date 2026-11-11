@@ -1275,6 +1275,19 @@ CATALOG: dict[str, str] = {
     "the unassigned client takes no Microsoft tenants": (
         "el cliente sin asignar no lleva tenants de Microsoft"
     ),
+    "another save happened at the same time; reload and try again": (
+        "otro guardado ocurrió al mismo tiempo; recarga e inténtalo de nuevo"
+    ),
+    "A credential for this organization's account email is created in Settings, "
+    "Email, not here.": (
+        "La credencial del correo de cuentas de esta organización se crea en Ajustes, "
+        "Correo, no aquí."
+    ),
+    "A credential for sign-in with Microsoft is created in Settings, Microsoft "
+    "sign-in, not here.": (
+        "La credencial del inicio de sesión con Microsoft se crea en Ajustes, Entrar con "
+        "Microsoft, no aquí."
+    ),
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"
     ),

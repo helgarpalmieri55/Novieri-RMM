@@ -143,12 +143,18 @@ async def _store_key(
     private_pem: str,
     existing: UUID | None,
 ) -> UUID:
-    """Into the vault, replacing `existing` in place (`app/core/mail.py::_store_secret`)."""
+    """Into the vault, replacing `existing` in place (`app/core/mail.py::_store_secret`).
+    Only a sign-in key is replaced: a row naming any other credential of the
+    organization gets a new key beside it, and that secret is left alone."""
     credential: Credential | None = None
     if existing is not None:
         credential = (
             await session.execute(
-                select(Credential).where(Credential.org_id == org_id, Credential.id == existing)
+                select(Credential).where(
+                    Credential.org_id == org_id,
+                    Credential.id == existing,
+                    Credential.type == ENTRA_CREDENTIAL_TYPE,
+                )
             )
         ).scalar_one_or_none()
     if credential is None:
@@ -177,11 +183,18 @@ async def _drop_key(
     session: AsyncSession, vault: VaultService, *, org_id: UUID, credential_id: UUID
 ) -> None:
     """Destroy a key nothing points at any more: the caller flushed that, so
-    `ON DELETE SET NULL` finds nothing to clear (`app/core/mail.py::_drop_secret`)."""
-    await vault.delete(session, org_id=org_id, credential_id=credential_id)
-    await session.execute(
-        delete(Credential).where(Credential.org_id == org_id, Credential.id == credential_id)
+    `ON DELETE SET NULL` finds nothing to clear (`app/core/mail.py::_drop_secret`).
+    Only a sign-in key: a row that named another credential never deletes it,
+    in the vault or here."""
+    ours = (
+        Credential.org_id == org_id,
+        Credential.id == credential_id,
+        Credential.type == ENTRA_CREDENTIAL_TYPE,
     )
+    if (await session.execute(select(Credential.id).where(*ours))).scalar_one_or_none() is None:
+        return
+    await vault.delete(session, org_id=org_id, credential_id=credential_id)
+    await session.execute(delete(Credential).where(*ours))
 
 
 def _in_use(
@@ -243,8 +256,10 @@ async def save(
     waits and then reads what the first wrote. Unlocked, an activation and
     a renewal that read the same waiting pair could leave the renewal's key
     under the activated certificate, or fail on the next-slot CHECK. Two
-    FIRST saves have no row to lock:
-    the second fails on the primary key and writes nothing."""
+    FIRST saves have no row to lock: the second's INSERT waits for the first
+    and then fails on the primary key (`auth_entra_settings_pkey`), so its
+    transaction writes nothing; the route answers that one conflict 409,
+    "reload and try again" (`app/api/v1/entra_settings.py`)."""
     if staff_tenant_id == CONSUMER_TENANT:
         raise EntraSettingsInvalid(
             tr("a personal Microsoft account tenant cannot sign anyone in here")
@@ -405,7 +420,16 @@ async def signing_key(
     before anything is read. The row is then found by id, organization AND
     type, so a `credential_id` naming another organization's credential, or
     one of this organization's other secrets, is a LookupError: nothing is
-    decrypted and nothing is audited. LookupError is "no readable key"."""
+    decrypted and nothing is audited.
+
+    WHAT IT RAISES, ALL OF IT "THE KEY CANNOT BE READ": `LookupError` (no
+    sign-in key of this organization is stored); and, from `vault.checkout`,
+    `ValueError` (the row holds no ciphertext), `httpx.HTTPError` (OpenBao
+    refused, timed out or is sealed) and, for a damaged ciphertext,
+    `cryptography.exceptions.InvalidTag`. Nothing is audited for any of them.
+    The callers (the sign-in flows, Task 9) answer every one 503
+    `sign_in_unavailable`, never a 500 and never `microsoft_failed`. The
+    RuntimeError above is a caller's bug, not an answer."""
     if session_scope(session) is None:
         raise RuntimeError(  # i18n-exempt: a caller's contract, never a person's answer
             "the sign-in key is read only under the organization's own org_session"

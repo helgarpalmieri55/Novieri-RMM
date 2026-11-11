@@ -151,6 +151,29 @@ async def _client_of_new_credential(
     return client_id
 
 
+def _refuse_settings_owned_type(kind: str) -> None:
+    """Account email's relay sign-in and sign-in with Microsoft's key are made
+    by their Settings pages and nothing else. One made here would serve
+    nothing -- no settings row names it -- and could then be neither renamed
+    nor deleted (`_refuse_account_mail` refuses both for its type)."""
+    if kind == ACCOUNT_MAIL_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "A credential for this organization's account email is created in Settings, "
+                "Email, not here."
+            ),
+        )
+    if kind == ENTRA_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "A credential for sign-in with Microsoft is created in Settings, Microsoft "
+                "sign-in, not here."
+            ),
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CredentialOut)
 async def create_credential(
     body: CredentialCreate,
@@ -158,6 +181,7 @@ async def create_credential(
     ctx: AuthContext = Depends(require_permission("credentials.manage")),
 ) -> CredentialOut:
     state = request.app.state
+    _refuse_settings_owned_type(body.type)
     if (
         body.type in PUSHABLE_CREDENTIAL_TYPES
         and body.client_id is None
