@@ -115,5 +115,11 @@ export const components = {
     password: "Your password",
     confirmPassword: "Confirm with your password",
     noMethodContact: "Sign out and sign in again, then make this change within 10 minutes.",
+    // For that contact, `body`: the password is no second factor (C5).
+    bodyPassword: "Enter your password to continue.",
+    bodyPasswordOrPasskey: "Use a passkey or enter your password to continue.",
+    // That contact's passkey, on a browser that cannot use it.
+    passkeyUsePassword:
+      "This browser cannot use passkeys, so your passkey is not offered here. Confirm with your password.",
   },
 } as const;

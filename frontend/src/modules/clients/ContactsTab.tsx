@@ -14,6 +14,7 @@ import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
+import { ShownOnceLink, type ShownOnceLinkText } from "../../components/shownOnce";
 import { useStepUp } from "../../components/stepUp";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -24,7 +25,6 @@ import { formatDateTime } from "../../lib/datetime";
 import { useOrgZone } from "../../lib/zone";
 import { Btn, KIND_ICON, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import {
   useCancelContactInviteMutation,
   useClientContacts,
@@ -35,6 +35,17 @@ import {
 } from "./api";
 
 const contactRules = (): readonly FieldRule[] => [{ name: "email", label: translate("clients.contacts.email") }];
+
+/** The words of a portal invitation's link, shown once (`components/shownOnce.tsx`). */
+const LINK_TEXT: ShownOnceLinkText = {
+  title: "clients.contacts.link.title",
+  once: "clients.contacts.link.once",
+  label: "clients.contacts.link.label",
+  copy: "clients.contacts.link.copy",
+  copied: "clients.contacts.link.copied",
+  copyFailed: "clients.contacts.link.copyFailed",
+  done: "clients.contacts.link.done",
+};
 
 export function ContactsTab({ client }: { client: ClientOut }) {
   const t = useT();
@@ -55,7 +66,8 @@ export function ContactsTab({ client }: { client: ClientOut }) {
   const reset = useResetContactAccessMutation(client.id, stepUp.run);
   const [resetting, setResetting] = useState<ContactOut | null>(null);
   // THE ONE COPY OF A LINK NO MAIL CARRIED: here until the technician says
-  // they passed it on, and in no mutation (each is reset once it settles).
+  // they passed it on, and in no mutation (`useSecretMutation` resets each
+  // once it settles, after the callbacks below have taken what they need).
   const [shownLink, setShownLink] = useState<{ email: string; link: string } | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
   // What came of the last access act, held here: the two mutations whose
@@ -73,10 +85,7 @@ export function ContactsTab({ client }: { client: ClientOut }) {
     setAccessError(null);
     invite.mutate(contact.id, {
       onSuccess: sent,
-      onSettled: (_data, error) => {
-        setAccessError(error ?? null);
-        invite.reset();
-      },
+      onSettled: (_data, error) => setAccessError(error ?? null),
     });
   }
 
@@ -258,38 +267,12 @@ export function ContactsTab({ client }: { client: ClientOut }) {
 
       {shownLink ? (
         // SHOWN ONCE: the server keeps only the link's hash.
-        <section aria-label={t("clients.contacts.link.title", { email: shownLink.email })}>
-          <Panel title={t("clients.contacts.link.title", { email: shownLink.email })}>
-            <div className="notice gold" role="status">
-              <Icon name={KIND_ICON.warn} size={16} />
-              <span>{t("clients.contacts.link.once", { email: shownLink.email })}</span>
-            </div>
-            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 12 }}>
-              <Field label={t("clients.contacts.link.label")}>
-                <input
-                  className={inputClass}
-                  data-secret
-                  readOnly
-                  value={shownLink.link}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-              </Field>
-            </div>
-            <div className="form-actions">
-              <Btn
-                icon="copy"
-                label={t("clients.contacts.link.copy")}
-                onClick={() => void navigator.clipboard?.writeText(shownLink.link).catch(() => undefined)}
-              />
-              <Btn
-                variant="primary"
-                icon="check"
-                label={t("clients.contacts.link.done")}
-                onClick={() => setShownLink(null)}
-              />
-            </div>
-          </Panel>
-        </section>
+        <ShownOnceLink
+          email={shownLink.email}
+          link={shownLink.link}
+          text={LINK_TEXT}
+          onDone={() => setShownLink(null)}
+        />
       ) : null}
 
       {editing !== null ? (
@@ -329,10 +312,7 @@ export function ContactsTab({ client }: { client: ClientOut }) {
           setAccessError(null);
           reset.mutate(contact.id, {
             onSuccess: sent,
-            onSettled: (_data, error) => {
-              setAccessError(error ?? null);
-              reset.reset();
-            },
+            onSettled: (_data, error) => setAccessError(error ?? null),
           });
         }}
       />

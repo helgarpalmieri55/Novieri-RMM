@@ -88,6 +88,26 @@ describe("a contact's invitation", () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/portal"));
   });
 
+  it("says so when the passkey is not made, and the invitation still takes a password (fix round 1)", async () => {
+    calls.invitePasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
+    webauthn.startRegistration.mockRejectedValue(Object.assign(new Error("The prompt was closed"), { name: "NotAllowedError" }));
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-contact-1");
+    await user.click(await screen.findByRole("button", { name: "Use a passkey instead" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The passkey prompt was closed or timed out, so nothing was used.",
+    );
+    expect(calls.invitePasskey).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    // The link was not spent: the same invitation accepts a password.
+    expect(screen.getByRole("button", { name: "Use a passkey instead" })).toBeEnabled();
+    await user.type(screen.getByLabelText("New password"), GOOD);
+    await user.type(screen.getByLabelText("The same password again"), GOOD);
+    await user.click(screen.getByRole("button", { name: "Set password and continue" }));
+    expect(calls.acceptInvite).toHaveBeenCalledWith({ token: "tok-contact-1", password: GOOD });
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/portal"));
+  });
+
   it("does not offer a passkey on a browser that cannot make one", async () => {
     webauthn.supported = false;
     renderAuth("/invite#tok-contact-1");

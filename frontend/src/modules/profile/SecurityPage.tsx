@@ -148,6 +148,10 @@ function SecurityBody({ zone }: { zone: string | null }) {
   const contact = data?.kind === "contact";
   // A contact's second factor is the authenticator app alone (C5).
   const secondFactor = data !== undefined && data.has_totp;
+  // "Your password was added." outlives the form that added it (fix round 1):
+  // the re-read page offers to CHANGE the password instead, and says so there
+  // until a change is asked for.
+  const [passwordAdded, setPasswordAdded] = useState(false);
 
   return (
     <>
@@ -166,9 +170,15 @@ function SecurityBody({ zone }: { zone: string | null }) {
       ) : data ? (
         <>
           {data.has_password ? (
-            <PasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} contact={contact} />
+            <PasswordPanel
+              run={stepUp.run}
+              minimum={contact ? 15 : 12}
+              contact={contact}
+              added={passwordAdded}
+              onChanging={() => setPasswordAdded(false)}
+            />
           ) : (
-            <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} />
+            <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} onAdded={() => setPasswordAdded(true)} />
           )}
           <PasskeysPanel security={data} run={stepUp.run} zone={zone} />
           <TotpPanel security={data} run={stepUp.run} />
@@ -182,7 +192,20 @@ function SecurityBody({ zone }: { zone: string | null }) {
   );
 }
 
-function PasswordPanel({ run, minimum, contact }: { run: StepUpRun; minimum: number; contact: boolean }) {
+function PasswordPanel({
+  run,
+  minimum,
+  contact,
+  added,
+  onChanging,
+}: {
+  run: StepUpRun;
+  minimum: number;
+  contact: boolean;
+  /** The password was just added (`AddPasswordPanel`): said here until a change is asked for. */
+  added: boolean;
+  onChanging: () => void;
+}) {
   const t = useT();
   const change = useChangePasswordMutation(run);
   const [current, setCurrent] = useState("");
@@ -206,6 +229,7 @@ function PasswordPanel({ run, minimum, contact }: { run: StepUpRun; minimum: num
 
   function submit() {
     setOutcome(null);
+    onChanging();
     setChecked(true);
     if (current === "" || checkNewPassword(next, repeat, minimum) !== null) return;
     change.mutate(
@@ -291,6 +315,12 @@ function PasswordPanel({ run, minimum, contact }: { run: StepUpRun; minimum: num
               {t("profile.securityPage.password.changed")}
             </span>
           ) : null}
+          {added && outcome === null ? (
+            <span role="status" className="form-saved">
+              <Icon name={KIND_ICON.ok} size={13} />
+              {t("profile.securityPage.password.added")}
+            </span>
+          ) : null}
         </div>
       </Form>
     </Panel>
@@ -302,7 +332,7 @@ function PasswordPanel({ run, minimum, contact }: { run: StepUpRun; minimum: num
  * passkey or Microsoft. No current password to give; the recent confirmation
  * is the server's to ask (§2.5), and the boxes empty whatever it answers.
  */
-function AddPasswordPanel({ run, minimum }: { run: StepUpRun; minimum: number }) {
+function AddPasswordPanel({ run, minimum, onAdded }: { run: StepUpRun; minimum: number; onAdded: () => void }) {
   const t = useT();
   const add = useAddPasswordMutation(run);
   const [next, setNext] = useState("");
@@ -315,13 +345,14 @@ function AddPasswordPanel({ run, minimum }: { run: StepUpRun; minimum: number })
     setOutcome(null);
     setChecked(true);
     if (checkNewPassword(next, repeat, minimum) !== null) return;
+    // `useSecretMutation` forgets the body once this has run.
     add.mutate(next, {
       onSettled: (_data, error) => {
         setNext("");
         setRepeat("");
         setChecked(false);
         setOutcome(error ? { kind: "failed", error } : { kind: "added" });
-        add.reset();
+        if (!error) onAdded();
       },
     });
   }

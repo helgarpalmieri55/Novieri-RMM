@@ -176,6 +176,8 @@ export const clients = {
       once: "Email is not set up, so this link was not sent. It is shown only now: copy it and give it to {email} another way. It works once and expires after 72 hours.",
       label: "Invitation link",
       copy: "Copy link",
+      copied: "Copied.",
+      copyFailed: "This browser would not copy it. Select the link and copy it by hand.",
       done: "Done, I have passed it on",
     },
   },

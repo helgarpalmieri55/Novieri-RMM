@@ -187,6 +187,13 @@ describe("a contact on the real /portal page (fix round 1)", () => {
     expect(screen.getByTestId("portal-shell")).toBeInTheDocument();
   });
 
+  it("links to the contact's own sign-in security (Task 11, fix round 1)", async () => {
+    stubServer(PORTAL_ONLY);
+    app("/portal");
+    await screen.findByText("Ana Ruiz");
+    expect(screen.getByRole("link", { name: "Sign-in and security" })).toHaveAttribute("href", "/portal/security");
+  });
+
   it("signs out to the portal's sign-in page", async () => {
     stubServer(PORTAL_ONLY);
     const user = userEvent.setup();

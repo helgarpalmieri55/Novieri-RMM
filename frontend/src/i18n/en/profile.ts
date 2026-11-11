@@ -90,7 +90,7 @@ export const profile = {
       left: { one: "{count} of {total} left", other: "{count} of {total} left" },
       low: "Few codes left. Make new ones before you run out.",
       subtitleContact: "For when you do not have your authenticator app. Each code works once",
-      none: "You have no recovery codes yet. Make them now: they get you in if you lose your app.",
+      none: "You have no recovery codes. Make new ones now: they get you in if you cannot use your second factor.",
       regenerate: "Make new codes",
       regenerating: "Making…",
       shownOnce: "These codes are shown only now. Keep them somewhere safe, away from this device. Your old codes no longer work.",

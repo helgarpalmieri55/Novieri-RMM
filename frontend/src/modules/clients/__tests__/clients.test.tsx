@@ -737,6 +737,27 @@ describe("a client's contacts' portal access", () => {
     expect(resetContactAccess).toHaveBeenLastCalledWith("c-andes", "ct-ana");
   });
 
+  it("says when the shown link was not copied, so it is not dismissed unseen (fix round 1)", async () => {
+    const link = "https://itms.example/invite#tok-contact-3";
+    const inviteContact = vi.fn().mockResolvedValue({ contact: { ...LUIS, access: "invited" }, invite_link: link });
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([LUIS]), inviteContact }));
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Invite Luis Pardo to the portal" }));
+    const shown = await screen.findByRole("region", { name: "Portal invitation for luis@andes.example" });
+    await user.click(within(shown).getByRole("button", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledWith(link);
+    expect(await within(shown).findByRole("alert")).toHaveTextContent(
+      "This browser would not copy it. Select the link and copy it by hand.",
+    );
+    writeText.mockResolvedValue(undefined);
+    await user.click(within(shown).getByRole("button", { name: "Copy link" }));
+    expect(await within(shown).findByText("Copied.")).toBeInTheDocument();
+    expect(within(shown).queryByRole("alert")).not.toBeInTheDocument();
+    writeText.mockRestore();
+  });
+
   it("keeps a reset's new link in no mutation (A2-69)", async () => {
     const link = "https://itms.example/invite#tok-reset-ana";
     const resetContactAccess = vi.fn().mockResolvedValue({ contact: { ...ANA, access: "invited" }, invite_link: link });

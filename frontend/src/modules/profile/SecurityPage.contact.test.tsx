@@ -89,6 +89,22 @@ describe("a contact's security", () => {
     await waitFor(() => expect(calls.addPassword).toHaveBeenCalledExactlyOnceWith(GOOD));
   });
 
+  it("still says the password was added once the page offers to change it (fix round 1)", async () => {
+    calls.getMySecurity
+      .mockResolvedValueOnce({ ...CONTACT, has_password: false, passkeys: [MY_SECURITY_FIXTURE.passkeys[0]] })
+      .mockResolvedValue({ ...CONTACT, has_password: true, passkeys: [MY_SECURITY_FIXTURE.passkeys[0]] });
+    const user = userEvent.setup();
+    renderPortalSecurity();
+    const box = await panel("Password");
+    await user.type(within(box).getByLabelText("New password"), GOOD);
+    await user.type(within(box).getByLabelText("New password again"), GOOD);
+    await user.click(within(box).getByRole("button", { name: "Add password" }));
+    // The server's answer re-reads the page: the change form replaces the add form.
+    const changed = await panel("Password");
+    expect(await within(changed).findByLabelText("Current password")).toBeInTheDocument();
+    expect(within(changed).getByText("Your password was added.")).toBeInTheDocument();
+  });
+
   it("never offers to remove the last way in", async () => {
     calls.getMySecurity.mockResolvedValue({
       ...CONTACT,
@@ -127,7 +143,9 @@ describe("a contact's security", () => {
     renderPortalSecurity();
     const codes = await panel("Recovery codes");
     expect(
-      within(codes).getByText("You have no recovery codes yet. Make them now: they get you in if you lose your app."),
+      within(codes).getByText(
+        "You have no recovery codes. Make new ones now: they get you in if you cannot use your second factor.",
+      ),
     ).toBeInTheDocument();
     expect(within(codes).getByRole("button", { name: "Make new codes" })).toBeEnabled();
   });

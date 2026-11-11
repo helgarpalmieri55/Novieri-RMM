@@ -206,14 +206,24 @@ function StepUpDialog({
   // not have. The dialog says why it is missing, and what is left.
   const ownsPasskey = (data?.passkeys.length ?? 0) > 0;
   const hasPasskey = ownsPasskey && canUsePasskeys();
+  // A contact who may confirm with the password still has a way to confirm
+  // (fix round 1): "no other second factor" would contradict the form below.
   const hiddenAdvice =
     ownsPasskey && !hasPasskey
-      ? (passkeyHiddenAdvice({ totp: hasTotp, recovery: codesLeft > 0 }) ?? "components.stepUp.passkeyOnly")
+      ? contactPassword
+        ? "components.stepUp.passkeyUsePassword"
+        : (passkeyHiddenAdvice({ totp: hasTotp, recovery: codesLeft > 0 }) ?? "components.stepUp.passkeyOnly")
       : null;
+  // The password is no second factor (C5): the dialog asks for what it offers.
+  const body = contactPassword
+    ? hasPasskey
+      ? "components.stepUp.bodyPasswordOrPasskey"
+      : "components.stepUp.bodyPassword"
+    : "components.stepUp.body";
 
   return (
     <Dialog open={open} onClose={onCancel} title={t("components.stepUp.title")}>
-      <p style={{ marginBottom: 12 }}>{t("components.stepUp.body")}</p>
+      <p style={{ marginBottom: 12 }}>{t(body)}</p>
       {security.isLoading ? <p className="note">{t("components.stepUp.loading")}</p> : null}
       {security.error ? (
         <p role="alert" className="notice red">
@@ -282,7 +292,7 @@ function StepUpDialog({
             <Btn
               type="submit"
               icon="check"
-              variant={hasPasskey || hasTotp ? "secondary" : "primary"}
+              variant={hasPasskey ? "secondary" : "primary"}
               label={t("components.stepUp.confirmPassword")}
               disabled={busy || password === ""}
             />

@@ -89,6 +89,7 @@ import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { EntityPicker } from "../../components/picker";
+import { ShownOnceLink, type ShownOnceLinkText } from "../../components/shownOnce";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -163,18 +164,20 @@ const DONE: Record<Done["key"], MessageKey> = {
 };
 
 /**
- * Copying without swallowing the failure (`enrollment/EnrollmentPage.tsx:254-270`):
- * a copy that fails silently would let an operator dismiss the only copy of
- * an invitation link believing it was on the clipboard.
+ * The words of the link shown once (`components/shownOnce.tsx`, which also
+ * says when a copy failed: a copy that fails silently would let an operator
+ * dismiss the only copy of an invitation link believing it was on the
+ * clipboard).
  */
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const LINK_TEXT: ShownOnceLinkText = {
+  title: "settings.users.link.title",
+  once: "settings.users.link.once",
+  label: "settings.users.link.label",
+  copy: "settings.users.link.copy",
+  copied: "settings.users.link.copied",
+  copyFailed: "settings.users.link.copyFailed",
+  done: "settings.users.link.done",
+};
 
 function statusTone(status: string): "success" | "warning" | "muted" {
   if (status === "active") return "success";
@@ -268,7 +271,6 @@ export function UsersTab({
   const [draftClientId, setDraftClientId] = useState("");
   const [draftTyping, setDraftTyping] = useState(false);
   const [shownLink, setShownLink] = useState<ShownLink | null>(null);
-  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
   const [done, setDone] = useState<Done | null>(null);
 
   const [rolesForId, setRolesForId] = useState<string | null>(null);
@@ -334,7 +336,6 @@ export function UsersTab({
         onSuccess: (out) => {
           if (out.invite_link) {
             setShownLink({ email: address, link: out.invite_link });
-            setCopied(null);
             setDone(null);
           } else {
             setDone({ key: "inviteEmailed", email: address });
@@ -355,7 +356,6 @@ export function UsersTab({
       onSuccess: (out) => {
         if (out.invite_link) {
           setShownLink({ email: target.email, link: out.invite_link });
-          setCopied(null);
           setDone(null);
         } else {
           setDone({ key: "inviteResent", email: target.email });
@@ -507,54 +507,12 @@ export function UsersTab({
       {shownLink ? (
         // SHOWN ONCE: the server keeps only the link's hash, so this is the
         // one copy there is. It stays until the operator says it was passed on.
-        <section aria-label={t("settings.users.link.title", { email: shownLink.email })}>
-          <Panel title={t("settings.users.link.title", { email: shownLink.email })}>
-            <div className="notice gold" role="status">
-              <Icon name={KIND_ICON.warn} size={16} />
-              <span>{t("settings.users.link.once", { email: shownLink.email })}</span>
-            </div>
-            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 12 }}>
-              <Field label={t("settings.users.link.label")}>
-                <input
-                  className={inputClass}
-                  readOnly
-                  value={shownLink.link}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-              </Field>
-            </div>
-            <div className="form-actions">
-              <Btn
-                icon="copy"
-                label={t("settings.users.link.copy")}
-                onClick={() =>
-                  void copyToClipboard(shownLink.link).then((ok) => setCopied(ok ? "copied" : "failed"))
-                }
-              />
-              <Btn
-                variant="primary"
-                icon="check"
-                label={t("settings.users.link.done")}
-                onClick={() => {
-                  setShownLink(null);
-                  setCopied(null);
-                }}
-              />
-              {copied === "copied" ? (
-                <span className="form-saved">
-                  <Icon name={KIND_ICON.ok} size={13} />
-                  {t("settings.users.link.copied")}
-                </span>
-              ) : null}
-              {copied === "failed" ? (
-                <span role="alert" className="form-error">
-                  <Icon name={KIND_ICON.crit} size={13} />
-                  {t("settings.users.link.copyFailed")}
-                </span>
-              ) : null}
-            </div>
-          </Panel>
-        </section>
+        <ShownOnceLink
+          email={shownLink.email}
+          link={shownLink.link}
+          text={LINK_TEXT}
+          onDone={() => setShownLink(null)}
+        />
       ) : null}
       <Panel
         title={t("settings.users.title")}

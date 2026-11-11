@@ -112,5 +112,9 @@ export const components: Shape<typeof en> = {
     password: "Tu contraseña",
     confirmPassword: "Confirmar con tu contraseña",
     noMethodContact: "Sal y vuelve a entrar, y haz este cambio en los 10 minutos siguientes.",
+    bodyPassword: "Escribe tu contraseña para continuar.",
+    bodyPasswordOrPasskey: "Usa una clave de acceso o escribe tu contraseña para continuar.",
+    passkeyUsePassword:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Confirma con tu contraseña.",
   },
 };

@@ -92,7 +92,7 @@ export const profile: Shape<typeof en> = {
       left: { one: "Queda {count} de {total}", other: "Quedan {count} de {total}" },
       low: "Te quedan pocos códigos. Genera otros nuevos antes de que se acaben.",
       subtitleContact: "Para cuando no tengas tu app de autenticación. Cada código sirve una vez",
-      none: "Aún no tienes códigos de recuperación. Hazlos ahora: te dejan entrar si pierdes la app.",
+      none: "No tienes códigos de recuperación. Haz unos nuevos ahora: te dejan entrar si no puedes usar tu segundo factor.",
       regenerate: "Generar códigos nuevos",
       regenerating: "Generando…",
       shownOnce: "Estos códigos solo se muestran ahora. Guárdalos en un lugar seguro, lejos de este dispositivo. Tus códigos anteriores ya no funcionan.",

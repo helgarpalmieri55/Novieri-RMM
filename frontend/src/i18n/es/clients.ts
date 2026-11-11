@@ -180,6 +180,8 @@ export const clients: Shape<typeof en> = {
       once: "El correo no está configurado, así que este enlace no se envió. Solo se muestra ahora: cópialo y dáselo a {email} por otra vía. Funciona una vez y caduca a las 72 horas.",
       label: "Enlace de invitación",
       copy: "Copiar el enlace",
+      copied: "Copiado.",
+      copyFailed: "Este navegador no lo copió. Selecciona el enlace y cópialo a mano.",
       done: "Hecho, ya lo entregué",
     },
   },
