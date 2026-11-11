@@ -59,6 +59,9 @@ from tests.tool_surface import build_router_only_app
 
 #: What `deps.require_step_up` says, in the body and in an MCP tool's error.
 CONFIRM_AGAIN = "confirm your second factor again to do this"
+#: What `deps.require_all_clients` says to a holder of the code on fewer than
+#: every client (`tests/test_global_writes.py::EVERY_CLIENT`).
+EVERY_CLIENT = "only a technician with access to every client can do this"
 #: The confirmations the refusals are asked of (design §2.5, §2.6).
 REFUSED = ("none", "stale", "remembered")
 
@@ -524,6 +527,67 @@ async def test_with_a_recent_second_factor_it_goes_through(env: Any, act: Act) -
 
 
 # --------------------------------------------------------------------------- #
+# The scope comes first
+# --------------------------------------------------------------------------- #
+
+
+async def _on_one_client(env: Any, org: UUID) -> str:
+    """A person holding the platform's `org-admin` -- `orgs.manage`,
+    `users.manage` and `roles.manage` among its codes -- on ONE client only."""
+    sub = await env.create_user(org)
+    user_id = await user_id_of(env, sub)
+    org_admin = await _role(env, "org-admin")
+    async with AsyncSession(env.admin_engine) as s:
+        client = Client(org_id=org, name="Acme", kind="customer")
+        s.add(client)
+        await s.flush()
+        s.add(UserRole(org_id=org, user_id=user_id, role_id=org_admin, client_id=client.id))
+        await s.commit()
+    return sub
+
+
+#: One write behind the dependency per code it wraps: Settings → Email
+#: (`orgs.manage`), and a `_MANAGE_CONFIRMED` route of `user_admin/api.py`
+#: (`users.manage`) and of `roles.py` (`roles.manage`).
+SCOPE_FIRST = {
+    "orgs.manage": ("PUT", "/api/v1/settings/email"),
+    "users.manage": ("POST", "/api/v1/users/invite"),
+    "roles.manage": ("POST", "/api/v1/roles"),
+}
+
+
+@pytest.mark.parametrize("code", sorted(SCOPE_FIRST))
+async def test_on_one_client_the_scope_is_refused_and_no_factor_asked(env: Any, code: str) -> None:
+    """`deps.require_permission_on_every_client_with_step_up`: the scope
+    first. A person who holds `code` on one client only, with a confirmation
+    eleven minutes old, is told the act is not theirs -- the every-client 403
+    -- and is never asked for a factor that could not make it so. With the
+    two checks the other way round this answer is `step_up_required`. The
+    every-client detail also shows the person holds `code` (else: "requires")."""
+    org = await env.create_org("step-up-scope")
+    sub = await _on_one_client(env, org)
+    stale = await _confirmed(env, org, sub, "stale")
+    bodies: dict[str, dict[str, Any]] = {
+        "orgs.manage": EMAIL,
+        "users.manage": {
+            "email": f"new-{uuid4().hex[:8]}@toeshee.com",
+            "display_name": "Ana",
+            "grants": [{"role_id": str(await _role(env, "technician"))}],
+        },
+        "roles.manage": {"name": f"role-{uuid4().hex[:8]}", "description": "", "codes": []},
+    }
+    method, url = SCOPE_FIRST[code]
+    rows = await _audit_rows(env, org)
+
+    refused = await env.client.request(method, url, headers=stale, json=bodies[code])
+
+    assert refused.status_code == 403, refused.text
+    assert refusal_code(refused) != "step_up_required", refused.text
+    assert refused.json()["detail"] == EVERY_CLIENT, refused.text
+    assert await _audit_rows(env, org) == rows
+
+
+# --------------------------------------------------------------------------- #
 # Only the change itself asks
 # --------------------------------------------------------------------------- #
 
@@ -581,15 +645,33 @@ async def test_only_switching_ai_access_on_asks(env: Any) -> None:
     assert (await _org_settings(env, org)).get("mcp_enabled") is False
 
 
+async def _connected_ai_app(env: Any, org: UUID, sub: str, admin: dict[str, str]) -> str:
+    """An AI app `sub` really connected: AI access switched on with the
+    administrator's fresh headers and one tool called over MCP as `claude`,
+    so `GET /mcp/connections` lists it. The console becomes the MCP
+    resource's (`MCP_BASE`), as `mcp_env` does."""
+    env.settings.public_console_url = MCP_BASE
+    on = await env.client.patch(
+        "/api/v1/orgs/current", headers=admin, json={"settings": {"mcp_enabled": True}}
+    )
+    assert on.status_code == 200, on.text
+    token = mcp_token(env, await env.org_slug(org), sub)
+    async with running_mcp(env), mcp_session(env, token) as session:
+        called = await session.call_tool("me_get", {})
+    assert called.is_error is False, called
+    return "claude"
+
+
 async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     """S4, pinned: cancelling an invitation, disabling a person, signing them
-    out, turning AI access off and revoking an AI app protect, and must never
-    wait for a factor; the test mail changes nothing; a contact's acts are
-    unchanged (inviting to the portal, cancelling it, deactivating). S5,
-    pinned: renaming or re-describing a role changes nobody's access, and
-    disabling stays as it was while enabling again asks. Each with an
-    eleven-minute-old confirmation."""
+    out, turning AI access off and revoking an AI app (one this person really
+    connected) protect, and must never wait for a factor; the test mail
+    changes nothing; a contact's acts are unchanged (inviting to the portal,
+    cancelling it, deactivating). S5, pinned: renaming or re-describing a role
+    changes nobody's access, and disabling stays as it was while enabling
+    again asks. Each with an eleven-minute-old confirmation."""
     org, sub, admin = await _admin(env)
+    ai_app = await _connected_ai_app(env, org, sub, admin)
     invited = await _invited(env, admin)
     disabled, signed_out = await _technician(env, org), await _technician(env, org)
     role = await _own_role(env, admin)
@@ -617,7 +699,7 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
             "/api/v1/orgs/current", headers=stale, json={"settings": {"mcp_enabled": False}}
         ),
         "revoke an ai app": await client.post(
-            f"/api/v1/mcp/connections/{uuid4()}/revoke", headers=stale, json={"scope": "me"}
+            f"/api/v1/mcp/connections/{ai_app}/revoke", headers=stale, json={"scope": "me"}
         ),
         "send the test mail": await client.post(
             "/api/v1/settings/email/test", headers=stale, json={}
@@ -644,6 +726,14 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     assert answers["disable a person"].status_code == 200
     assert answers["sign a person out"].status_code == 204
     assert answers["switch ai access off"].status_code == 200
+    assert (await _org_settings(env, org)).get("mcp_enabled") is False
+    assert answers["revoke an ai app"].status_code == 200
+    assert answers["revoke an ai app"].json()["revoked"] is True
+    # In force: the app this person connected is listed as revoked for them.
+    listed = await client.get("/api/v1/mcp/connections", headers=await env.headers(org, sub))
+    assert listed.status_code == 200, listed.text
+    [connection] = listed.json()["apps"]
+    assert (connection["client_id"], connection["revoked_for_me"]) == (ai_app, True)
     # Nothing saved to send through: past the gate, refused by the route.
     assert answers["send the test mail"].status_code == 409
     assert answers["rename a role"].status_code == 200
@@ -710,7 +800,13 @@ async def test_over_mcp_a_tenant_change_is_refused_and_the_rest_of_the_edit_is_n
     assert not set(WHOLE.values()) & names
     assert tool_error_text(tenants) == CONFIRM_AGAIN
     assert notes.is_error is False, notes
-    assert await _tenants(mcp_env, str(acme.id)) == []
+    # Read back: the notes the second call sent are stored, the tenants the
+    # first one sent are not.
+    async with AsyncSession(mcp_env.admin_engine) as s:
+        stored = await s.get(Client, acme.id)
+    assert stored is not None
+    assert stored.notes == "over mcp"
+    assert list(stored.microsoft_tenants or []) == []
 
 
 async def test_on_the_mcp_channel_switching_ai_access_on_is_refused(mcp_env: Any) -> None:

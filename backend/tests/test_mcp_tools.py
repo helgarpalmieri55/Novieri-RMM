@@ -273,6 +273,13 @@ async def test_an_org_admin_lists_tools_with_schemas_annotations_and_description
 async def test_a_technician_does_not_see_or_call_an_org_admin_tool(mcp_env) -> None:
     org_id, slug = await _org(mcp_env)
     sub = await mcp_env.create_user(org_id, "technician")
+    # A role of the organization's own, so a rename that got through would
+    # show: in its name and in a `role.updated`. (A random id would be a 404
+    # either way, and the assertions below could not fail.)
+    async with AsyncSession(mcp_env.admin_engine, expire_on_commit=False) as s:
+        role = Role(org_id=org_id, name="night-shift")
+        s.add(role)
+        await s.commit()
     await _grant(mcp_env, org_id, sub, "mcp.use")
     token = mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
@@ -284,14 +291,18 @@ async def test_a_technician_does_not_see_or_call_an_org_admin_tool(mcp_env) -> N
         assert "devices_list" in names  # non-vacuity: the technician sees tools
         assert "roles_update" not in names
         result = await session.call_tool(
-            "roles_update", {"role_id": str(uuid4()), "body": {"name": "x"}}
+            "roles_update", {"role_id": str(role.id), "body": {"name": "x"}}
         )
     assert "requires roles.manage" in _error_text(result)
-    # Refused before the route: no role was renamed, and the refusal is audited.
+    # Refused before the route: the role was not renamed, and the refusal is
+    # audited.
     (event,) = await _events(mcp_env, org_id, "mcp.tool_called")
     assert event.meta["tool"] == "roles_update"
     assert event.meta["status"] == 403
     assert not await _events(mcp_env, org_id, "role.updated")
+    async with AsyncSession(mcp_env.admin_engine) as s:
+        kept = await s.get(Role, role.id)
+    assert kept is not None and kept.name == "night-shift"
 
 
 async def test_areas_narrow_the_list_and_what_is_callable(mcp_env) -> None:

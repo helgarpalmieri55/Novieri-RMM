@@ -810,14 +810,15 @@ def require_permission_on_every_client_with_step_up(
     """`require_permission_on_every_client(code)`, then `require_step_up`.
 
     For the global writes the operator put behind a recent second factor on
-    2026-11-08 and 2026-11-09 (design §2.5, decisions S1-S3 and S5): the
+    2026-11-08 and 2026-11-09 (design §2.5, decisions S1 and S5): the
     organization's sign-in settings, who gets a technician's access and what a
-    role grants. A DEPENDENCY, like the two it joins, so both refusals come
-    before the body is read -- the scope first: a per-client technician is
-    told the act is not theirs, never asked for a factor that could not make
-    it so. `route_permission` still recovers `code` through both wrappers, and
-    `tests/test_global_writes.py` still finds `on_every_client` under this
-    one."""
+    role grants. (S3, switching MCP on, is asked in `orgs.py` itself.) A
+    DEPENDENCY, like the two it joins, so both refusals come before the body
+    is read -- the scope first: a per-client technician is told the act is not
+    theirs, never asked for a factor that could not make it so
+    (`tests/test_step_up_widened.py` pins the order). `route_permission` still
+    recovers `code` through both wrappers, and `tests/test_global_writes.py`
+    still finds `on_every_client` under this one."""
     gate = require_permission_on_every_client(code)
 
     async def on_every_client_with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
