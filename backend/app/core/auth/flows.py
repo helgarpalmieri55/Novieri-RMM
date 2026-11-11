@@ -12,6 +12,17 @@ technician's auth rows belong to no client (`O("users", "user_id")`,
 every-client scope write such a row. This module is the reviewed place that
 holds that scope for sign-in (`ALL_SCOPE_ALLOWLIST`); a route file never does.
 
+A SIGNED-IN CONTACT'S STEPS RUN IN THEIR OWN CLIENT (invariant 5a; phase 2,
+Task 9b, item C). Once a session exists -- the second factor, an enrolment,
+the recent confirmation, signing out; Microsoft's link (`entra_flows`) --
+the step runs in `signed_in_session`: a technician's under every client, a
+contact's under their own client alone, learned by one every-client read
+keyed by the session's own person (as the door does), never by anything the
+request names; any other kind is refused. Every client remains only where no
+signed-in contact is involved: the sign-in steps before a session exists
+(the password, a passkey alone), the reads that learn the organization or
+the client, and the use of a link.
+
 WHAT A REFUSAL TELLS (design §2.3, plan decision 5). Before the password is
 proved, one answer for everything, after one argon2 verification. After it,
 the person learns whether to wait, that a factor is locked, or that a code
@@ -44,7 +55,7 @@ unchanged (falsifier 2).
 """
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -95,6 +106,7 @@ from app.core.auth.recovery import remaining, replace_codes, use_code
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.session_policy import read_policy
 from app.core.auth.sessions import (
+    FirstStep,
     SessionPrincipal,
     end_all_for_user,
     mark_factor,
@@ -161,6 +173,57 @@ async def _identity_session(org_id: UUID, engine: AsyncEngine) -> AsyncIterator[
     """See the module docstring: one organization, every client, auth rows only."""
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         yield session
+
+
+async def _contact_client(org_id: UUID, user_id: UUID, engine: AsyncEngine) -> UUID | None:
+    """A signed-in contact's client: ONE read under every client, keyed by
+    the session's own person -- as the door reads the person before it pins
+    their scope (`deps._admit_session`) -- and never by anything the request
+    names. A contact's client never changes (`update_contact` never writes
+    `client_id`)."""
+    async with _identity_session(org_id, engine) as session:
+        client_id: UUID | None = await session.scalar(
+            select(User.client_id).where(
+                User.id == user_id, User.org_id == org_id, User.kind == CONTACT_KIND
+            )
+        )
+    return client_id
+
+
+@asynccontextmanager
+async def signed_in_session(
+    engine: AsyncEngine, *, org_id: UUID, user_id: UUID, kind: str
+) -> AsyncIterator[AsyncSession]:
+    """A signed-in person's own `/auth/*` step (the module docstring; Task 9b,
+    item C), in the scope of an ALLOWLIST of kinds, as `account.own_session`
+    chooses one: a technician's under every client (`_identity_session`:
+    their auth rows are global rows); a contact's under THEIR OWN CLIENT
+    ALONE, where the database itself confines the step to their rows
+    (invariant 5a); any other kind, or a contact with no client, refused --
+    401 `auth_required` -- before a session opens. Opened AFTER the read
+    that learns the client has committed: one request never holds two
+    transactions at once. Public: `entra_flows` links Microsoft in it."""
+    if kind == STAFF_KIND:
+        async with _identity_session(org_id, engine) as session:
+            yield session
+        return
+    if kind != CONTACT_KIND:
+        raise sign_in_again()
+    client_id = await _contact_client(org_id, user_id, engine)
+    if client_id is None:
+        raise sign_in_again()
+    scope = ClientScope.only([client_id])
+    async with org_session(org_id, engine=engine, clients=scope) as session:
+        yield session
+
+
+def _own(
+    request: Request, principal: SessionPrincipal
+) -> AbstractAsyncContextManager[AsyncSession]:
+    """`signed_in_session` for the session a step was handed."""
+    return signed_in_session(
+        _engine(request), org_id=principal.org_id, user_id=principal.user_id, kind=principal.kind
+    )
 
 
 def _engine(request: Request) -> AsyncEngine:
@@ -387,6 +450,7 @@ async def started(
     user: User,
     *,
     state: Literal["factor_required", "enroll_required", "signed_in"],
+    first_step: FirstStep,
     factor_done: bool = False,
     device: AuthTrustedDevice | None = None,
     resume: AuthSession | None = None,
@@ -395,7 +459,8 @@ async def started(
 ) -> SignIn:
     """A new session for `user`, of the person's own kind: a contact's is a
     contact session, which only the portal's door admits (design §3). Public
-    since phase 2 (plan decision 2): Microsoft's sign-in starts one too."""
+    since phase 2 (plan decision 2): Microsoft's sign-in starts one too.
+    `first_step`: how it started (Task 9b, item B; `sessions.FirstStep`)."""
     record, token = await start_session(
         session,
         user,
@@ -403,6 +468,7 @@ async def started(
         request=request,
         factor_done=factor_done,
         trusted_device_id=device.id if device is not None else None,
+        first_step=first_step,
         resume=resume,
     )
     return SignIn(
@@ -492,7 +558,11 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
 
 
 async def after_first_factor(
-    session: AsyncSession, request: Request, user: User, *, method: str = "password"
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    *,
+    method: Literal["password", "microsoft"] = "password",
 ) -> SignIn:
     """The first factor is right -- the password, or (phase 2, Task 9) a
     linked Microsoft account, named by `method` in the audit. In order: an
@@ -506,11 +576,15 @@ async def after_first_factor(
     so it is neither asked for nor offered here.
 
     The caller holds the person's row (the module docstring's lock order);
-    each sign-in is audited AFTER its session is made."""
+    each sign-in is audited AFTER its session is made. The session records
+    `method` as its first step (Task 9b, item B): one Microsoft started never
+    clears the "password set by mail" mark."""
     if method == "password":
         idle = await resumable(session, request, user.id)
         if idle is not None:
-            resumed = await started(session, request, user, state="signed_in", resume=idle)
+            resumed = await started(
+                session, request, user, state="signed_in", first_step=method, resume=idle
+            )
             await _audit(
                 session, user, "auth.signed_in", {"method": "resume", "trusted_device": False}
             )
@@ -520,16 +594,26 @@ async def after_first_factor(
     passkey_factor = has_passkey and user.kind == STAFF_KIND
     if not (passkey_factor or has_totp):
         if user.kind == CONTACT_KIND:
-            entered = await started(session, request, user, state="signed_in", factor_done=True)
+            entered = await started(
+                session, request, user, state="signed_in", first_step=method, factor_done=True
+            )
             await _audit(
                 session, user, "auth.signed_in", {"method": method, "trusted_device": False}
             )
             return entered
-        return await started(session, request, user, state="enroll_required")
+        return await started(
+            session, request, user, state="enroll_required", first_step=method
+        )
     device = await recognised(session, user.id, request)
     if device is not None:
         trusted = await started(
-            session, request, user, state="signed_in", factor_done=True, device=device
+            session,
+            request,
+            user,
+            state="signed_in",
+            first_step=method,
+            factor_done=True,
+            device=device,
         )
         await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": True})
         return trusted
@@ -540,6 +624,7 @@ async def after_first_factor(
         request,
         user,
         state="factor_required",
+        first_step=method,
         methods=tuple(name for name, available in offered if available),
         remember_device_days=(
             policy.remember_device_days if policy.remember_device_enabled else None
@@ -552,18 +637,41 @@ async def after_first_factor(
 # --------------------------------------------------------------------------- #
 
 
+async def _after_the_password(session: AsyncSession, principal: SessionPrincipal) -> bool:
+    """Whether this session started with the password (`auth_sessions.
+    first_step`; Task 9b, item B, the Task 9 review's I1). ONLY THEN does a
+    second factor it proves -- at sign-in or at a recent confirmation --
+    clear the "password set by mail" mark (`failures.record_success`): the
+    mark holds off an administrator's factor reset until somebody proves a
+    factor AFTER PRESENTING THE PASSWORD the mailbox chose. A session that
+    Microsoft, a passkey alone or the recovery link started presented none,
+    so its factors leave the mark -- else whoever holds the mailbox resets
+    the password, the person's next Microsoft-and-code sign-in clears the
+    mark, the administrator's reset goes through, and the mailed password
+    takes the account."""
+    first = await session.scalar(
+        select(AuthSession.first_step).where(AuthSession.id == principal.session_id)
+    )
+    return first == "password"
+
+
 async def factor_totp(
     request: Request, principal: SessionPrincipal, *, code: str, remember: bool
 ) -> SignIn:
     require_pending(principal)
     result: SignIn | None = None
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if not (await summary(session, user.id))[1]:
             raise _unavailable()
         await gate(session, user.id, "totp")
         if await verify_totp(session, user.id, code, vault=_vault(request), now=_now()):
-            await record_success(session, user.id, "totp")
+            await record_success(
+                session,
+                user.id,
+                "totp",
+                clear_mail_mark=await _after_the_password(session, principal),
+            )
             result = await _factor_done(
                 session, request, user, principal, method="totp", remember=remember
             )
@@ -575,7 +683,11 @@ async def factor_totp(
 
 
 async def _spend_recovery_code(
-    session: AsyncSession, request: Request, user: User, code: str
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    principal: SessionPrincipal,
+    code: str,
 ) -> int | None:
     """Spend the code: the codes left, or None for a wrong one (counted). The
     caller audits the use (`_record_recovery_code_used`) after its session's
@@ -585,7 +697,12 @@ async def _spend_recovery_code(
     if not await use_code(session, user.id, code):
         await count_failure(session, user, "recovery", vault=_vault(request))
         return None
-    await record_success(session, user.id, "recovery")
+    await record_success(
+        session,
+        user.id,
+        "recovery",
+        clear_mail_mark=await _after_the_password(session, principal),
+    )
     return await remaining(session, user.id)
 
 
@@ -614,12 +731,12 @@ async def factor_recovery(
 ) -> SignIn:
     require_pending(principal)
     result: SignIn | None = None
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
-        left = await _spend_recovery_code(session, request, user, code)
+        left = await _spend_recovery_code(session, request, user, principal, code)
         if left is not None:
             # `mark_factor` refuses inside the block when the session ended
             # meanwhile: the audit and the notice come after it.
@@ -636,7 +753,7 @@ async def _passkey_options(
     request: Request, principal: SessionPrincipal, purpose: Literal["authenticate", "step_up"]
 ) -> dict[str, Any]:
     rp_id, _origin = relying_party(request.app.state.settings)
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if not (await summary(session, user.id))[0]:
             raise _unavailable()
@@ -655,6 +772,7 @@ async def _passkey_matches(
     session: AsyncSession,
     request: Request,
     user: User,
+    principal: SessionPrincipal,
     credential: dict[str, Any],
     purpose: Literal["authenticate", "step_up"],
 ) -> bool:
@@ -685,7 +803,12 @@ async def _passkey_matches(
     if key is None or key.user_id != user.id:
         await count_failure(session, user, "passkey", vault=_vault(request))
         return False
-    await record_success(session, user.id, "passkey")
+    await record_success(
+        session,
+        user.id,
+        "passkey",
+        clear_mail_mark=await _after_the_password(session, principal),
+    )
     return True
 
 
@@ -694,10 +817,10 @@ async def factor_passkey(
 ) -> SignIn:
     require_pending(principal)
     result: SignIn | None = None
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         await gate(session, user.id, "passkey")
-        if await _passkey_matches(session, request, user, credential, "authenticate"):
+        if await _passkey_matches(session, request, user, principal, credential, "authenticate"):
             result = await _factor_done(
                 session, request, user, principal, method="passkey", remember=remember
             )
@@ -748,7 +871,7 @@ async def enroll_totp_start(request: Request, principal: SessionPrincipal) -> st
     confirmed one -- in Redis under this session until a code from it is
     confirmed (plan decision 7)."""
     secret = new_secret()
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await _enrollable(session, principal)
         if principal.factor_done and await has_totp(session, user.id):
             sealed = await _vault(request).seal_bytes(
@@ -783,7 +906,7 @@ async def enroll_totp_confirm(request: Request, principal: SessionPrincipal, *, 
     key = _replacing_key(principal.session_id)
     sealed: str | None = await redis.get(key) if principal.factor_done else None
     accepted = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await _enrollable(session, principal)
         if sealed is not None:
             await _replace_totp(session, request, user, sealed, code)
@@ -818,7 +941,7 @@ async def enroll_totp_confirm(request: Request, principal: SessionPrincipal, *, 
 
 async def enroll_passkey_options(request: Request, principal: SessionPrincipal) -> dict[str, Any]:
     rp_id, _origin = relying_party(request.app.state.settings)
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await _enrollable(session, principal)
         # A contact's passkey signs in without an address, so the browser must
         # make it discoverable or fail (phase 2 Task 6, decision 3; D28).
@@ -836,7 +959,7 @@ async def enroll_passkey(
 ) -> None:
     rp_id, origin = relying_party(request.app.state.settings)
     rejected = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await _enrollable(session, principal)
         try:
             await verify_registration(
@@ -872,7 +995,7 @@ async def enroll_finish(request: Request, principal: SessionPrincipal) -> tuple[
             code="enroll_required",
             detail=tr("set up a passkey or an authenticator app first"),
         )
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         codes = await replace_codes(session, org_id=user.org_id, user_id=user.id)
         marked = await _mark_done(session, request, user, principal, remember=False)
@@ -904,13 +1027,18 @@ async def _stepped_up(session: AsyncSession, principal: SessionPrincipal) -> Non
 async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: str) -> None:
     require_full(principal)
     accepted = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if not (await summary(session, user.id))[1]:
             raise _unavailable()
         await gate(session, user.id, "totp")
         if await verify_totp(session, user.id, code, vault=_vault(request), now=_now()):
-            await record_success(session, user.id, "totp")
+            await record_success(
+                session,
+                user.id,
+                "totp",
+                clear_mail_mark=await _after_the_password(session, principal),
+            )
             await _stepped_up(session, principal)
             accepted = True
         else:
@@ -922,12 +1050,12 @@ async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: s
 async def step_up_recovery(request: Request, principal: SessionPrincipal, *, code: str) -> None:
     require_full(principal)
     accepted = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
-        left = await _spend_recovery_code(session, request, user, code)
+        left = await _spend_recovery_code(session, request, user, principal, code)
         if left is not None:
             # `_stepped_up` refuses inside the block when the session ended
             # meanwhile: the audit and the notice come after it.
@@ -949,10 +1077,10 @@ async def step_up_passkey(
 ) -> None:
     require_full(principal)
     accepted = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         await gate(session, user.id, "passkey")
-        accepted = await _passkey_matches(session, request, user, credential, "step_up")
+        accepted = await _passkey_matches(session, request, user, principal, credential, "step_up")
         if accepted:
             await _stepped_up(session, principal)
     if not accepted:
@@ -974,7 +1102,7 @@ async def step_up_password(request: Request, principal: SessionPrincipal, *, pas
     as a failure and answered 400 `factor_failed`."""
     require_full(principal)
     accepted = False
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         stored = await session.get(AuthPassword, user.id)
         if (
@@ -1103,7 +1231,14 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
                 # stays (fix round 1, coordinator decision; not the plan's
                 # Step 4). The passkey's failures are cleared.
                 await record_success(session, user.id, "passkey", clear_mail_mark=False)
-                result = await started(session, request, user, state="signed_in", factor_done=True)
+                result = await started(
+                    session,
+                    request,
+                    user,
+                    state="signed_in",
+                    first_step="passkey",
+                    factor_done=True,
+                )
                 await _audit(
                     session, user, "auth.signed_in", {"method": "passkey", "trusted_device": False}
                 )
@@ -1125,7 +1260,10 @@ async def logout(request: Request) -> None:
     named = await named_session(request)
     if named is None:
         return
-    async with _identity_session(named.org_id, _engine(request)) as session:
+    # A contact's in their own client (Task 9b, item C), whose row this is.
+    async with signed_in_session(
+        _engine(request), org_id=named.org_id, user_id=named.user_id, kind=named.kind
+    ) as session:
         # The person first (Task 9b), as every write of their sessions.
         await lock_user_row(session, named.user_id)
         await end_session(session, named.session_id, "signed_out")
@@ -1135,7 +1273,7 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
     """Every session of the person, this one included, and every remembered
     device: what somebody does who thinks their account was used."""
     require_full(principal)
-    async with _identity_session(principal.org_id, _engine(request)) as session:
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         await end_all_for_user(session, user.id, "signed_out_everywhere")
         await revoke_all_for_user(session, user.id)
@@ -1400,7 +1538,11 @@ async def microsoft_offered(session: AsyncSession, user: User) -> bool:
 
 
 async def contact_admitted(
-    session: AsyncSession, request: Request, user: User, *, method: str
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    *,
+    method: Literal["password", "passkey", "microsoft"],
 ) -> SignIn:
     """A contact accepted their invitation (D40): the portal role on their own
     client (`grant_portal`) and a complete session -- a contact has no second
@@ -1408,7 +1550,9 @@ async def contact_admitted(
     its own rows too, then records it all with `record_admitted`, the audit
     chain last. Public: Task 9's Microsoft acceptance ends here too."""
     await grant_portal(session, user)
-    return await started(session, request, user, state="signed_in", factor_done=True)
+    return await started(
+        session, request, user, state="signed_in", first_step=method, factor_done=True
+    )
 
 
 async def record_admitted(session: AsyncSession, user: User, *, method: str) -> None:
@@ -1467,7 +1611,9 @@ async def accept_invite(request: Request, *, token: str, password: str) -> SignI
             await _audit(session, user, "auth.password_changed", {"via": "invite"})
             await record_admitted(session, user, method="password")
             return admitted
-        waiting = await started(session, request, user, state="enroll_required")
+        waiting = await started(
+            session, request, user, state="enroll_required", first_step="password"
+        )
         await _audit(session, user, "auth.password_changed", {"via": "invite"})
         return waiting
 
@@ -1655,7 +1801,9 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         await clear_second_factors(session, user.id)
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
-        signed = await started(session, request, user, state="enroll_required")
+        signed = await started(
+            session, request, user, state="enroll_required", first_step="recovery"
+        )
         # The audit chain after every row (Task 9b, the lock order), in the
         # order the acts were done.
         if password_set:

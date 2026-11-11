@@ -433,3 +433,92 @@ async def test_a_contact_naming_another_client_is_refused(auth_env: Any) -> None
         "/api/v1/me/security", headers={**headers, "X-Client-Id": str(who.client_id)}
     )
     assert own.status_code == 200, own.text
+
+
+async def test_a_contacts_own_auth_steps_cannot_reach_another_clients_rows(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant 5a (own authentication phase 2, Task 9b, item C): the steps
+    of `/auth/*` that a contact takes with a session of theirs -- the second
+    factor, an enrolment, the recent confirmation, signing out -- run under
+    their OWN client, as `/me/*` does, never every client. The client is
+    learned by one read keyed by the session's own person; the request names
+    nothing. A probe runs in the very session each step opens -- at its first
+    act, taking the person's row (`flows.locked_user`, or `lock_user_row`
+    for signing out) -- and looks up and touches another client's contact BY
+    ID: it finds nothing and changes nothing, while the caller's own row is
+    there."""
+    from app.core.auth import flows
+    from app.core.auth.sessions import SESSION_COOKIE
+
+    who, headers = await _signed(auth_env)
+    other = await contact(auth_env, who.org_id)
+    assert other.client_id != who.client_id
+    pending = await sign_in(auth_env, who.org_id, who.sub, factor_done=False)
+    pending_headers = {**who.network, **pending.headers}
+    await auth_env.app.state.redis.set(f"auth:enrolled:{pending.session_id}", "1", ex=60)
+    seen: list[tuple[str, int, int, int]] = []
+
+    async def probe(session: AsyncSession, step: str) -> None:
+        theirs = await session.scalar(
+            select(func.count())
+            .select_from(AuthPassword)
+            .where(AuthPassword.user_id == other.user_id)
+        )
+        touched = await session.execute(
+            update(AuthPassword)
+            .where(AuthPassword.user_id == other.user_id)
+            .values(changed_at=AuthPassword.changed_at)
+            .execution_options(synchronize_session=False)
+        )
+        mine = await session.scalar(
+            select(func.count())
+            .select_from(AuthPassword)
+            .where(AuthPassword.user_id == who.user_id)
+        )
+        seen.append((step, theirs or 0, touched.rowcount, mine or 0))
+
+    real_locked, real_row = flows.locked_user, flows.lock_user_row
+
+    async def probing_locked(session: AsyncSession, principal: Any) -> Any:
+        await probe(session, "locked_user")
+        return await real_locked(session, principal)
+
+    async def probing_row(session: AsyncSession, user_id: UUID) -> Any:
+        await probe(session, "lock_user_row")
+        return await real_row(session, user_id)
+
+    monkeypatch.setattr(flows, "locked_user", probing_locked)
+    monkeypatch.setattr(flows, "lock_user_row", probing_row)
+    steps: list[tuple[str, dict[str, str], dict[str, Any] | None]] = [
+        ("/api/v1/auth/factor/totp", pending_headers, {"code": "000000"}),
+        ("/api/v1/auth/factor/recovery", pending_headers, {"code": "AAAA-BBBB"}),
+        ("/api/v1/auth/factor/passkey/options", pending_headers, None),
+        ("/api/v1/auth/factor/passkey", pending_headers, {"credential": {"id": "x"}}),
+        ("/api/v1/auth/enroll/finish", pending_headers, None),
+        ("/api/v1/auth/enroll/totp/start", headers, None),
+        ("/api/v1/auth/enroll/totp/confirm", headers, {"code": "000000"}),
+        ("/api/v1/auth/enroll/passkey/options", headers, None),
+        ("/api/v1/auth/enroll/passkey", headers, {"credential": {"id": "x"}, "name": "Phone"}),
+        ("/api/v1/auth/step-up/totp", headers, {"code": "000000"}),
+        ("/api/v1/auth/step-up/recovery", headers, {"code": "AAAA-BBBB"}),
+        ("/api/v1/auth/step-up/passkey/options", headers, None),
+        ("/api/v1/auth/step-up/passkey", headers, {"credential": {"id": "x"}}),
+        ("/api/v1/auth/step-up/password", headers, {"password": "not-the-password"}),
+        ("/api/v1/auth/logout-everywhere", headers, None),
+    ]
+    for path, sent, body in steps:
+        answer = await auth_env.client.post(path, headers=sent, json=body)
+        assert answer.status_code < 500, (path, answer.text)
+    # Signing out with the cookie alone: the session `named`, no door.
+    again = await sign_in(auth_env, who.org_id, who.sub)
+    out = await auth_env.client.post(
+        "/api/v1/auth/logout",
+        headers={**who.network, "Cookie": f"{SESSION_COOKIE}={again.token}"},
+    )
+    assert out.status_code == 204, out.text
+    # Per step: (another client's rows seen, changed; the caller's own row seen).
+    assert len(seen) == len(steps) + 1, seen
+    assert [(theirs, touched, mine) for _step, theirs, touched, mine in seen] == [
+        (0, 0, 1)
+    ] * len(seen), seen

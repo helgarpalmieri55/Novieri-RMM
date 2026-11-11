@@ -344,11 +344,15 @@ async def record_success(
     administrator's factor reset is no longer refused. The password's own
     success is not a second factor and leaves it.
 
-    `clear_mail_mark=False` leaves the mark for a factor used ALONE, with no
-    password presented -- a contact's passkey without an address (own
-    authentication phase 2, Task 6, coordinator decision of the fix round):
-    nothing then shows who set the password, so the mark stays for a later
-    contact access reset to read. The failures are cleared all the same."""
+    `clear_mail_mark=False` leaves the mark for a factor proved WITHOUT THE
+    PASSWORD PRESENTED in its session -- a contact's passkey without an
+    address (own authentication phase 2, Task 6, coordinator decision of the
+    fix round), and any second factor of a session that Microsoft, a passkey
+    alone or the recovery link started (Task 9b, item B: the steps pass
+    `flows._after_the_password`, the session's `first_step`): nothing then
+    shows who set the password, so the mark stays -- for an administrator's
+    factor reset and a later contact access reset to read. The failures are
+    cleared all the same."""
     if factor != "password" and clear_mail_mark:
         await session.execute(
             update(AuthPassword)

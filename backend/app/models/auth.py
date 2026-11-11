@@ -239,6 +239,11 @@ class AuthSession(Base):
         CheckConstraint(
             "(ended_at IS NULL) = (ended_reason IS NULL)", name="ck_auth_sessions_ended"
         ),
+        # Migration 0246 (phase 2, Task 9b): how the session started.
+        CheckConstraint(
+            "first_step IN ('password', 'passkey', 'microsoft', 'recovery')",
+            name="ck_auth_sessions_first_step",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -249,6 +254,13 @@ class AuthSession(Base):
     )
     token_hash: Mapped[bytes] = mapped_column(LargeBinary)
     kind: Mapped[str] = mapped_column(Text)
+    #: How the session started (phase 2, Task 9b): `password`, `passkey`,
+    #: `microsoft` or `recovery`. Only a session that started with the
+    #: password clears the "password set by mail" mark when it proves a
+    #: second factor (`failures.record_success`). Every session the code
+    #: starts says which (`sessions.start_session`); a row that does not reads
+    #: `recovery`, which never clears it (fail closed).
+    first_step: Mapped[str] = mapped_column(Text, server_default="recovery")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column()

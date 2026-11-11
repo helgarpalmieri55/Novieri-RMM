@@ -371,7 +371,9 @@ class MicrosoftStartIn(BaseModel):
     #: An invitation's token, for `invite`: a secret, no Pydantic bound.
     token: str | None = None
     #: A technician's new password, for `invite` (operator decision C3): a
-    #: secret, no Pydantic bound -- the rule bounds it.
+    #: secret, no Pydantic bound -- the rule bounds it. Sent with any other
+    #: intent, or with a contact's invitation, it is a 422 `password_not_used`
+    #: (Task 9b, D4), never dropped.
     password: str | None = None
 
 

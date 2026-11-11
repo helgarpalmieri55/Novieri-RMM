@@ -32,6 +32,7 @@ from app.core.auth.devices import remember
 from app.core.auth.sessions import (
     DEVICE_COOKIE,
     SESSION_COOKIE,
+    FirstStep,
     SessionPrincipal,
     mark_step_up,
     start_session,
@@ -105,6 +106,7 @@ async def sign_in(
     factor_done: bool = True,
     trusted_device_id: UUID | None = None,
     step_up: bool = False,
+    first_step: FirstStep = "password",
 ) -> SignedIn:
     """A session for the user `ApiEnv.create_user` returned `sub` for.
 
@@ -113,7 +115,11 @@ async def sign_in(
     has, and what the vault asks for (Task 6). A session started with
     `factor_done` and no remembered device already has it (`start_session`);
     on a remembered device it does not, and this adds it. Only for a session
-    whose factor is done; anything else is the test's mistake."""
+    whose factor is done; anything else is the test's mistake.
+
+    `first_step` (own authentication phase 2, Task 9b): how the session
+    started, `auth_sessions.first_step` -- the password unless a test says
+    otherwise, as the sign-ins these sessions stand for did."""
     assert factor_done or not step_up, "a session without its factor has nothing to confirm"
     user_id = await user_id_of(env, sub)
     async with org_session(org_id, engine=env.app_engine, clients=ClientScope.all()) as s:
@@ -125,6 +131,7 @@ async def sign_in(
             request=http_request(env),
             factor_done=factor_done,
             trusted_device_id=trusted_device_id,
+            first_step=first_step,
         )
         session_id = row.id
         if step_up:

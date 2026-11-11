@@ -163,6 +163,7 @@ async def test_a_session_starts_from_an_admin_session_and_a_bare_request(api_env
             request=Request({"type": "http", "headers": []}),
             factor_done=True,
             trusted_device_id=None,
+            first_step="password",
         )
         await s.commit()
     assert row.ip == "" and row.user_agent == ""
@@ -316,6 +317,7 @@ async def test_a_new_sign_in_ends_the_session_the_browser_still_holds(api_env: A
             request=http_request(api_env, cookie=cookie_header(old.token)),
             factor_done=False,
             trusted_device_id=None,
+            first_step="password",
         )
     previous = await _row(api_env, old.session_id)
     assert previous.ended_reason == "replaced" and previous.ended_at is not None
@@ -384,7 +386,7 @@ async def test_an_idle_session_resumes_with_its_maximum_and_without_a_confirmati
         assert idle is not None and idle.id == old.session_id
         new, token = await start_session(
             s, user, kind="staff", request=request, factor_done=True, trusted_device_id=None,
-            resume=idle,
+            first_step="password", resume=idle,
         )
         expected_max, expected_factor = idle.expires_at, idle.factor_at
     resumed = await _resolve(api_env, token)

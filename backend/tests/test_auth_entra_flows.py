@@ -8,13 +8,14 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 import httpx
+import pyotp
 import pytest
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import entra_flows, recover
 from app.core.auth.refusals import AuthRefusal
-from app.core.auth.sessions import ENTRA_COOKIE, SESSION_COOKIE
+from app.core.auth.sessions import ENTRA_COOKIE, SESSION_COOKIE, token_hash
 from app.core.client_scope import ClientScope
 from app.models import AuditEvent, Client, Role, User
 from app.models.auth import (
@@ -32,6 +33,7 @@ from tests.auth_support import (
     console_ready,
     contact,
     cookie,
+    fresh_code,
     link_token,
     login,
     point_at,
@@ -872,3 +874,422 @@ async def test_a_microsoft_sign_in_leaves_the_mail_reset_mark(auth_env: Any) -> 
         )
     assert len(marks) == 2 and all(mark is not None for mark in marks)
     assert len(used) == 2 and all(when is not None for when in used)
+
+
+# --------------------------------------------------------------------------- #
+# Task 9b, item B: the "password set by mail" mark after a first step that
+# was not the password (Task 9 review, I1)
+# --------------------------------------------------------------------------- #
+
+
+async def _mark_of(env: Any, user_id: UUID) -> datetime | None:
+    async with AsyncSession(env.admin_engine) as s:
+        mark: datetime | None = await s.scalar(
+            select(AuthPassword.mail_reset_at).where(AuthPassword.user_id == user_id)
+        )
+        return mark
+
+
+async def _set_mark(env: Any, user_id: UUID) -> None:
+    async with AsyncSession(env.admin_engine) as s:
+        await s.execute(
+            update(AuthPassword)
+            .where(AuthPassword.user_id == user_id)
+            .values(mail_reset_at=datetime.now(UTC))
+        )
+        await s.commit()
+
+
+async def _first_step(env: Any, response: httpx.Response) -> str | None:
+    """The `first_step` of the session whose cookie `response` set."""
+    token = cookie(response, SESSION_COOKIE)
+    assert token is not None
+    async with AsyncSession(env.admin_engine) as s:
+        step: str | None = await s.scalar(
+            select(AuthSession.first_step).where(AuthSession.token_hash == token_hash(token))
+        )
+        return step
+
+
+def _carrying(network: dict[str, str], response: httpx.Response) -> dict[str, str]:
+    token = cookie(response, SESSION_COOKIE)
+    assert token is not None
+    return {**network, "Cookie": f"{SESSION_COOKIE}={token}"}
+
+
+async def test_a_factor_after_a_microsoft_first_step_leaves_the_mail_reset_mark(
+    auth_env: Any,
+) -> None:
+    """Task 9b item B. The mark holds off an administrator's factor reset
+    until somebody proves a second factor AFTER PRESENTING THE PASSWORD the
+    mailbox chose. A session Microsoft started presented none: its code at
+    sign-in and at a recent confirmation leave the mark, and the reset is
+    still refused -- else the mailbox holder resets the password, the
+    victim's next Microsoft and code sign-in clears the mark, the
+    administrator's reset goes through, and the mailed password takes the
+    account. The same code after the password clears it, as it always did."""
+    org, admin = await _org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    oid = uuid4()
+    linked = await _round_trip(auth_env, tech.headers(), {"intent": "link"}, oid=oid)
+    assert linked.status_code == 200, linked.text
+    await _set_mark(auth_env, tech.user_id)
+
+    network = browser()
+    asked = await _round_trip(auth_env, network, {"intent": "sign_in"}, oid=oid)
+    assert asked.json()["state"] == "factor_required", asked.text
+    code = await fresh_code(auth_env, tech)
+    entered = await auth_env.client.post(
+        "/api/v1/auth/factor/totp", headers=_carrying(network, asked), json={"code": code}
+    )
+    assert entered.json()["state"] == "signed_in", entered.text
+    assert await _mark_of(auth_env, tech.user_id) is not None
+    assert await _first_step(auth_env, entered) == "microsoft"
+
+    up = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=_carrying(network, entered),
+        json={"code": await fresh_code(auth_env, tech)},
+    )
+    assert up.status_code == 204, up.text
+    assert await _mark_of(auth_env, tech.user_id) is not None
+    refused = await auth_env.client.post(
+        f"/api/v1/users/{tech.user_id}/factors/reset", headers=admin
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "reset_needs_recovery"
+
+    tech.session, tech.network = None, browser()
+    first = await login(auth_env, tech)
+    assert first.json()["state"] == "factor_required", first.text
+    assert await _first_step(auth_env, first) == "password"
+    done = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=tech.headers(),
+        json={"code": await fresh_code(auth_env, tech)},
+    )
+    assert done.json()["state"] == "signed_in", done.text
+    assert await _mark_of(auth_env, tech.user_id) is None
+    allowed = await auth_env.client.post(
+        f"/api/v1/users/{tech.user_id}/factors/reset", headers=admin
+    )
+    assert allowed.status_code == 204, allowed.text
+
+
+async def test_a_step_up_in_a_session_microsoft_started_leaves_the_mark(auth_env: Any) -> None:
+    """Task 9b item B. A contact who turned the app on signs in with
+    Microsoft and the code; the mark is set while that session is open (as a
+    mail reset leaves it, set here by hand so the step-up is the only act
+    that could clear it) and stays through the step-up. A session the
+    password started clears it with the same step-up."""
+    org, _admin = await _org(auth_env)
+    who = await contact(auth_env, org)
+    await _lists_other_tenant(auth_env, who.client_id)
+    oid = uuid4()
+    await _linked(auth_env, who, tenant=OTHER_TENANT, oid=oid)
+    first = await login(auth_env, who)
+    assert first.json() == {"state": "signed_in"}, first.text
+    start = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert start.status_code == 200, start.text
+    who.totp_secret = parse_qs(urlsplit(start.json()["otpauth_uri"]).query)["secret"][0]
+    confirmed = await auth_env.client.post(
+        "/api/v1/auth/enroll/totp/confirm",
+        headers=who.headers(),
+        json={"code": pyotp.TOTP(who.totp_secret).now()},
+    )
+    assert confirmed.status_code == 204, confirmed.text
+
+    network = browser()
+    asked = await _round_trip(
+        auth_env, network, {"intent": "sign_in"}, oid=oid, tid=OTHER_TENANT
+    )
+    assert asked.json()["state"] == "factor_required", asked.text
+    entered = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=_carrying(network, asked),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert entered.json()["state"] == "signed_in", entered.text
+    await _set_mark(auth_env, who.user_id)
+    up = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=_carrying(network, entered),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert up.status_code == 204, up.text
+    assert await _mark_of(auth_env, who.user_id) is not None
+
+    up_after_password = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert up_after_password.status_code == 204, up_after_password.text
+    assert await _mark_of(auth_env, who.user_id) is None
+
+
+async def test_each_session_records_the_step_it_started_with(auth_env: Any) -> None:
+    """Task 9b item B, `auth_sessions.first_step`: the password, Microsoft,
+    and a contact's invitation accepted with Microsoft."""
+    org, admin = await _org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    oid = uuid4()
+    await _round_trip(auth_env, tech.headers(), {"intent": "link"}, oid=oid)
+    tech.session = None
+    assert await _first_step(auth_env, await login(auth_env, tech)) == "password"
+    by_microsoft = await _round_trip(auth_env, browser(), {"intent": "sign_in"}, oid=oid)
+    assert await _first_step(auth_env, by_microsoft) == "microsoft"
+    who = await contact(auth_env, org, password=None, role=False)
+    await _lists_other_tenant(auth_env, who.client_id)
+    token = await _invite_contact(auth_env, who, admin)
+    accepted = await _round_trip(
+        auth_env, browser(), {"intent": "invite", "token": token}, oid=uuid4(), tid=OTHER_TENANT
+    )
+    assert accepted.json() == {"state": "signed_in"}, accepted.text
+    assert await _first_step(auth_env, accepted) == "microsoft"
+
+
+# --------------------------------------------------------------------------- #
+# Task 9b, item C (invariant 5a) and item D's tests
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_contact_links_microsoft_from_my_security_in_their_own_clients_scope(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Items C and D5. A contact links their account from My security: a
+    tenant their client does not list is a 403 `microsoft_tenant_refused`
+    and nothing is linked; one it lists is linked, told and audited
+    (`source: profile`). The start and the return run under the contact's
+    OWN client (invariant 5a), never `_entra_session`'s every client: a probe
+    at each one's first act -- `signed_user` at the start, `locked_user` at
+    the return -- looks up and touches another client's contact by id, and
+    finds nothing, while the caller's own row is there."""
+    org, _admin = await _org(auth_env)
+    who = await contact(auth_env, org)
+    await _lists_other_tenant(auth_env, who.client_id)
+    other = await contact(auth_env, org)
+    signed = await sign_in(auth_env, org, who.sub, step_up=True)
+    headers = {**who.network, **signed.headers}
+    seen: list[tuple[int, int, int]] = []
+
+    async def probe(session: AsyncSession) -> None:
+        theirs = await session.scalar(
+            select(func.count())
+            .select_from(AuthPassword)
+            .where(AuthPassword.user_id == other.user_id)
+        )
+        touched = await session.execute(
+            update(AuthPassword)
+            .where(AuthPassword.user_id == other.user_id)
+            .values(changed_at=AuthPassword.changed_at)
+            .execution_options(synchronize_session=False)
+        )
+        mine = await session.scalar(
+            select(func.count())
+            .select_from(AuthPassword)
+            .where(AuthPassword.user_id == who.user_id)
+        )
+        seen.append((theirs or 0, touched.rowcount, mine or 0))
+
+    real_signed, real_locked = entra_flows.signed_user, entra_flows.locked_user
+
+    async def probing_signed(session: AsyncSession, principal: Any) -> Any:
+        await probe(session)
+        return await real_signed(session, principal)
+
+    async def probing_locked(session: AsyncSession, principal: Any) -> Any:
+        await probe(session)
+        return await real_locked(session, principal)
+
+    monkeypatch.setattr(entra_flows, "signed_user", probing_signed)
+    monkeypatch.setattr(entra_flows, "locked_user", probing_locked)
+
+    refused = await _round_trip(auth_env, headers, {"intent": "link"}, oid=uuid4(), tid=TENANT)
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "microsoft_tenant_refused"
+    assert await _links_of(auth_env, who.user_id) == 0
+
+    mails = len(auth_env.mail.sent)
+    oid = uuid4()
+    linked = await _round_trip(
+        auth_env, headers, {"intent": "link"}, oid=oid, tid=OTHER_TENANT
+    )
+    assert linked.status_code == 200, linked.text
+    assert linked.json() == {"state": "linked"}
+    async with AsyncSession(auth_env.admin_engine) as s:
+        row = (
+            await s.execute(
+                select(AuthExternalIdentity).where(AuthExternalIdentity.user_id == who.user_id)
+            )
+        ).scalar_one()
+        meta = await s.scalar(
+            select(AuditEvent.meta).where(
+                AuditEvent.org_id == org,
+                AuditEvent.action == "auth.identity_linked",
+                AuditEvent.target_id == str(who.user_id),
+            )
+        )
+    assert (row.tenant_id, row.subject, row.client_id) == (OTHER_TENANT, oid, who.client_id)
+    assert meta == {"provider": "entra", "tenant_id": str(OTHER_TENANT), "source": "profile"}
+    [told] = auth_env.mail.sent[mails:]
+    assert told.to == who.email and "Microsoft" in told.text
+    # Two round trips, each a start and a return.
+    assert seen == [(0, 0, 1)] * 4, seen
+
+
+async def test_a_technician_is_refused_at_sign_in_when_novieris_tenant_is_not_set(
+    auth_env: Any,
+) -> None:
+    """D5. A technician signs in with Microsoft only from Novieri's own
+    tenant (`staff_tenant_id`). With none set, a linked technician is the
+    401 of an account linked to nobody (A2-54)."""
+    org, _admin = await _org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    oid = uuid4()
+    await _round_trip(auth_env, tech.headers(), {"intent": "link"}, oid=oid)
+    async with AsyncSession(auth_env.admin_engine) as s:
+        await s.execute(
+            update(AuthEntraSettings)
+            .where(AuthEntraSettings.org_id == org)
+            .values(staff_tenant_id=None)
+        )
+        await s.commit()
+    answer = await _round_trip(auth_env, browser(), {"intent": "sign_in"}, oid=oid)
+    assert answer.status_code == 401, answer.text
+    assert answer.json()["code"] == "microsoft_not_linked"
+    assert cookie(answer, SESSION_COOKIE) is None
+
+
+async def test_the_key_is_audited_with_the_technician_who_accepts_an_invitation(
+    auth_env: Any,
+) -> None:
+    """D5. A technician accepting their invitation with Microsoft (C3) is
+    known at the return -- the session their password opened at `/start` --
+    so the use of the platform's key is audited with them as the actor
+    (decision 6, A2-51), never the system."""
+    org, admin = await _org(auth_env)
+    user_id, token = await _invite_technician(auth_env, admin)
+    network = browser()
+    start = await _start(
+        auth_env, network, {"intent": "invite", "token": token, "password": PASSWORD}
+    )
+    session = cookie(start, SESSION_COOKIE)
+    assert session is not None
+    done = await _finish(
+        auth_env, {**network, "Cookie": f"{SESSION_COOKIE}={session}"}, start, oid=uuid4()
+    )
+    assert done.status_code == 200, done.text
+    async with AsyncSession(auth_env.admin_engine) as s:
+        used = (
+            await s.execute(
+                select(AuditEvent.actor_type, AuditEvent.actor_id).where(
+                    AuditEvent.org_id == org, AuditEvent.action == "auth.entra_credential_used"
+                )
+            )
+        ).all()
+    assert [tuple(row) for row in used] == [("user", user_id)]
+
+
+async def _end_sessions_of(env: Any, user_id: UUID) -> None:
+    async with AsyncSession(env.admin_engine) as s:
+        await s.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == user_id, AuthSession.ended_at.is_(None))
+            .values(ended_at=datetime.now(UTC), ended_reason="signed_out_everywhere")
+        )
+        await s.commit()
+
+
+@pytest.mark.parametrize("when", ["during_the_exchange", "at_the_persons_lock"])
+async def test_a_link_whose_session_ended_on_the_way_links_nothing(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch, when: str
+) -> None:
+    """D1. The return checks its session at the door (`_caller`), then talks
+    to Microsoft, then links. A session ended in between -- "sign out
+    everywhere" while Microsoft answers, or an act that ends it under the
+    person's advisory lock just before the link takes it -- links nothing:
+    401 `auth_required`, checked again under that lock."""
+    from app.core.auth import entra
+
+    org, _admin = await _org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    start = await _start(auth_env, tech.headers(), {"intent": "link"})
+    if when == "during_the_exchange":
+        real_exchange = entra.exchange
+
+        async def exchange_then_sign_out(**kwargs: Any) -> str:
+            await _end_sessions_of(auth_env, tech.user_id)
+            return await real_exchange(**kwargs)
+
+        monkeypatch.setattr(entra, "exchange", exchange_then_sign_out)
+    else:
+        real_lock = entra_flows.lock_person
+
+        async def ended_just_before(session: AsyncSession, user_id: UUID) -> None:
+            await _end_sessions_of(auth_env, tech.user_id)
+            await real_lock(session, user_id)
+
+        monkeypatch.setattr(entra_flows, "lock_person", ended_just_before)
+    late = await _finish(auth_env, tech.headers(), start, oid=uuid4())
+    assert late.status_code == 401, late.text
+    assert refusal_code(late) == "auth_required"
+    assert await _links_of(auth_env, tech.user_id) == 0
+
+
+@pytest.mark.parametrize("same_account", [True, False])
+async def test_a_technician_who_linked_meanwhile_is_told_so_precisely(
+    auth_env: Any, same_account: bool
+) -> None:
+    """D3. A technician accepts their invitation with Microsoft; before the
+    return comes back, a Microsoft account is already linked to them (from
+    another tab). The answer says so -- the same account is already theirs,
+    or they already have one -- never that it is "somebody here"'s."""
+    org, admin = await _org(auth_env)
+    user_id, token = await _invite_technician(auth_env, admin)
+    network = browser()
+    start = await _start(
+        auth_env, network, {"intent": "invite", "token": token, "password": PASSWORD}
+    )
+    session = cookie(start, SESSION_COOKIE)
+    assert session is not None
+    oid = uuid4()
+    async with AsyncSession(auth_env.admin_engine) as s:
+        s.add(
+            AuthExternalIdentity(
+                org_id=org,
+                user_id=user_id,
+                provider=ENTRA,
+                tenant_id=TENANT,
+                subject=oid if same_account else uuid4(),
+            )
+        )
+        await s.commit()
+    done = await _finish(
+        auth_env, {**network, "Cookie": f"{SESSION_COOKIE}={session}"}, start, oid=oid
+    )
+    assert done.status_code == 409, done.text
+    assert done.json()["code"] == "microsoft_already_linked"
+    assert done.json()["detail"] == (
+        "this Microsoft account is already linked to your account"
+        if same_account
+        else "you already have a Microsoft account linked; remove it first"
+    )
+    assert await _links_of(auth_env, user_id) == 1
+
+
+@pytest.mark.parametrize("intent", ["sign_in", "link"])
+async def test_a_password_sent_with_a_sign_in_or_a_link_is_refused(
+    auth_env: Any, intent: str
+) -> None:
+    """D4. Only a technician's invitation carries a password to `/start`
+    (C3). Sent with a sign-in or a link it is refused -- 422
+    `password_not_used`, as a contact's invitation refuses one -- never
+    silently dropped, and no transaction is begun."""
+    org, _admin = await _org(auth_env)
+    tech = await signed_in(auth_env, org, "technician")
+    headers = tech.headers() if intent == "link" else browser()
+    refused = await _start(auth_env, headers, {"intent": intent, "password": PASSWORD})
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["code"] == "password_not_used"
+    assert cookie(refused, ENTRA_COOKIE) is None

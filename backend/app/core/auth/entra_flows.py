@@ -47,15 +47,24 @@ A RESET KEEPS THE LINK (decision 5, B2-24): it is a first factor, like the
 password; `factors.clear_second_factors` takes second factors only.
 
 ONE ORGANIZATION, EVERY CLIENT (`_entra_session`, `ALL_SCOPE_ALLOWLIST`), for
-the steps of `/auth/microsoft/*`, which no door admits: a technician's link
-has no client, a contact's is their client's, and the lookup by (`tid`,
-`oid`) happens before anybody's scope exists -- the organization comes from
-the deployment's slug, the session or the invitation, never a request field
-naming it. NOT FOR UNLINKING (invariant 5a, the coordinator's Task 7
+the steps of `/auth/microsoft/*` where no signed-in person is involved: the
+sign-in, whose lookup by (`tid`, `oid`) happens before anybody's scope
+exists; an invitation accepted with Microsoft, which is a link's use; and
+the return's checkout of the platform's own key, which reads and writes no
+person's rows. The organization comes from the deployment's slug, the
+session or the invitation, never a request field naming it. A SIGNED-IN
+PERSON'S LINK -- its start and its return -- runs in the scope of their kind
+(invariant 5a; Task 9b, item C): a contact's own client, a technician's
+every client (`flows.signed_in_session`), as a technician's invitation
+finished at the return does. NOR FOR UNLINKING (the coordinator's Task 7
 decision): `DELETE /me/microsoft` goes through the door that admits
 contacts, and `unlink` runs in the scope it established -- a contact's own
 client, a technician's every client (`account.own_session`, an allowlist of
 kinds).
+
+THE LOCK ORDER is `flows`' (Task 9b): the person's `users` row first, then
+their advisory lock where it is taken, then their link and session, and the
+audit chain last.
 
 AN UNKNOWN ORGANIZATION (the Task 6 review note): a slug that names none is
 answered as everybody else -- at `start`, where nobody is known yet, as an
@@ -73,7 +82,7 @@ import hmac
 import json
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
@@ -95,6 +104,7 @@ from app.core.auth.guards import (
     lock_user_row,
     locked_user,
     require_fresh,
+    require_live,
     session_of,
     sign_in_again,
     signed_user,
@@ -139,6 +149,16 @@ async def _entra_session(org_id: UUID, engine: AsyncEngine) -> AsyncIterator[Asy
 def _engine(request: Request) -> AsyncEngine:
     engine: AsyncEngine = request.app.state.app_engine
     return engine
+
+
+def _own(
+    request: Request, principal: SessionPrincipal
+) -> AbstractAsyncContextManager[AsyncSession]:
+    """The signed-in person's own scope (`flows.signed_in_session`): a
+    contact's client, a technician's every client (Task 9b, item C)."""
+    return flows.signed_in_session(
+        _engine(request), org_id=principal.org_id, user_id=principal.user_id, kind=principal.kind
+    )
 
 
 def _vault(request: Request) -> VaultService:
@@ -249,6 +269,16 @@ def _password_not_used() -> AuthRefusal:
     )
 
 
+def _no_password_here() -> AuthRefusal:
+    """D4 (Task 9b): the same code as `_password_not_used`, for a sign-in or
+    a link."""
+    return _refusal(
+        "password_not_used",
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        tr("a sign-in or a link with Microsoft sends no password"),
+    )
+
+
 async def _tenant_allowed(
     session: AsyncSession, user: User, config: EntraConfig, tenant: UUID
 ) -> bool:
@@ -274,6 +304,11 @@ async def start(
         redirect = entra.redirect_uri(request.app.state.settings)
     except entra.EntraNotConfigured as exc:
         raise _not_configured() from exc
+    if intent != "invite" and password is not None:
+        # D4 (Task 9b): only a technician's invitation carries a password
+        # here (C3). One sent with a sign-in or a link is refused, as a
+        # contact's invitation refuses one, never silently dropped.
+        raise _no_password_here()
     session_id: UUID | None = None
     invite_digest: bytes | None = None
     signed: flows.SignIn | None = None
@@ -293,7 +328,8 @@ async def start(
         principal = await session_of(request)
         require_fresh(principal)
         org_id, session_id = principal.org_id, principal.session_id
-        async with _entra_session(org_id, _engine(request)) as session:
+        # The signed-in person's own scope (item C): a contact's client.
+        async with _own(request, principal) as session:
             user = await signed_user(session, principal)
             config = await entra_settings.read(session, org_id)
             # A2-58: a contact whose client lists no tenant does not set out.
@@ -495,6 +531,29 @@ async def _sign_in(
         return await flows.after_first_factor(session, request, user, method="microsoft")
 
 
+async def _refuse_a_second_link(
+    session: AsyncSession, user: User, identity: entra.EntraIdentity
+) -> None:
+    """One account per person (decision 3), said precisely (D3, Task 9b):
+    the person already has THIS account linked -- from another tab, while
+    this round trip was away -- or another one. Read under the person's row
+    lock, which every writer of their link takes first, so a link made
+    meanwhile is seen here and never reaches `_insert_link`'s "somebody
+    here", which is for another person's."""
+    mine = (
+        await session.execute(
+            select(AuthExternalIdentity.tenant_id, AuthExternalIdentity.subject).where(
+                AuthExternalIdentity.user_id == user.id, AuthExternalIdentity.provider == ENTRA
+            )
+        )
+    ).one_or_none()
+    if mine is None:
+        return
+    if (mine.tenant_id, mine.subject) == (identity.tenant_id, identity.object_id):
+        raise _already_linked(tr("this Microsoft account is already linked to your account"))
+    raise _already_linked(tr("you already have a Microsoft account linked; remove it first"))
+
+
 async def _insert_link(
     session: AsyncSession, org_id: UUID, user: User, identity: entra.EntraIdentity
 ) -> None:
@@ -544,25 +603,23 @@ async def _link(
     principal: SessionPrincipal,
 ) -> None:
     """Decision 3: the session that started, complete and recently confirmed
-    (`_caller`); one account per person."""
-    async with _entra_session(org_id, _engine(request)) as session:
+    (`_caller`); one account per person. In the person's own scope (item C):
+    a contact's link is written under their client alone."""
+    async with _own(request, principal) as session:
         # The person first (Task 9b), then their advisory lock.
         user = await locked_user(session, principal)
         await lock_person(session, user.id)
+        # D1 (Task 9b): the session that started may have ended while
+        # Microsoft answered, after `_caller` read it -- "sign out everywhere",
+        # or an act that ends it under this same lock. Checked again here,
+        # under the lock: an ended session links nothing.
+        await require_live(session, principal)
         # C3 again, under the lock: the password may have gone since `/start`.
         if user.kind == STAFF_KIND and not await has_password(session, user.id):
             raise _password_first()
         if not await _tenant_allowed(session, user, config, identity.tenant_id):
             raise _tenant_refused()
-        mine = await session.scalar(
-            select(AuthExternalIdentity.id).where(
-                AuthExternalIdentity.user_id == user.id, AuthExternalIdentity.provider == ENTRA
-            )
-        )
-        if mine is not None:
-            raise _already_linked(
-                tr("you already have a Microsoft account linked; remove it first")
-            )
+        await _refuse_a_second_link(session, user, identity)
         await _insert_link(session, org_id, user, identity)
         await _record_link(session, org_id, user, identity, source="profile")
         await notices.tell(
@@ -584,13 +641,16 @@ async def _technician_invited(
 ) -> flows.SignIn | None:
     """Decision 4 (C3): the invitation was accepted with a password at
     `start`; the account is linked to that same new person now. A refused
-    tenant leaves them where the password put them."""
-    async with _entra_session(org_id, _engine(request)) as session:
+    tenant leaves them where the password put them. The session is the
+    signed-in person's own (`_own`): a technician's, every client."""
+    async with _own(request, principal) as session:
         user = await locked_user(session, principal)
         if user.kind != STAFF_KIND:
             raise _failed()
         if not await _tenant_allowed(session, user, config, identity.tenant_id):
             raise _tenant_refused()
+        # D3 (Task 9b): linked meanwhile from another tab is said as such.
+        await _refuse_a_second_link(session, user, identity)
         await _insert_link(session, org_id, user, identity)
         await _record_link(session, org_id, user, identity, source="invite")
     if principal.factor_done:

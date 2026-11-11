@@ -21,9 +21,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import flows
 from app.core.auth.passkeys import CHALLENGE_BYTES, PasskeyRejected, user_handle
-from app.core.auth.sessions import SESSION_COOKIE
+from app.core.auth.sessions import SESSION_COOKIE, token_hash
 from app.models import AuditEvent, Organization, User
-from app.models.auth import AuthFailure, AuthPasskey, AuthPassword, AuthWebauthnChallenge
+from app.models.auth import (
+    AuthFailure,
+    AuthPasskey,
+    AuthPassword,
+    AuthSession,
+    AuthWebauthnChallenge,
+)
 from tests.auth_support import (
     add_passkey,
     capture_mail,
@@ -490,3 +496,23 @@ async def test_a_passkey_alone_leaves_the_password_set_by_mail_mark(
     assert answer.status_code == 200, answer.text
     assert answer.json() == {"state": "signed_in"}
     assert await mark() is not None
+
+
+async def test_a_passkey_alone_session_records_that_it_started_with_a_passkey(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 9b, item B: `auth_sessions.first_step`, which no later factor of
+    this session can turn into a password presented."""
+    org = await auth_env.create_org("pk-first-step")
+    who = await contact(auth_env, org, password=None)
+    await point_at(auth_env, org)
+    _verifying(monkeypatch, await add_passkey(auth_env, who))
+    answer = await _post(auth_env, who)
+    assert answer.status_code == 200, answer.text
+    token = cookie(answer, SESSION_COOKIE)
+    assert token is not None
+    async with AsyncSession(auth_env.admin_engine) as s:
+        step = await s.scalar(
+            select(AuthSession.first_step).where(AuthSession.token_hash == token_hash(token))
+        )
+    assert step == "passkey"

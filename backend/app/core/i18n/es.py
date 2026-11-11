@@ -4729,6 +4729,13 @@ CATALOG: dict[str, str] = {
     "you already have a Microsoft account linked; remove it first": (
         "ya tienes una cuenta de Microsoft vinculada; quítala primero"
     ),
+    # Task 9b, D3 and D4.
+    "this Microsoft account is already linked to your account": (
+        "esta cuenta de Microsoft ya está vinculada a tu cuenta"
+    ),
+    "a sign-in or a link with Microsoft sends no password": (
+        "un inicio de sesión o una vinculación con Microsoft no envía contraseña"
+    ),
     "no Microsoft account is linked": "no hay ninguna cuenta de Microsoft vinculada",
     "a Microsoft account": "una cuenta de Microsoft",
     "choose a password too: a technician never signs in with Microsoft alone": (

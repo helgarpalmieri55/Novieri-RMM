@@ -91,6 +91,13 @@ TOUCH_EVERY = timedelta(seconds=60)
 #: What a request may say about itself, at most, in the session list.
 _USER_AGENT_MAX = 300
 
+#: How a session started (`auth_sessions.first_step`, phase 2 Task 9b): the
+#: password (a sign-in, a resumption, an invitation accepted with one), a
+#: contact's passkey alone (or an invitation accepted with one), Microsoft,
+#: or the server's recovery link. A second factor this session proves
+#: clears the "password set by mail" mark only after `password`.
+FirstStep = Literal["password", "passkey", "microsoft", "recovery"]
+
 EndReason = Literal[
     "signed_out",
     "signed_out_everywhere",
@@ -337,10 +344,14 @@ async def start_session(
     request: Request,
     factor_done: bool,
     trusted_device_id: UUID | None,
+    first_step: FirstStep,
     resume: AuthSession | None = None,
 ) -> tuple[AuthSession, str]:
     """A new session for `user` and its cookie value (set it with
     `set_session_cookie`). A new identifier every time (design §2.4).
+
+    `first_step`: how it started (`FirstStep`), always said by the caller --
+    no default, so no new way to start one can leave it to chance.
 
     The session the request's cookie still names, if any, is ENDED
     (`replaced`): a sign-in never inherits an identifier somebody else may have
@@ -391,6 +402,7 @@ async def start_session(
         factor_at=factor_at,
         step_up_at=step_up_at,
         trusted_device_id=trusted_device_id,
+        first_step=first_step,
         user_agent=request.headers.get("user-agent", "")[:_USER_AGENT_MAX],
         ip="" if address is None else str(address),
     )
