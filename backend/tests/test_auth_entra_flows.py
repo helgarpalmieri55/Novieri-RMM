@@ -624,6 +624,29 @@ async def test_a_link_microsoft_is_not_offered_for_asks_no_confirmation_first(
     assert cookie(refused, ENTRA_COOKIE) is None
 
 
+async def test_a_session_waiting_for_its_second_factor_cannot_start_a_link(
+    auth_env: Any,
+) -> None:
+    """Final review of phase 2, round 2, item 2. Item 7 moved the recent
+    confirmation after the "can this link be made" refusals, and with it the
+    full-session check inside it: a session whose second factor is not done
+    yet -- the password alone -- read whether Microsoft is offered to the
+    account before being told to finish signing in. It is told only that
+    now, 403 `factor_required`, whether Microsoft is offered or not."""
+    plain = await auth_env.create_org("no-microsoft")
+    unoffered = await signed_in(auth_env, plain, "technician")
+    org, _admin = await entra_org(auth_env)
+    offered = await signed_in(auth_env, org, "technician")
+    for who, home in ((unoffered, plain), (offered, org)):
+        await point_at(auth_env, home)
+        who.session, who.network = None, browser()
+        assert (await login(auth_env, who)).json()["state"] == "factor_required"
+        refused = await start_microsoft(auth_env, who.headers(), {"intent": "link"})
+        assert refused.status_code == 403, refused.text
+        assert refusal_code(refused) == "factor_required"
+        assert cookie(refused, ENTRA_COOKIE) is None
+
+
 async def test_a_key_that_cannot_be_used_to_sign_is_a_503_and_nothing_is_sent(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

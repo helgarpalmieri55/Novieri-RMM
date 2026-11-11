@@ -104,6 +104,7 @@ from app.core.auth.guards import (
     lock_user_row,
     locked_user,
     require_fresh,
+    require_full,
     require_live,
     session_of,
     sign_in_again,
@@ -316,6 +317,12 @@ async def start(
             raise _unavailable()
     elif intent == "link":
         principal = await session_of(request)
+        # SIGNED IN FIRST (final review of phase 2, round 2): a session whose
+        # second factor is not done is not signed in, and learns nothing of
+        # the account -- not whether Microsoft is offered to it, nor whether
+        # it has a password -- before it is told to finish: 403
+        # `factor_required`, what `require_fresh` below answers it too.
+        require_full(principal)
         org_id, session_id = principal.org_id, principal.session_id
         # The signed-in person's own scope (item C): a contact's client.
         async with flows.principal_session(request, principal) as session:

@@ -496,6 +496,51 @@ def _ending_sessions(env: Any, org: UUID, admin_id: UUID, user_id: UUID) -> "asy
     return asyncio.create_task(end())
 
 
+async def test_patch_me_vs_admin_end_sessions(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Final review of phase 2, round 2, item 1 (the re-review's probe). An
+    administrator ends a technician's sessions and is held after it took the
+    row, before the chain. The technician saves their own profile meanwhile
+    (`PATCH /me`). At ab3b300 the profile assigned its fields to the row it
+    read unlocked and audited: `audit_service.record` takes the chain with a
+    `text()` statement, which does not autoflush, and the row was written
+    only at the record's next ORM read -- the chain held while waiting on the
+    row, against an act holding the row and then waiting on the chain: a
+    40P01. Now it locks the person's ROW first and waits there; both
+    finish. (Admitted before the sessions ended, the save goes through.)"""
+    env = auth_env
+    org = await env.create_org("tech-race")
+    admin_id = await _id(env, await env.create_user(org, "org-admin"))
+    tech_sub = await env.create_user(org, "technician")
+    tech_id = await _id(env, tech_sub)
+    headers = await env.headers(org, tech_sub)
+    paused, go, seen = _pause(monkeypatch, "end_all_for_user")
+    ending = _ending_sessions(env, org, admin_id, tech_id)
+    await asyncio.wait_for(paused.wait(), 30)
+    saving = asyncio.create_task(
+        env.client.patch("/api/v1/me", headers=headers, json={"display_name": "New Name"})
+    )
+    try:
+        waiting = await until_blocked_by(env.app_engine, seen["pid"])
+        held = not saving.done()
+    finally:
+        go.set()
+    ended, saved = await asyncio.wait_for(
+        asyncio.gather(ending, saving, return_exceptions=True), timeout=30
+    )
+    assert held
+    assert _on_the_person(waiting), (waiting, ended, saved)
+    assert ended == "end_sessions committed", ended
+    assert not isinstance(saved, BaseException), saved
+    assert saved.status_code == 200, saved.text
+    async with AsyncSession(env.admin_engine) as s:
+        name = await s.scalar(select(User.display_name).where(User.id == tech_id))
+    assert name == "New Name"
+    assert len(await _actions(env, org, "user.profile_updated")) == 1
+    assert len(await _actions(env, org, "auth.sessions_ended")) == 1
+
+
 async def test_mcp_door_email_refresh_vs_admin_end_sessions(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

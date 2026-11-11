@@ -1114,10 +1114,12 @@ async def reset_factors(
     THE ROW FIRST (`_target(lock=True)`, own authentication phase 2, Task 9b
     fix round 1), then `factors.lock_person`, then the factors, sessions and
     devices, and the audit chain last -- the order every writer of a
-    person's live rows keeps: each act in this module (`_target`, since the
-    final review of phase 2), each use of their links, their own sign-in
-    steps and the MCP door's address refresh (`guards.lock_user_row` lists
-    them, and the two writers that take no row). A passkey step in flight
+    person's live rows keeps that takes the row at all: each act in this
+    module (`_target`, since the final review of phase 2), the acts on a
+    contact, each use of their links, their own sign-in steps and profile
+    (`PATCH /me`), and the MCP door (`guards.lock_user_row` lists them, and
+    the writers that take no person's row, each of which takes the chain
+    last or not at all). A passkey step in flight
     read the passkey this deletes and waited to write its counter on the
     deleted row: a StaleDataError, a 500. Now it waits on the person's row
     and then finds its session ended."""
