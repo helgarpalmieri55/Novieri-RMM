@@ -115,6 +115,8 @@ class SessionPrincipal:
     email: str
     display_name: str
     expires_at: datetime
+    #: The person's saved time zone, for the portal's own pages (phase 2, `GET /portal/me`).
+    timezone: str | None = None
 
 
 def _now() -> datetime:
@@ -250,7 +252,9 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
             return None
         person = (
             await session.execute(
-                select(User.email, User.display_name).where(User.id == row.user_id)
+                select(User.email, User.display_name, User.timezone).where(
+                    User.id == row.user_id
+                )
             )
         ).one()
         if touch and now - row.last_seen_at >= TOUCH_EVERY:
@@ -269,6 +273,7 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
         email=person.email,
         display_name=person.display_name,
         expires_at=row.expires_at,
+        timezone=person.timezone,
     )
 
 

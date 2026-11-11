@@ -118,6 +118,18 @@ async def resolve_portal_principal(request: Request) -> PortalContext:
     )
 
 
+async def portal_permissions(request: Request, ctx: PortalContext) -> list[str]:
+    """The portal codes the person holds inside the request's scope, in
+    `PORTAL_CODES` order: what the portal's pages offer (invariant 6: the
+    server still checks every route)."""
+    held: list[str] = []
+    for code in PORTAL_CODES:
+        within = await _holds_within(request, ctx.org_id, ctx.requester_user_id, code, ctx.clients)
+        if not within.is_empty:
+            held.append(code)
+    return held
+
+
 async def bound_portal_principal(request: Request) -> AsyncIterator[PortalContext]:
     """`resolve_portal_principal`, with org_id/requester bound as CONTEXTVARS
     for the rest of the request -- the dependency portal routes use.

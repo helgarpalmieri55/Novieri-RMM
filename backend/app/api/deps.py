@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import loopback
-from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
+from app.core.auth.refusals import AUTH_REQUIRED, PORTAL_ONLY, STEP_UP_REQUIRED, AuthRefusal
 from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
 from app.core.i18n import N_, tr, tr_marked
@@ -500,9 +500,10 @@ async def _admit_session(
     and the sign-in routes (Task 7) are the only ones that accept it. Then, in
     the order the MCP bearer path uses: the console's email-domain rule (staff
     only -- it says who may use the CONSOLE; a contact, from phase 2, uses the
-    portal), `users.status`, a contact refused unless `contacts`, and the
-    person's scope. Nothing is written and nothing is self-provisioned: a
-    session exists only for a person the platform already has."""
+    portal), `users.status`, a contact refused unless `contacts` -- with 403
+    `portal_only`, not logged (phase 2, Task 4) --, and the person's scope.
+    Nothing is written and nothing is self-provisioned: a session exists only
+    for a person the platform already has."""
     if not principal.factor_done:
         raise AuthRefusal(
             status.HTTP_401_UNAUTHORIZED,
@@ -524,19 +525,27 @@ async def _admit_session(
                 detail=tr("your session has ended; sign in again"),
             )
         who = f"user:{user.id}"
-        reasons = [
+        domain_reason = (
             None
             if user.kind == CONTACT_KIND
             else domain_refusal(
                 user.email, await resolve_console_domain(session, principal.org_id, settings)
-            ),
-            status_refusal(user.status),
-            None if contacts else contact_refusal(user.kind),
-        ]
-        for reason in reasons:
+            )
+        )
+        for reason in (domain_reason, status_refusal(user.status)):
             if reason is not None:
                 log_admission_refusal("session", sub=who, email=user.email, reason=reason)
                 raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(reason))
+        if not contacts:
+            reason = contact_refusal(user.kind)
+            if reason is not None:
+                # Not logged (plan 2026-11-06, Task 4, decision 7): a contact at
+                # the console's door is expected since phase 2 -- the console
+                # asks `/me` on every page -- and the console answers it by
+                # going to the portal (D42).
+                raise AuthRefusal(
+                    status.HTTP_403_FORBIDDEN, code=PORTAL_ONLY, detail=tr_marked(reason)
+                )
         if user.kind == CONTACT_KIND:
             scope = ClientScope.only([] if user.client_id is None else [user.client_id])
         else:

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pyotp
@@ -35,12 +35,13 @@ from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
 from app.core.auth.totp import step_of
 from app.core.client_address import parse_trusted_proxies
 from app.core.mail import MailFailure, MailNotConfigured, MailSendFailed
-from app.models import User
+from app.models import Client, Role, User, UserRole
 from app.models.auth import AuthPasskey, AuthPassword, AuthTotp
 from tests.session_support import CONSOLE, console_headers, use_console
 
 __all__ = [
     "CONSOLE",
+    "CONTACT_PASSWORD",
     "PASSWORD",
     "MailBox",
     "Staff",
@@ -48,6 +49,7 @@ __all__ = [
     "browser",
     "capture_mail",
     "console_ready",
+    "contact",
     "cookie",
     "enrol_totp",
     "fresh_code",
@@ -111,6 +113,7 @@ class Staff:
     totp_secret: str | None = None
     last_code: str | None = None
     recovery_codes: list[str] = field(default_factory=list)
+    client_id: UUID | None = None
 
     def headers(self) -> dict[str, str]:
         jar = []
@@ -143,6 +146,66 @@ async def staff(env: Any, org_id: UUID, *roles: str, password: str = PASSWORD) -
         )
         await session.commit()
     return Staff(org_id, user.id, sub, user.email, password, browser())
+
+
+#: A contact's password: 15 characters at least (design §3), not on the
+#: blocklist, and free of every test address's words and the product's name.
+CONTACT_PASSWORD = "Ultramarine-Kettle-7319-Harbor"
+
+
+async def contact(
+    env: Any, org_id: UUID, *, password: str | None = CONTACT_PASSWORD, role: bool = True
+) -> Staff:
+    """A contact of a new client, holding the portal role (`requester`) on that
+    client only (design §3) unless `role` is False -- the state before an
+    invitation is accepted, which grants it (Task 8) -- and, unless `password`
+    is None, a password. The same `Staff` bag the technician helpers use:
+    `sub` is the contact's `external_subject`."""
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        client = Client(org_id=org_id, name=f"Acme-{secrets.token_hex(3)}", kind="customer")
+        session.add(client)
+        await session.flush()
+        user = User(
+            org_id=org_id,
+            kind="contact",
+            client_id=client.id,
+            email=f"{secrets.token_hex(4)}@acme.test",
+            external_subject=f"contact-pending:{uuid4()}",
+        )
+        session.add(user)
+        await session.flush()
+        if role:
+            requester = (
+                await session.execute(
+                    select(Role).where(Role.name == "requester", Role.org_id.is_(None))
+                )
+            ).scalar_one()
+            session.add(
+                UserRole(
+                    org_id=org_id, user_id=user.id, role_id=requester.id, client_id=client.id
+                )
+            )
+        if password is not None:
+            digest, version = await hash_password(org_id, password)
+            session.add(
+                AuthPassword(
+                    user_id=user.id,
+                    org_id=org_id,
+                    hash=digest,
+                    pepper_version=version,
+                    changed_at=datetime.now(UTC),
+                )
+            )
+        await session.commit()
+    return Staff(
+        org_id,
+        user.id,
+        user.external_subject,
+        user.email,
+        password or "",
+        browser(),
+        client_id=client.id,
+    )
 
 
 async def login(env: Any, who: Staff, *, password: str | None = None) -> httpx.Response:

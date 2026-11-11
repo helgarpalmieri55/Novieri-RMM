@@ -120,7 +120,11 @@ from app.core.ticket_words import status_quoted
 from app.models import Ticket, TicketAttachment
 from app.modules.portal.errors import PortalNotFoundError, PortalValidationError
 from app.modules.portal.help import get_help_article, suggest_help
-from app.modules.portal.principal import PortalContext, require_portal_permission
+from app.modules.portal.principal import (
+    PortalContext,
+    portal_permissions,
+    require_portal_permission,
+)
 from app.modules.portal.schema import (
     PortalAttachmentOut,
     PortalCategoryOut,
@@ -128,6 +132,7 @@ from app.modules.portal.schema import (
     PortalCommentOut,
     PortalHelpArticle,
     PortalHelpSuggestion,
+    PortalMeOut,
     PortalTicketCreate,
     PortalTicketDetail,
     PortalTicketSummary,
@@ -218,6 +223,37 @@ async def _load_my_ticket_row(
     if ticket is None:
         raise PortalNotFoundError(tr("ticket {ticket_id} not found", ticket_id=ticket_id))
     return ticket
+
+
+# --------------------------------------------------------------------------- #
+# GET /portal/me -- the person using the portal (own authentication phase 2,
+# Task 4, decision 8). The person is not read here: the session that admitted
+# the request names them. The codes are: `portal_permissions` reads the
+# person's grants (`person_scope`, once per portal code), as the door does.
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/portal/me", response_model=PortalMeOut)
+async def portal_me_route(
+    request: Request,
+    ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
+) -> PortalMeOut:
+    """The person using the portal -- a contact, or a technician with a
+    portal code: their name, address, kind and the portal codes they hold."""
+    principal = getattr(request.state, "session_principal", None)
+    if principal is None:
+        # Only a browser session or the assistant's internal token reaches a
+        # portal route with a principal; the MCP channel has neither, and this
+        # route is not an MCP tool (`NOT_FOR_MCP`).
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, tr("sign in to continue"))
+    return PortalMeOut(
+        user_id=principal.user_id,
+        kind=principal.kind,
+        email=principal.email,
+        display_name=principal.display_name,
+        timezone=principal.timezone,
+        permissions=await portal_permissions(request, ctx),
+    )
 
 
 # --------------------------------------------------------------------------- #

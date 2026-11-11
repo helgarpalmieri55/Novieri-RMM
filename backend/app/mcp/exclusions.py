@@ -75,6 +75,7 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
             ("step-up/recovery", "takes a recovery code"),
             ("step-up/passkey/options", "issues a passkey challenge"),
             ("step-up/passkey", "takes a passkey assertion"),
+            ("step-up/password", "takes the account's password"),
             ("logout", "ends the console session the cookie names"),
             ("logout-everywhere", "ends every console session of the person"),
             ("password/forgot", "mails a one-time password-reset link"),
@@ -282,6 +283,12 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/trusted-devices/{device_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
+    # The portal page's own account summary (own authentication phase 2): read
+    # from the browser's session, which the MCP channel never has. An AI app
+    # asks `GET /me`.
+    ("GET", "/api/v1/portal/me"): (
+        "the portal page's own summary of the signed-in person, read from the browser's session"
+    ),
     # Needs the administrator's own second factor confirmed in the console in
     # the last ten minutes (design §2.5), which the MCP channel cannot do.
     ("POST", "/api/v1/users/{user_id}/factors/reset"): (

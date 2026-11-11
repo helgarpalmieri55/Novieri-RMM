@@ -597,14 +597,29 @@ from tests.tool_surface import (
 # documented and not a list, so P3, P4 and P5 do not move; failing P2 it is in
 # neither "passing five" nor "passing six", so neither set nor
 # PENDING_TOOL_REVIEW moves either.
-EXPECTED_GET_ROUTES = 255
-EXPECTED_PASSING_FIVE = 52
+# 255 -> 256 (2026-11-06, own authentication phase 2, Task 4): `GET /portal/me`,
+# gated (`require_portal_permission`), typed, not a list and closed. MEASURED,
+# it passes all six: P5 asks for a route description OR, failing that, a
+# described model (`tests/tool_surface.py`), and both the handler and
+# `PortalMeOut` carry a docstring -- unlike the portal routes that fail P5,
+# whose handlers have none. (The plan expected "P5 self-describing" +1; the
+# measurement says otherwise, and the record follows the measurement.) So
+# passing five 52 -> 53, and it waits in PENDING_TOOL_REVIEW, where it should
+# stay: it is the portal page's own summary of the person its browser session
+# names, not an MCP tool (`NOT_FOR_MCP`); the console's assistant asks
+# `GET /me`, and the portal's persona has its own registry
+# (`app/modules/ai_portal/tools.py`).
+EXPECTED_GET_ROUTES = 256
+EXPECTED_PASSING_FIVE = 53
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
 # half of "how many".
 EXPECTED_PASSING_SIX = frozenset(
     {
+        # Added 2026-11-06 (P2 phase 2 Task 4); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/portal/me",
         # Added 2026-10-24 (MSP clients API). Eligible, not registered -- see
         # the note above EXPECTED_GET_ROUTES.
         "/api/v1/clients/{client_id}",
@@ -965,6 +980,9 @@ def test_the_two_registered_tools_are_closed() -> None:
 # expects and asks a human to resolve.
 PENDING_TOOL_REVIEW = frozenset(
     {
+        # Added 2026-11-06 (P2 phase 2 Task 4); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/portal/me",
         # Added 2026-10-24 (MSP clients API); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/clients/{client_id}",

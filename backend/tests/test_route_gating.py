@@ -155,6 +155,9 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/step-up/passkey/options"),
         # The same, the passkey assertion.
         ("POST", "/api/v1/auth/step-up/passkey"),
+        # A contact confirms with the password (P2 phase 2, D29): the full
+        # session `guards.session_of` + `require_full`, the password's counters.
+        ("POST", "/api/v1/auth/step-up/password"),
         # Ends only the session the caller's own cookie names.
         ("POST", "/api/v1/auth/logout"),
         # The caller's full session, ending the caller's own sessions.

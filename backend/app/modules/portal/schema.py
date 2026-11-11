@@ -247,3 +247,18 @@ class PortalHelpArticle(BaseModel):
     id: UUID
     title: str
     body: str
+
+
+class PortalMeOut(BaseModel):
+    """Who is using the portal, for the portal's own pages (own authentication
+    phase 2, Task 4): a client's contact, or a technician holding a portal
+    code. Read from the session that admitted the request."""
+
+    user_id: UUID
+    kind: Literal["staff", "contact"]
+    email: str
+    display_name: str
+    timezone: str | None = Field(description="The person's saved time zone, or null.")
+    permissions: list[str] = Field(
+        description="The portal codes held: portal.ticket.read and/or portal.ticket.write."
+    )

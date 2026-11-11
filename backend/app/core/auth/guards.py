@@ -23,7 +23,7 @@ from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
 from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.config import Settings
 from app.core.i18n import tr
-from app.core.identity import ACTIVE_STATUS, STAFF_KIND
+from app.core.identity import ACTIVE_STATUS, CONTACT_KIND, STAFF_KIND
 from app.models import User
 
 
@@ -101,12 +101,21 @@ def require_fresh(principal: SessionPrincipal) -> None:
 
 
 async def signed_user(session: AsyncSession, principal: SessionPrincipal) -> User:
-    """The session's person, still a technician who may sign in."""
+    """The session's person, still active and of the session's own kind: a
+    technician or, since own authentication phase 2, a client's contact (plan
+    decision D25). `its_auth_session` already refuses a session whose kind is
+    not its person's; this reads the same rule again in the caller's
+    transaction, where a disabled person or a kind changed since is caught."""
     user = (
         await session.execute(
             select(User).where(User.id == principal.user_id, User.org_id == principal.org_id)
         )
     ).scalar_one_or_none()
-    if user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
+    if (
+        user is None
+        or user.kind != principal.kind
+        or user.kind not in (STAFF_KIND, CONTACT_KIND)
+        or user.status != ACTIVE_STATUS
+    ):
         raise sign_in_again()
     return user
