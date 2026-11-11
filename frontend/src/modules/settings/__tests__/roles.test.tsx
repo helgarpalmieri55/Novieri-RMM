@@ -362,4 +362,25 @@ describe("Settings — Roles tab, a recent second factor", () => {
     expect(await screen.findByText("Nothing was changed: the confirmation was closed.")).toBeInTheDocument();
     expect(calls.createRole).toHaveBeenCalledTimes(1);
   });
+
+  // Fix round 1: the delete dialog is not dismissible while the confirmation
+  // stands over it (`dismissible={!stepUp.open}`), so Escape answers the
+  // confirmation alone and the delete dialog stays, over the same role.
+  it("closes only the confirmation on Escape, and keeps the delete dialog open over the same role", async () => {
+    calls.deleteRole.mockRejectedValue(stepUpRequired());
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Delete role auditor" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete role" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete auditor" }));
+    await screen.findByRole("dialog", { name: "Confirm it's you" });
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    const still = screen.getByRole("dialog", { name: "Delete role" });
+    expect(within(still).getByText(/Delete the role auditor\?/)).toBeInTheDocument();
+    expect(within(still).getByRole("button", { name: "Delete auditor" })).toBeInTheDocument();
+    expect(await within(still).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
+    expect(calls.deleteRole).toHaveBeenCalledExactlyOnceWith(AUDITOR_ROLE.id);
+  });
 });

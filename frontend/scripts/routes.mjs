@@ -210,6 +210,12 @@ export const ROUTES = [
   // and the row's actions, with Resend and Cancel for the fixtures' open
   // invitation (`usr-invited-seed`).
   "/settings?tab=users",
+  // Settings -> Email and -> Roles (own-auth phase 2, Task 14), for the same
+  // reason as Sessions: their saves now ask for a recent second factor, and
+  // `/settings` alone never opens either. No `<details>` to open: the Email
+  // fixture signs in with a password, and Roles has none.
+  "/settings?tab=email",
+  "/settings?tab=roles",
   "/admin",
   "/governance",
   "/assets",

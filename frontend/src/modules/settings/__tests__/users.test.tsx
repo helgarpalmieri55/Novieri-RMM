@@ -1111,6 +1111,24 @@ describe("Settings — Users tab, a recent second factor", () => {
     expect(calls.setUserEnabled).toHaveBeenLastCalledWith(CASEY_USER.id, true);
   });
 
+  // Fix round 1: the hook disabling and enabling share sends only enabling
+  // through `run`. A disable the server refused for a stale factor (it never
+  // does: S4) is shown as it came -- no confirmation is opened and it is not
+  // sent again -- so wrapping both branches in `run` turns this red.
+  it("never asks before a person is disabled: a refusal is shown as it came, sent once (S4)", async () => {
+    calls.setUserEnabled.mockRejectedValue(stepUpRequired());
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Disable operator@example.com" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Disable operator@example.com" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("confirm your second factor again to do this");
+    expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument();
+    expect(calls.setUserEnabled).toHaveBeenCalledExactlyOnceWith(OPERATOR_USER.id, false);
+  });
+
   it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
     calls.inviteUser.mockRejectedValue(stepUpRequired());
     const user = await openUsers();
