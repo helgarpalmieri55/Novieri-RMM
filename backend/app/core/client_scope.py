@@ -147,8 +147,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/core/auth/flows.py::_identity_session": (
         "sign-in before the door admits anybody: the password, a contact's passkey alone, the "
         "second factor, the enrolment, the recent confirmation, the reset link -- a "
-        "technician's or a contact's own auth rows and users row only (P2 design §6.2; "
-        "phase 2, D25, D28)"
+        "technician's or a contact's own auth rows and users row (P2 design §6.2; phase 2, "
+        "D25, D28). Accepting a contact's invitation also writes their portal role on their "
+        "OWN client (`grant_portal`, D40) and reads that client's Microsoft tenants "
+        "(`microsoft_offered`, design §4)"
     ),
     "app/core/auth/account.py::_own_session": (
         "My security is personal, like /me: a TECHNICIAN's own auth rows, by the user id of "

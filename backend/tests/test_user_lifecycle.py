@@ -178,7 +178,17 @@ async def test_an_invitee_chooses_a_password_and_goes_on_to_the_first_factor(
         json={"token": token, "password": "Pelican-Orbit-Lantern-59"},
     )
 
-    assert details.json() == {"email": "ana@toeshee.test", "display_name": "Ana"}
+    # Re-aimed by own authentication phase 2, D40 (Task 8): the page also
+    # learns how the invitation may be accepted -- a technician's, with a
+    # 12-character password, no passkey and (not set up here) no Microsoft.
+    assert details.json() == {
+        "email": "ana@toeshee.test",
+        "display_name": "Ana",
+        "kind": "staff",
+        "password_minimum": 12,
+        "passkey": False,
+        "microsoft": False,
+    }
     assert weak.status_code == 422
     assert weak.json() == {"code": "password_rejected", "detail": "Use at least 12 characters."}
     assert accepted.status_code == 200, accepted.text
@@ -413,7 +423,17 @@ async def test_an_expired_invitation_can_still_be_resent(lifecycle_env: Any) -> 
     details = await env.client.post(
         "/api/v1/auth/invite/details", headers=browser(), json={"token": fresh}
     )
-    assert details.json() == {"email": "ana@toeshee.test", "display_name": "Ana"}
+    # Re-aimed by own authentication phase 2, D40 (Task 8): the page also
+    # learns how the invitation may be accepted -- a technician's, with a
+    # 12-character password, no passkey and (not set up here) no Microsoft.
+    assert details.json() == {
+        "email": "ana@toeshee.test",
+        "display_name": "Ana",
+        "kind": "staff",
+        "password_minimum": 12,
+        "passkey": False,
+        "microsoft": False,
+    }
 
 
 async def test_a_cancel_needs_a_pending_invitation(lifecycle_env: Any) -> None:

@@ -183,6 +183,36 @@ def invitation_mail(link: str, *, inviter: str) -> tuple[str, str]:
     )
 
 
+def contact_invitation_mail(link: str, *, inviter: str, reset: bool) -> tuple[str, str]:
+    """A contact's invitation to the portal (design §3; D39, D40). `reset`: a
+    technician reset the contact's access, so the old ways in are gone."""
+    if reset:
+        return (
+            tr("Your access to the {product} portal was reset", product=PRODUCT),
+            tr(
+                "{inviter} reset your access to the {product} portal: your previous password, "
+                "passkeys and linked accounts no longer work.\n\n"
+                "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+                "If you did not expect this, tell {inviter}.",
+                inviter=inviter,
+                product=PRODUCT,
+                link=link,
+            ),
+        )
+    return (
+        tr("You are invited to the {product} portal", product=PRODUCT),
+        tr(
+            "{inviter} invited you to the {product} portal, where you can follow your "
+            "requests.\n\n"
+            "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+            "If you did not expect this, ignore this message.",
+            inviter=inviter,
+            product=PRODUCT,
+            link=link,
+        ),
+    )
+
+
 async def deliver(
     session: AsyncSession,
     *,

@@ -22,8 +22,11 @@ live enrollment tokens and switches off the install links beneath it, in the
 same transaction, each audited -- and `enroll`, `live_link_for` and the MSI
 refuse an archived site or client whatever predates the archive.
 
-A CONTACT IS A `users` ROW OF KIND `contact` (spec §1.3) that cannot sign in
-yet: how a contact authenticates is project 2. Its `external_subject` -- NOT
+A CONTACT IS A `users` ROW OF KIND `contact` (spec §1.3) that signs in to the
+portal once invited (`app.services.contact_access`, own authentication phase
+2). Switching one off -- by hand or with its client's archive -- ends what it
+had open (`_cut_access`, D43), and a new address kills the links sent to the
+old one (`_revoke_links`, A2-44). Its `external_subject` -- NOT
 NULL and unique per organisation -- holds a placeholder no identity provider
 issues (`contact-pending:<uuid>`), never the email: an email there would make
 the organisation-wide key an oracle across clients (Task 8b), and would go
@@ -44,7 +47,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import action_tokens
+from app.core.auth.devices import revoke_all_for_user
 from app.core.auth.entra import CONSUMER_TENANT
+from app.core.auth.sessions import end_all_for_user
 from app.core.i18n import tr
 from app.core.identity import CONTACT_KIND
 from app.models import Client, Device, Site, User
@@ -494,6 +500,27 @@ async def archive_client(
                 count=active,
             ),
         )
+    # AND WHAT THEY HAD OPEN (Task 8, D43), AFTER THEIR ROWS AND BEFORE ANY
+    # AUDIT WRITE. Before the chain: a contact's own transaction may hold one
+    # of their session or device rows and then wait on the chain -- signing
+    # out everywhere does (`flows.logout_everywhere`) -- and with the chain
+    # held here first, each would wait on the other. After `_lock_contacts`:
+    # THE PERSON'S ROW COMES FIRST, here and in every use of their links
+    # (`flows._consumed`, fix round 1), so an acceptance or a reset link in
+    # flight holds the contact's row and the archive waits above for it to
+    # commit; its link is then already spent, or still here to revoke. NOT
+    # YET COVERED: the contact's own sign-in steps, which do not take their
+    # row first -- `sessions.mark_factor` locks a session and then writes
+    # `users.last_login_at`; `login` takes its failure rows and the audit
+    # chain before `start_session` writes it. They can meet this archive the
+    # other way round, and so can they a reset of the person's own password
+    # (`flows.reset_password`, users first since fix round 1, for staff and
+    # contacts alike): one of the two is a 40P01. A lock-order task of its
+    # own, after Task 9. A refusal after this point rolls it back with
+    # everything else.
+    for user in contacts:
+        if user.status == "active":
+            await _cut_access(session, user)
     client.status = CLIENT_ARCHIVED
     await session.flush()
     revoked = await enrollment_svc.revoke_tokens(
@@ -543,6 +570,27 @@ async def _lock_contacts(session: AsyncSession, org_id: UUID, client_id: UUID) -
     )
 
 
+async def _revoke_links(session: AsyncSession, user: User) -> int:
+    """A contact's open invitation and reset links die: they went to the
+    mailbox of then (decision 4, A2-44) or to a person switched off (D43).
+    How many were still live (`revoke_open`; one that had run out is spent
+    too, and not counted): the audit says a link died only when one did."""
+    revoked = 0
+    for purpose in (action_tokens.INVITE, action_tokens.RESET):
+        revoked += await action_tokens.revoke_open(session, user_id=user.id, purpose=purpose)
+    return revoked
+
+
+async def _cut_access(session: AsyncSession, user: User) -> None:
+    """A contact switched off -- by hand or with its client's archive -- signs
+    in no more, at once (design §2.4; plan D43): their sessions end, their
+    remembered devices are forgotten, and their open invitation and reset
+    links die."""
+    await end_all_for_user(session, user.id, "disabled")
+    await revoke_all_for_user(session, user.id)
+    await _revoke_links(session, user)
+
+
 async def _disable_contacts(
     session: AsyncSession, org_id: UUID, actor_id: UUID, client_id: UUID, contacts: list[User]
 ) -> int:
@@ -550,7 +598,9 @@ async def _disable_contacts(
     each audited `contact.updated` with `reason="client_archived"` -- the
     code a person's own switch-off records, so the contact's history reads as
     one list. Its people keep no way in through the portal (project 2) to a
-    client nobody serves. `contacts` are `_lock_contacts`' rows."""
+    client nobody serves: `archive_client` has already cut what they had
+    open (`_cut_access`, before the chain's lock). `contacts` are
+    `_lock_contacts`' rows."""
     count = 0
     for user in contacts:
         if user.status != "active":
@@ -994,6 +1044,15 @@ async def update_contact(
         for key, diff in changed.items():
             setattr(user, key, diff["after"])
         await _flush_contact(session)
+        meta: dict[str, Any] = {"client_id": str(user.client_id), "changed": changed}
+        if changed.get("status", {}).get("after") == "disabled":
+            await _cut_access(session, user)
+        elif "email" in changed:
+            # Task 8, decision 4: links sent to the old address die with it,
+            # and the immutable log says so only when one did (f2-3 M7).
+            revoked = await _revoke_links(session, user)
+            if revoked:
+                meta["links_revoked"] = revoked
         await audit_service.record(
             session,
             org_id=org_id,
@@ -1002,6 +1061,6 @@ async def update_contact(
             action="contact.updated",
             target_type="user",
             target_id=str(user.id),
-            metadata={"client_id": str(user.client_id), "changed": changed},
+            metadata=meta,
         )
     return user

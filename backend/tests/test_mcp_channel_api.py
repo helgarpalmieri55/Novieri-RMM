@@ -77,6 +77,9 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             # Task 8: the invitation's and the server's recovery link.
             "invite/details",
             "invite/accept",
+            # Own authentication phase 2, Task 8: a contact accepts with a passkey.
+            "invite/passkey/options",
+            "invite/passkey",
             "recover/details",
             "recover/accept",
         )
@@ -88,6 +91,10 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
     # Task 8: an invitation's answer carries its one-time link when no mail did.
     ("POST", "/api/v1/users/invite"),
     ("POST", "/api/v1/users/{user_id}/invite/resend"),
+    # Own authentication phase 2, Task 8: a contact's portal invitation link, the
+    # same way, and the reset of their access that issues a new one.
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"),
 }
 
 
@@ -191,7 +198,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 40
+    assert len(NEVER_EXPOSED) == 44
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 

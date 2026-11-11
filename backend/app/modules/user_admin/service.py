@@ -218,8 +218,20 @@ Deliver = Callable[[UserView, str], Awaitable[bool]]
 # --------------------------------------------------------------------------- #
 
 
-async def _target(session: AsyncSession, org_id: UUID, user_id: UUID) -> User:
+async def _target(
+    session: AsyncSession, org_id: UUID, user_id: UUID, *, lock: bool = False
+) -> User:
     """This organization's TECHNICIAN, or a 404.
+
+    `lock`: THE ROW IS LOCKED FOR NO KEY UPDATE, and re-read
+    (`populate_existing`), before the act touches anything else of the
+    person's (own authentication phase 2, Task 8 fix round 2). The lock order
+    of a person's account is THEIR `users` ROW, THEN THEIR LINKS, ROLES AND
+    SESSIONS, THEN THE AUDIT CHAIN: a use of their invitation or reset link
+    takes it in that order (`flows._consumed`), so an act here that touches
+    their links or sessions and writes their row afterwards must take the row
+    first, or each holds what the other waits on -- a 40P01, and a 500 for
+    the person following their link (`tests/test_user_admin_races.py`).
 
     `User.org_id == org_id` mirrors the RLS policy rather than relying on it.
     RLS is the backstop; a route with no predicate of its own passes every test
@@ -236,13 +248,10 @@ async def _target(session: AsyncSession, org_id: UUID, user_id: UUID) -> User:
     are its client's business, and this surface's `users.manage` on every
     client is a technician administrator's.
     """
-    user = (
-        await session.execute(
-            select(User).where(
-                User.id == user_id, User.org_id == org_id, User.kind == STAFF_KIND
-            )
-        )
-    ).scalar_one_or_none()
+    query = select(User).where(User.id == user_id, User.org_id == org_id, User.kind == STAFF_KIND)
+    if lock:
+        query = query.with_for_update(key_share=True).execution_options(populate_existing=True)
+    user = (await session.execute(query)).scalar_one_or_none()
     if user is None:
         raise UserAdminError(404, tr("no such user"))
     return user
@@ -793,8 +802,12 @@ async def cancel_invite(
     with the address -- deleted ones included -- as does the
     `ux_users_org_lower_email_staff` index. So a cancelled invitation's
     address, like a deleted technician's, can never be invited again in this
-    organization. The route's description says so."""
-    user = await _target(session, org_id, user_id)
+    organization. The route's description says so.
+
+    THE ROW FIRST (`_target(lock=True)`, Task 8 fix round 2): the link is
+    revoked and the sessions ended before the row is marked deleted, so the
+    row is locked before either, in the order an acceptance takes them."""
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     _refuse_self(actor_id, user.id, DELETE)
     await _require_pending_invitation(session, org_id, user)
@@ -1141,8 +1154,13 @@ async def delete_user(
     So do an open invitation, the sessions and the remembered devices, in the
     same transaction (design §2.4; plan decision 7: the sessions end as
     `"disabled"`, there being no `"deleted"` reason).
+
+    THE ROW FIRST (`_target(lock=True)`, Task 8 fix round 2): the grants,
+    the invitation, the sessions and the devices go before the row is marked
+    deleted, so the row is locked before any of them, in the order a use of
+    the person's links takes them.
     """
-    user = await _target(session, org_id, user_id)
+    user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     _refuse_self(actor_id, user.id, DELETE)
     await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_DELETED)

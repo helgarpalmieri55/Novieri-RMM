@@ -12,9 +12,10 @@ Read in the caller's session (one organization, every client: a technician's
 rows are global, a contact's are their client's, migration 0231).
 """
 
+from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import AuthExternalIdentity, AuthPasskey, AuthPassword
@@ -74,3 +75,20 @@ async def contact_may_reset(session: AsyncSession, user_id: UUID) -> bool:
         )
     )
     return bool(found)
+
+
+async def with_sign_in_method(session: AsyncSession, user_ids: Sequence[UUID]) -> set[UUID]:
+    """`has_sign_in_method` for many people in ONE query (a client's contacts
+    list): the same three tables -- a password, a passkey, a Microsoft link.
+    `test_contact_access_api.py` holds the two to the same answer."""
+    ids = list(user_ids)
+    if not ids:
+        return set()
+    rows = await session.execute(
+        union(
+            select(AuthPassword.user_id).where(AuthPassword.user_id.in_(ids)),
+            select(AuthPasskey.user_id).where(AuthPasskey.user_id.in_(ids)),
+            select(AuthExternalIdentity.user_id).where(AuthExternalIdentity.user_id.in_(ids)),
+        )
+    )
+    return set(rows.scalars())

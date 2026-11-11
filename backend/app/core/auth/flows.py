@@ -42,7 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
-from app.core.auth import action_tokens, notices, staff_password
+from app.core.auth import action_tokens, entra_settings, notices, staff_password
 from app.core.auth.devices import RememberingOff, presented, recognised, revoke_all_for_user
 from app.core.auth.devices import remember as remember_device
 from app.core.auth.factors import (
@@ -64,7 +64,7 @@ from app.core.auth.guards import (
 )
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.lookup import find_person, org_of_slug
-from app.core.auth.methods import contact_may_reset
+from app.core.auth.methods import contact_may_reset, has_sign_in_method
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
@@ -74,6 +74,7 @@ from app.core.auth.passkeys import (
     verify_registration,
 )
 from app.core.auth.passwords import verify_against_nobody, verify_password
+from app.core.auth.portal_access import grant_portal
 from app.core.auth.recovery import remaining, replace_codes, use_code
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.session_policy import read_policy
@@ -103,8 +104,8 @@ from app.core.rate_limit import hit
 from app.core.rbac_admin import SUPER_ADMIN
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
-from app.models import Organization, Role, User, UserRole
-from app.models.auth import AuthPassword, AuthSession, AuthTrustedDevice
+from app.models import Client, Organization, Role, User, UserRole
+from app.models.auth import AuthActionToken, AuthPassword, AuthSession, AuthTrustedDevice
 
 #: How long a pending session may take to finish enrolling (plan decision 6).
 ENROLLED_S = 900
@@ -191,7 +192,8 @@ def _passkey_rejected(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRe
     """A passkey that is not accepted, whatever the reason (W3C: indistinguishable
     from "no such credential"). 401 on the sign-in screen (`passkey_sign_in`);
     400 where a session is open -- an enrolment -- because there a 401 ends it,
-    as `_factor_failed` says."""
+    as `_factor_failed` says; 400 too where an invitation is accepted
+    (`invite_passkey`, the plan's Global Constraints)."""
     return AuthRefusal(
         status_code,
         code="passkey_rejected",
@@ -220,9 +222,18 @@ def _invalid_link() -> AuthRefusal:
     )
 
 
-async def _audit(session: AsyncSession, user: User, action: str, meta: dict[str, Any]) -> None:
+async def _audit(
+    session: AsyncSession,
+    user: User,
+    action: str,
+    meta: dict[str, Any],
+    *,
+    client_id: UUID | None = None,
+) -> None:
     """The one audit wrapper of this file (plan decision 12): every caller
-    passes its action as a literal, listed in the vocabulary guard's DYNAMIC."""
+    passes its action as a literal, listed in the vocabulary guard's DYNAMIC.
+    `client_id` is the row's informative client (invariant 5a: the audit
+    table has none of its own), given for a contact's `contact.*` act."""
     await audit_service.record(
         session,
         org_id=user.org_id,
@@ -232,7 +243,53 @@ async def _audit(session: AsyncSession, user: User, action: str, meta: dict[str,
         target_type="user",
         target_id=str(user.id),
         metadata=meta,
+        client_id=client_id,
     )
+
+
+async def _consumed(
+    session: AsyncSession, *, digest: bytes, purposes: tuple[str, ...]
+) -> AuthActionToken | None:
+    """A one-time link consumed IN THE LOCK ORDER (Task 8, fix rounds 1-2):
+    THE PERSON'S `users` ROW FIRST, FOR NO KEY UPDATE, THEN THE LINK'S ROW,
+    then -- whenever the caller audits -- the chain. For a technician as for
+    a contact: an invitation's acceptance (`invitee`) and a password reset
+    (`reset_password`) serve both kinds, and so must every administrator's
+    act that touches a person's links or sessions and writes their row:
+    - a contact's: the archive (`services.clients._lock_contacts`, then
+      `_cut_access`), a switch-off or an address change (`update_contact`'s
+      UPDATE, then the links), and `services.contact_access._contact`;
+    - a technician's: `user_admin.service.cancel_invite` and `delete_user`
+      (`_target(lock=True)`, fix round 2), and `set_enabled`, which writes
+      the row before it ends anything.
+    A use that took the link first and wrote the person's row last
+    (`users.last_login_at`, in `sessions.start_session`; a reset's sessions)
+    waited on them while they waited on it: a 40P01, and a 500
+    (`tests/test_contact_access_races.py`, `tests/test_user_admin_races.py`).
+
+    NOT YET COVERED -- the person's OWN concurrent sign-in steps, which do
+    not take their row first: `sessions.mark_factor` locks a session and
+    then writes the row; `login` takes its failure rows and the audit chain
+    before `start_session` writes it. Any users-first writer above -- this
+    function's callers included, a reset of the person's own password among
+    them -- can meet one of them the other way round, and one of the two is
+    a 40P01. That class is a lock-order task of its own, after Task 9.
+
+    The link is read unlocked, only to learn whose it is; the person is
+    locked, re-read (`populate_existing`: what a switch-off committed
+    meanwhile is what the caller then checks); and only then is the link
+    consumed, under its own row lock and re-read too -- one revoked meanwhile
+    is None. `session.get(User, row.user_id)` then answers the locked row."""
+    seen = await action_tokens.peek_digest(session, digest=digest, purposes=purposes)
+    if seen is None:
+        return None
+    await session.execute(
+        select(User)
+        .where(User.id == seen.user_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    return await action_tokens.consume_digest(session, digest=digest, purposes=purposes)
 
 
 async def _remember(
@@ -1122,8 +1179,9 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
         raise _invalid_link()
     spent_dead = False
     async with _identity_session(org_id, _engine(request)) as session:
-        row = await action_tokens.consume(
-            session, token=token, purposes=(action_tokens.RESET,)
+        # The person, then the link (`_consumed`, Task 8 fix round 1).
+        row = await _consumed(
+            session, digest=action_tokens.digest(token), purposes=(action_tokens.RESET,)
         )
         user = await session.get(User, row.user_id) if row is not None else None
         if (
@@ -1174,7 +1232,8 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
 
 
 # --------------------------------------------------------------------------- #
-# the invitation (Task 8, design §7)
+# the invitation: a technician's (Task 8, design §7) or, since phase 2, a
+# client's contact's (phase 2 Task 8, design §3; D40)
 # --------------------------------------------------------------------------- #
 
 
@@ -1191,63 +1250,200 @@ async def _holds_super_admin(session: AsyncSession, user_id: UUID) -> bool:
     return held is not None
 
 
-async def _invited(session: AsyncSession, token: str, *, consume: bool) -> User:
-    """The invitee of a live, unaccepted invitation, or `invalid_link`.
+@dataclass(frozen=True)
+class Invitation:
+    """What an invitation's page needs (design §3, §7): who it is for, and how
+    they may accept it."""
 
-    NEVER A SUPER-ADMIN (Task 8 review). No organization can grant the role,
-    so none invites its holder (`user_admin.service.resend_invite` refuses it);
-    a link that names one anyway -- however it came to exist -- sets no
-    password, and answers what every dead link answers.
+    email: str
+    display_name: str
+    kind: str
+    password_minimum: int
+    #: A contact may accept with a passkey instead of a password (D40).
+    passkey: bool
+    #: Sign-in with Microsoft is set up for this person (Task 9 offers it).
+    microsoft: bool
+
+
+async def invitee(session: AsyncSession, *, digest: bytes, consume: bool) -> User:
+    """The person of a live, unaccepted invitation -- a technician or a
+    client's contact -- or `invalid_link`. With `consume`, the link is spent
+    in the lock order: the person, then the link (`_consumed`). See
+    `_invitation`."""
+    _row, user = await _invitation(session, digest=digest, consume=consume)
+    return user
+
+
+async def _invitation(
+    session: AsyncSession, *, digest: bytes, consume: bool
+) -> tuple[AuthActionToken, User]:
+    """`invitee`, and the link's row with it (`invite_passkey` puts it back).
+
+    NEVER A SUPER-ADMIN (Task 8 review, phase 1). No organization can grant
+    the role, so none invites its holder (`user_admin.service.resend_invite`
+    refuses it); a link that names one anyway -- however it came to exist --
+    sets no password, and answers what every dead link answers. NEVER
+    SOMEBODY WHO ALREADY HAS A WAY IN (`methods.has_sign_in_method`: a
+    password, a passkey or a Microsoft link).
 
     Nothing is written before a refusal here but the `consume`, and the
     refusal rolls it back with the block: a link that names nobody usable was
     never a link to spend."""
+    purposes = (action_tokens.INVITE,)
     if consume:
-        row = await action_tokens.consume(session, token=token, purposes=(action_tokens.INVITE,))
+        row = await _consumed(session, digest=digest, purposes=purposes)
     else:
-        row = await action_tokens.peek(session, token=token, purposes=(action_tokens.INVITE,))
+        row = await action_tokens.peek_digest(session, digest=digest, purposes=purposes)
     user = await session.get(User, row.user_id) if row is not None else None
     if (
         row is None
         or user is None
-        or user.kind != STAFF_KIND
+        or user.kind not in (STAFF_KIND, CONTACT_KIND)
         or user.status != ACTIVE_STATUS
-        or await session.get(AuthPassword, user.id) is not None
-        or await _holds_super_admin(session, user.id)
+        or await has_sign_in_method(session, user.id)
+        or (user.kind == STAFF_KIND and await _holds_super_admin(session, user.id))
     ):
         raise _invalid_link()
-    return user
+    return row, user
 
 
-async def invite_details(request: Request, *, token: str) -> tuple[str, str]:
-    """The address and the name an invitation is for. Leaves the link unused."""
+async def microsoft_offered(session: AsyncSession, user: User) -> bool:
+    """Whether this person could sign in with Microsoft here: it is on and,
+    for a technician, Novieri's tenant is set; for a contact, their client
+    lists a tenant (design §4, D32)."""
+    config = await entra_settings.read(session, user.org_id)
+    if not config.usable:
+        return False
+    if user.kind == STAFF_KIND:
+        return config.staff_tenant_id is not None
+    tenants = await session.scalar(
+        select(Client.microsoft_tenants).where(Client.id == user.client_id)
+    )
+    return bool(tenants)
+
+
+async def contact_admitted(
+    session: AsyncSession, request: Request, user: User, *, method: str
+) -> SignIn:
+    """A contact accepted their invitation (D40): the portal role on their own
+    client (`grant_portal`), audited `contact.invite_accepted`, and a complete
+    session -- a contact has no second factor to enrol. Public: Task 9's
+    Microsoft acceptance ends here too."""
+    await grant_portal(session, user)
+    await _audit(
+        session,
+        user,
+        "contact.invite_accepted",
+        {"client_id": str(user.client_id), "method": method},
+        client_id=user.client_id,
+    )
+    await _audit(session, user, "auth.signed_in", {"method": "invite", "trusted_device": False})
+    return await started(session, request, user, state="signed_in", factor_done=True)
+
+
+async def invite_details(request: Request, *, token: str) -> Invitation:
+    """Who an invitation is for and how they may accept it. Leaves the link
+    unused."""
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
     async with _identity_session(org_id, _engine(request)) as session:
-        user = await _invited(session, token, consume=False)
-        return user.email, user.display_name
+        user = await invitee(session, digest=action_tokens.digest(token), consume=False)
+        return Invitation(
+            email=user.email,
+            display_name=user.display_name,
+            kind=user.kind,
+            password_minimum=staff_password.minimum_for(user.kind),
+            passkey=user.kind == CONTACT_KIND,
+            microsoft=await microsoft_offered(session, user),
+        )
 
 
 async def accept_invite(request: Request, *, token: str, password: str) -> SignIn:
-    """The invitee's own password, and a session waiting for its first factor
-    (design §2.2: the person reaches the console only after registering one).
-    A refused password rolls the `consume` back: the link stays usable."""
+    """The invitee's own password. A technician: a session waiting for the
+    first factor (design §2.2: the person reaches the console only after
+    registering one). A contact: signed in, the portal granted
+    (`contact_admitted`). A refused password rolls the `consume` back: the
+    link stays usable."""
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
     async with _identity_session(org_id, _engine(request)) as session:
-        user = await _invited(session, token, consume=True)
+        user = await invitee(session, digest=action_tokens.digest(token), consume=True)
         # Raises a 422 that rolls the `consume` back: the link stays usable.
         await staff_password.require_acceptable(
             password,
             email=user.email,
             display_name=user.display_name,
             org_name=await staff_password.organization_name(session, org_id),
+            minimum=staff_password.minimum_for(user.kind),
         )
         await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
         await _audit(session, user, "auth.password_changed", {"via": "invite"})
+        if user.kind == CONTACT_KIND:
+            return await contact_admitted(session, request, user, method="password")
         return await started(session, request, user, state="enroll_required")
+
+
+async def invite_passkey_options(request: Request, *, token: str) -> dict[str, Any]:
+    """The creation options of a contact's first passkey, from the invitation
+    (D40): discoverable (D28), user verification required. Leaves the link
+    unused. A technician's invitation chooses a password (409)."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    rp_id, _origin = relying_party(request.app.state.settings)
+    async with _identity_session(org_id, _engine(request)) as session:
+        user = await invitee(session, digest=action_tokens.digest(token), consume=False)
+        if user.kind != CONTACT_KIND:
+            raise _unavailable()
+        return await registration_options(
+            session, user, rp_id=rp_id, rp_name=notices.PRODUCT, discoverable=True
+        )
+
+
+async def invite_passkey(
+    request: Request, *, token: str, credential: dict[str, Any], name: str
+) -> SignIn:
+    """A contact accepts with a passkey. Task 8's decision 2 (B2-30): the link
+    is consumed under its row lock BEFORE the passkey is verified; a refused
+    passkey puts it back (`used_at` NULL), the challenge stays spent, and the
+    block commits both before the 400 (`_passkey_rejected`: 400, not 401,
+    where the page is not a sign-in screen). A technician's invitation
+    chooses a password (409), and its link is left as it was."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    rp_id, origin = relying_party(request.app.state.settings)
+    digest = action_tokens.digest(token)
+    result: SignIn | None = None
+    async with _identity_session(org_id, _engine(request)) as session:
+        # The kind first, with the link left as it is: a technician's is a
+        # 409 that spends nothing.
+        if (await invitee(session, digest=digest, consume=False)).kind != CONTACT_KIND:
+            raise _unavailable()
+        # Then consumed in the lock order -- the person, then the link
+        # (`_consumed`) -- with every check made again under the locks.
+        row, user = await _invitation(session, digest=digest, consume=True)
+        try:
+            await verify_registration(
+                session, user, credential, name=name, expected_origin=origin, rp_id=rp_id
+            )
+        except PasskeyRejected:
+            # The challenge was spent in THIS transaction (`passkeys.py`); the
+            # link is put back in it, and the block commits both before the
+            # refusal. Nobody else took the link meanwhile: its row is locked.
+            row.used_at = None
+            await session.flush()
+        else:
+            # A2-47: audited as every passkey is (`enroll_passkey`); no
+            # notice, as a password chosen here has none -- the person is on
+            # the page, accepting.
+            await _audit(session, user, "auth.factor_added", {"factor": "passkey", "name": name})
+            result = await contact_admitted(session, request, user, method="passkey")
+    if result is None:
+        raise _passkey_rejected(status.HTTP_400_BAD_REQUEST)
+    return result
 
 
 # --------------------------------------------------------------------------- #

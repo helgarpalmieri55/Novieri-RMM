@@ -20,8 +20,10 @@ design §2, §6.4).
     POST   /auth/logout, /auth/logout-everywhere
     POST   /auth/password/forgot            202 for every address (429 per IP)
     POST   /auth/password/reset             a one-time link
-    POST   /auth/invite/details             who a one-time invitation is for
-    POST   /auth/invite/accept              its password -> the first factor
+    POST   /auth/invite/details             who a one-time invitation is for, and how to accept it
+    POST   /auth/invite/accept              its password -> the first factor (a contact: signed in)
+    POST   /auth/invite/passkey/options     a contact's first passkey: the creation options
+    POST   /auth/invite/passkey             the attestation    -> signed in (contacts)
     POST   /auth/recover/details            who the server's recovery link is for
     POST   /auth/recover/accept             the factors go (a mailed password too) -> a new factor
     GET    /me/security                     the caller's factors, devices, sessions
@@ -241,10 +243,14 @@ class RecoveryAcceptIn(BaseModel):
 
 
 class InviteOut(BaseModel):
-    """Who an invitation is for, for its page."""
+    """Who an invitation is for, and how they may accept it, for its page."""
 
     email: str
     display_name: str
+    kind: Literal["staff", "contact"] = Field(description="A technician or a client's contact.")
+    password_minimum: int = Field(description="The shortest password this person may choose.")
+    passkey: bool = Field(description="The invitation may be accepted with a passkey (contacts).")
+    microsoft: bool = Field(description="The invitation may be accepted with Microsoft.")
 
 
 class RecoveryOut(BaseModel):
@@ -607,9 +613,9 @@ async def reset_password(body: ResetIn, request: Request) -> Response:
 
 @router.post("/invite/details", response_model=InviteOut, dependencies=[Depends(_LINK)])
 async def invite_details(body: LinkTokenIn, request: Request) -> InviteOut:
-    """The address and the name an invitation is for. Leaves the link unused."""
-    email, name = await flows.invite_details(request, token=body.token)
-    return InviteOut(email=email, display_name=name)
+    """The address and the name an invitation is for, and how it may be
+    accepted. Leaves the link unused."""
+    return InviteOut(**vars(await flows.invite_details(request, token=body.token)))
 
 
 @router.post(
@@ -619,8 +625,45 @@ async def invite_details(body: LinkTokenIn, request: Request) -> InviteOut:
     dependencies=[Depends(_LINK)],
 )
 async def accept_invite(body: InviteAcceptIn, request: Request, response: Response) -> SignInOut:
-    """Choose a password through an invitation; the first factor comes next."""
+    """Choose a password through an invitation. A technician's first factor
+    comes next; a contact is signed in."""
     step = await flows.accept_invite(request, token=body.token, password=body.password)
+    return _answer(response, step)
+
+
+class InvitePasskeyOptionsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A one-time link's token: a secret, no Pydantic bound (`LinkTokenIn`).
+    token: str
+
+
+class InvitePasskeyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A one-time link's token: a secret, no Pydantic bound (`LinkTokenIn`).
+    token: str
+    credential: dict[str, Any]
+    name: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/invite/passkey/options", dependencies=[Depends(_LINK)])
+async def invite_passkey_options(body: InvitePasskeyOptionsIn, request: Request) -> dict[str, Any]:
+    """A contact's first passkey, from the invitation: the creation options.
+    Leaves the link unused."""
+    return await flows.invite_passkey_options(request, token=body.token)
+
+
+@router.post(
+    "/invite/passkey",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_LINK)],
+)
+async def invite_passkey(body: InvitePasskeyIn, request: Request, response: Response) -> SignInOut:
+    """Accept a contact's invitation with a passkey: signed in. A refused
+    passkey leaves the link usable."""
+    step = await flows.invite_passkey(
+        request, token=body.token, credential=body.credential, name=body.name
+    )
     return _answer(response, step)
 
 

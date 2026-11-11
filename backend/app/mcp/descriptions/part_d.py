@@ -124,7 +124,11 @@ PART_D: dict[str, str] = {
     ),
     "GET /api/v1/clients/{client_id}/contacts": (
         "Lists a client's contacts, the people of that client who will use the portal, with "
-        "their status."
+        "their status and whether each can sign in to the portal (none, invited or active)."
+    ),
+    "DELETE /api/v1/clients/{client_id}/contacts/{contact_id}/invite": (
+        "Cancels a contact's pending portal invitation: the link stops working and the contact "
+        "stays. A 409 when none is pending."
     ),
     "POST /api/v1/clients/{client_id}/contacts": (
         "Adds a contact to a client. A contact cannot sign in to the console; an email address "
