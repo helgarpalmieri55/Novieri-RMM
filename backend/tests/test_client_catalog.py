@@ -636,6 +636,14 @@ ORG_WIDE_KEYS: dict[str, str] = {
         "belongs to (`its_person_account_guard`). It is an identity, not a name -- a "
         "`users.id` nobody types -- so a collision tells nobody another client's names"
     ),
+    "uq_auth_external_identities_subject": (
+        "an identity, not a name: (tid, oid) of a Microsoft account its holder proved "
+        "(migration 0246, own-authentication phase 2, decision 1). One account is one person "
+        "in the organisation, as Microsoft keys it ([M5]: tid and oid as a combined key). "
+        "Written only by `entra_flows` under scope all, for the session's or the invitation's "
+        "own person. Per client, one Microsoft account could sign in as a person in each "
+        "client"
+    ),
 }
 
 

@@ -13,6 +13,10 @@ contact's address is "nobody" here -- the same answer, after the same work.
 
 A RAW CONNECTION WITH NO GUC (Task 1's contract): the function needs no
 organization pinned, and none is.
+
+`org_of_slug` is the third such read (0246): the organization of a slug, for a
+sign-in that has no address to look up, and for phase 3's anonymous OAuth
+routes, which must not open the admin engine to find it.
 """
 
 from dataclasses import dataclass
@@ -45,3 +49,14 @@ async def find_staff(engine: AsyncEngine, *, org_slug: str, email: str) -> PreId
     if row is None:
         return None
     return PreIdentity(user_id=row.user_id, org_id=row.org_id, status=row.status)
+
+
+async def org_of_slug(engine: AsyncEngine, slug: str) -> UUID | None:
+    """The organization `slug` names, or None (`its_auth_org`, migration 0246;
+    plan decision D36): what a sign-in that brings no address -- a passkey
+    without one, Microsoft -- pins before it reads anything under RLS."""
+    async with engine.connect() as connection:
+        value: UUID | None = (
+            await connection.execute(text("SELECT its_auth_org(:slug)"), {"slug": slug})
+        ).scalar_one()
+    return value
