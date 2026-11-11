@@ -11,11 +11,27 @@ claim and uvicorn does not put it on the wire before the handshake completes.
 Codes: 4401 no live signed-in session; 4403 another origin, or an identity the
 door refuses; 4409 (screen) past the door, no live screen session to join.
 
-EVERY CALL IS BOUNDED (`_messages`'s `wait_s`, 5 s by default): a socket still
-open when it runs out answers with what it sent so far, so a door that stops
-refusing fails on the assertion about its close code instead of hanging the
-run. A refusal also tells the socket the browser left (`disconnect_after`), so
-a regression that accepts goes on to close rather than wait.
+EVERY CALL IS BOUNDED (`_messages`'s `wait_s`, `SOCKET_WITHIN_S` by default):
+a socket still open when it runs out answers with what it sent so far, so a
+door that stops refusing fails on the assertion about its close code instead of
+hanging the run. A refusal also tells the socket the browser left
+(`disconnect_after`), so a regression that accepts goes on to close rather than
+wait.
+
+NO STEP IS GIVEN A FIXED TIME TO HAPPEN IN. Each test waits for the thing
+itself -- the socket's accept (`opened`), the screen's tunnel starting
+(`_open_screen`) -- within a bound far past any pause measured, and nothing
+waits for the bound when the doors work. They used to: the live socket was
+given 0.3 s to open, the screen 5 s for its tunnel to start, the session's
+maximum 1.5 s from being set to the door reading it. This process stops for a
+full garbage collection whenever one is due, and how long that takes grows
+with the run, because the heap does (measured 2026-11-11, own authentication
+phase 2: ~0.25 s with this file alone; 0.5-0.65 s a few hundred tests in;
+4.5-5.0 s by this file's place in the full suite, at ~5 M objects; in a
+112-test sample, 86% of the growth was the tests' engines, kept alive by
+SQLAlchemy's per-mapper statement caches). So each of those budgets failed
+whenever a collection landed inside it -- not because a door was slow: with
+collection off, the doors take the same ~36 ms before and after phase 2.
 """
 
 import asyncio
@@ -39,6 +55,18 @@ from app.models.auth import AuthSession
 from app.modules.remote.service import SCREEN
 from tests.session_support import CONSOLE, cookie_header, sign_in, use_console
 
+#: How long a socket may take to OPEN -- the door's reads, then its accept or
+#: the screen's tunnel starting -- before a test calls it broken (module
+#: docstring: far past the longest pause measured; nothing waits for it when
+#: the door works, and a door that refuses ends the wait at once).
+OPEN_WITHIN_S = 30.0
+
+#: The whole life of a socket a test drives: its opening, then whatever the
+#: test does and the re-check that answers it, each of which a pause can
+#: lengthen. Shorter than the screen re-check a test sets to 3600 s, so a
+#: deadline that is not honoured stays open past it and fails.
+SOCKET_WITHIN_S = OPEN_WITHIN_S + 30.0
+
 
 @pytest.fixture(autouse=True)
 def _console(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,12 +80,14 @@ async def _messages(
     cookie: str,
     origin: str | None,
     disconnect_after: bool = False,
-    wait_s: float = 5.0,
+    wait_s: float = SOCKET_WITHIN_S,
+    opened: asyncio.Event | None = None,
 ) -> list[dict[str, Any]]:
     """Every message the route sent, offered NO subprotocol (what the
     console's `new WebSocket(url)` sends once Task 10 drops the token), within
     `wait_s`: a route still running then is cancelled, and what it had sent
-    is the answer (module docstring)."""
+    is the answer (module docstring). `opened`, if given, is set when the
+    route accepts: the moment a test may act on an open socket."""
     sent: list[dict[str, Any]] = []
     inbound: list[dict[str, Any]] = [{"type": "websocket.connect"}]
 
@@ -71,6 +101,8 @@ async def _messages(
 
     async def send(message: dict[str, Any]) -> None:
         sent.append(message)
+        if opened is not None and message["type"] == "websocket.accept":
+            opened.set()
 
     headers = [(b"host", b"itms.test"), (b"cookie", cookie.encode())]
     if origin is not None:
@@ -102,6 +134,20 @@ def _closes(messages: list[dict[str, Any]]) -> list[int]:
 
 def _accepted(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [m for m in messages if m["type"] == "websocket.accept"]
+
+
+async def _until(event: asyncio.Event, socket: asyncio.Task[list[dict[str, Any]]]) -> None:
+    """Wait until `event` is set, or until `socket` ends first -- a door that
+    refuses ends the wait at once, and the test's assertions then say what it
+    sent -- for at most `OPEN_WITHIN_S`."""
+    waiter = asyncio.create_task(event.wait())
+    try:
+        await asyncio.wait(
+            {waiter, socket}, timeout=OPEN_WITHIN_S, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
 
 
 async def _reader(env: Any, *, factor_done: bool = True) -> Any:
@@ -170,12 +216,21 @@ async def test_the_live_socket_closes_when_its_session_ends(
     4401 on the next check. Protects `recheck` in `ws.py::_admit_session`."""
     monkeypatch.setattr(ws_module, "RECHECK_INTERVAL_S", 0.2)
     org_id, signed = await _reader(api_env)
+    opened = asyncio.Event()
     task = asyncio.create_task(
         _messages(
-            api_env, "/api/v1/ws", cookie=cookie_header(signed.token), origin=CONSOLE, wait_s=10
+            api_env,
+            "/api/v1/ws",
+            cookie=cookie_header(signed.token),
+            origin=CONSOLE,
+            opened=opened,
         )
     )
-    await asyncio.sleep(0.3)
+    # Open first, then end the session: the claim is about an OPEN socket.
+    # (A fixed 0.3 s here lost to a full collection that held the door past
+    # it: the session ended first, and the door refused 4401 before any
+    # accept -- module docstring.)
+    await _until(opened, task)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         await end(s, signed.session_id, "signed_out")
     sent = await task
@@ -327,19 +382,28 @@ def _live_screen(
 
 
 async def _open_screen(
-    env: Any, sid: UUID, token: str, seen: dict[str, Any], *, wait_s: float = 10.0
+    env: Any, sid: UUID, token: str, seen: dict[str, Any]
 ) -> asyncio.Task[list[dict[str, Any]]]:
-    """The screen, opened from the console and running (the tunnel started)."""
+    """The screen, opened from the console and running (the tunnel started).
+
+    Waits for the tunnel to start, within `OPEN_WITHIN_S` (it gave it 5 s,
+    which a full collection late in the suite outlasts: module docstring), or
+    for the socket to end first -- a door that refuses then fails HERE on what
+    it sent, instead of on a timeout that cannot tell refused from slow."""
     task = asyncio.create_task(
         _messages(
             env,
             f"/api/v1/remote/sessions/{sid}/screen",
             cookie=cookie_header(token),
             origin=CONSOLE,
-            wait_s=wait_s,
         )
     )
-    await asyncio.wait_for(seen["started"].wait(), timeout=5)
+    await _until(seen["started"], task)
+    assert seen["started"].is_set(), (
+        f"the screen did not open: {task.result()}"
+        if task.done()
+        else f"the screen did not open within {OPEN_WITHIN_S} s"
+    )
     return task
 
 
@@ -438,19 +502,29 @@ async def test_the_screen_closes_at_its_sessions_maximum(
 ) -> None:
     """The absolute maximum (`expires_at`) stops the screen by itself, with no
     re-check due: the interval here is longer than the whole test. Protects
-    the deadline in `watch_tunnel_session`."""
+    the deadline in `watch_tunnel_session`.
+
+    The DOOR reads the session as of the moment the maximum was set (`_now`,
+    which `resolve` asks), however long the opening then takes: a full
+    collection longer than the 1.5 s, landing between this row and the door,
+    used to make the door find the session past its maximum and refuse the
+    screen before it opened (module docstring). The WATCHDOG's deadline runs
+    on the real clock (`time.time()` in `watch_tunnel_session`); that deadline
+    is the claim, and nothing here moves it."""
     monkeypatch.setattr(tunnel_module, "RECHECK_INTERVAL_S", 3600.0)
     org_id, signed = await _technician(api_env)
     sid = await _screen_session(api_env, org_id, signed.user_id)
+    set_at = datetime.now(UTC)
     async with AsyncSession(api_env.admin_engine) as s:
         await s.execute(
             update(AuthSession)
             .where(AuthSession.id == signed.session_id)
-            .values(expires_at=datetime.now(UTC) + timedelta(seconds=1.5))
+            .values(expires_at=set_at + timedelta(seconds=1.5))
         )
         await s.commit()
+    monkeypatch.setattr(sessions_module, "_now", lambda: set_at)
     seen = _live_screen(api_env, monkeypatch, sid, hold=True)
-    task = await _open_screen(api_env, sid, signed.token, seen, wait_s=6.0)
+    task = await _open_screen(api_env, sid, signed.token, seen)
 
     sent = await task
     assert _accepted(sent)
@@ -478,7 +552,7 @@ async def test_an_unattended_open_screen_is_idle_ended(
     org_id, signed = await _technician(api_env)
     sid = await _screen_session(api_env, org_id, signed.user_id)
     seen = _live_screen(api_env, monkeypatch, sid, hold=True)
-    task = await _open_screen(api_env, sid, signed.token, seen, wait_s=6.0)
+    task = await _open_screen(api_env, sid, signed.token, seen)
 
     # 29 minutes without activity: not idle yet, and the re-checks that run
     # now must not renew it.
