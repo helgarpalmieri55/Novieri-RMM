@@ -62,6 +62,8 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
         ("POST", f"/api/v1/auth/{path}"): reason
         for path, reason in (
             ("login", "takes a password and mints a session cookie"),
+            ("passkey/options", "issues a passkey challenge for a sign-in without an address"),
+            ("passkey", "takes a passkey assertion and mints a session cookie"),
             ("factor/totp", "takes a second-factor code and mints a session cookie"),
             ("factor/recovery", "takes a recovery code and mints a session cookie"),
             ("factor/passkey/options", "issues a passkey challenge for a sign-in"),

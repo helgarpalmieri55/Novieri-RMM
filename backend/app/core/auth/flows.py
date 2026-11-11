@@ -1,15 +1,16 @@
 """Signing in, before -- and around -- the console session (design §2).
 
 EVERY FUNCTION HERE STARTS FROM SOMETHING THE DOOR DOES NOT ADMIT: an address
-and a password, a session waiting for its second factor, a one-time link. So
-the organization comes first -- from `its_auth_principal` (`lookup`), from the
-session's own row (`sessions.resolve`) or from the link (`action_tokens`) --
-and everything else is read and written under `_identity_session`: that
-organization and EVERY client. A technician's auth rows belong to no client
-(`O("users", "user_id")`, `users.client_id` NULL), and migration 0231's O
-policies let only an every-client scope write such a row. This module is the
-reviewed place that holds that scope for sign-in (`ALL_SCOPE_ALLOWLIST`); a
-route file never does.
+and a password, a session waiting for its second factor, a one-time link, a
+passkey alone. So the organization comes first -- from `its_auth_principal`
+(`lookup`), from the session's own row (`sessions.resolve`), from the link
+(`action_tokens`) or, for a passkey without an address, from the deployment's
+slug alone (`its_auth_org`, phase 2) -- and everything else is read and
+written under `_identity_session`: that organization and EVERY client. A
+technician's auth rows belong to no client (`O("users", "user_id")`,
+`users.client_id` NULL), and migration 0231's O policies let only an
+every-client scope write such a row. This module is the reviewed place that
+holds that scope for sign-in (`ALL_SCOPE_ALLOWLIST`); a route file never does.
 
 WHAT A REFUSAL TELLS (design §2.3, plan decision 5). Before the password is
 proved, one answer for everything, after one argon2 verification. After it,
@@ -62,12 +63,13 @@ from app.core.auth.guards import (
     signed_user,
 )
 from app.core.auth.keys import UnknownKeyVersion
-from app.core.auth.lookup import find_person
+from app.core.auth.lookup import find_person, org_of_slug
 from app.core.auth.methods import contact_may_reset
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
     registration_options,
+    unanswerable_options,
     verify_authentication,
     verify_registration,
 )
@@ -101,7 +103,7 @@ from app.core.rate_limit import hit
 from app.core.rbac_admin import SUPER_ADMIN
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
-from app.models import Role, User, UserRole
+from app.models import Organization, Role, User, UserRole
 from app.models.auth import AuthPassword, AuthSession, AuthTrustedDevice
 
 #: How long a pending session may take to finish enrolling (plan decision 6).
@@ -162,6 +164,18 @@ def _invalid_credentials() -> AuthRefusal:
     )
 
 
+def _no_organization() -> AuthRefusal:
+    """No `ITS_DEFAULT_ORG_SLUG`: a fact about the installation, the same for
+    every caller, so it may be said."""
+    return AuthRefusal(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        code="sign_in_unavailable",
+        detail=tr(
+            "signing in is not set up on this installation: it names no organization to sign in to"
+        ),
+    )
+
+
 def _factor_failed(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRefusal:
     """401 on the public sign-in screen; 400 where the console calls it with a
     session open -- a step-up, an enrolment -- because there a 401 ends the
@@ -170,6 +184,18 @@ def _factor_failed(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRefus
         status_code,
         code="factor_failed",
         detail=tr("the second factor was not accepted; try again"),
+    )
+
+
+def _passkey_rejected(status_code: int = status.HTTP_401_UNAUTHORIZED) -> AuthRefusal:
+    """A passkey that is not accepted, whatever the reason (W3C: indistinguishable
+    from "no such credential"). 401 on the sign-in screen (`passkey_sign_in`);
+    400 where a session is open -- an enrolment -- because there a 401 ends it,
+    as `_factor_failed` says."""
+    return AuthRefusal(
+        status_code,
+        code="passkey_rejected",
+        detail=tr("the passkey was not accepted; try again"),
     )
 
 
@@ -312,14 +338,7 @@ async def _password_matches(org_id: UUID, plain: str, stored: AuthPassword) -> b
 async def login(request: Request, *, email: str, password: str) -> SignIn:
     slug = request.app.state.settings.default_org_slug
     if not slug:
-        raise AuthRefusal(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            code="sign_in_unavailable",
-            detail=tr(
-                "signing in is not set up on this installation: it names no organization to "
-                "sign in to"
-            ),
-        )
+        raise _no_organization()
     if not password or len(password) > staff_password.SUBMITTED_MAX:
         # Plan decision 16: the bound lives here, not on `LoginIn` (a field
         # failure repeats the password in its 422). No password the rule
@@ -531,11 +550,20 @@ async def _passkey_matches(
 
     `PasskeyRejected` is caught HERE, never let through the caller's block:
     Task 5 spent the challenge in this transaction, and only a commit keeps
-    it spent (`passkeys.py`, "THE CALLER'S TRANSACTION")."""
+    it spent (`passkeys.py`, "THE CALLER'S TRANSACTION").
+
+    THE CHALLENGE MUST BE THIS PERSON'S (`owner`, phase 2 Task 6, decision 4):
+    since `/auth/passkey/options` issues challenges that are nobody's, one of
+    those must not answer this step."""
     rp_id, origin = relying_party(request.app.state.settings)
     try:
         key = await verify_authentication(
-            session, credential, expected_origin=origin, rp_id=rp_id, purpose=purpose
+            session,
+            credential,
+            expected_origin=origin,
+            rp_id=rp_id,
+            purpose=purpose,
+            owner=user.id,
         )
     except PasskeyRejected:
         key = None
@@ -677,7 +705,15 @@ async def enroll_passkey_options(request: Request, principal: SessionPrincipal) 
     rp_id, _origin = relying_party(request.app.state.settings)
     async with _identity_session(principal.org_id, _engine(request)) as session:
         user = await _enrollable(session, principal)
-        return await registration_options(session, user, rp_id=rp_id, rp_name=notices.PRODUCT)
+        # A contact's passkey signs in without an address, so the browser must
+        # make it discoverable or fail (phase 2 Task 6, decision 3; D28).
+        return await registration_options(
+            session,
+            user,
+            rp_id=rp_id,
+            rp_name=notices.PRODUCT,
+            discoverable=user.kind == CONTACT_KIND,
+        )
 
 
 async def enroll_passkey(
@@ -707,11 +743,7 @@ async def enroll_passkey(
                 factor="passkey",
             )
     if rejected:
-        raise AuthRefusal(
-            status.HTTP_400_BAD_REQUEST,
-            code="passkey_rejected",
-            detail=tr("the passkey was not accepted; try again"),
-        )
+        raise _passkey_rejected(status.HTTP_400_BAD_REQUEST)
     await _enrolled(request, principal)
 
 
@@ -853,6 +885,104 @@ async def step_up_password(request: Request, principal: SessionPrincipal, *, pas
             )
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
+
+
+# --------------------------------------------------------------------------- #
+# a passkey alone, without an address (phase 2, Task 6; design §3, D28)
+# --------------------------------------------------------------------------- #
+
+#: The `organizations.status` whose people may sign in (the column's default;
+#: `Organization.status`).
+_ORG_ACTIVE = "active"
+
+
+async def _deployment_org(request: Request) -> UUID | None:
+    """The organization a sign-in without an address signs in to: the
+    deployment's (`default_org_slug`), through `its_auth_org` (D36). No slug
+    is the installation's 503, as `login` says it. A slug that names no
+    organization is None, which the callers answer as they answer everybody
+    else (Task 6 review note): `org_of_slug` names an organization whatever its
+    status, and nothing for a slug that names none."""
+    slug = request.app.state.settings.default_org_slug
+    if not slug:
+        raise _no_organization()
+    return await org_of_slug(_engine(request), slug)
+
+
+async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
+    """A challenge that belongs to nobody yet, and no list of credentials:
+    the browser offers the person's own discoverable passkeys (D28). Nothing
+    in the answer says whether any address has an account -- nor whether the
+    organization is active or exists: a suspended one is issued a challenge
+    like an active one, and a slug that names none gets options of the same
+    shape whose challenge is stored nowhere (`unanswerable_options`).
+
+    THE TIME IS NOT THE SAME for a slug that names none: it opens no
+    session, sweeps nothing and inserts nothing, so it answers sooner. That
+    tells nobody anything they could choose to ask: the slug is the server's
+    configuration (`ITS_DEFAULT_ORG_SLUG`), never part of the request."""
+    rp_id, _origin = relying_party(request.app.state.settings)
+    org_id = await _deployment_org(request)
+    if org_id is None:
+        return unanswerable_options(rp_id=rp_id)
+    async with _identity_session(org_id, _engine(request)) as session:
+        return await authentication_options(
+            session, None, org_id=org_id, rp_id=rp_id, purpose="authenticate"
+        )
+
+
+async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> SignIn:
+    """A contact's passkey alone: user verification required and checked
+    (Task 5 of phase 1), so it is two factors and the session is complete
+    (D27). Refused alike -- 401 `passkey_rejected` -- for an unknown, spent
+    or forged assertion, a technician's passkey (decision 1), a person not
+    active, a passkey factor locked or waiting (decision 2), and an
+    organization that is not active or that the slug does not name (Task 6
+    review note). Nothing is counted (decision 2). The challenge is spent in
+    this transaction, which commits before the refusal (`passkeys.py`, "THE
+    CALLER'S TRANSACTION").
+
+    WHERE EACH IS REFUSED. The assertion is verified before anything about
+    the organization is looked at: a suspended organization's is verified in
+    full, as an active one's, and then refused. A slug that names no
+    organization goes through the same verification call, pinned to
+    `_NO_ORG`, which holds no challenge: it is refused AT THE CHALLENGE, as a
+    replayed or expired assertion is -- sooner than one whose signature is
+    checked. Its answer is the same; its time may differ, and the slug is
+    the server's configuration, never the request's, so nobody can choose
+    to probe with it."""
+    rp_id, origin = relying_party(request.app.state.settings)
+    org_id = await _deployment_org(request) or _NO_ORG
+    result: SignIn | None = None
+    async with _identity_session(org_id, _engine(request)) as session:
+        try:
+            key = await verify_authentication(
+                session, credential, expected_origin=origin, rp_id=rp_id, purpose="authenticate"
+            )
+        except PasskeyRejected:
+            key = None
+        organization = await session.get(Organization, org_id)
+        user = await session.get(User, key.user_id) if key is not None else None
+        if (
+            organization is not None
+            and organization.status == _ORG_ACTIVE
+            and user is not None
+            and user.kind == CONTACT_KIND
+            and user.status == ACTIVE_STATUS
+        ):
+            state = await check_allowed(session, user.id, "passkey")
+            if state.allowed:
+                # No password was presented: the "password set by mail" mark
+                # stays (fix round 1, coordinator decision; not the plan's
+                # Step 4). The passkey's failures are cleared.
+                await record_success(session, user.id, "passkey", clear_mail_mark=False)
+                await _audit(
+                    session, user, "auth.signed_in", {"method": "passkey", "trusted_device": False}
+                )
+                result = await started(session, request, user, state="signed_in", factor_done=True)
+    if result is None:
+        raise _passkey_rejected()
+    return result
 
 
 # --------------------------------------------------------------------------- #

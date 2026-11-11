@@ -761,7 +761,9 @@ async def test_a_passkey_signs_in_only_as_its_own_person(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`flows._passkey_matches` checks the passkey's owner, and hands Task 5
-    the console's own origin and host (`csrf.console_origin`/`console_host`)."""
+    the console's own origin and host (`csrf.console_origin`/`console_host`)
+    -- and, since phase 2 (Task 6, decision 4), the person whose challenge it
+    must be (`owner`)."""
     org = await auth_env.create_org("passkey")
     who = await signed_in(auth_env, org, "technician")
     other = await signed_in(auth_env, org, "technician")
@@ -776,9 +778,20 @@ async def test_a_passkey_signs_in_only_as_its_own_person(
         return {"challenge": "Y2hhbGxlbmdl"}
 
     async def verify(
-        session: Any, credential: dict[str, Any], *, expected_origin: str, rp_id: str, purpose: str
+        session: Any,
+        credential: dict[str, Any],
+        *,
+        expected_origin: str,
+        rp_id: str,
+        purpose: str,
+        owner: Any,
     ) -> AuthPasskey:
-        assert (expected_origin, rp_id, purpose) == (CONSOLE, "itms.test", "authenticate")
+        assert (expected_origin, rp_id, purpose, owner) == (
+            CONSOLE,
+            "itms.test",
+            "authenticate",
+            who.user_id,
+        )
         wanted = mine if credential["id"] == "mine" else theirs
         return (
             await session.execute(select(AuthPasskey).where(AuthPasskey.id == wanted))

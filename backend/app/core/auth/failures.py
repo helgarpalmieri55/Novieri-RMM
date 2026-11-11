@@ -330,7 +330,9 @@ async def _clear_devices(session: AsyncSession, user_id: UUID) -> None:
     )
 
 
-async def record_success(session: AsyncSession, user_id: UUID, factor: Factor) -> None:
+async def record_success(
+    session: AsyncSession, user_id: UUID, factor: Factor, *, clear_mail_mark: bool = True
+) -> None:
     """Clear the factor's failures -- for the password, the account's row and
     every device's count, whichever browser succeeded -- unless it is
     disabled, which only `reset_factor` undoes.
@@ -340,8 +342,14 @@ async def record_success(session: AsyncSession, user_id: UUID, factor: Factor) -
     set by mail" mark (`AuthPassword.mail_reset_at`, operator decision
     2026-11-05): whoever set that password holds a factor too, so an
     administrator's factor reset is no longer refused. The password's own
-    success is not a second factor and leaves it."""
-    if factor != "password":
+    success is not a second factor and leaves it.
+
+    `clear_mail_mark=False` leaves the mark for a factor used ALONE, with no
+    password presented -- a contact's passkey without an address (own
+    authentication phase 2, Task 6, coordinator decision of the fix round):
+    nothing then shows who set the password, so the mark stays for a later
+    contact access reset to read. The failures are cleared all the same."""
+    if factor != "password" and clear_mail_mark:
         await session.execute(
             update(AuthPassword)
             .where(AuthPassword.user_id == user_id, AuthPassword.mail_reset_at.is_not(None))
