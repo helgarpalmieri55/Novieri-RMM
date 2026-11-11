@@ -4,7 +4,7 @@
 PERSONAL. Every query below is the caller's OWN rows, by the `user_id` of the
 session the door admitted -- never a request field: an id in a path
 (`/me/passkeys/{id}`) is matched together with that `user_id`, so another
-person's id is a 404. The SCOPE depends on who the caller is (`_own_session`):
+person's id is a 404. The SCOPE depends on who the caller is (`own_session`):
 
 - A TECHNICIAN runs under every client, for the reason `own_profile.py` gives:
   their auth rows are global rows of an O table, which a per-client scope may
@@ -41,7 +41,13 @@ from app.core.auth import notices, staff_password
 from app.core.auth.devices import presented, revoke, revoke_all_for_user
 from app.core.auth.factors import count_failure, gate, lock_person, summary
 from app.core.auth.failures import record_success
-from app.core.auth.guards import require_fresh, sign_in_again, signed_user
+from app.core.auth.guards import (
+    lock_user_row,
+    require_fresh,
+    require_live,
+    sign_in_again,
+    signed_user,
+)
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.methods import has_password, has_sign_in_method
 from app.core.auth.passwords import verify_password
@@ -125,7 +131,7 @@ class MySecurity:
 
 
 @asynccontextmanager
-async def _own_session(
+async def own_session(
     principal: SessionPrincipal, request: Request, clients: ClientScope
 ) -> AsyncIterator[AsyncSession]:
     """See the module docstring: the caller's own auth rows. The scope is an
@@ -135,7 +141,18 @@ async def _own_session(
     named another). Anything else -- a contact handed every client, which the
     door never does, or a kind this list does not name -- is refused (401
     `auth_required`) before a session opens: it fails closed rather than
-    reopening 5a."""
+    reopening 5a.
+
+    THE PERSON FIRST (own authentication phase 2, Task 9b): the caller's
+    `users` row is locked FOR NO KEY UPDATE before anything else is read or
+    written (`guards.lock_user_row`), the order every writer of a person's
+    rows keeps and every sign-in step of theirs too (`flows`' module
+    docstring). An act here then never interleaves with one of those on the
+    same rows: a factor step that read a passkey this removes, or a reset of
+    the person's access. A scope that cannot see the row (a contact naming
+    another client) locks nothing, and `signed_user` refuses it.
+
+    Public since Task 9b (D2): `entra_flows.unlink` opens it too."""
     engine: AsyncEngine = request.app.state.app_engine
     if principal.kind == STAFF_KIND:
         scope = ClientScope.all()
@@ -144,6 +161,7 @@ async def _own_session(
     else:
         raise sign_in_again()
     async with org_session(principal.org_id, engine=engine, clients=scope) as session:
+        await lock_user_row(session, principal.user_id)
         yield session
 
 
@@ -178,7 +196,7 @@ async def my_security(
     # read does not renew the device as `devices.recognised` would.
     here = cookie_token(request, DEVICE_COOKIE)
     here_hash = token_hash(here) if here is not None else None
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         _has_passkey, has_totp, codes = await summary(session, user.id)
         password = await has_password(session, user.id)
@@ -326,7 +344,7 @@ async def change_password(
     or change, and the refusal raised after the block commits the count."""
     require_fresh(principal)
     changed: tuple[str, datetime] | None = None
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         stored = await session.get(AuthPassword, user.id)
         device = await presented(session, user.id, request)
@@ -408,21 +426,6 @@ def _password_exists() -> AuthRefusal:
     )
 
 
-async def _require_live(session: AsyncSession, principal: SessionPrincipal) -> None:
-    """Under `lock_person`: the caller's session has not ended since the door
-    admitted it (plan 2026-11-06, A2-38). A reset of the person's access
-    takes the same lock (`factors.clear_second_factors`), so one that won
-    the race has committed by now, and what it meant to cut must not add a
-    way in after it."""
-    live = await session.scalar(
-        select(AuthSession.id).where(
-            AuthSession.id == principal.session_id, AuthSession.ended_at.is_(None)
-        )
-    )
-    if live is None:
-        raise sign_in_again()
-
-
 async def add_password(
     request: Request, principal: SessionPrincipal, *, new: str, clients: ClientScope
 ) -> None:
@@ -437,10 +440,14 @@ async def add_password(
     somebody does who fears for the account, and the notice goes all the
     same (design §2.7)."""
     require_fresh(principal)
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
-        await _require_live(session, principal)
+        # A2-38: under `lock_person` the caller's session has not ended since
+        # the door admitted it. A reset of the person's access takes the same
+        # lock (`factors.clear_second_factors`), so one that won the race has
+        # committed by now, and what it meant to cut must not add a way in.
+        await require_live(session, principal)
         if await has_password(session, user.id):
             raise _password_exists()
         # A refused password raises its 422 here, before anything is written.
@@ -482,7 +489,7 @@ async def remove_passkey(
     (`last_method`, decision 2). Under the person's lock: two removals at
     once each see the other's key still there, and without it both would
     pass and leave no way in."""
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         key = (
@@ -530,7 +537,7 @@ async def remove_totp(
     factor (`last_factor`); a contact's is optional (D27), and their
     recovery codes go with it (decision 3, B2-06): codes made for an app
     that is gone must not come back as the backup of the next one."""
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         has_passkey, has_totp, _codes = await summary(session, user.id)
@@ -558,12 +565,12 @@ async def new_recovery_codes(
     only with an authenticator app (decision 3, B2-06): with none, 409
     `method_unavailable` -- a passkey is a contact's way in, not a second
     factor (operator decision C5), and codes back up a second factor."""
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         await lock_person(session, user.id)
         # A2-38, as `add_password`: a reset that won the lock has wiped the
         # codes; the session it cut must not mint new ones after it.
-        await _require_live(session, principal)
+        await require_live(session, principal)
         if user.kind == CONTACT_KIND:
             _has_passkey, has_totp, _codes = await summary(session, user.id)
             if not has_totp:
@@ -588,7 +595,7 @@ async def new_recovery_codes(
 async def forget_device(
     request: Request, principal: SessionPrincipal, device_id: UUID, *, clients: ClientScope
 ) -> None:
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         if not await revoke(session, user.id, device_id):
             raise _not_found(tr("no such remembered device"))
@@ -598,7 +605,7 @@ async def forget_device(
 async def end_my_session(
     request: Request, principal: SessionPrincipal, session_id: UUID, *, clients: ClientScope
 ) -> None:
-    async with _own_session(principal, request, clients) as session:
+    async with own_session(principal, request, clients) as session:
         user = await signed_user(session, principal)
         mine = (
             await session.execute(

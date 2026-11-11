@@ -296,6 +296,10 @@ class NamedSession:
 
     session_id: UUID
     org_id: UUID
+    #: Whose it is, and of which kind: signing out takes the person's row
+    #: first (phase 2, Task 9b) and, for a contact, runs in their own client.
+    user_id: UUID
+    kind: str
 
 
 async def named(connection: HTTPConnection) -> NamedSession | None:
@@ -311,13 +315,18 @@ async def named(connection: HTTPConnection) -> NamedSession | None:
     async with AsyncSession(connection.app.state.app_engine) as lookup:
         row = (
             await lookup.execute(
-                text("SELECT session_id, org_id, ended_at FROM its_auth_session(:token_hash)"),
+                text(
+                    "SELECT session_id, org_id, user_id, kind, ended_at "
+                    "FROM its_auth_session(:token_hash)"
+                ),
                 {"token_hash": token_hash(token)},
             )
         ).one_or_none()
     if row is None or row.ended_at is not None:
         return None
-    return NamedSession(session_id=row.session_id, org_id=row.org_id)
+    return NamedSession(
+        session_id=row.session_id, org_id=row.org_id, user_id=row.user_id, kind=row.kind
+    )
 
 
 async def start_session(

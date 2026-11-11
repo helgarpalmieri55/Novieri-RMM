@@ -334,7 +334,7 @@ async def test_a_contacts_own_routes_cannot_reach_another_clients_rows(
 
 
 async def test_a_contacts_own_session_is_never_every_client(auth_env: Any) -> None:
-    """`account._own_session` fails closed: handed every client for a contact
+    """`account.own_session` fails closed: handed every client for a contact
     -- which the door never does, it pins a contact to their own client --
     it refuses instead of reopening invariant 5a; handed the contact's own
     client, it answers."""
@@ -354,7 +354,7 @@ async def test_a_contacts_own_session_is_never_every_client(auth_env: Any) -> No
 
 
 async def test_a_person_of_no_known_kind_never_gets_a_scope(auth_env: Any) -> None:
-    """`account._own_session` chooses the scope from an ALLOWLIST of kinds
+    """`account.own_session` chooses the scope from an ALLOWLIST of kinds
     (Task 7 fix round 2): a technician every client, a contact their own;
     any other kind is refused on entry, before a session opens -- never
     every client by default. The database cannot hold such a person
@@ -367,7 +367,7 @@ async def test_a_person_of_no_known_kind_never_gets_a_scope(auth_env: Any) -> No
     robot = dataclasses.replace(await principal_for(auth_env, signed.session_id), kind="robot")
     for clients in (ClientScope.all(), ClientScope.only([who.client_id or uuid4()])):
         with pytest.raises(AuthRefusal) as refused:
-            async with account._own_session(robot, http_request(auth_env), clients):
+            async with account.own_session(robot, http_request(auth_env), clients):
                 pytest.fail("a session opened for a person of no known kind")
         assert refused.value.status_code == 401
         assert refused.value.code == "auth_required"

@@ -27,6 +27,20 @@ raised from inside.
 THE IDENTIFIER CHANGES (design §2.4): the password makes a pending session
 (`start_session`, which also ends any session the browser's cookie still
 named); the factor gives it a NEW value (`mark_factor`, Task 6).
+
+THE LOCK ORDER (phase 2, Task 9b; `guards.lock_user_row`). Every transaction
+here that writes a person's rows takes them in the order the administrators'
+acts on a person take them: THE PERSON'S `users` ROW, FOR NO KEY UPDATE, once
+the person is known (a step with a session: `guards.locked_user`; a link:
+`_consumed`; the password: `login`, after `find_person`; a passkey alone:
+`passkeys.credential_owner`); then their advisory lock, when the transaction
+takes it (`factors.lock_person`); then their failure counters, links,
+challenges, credentials, sessions and devices -- `users.last_login_at`
+included, its row already held; and LAST the organization's audit chain, then
+the mail. The audit rows of a step are therefore written after its session's
+rows, in the order they always were. Nobody unknown is locked: an address with
+no active account opens no transaction at all, and the time it takes is
+unchanged (falsifier 2).
 """
 
 from collections.abc import AsyncIterator
@@ -55,12 +69,13 @@ from app.core.auth.factors import (
 )
 from app.core.auth.failures import check_allowed, record_success, reset_factor
 from app.core.auth.guards import (
+    lock_user_row,
+    locked_user,
     relying_party,
     require_fresh,
     require_full,
     require_pending,
     sign_in_again,
-    signed_user,
 )
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.lookup import find_person, org_of_slug
@@ -68,6 +83,7 @@ from app.core.auth.methods import contact_may_reset, has_sign_in_method
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
+    credential_owner,
     registration_options,
     unanswerable_options,
     verify_authentication,
@@ -270,50 +286,84 @@ async def _consumed(
     (`users.last_login_at`, in `sessions.start_session`; a reset's sessions)
     waited on them while they waited on it: a 40P01, and a 500
     (`tests/test_contact_access_races.py`, `tests/test_user_admin_races.py`).
-
-    NOT YET COVERED -- the person's OWN concurrent sign-in steps, which do
-    not take their row first: `sessions.mark_factor` locks a session and
-    then writes the row; `login` takes its failure rows and the audit chain
-    before `start_session` writes it; and a sign-in with Microsoft (phase 2
-    Task 9, `entra_flows._sign_in`) writes the link's `last_used_at` -- a row
-    a contact's access reset deletes after taking the person's -- before
-    `start_session` writes the person's row. Any users-first writer above -- this
-    function's callers included, a reset of the person's own password among
-    them -- can meet one of them the other way round, and one of the two is
-    a 40P01. That class is a lock-order task of its own, after Task 9.
+    The person's OWN sign-in steps keep the same order since Task 9b (the
+    module docstring, `tests/test_auth_sign_in_races.py`).
 
     The link is read unlocked, only to learn whose it is; the person is
-    locked, re-read (`populate_existing`: what a switch-off committed
-    meanwhile is what the caller then checks); and only then is the link
-    consumed, under its own row lock and re-read too -- one revoked meanwhile
-    is None. `session.get(User, row.user_id)` then answers the locked row."""
+    locked, re-read (`guards.lock_user_row`: what a switch-off committed
+    meanwhile is what the caller then checks); then the person's advisory
+    lock (`factors.lock_person`, re-entrant: a reset and a recovery take it
+    again to read the factors); and only then is the link consumed, under its
+    own row lock and re-read too -- one revoked meanwhile is None.
+    `session.get(User, row.user_id)` then answers the locked row."""
     seen = await action_tokens.peek_digest(session, digest=digest, purposes=purposes)
     if seen is None:
         return None
-    await session.execute(
-        select(User)
-        .where(User.id == seen.user_id)
-        .with_for_update(key_share=True)
-        .execution_options(populate_existing=True)
-    )
+    await lock_user_row(session, seen.user_id)
+    await lock_person(session, seen.user_id)
     return await action_tokens.consume_digest(session, digest=digest, purposes=purposes)
 
 
-async def _remember(
-    session: AsyncSession, request: Request, user: User
-) -> tuple[str | None, datetime | None]:
-    """Remember this browser when the organization allows it (Task 6 says
-    whether): audited and told (design §2.6)."""
+@dataclass(frozen=True)
+class _Marked:
+    """The rows of a factor proved (`_mark_done`), before anything is audited."""
+
+    token: str
+    device: AuthTrustedDevice | None = None
+    device_token: str | None = None
+
+
+async def _mark_done(
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    principal: SessionPrincipal,
+    *,
+    remember: bool,
+) -> _Marked:
+    """The pending session proved its factor: a new identifier and the recent
+    confirmation (`mark_factor`, which writes the person's row too), and this
+    browser remembered when asked and the organization allows it (Task 6 says
+    whether). ROWS ONLY: the step audits after them (`_signed_in`), in the
+    lock order (module docstring)."""
     try:
-        device, token = await remember_device(session, user, request)
+        token = await mark_factor(session, principal.session_id)
+    except LookupError as exc:
+        raise sign_in_again() from exc
+    if not remember:
+        return _Marked(token)
+    try:
+        device, device_token = await remember_device(session, user, request)
     except RememberingOff:
-        return None, None
-    days = (device.expires_at - device.created_at).days
-    await _audit(session, user, "auth.device_remembered", {"days": days})
-    await notices.tell(
-        session, user, "device_remembered", vault=_vault(request), actor_id=user.id, days=days
+        return _Marked(token)
+    return _Marked(token, device, device_token)
+
+
+async def _signed_in(
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    principal: SessionPrincipal,
+    marked: _Marked,
+    *,
+    method: str,
+) -> SignIn:
+    """`_mark_done`'s rows, recorded: `auth.signed_in`, and a remembered
+    device audited and told (design §2.6) -- the chain and the mail last."""
+    await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": False})
+    if marked.device is not None:
+        days = (marked.device.expires_at - marked.device.created_at).days
+        await _audit(session, user, "auth.device_remembered", {"days": days})
+        await notices.tell(
+            session, user, "device_remembered", vault=_vault(request), actor_id=user.id, days=days
+        )
+    return SignIn(
+        state="signed_in",
+        session_token=marked.token,
+        expires_at=principal.expires_at,
+        device_token=marked.device_token,
+        device_expires_at=None if marked.device is None else marked.device.expires_at,
     )
-    return token, device.expires_at
 
 
 async def _factor_done(
@@ -325,23 +375,10 @@ async def _factor_done(
     method: str,
     remember: bool,
 ) -> SignIn:
-    """The pending session proved its factor: a new identifier and the recent
-    confirmation (`mark_factor`), audited; the browser remembered when asked."""
-    try:
-        token = await mark_factor(session, principal.session_id)
-    except LookupError as exc:
-        raise sign_in_again() from exc
-    await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": False})
-    device_token, device_expires_at = (
-        await _remember(session, request, user) if remember else (None, None)
-    )
-    return SignIn(
-        state="signed_in",
-        session_token=token,
-        expires_at=principal.expires_at,
-        device_token=device_token,
-        device_expires_at=device_expires_at,
-    )
+    """The pending session proved its factor (`_mark_done`), recorded
+    (`_signed_in`)."""
+    marked = await _mark_done(session, request, user, principal, remember=remember)
+    return await _signed_in(session, request, user, principal, marked, method=method)
 
 
 async def started(
@@ -419,7 +456,11 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
     outcome: SignIn | None = None
     untried = False
     async with _identity_session(found.org_id, _engine(request)) as session:
-        user = await session.get(User, found.user_id)
+        # The person first (Task 9b): known and active, so locking them tells
+        # nothing an unknown address does not. Re-read under the lock: a
+        # switch-off committed while this waited is refused like any other
+        # inactive account, after the same argon2 work.
+        user = await lock_user_row(session, found.user_id)
         stored = await session.get(AuthPassword, found.user_id)
         # The counter this browser waits and counts on (design §2.3, operator
         # decision 2026-11-05): its device's when `recognised`'s rule accepts
@@ -428,7 +469,7 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
         device = await presented(session, found.user_id, request)
         counter = device.id if device is not None else None
         state = await check_allowed(session, found.user_id, "password", device_id=counter)
-        if user is None or stored is None or not state.allowed:
+        if user is None or user.status != ACTIVE_STATUS or stored is None or not state.allowed:
             untried = True
         else:
             matches = await _password_matches(found.org_id, password, stored)
@@ -462,30 +503,36 @@ async def after_first_factor(
     remembered device stands in for the factor (§2.6); everybody else is
     asked for it. A CONTACT'S SECOND FACTOR IS THE AUTHENTICATOR APP ALONE:
     their passkey is another way in (operator decision C5, plan decision 3),
-    so it is neither asked for nor offered here."""
+    so it is neither asked for nor offered here.
+
+    The caller holds the person's row (the module docstring's lock order);
+    each sign-in is audited AFTER its session is made."""
     if method == "password":
         idle = await resumable(session, request, user.id)
         if idle is not None:
+            resumed = await started(session, request, user, state="signed_in", resume=idle)
             await _audit(
                 session, user, "auth.signed_in", {"method": "resume", "trusted_device": False}
             )
-            return await started(session, request, user, state="signed_in", resume=idle)
+            return resumed
     has_passkey, has_totp, codes = await summary(session, user.id)
     # C5: for a contact, a passkey is not a second factor of the password.
     passkey_factor = has_passkey and user.kind == STAFF_KIND
     if not (passkey_factor or has_totp):
         if user.kind == CONTACT_KIND:
+            entered = await started(session, request, user, state="signed_in", factor_done=True)
             await _audit(
                 session, user, "auth.signed_in", {"method": method, "trusted_device": False}
             )
-            return await started(session, request, user, state="signed_in", factor_done=True)
+            return entered
         return await started(session, request, user, state="enroll_required")
     device = await recognised(session, user.id, request)
     if device is not None:
-        await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": True})
-        return await started(
+        trusted = await started(
             session, request, user, state="signed_in", factor_done=True, device=device
         )
+        await _audit(session, user, "auth.signed_in", {"method": method, "trusted_device": True})
+        return trusted
     offered = (("passkey", passkey_factor), ("totp", has_totp), ("recovery", codes > 0))
     policy = await read_policy(session, user.org_id)
     return await started(
@@ -511,7 +558,7 @@ async def factor_totp(
     require_pending(principal)
     result: SignIn | None = None
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         if not (await summary(session, user.id))[1]:
             raise _unavailable()
         await gate(session, user.id, "totp")
@@ -531,16 +578,19 @@ async def _spend_recovery_code(
     session: AsyncSession, request: Request, user: User, code: str
 ) -> int | None:
     """Spend the code: the codes left, or None for a wrong one (counted). The
-    caller tells the person (`_tell_recovery_code_used`) only after its own
-    last check that can still refuse -- a notice is mail, and mail does not
-    roll back (fix round 3)."""
+    caller audits the use (`_record_recovery_code_used`) after its session's
+    row (the lock order), and tells the person (`_tell_recovery_code_used`)
+    only after its own last check that can still refuse -- a notice is mail,
+    and mail does not roll back (fix round 3)."""
     if not await use_code(session, user.id, code):
         await count_failure(session, user, "recovery", vault=_vault(request))
         return None
     await record_success(session, user.id, "recovery")
-    left = await remaining(session, user.id)
+    return await remaining(session, user.id)
+
+
+async def _record_recovery_code_used(session: AsyncSession, user: User, left: int) -> None:
     await _audit(session, user, "auth.recovery_code_used", {"left": left})
-    return left
 
 
 async def _tell_recovery_code_used(
@@ -565,17 +615,17 @@ async def factor_recovery(
     require_pending(principal)
     result: SignIn | None = None
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
         left = await _spend_recovery_code(session, request, user, code)
         if left is not None:
             # `mark_factor` refuses inside the block when the session ended
-            # meanwhile: the notice comes after it.
-            result = await _factor_done(
-                session, request, user, principal, method="recovery", remember=remember
-            )
+            # meanwhile: the audit and the notice come after it.
+            marked = await _mark_done(session, request, user, principal, remember=remember)
+            await _record_recovery_code_used(session, user, left)
+            result = await _signed_in(session, request, user, principal, marked, method="recovery")
             await _tell_recovery_code_used(session, request, user, left)
     if result is None:
         raise _factor_failed()
@@ -587,7 +637,7 @@ async def _passkey_options(
 ) -> dict[str, Any]:
     rp_id, _origin = relying_party(request.app.state.settings)
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         if not (await summary(session, user.id))[0]:
             raise _unavailable()
         await gate(session, user.id, "passkey")
@@ -645,7 +695,7 @@ async def factor_passkey(
     require_pending(principal)
     result: SignIn | None = None
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         await gate(session, user.id, "passkey")
         if await _passkey_matches(session, request, user, credential, "authenticate"):
             result = await _factor_done(
@@ -669,7 +719,7 @@ async def _enrollable(session: AsyncSession, principal: SessionPrincipal) -> Use
     """Plan decision 6. A full session adds a factor with a recent confirmation;
     a pending one only when the person has no second factor at all -- the
     password alone must never let somebody add theirs."""
-    user = await signed_user(session, principal)
+    user = await locked_user(session, principal)
     if principal.factor_done:
         require_fresh(principal)
     else:
@@ -823,12 +873,11 @@ async def enroll_finish(request: Request, principal: SessionPrincipal) -> tuple[
             detail=tr("set up a passkey or an authenticator app first"),
         )
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         codes = await replace_codes(session, org_id=user.org_id, user_id=user.id)
+        marked = await _mark_done(session, request, user, principal, remember=False)
         await _audit(session, user, "auth.factor_added", {"factor": "recovery_codes"})
-        result = await _factor_done(
-            session, request, user, principal, method="enrolment", remember=False
-        )
+        result = await _signed_in(session, request, user, principal, marked, method="enrolment")
     await redis.delete(_enrolled_key(principal.session_id))
     return codes, result
 
@@ -856,7 +905,7 @@ async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: s
     require_full(principal)
     accepted = False
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         if not (await summary(session, user.id))[1]:
             raise _unavailable()
         await gate(session, user.id, "totp")
@@ -874,15 +923,16 @@ async def step_up_recovery(request: Request, principal: SessionPrincipal, *, cod
     require_full(principal)
     accepted = False
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
         left = await _spend_recovery_code(session, request, user, code)
         if left is not None:
             # `_stepped_up` refuses inside the block when the session ended
-            # meanwhile: the notice comes after it.
+            # meanwhile: the audit and the notice come after it.
             await _stepped_up(session, principal)
+            await _record_recovery_code_used(session, user, left)
             await _tell_recovery_code_used(session, request, user, left)
             accepted = True
     if not accepted:
@@ -900,7 +950,7 @@ async def step_up_passkey(
     require_full(principal)
     accepted = False
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         await gate(session, user.id, "passkey")
         accepted = await _passkey_matches(session, request, user, credential, "step_up")
         if accepted:
@@ -925,7 +975,7 @@ async def step_up_password(request: Request, principal: SessionPrincipal, *, pas
     require_full(principal)
     accepted = False
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         stored = await session.get(AuthPassword, user.id)
         if (
             user.kind != CONTACT_KIND
@@ -961,7 +1011,7 @@ async def step_up_password(request: Request, principal: SessionPrincipal, *, pas
 _ORG_ACTIVE = "active"
 
 
-async def _deployment_org(request: Request) -> UUID | None:
+async def deployment_org(request: Request) -> UUID | None:
     """The organization a sign-in without an address signs in to: the
     deployment's (`default_org_slug`), through `its_auth_org` (D36). No slug
     is the installation's 503, as `login` says it. A slug that names no
@@ -987,7 +1037,7 @@ async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
     tells nobody anything they could choose to ask: the slug is the server's
     configuration (`ITS_DEFAULT_ORG_SLUG`), never part of the request."""
     rp_id, _origin = relying_party(request.app.state.settings)
-    org_id = await _deployment_org(request)
+    org_id = await deployment_org(request)
     if org_id is None:
         return unanswerable_options(rp_id=rp_id)
     async with _identity_session(org_id, _engine(request)) as session:
@@ -1015,11 +1065,23 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
     replayed or expired assertion is -- sooner than one whose signature is
     checked. Its answer is the same; its time may differ, and the slug is
     the server's configuration, never the request's, so nobody can choose
-    to probe with it."""
+    to probe with it.
+
+    THE PERSON FIRST (Task 9b, the module docstring's lock order). The
+    assertion names its passkey, and the passkey its person
+    (`passkeys.credential_owner`, a read that verifies nothing): that
+    person's row is locked BEFORE the verification writes the passkey's
+    counter, so a reset of their access in flight is waited for, and what it
+    deleted is then not there to verify. A credential nobody holds locks
+    nobody. The person is read again from the verified passkey, under the
+    same (re-entrant) lock."""
     rp_id, origin = relying_party(request.app.state.settings)
-    org_id = await _deployment_org(request) or _NO_ORG
+    org_id = await deployment_org(request) or _NO_ORG
     result: SignIn | None = None
     async with _identity_session(org_id, _engine(request)) as session:
+        named = await credential_owner(session, credential)
+        if named is not None:
+            await lock_user_row(session, named)
         try:
             key = await verify_authentication(
                 session, credential, expected_origin=origin, rp_id=rp_id, purpose="authenticate"
@@ -1027,7 +1089,7 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
         except PasskeyRejected:
             key = None
         organization = await session.get(Organization, org_id)
-        user = await session.get(User, key.user_id) if key is not None else None
+        user = await lock_user_row(session, key.user_id) if key is not None else None
         if (
             organization is not None
             and organization.status == _ORG_ACTIVE
@@ -1041,10 +1103,10 @@ async def passkey_sign_in(request: Request, *, credential: dict[str, Any]) -> Si
                 # stays (fix round 1, coordinator decision; not the plan's
                 # Step 4). The passkey's failures are cleared.
                 await record_success(session, user.id, "passkey", clear_mail_mark=False)
+                result = await started(session, request, user, state="signed_in", factor_done=True)
                 await _audit(
                     session, user, "auth.signed_in", {"method": "passkey", "trusted_device": False}
                 )
-                result = await started(session, request, user, state="signed_in", factor_done=True)
     if result is None:
         raise _passkey_rejected()
     return result
@@ -1064,6 +1126,8 @@ async def logout(request: Request) -> None:
     if named is None:
         return
     async with _identity_session(named.org_id, _engine(request)) as session:
+        # The person first (Task 9b), as every write of their sessions.
+        await lock_user_row(session, named.user_id)
         await end_session(session, named.session_id, "signed_out")
 
 
@@ -1072,7 +1136,7 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
     device: what somebody does who thinks their account was used."""
     require_full(principal)
     async with _identity_session(principal.org_id, _engine(request)) as session:
-        user = await signed_user(session, principal)
+        user = await locked_user(session, principal)
         await end_all_for_user(session, user.id, "signed_out_everywhere")
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "auth.sessions_ended", {"by": "self", "scope": "everywhere"})
@@ -1140,8 +1204,13 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
         if found is None or found.status != ACTIVE_STATUS:
             return
         async with _identity_session(found.org_id, engine) as session:
-            user = await session.get(User, found.user_id)
-            if user is None or not await _may_be_sent_a_reset(session, user):
+            # The person first (Task 9b): the link replaces their open ones.
+            user = await lock_user_row(session, found.user_id)
+            if (
+                user is None
+                or user.status != ACTIVE_STATUS
+                or not await _may_be_sent_a_reset(session, user)
+            ):
                 return
             second_factor = await _has_second_factor(session, user)
             token = await action_tokens.issue(
@@ -1334,10 +1403,17 @@ async def contact_admitted(
     session: AsyncSession, request: Request, user: User, *, method: str
 ) -> SignIn:
     """A contact accepted their invitation (D40): the portal role on their own
-    client (`grant_portal`), audited `contact.invite_accepted`, and a complete
-    session -- a contact has no second factor to enrol. Public: Task 9's
-    Microsoft acceptance ends here too."""
+    client (`grant_portal`) and a complete session -- a contact has no second
+    factor to enrol. ROWS ONLY (Task 9b, the lock order): the caller writes
+    its own rows too, then records it all with `record_admitted`, the audit
+    chain last. Public: Task 9's Microsoft acceptance ends here too."""
     await grant_portal(session, user)
+    return await started(session, request, user, state="signed_in", factor_done=True)
+
+
+async def record_admitted(session: AsyncSession, user: User, *, method: str) -> None:
+    """`contact_admitted`, audited: `contact.invite_accepted` and the sign-in.
+    After every row of the acceptance's transaction (the lock order)."""
     await _audit(
         session,
         user,
@@ -1346,7 +1422,6 @@ async def contact_admitted(
         client_id=user.client_id,
     )
     await _audit(session, user, "auth.signed_in", {"method": "invite", "trusted_device": False})
-    return await started(session, request, user, state="signed_in", factor_done=True)
 
 
 async def invite_details(request: Request, *, token: str) -> Invitation:
@@ -1387,10 +1462,14 @@ async def accept_invite(request: Request, *, token: str, password: str) -> SignI
             minimum=staff_password.minimum_for(user.kind),
         )
         await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
-        await _audit(session, user, "auth.password_changed", {"via": "invite"})
         if user.kind == CONTACT_KIND:
-            return await contact_admitted(session, request, user, method="password")
-        return await started(session, request, user, state="enroll_required")
+            admitted = await contact_admitted(session, request, user, method="password")
+            await _audit(session, user, "auth.password_changed", {"via": "invite"})
+            await record_admitted(session, user, method="password")
+            return admitted
+        waiting = await started(session, request, user, state="enroll_required")
+        await _audit(session, user, "auth.password_changed", {"via": "invite"})
+        return waiting
 
 
 async def invite_passkey_options(request: Request, *, token: str) -> dict[str, Any]:
@@ -1405,6 +1484,8 @@ async def invite_passkey_options(request: Request, *, token: str) -> dict[str, A
         user = await invitee(session, digest=action_tokens.digest(token), consume=False)
         if user.kind != CONTACT_KIND:
             raise _unavailable()
+        # The person first (Task 9b): the options write their challenge.
+        await lock_user_row(session, user.id)
         return await registration_options(
             session, user, rp_id=rp_id, rp_name=notices.PRODUCT, discoverable=True
         )
@@ -1446,9 +1527,10 @@ async def invite_passkey(
         else:
             # A2-47: audited as every passkey is (`enroll_passkey`); no
             # notice, as a password chosen here has none -- the person is on
-            # the page, accepting.
-            await _audit(session, user, "auth.factor_added", {"factor": "passkey", "name": name})
+            # the page, accepting. After the session's row (the lock order).
             result = await contact_admitted(session, request, user, method="passkey")
+            await _audit(session, user, "auth.factor_added", {"factor": "passkey", "name": name})
+            await record_admitted(session, user, method="passkey")
     if result is None:
         raise _passkey_rejected(status.HTTP_400_BAD_REQUEST)
     return result
@@ -1461,10 +1543,12 @@ async def invite_passkey(
 
 async def _recovering(session: AsyncSession, token: str, *, consume: bool) -> User:
     """The holder of a live recovery link, still an active technician, or
-    `invalid_link`. Only `app.core.auth.recover` issues one (falsifier 9)."""
+    `invalid_link`. Only `app.core.auth.recover` issues one (falsifier 9).
+    With `consume`, in the lock order of every link's use (`_consumed`):
+    the person, their advisory lock, then the link (Task 9b)."""
     purposes = (action_tokens.RECOVER,)
     if consume:
-        row = await action_tokens.consume(session, token=token, purposes=purposes)
+        row = await _consumed(session, digest=action_tokens.digest(token), purposes=purposes)
     else:
         row = await action_tokens.peek(session, token=token, purposes=purposes)
     user = await session.get(User, row.user_id) if row is not None else None
@@ -1567,13 +1651,16 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
                 org_name=await staff_password.organization_name(session, org_id),
             )
             await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
-            await _audit(session, user, "auth.password_changed", {"via": action_tokens.RECOVER})
             password_set = True
         await clear_second_factors(session, user.id)
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
-        await _audit(session, user, "user.recovery_link_used", {"email": user.email})
         signed = await started(session, request, user, state="enroll_required")
+        # The audit chain after every row (Task 9b, the lock order), in the
+        # order the acts were done.
+        if password_set:
+            await _audit(session, user, "auth.password_changed", {"via": action_tokens.RECOVER})
+        await _audit(session, user, "user.recovery_link_used", {"email": user.email})
         # The last acts (fix round 3): after the new session is made, so a
         # failure there cannot leave a mail -- and a relay checkout whose
         # audit row rolled back -- for a recovery that did not happen. The

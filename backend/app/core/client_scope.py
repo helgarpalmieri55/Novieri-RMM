@@ -152,7 +152,7 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "OWN client (`grant_portal`, D40) and reads that client's Microsoft tenants "
         "(`microsoft_offered`, design §4)"
     ),
-    "app/core/auth/account.py::_own_session": (
+    "app/core/auth/account.py::own_session": (
         "My security is personal, like /me: a TECHNICIAN's own auth rows, by the user id of "
         "the session the door admitted (P2 phase 1 design §2.4-§2.6); their rows are global, "
         "which a per-client scope may read and not change. The technician's path only: a "
@@ -174,7 +174,7 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "(`contact_admitted`) and that client's Microsoft tenants (read), found before their "
         "scope exists. The organization from the deployment's slug, the session or the "
         "invitation (P2 phase 2 design §4). NOT unlinking: `DELETE /me/microsoft` acts for a "
-        "signed-in person under the scope the door established (`account._own_session`, "
+        "signed-in person under the scope the door established (`account.own_session`, "
         "invariant 5a)"
     ),
     # -- (a) processes with no person behind them --------------------------
