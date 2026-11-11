@@ -4,6 +4,7 @@ door that admits contacts, the contact's rules for its ways in, the
 recovery codes that follow the app, and the first password -- with the
 gates shown to refuse, not only to admit."""
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -25,6 +26,7 @@ from app.models.auth import (
     AuthRecoveryCode,
     AuthSession,
     AuthTotp,
+    AuthTrustedDevice,
 )
 from tests.auth_support import (
     CONTACT_PASSWORD,
@@ -35,7 +37,13 @@ from tests.auth_support import (
     login,
     point_at,
 )
-from tests.session_support import http_request, principal_for, refusal_code, sign_in
+from tests.session_support import (
+    http_request,
+    principal_for,
+    refusal_code,
+    remembered_device,
+    sign_in,
+)
 
 
 @pytest.fixture()
@@ -343,3 +351,85 @@ async def test_a_contacts_own_session_is_never_every_client(auth_env: Any) -> No
         http_request(auth_env), principal, clients=ClientScope.only([who.client_id])
     )
     assert mine.kind == "contact"
+
+
+async def test_a_person_of_no_known_kind_never_gets_a_scope(auth_env: Any) -> None:
+    """`account._own_session` chooses the scope from an ALLOWLIST of kinds
+    (Task 7 fix round 2): a technician every client, a contact their own;
+    any other kind is refused on entry, before a session opens -- never
+    every client by default. The database cannot hold such a person
+    (`users.kind`, `its_auth_session`), and `guards.signed_user` would refuse
+    one further in, so the principal is built by hand and the scope's choice
+    is tested on its own."""
+    org = await auth_env.create_org("contact-sec-kind")
+    who = await contact(auth_env, org)
+    signed = await sign_in(auth_env, org, who.sub, step_up=True)
+    robot = dataclasses.replace(await principal_for(auth_env, signed.session_id), kind="robot")
+    for clients in (ClientScope.all(), ClientScope.only([who.client_id or uuid4()])):
+        with pytest.raises(AuthRefusal) as refused:
+            async with account._own_session(robot, http_request(auth_env), clients):
+                pytest.fail("a session opened for a person of no known kind")
+        assert refused.value.status_code == 401
+        assert refused.value.code == "auth_required"
+
+
+async def test_a_contacts_own_changes_take_effect_in_their_clients_scope(auth_env: Any) -> None:
+    """Under the narrowed scope a contact's writes still land (Task 7 fix round
+    2): forgetting a remembered browser, ending another session, and changing
+    the password -- which ends the remaining other session, sends the §2.7
+    notice, and is the password that signs in from then on."""
+    who, headers = await _signed(auth_env)
+    device = await remembered_device(auth_env, who.org_id, who.sub)
+    ended_by_me = await sign_in(auth_env, who.org_id, who.sub)
+    ended_by_change = await sign_in(auth_env, who.org_id, who.sub)
+
+    forgotten = await auth_env.client.delete(
+        f"/api/v1/me/trusted-devices/{device}", headers=headers
+    )
+    assert forgotten.status_code == 204, forgotten.text
+    ended = await auth_env.client.delete(
+        f"/api/v1/me/sessions/{ended_by_me.session_id}", headers=headers
+    )
+    assert ended.status_code == 204, ended.text
+    new = "Pelican-Orbit-Lantern-58-Quay"
+    changed = await auth_env.client.put(
+        "/api/v1/me/password", headers=headers, json={"current": CONTACT_PASSWORD, "new": new}
+    )
+    assert changed.status_code == 204, changed.text
+
+    async with AsyncSession(auth_env.admin_engine) as s:
+        row = await s.get(AuthTrustedDevice, device)
+        assert row is not None and row.revoked_at is not None
+        first = await s.get(AuthSession, ended_by_me.session_id)
+        assert first is not None and first.ended_reason == "signed_out"
+        second = await s.get(AuthSession, ended_by_change.session_id)
+        assert second is not None and second.ended_reason == "password_changed"
+    assert [m.to for m in auth_env.mail.sent] == [who.email]
+    assert "password" in auth_env.mail.sent[0].subject.lower()
+    assert (await login(auth_env, who)).status_code != 200
+    who.password = new
+    assert (await login(auth_env, who)).status_code == 200
+
+
+async def test_a_contact_naming_another_client_is_refused(auth_env: Any) -> None:
+    """`X-Client-Id` narrows, never widens: a contact who names another
+    client's id narrows to no client at all, where not even their own row
+    exists, and is answered 401 `auth_required` -- fail closed, before
+    anything is read or written (Task 7 fix round 2). Their own client's id
+    is the same as none."""
+    who, headers = await _signed(auth_env)
+    other = await contact(auth_env, who.org_id)
+    assert other.client_id is not None and who.client_id is not None
+    elsewhere = {**headers, "X-Client-Id": str(other.client_id)}
+    for method, path, body in (
+        ("GET", "/api/v1/me/security", None),
+        ("POST", "/api/v1/me/password", {"new": CONTACT_PASSWORD}),
+        ("DELETE", "/api/v1/me/totp", None),
+    ):
+        refused = await auth_env.client.request(method, path, headers=elsewhere, json=body)
+        assert refused.status_code == 401, (path, refused.text)
+        assert refusal_code(refused) == "auth_required"
+    own = await auth_env.client.get(
+        "/api/v1/me/security", headers={**headers, "X-Client-Id": str(who.client_id)}
+    )
+    assert own.status_code == 200, own.text

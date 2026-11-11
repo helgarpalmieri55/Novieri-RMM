@@ -14,7 +14,11 @@ person's id is a 404. The SCOPE depends on who the caller is (`_own_session`):
   under the scope the door established for them -- their own client, never
   every client (invariant 5a; Task 7 fix round 1). Their auth rows are C rows
   of that client, so the database confines the request as well as the
-  `user_id` filter: a row of another client does not exist for it.
+  `user_id` filter: a row of another client does not exist for it. A contact
+  whose request names ANOTHER client in `X-Client-Id` narrows to no client at
+  all, where not even their own `users` row exists: 401 `auth_required`,
+  before anything is read or written (fail closed; Task 7 fix round 2).
+- ANY OTHER KIND gets no scope at all: refused on entry (fix round 2).
 
 THE CHANGES ASK FOR THE RECENT CONFIRMATION (design §2.5) at the route
 (`deps.require_step_up`, Task 6): password, a factor removed, new recovery
@@ -56,7 +60,7 @@ from app.core.auth.sessions import end as end_session
 from app.core.auth.totp import remove_totp as drop_totp
 from app.core.client_scope import ClientScope
 from app.core.i18n import tr
-from app.core.identity import CONTACT_KIND
+from app.core.identity import CONTACT_KIND, STAFF_KIND
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
 from app.models import User
@@ -124,18 +128,21 @@ class MySecurity:
 async def _own_session(
     principal: SessionPrincipal, request: Request, clients: ClientScope
 ) -> AsyncIterator[AsyncSession]:
-    """See the module docstring: the caller's own auth rows. A technician's
-    session is every client. A contact's is `clients`, the scope the door
-    established (`AuthContext.clients`: their own client, or none when
-    `X-Client-Id` named another); every client is refused for a contact,
-    so a caller that passed it fails closed rather than reopening 5a."""
+    """See the module docstring: the caller's own auth rows. The scope is an
+    ALLOWLIST of kinds (Task 7 fix round 2). A technician's session is every
+    client. A contact's is `clients`, the scope the door established
+    (`AuthContext.clients`: their own client, or none when `X-Client-Id`
+    named another). Anything else -- a contact handed every client, which the
+    door never does, or a kind this list does not name -- is refused (401
+    `auth_required`) before a session opens: it fails closed rather than
+    reopening 5a."""
     engine: AsyncEngine = request.app.state.app_engine
-    if principal.kind != CONTACT_KIND:
+    if principal.kind == STAFF_KIND:
         scope = ClientScope.all()
-    elif clients.is_all:
-        raise sign_in_again()
-    else:
+    elif principal.kind == CONTACT_KIND and not clients.is_all:
         scope = clients
+    else:
+        raise sign_in_again()
     async with org_session(principal.org_id, engine=engine, clients=scope) as session:
         yield session
 
