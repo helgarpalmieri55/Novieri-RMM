@@ -50,6 +50,7 @@ from tests.auth_support import (
     login,
     signed_in,
 )
+from tests.race_helpers import backend_pid, until_blocked_by
 from tests.session_support import remembered_device
 from tests.test_auth_reset_needs_recovery import NEW_PASSWORD as MAILED
 from tests.test_auth_reset_needs_recovery import _has_totp, _mail_reset, _mark, _reset_links
@@ -532,10 +533,12 @@ async def test_a_mail_reset_between_the_details_and_the_press_is_caught(
     assert forgot.status_code == 202
     reset_token = link_token([m for m in _reset_links(auth_env) if m.to == who.email][-1].text)
     paused, release = asyncio.Event(), asyncio.Event()
+    holder: list[int] = []  # the paused reset's backend, which holds the lock
     real_tell = notices.tell
 
     async def held_tell(session: Any, user: Any, kind: Any, **kwargs: Any) -> bool:
         if kind == "password_changed":
+            holder.append(await backend_pid(session))
             paused.set()
             await release.wait()
         return await real_tell(session, user, kind, **kwargs)
@@ -550,7 +553,10 @@ async def test_a_mail_reset_between_the_details_and_the_press_is_caught(
     )
     await asyncio.wait_for(paused.wait(), timeout=10)
     pressed = asyncio.create_task(_accept(auth_env, token))
-    await asyncio.sleep(0.5)
+    # SEEN waiting on the reset, not given 0.5 s: held up longer than that
+    # (a pause in this process), it reached the lock after the release and
+    # read the committed mark, and the order this pins was never exercised.
+    await until_blocked_by(auth_env.app_engine, holder[0])
     assert not pressed.done(), "the recovery must wait for the person's lock"
     release.set()
 

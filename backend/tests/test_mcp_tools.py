@@ -57,6 +57,12 @@ _DEVICES_READ = Depends(require_permission("devices.read"))
 #: What the probe routes did, in order, for the tests that ask whether a route
 #: ran to completion or was cancelled. Cleared by the fixture.
 PROBE_EVENTS: list[str] = []
+#: What lets the slow write finish: a test sets `PROBE_GATES["write"]` when
+#: it has seen what it needs to see first. It used to be a fixed 0.5 s, and
+#: "the answer came before the write finished" then held only if the answer
+#: took less than that: a pause in this process (a full collection) of 0.6 s
+#: after the timeout let the write finish first. Made new by the fixture.
+PROBE_GATES: dict[str, anyio.Event] = {}
 
 
 def _probe_router() -> APIRouter:
@@ -105,7 +111,7 @@ def _probe_router() -> APIRouter:
         ctx: AuthContext = _DEVICES_READ,
     ) -> dict[str, bool]:
         try:
-            await anyio.sleep(0.5)
+            await PROBE_GATES["write"].wait()
         except anyio.get_cancelled_exc_class():
             PROBE_EVENTS.append("slow write cancelled")
             raise
@@ -164,6 +170,7 @@ async def mcp_env(api_env):
     api_env.settings.public_console_url = BASE
     api_env.app.include_router(_probe_router(), prefix="/api/v1")
     PROBE_EVENTS.clear()
+    PROBE_GATES["write"] = anyio.Event()
     return api_env
 
 
@@ -586,6 +593,7 @@ async def test_a_timed_out_write_is_not_cancelled_and_its_outcome_is_unknown(
             "check before retrying"
         )
         assert PROBE_EVENTS == []  # the answer came before the write finished...
+        PROBE_GATES["write"].set()
         with anyio.fail_after(5):
             while not PROBE_EVENTS:
                 await anyio.sleep(0.02)
@@ -939,13 +947,22 @@ async def test_a_late_write_is_cancelled_at_the_hard_cap(
 ) -> None:
     import app.mcp.invoke as invoke_mod
 
+    # The cap counts from the write's start, door included, and only a write
+    # that has reached its route can say it was cancelled there. At 0.2 s the
+    # door had to finish inside the cap: run with seven other tests of this
+    # file (`-k "slow or write or late or timed_out"`), the cap cut the
+    # request in its database reads, every time, and nothing said
+    # "cancelled". Full collections in this process last up to ~4.3 s at
+    # this file's place in the full suite. The write is held at
+    # `PROBE_GATES` and never released here, so the cap is the only way it
+    # ends, however long the cap is.
     monkeypatch.setattr(invoke_mod, "TOOL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(invoke_mod, "WRITE_HARD_CAP_S", 0.2)
+    monkeypatch.setattr(invoke_mod, "WRITE_HARD_CAP_S", 10.0)
     _, _, token = await _admin(mcp_env)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         result = await session.call_tool(_probe_tool(mcp_env, "slow-write"), {})
         assert "outcome is unknown" in _error_text(result)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):
             while not PROBE_EVENTS:
                 await anyio.sleep(0.02)
     assert PROBE_EVENTS == ["slow write cancelled"]
@@ -967,6 +984,7 @@ async def test_a_late_write_logs_its_final_status(
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         tool = _probe_tool(mcp_env, "slow-write")
         await session.call_tool(tool, {})
+        PROBE_GATES["write"].set()  # it finishes now, after its answer
         with anyio.fail_after(5):
             while not [r for r in caplog.records if "finished after" in r.getMessage()]:
                 await anyio.sleep(0.02)

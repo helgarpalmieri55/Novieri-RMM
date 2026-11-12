@@ -26,6 +26,7 @@ from app.core.tenancy import org_session
 from app.models import AuditEvent, Client, Credential, Role, User, UserRole
 from app.models.auth import AuthEntraSettings
 from tests.entra_support import APP, CONSUMERS, TENANT, FakeMicrosoft
+from tests.race_helpers import backend_pid, until_blocked_by
 
 API = "/api/v1/settings/microsoft-sign-in"
 OFF = {"enabled": False, "app_client_id": None, "staff_tenant_id": None}
@@ -299,7 +300,12 @@ async def test_two_saves_at_once_take_turns(api_env: Any) -> None:
     activation's write already made, its own write then fails on
     `ck_auth_entra_settings_next_certificate` (red); had both read before
     either wrote, it would have re-encrypted the credential being promoted,
-    leaving its key under the activated certificate, which Entra refuses."""
+    leaving its key under the activated certificate, which Entra refuses.
+
+    The activation commits only once the renewal is SEEN waiting on it
+    (`until_blocked_by`). After a fixed 0.5 s, a renewal held up by a pause
+    in this process read the committed row without ever meeting the lock,
+    and the test passed whether or not `save` took it."""
     org, headers = await _admin(api_env)
     await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
     await api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
@@ -322,8 +328,9 @@ async def test_two_saves_at_once_take_turns(api_env: Any) -> None:
 
     async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as first:
         await entra_settings.save(first, vault, activate_certificate=True, **values)
+        holder = await backend_pid(first)
         second = asyncio.create_task(renew())
-        await asyncio.sleep(0.5)
+        await until_blocked_by(api_env.app_engine, holder)
         assert not second.done(), "the renewal waits for the activation's lock"
     renewed = await second
     assert renewed.pending
@@ -572,7 +579,14 @@ async def test_a_save_never_overwrites_or_deletes_another_credential(
 async def test_two_first_saves_at_once_answer_409_not_500(api_env: Any) -> None:
     """Fix round 1, item 7: two FIRST saves have no row to lock, so the
     second's INSERT waits for the first's and then meets its primary key.
-    That is a 409 asking for a reload, not a 500; the first save stands."""
+    That is a 409 asking for a reload, not a 500; the first save stands.
+
+    The first save commits only once the second is SEEN waiting on it
+    (`until_blocked_by`). It used to commit after a fixed 0.5 s: a pause in
+    this process longer than that -- a full garbage collection, ~3 s at this
+    file's place in the full suite -- held the second request before its
+    read, the first committed, and the second found the row and answered
+    200 (tests/test_session_sockets.py, module docstring)."""
     org, headers = await _admin(api_env)
     async with AsyncSession(api_env.admin_engine) as s:
         actor = await s.scalar(select(User.id).where(User.org_id == org).limit(1))
@@ -588,10 +602,11 @@ async def test_two_first_saves_at_once_answer_409_not_500(api_env: Any) -> None:
             staff_tenant_id=TENANT,
             new_certificate=True,
         )
+        holder = await backend_pid(first)
         second = asyncio.create_task(
             api_env.client.put(API, headers=headers, json={**ON, "new_certificate": True})
         )
-        await asyncio.sleep(0.5)
+        await until_blocked_by(api_env.app_engine, holder)
         assert not second.done(), "the second INSERT waits for the first"
     answer = await second
     assert answer.status_code == 409, answer.text
