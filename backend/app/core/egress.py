@@ -91,6 +91,7 @@ import ipaddress
 import json
 import socket
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -638,5 +639,129 @@ async def post_json(
             raw = bytes(chunks[:_BODY_MAX_BYTES]).decode("utf-8", errors="replace")
             excerpt = "".join(ch for ch in raw if ch.isprintable())[:_EXCERPT_MAX]
             return EgressResponse(status_code=response.status_code, excerpt=excerpt)
+
+    return await asyncio.wait_for(_do_request(), timeout=timeout_s)
+
+
+# --------------------------------------------------------------------------- #
+# Reading a document (own authentication phase 3, design §5.5)
+# --------------------------------------------------------------------------- #
+
+#: RFC 8215's local-use NAT64 prefix: on a site that uses it, `64:ff9b:1::a00:5`
+#: is 10.0.0.5, and `_NAT64_NET` does not unwrap it.
+_LOCAL_NAT64_NET = ipaddress.ip_network("64:ff9b:1::/48")
+
+
+@dataclass(frozen=True)
+class EgressBody:
+    """A GET's answer, read no further than `max_bytes` off the wire
+    (`get_bounded`). `truncated` says there was more; `content_encoding` is
+    the answer's `Content-Encoding`, whose bytes `content` holds undecoded. The
+    caller decides what each means."""
+
+    status_code: int
+    content: bytes
+    truncated: bool
+    content_type: str
+    cache_control: str
+    content_encoding: str = ""
+
+
+def _is_special_use(ip_str: str) -> bool:
+    """Not a global unicast address, nor carrying one inside (CIMD-03 §10.7,
+    RFC 6890): `_is_denied` and then `is_global`, of the address and of every
+    IPv4 it embeds, and never RFC 8215's local-use NAT64 prefix."""
+    if _is_denied(ip_str):
+        return True
+    ip = ipaddress.ip_address(ip_str)
+    if not ip.is_global:
+        return True
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip in _LOCAL_NAT64_NET:
+            return True
+        return any(not embedded.is_global for embedded in _ipv4_embedded_addresses(ip))
+    return False
+
+
+async def get_bounded(
+    url: str,
+    *,
+    max_bytes: int,
+    timeout_s: float = 10.0,
+    headers: Mapping[str, str] | None = None,
+) -> EgressBody:
+    """GET `url` under `post_json`'s five properties, for a document the
+    platform must READ: an OAuth client's metadata document, whose address a
+    stranger chose (own authentication design §5.5).
+
+    STRICTER THAN `post_json`, ON PURPOSE: https only, the scheme's default
+    port only, and NO allowlist -- nothing an administrator configured can
+    open a private address to a URL somebody else named. Every DNS answer must
+    be a global address (`_is_special_use`; CIMD-03 §10.7). The platform's own
+    hosts are refused by name and by address; the connection is pinned to the
+    validated answer; no redirect; nothing compressed is asked for, and at most
+    `max_bytes` are read off the wire, counted as they arrive (`aiter_raw`);
+    one deadline for all of it, DNS included.
+
+    Only reasons `post_json` already raises: `tests/test_notification_
+    delivery.py` reads every one from this file and holds it terminal."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").rstrip(".")
+    if parts.scheme != "https":
+        raise EgressBlocked("scheme_not_allowed",  # i18n-exempt: machine code, the console words it
+            f"scheme {parts.scheme!r}")
+    try:
+        explicit_port = parts.port
+    except ValueError as exc:
+        raise EgressBlocked("invalid_url",  # i18n-exempt: machine code, the console words it
+            "malformed port") from exc
+    if not host:
+        raise EgressBlocked("invalid_url",  # i18n-exempt: machine code, the console words it
+            "no host")
+    port = explicit_port or _DEFAULT_PORT_FOR_SCHEME["https"]
+    if port != _DEFAULT_PORT_FOR_SCHEME["https"]:
+        raise EgressBlocked("port_not_allowed",  # i18n-exempt: machine code
+            "only the scheme's default port is permitted")
+    if _platform_layer1_denies(host, port, set()):
+        raise EgressBlocked("blocked_platform_host",  # i18n-exempt: machine code
+            "refused: this is one of the platform's own hosts")
+    timeout = httpx.Timeout(timeout_s, connect=min(_CONNECT_TIMEOUT_S, timeout_s))
+
+    async def _do_request() -> EgressBody:
+        resolved = await resolve(host, port)
+        pinned = check_host(host, resolved, allowlisted=False)
+        if any(_is_special_use(addr) for addr in resolved):
+            raise EgressBlocked("blocked_private",  # i18n-exempt: machine code
+                f"{host} resolves into special-use address space")
+        if await _platform_layer2_denies(pinned, port):
+            raise EgressBlocked("blocked_platform_host",  # i18n-exempt: machine code
+                "refused: resolves to one of the platform's own hosts")
+        pinned_netloc = f"[{pinned}]" if ":" in pinned else pinned
+        pinned_url = parts._replace(netloc=f"{pinned_netloc}:{port}").geturl()
+        request_headers = {**(headers or {}), "Host": host, "Accept-Encoding": "identity"}
+        async with httpx.AsyncClient(
+            transport=_build_transport(pinned), timeout=timeout, follow_redirects=False
+        ) as client:
+            async with client.stream(
+                "GET", pinned_url, headers=request_headers, extensions={"sni_hostname": host}
+            ) as response:
+                if 300 <= response.status_code < 400:
+                    raise EgressBlocked("redirect_refused",  # i18n-exempt: machine code
+                        f"destination returned {response.status_code}")
+                chunks = bytearray()
+                truncated = False
+                async for chunk in response.aiter_raw():
+                    chunks.extend(chunk)
+                    if len(chunks) > max_bytes:
+                        truncated = True
+                        break
+                return EgressBody(
+                    status_code=response.status_code,
+                    content=bytes(chunks[:max_bytes]),
+                    truncated=truncated,
+                    content_type=response.headers.get("content-type", ""),
+                    cache_control=response.headers.get("cache-control", ""),
+                    content_encoding=response.headers.get("content-encoding", "").strip().lower(),
+                )
 
     return await asyncio.wait_for(_do_request(), timeout=timeout_s)
