@@ -27,6 +27,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import CIDR
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid7_pk
@@ -68,6 +69,13 @@ class Client(TimestampMixin, Base):
         # makes a row's client a client of the row's own organization. A
         # foreign key check ignores RLS, so nothing else can say it.
         UniqueConstraint("id", "org_id", name="uq_clients_id_org"),
+        CheckConstraint(
+            "cardinality(microsoft_tenants) <= 20", name="ck_clients_microsoft_tenants"
+        ),
+        CheckConstraint(
+            "NOT ('9188040d-6c67-4c5b-b112-36a304b66dad'::uuid = ANY (microsoft_tenants))",
+            name="ck_clients_microsoft_tenants_no_consumers",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -77,6 +85,11 @@ class Client(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
     email_domains: Mapped[list[str]] = mapped_column(
         ARRAY(String(253)), default=list, server_default=text("'{}'")
+    )
+    # Migration 0246 (own authentication phase 2, design §4): the Microsoft
+    # tenants whose accounts this client's contacts may sign in with.
+    microsoft_tenants: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PG_UUID(as_uuid=True)), default=list, server_default=text("'{}'")
     )
     phone: Mapped[str] = mapped_column(String(40), default="", server_default="")
     address: Mapped[str] = mapped_column(Text, default="", server_default="")

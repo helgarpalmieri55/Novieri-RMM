@@ -177,7 +177,44 @@ La persona no llega a la consola hasta registrar uno.
 ### 2.5 Confirmación reciente del segundo factor
 
 Exigida en los últimos 10 minutos para: cambiar la propia contraseña o los factores; que un administrador restablezca
-los factores de otro; sacar una credencial de la bóveda [S5, S7].
+los factores de otro; sacar una credencial de la bóveda [S5, S7]. **Ampliada el 2026-11-08** (decisiones del operador
+S1 y S3) **y el 2026-11-09** (decisión del operador S5; plan de la fase 2, Task 14), también para:
+
+- guardar **Ajustes → Correo** (`PUT /settings/email`), **Ajustes → Sesiones** (`PUT /settings/sessions`) y
+  **Ajustes → Microsoft** (`PUT /settings/microsoft-sign-in`, también al pedir un certificado nuevo y al cambiar al que
+  espera);
+- cambiar los **tenants de Microsoft de un cliente** (`PATCH /clients/{id}`, solo cuando la lista cambia; el resto de la
+  ficha, no);
+- **el acceso de un técnico:** invitarlo (`POST /users/invite`), reenviar su invitación
+  (`POST /users/{id}/invite/resend`), concederle un rol (`POST /users/{id}/roles`) y quitárselo
+  (`DELETE /users/{id}/roles/{assignment_id}`); **y, desde el 2026-11-09** (decisión del operador S5), reactivarlo
+  (`POST /users/{id}/enable`), que vuelve con los roles que tenía;
+- **la definición de los roles** (S5, 2026-11-09): crear uno (`POST /roles`), cambiar sus permisos
+  (`PUT /roles/{id}/permissions`), que cambia de una vez lo que puede cada persona que lo tiene, y borrarlo
+  (`DELETE /roles/{id}`);
+- **encender MCP** (`mcp_enabled` de apagado a encendido, `PATCH /orgs/current`).
+
+Por qué, con OWASP ASVS 5.0, V7.5 (https://github.com/OWASP/ASVS/blob/master/5.0/en/0x16-V7-Session-Management.md,
+leído el 2026-11-08). V7.5.3 (nivel 3): *«Verify that the application requires further authentication with at least one
+factor or secondary verification before performing highly sensitive transactions or operations.»* V7.5.1 (nivel 2):
+*«Verify that the application requires full re-authentication before allowing modifications to sensitive account
+attributes which may affect authentication such as email address, phone number, MFA configuration, or other
+information used in account recovery.»* —este habla de la cuenta de la propia persona; aquí son los ajustes que deciden
+cómo entra toda la organización y quién tiene acceso—. Lo que §2.5 pide es un factor reciente (V7.5.3), no la reautenticación completa de V7.5.1. Así, la cookie de una sesión de administrador inactiva, sin su
+segundo factor, ya no basta para apuntar el correo de las invitaciones y los enlaces a otro relé, alargar las sesiones
+o dejar que un equipo se salte el factor, cambiar la aplicación de Microsoft o su certificado, abrir la entrada a otro
+tenant, dar o quitar acceso a un técnico, devolvérselo a una persona desactivada, redefinir lo que puede un rol, ni abrir
+la organización a las aplicaciones de IA. Un equipo recordado no la da (§2.6). Una IA conectada por MCP no hace
+ninguno de estos actos: el canal no lleva sesión que confirmar, y las
+rutas que la piden enteras no son herramientas (`CLAUDE.md` 1c(e): los límites de la propia API se mantienen). Un
+contacto con app TOTP confirma con ella o con su clave de acceso (decisión del operador del 2026-11-08, «S2» del plan de la fase 2 —no la «S2 Sesiones» de §0—; §3).
+
+**Lo que esto deliberadamente no cubre** (decisión del operador S4, 2026-11-08). Los actos sobre un contacto no cambian:
+invitarlo al portal, reenviar, restablecer su acceso —que ya la pide— y desactivarlo. No la piden cancelar una
+invitación, desactivar a una persona, cerrar sus sesiones, apagar MCP ni revocar una aplicación de IA: solo quitan
+acceso, y son lo que se hace con prisa para parar a alguien. Ni el correo de prueba de Ajustes → Correo, que no cambia
+nada. Ni renombrar o redescribir un rol (`PATCH /roles/{id}`), que no cambia lo que nadie puede (decisión del operador
+S5, 2026-11-09).
 
 ### 2.6 Recordar este equipo (decisión S2b)
 
@@ -187,7 +224,9 @@ los factores de otro; sacar una credencial de la bóveda [S5, S7].
 - Aplica a cualquier cuenta con segundo factor: técnicos y contactos que lo activaron.
 - **Límites:** la persona lo revoca en «Mis equipos de confianza» y un administrador también; se revoca solo al cambiar
   la contraseña, al restablecer los factores o al desactivar a la persona; las acciones de §2.5 siguen pidiendo el
-  segundo factor; cada equipo recordado se audita y se avisa por correo.
+  segundo factor (un contacto con app TOTP lo da también con su clave de acceso, §3; *añadido el 2026-11-06, para que
+  §2.6 no contradiga a §3 tras la decisión C5 del operador; confirmado por el operador el 2026-11-08, decisión S2 del
+  plan de la fase 2*); cada equipo recordado se audita y se avisa por correo.
 
 ### 2.7 Avisos por correo
 
@@ -212,9 +251,20 @@ tiempo.
   aleatorio, de un solo uso, que caduca a las 72 h [S8]. Al aceptarla, el contacto recibe en **su** cliente el rol de
   portal (`portal.ticket.read` y `portal.ticket.write`), en ningún otro.
 - **Entrada:** llave de acceso o contraseña de **15+** caracteres (NIST, sin segundo factor [S1 §3.1.1.2]) con la misma
-  lista de bloqueo; segundo factor opcional.
+  lista de bloqueo; segundo factor opcional. **Para un contacto, una clave de acceso es otra forma de entrar, no un
+  segundo factor; solo una app TOTP activada hace de dos pasos la entrada con contraseña** (decisión del operador C5,
+  2026-11-06). Y solo un contacto sin app confirma las acciones de §2.5 con la contraseña: quien la activó confirma con
+  ella **o con su clave de acceso** (§2.6). La clave de acceso pide la verificación de la persona y el servidor la
+  comprueba (§2.2), así que es por sí sola un autenticador criptográfico multifactor: NIST SP 800-63B-4 §3.1.7.2, *«Some
+  multi-factor authenticators include flags to indicate whether an activation factor was used. If such a flag is present
+  and indicates that an activation factor was not used, the authentication SHALL be treated as single-factor. Otherwise,
+  verification of the output from a multi-factor cryptographic authenticator indicates that the activation factor was
+  used.»*, y §2.2.1, que lo admite en AAL2 (*«When a multi-factor authenticator is used, any of the following MAY be
+  used: … Multi-factor cryptographic authentication (Sec. 3.1.7)»*). *(Añadido el 2026-11-06; confirmado por el operador
+  el 2026-11-08, decisión S2 del plan de la fase 2, no la «S2 Sesiones» de §0.)*
 - **Olvidé mi contraseña:** enlace de un solo uso de 30 min; misma respuesta exista o no la cuenta; al cambiarla se
-  cierran sus otras sesiones [S8].
+  cierran sus otras sesiones [S8]. El enlace va a todo contacto que ya aceptó su invitación, salvo a quien solo entra
+  con Microsoft (decisión del operador C6, 2026-11-06).
 - **Sesión:** valores propios en «Sesiones»: inactividad 60 min, máximo 7 días (configurable hasta 30, el máximo de NIST
   para AAL1 [S1 §2]).
 - Un contacto nunca pasa la puerta de la consola; solo la del portal (`admit(contacts=True)`).
@@ -224,11 +274,26 @@ tiempo.
 
 ## 4. Entrar con Microsoft (Entra ID)
 
-- **Una app** registrada por Novieri, multi-tenant (autoridad `organizations` [S62]). Su secreto va a OpenBao
-  (invariante 3). Código de autorización con PKCE, `state` y `nonce` [S62].
+- **Una app** registrada por Novieri, multi-tenant (autoridad `organizations` [S62]). La plataforma se identifica ante
+  Microsoft con un certificado que ella misma genera —`private_key_jwt`, aserción PS256 [M9]—, que el administrador sube
+  a la app desde Ajustes → Microsoft, donde ve su caducidad. La clave privada va a la bóveda de la plataforma —una
+  credencial sellada con la clave de sobre que envuelve OpenBao, como la contraseña SMTP— y solo se descifra para firmar
+  (invariante 3). **El certificado es autofirmado porque así lo eligió el operador (C4), no porque no haya otra
+  opción:** Microsoft prefiere uno de una CA (*«use a certificate from a trusted certificate authority (CA) instead of a
+  self-signed certificate. Configure a policy to enforce that certificates come from trusted issuers. However, if using
+  a trusted CA isn't possible, self-signed certificates are still preferred over passwords.»* [M8]). Una política de
+  gestión de aplicaciones del tenant de Novieri —`trustedCertificateAuthority`, o `asymmetricKeyLifetime` por debajo de
+  360 días— rechazaría la subida, y la plataforma no importa certificados de una CA. **Renovar no deja hueco:** el
+  certificado nuevo espera junto al que está en uso, que sigue firmando, mientras el administrador lo sube a la app
+  (Entra guarda varios), y solo cuando él dice «ya lo subí» pasa a firmar el nuevo y la clave vieja se destruye.
+  *(Corregido el 2026-11-06: decía «Su secreto va a OpenBao»; decisiones del operador C4 y B2-35, plan de la fase 2, D33
+  y Task 5, decisión 5.)* Código de autorización con PKCE, `state` y `nonce` [S62].
 - **Técnicos:** solo el tenant de Novieri (configurado en Ajustes). La plataforma pide después su propio segundo factor
   (salvo equipo recordado), porque el token de Microsoft no trae el dato que diría si hubo doble factor: la tabla de
-  claims de Microsoft no incluye `amr` [S61].
+  claims de Microsoft no incluye `amr` [S61]. Un técnico que acepta su invitación con Microsoft elige también una
+  contraseña: Microsoft nunca es su única forma de entrar (decisión del operador C3, 2026-11-06). Siempre por la
+  autoridad `organizations` y `tid` igual al tenant de Novieri: un invitado B2B en ese tenant no entra como técnico con
+  Microsoft (B2-05).
 - **Contactos:** cada cliente lista en su ficha sus tenants permitidos.
 - **Nunca se crea una cuenta por entrar con Microsoft.** La persona tiene que estar invitada; el enlace se hace la
   primera vez desde la invitación o desde «Mi perfil» y guarda `tid` + `oid`, que Microsoft recomienda porque no cambian;
@@ -324,6 +389,17 @@ la rotación conserva la clave anterior durante la vida de los tokens. El pepper
 no cambian. El socket en vivo usa la cookie y comprueba `Origin` en el handshake; se mantiene la revisión cada 60 s.
 MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
 
+**El estado de la organización no es una función hoy** (nota del 2026-11-11, revisión final de la fase 2).
+`organizations.status` existe (por defecto `active`), pero nada lo escribe —ninguna ruta, ningún proceso ni ninguna
+migración lo cambia— y la fase 1 nunca lo hizo cumplir: ni `admit()` por sesión ni por token, ni los sockets, ni
+`its_auth_session` lo leen. Solo lo comprueba la entrada con una clave de acceso sin dirección (fase 2, Task 6,
+`flows.passkey_sign_in`), que lo añadió de paso. **Por qué se apunta:** quien lea esa comprobación puede creer que
+suspender una organización deja fuera a su gente, y no es así; una suspensión que solo esa ruta respetara dejaría
+entrar por contraseña, por Microsoft, por MCP y con toda sesión abierta. **Si algún día se suspende una organización**,
+la comprobación tiene que ir en `sessions.resolve` —que toda sesión de esa organización muera en su siguiente
+petición, consola, portal y sockets incluidos— y en la búsqueda de la organización por token de `admit()` (MCP); y en
+el mismo cambio, en el inicio de sesión (`flows.login`, `entra_flows`) para que no se abra ninguna sesión nueva.
+
 ---
 
 ## 7. Cuentas, correo y auditoría
@@ -349,8 +425,12 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     restablecimiento enviado por correo y desde entonces no se haya verificado ningún segundo factor (una llave, una
     app TOTP confirmada o un código de recuperación, al iniciar sesión o en una confirmación reciente). Sin ventana de
     tiempo. No cubre las contraseñas de una invitación: eso es el alta, por diseño. La marca
-    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después, un cambio de contraseña
-    con la sesión abierta y el enlace de recuperación, que sigue siendo el camino de vuelta. La comprobación del
+    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después **en una sesión que empezó
+    con la contraseña**, un cambio de contraseña con la sesión abierta y el enlace de recuperación, que sigue siendo el
+    camino de vuelta. Una sesión que empezó con Microsoft, con una llave de acceso sola o con el enlace de
+    recuperación no presentó la contraseña, así que su segundo factor no la borra (`auth_sessions.first_step`; fase 2,
+    Task 9b): si no, quien tiene el buzón restablece la contraseña, el siguiente inicio con Microsoft y código de la
+    persona borra la marca, el restablecimiento del administrador pasa y la contraseña del buzón se queda la cuenta. La comprobación del
     restablecimiento por correo («¿tiene segundo factor?») y la del administrador («¿la puso el buzón?») toman el
     mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de esas dos deja una cuenta sin
     factores con la contraseña del buzón. Y un segundo factor verificado no borra la marca en una sesión que el
@@ -441,8 +521,9 @@ directamente a la sesión propia.
   exigido).
 - `CLAUDE.md` 1c(a) no cambia: ya está redactada sin nombrar proveedor y sigue siendo cierta con la plataforma como
   emisor.
-- OpenBao: rutas nuevas para el pepper, la clave de firma, la contraseña SMTP y el secreto de Entra; `openbao-init` las
-  crea.
+- OpenBao: rutas nuevas para el pepper y la clave de firma; `openbao-init` las crea. La contraseña SMTP (fase 1, D9) y
+  la clave privada de Entra (fase 2, D33) son credenciales de la bóveda de la plataforma, que OpenBao envuelve: ninguna
+  ruta nueva para ellas. *(Corregido el 2026-11-06.)*
 - El despliegue lo absorbe el proyecto 4.
 
 ## 10. Falsificadores
@@ -512,3 +593,10 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
 - [S63] OWASP Cross-Site Request Forgery Prevention Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - [S64] ChromeDevTools/devtools-protocol, `json/browser_protocol.json`, dominio WebAuthn. https://github.com/ChromeDevTools/devtools-protocol
 - [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies. https://community.owasp.org/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies (owasp.org/www-community/… redirige con 308). Cita comprobada contra la página el 2026-11-05.
+- [M8] Microsoft, Security best practices for application properties (actualizada 2026-10-02), «Certificates and
+  secrets»: la cita de §4 sobre los certificados de una CA. https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration
+- [M9] Microsoft, Microsoft identity platform application authentication certificate credentials (actualizada
+  2026-06-15). https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
+
+[M8] y [M9] se leyeron para el plan de la fase 2 (`docs/superpowers/plans/2026-11-06-autenticacion-propia-fase2.md`,
+Apéndice C, 2026-11-06) y entran aquí con la corrección de §4 del 2026-11-06.

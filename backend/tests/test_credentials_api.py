@@ -1,4 +1,5 @@
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,3 +164,39 @@ async def test_another_orgs_credential_answers_404_and_delete_still_works(api_en
 
     verify = await api_env.client.get("/api/v1/audit/verify", headers=headers_a)
     assert verify.json()["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("kind", "refusal"),
+    [
+        (
+            "entra_sign_in",
+            "A credential for sign-in with Microsoft is created in Settings, Microsoft "
+            "sign-in, not here.",
+        ),
+        (
+            "account_mail",
+            "A credential for this organization's account email is created in Settings, "
+            "Email, not here.",
+        ),
+    ],
+)
+async def test_a_settings_owned_type_is_not_created_here(api_env, kind, refusal) -> None:
+    """Own authentication phase 2, Task 5 fix round 1 (item 6): Settings makes
+    these two credentials and nothing else does. One made here would serve
+    nothing -- no settings row names it -- and could then be neither renamed
+    nor deleted, both refused (409) for its type. Refused before anything is
+    written, with a 409 like those."""
+    org_id = await api_env.create_org("cred")
+    admin = await api_env.create_user(org_id, "org-admin")
+    headers = await api_env.headers(org_id, admin)
+    refused = await api_env.client.post(
+        "/api/v1/credentials",
+        json={"name": "reserved", "type": kind, "secret": "anything"},
+        headers=headers,
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"] == refusal
+    assert "anything" not in refused.text
+    listed = await api_env.client.get("/api/v1/credentials", headers=headers)
+    assert listed.json() == []

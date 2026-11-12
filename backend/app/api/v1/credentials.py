@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_permission_with_step_up
 from app.core.audit import audit_service
+from app.core.auth.entra_settings import ENTRA_CREDENTIAL_TYPE
 from app.core.i18n import tr, tr_marked
 from app.core.mail import ACCOUNT_MAIL_CREDENTIAL_TYPE
 from app.core.tenancy import org_session
@@ -150,6 +151,29 @@ async def _client_of_new_credential(
     return client_id
 
 
+def _refuse_settings_owned_type(kind: str) -> None:
+    """Account email's relay sign-in and sign-in with Microsoft's key are made
+    by their Settings pages and nothing else. One made here would serve
+    nothing -- no settings row names it -- and could then be neither renamed
+    nor deleted (`_refuse_account_mail` refuses both for its type)."""
+    if kind == ACCOUNT_MAIL_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "A credential for this organization's account email is created in Settings, "
+                "Email, not here."
+            ),
+        )
+    if kind == ENTRA_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "A credential for sign-in with Microsoft is created in Settings, Microsoft "
+                "sign-in, not here."
+            ),
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CredentialOut)
 async def create_credential(
     body: CredentialCreate,
@@ -157,6 +181,7 @@ async def create_credential(
     ctx: AuthContext = Depends(require_permission("credentials.manage")),
 ) -> CredentialOut:
     state = request.app.state
+    _refuse_settings_owned_type(body.type)
     if (
         body.type in PUSHABLE_CREDENTIAL_TYPES
         and body.client_id is None
@@ -269,6 +294,18 @@ async def checkout_credential(
                     "and cannot be revealed."
                 ),
             )
+        # Sign-in with Microsoft's private key (own authentication phase 2,
+        # operator decision C4): opened only to sign a client assertion,
+        # audited there. Settings -> Microsoft sign-in replaces it; nothing
+        # reads it back.
+        if credential.type == ENTRA_CREDENTIAL_TYPE:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                tr(
+                    "This credential is used only to sign people in with Microsoft and cannot be "
+                    "revealed."
+                ),
+            )
         secret = await state.vault.checkout(
             session, org_id=ctx.org_id, credential_id=credential_id
         )
@@ -292,13 +329,22 @@ async def checkout_credential(
 def _refuse_account_mail(credential: Credential) -> None:
     """Account email's relay sign-in is changed and removed by Settings -> Email
     alone: rotating or deleting it here would leave that row pointing at a
-    secret that no longer works (or at nothing), bypassing its audit record."""
+    secret that no longer works (or at nothing), bypassing its audit record.
+    The same holds for sign-in with Microsoft's private key (Task 5)."""
     if credential.type == ACCOUNT_MAIL_CREDENTIAL_TYPE:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             tr(
                 "This credential belongs to this organization's account email; change it "
                 "in Settings, Email."
+            ),
+        )
+    if credential.type == ENTRA_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "This credential belongs to sign-in with Microsoft; ask for a new certificate in "
+                "Settings, Microsoft sign-in."
             ),
         )
 

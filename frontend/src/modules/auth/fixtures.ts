@@ -12,12 +12,15 @@
  * imports this file (`src/test/preview.test.ts`).
  */
 import type { FixtureMap } from "../../fixtures/client";
+import { ApiError } from "../../lib/api";
 
 const challenge = "q1mEu2YhQUi3_fixture_challenge_b64url";
 
 export const fixtures: FixtureMap = {
   login: () => ({ state: "factor_required", methods: ["passkey", "totp", "recovery"], remember_device_days: 15 }),
   factorTotp: () => ({ state: "signed_in" }),
+  passkeySignInOptions: () => ({ challenge: "cG9ydGFs", userVerification: "required", allowCredentials: [] }),
+  passkeySignIn: () => ({ state: "signed_in" as const }),
   factorPasskeyOptions: () => ({ challenge, rpId: "localhost", userVerification: "required", timeout: 60_000 }),
   factorPasskey: () => ({ state: "signed_in" }),
   factorRecovery: () => ({ state: "signed_in" }),
@@ -42,9 +45,39 @@ export const fixtures: FixtureMap = {
   }),
   forgotPassword: () => undefined,
   resetPassword: () => undefined,
-  getInvite: () => ({ email: "dana.okafor@toeshee.example", display_name: "Dana Okafor" }),
-  acceptInvite: () => undefined,
+  getInvite: () => ({
+    email: "dana.okafor@toeshee.example",
+    display_name: "Dana Okafor",
+    kind: "staff",
+    password_minimum: 12,
+    passkey: false,
+    microsoft: false,
+  }),
+  acceptInvite: () => ({ state: "enroll_required" as const }),
+  // A contact's invitation (own-auth phase 2): its first passkey, as the
+  // sign-in module's enrolment answers, and then signed in.
+  invitePasskeyOptions: () => ({
+    rp: { id: "localhost", name: "ITMS" },
+    user: { id: "dXNyLWNvbnRhY3Q", name: "ana.rojas@andeslogistics.example", displayName: "Ana Rojas" },
+    challenge,
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    authenticatorSelection: { residentKey: "required", userVerification: "required" },
+    attestation: "none",
+  }),
+  invitePasskey: () => ({ state: "signed_in" as const }),
   getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
+  // Sign in with Microsoft (own-auth phase 2, Task 12): switched off, as the
+  // server answers when it is (409 `microsoft_unavailable`), so a click in a
+  // demo says one sentence instead of taking the whole page to Microsoft's
+  // real sign-in (fix round 1). A return that signs in; fixture mode never
+  // has a fragment to send, so the return page asks nothing.
+  microsoftStart: () => {
+    throw new ApiError(
+      409,
+      JSON.stringify({ code: "microsoft_unavailable", detail: "sign-in with Microsoft is not set up here" }),
+    );
+  },
+  microsoftComplete: () => ({ state: "signed_in" as const }),
   logoutEverywhere: () => undefined,
 };

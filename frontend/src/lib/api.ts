@@ -786,6 +786,74 @@ export interface MeClient {
   permissions: string[];
 }
 
+/**
+ * `GET /portal/me` (own-auth phase 2): the person using the portal -- a
+ * client's contact, or a technician holding a portal code -- for the
+ * portal's own pages. A contact has no `GET /me`: the console's door answers
+ * them 403 `portal_only`.
+ */
+export interface PortalMe {
+  user_id: string;
+  kind: "staff" | "contact";
+  email: string;
+  display_name: string;
+  timezone: string | null;
+  /** Of `portal.ticket.read` and `portal.ticket.write`. */
+  permissions: string[];
+}
+
+/** `POST /auth/microsoft/start` (own-auth phase 2, design §4). Always the `organizations` authority: no page says whose sign-in it is. */
+export interface MicrosoftStartIn {
+  intent: "sign_in" | "link" | "invite";
+  /** The invitation's token, for `invite`: it travels in this body only. */
+  token?: string;
+  /** A technician's new password, for `invite` (operator decision C3): stored before Microsoft is asked. */
+  password?: string;
+}
+
+/** `POST /auth/microsoft/complete`: where the sign-in stands, or `linked`. */
+export type MicrosoftStep = LoginResult | { state: "linked" };
+
+/**
+ * `GET /settings/microsoft-sign-in` (operator decision C4): the platform's
+ * certificates -- public, to upload to the application in Entra -- and never
+ * a private key, which stays in the vault. `configured`: an application id,
+ * a key and its certificate are stored. A renewal waits in `next_*` beside the
+ * certificate in use until a person switches to it (Task 5, decision 5).
+ */
+export interface MicrosoftSettingsOut {
+  enabled: boolean;
+  app_client_id: string | null;
+  staff_tenant_id: string | null;
+  configured: boolean;
+  /** The certificate in use, PEM; `null` until one is asked for. */
+  certificate: string | null;
+  /** Base64url SHA-256 of the certificate (`x5t#S256`): what each sign-in's assertion names. */
+  certificate_thumbprint: string | null;
+  certificate_expires_at: string | null;
+  /** A new certificate waiting to be uploaded beside the one in use; `null` when none waits. */
+  next_certificate: string | null;
+  next_certificate_thumbprint: string | null;
+  next_certificate_expires_at: string | null;
+  /** To register in the Microsoft application; `null` while the console's address is not configured. */
+  redirect_uri: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+/**
+ * `PUT /settings/microsoft-sign-in`: every value, and at most one act.
+ * `new_certificate` makes a new key and certificate (the first goes into use,
+ * a later one waits); `activate_certificate` switches to the waiting one.
+ */
+export interface MicrosoftSettingsUpdate {
+  enabled: boolean;
+  app_client_id: string | null;
+  staff_tenant_id: string | null;
+  new_certificate: boolean;
+  activate_certificate: boolean;
+}
+
 export interface Me {
   user_id: string;
   org_id: string;
@@ -878,6 +946,8 @@ export interface ClientOut {
   /** `active` or `archived`: clients are archived, never deleted. */
   status: string;
   email_domains: string[];
+  /** Microsoft organisations (tenant IDs) whose accounts this client's contacts may sign in with (own-auth phase 2, at most 20). */
+  microsoft_tenants: string[];
   phone: string;
   address: string;
   website: string;
@@ -916,6 +986,10 @@ export interface ContactOut {
   phone: string | null;
   /** `active` or `disabled`. */
   status: string;
+  /** Portal access (own-auth phase 2): none yet, an open invitation, or able to sign in. */
+  access: "none" | "invited" | "active";
+  /** When the open invitation expires; `null` without one. */
+  invite_expires_at: string | null;
 }
 
 /** A partial edit of a contact; `status` switches it off and on (`ContactUpdate`). */
@@ -924,6 +998,16 @@ export interface ContactUpdate {
   display_name?: string;
   phone?: string | null;
   status?: "active" | "disabled";
+}
+
+/**
+ * `POST .../contacts/{id}/invite` and `.../access/reset`: the contact as it
+ * stands now, and the one-time link ONLY when no mail carried it -- shown
+ * once, kept nowhere (invariant 3's spirit: the server keeps its hash only).
+ */
+export interface ContactInviteOut {
+  contact: ContactOut;
+  invite_link: string | null;
 }
 
 /** `POST /clients` (`ClientCreate`): a customer client, born with a site called Principal. */
@@ -941,6 +1025,7 @@ export interface ClientCreate {
 export interface ClientUpdate {
   name?: string;
   email_domains?: string[];
+  microsoft_tenants?: string[];
   phone?: string;
   address?: string;
   website?: string;
@@ -1125,6 +1210,7 @@ import type {
 import type {
   AuthenticationResponseJSON,
   EnrollFrom,
+  InviteAccepted,
   InviteDetails,
   LoginResult,
   PublicKeyCredentialCreationOptionsJSON,
@@ -1808,6 +1894,42 @@ export class ApiClient {
     return this.request<SignedIn>("/auth/factor/passkey", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
   }
 
+  /** `POST /auth/passkey/options`: a challenge for a passkey alone, with no address (a contact's, D28). */
+  passkeySignInOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>("/auth/passkey/options", { method: "POST" }, { anonymous: true });
+  }
+
+  /** `POST /auth/passkey`: the browser's assertion; signed in, or the one 401. */
+  passkeySignIn(credential: AuthenticationResponseJSON): Promise<SignedIn> {
+    return this.request<SignedIn>(
+      "/auth/passkey",
+      { method: "POST", body: JSON.stringify({ credential }) },
+      { anonymous: true },
+    );
+  }
+
+  /**
+   * Start a sign-in with Microsoft. `signedIn` for `link`, from Sign-in and
+   * security: there a 401 is the session ending, and a 403
+   * `step_up_required` goes through `useStepUp().run`.
+   */
+  microsoftStart(body: MicrosoftStartIn, { signedIn = false }: EnrollFrom = {}): Promise<{ authorize_url: string }> {
+    return this.request<{ authorize_url: string }>(
+      "/auth/microsoft/start",
+      { method: "POST", body: JSON.stringify(body) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** The code and the state Microsoft handed the browser, in the body; the transaction's cookie travels with it. */
+  microsoftComplete(body: { code: string; state: string }): Promise<MicrosoftStep> {
+    return this.request<MicrosoftStep>(
+      "/auth/microsoft/complete",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
+  }
+
   /** `POST /auth/factor/recovery`: one of the ten codes. */
   factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
     return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
@@ -1883,9 +2005,35 @@ export class ApiClient {
     );
   }
 
-  /** `POST /auth/invite/accept`: the password; answers `{"state": "enroll_required"}` and a session that still needs a factor. */
-  acceptInvite(body: { token: string; password: string }): Promise<void> {
-    return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  /**
+   * `POST /auth/invite/accept`: the password. A technician's answer is
+   * `enroll_required` and a session that still needs a factor; a contact's is
+   * `signed_in` (own-auth phase 2).
+   */
+  acceptInvite(body: { token: string; password: string }): Promise<InviteAccepted> {
+    return this.request<InviteAccepted>(
+      "/auth/invite/accept",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
+  }
+
+  /** A contact's first passkey from the invitation: the creation options. The link stays unused. */
+  invitePasskeyOptions(token: string): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    return this.request<PublicKeyCredentialCreationOptionsJSON>(
+      "/auth/invite/passkey/options",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /** Accept a contact's invitation with that passkey: signed in. A refused one leaves the link usable. */
+  invitePasskey(body: { token: string; credential: RegistrationResponseJSON; name: string }): Promise<SignedIn> {
+    return this.request<SignedIn>(
+      "/auth/invite/passkey",
+      { method: "POST", body: JSON.stringify(body) },
+      { anonymous: true },
+    );
   }
 
   /** `POST /auth/recover/details`: whose account the server's recovery link (`recover` command) is for. */
@@ -2155,6 +2303,20 @@ export class ApiClient {
     return this.request<void>("/me/password", { method: "PUT", body: JSON.stringify(body) }, { global: true });
   }
 
+  /**
+   * `POST /me/password`: the FIRST password, for someone who has none -- a
+   * contact who signed in with a passkey or Microsoft (a technician always
+   * has one, operator decision C3). 409 `password_exists` otherwise.
+   */
+  addPassword(password: string): Promise<void> {
+    return this.request<void>("/me/password", { method: "POST", body: JSON.stringify({ new: password }) }, { global: true });
+  }
+
+  /** Unlink your Microsoft account: a recent confirmation; never the last way in (409 `last_method`). */
+  unlinkMicrosoft(): Promise<void> {
+    return this.request<void>("/me/microsoft", { method: "DELETE" }, { global: true });
+  }
+
   removePasskey(passkeyId: string): Promise<void> {
     return this.request<void>(
       `/me/passkeys/${encodeURIComponent(passkeyId)}`,
@@ -2222,6 +2384,11 @@ export class ApiClient {
     return this.request<void>("/auth/step-up/recovery", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
   }
 
+  /** A contact without an authenticator app confirms with the password (D29, C5, design §2.6); anybody else's answer is 409 `method_unavailable`. */
+  stepUpPassword(password: string): Promise<void> {
+    return this.request<void>("/auth/step-up/password", { method: "POST", body: JSON.stringify({ password }) }, { global: true });
+  }
+
   // ------------------------------------------------------------------ email
 
   /**
@@ -2281,6 +2448,26 @@ export class ApiClient {
   /** All seven values, never a part: the server stores what it is sent, within its CHECK bounds. */
   putSessionSettings(body: SessionSettingsUpdate): Promise<SessionSettingsOut> {
     return this.request<SessionSettingsOut>("/settings/sessions", { method: "PUT", body: JSON.stringify(body) });
+  }
+
+  /**
+   * Sign in with Microsoft (`GET /settings/microsoft-sign-in`, own-auth
+   * phase 2): `orgs.manage`. The private key is never in the answer; the
+   * certificate is public.
+   */
+  getMicrosoftSettings(): Promise<MicrosoftSettingsOut> {
+    return this.request<MicrosoftSettingsOut>("/settings/microsoft-sign-in");
+  }
+
+  /**
+   * `orgs.manage` on every client, so it is in `globalRoutes.json` and
+   * travels without `X-Client-Id`. No secret travels either way (C4).
+   */
+  putMicrosoftSettings(body: MicrosoftSettingsUpdate): Promise<MicrosoftSettingsOut> {
+    return this.request<MicrosoftSettingsOut>("/settings/microsoft-sign-in", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
   }
 
   // ------------------------------------------------------------------ roles
@@ -2423,6 +2610,34 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(body),
     });
+  }
+
+  /** Send a contact a one-time portal link, valid 72 hours, replacing any open one (`clients.manage`). */
+  inviteContact(clientId: string, contactId: string): Promise<ContactInviteOut> {
+    return this.request<ContactInviteOut>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/invite`,
+      { method: "POST" },
+    );
+  }
+
+  /** Cancel a contact's open invitation; the contact stays. */
+  cancelContactInvite(clientId: string, contactId: string): Promise<void> {
+    return this.request<void>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/invite`,
+      { method: "DELETE" },
+    );
+  }
+
+  /**
+   * Everything the contact signs in with goes, and a new invitation is sent.
+   * Needs the technician's recent confirmation: 403 `step_up_required`, sent
+   * through `useStepUp().run`.
+   */
+  resetContactAccess(clientId: string, contactId: string): Promise<ContactInviteOut> {
+    return this.request<ContactInviteOut>(
+      `/clients/${encodeURIComponent(clientId)}/contacts/${encodeURIComponent(contactId)}/access/reset`,
+      { method: "POST" },
+    );
   }
 
   /** `DELETE /users/{id}`. The row is RETAINED, marked `deleted`, so the audit log can still say who did what. */
@@ -5207,6 +5422,11 @@ export class ApiClient {
 
   getPortalHelpArticle(id: string): Promise<PortalHelpArticle> {
     return this.request<PortalHelpArticle>(`/portal/help/articles/${id}`);
+  }
+
+  /** `GET /portal/me`: the person using the portal -- the person, not a client's data, so no `X-Client-Id`. */
+  portalMe(): Promise<PortalMe> {
+    return this.request<PortalMe>("/portal/me", {}, { global: true });
   }
 
   listPortalCategories(): Promise<PortalCategoryOut[]> {

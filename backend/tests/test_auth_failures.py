@@ -7,6 +7,7 @@ restores it [S1 §3.2.2]; a success clears that factor's failures.
 """
 
 import asyncio
+import inspect
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
 from app.models.auth import AuthFailure, AuthTrustedDevice
+from tests.race_helpers import backend_pid, until_blocked_by
 
 NOW = datetime(2026, 11, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -85,7 +87,7 @@ async def _check(
 
 async def _succeed(w: _World, factor: Factor = "totp") -> None:
     async with org_session(w.org_id, engine=w.app_engine, clients=ClientScope.all()) as session:
-        await failures.record_success(session, w.user_id, factor)
+        await failures.record_success(session, w.user_id, factor, clear_mail_mark=True)
 
 
 async def _consecutive(w: _World, factor: Factor = "totp") -> int | None:
@@ -291,9 +293,12 @@ async def test_concurrent_attempts_at_99_failures_cannot_both_get_through(
             state = await failures.check_allowed(session, world.user_id, "totp", now=NOW)
             if first:
                 arrived.set()
-                # Hold the transaction open long enough for the other attempt
-                # to reach its own check_allowed (it must block on the lock).
-                await asyncio.sleep(0.5)
+                # Hold the transaction open until the other attempt is SEEN
+                # blocked on the lock in its own check_allowed. (A fixed 0.5 s
+                # let a pause in this process carry it past this commit: it
+                # then read the 100th failure without ever meeting the lock,
+                # and the test passed with the lock or without it.)
+                await until_blocked_by(world.app_engine, await backend_pid(session))
             if state.allowed:
                 await failures.record_failure(
                     session, org_id=world.org_id, user_id=world.user_id, factor="totp", now=NOW
@@ -516,3 +521,17 @@ async def test_a_parallel_burst_on_one_device_waits_its_turn(world: _World) -> N
 
     assert results.count(True) == 1
     assert await _device_failures(world, device) == (5, NOW)
+
+
+def test_whether_a_success_clears_the_mail_mark_is_always_said() -> None:
+    """Task 9b fix round 1. `record_success` clears the "password set by
+    mail" mark only when its caller says so, and every caller must say:
+    `clear_mail_mark` is a required keyword with no default, as
+    `sessions.start_session(first_step=)` is. A default of True failed open
+    -- a new caller that forgot it cleared the mark for a factor proved
+    without the password (the Task 9 review's I1)."""
+    parameter = inspect.signature(failures.record_success).parameters["clear_mail_mark"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        failures.record_success(None, uuid4(), "totp")  # type: ignore[call-arg, arg-type]

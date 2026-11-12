@@ -14,7 +14,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setActiveLanguage } from "../../i18n/core";
+import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { describeSubmitError } from "../../components/form";
 import { ApiError } from "../../lib/api";
@@ -25,6 +25,7 @@ import { NewTicketPage } from "./NewTicketPage";
 import { PortalAssistantPanel } from "./PortalAssistantPanel";
 import { PortalNav } from "./PortalNav";
 import { PortalPrerequisites } from "./PortalPrerequisites";
+import { PortalShell } from "./PortalShell";
 import { PortalTicketDetailPage } from "./PortalTicketDetailPage";
 import {
   PORTAL_CATEGORY_GROUPS,
@@ -38,6 +39,15 @@ import {
   portalTicketTypeLabel,
 } from "./portalState";
 import type { PortalCategoryOut, PortalTicketDetail, PortalTicketSummary } from "./types";
+
+const portalMeOf = (me: { user_id: string; email: string; display_name: string; permissions: string[]; timezone?: string | null }) => ({
+  user_id: me.user_id,
+  kind: "staff" as const,
+  email: me.email,
+  display_name: me.display_name,
+  timezone: me.timezone ?? null,
+  permissions: me.permissions.filter((code) => code.startsWith("portal.")),
+});
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -109,6 +119,7 @@ const DETAIL: PortalTicketDetail = {
 function baseApi(over: Partial<ApiClient> = {}): Partial<ApiClient> {
   const api: Partial<ApiClient> = {
     me: vi.fn().mockResolvedValue(ME),
+    portalMe: vi.fn().mockResolvedValue(portalMeOf(ME)),
     listPortalTickets: vi.fn().mockResolvedValue(SUMMARIES),
     listPortalCategories: vi.fn().mockResolvedValue(CATEGORIES),
     getPortalTicket: vi.fn().mockResolvedValue(DETAIL),
@@ -123,6 +134,34 @@ function baseApi(over: Partial<ApiClient> = {}): Partial<ApiClient> {
   mockUseApi.mockReturnValue(api as ApiClient);
   return api;
 }
+
+// ------------------------------------------------------- the contact's frame
+
+describe("the portal's frame in Spanish", () => {
+  // A contact is told, in the Microsoft and recovery-code sentences, to find
+  // «Inicio de sesión y seguridad» (`profile.security.title`): the header link
+  // has to carry that name (final review F, item 2).
+  it("names the security link as the sentences that send a contact there name it", async () => {
+    baseApi();
+    const { container } = renderAt(
+      <PortalShell>
+        <p>{ME.display_name}</p>
+      </PortalShell>,
+      "/portal",
+    );
+    const link = await screen.findByRole("link", { name: "Inicio de sesión y seguridad" });
+    expect(link).toHaveAttribute("href", "/portal/security");
+    expect(link).toHaveTextContent(translate("profile.security.title"));
+    for (const sentence of [
+      translate("auth.microsoft.stepUpAgain"),
+      translate("auth.microsoft.backToSecurity"),
+      translate("auth.codes.none"),
+    ]) {
+      expect(sentence).toContain(link.textContent ?? "");
+    }
+    expectNoEnglish(container, [ME.display_name]);
+  });
+});
 
 // ---------------------------------------------------------------- My tickets
 
@@ -300,6 +339,7 @@ describe("New ticket in Spanish", () => {
 function renderDetail(detail: PortalTicketDetail = DETAIL, permissions = ME.permissions) {
   baseApi({
     me: vi.fn().mockResolvedValue({ ...ME, permissions }),
+    portalMe: vi.fn().mockResolvedValue(portalMeOf({ ...ME, permissions })),
     getPortalTicket: vi.fn().mockResolvedValue(detail),
   });
   return renderAt(<PortalTicketDetailPage />, "/portal/tickets/:ticketId", `/portal/tickets/${detail.id}`);
@@ -449,6 +489,7 @@ const article = (id: string, portal_visible: boolean) => ({ id, title: id, archi
 function panelApi(over: Record<string, unknown> = {}, permissions = OPERATOR) {
   const api = {
     me: meWith(permissions),
+    portalMe: vi.fn().mockResolvedValue({ user_id: "u1", kind: "staff", email: "a@b.test", display_name: "A", timezone: null, permissions: [] }),
     listRoles: vi.fn().mockResolvedValue({ roles: [role("requester", 0)] }),
     listArticles: vi.fn().mockResolvedValue({ items: [article("a1", false)], total: 1 }),
     getAiStatus: vi.fn().mockResolvedValue({ enabled: false, reason: "No hay ningún proveedor de modelos configurado." }),

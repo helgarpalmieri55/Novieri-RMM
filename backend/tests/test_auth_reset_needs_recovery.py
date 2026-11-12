@@ -53,6 +53,7 @@ from tests.auth_support import (
     signed_in,
 )
 from tests.mcp_support import MCP_BASE, marked_client, mcp_token
+from tests.race_helpers import backend_pid, until_blocked_by
 
 NEW_PASSWORD = "Pelican-Orbit-Lantern-58"
 REFUSAL = (
@@ -240,11 +241,13 @@ async def test_every_second_factors_success_clears_the_mark_and_the_password_doe
     who = await signed_in(auth_env, org, "technician")
     await _set_mark(auth_env, who)
     async with org_session(org, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
-        await failures.record_success(s, who.user_id, "password")
+        await failures.record_success(s, who.user_id, "password", clear_mail_mark=True)
     assert await _mark(auth_env, who) is not None
 
     async with org_session(org, engine=auth_env.app_engine, clients=ClientScope.all()) as s:
-        await failures.record_success(s, who.user_id, factor)  # type: ignore[arg-type]
+        await failures.record_success(
+            s, who.user_id, factor, clear_mail_mark=True  # type: ignore[arg-type]
+        )
 
     assert await _mark(auth_env, who) is None
 
@@ -467,6 +470,7 @@ async def test_a_reset_link_used_while_a_factor_reset_is_open_waits_and_is_refus
             user_id=who.user_id,
             vault=auth_env.app.state.vault,
         )
+        holder = await backend_pid(session)
         used = asyncio.create_task(
             auth_env.client.post(
                 "/api/v1/auth/password/reset",
@@ -474,7 +478,10 @@ async def test_a_reset_link_used_while_a_factor_reset_is_open_waits_and_is_refus
                 json={"token": token, "password": NEW_PASSWORD},
             )
         )
-        await asyncio.sleep(0.5)
+        # SEEN waiting on the factor reset, not given 0.5 s: held up longer
+        # than that (a pause in this process), the link reached the lock after
+        # the commit and the order this pins was never exercised.
+        await until_blocked_by(auth_env.app_engine, holder)
         assert not used.done(), "the link must wait for the person's lock"
     answer = await used
 
@@ -500,10 +507,12 @@ async def test_a_factor_reset_while_a_mail_reset_is_open_waits_and_is_refused(
     assert forgot.status_code == 202
     token = link_token(_reset_links(auth_env)[-1].text)
     paused, release = asyncio.Event(), asyncio.Event()
+    holder: list[int] = []  # the paused mail reset's backend, which holds the lock
     real_tell = notices.tell
 
     async def held_tell(session: Any, user: Any, kind: Any, **kwargs: Any) -> bool:
         if kind == "password_changed":
+            holder.append(await backend_pid(session))
             paused.set()
             await release.wait()
         return await real_tell(session, user, kind, **kwargs)
@@ -518,7 +527,8 @@ async def test_a_factor_reset_while_a_mail_reset_is_open_waits_and_is_refused(
     )
     await asyncio.wait_for(paused.wait(), timeout=10)
     reset = asyncio.create_task(_reset_factors(auth_env, admin, who))
-    await asyncio.sleep(0.5)
+    # SEEN waiting on the mail reset, not given 0.5 s (as order 1 above).
+    await until_blocked_by(auth_env.app_engine, holder[0])
     assert not reset.done(), "the factor reset must wait for the person's lock"
     release.set()
 

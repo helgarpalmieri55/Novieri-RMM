@@ -597,14 +597,34 @@ from tests.tool_surface import (
 # documented and not a list, so P3, P4 and P5 do not move; failing P2 it is in
 # neither "passing five" nor "passing six", so neither set nor
 # PENDING_TOOL_REVIEW moves either.
-EXPECTED_GET_ROUTES = 255
-EXPECTED_PASSING_FIVE = 52
+# 255 -> 256 (2026-11-06, own authentication phase 2, Task 4): `GET /portal/me`,
+# gated (`require_portal_permission`), typed, not a list and closed. MEASURED,
+# it passes all six: P5 asks for a route description OR, failing that, a
+# described model (`tests/tool_surface.py`), and both the handler and
+# `PortalMeOut` carry a docstring -- unlike the portal routes that fail P5,
+# whose handlers have none. (The plan expected "P5 self-describing" +1; the
+# measurement says otherwise, and the record follows the measurement.) So
+# passing five 52 -> 53, and it waits in PENDING_TOOL_REVIEW, where it should
+# stay: it is the portal page's own summary of the person its browser session
+# names, not an MCP tool (`NOT_FOR_MCP`); the console's assistant asks
+# `GET /me`, and the portal's persona has its own registry
+# (`app/modules/ai_portal/tools.py`).
+# 256 -> 257 (2026-11-06, P2 phase 2 Task 5): GET /settings/microsoft-sign-in, gated
+# (orgs.manage), typed, described and closed: passing five 53 -> 54. It passes all
+# six and waits in PENDING_TOOL_REVIEW beside /settings/email and
+# /settings/sessions: who may sign in with which Microsoft tenant is
+# reconnaissance about the organisation's sign-in posture.
+EXPECTED_GET_ROUTES = 257
+EXPECTED_PASSING_FIVE = 54
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
 # half of "how many".
 EXPECTED_PASSING_SIX = frozenset(
     {
+        # Added 2026-11-06 (P2 phase 2 Task 4); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/portal/me",
         # Added 2026-10-24 (MSP clients API). Eligible, not registered -- see
         # the note above EXPECTED_GET_ROUTES.
         "/api/v1/clients/{client_id}",
@@ -655,6 +675,8 @@ EXPECTED_PASSING_SIX = frozenset(
         # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/settings/sessions",
+        # Added 2026-11-06 (P2 phase 2 Task 5); reasoning above EXPECTED_GET_ROUTES.
+        "/api/v1/settings/microsoft-sign-in",
         # Added 2026-08-21 (patch approvals list). Eligible, and deliberately
         # not registered: the list names every patch cleared to reach a
         # machine, and hands out the ids `DELETE /approvals/{id}` takes.
@@ -791,7 +813,8 @@ EXPECTED_UNGATED_PATHS = frozenset(
         "/api/v1/dashboard/layout",
         # Added 2026-11-04 (P2 phase 1, own sign-in). The caller's OWN second
         # factors, remembered browsers and sessions; ungated like `/me`, and
-        # it needs the console session (`app/api/v1/auth.py::_console_ctx`).
+        # it needs `app/api/v1/auth.py::_account_ctx`, a technician's or a
+        # contact's own browser session (phase 2, D26).
         # Not a tool (`NOT_FOR_MCP`).
         "/api/v1/me/security",
     }
@@ -965,6 +988,9 @@ def test_the_two_registered_tools_are_closed() -> None:
 # expects and asks a human to resolve.
 PENDING_TOOL_REVIEW = frozenset(
     {
+        # Added 2026-11-06 (P2 phase 2 Task 4); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/portal/me",
         # Added 2026-10-24 (MSP clients API); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/clients/{client_id}",
@@ -998,6 +1024,8 @@ PENDING_TOOL_REVIEW = frozenset(
         # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/settings/sessions",
+        # Added 2026-11-06 (P2 phase 2 Task 5); reasoning above EXPECTED_GET_ROUTES.
+        "/api/v1/settings/microsoft-sign-in",
         # Added 2026-08-21 (patch approvals list); reasoning beside
         # EXPECTED_PASSING_SIX above.
         "/api/v1/patch/approvals",

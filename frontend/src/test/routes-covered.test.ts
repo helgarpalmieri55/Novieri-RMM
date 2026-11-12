@@ -96,6 +96,11 @@ describe("scripts/routes.mjs covers App.tsx", () => {
     expect(ROUTES).toContain("/settings?tab=ai-connections");
   });
 
+  it("walks Settings -> Email and -> Roles, whose saves ask for a recent second factor (own-auth phase 2, Task 14)", () => {
+    expect(ROUTES).toContain("/settings?tab=email");
+    expect(ROUTES).toContain("/settings?tab=roles");
+  });
+
   it("has no duplicates", () => {
     expect(new Set(ROUTES).size).toBe(ROUTES.length);
   });

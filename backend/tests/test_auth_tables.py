@@ -12,8 +12,9 @@ What is held here, each by a test that goes red when the protection goes:
 - `its_auth_principal` and `its_auth_session` DO read before the organization
   is known, answer only their few columns, are SECURITY DEFINER with a pinned
   `search_path`, and only `app_user` may call them;
-- they are, with the four that existed before, the whole reviewed list of
-  SECURITY DEFINER functions;
+- they are, with the four that existed before and 0246's `its_auth_org`
+  (own-authentication phase 2), the whole reviewed list of SECURITY DEFINER
+  functions;
 - two technicians of one organization never share an address (D2);
 - the stored secrets have the shape of a hash, the settings stay in bounds,
   and a session cannot name another person's remembered device.
@@ -38,6 +39,8 @@ from app.core.tenancy import org_session
 from app.models import (
     AccountMailSettings,
     AuthActionToken,
+    AuthEntraSettings,
+    AuthExternalIdentity,
     AuthFailure,
     AuthOrgSettings,
     AuthPasskey,
@@ -51,6 +54,7 @@ from app.models import (
     Organization,
     User,
 )
+from app.models.auth import ENTRA
 
 AUTH_TABLES = (
     "auth_passwords",
@@ -64,6 +68,8 @@ AUTH_TABLES = (
     "auth_webauthn_challenges",
     "auth_org_settings",
     "account_mail_settings",
+    "auth_external_identities",
+    "auth_entra_settings",
 )
 
 SESSION_COLUMNS = [
@@ -140,7 +146,7 @@ async def _session(
 
 
 def _one_of_each(org: UUID, user: UUID) -> list[Any]:
-    """A row in every table of 0245, for one person of `org`."""
+    """A row in every table of 0245 and 0246, for one person of `org`."""
     device = AuthTrustedDevice(org_id=org, user_id=user, token_hash=_digest(), expires_at=_later())
     return [
         AuthPassword(org_id=org, user_id=user, hash="$argon2id$x", pepper_version=1),
@@ -175,13 +181,17 @@ def _one_of_each(org: UUID, user: UUID) -> list[Any]:
             org_id=org, host="smtp.acme.test", port=587, from_address="it@acme.test",
             encryption="starttls",
         ),
+        AuthExternalIdentity(
+            org_id=org, user_id=user, provider=ENTRA, tenant_id=uuid4(), subject=uuid4()
+        ),
+        AuthEntraSettings(org_id=org),
     ]
 
 
 async def test_with_no_organization_pinned_no_auth_table_shows_a_row(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """Forced `tenant_isolation` on all eleven tables: before the organization is
+    """Forced `tenant_isolation` on all thirteen tables: before the organization is
     known, the application role reads nothing -- which is why the two
     functions below exist at all."""
     org, _ = await _org(admin_engine)
@@ -339,7 +349,15 @@ async def test_a_technician_and_a_contact_sharing_an_address_come_staff_first(
     assert [tuple(r) for r in rows] == [(staff, "staff"), (contact, "contact")]
 
 
-@pytest.mark.parametrize("signature", ["its_auth_principal(text,text)", "its_auth_session(bytea)"])
+_DEFINER_CALLS = {
+    "its_auth_principal(text,text)": "SELECT * FROM its_auth_principal('x', 'y')",
+    "its_auth_session(bytea)": "SELECT * FROM its_auth_session('\\x00'::bytea)",
+    # 0246 (own-authentication phase 2, D36): the organization of a slug.
+    "its_auth_org(text)": "SELECT its_auth_org('x')",
+}
+
+
+@pytest.mark.parametrize("signature", sorted(_DEFINER_CALLS))
 async def test_only_the_application_role_may_call_them(
     signature: str, admin_engine: AsyncEngine, portal_engine: AsyncEngine
 ) -> None:
@@ -360,11 +378,7 @@ async def test_only_the_application_role_may_call_them(
     assert fn.proconfig == ["search_path=public, pg_temp"]
     assert (fn.app, fn.portal, fn.anyone) == (True, False, False)
 
-    call = (
-        "SELECT * FROM its_auth_principal('x', 'y')"
-        if signature.startswith("its_auth_principal")
-        else "SELECT * FROM its_auth_session('\\x00'::bytea)"
-    )
+    call = _DEFINER_CALLS[signature]
     with pytest.raises(DBAPIError, match="permission denied"):
         async with portal_engine.connect() as conn:
             await conn.execute(text(call))
@@ -384,6 +398,9 @@ REVIEWED_SECURITY_DEFINER = {
     # 0245: the two reads before the organization is known.
     "its_auth_principal",
     "its_auth_session",
+    # 0246: the third read before the organization is known -- the id a slug
+    # names, for a sign-in without an address (own-authentication phase 2, D36).
+    "its_auth_org",
 }
 
 

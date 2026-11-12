@@ -53,6 +53,9 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
         ("POST", f"/api/v1/auth/{path}")
         for path in (
             "login",
+            # Task 6 of phase 2: a contact's passkey alone.
+            "passkey/options",
+            "passkey",
             "factor/totp",
             "factor/recovery",
             "factor/passkey/options",
@@ -66,6 +69,7 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             "step-up/recovery",
             "step-up/passkey/options",
             "step-up/passkey",
+            "step-up/password",
             "logout",
             "logout-everywhere",
             "password/forgot",
@@ -73,15 +77,44 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             # Task 8: the invitation's and the server's recovery link.
             "invite/details",
             "invite/accept",
+            # Own authentication phase 2, Task 8: a contact accepts with a passkey.
+            "invite/passkey/options",
+            "invite/passkey",
             "recover/details",
             "recover/accept",
+            # Own authentication phase 2, Task 9: sign in with Microsoft.
+            "microsoft/start",
+            "microsoft/complete",
         )
     ),
     ("PUT", "/api/v1/me/password"),
+    # Own authentication phase 2, Task 7: the first password of an account with none.
+    ("POST", "/api/v1/me/password"),
     ("POST", "/api/v1/me/recovery-codes"),
     # Task 8: an invitation's answer carries its one-time link when no mail did.
     ("POST", "/api/v1/users/invite"),
     ("POST", "/api/v1/users/{user_id}/invite/resend"),
+    # Own authentication phase 2, Task 8: a contact's portal invitation link, the
+    # same way, and the reset of their access that issues a new one.
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"),
+}
+
+# Own authentication phase 2, Task 14 (design §2.5, widened by the operator on
+# 2026-11-08, S1, and on 2026-11-09, S5): the acts that need a recent second
+# factor as a whole. The channel has none to confirm. `POST /users/invite` and
+# its resend need one too, and are above already: they can answer a one-time
+# link.
+RECENT_FACTOR_NEVER_EXPOSED = {
+    ("PUT", "/api/v1/settings/email"),
+    ("PUT", "/api/v1/settings/sessions"),
+    ("PUT", "/api/v1/settings/microsoft-sign-in"),
+    ("POST", "/api/v1/users/{user_id}/roles"),
+    ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"),
+    ("POST", "/api/v1/roles"),
+    ("PUT", "/api/v1/roles/{role_id}/permissions"),
+    ("DELETE", "/api/v1/roles/{role_id}"),
+    ("POST", "/api/v1/users/{user_id}/enable"),
 }
 
 
@@ -185,8 +218,10 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 36
-    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
+    assert len(NEVER_EXPOSED) == 55
+    assert set(NEVER_EXPOSED) == (
+        GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED | RECENT_FACTOR_NEVER_EXPOSED
+    )
 
 
 def test_never_exposed_names_only_real_routes(api_env) -> None:

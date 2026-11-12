@@ -13,12 +13,15 @@ import type {
   ClientSiteOut,
   ClientUpdate,
   ContactCreate,
+  ContactInviteOut,
   ContactOut,
   ContactUpdate,
   SiteCreate,
   SiteUpdate,
 } from "../../lib/api";
+import { sendOnce, type StepUpRun } from "../../components/stepUp";
 import { useApi } from "../../lib/ApiContext";
+import { useSecretMutation } from "../../lib/secretMutation";
 import { CLIENTS_KEY } from "../settings/api";
 
 export const CLIENT_LIST_KEY = "clients-page";
@@ -91,12 +94,17 @@ export function useCreateClientMutation() {
  * the Modules tab's second switch sent the old `enabled_modules` and undid
  * the first on the server. So the server's answer goes into the record's
  * cache before anything is refreshed.
+ *
+ * `run` is the edit form's `useStepUp().run`: a change to the client's
+ * Microsoft tenants needs the second factor confirmed in the last 10 minutes
+ * (design §2.5, S1). The Modules tab sends only `enabled_modules`, which
+ * never does, and sends once.
  */
-export function useUpdateClientMutation(clientId: string) {
+export function useUpdateClientMutation(clientId: string, run: StepUpRun = sendOnce) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ClientOut, ApiError, ClientUpdate>({
-    mutationFn: (body) => api.updateClient(clientId, body),
+  return useMutation<ClientOut, Error, ClientUpdate>({
+    mutationFn: (body) => run(() => api.updateClient(clientId, body)),
     onSuccess: (saved) => {
       queryClient.setQueryData<ClientOut>([CLIENT_KEY, clientId], saved);
       afterClientChange(queryClient, clientId);
@@ -161,6 +169,44 @@ export function useUpdateContactMutation(clientId: string) {
   const queryClient = useQueryClient();
   return useMutation<ContactOut, ApiError, { contactId: string; body: ContactUpdate }>({
     mutationFn: ({ contactId, body }) => api.updateContact(contactId, body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [CONTACTS_KEY, clientId] }),
+  });
+}
+
+/**
+ * Invite (or invite again) a contact. THE ANSWER CAN CARRY A ONE-TIME LINK:
+ * `useSecretMutation` (`lib/secretMutation.ts`) -- the page's own callbacks
+ * take it into the page's state, then the mutation forgets body and answer
+ * (A2-69; `test/secretMutations.test.ts`).
+ */
+export function useInviteContactMutation(clientId: string) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useSecretMutation<ContactInviteOut, ApiError, string>({
+    mutationFn: (contactId) => api.inviteContact(clientId, contactId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [CONTACTS_KEY, clientId] }),
+  });
+}
+
+export function useCancelContactInviteMutation(clientId: string) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (contactId) => api.cancelContactInvite(clientId, contactId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [CONTACTS_KEY, clientId] }),
+  });
+}
+
+/**
+ * Through the tab's `useStepUp().run`: the server asks for the technician's
+ * recent confirmation. Its answer can carry the new one-time link, as an
+ * invitation's: `useSecretMutation` (A2-69).
+ */
+export function useResetContactAccessMutation(clientId: string, run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useSecretMutation<ContactInviteOut, Error, string>({
+    mutationFn: (contactId) => run(() => api.resetContactAccess(clientId, contactId)),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [CONTACTS_KEY, clientId] }),
   });
 }

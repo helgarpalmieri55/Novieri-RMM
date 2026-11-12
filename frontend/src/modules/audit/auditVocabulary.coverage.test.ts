@@ -226,6 +226,7 @@ const DYNAMIC: Dynamic[] = [
       "auth.sessions_ended",
       "auth.password_changed",
       "user.recovery_link_used",
+      "contact.invite_accepted",
     ],
   },
   {
@@ -471,6 +472,9 @@ const DYNAMIC: Dynamic[] = [
 const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "core/ai/act.py": 11,
   "core/auth/account.py": 1,
+  // `action=USED_ACTION` in `signing_key` (P2 phase 2 Task 5): the constant
+  // `USED_ACTION = "auth.entra_credential_used"`, read by the `*_ACTION` rule.
+  "core/auth/entra_settings.py": 1,
   "core/auth/flows.py": 1,
   "core/errors/triage.py": 2,
   "core/identity/__init__.py": 1,

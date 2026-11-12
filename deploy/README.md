@@ -33,7 +33,7 @@ Keycloak still signs MCP clients in until phase 3. The sections of this
 runbook that describe the console's sign-in through Keycloak -- the
 enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
 predate that change; the runbook is rewritten with the deployment project
-(design §9). Three things phase 1 changed that every deployment needs:
+(design §9). Four things phase 1 changed, and two phase 2 changed, that every deployment needs:
 
 - **`ITS_PUBLIC_CONSOLE_URL` is required for any console sign-in**, and it must
   be exactly the `https://host[:port]` origin the browser's address bar shows
@@ -63,6 +63,14 @@ predate that change; the runbook is rewritten with the deployment project
   console](#publishing-the-agent-to-the-console) (`super-admin` is not
   grantable from any screen). The account keeps its own password and second
   factor; nothing is mailed.
+- **Phase 2's migration 0246** runs with every `up -d` (`migrate`), and
+  phase 2 adds **no `.env` key and no OpenBao path**. A host with
+  `ITS_AUTH_KEYS_BACKEND=local` in production now refuses to start (it had no
+  business running); `grep '^ITS_AUTH_KEYS_BACKEND=openbao' .env` must print
+  the line.
+- **Sign in with Microsoft is configured in the console**, not in `.env`:
+  see [Sign in with Microsoft](#sign-in-with-microsoft-own-authentication-phase-2).
+  The `ENTRA_*` lines of `.env.example` are Keycloak's and are not read by it.
 
 ---
 
@@ -520,8 +528,9 @@ OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
 the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
 API cannot verify a password. **And add `ITS_AUTH_KEYS_BACKEND=openbao` to an
 existing `.env`** (a new one copied from `.env.example` has it): without it the
-api uses the `local` backend, which with `ITS_ENVIRONMENT=production` refuses
-to start (`MissingAuthKeyError`), so the api restart-loops:
+api uses the `local` backend, which with `ITS_ENVIRONMENT=production` is
+refused at start (`LocalAuthKeysInProduction`), whether or not its files exist,
+so the api restart-loops:
 
 ```sh
 sed -i '/^ITS_AUTH_KEYS_BACKEND=/d' .env && echo 'ITS_AUTH_KEYS_BACKEND=openbao' >> .env
@@ -1483,6 +1492,109 @@ account's roles.
 
 ---
 
+## Sign in with Microsoft (own authentication, phase 2)
+
+**This replaces "3. Sign in with Microsoft — by hand, for now" above for the
+console and the portal.** That section now concerns MCP clients only, until
+phase 4 removes Keycloak (from phase 3 on, it signs nobody in).
+
+In Microsoft Entra ID, register **one** application for this installation:
+
+1. **Multi-tenant**, for work and school accounts of any organization: the
+   platform signs in through the `organizations` authority ("Only users with
+   work or school accounts from Microsoft Entra ID can sign in to the
+   application",
+   https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc).
+   Technicians come from Novieri's tenant and contacts from their clients'
+   tenants; the platform checks the tenant itself. **A guest (B2B) in
+   Novieri's tenant does not sign in as a technician with Microsoft** -- the
+   token's tenant is their home one; they sign in with their password.
+2. **A web application** whose redirect URI is the console's address
+   followed by `/sign-in/microsoft`. Settings -> Microsoft sign-in shows the
+   exact value to paste, built from `ITS_PUBLIC_CONSOLE_URL`.
+3. **No client secret.** The platform proves itself with a certificate it
+   makes (`private_key_jwt`). Microsoft: "Don't use password credentials,
+   also known as secrets"
+   (https://learn.microsoft.com/en-us/entra/identity-platform/security-best-practices-for-app-registration).
+   **The certificate is self-signed because the operator chose that
+   (decision C4, 2026-11-06), knowing that Microsoft prefers one from a
+   certificate authority.** Its words, on the same page: "use a certificate
+   from a trusted certificate authority (CA) instead of a self-signed
+   certificate. Configure a policy to enforce that certificates come from
+   trusted issuers. However, if using a trusted CA isn't possible,
+   self-signed certificates are still preferred over passwords." And on
+   another: "in production, you should purchase a certificate signed by a
+   well-known certificate authority"
+   (https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
+   **If Novieri's tenant has an application management policy that only
+   accepts certificates from trusted issuers (`trustedCertificateAuthority`),
+   or that limits certificate lifetime to less than 360 days
+   (`asymmetricKeyLifetime`), Entra refuses to upload this certificate**
+   (https://learn.microsoft.com/en-us/graph/api/resources/keycredentialconfiguration?view=graph-rest-beta),
+   and the platform has no way to use one issued by a CA instead. Check the
+   tenant's policy before you start.
+4. The platform asks for `openid profile` and nothing else.
+
+Then, in the console, **Settings -> Microsoft sign-in** (`orgs.manage` on
+every client): the application (client) ID and Novieri's tenant ID -- the
+only tenant technicians may sign in from --, then **Make a new certificate
+when I save**, save, and upload the certificate the tab shows (or its
+download, `itms-sign-in.cer`) to the application: *Certificates & secrets*
+-> *Certificates* -> *Upload certificate*. Then switch sign-in with Microsoft
+on. Each client's tenants are on that client's **Edit** form.
+
+**The certificate lasts 360 days.** The tab shows when it expires and warns
+30 days before; nothing else tells anyone, so put the date in your calendar.
+On the day it expires nobody can start a sign-in with Microsoft. **Renewing
+is two steps and leaves no gap:**
+
+1. Tick *Make a new certificate when I save* and save. The new certificate
+   **waits** beside the one in use, which keeps signing people in; the tab
+   shows both, each with its expiry.
+2. Upload the new one (or its download, `itms-sign-in-new.cer`) to the same
+   application, next to the old one -- Entra keeps several at once -- and
+   then press *I uploaded it: switch to the new certificate*. From that
+   moment the platform signs with the new key and destroys the old one;
+   remove the old certificate from Entra afterwards.
+
+Switching before the upload is the only way a renewal breaks sign-in: until
+the new certificate is in Entra, every sign-in with Microsoft fails. Clearing
+the application ID (with sign-in switched off) destroys both certificates
+and their keys.
+
+**Changing the application ID** needs a new certificate in the same save
+(the tab says so beside the ID), and **from that save on nobody signs in with
+Microsoft until the new certificate is uploaded to the new application**:
+there is no certificate Entra already holds for it to keep signing with. Do
+it at a quiet time. The very first certificate is the same, which is why the
+order above is save, upload, and only then switch sign-in on.
+
+Nothing is added to `.env` and nothing to OpenBao: the private key is a
+vault credential sealed by the organization's envelope key, like the SMTP
+password, decrypted only to sign and audited every time
+(`auth.entra_credential_used`). The API already reaches
+`login.microsoftonline.com` (Email intake). Depending on each tenant's
+policy, its administrator may have to approve the application once.
+
+Nobody gets an account by signing in with Microsoft. A person links their
+Microsoft account from their invitation or from Sign-in and security; an
+account nobody linked is refused. **A technician who accepts with Microsoft
+also chooses a password**, so another administrator's *Reset factors* and
+the recovery command always have a password to come back to.
+
+**Passkeys for contacts must be discoverable.** A contact signs in with a
+passkey without typing an address, which needs a credential stored on the
+authenticator; an older security key without that storage cannot be a
+contact's passkey (the browser refuses to make one).
+
+**Without mail configured**, inviting a contact or resetting their access
+shows the technician the one-time link once. That technician could follow
+it themselves -- as they could by changing the contact's address and
+inviting -- which the audit log records (`link_shown: true`). Configure
+Settings -> Email so links go to the contact.
+
+---
+
 ## Language: English and Spanish
 
 The console speaks English and Spanish. Each person picks their own language
@@ -1722,9 +1834,9 @@ and then silently drops mail from an unknown sender is the common case.
 `deploy/keycloak/realm-it-suite.json` **cannot carry the SMTP password**, and
 must not be edited to. That file is in **git**: a secret committed there is a
 credential in every clone, every fork and every CI cache, rotatable only by
-rewriting history. It is the same argument the "Sign in with Microsoft" section
-above makes about `ENTRA_CLIENT_SECRET`, at the second field somebody reaches
-for.
+rewriting history. It is the same argument the
+"3. Sign in with Microsoft — by hand, for now" section above makes about
+`ENTRA_CLIENT_SECRET`, at the second field somebody reaches for.
 
 There is a second reason the file is the wrong place regardless of secrets:
 **realm import runs only against an empty database**, so editing the JSON on a
@@ -2395,6 +2507,19 @@ second time, and do not need to be: **every MCP tool call can reach only its
 own route.** The API refuses a tool's request unless the router would send it
 to the exact route that tool was generated from (`app/mcp/guard.py`), so no
 tool can be steered at a route that is not one.
+
+**The acts that ask for your second factor again** (own authentication phase
+2): saving Settings → Email, Sessions or Microsoft sign-in, changing a
+client's Microsoft tenants, inviting a technician or sending the invitation
+again, granting or removing a role, re-enabling a disabled person, creating a
+role, changing a role's permissions or deleting a role, and switching AI
+connections on need the person's second factor confirmed in the console in
+the last ten minutes, and **an AI app connected over MCP cannot do any of
+them** -- the settings, the invitations, the grants, re-enabling and the
+role definitions are not tools and are refused on the channel; a client edit
+and the organization's settings stay tools and refuse that part. Cancelling
+an invitation, disabling a person, signing them out, switching MCP off,
+revoking an app and renaming a role never ask.
 
 Every result is also scanned for secret-looking field names, at every depth,
 and one hit blocks the whole result rather than redacting it.

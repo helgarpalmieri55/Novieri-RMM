@@ -118,7 +118,10 @@ async def test_a_new_technician_enrols_a_factor_and_only_then_reaches_the_consol
     assert me.json()["user_id"] == str(who.user_id)
     assert len(who.recovery_codes) == 10
     signed = await _audit(auth_env, org, "auth.signed_in")
-    assert [e.meta for e in signed] == [{"method": "enrolment", "trusted_device": False}]
+    # Final review of phase 2, item 4: the session's first step too.
+    assert [e.meta for e in signed] == [
+        {"method": "enrolment", "trusted_device": False, "first_step": "password"}
+    ]
 
 
 async def test_the_next_sign_in_asks_for_the_factor_and_changes_the_identifier(
@@ -142,6 +145,9 @@ async def test_the_next_sign_in_asks_for_the_factor_and_changes_the_identifier(
     who.session = cookie(done, SESSION_COOKIE)
     assert who.session and who.session != pending
     assert cookie(done, DEVICE_COOKIE) is None
+    # Final review of phase 2, item 4: how the sign-in started, beside the factor.
+    signed = await _audit(auth_env, org, "auth.signed_in")
+    assert signed[-1].meta == {"method": "totp", "trusted_device": False, "first_step": "password"}
 
     # Design §2.4: the identifier changes when the factor is confirmed
     # (`sessions.mark_factor`, Task 6); the pending value names nothing now.
@@ -761,7 +767,9 @@ async def test_a_passkey_signs_in_only_as_its_own_person(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`flows._passkey_matches` checks the passkey's owner, and hands Task 5
-    the console's own origin and host (`csrf.console_origin`/`console_host`)."""
+    the console's own origin and host (`csrf.console_origin`/`console_host`)
+    -- and, since phase 2 (Task 6, decision 4), the person whose challenge it
+    must be (`owner`)."""
     org = await auth_env.create_org("passkey")
     who = await signed_in(auth_env, org, "technician")
     other = await signed_in(auth_env, org, "technician")
@@ -776,9 +784,20 @@ async def test_a_passkey_signs_in_only_as_its_own_person(
         return {"challenge": "Y2hhbGxlbmdl"}
 
     async def verify(
-        session: Any, credential: dict[str, Any], *, expected_origin: str, rp_id: str, purpose: str
+        session: Any,
+        credential: dict[str, Any],
+        *,
+        expected_origin: str,
+        rp_id: str,
+        purpose: str,
+        owner: Any,
     ) -> AuthPasskey:
-        assert (expected_origin, rp_id, purpose) == (CONSOLE, "itms.test", "authenticate")
+        assert (expected_origin, rp_id, purpose, owner) == (
+            CONSOLE,
+            "itms.test",
+            "authenticate",
+            who.user_id,
+        )
         wanted = mine if credential["id"] == "mine" else theirs
         return (
             await session.execute(select(AuthPasskey).where(AuthPasskey.id == wanted))

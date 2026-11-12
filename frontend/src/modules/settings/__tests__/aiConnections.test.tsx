@@ -18,6 +18,7 @@ import {
   calls,
   installDefaults,
   renderSettings,
+  stepUpRequired,
 } from "./harness";
 
 // Lazily, for the reason `assistant.test.tsx` gives.
@@ -228,6 +229,29 @@ describe("Settings — AI connections tab", () => {
     expect(JSON.parse(JSON.stringify(calls.updateCurrentOrg.mock.calls[0]?.[0]))).toEqual({
       settings: { mcp_enabled: true },
     });
+  });
+
+  it("asks for the second factor after the question when the server says it is stale, then switches on (§2.5, S3)", async () => {
+    const { mcp_enabled: _unused, ...withoutSwitch } = ORG_MCP_ON.settings;
+    void _unused;
+    calls.getCurrentOrg.mockResolvedValue({ ...ORG_MCP_ON, settings: withoutSwitch });
+    calls.updateCurrentOrg.mockRejectedValueOnce(stepUpRequired());
+    const user = userEvent.setup();
+    openTab();
+    const toggle = await screen.findByRole("switch", { name: SWITCH });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    await user.click(toggle);
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Allow AI apps" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.updateCurrentOrg).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(JSON.stringify(calls.updateCurrentOrg.mock.calls[1]?.[0]))).toEqual({
+      settings: { mcp_enabled: true },
+    });
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
   });
 
   it("reads a stored \"true\" string as off, the way the server does", async () => {

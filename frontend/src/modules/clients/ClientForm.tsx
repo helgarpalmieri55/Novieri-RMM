@@ -8,12 +8,13 @@ import { useState } from "react";
 
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
+import { useStepUp } from "../../components/stepUp";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { ClientOut } from "../../lib/api";
 import { useCreateClientMutation, useUpdateClientMutation } from "./api";
-import { OPTIONAL_MODULES, type OptionalModule, moduleLabel, parseDomains } from "./labels";
+import { OPTIONAL_MODULES, type OptionalModule, moduleLabel, parseDomains, parseTenants } from "./labels";
 
 const clientRules = (): readonly FieldRule[] => [{ name: "name", label: translate("clients.form.name") }];
 
@@ -31,10 +32,15 @@ export function ClientFormDialog({
 }) {
   const t = useT();
   const create = useCreateClientMutation();
-  const update = useUpdateClientMutation(client?.id ?? "");
+  // A change to the client's Microsoft tenants needs the second factor
+  // confirmed in the last 10 minutes (design §2.5, S1); the rest of the
+  // edit never does, and the server says which.
+  const stepUp = useStepUp();
+  const update = useUpdateClientMutation(client?.id ?? "", stepUp.run);
   const mutation = client ? update : create;
   const [name, setName] = useState(client?.name ?? "");
   const [domains, setDomains] = useState((client?.email_domains ?? []).join("\n"));
+  const [tenants, setTenants] = useState((client?.microsoft_tenants ?? []).join("\n"));
   const [phone, setPhone] = useState(client?.phone ?? "");
   const [address, setAddress] = useState(client?.address ?? "");
   const [website, setWebsite] = useState(client?.website ?? "");
@@ -43,7 +49,8 @@ export function ClientFormDialog({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // THE UNASSIGNED CLIENT TAKES NO EMAIL DOMAINS (phase 3 final review C, T12
   // minor): a typed one is the server's 422. The field is not offered and the
-  // edit sends none.
+  // edit sends none. Nor Microsoft tenants (own-auth phase 2): it has no
+  // contacts to sign in.
   const takesDomains = client?.kind !== "unassigned";
 
   function toggle(module: OptionalModule) {
@@ -69,7 +76,12 @@ export function ClientFormDialog({
     };
     const emailDomains = parseDomains(domains);
     if (client) {
-      update.mutate(takesDomains ? { ...fields, email_domains: emailDomains } : fields, { onSuccess: onSaved });
+      update.mutate(
+        takesDomains
+          ? { ...fields, email_domains: emailDomains, microsoft_tenants: parseTenants(tenants) }
+          : fields,
+        { onSuccess: onSaved },
+      );
     } else {
       create.mutate(
         {
@@ -82,11 +94,14 @@ export function ClientFormDialog({
     }
   }
 
-  return (
+  // The form's dialog, then the confirmation outside it: it holds forms of
+  // its own, and Escape answers it alone while it is open.
+  const editor = (
     <Dialog
       open={open}
       onClose={onClose}
       title={client ? t("clients.form.editTitle") : t("clients.form.createTitle")}
+      dismissible={!stepUp.open}
     >
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -100,6 +115,18 @@ export function ClientFormDialog({
                 rows={3}
                 value={domains}
                 onChange={(event) => setDomains(event.target.value)}
+              />
+            </Field>
+          ) : null}
+          {/* Editing only: `ClientCreate` takes no tenants (own-auth phase 2, Task 5). */}
+          {client !== null && takesDomains ? (
+            <Field label={t("clients.form.microsoftTenants")} help={t("clients.form.microsoftTenantsHelp")} full>
+              <textarea
+                className={inputClass}
+                rows={2}
+                spellCheck={false}
+                value={tenants}
+                onChange={(event) => setTenants(event.target.value)}
               />
             </Field>
           ) : null}
@@ -147,5 +174,11 @@ export function ClientFormDialog({
         </div>
       </Form>
     </Dialog>
+  );
+  return (
+    <>
+      {editor}
+      {stepUp.dialog}
+    </>
   );
 }

@@ -132,6 +132,27 @@ async def test_registration_options_require_user_verification_and_no_attestation
     assert options["excludeCredentials"] == []
 
 
+async def test_discoverable_registration_options_require_a_discoverable_credential(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects `ResidentKeyRequirement.REQUIRED` under `discoverable` (phase 2,
+    Task 6, decision 3; W3C WebAuthn Level 3 §5.4.6): a contact's passkey
+    signs in without an address, so the browser must make it discoverable or
+    fail. Everything else in the options is what the default gives."""
+    user = await _person(admin_engine)
+    async with _session(app_engine, user.org_id) as s:
+        plain = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        options = await registration_options(
+            s, user, rp_id=RP_ID, rp_name=RP_NAME, discoverable=True
+        )
+    selection = options["authenticatorSelection"]
+    assert selection["residentKey"] == "required"
+    assert selection["requireResidentKey"] is True
+    assert selection["userVerification"] == "required"
+    assert plain["authenticatorSelection"]["residentKey"] == "preferred"
+    assert set(options) == set(plain) and options["attestation"] == "none"
+
+
 async def test_a_passkey_registers_with_its_key_flags_and_transports(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
@@ -563,6 +584,65 @@ async def test_a_discoverable_sign_in_finds_the_person_from_the_passkey(
             purpose="authenticate",
         )
     assert passkey.user_id == user.id
+
+
+async def test_an_owner_takes_only_their_own_challenge(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects `challenge_owner != owner` (phase 2, Task 6, decision 4): with
+    `owner`, the challenge must be that person's. An anonymous challenge (a
+    sign-in without an address) and another person's are refused, by reason
+    `challenge`, and each is spent all the same; the person's own passes."""
+    alice = await _person(admin_engine)
+    bob = await _person(admin_engine, alice.org_id)
+    alices, _ = await _registered(app_engine, alice)
+    async with _session(app_engine, alice.org_id) as s:
+        anonymous = await authentication_options(
+            s, None, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        bobs_challenge = await authentication_options(
+            s, bob.id, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        refused = [
+            await _reason(
+                verify_authentication(
+                    s,
+                    alices.get(options, origin=ORIGIN),
+                    expected_origin=ORIGIN,
+                    rp_id=RP_ID,
+                    purpose="authenticate",
+                    owner=alice.id,
+                )
+            )
+            for options in (anonymous, bobs_challenge)
+        ]
+        own = await authentication_options(
+            s, alice.id, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        passkey = await verify_authentication(
+            s,
+            alices.get(own, origin=ORIGIN),
+            expected_origin=ORIGIN,
+            rp_id=RP_ID,
+            purpose="authenticate",
+            owner=alice.id,
+        )
+        spent = (
+            (
+                await s.execute(
+                    select(AuthWebauthnChallenge.challenge).where(
+                        AuthWebauthnChallenge.purpose == "authenticate",
+                        AuthWebauthnChallenge.used_at.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert refused == ["challenge", "challenge"]
+    assert passkey.user_id == alice.id
+    issued = {unb64url(o["challenge"]) for o in (anonymous, bobs_challenge, own)}
+    assert set(spent) == issued
 
 
 async def test_an_unknown_credential_is_refused(

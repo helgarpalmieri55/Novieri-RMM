@@ -57,6 +57,12 @@ _DEVICES_READ = Depends(require_permission("devices.read"))
 #: What the probe routes did, in order, for the tests that ask whether a route
 #: ran to completion or was cancelled. Cleared by the fixture.
 PROBE_EVENTS: list[str] = []
+#: What lets the slow write finish: a test sets `PROBE_GATES["write"]` when
+#: it has seen what it needs to see first. It used to be a fixed 0.5 s, and
+#: "the answer came before the write finished" then held only if the answer
+#: took less than that: a pause in this process (a full collection) of 0.6 s
+#: after the timeout let the write finish first. Made new by the fixture.
+PROBE_GATES: dict[str, anyio.Event] = {}
 
 
 def _probe_router() -> APIRouter:
@@ -105,7 +111,7 @@ def _probe_router() -> APIRouter:
         ctx: AuthContext = _DEVICES_READ,
     ) -> dict[str, bool]:
         try:
-            await anyio.sleep(0.5)
+            await PROBE_GATES["write"].wait()
         except anyio.get_cancelled_exc_class():
             PROBE_EVENTS.append("slow write cancelled")
             raise
@@ -164,6 +170,7 @@ async def mcp_env(api_env):
     api_env.settings.public_console_url = BASE
     api_env.app.include_router(_probe_router(), prefix="/api/v1")
     PROBE_EVENTS.clear()
+    PROBE_GATES["write"] = anyio.Event()
     return api_env
 
 
@@ -273,21 +280,36 @@ async def test_an_org_admin_lists_tools_with_schemas_annotations_and_description
 async def test_a_technician_does_not_see_or_call_an_org_admin_tool(mcp_env) -> None:
     org_id, slug = await _org(mcp_env)
     sub = await mcp_env.create_user(org_id, "technician")
+    # A role of the organization's own, so a rename that got through would
+    # show: in its name and in a `role.updated`. (A random id would be a 404
+    # either way, and the assertions below could not fail.)
+    async with AsyncSession(mcp_env.admin_engine, expire_on_commit=False) as s:
+        role = Role(org_id=org_id, name="night-shift")
+        s.add(role)
+        await s.commit()
     await _grant(mcp_env, org_id, sub, "mcp.use")
     token = mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         catalog = mcp_env.app.state.mcp_catalog
-        assert catalog["roles_create"].permission == "roles.manage"
+        # `roles_update`, not `roles_create`: creating a role is no tool since
+        # 2026-11-09 (design §2.5, S5); renaming one still is, on the same code.
+        assert catalog["roles_update"].permission == "roles.manage"
         names = {t.name for t in (await session.list_tools()).tools}
         assert "devices_list" in names  # non-vacuity: the technician sees tools
-        assert "roles_create" not in names
-        result = await session.call_tool("roles_create", {"body": {"name": "x"}})
+        assert "roles_update" not in names
+        result = await session.call_tool(
+            "roles_update", {"role_id": str(role.id), "body": {"name": "x"}}
+        )
     assert "requires roles.manage" in _error_text(result)
-    # Refused before the route: no role was created, and the refusal is audited.
+    # Refused before the route: the role was not renamed, and the refusal is
+    # audited.
     (event,) = await _events(mcp_env, org_id, "mcp.tool_called")
-    assert event.meta["tool"] == "roles_create"
+    assert event.meta["tool"] == "roles_update"
     assert event.meta["status"] == 403
-    assert not await _events(mcp_env, org_id, "role.created")
+    assert not await _events(mcp_env, org_id, "role.updated")
+    async with AsyncSession(mcp_env.admin_engine) as s:
+        kept = await s.get(Role, role.id)
+    assert kept is not None and kept.name == "night-shift"
 
 
 async def test_areas_narrow_the_list_and_what_is_callable(mcp_env) -> None:
@@ -436,15 +458,21 @@ async def test_a_404_is_not_found_with_the_apis_detail(mcp_env) -> None:
 
 
 async def test_a_409_is_the_apis_detail(mcp_env) -> None:
+    # A rename onto a name the organization already has: `roles_create` was the
+    # example until creating a role left the tools on 2026-11-09 (S5).
     org_id, sub, token = await _admin(mcp_env)
-    console = await mcp_env.client.post(
-        "/api/v1/roles",
-        json={"name": "technician"},
-        headers=await mcp_env.headers(org_id, sub),
+    headers = await mcp_env.headers(org_id, sub)
+    made = await mcp_env.client.post("/api/v1/roles", json={"name": "night-shift"}, headers=headers)
+    assert made.status_code == 201, made.text
+    role_id = made.json()["id"]
+    console = await mcp_env.client.patch(
+        f"/api/v1/roles/{role_id}", json={"name": "technician"}, headers=headers
     )
     assert console.status_code == 409
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
-        result = await session.call_tool("roles_create", {"body": {"name": "technician"}})
+        result = await session.call_tool(
+            "roles_update", {"role_id": role_id, "body": {"name": "technician"}}
+        )
     assert _error_text(result) == console.json()["detail"]
     assert _error_text(result).startswith("a role named 'technician' already exists")
 
@@ -565,6 +593,7 @@ async def test_a_timed_out_write_is_not_cancelled_and_its_outcome_is_unknown(
             "check before retrying"
         )
         assert PROBE_EVENTS == []  # the answer came before the write finished...
+        PROBE_GATES["write"].set()
         with anyio.fail_after(5):
             while not PROBE_EVENTS:
                 await anyio.sleep(0.02)
@@ -918,13 +947,22 @@ async def test_a_late_write_is_cancelled_at_the_hard_cap(
 ) -> None:
     import app.mcp.invoke as invoke_mod
 
+    # The cap counts from the write's start, door included, and only a write
+    # that has reached its route can say it was cancelled there. At 0.2 s the
+    # door had to finish inside the cap: run with seven other tests of this
+    # file (`-k "slow or write or late or timed_out"`), the cap cut the
+    # request in its database reads, every time, and nothing said
+    # "cancelled". Full collections in this process last up to ~4.3 s at
+    # this file's place in the full suite. The write is held at
+    # `PROBE_GATES` and never released here, so the cap is the only way it
+    # ends, however long the cap is.
     monkeypatch.setattr(invoke_mod, "TOOL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(invoke_mod, "WRITE_HARD_CAP_S", 0.2)
+    monkeypatch.setattr(invoke_mod, "WRITE_HARD_CAP_S", 10.0)
     _, _, token = await _admin(mcp_env)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         result = await session.call_tool(_probe_tool(mcp_env, "slow-write"), {})
         assert "outcome is unknown" in _error_text(result)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):
             while not PROBE_EVENTS:
                 await anyio.sleep(0.02)
     assert PROBE_EVENTS == ["slow write cancelled"]
@@ -946,6 +984,7 @@ async def test_a_late_write_logs_its_final_status(
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         tool = _probe_tool(mcp_env, "slow-write")
         await session.call_tool(tool, {})
+        PROBE_GATES["write"].set()  # it finishes now, after its answer
         with anyio.fail_after(5):
             while not [r for r in caplog.records if "finished after" in r.getMessage()]:
                 await anyio.sleep(0.02)

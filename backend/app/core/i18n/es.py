@@ -1238,6 +1238,56 @@ CATALOG: dict[str, str] = {
         "Esta credencial solo se usa para enviar el correo de cuentas de esta organización y no "
         "se puede revelar."
     ),
+    # Sign-in with Microsoft: Settings, its key, a client's tenants (own
+    # authentication phase 2, Task 5).
+    "a personal Microsoft account tenant cannot sign anyone in here": (
+        "el tenant de las cuentas personales de Microsoft no puede iniciar sesión aquí"
+    ),
+    "the Microsoft application (client) ID is needed to switch sign-in with Microsoft on": (
+        "para activar el inicio de sesión con Microsoft hace falta el ID de la aplicación (cliente)"
+    ),
+    "enter the Microsoft application (client) ID before asking for a certificate": (
+        "escribe el ID de la aplicación (cliente) de Microsoft antes de pedir un certificado"
+    ),
+    "ask for a certificate before switching sign-in with Microsoft on": (
+        "pide un certificado antes de activar el inicio de sesión con Microsoft"
+    ),
+    "another Microsoft application needs a certificate of its own: ask for a new one": (
+        "otra aplicación de Microsoft necesita su propio certificado: pide uno nuevo"
+    ),
+    "make the new certificate and switch to it in two saves: upload it to Entra "
+    "in between": (
+        "crea el certificado nuevo y cambia a él en dos guardados: súbelo a Entra entre "
+        "uno y otro"
+    ),
+    "there is no new certificate to switch to": "no hay ningún certificado nuevo al que cambiar",
+    "switch to the new certificate without changing the Microsoft application": (
+        "cambia al certificado nuevo sin cambiar la aplicación de Microsoft"
+    ),
+    "This credential is used only to sign people in with Microsoft and cannot be revealed.": (
+        "Esta credencial solo sirve para iniciar sesión con Microsoft y no se puede revelar."
+    ),
+    "This credential belongs to sign-in with Microsoft; ask for a new certificate in "
+    "Settings, Microsoft sign-in.": (
+        "Esta credencial es del inicio de sesión con Microsoft; pide un certificado nuevo en "
+        "Ajustes, Entrar con Microsoft."
+    ),
+    "the unassigned client takes no Microsoft tenants": (
+        "el cliente sin asignar no lleva tenants de Microsoft"
+    ),
+    "another save happened at the same time; reload and try again": (
+        "otro guardado ocurrió al mismo tiempo; recarga e inténtalo de nuevo"
+    ),
+    "A credential for this organization's account email is created in Settings, "
+    "Email, not here.": (
+        "La credencial del correo de cuentas de esta organización se crea en Ajustes, "
+        "Correo, no aquí."
+    ),
+    "A credential for sign-in with Microsoft is created in Settings, Microsoft "
+    "sign-in, not here.": (
+        "La credencial del inicio de sesión con Microsoft se crea en Ajustes, Entrar con "
+        "Microsoft, no aquí."
+    ),
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"
     ),
@@ -4527,6 +4577,16 @@ CATALOG: dict[str, str] = {
     "this is your only second factor; add another one before removing it": (
         "es tu único segundo factor; añade otro antes de quitarlo"
     ),
+    # My security for a contact (own authentication phase 2, Task 7).
+    "you already have a password; change it instead": (
+        "ya tienes una contraseña; cámbiala en su lugar"
+    ),
+    "this is your only way to sign in; add another one before removing it": (
+        "es tu única forma de iniciar sesión; añade otra antes de quitarla"
+    ),
+    "turn on an authenticator app before asking for recovery codes": (
+        "activa una app de autenticación antes de pedir códigos de recuperación"
+    ),
     "no such passkey": "no existe esa clave de acceso",
     "no such remembered device": "no existe ese equipo recordado",
     "a passkey": "una clave de acceso",
@@ -4595,6 +4655,13 @@ CATALOG: dict[str, str] = {
         "para iniciar sesión.\n{link}\n\nSi no fuiste tú, ignora este mensaje: tu contraseña no "
         "ha cambiado."
     ),
+    "Someone asked to reset the password of your {product} account.\n\n"
+    "Open this link within 30 minutes to choose a new one.\n{link}\n\n"
+    "If it was not you, ignore this message: your password has not changed.": (
+        "Alguien pidió restablecer la contraseña de tu cuenta de {product}.\n\n"
+        "Abre este enlace en los próximos 30 minutos para elegir una nueva.\n{link}\n\n"
+        "Si no fuiste tú, ignora este mensaje: tu contraseña no ha cambiado."
+    ),
     "A recovery link was issued for your {product} account": (
         "Se emitió un enlace de recuperación para tu cuenta de {product}"
     ),
@@ -4611,6 +4678,76 @@ CATALOG: dict[str, str] = {
         "{inviter} te invitó a {product}.\n\nAbre este enlace en las próximas 72 horas para "
         "elegir una contraseña y configurar tu segundo factor:\n{link}\n\nSi no lo esperabas, "
         "ignora este mensaje."
+    ),
+    # A client's contact's portal access (own authentication phase 2, Task 8).
+    "switch the contact on first": "activa el contacto primero",
+    "that contact already signs in; reset their access instead": (
+        "ese contacto ya inicia sesión; restablece su acceso en su lugar"
+    ),
+    "that contact has no pending invitation": "ese contacto no tiene una invitación pendiente",
+    "that contact has not signed in yet; send an invitation instead": (
+        "ese contacto aún no ha iniciado sesión; envíale una invitación en su lugar"
+    ),
+    "Your access to the {product} portal was reset": (
+        "Se restableció tu acceso al portal de {product}"
+    ),
+    "{inviter} reset your access to the {product} portal: your previous password, passkeys and "
+    "linked accounts no longer work.\n\n"
+    "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+    "If you did not expect this, tell {inviter}.": (
+        "{inviter} restableció tu acceso al portal de {product}: tu contraseña, tus claves de "
+        "acceso y tus cuentas vinculadas anteriores ya no funcionan.\n\n"
+        "Abre este enlace en las próximas 72 horas para elegir cómo iniciarás sesión:\n{link}\n\n"
+        "Si no lo esperabas, díselo a {inviter}."
+    ),
+    "You are invited to the {product} portal": "Te han invitado al portal de {product}",
+    "{inviter} invited you to the {product} portal, where you can follow your requests.\n\n"
+    "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+    "If you did not expect this, ignore this message.": (
+        "{inviter} te invitó al portal de {product}, donde puedes seguir tus solicitudes.\n\n"
+        "Abre este enlace en las próximas 72 horas para elegir cómo iniciarás sesión:\n{link}\n\n"
+        "Si no lo esperabas, ignora este mensaje."
+    ),
+    # Sign in with Microsoft, the flows (own authentication phase 2, Task 9).
+    "sign-in with Microsoft is not set up here": (
+        "el inicio de sesión con Microsoft no está configurado aquí"
+    ),
+    "the sign-in with Microsoft did not finish; start it again": (
+        "el inicio de sesión con Microsoft no terminó; empieza de nuevo"
+    ),
+    "this Microsoft account is not linked to anybody here; sign in another way and link it from "
+    "your profile, or use your invitation": (
+        "esta cuenta de Microsoft no está vinculada a nadie aquí; inicia sesión de otra forma y "
+        "vincúlala desde tu perfil, o usa tu invitación"
+    ),
+    "this Microsoft account's organization may not sign in here": (
+        "la organización de esta cuenta de Microsoft no puede iniciar sesión aquí"
+    ),
+    "this Microsoft account is already linked to somebody here": (
+        "esta cuenta de Microsoft ya está vinculada a otra persona aquí"
+    ),
+    "you already have a Microsoft account linked; remove it first": (
+        "ya tienes una cuenta de Microsoft vinculada; quítala primero"
+    ),
+    # Task 9b, D3 and D4.
+    "this Microsoft account is already linked to your account": (
+        "esta cuenta de Microsoft ya está vinculada a tu cuenta"
+    ),
+    "a sign-in or a link with Microsoft sends no password": (
+        "un inicio de sesión o una vinculación con Microsoft no envía contraseña"
+    ),
+    "no Microsoft account is linked": "no hay ninguna cuenta de Microsoft vinculada",
+    "a Microsoft account": "una cuenta de Microsoft",
+    "choose a password too: a technician never signs in with Microsoft alone": (
+        "elige también una contraseña: un técnico nunca entra solo con Microsoft"
+    ),
+    "a technician needs a password of their own before linking Microsoft": (
+        "un técnico necesita su propia contraseña antes de vincular Microsoft"
+    ),
+    "a contact who accepts with Microsoft sends no password; to choose one, accept with a "
+    "password instead": (
+        "un contacto que acepta con Microsoft no envía contraseña; para elegir una, acepta con "
+        "contraseña"
     ),
     # --- user_admin ---
     "{role} is cross-org platform administration and cannot be granted from an organization": (

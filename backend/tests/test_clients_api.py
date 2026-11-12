@@ -383,6 +383,9 @@ async def test_a_client_carries_its_fields_and_counts(api_env) -> None:
         "kind": "customer",
         "status": "active",
         "email_domains": ["acme.co", "mail.acme.co"],
+        # Own authentication phase 2, Task 5 (D35): the Microsoft tenants
+        # whose accounts the client's contacts may sign in with; none yet.
+        "microsoft_tenants": [],
         "phone": "+57 1 555",
         "address": "Calle 1",
         "website": "https://acme.co",

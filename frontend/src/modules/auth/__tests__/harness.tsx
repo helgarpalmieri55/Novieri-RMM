@@ -6,14 +6,17 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
+import { Fragment, StrictMode } from "react";
 import { MemoryRouter, Route, Routes, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
-import type { ApiClient } from "../../../lib/api";
+import { ApiError, type ApiClient } from "../../../lib/api";
 import { EnrollPage } from "../EnrollPage";
 import { FactorPage } from "../FactorPage";
 import { ForgotPasswordPage } from "../ForgotPasswordPage";
 import { InvitePage } from "../InvitePage";
+import { MicrosoftCallbackPage } from "../MicrosoftCallbackPage";
+import { PortalSignInPage } from "../PortalSignInPage";
 import { RecoverPage } from "../RecoverPage";
 import { RecoveryCodesPage } from "../RecoveryCodesPage";
 import { ResetPasswordPage } from "../ResetPasswordPage";
@@ -25,6 +28,8 @@ export const calls = {
   factorPasskeyOptions: vi.fn(),
   factorPasskey: vi.fn(),
   factorRecovery: vi.fn(),
+  passkeySignInOptions: vi.fn(),
+  passkeySignIn: vi.fn(),
   enrollTotpStart: vi.fn(),
   enrollTotpConfirm: vi.fn(),
   enrollPasskeyOptions: vi.fn(),
@@ -34,8 +39,12 @@ export const calls = {
   resetPassword: vi.fn(),
   getInvite: vi.fn(),
   acceptInvite: vi.fn(),
+  invitePasskeyOptions: vi.fn(),
+  invitePasskey: vi.fn(),
   getRecovery: vi.fn(),
   acceptRecovery: vi.fn(),
+  microsoftStart: vi.fn(),
+  microsoftComplete: vi.fn(),
 };
 
 export const TEN_CODES = [
@@ -54,6 +63,8 @@ export function installDefaults(): void {
   calls.factorPasskeyOptions.mockResolvedValue({ challenge: "c2lnbi1pbg", userVerification: "required" });
   calls.factorPasskey.mockResolvedValue({ state: "signed_in" });
   calls.factorRecovery.mockResolvedValue({ state: "signed_in" });
+  calls.passkeySignInOptions.mockResolvedValue({ challenge: "cG9ydGFs", userVerification: "required", allowCredentials: [] });
+  calls.passkeySignIn.mockResolvedValue({ state: "signed_in" });
   calls.enrollTotpStart.mockResolvedValue({ otpauth_uri: OTPAUTH });
   calls.enrollTotpConfirm.mockResolvedValue(undefined);
   calls.enrollPasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
@@ -61,10 +72,21 @@ export function installDefaults(): void {
   calls.enrollFinish.mockResolvedValue({ recovery_codes: TEN_CODES });
   calls.forgotPassword.mockResolvedValue(undefined);
   calls.resetPassword.mockResolvedValue(undefined);
-  calls.getInvite.mockResolvedValue({ email: "dana@example.test", display_name: "Dana Okafor" });
-  calls.acceptInvite.mockResolvedValue(undefined);
+  calls.getInvite.mockResolvedValue({
+    email: "dana@example.test",
+    display_name: "Dana Okafor",
+    kind: "staff",
+    password_minimum: 12,
+    passkey: false,
+    microsoft: false,
+  });
+  calls.acceptInvite.mockResolvedValue({ state: "enroll_required" });
   calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: false });
   calls.acceptRecovery.mockResolvedValue(undefined);
+  // Where Microsoft is not set up: the button is always on the sign-in pages
+  // (Task 12, decision 1), and a test that leaves for Microsoft says so.
+  calls.microsoftStart.mockRejectedValue(new ApiError(409, '{"code":"microsoft_unavailable"}'));
+  calls.microsoftComplete.mockResolvedValue({ state: "signed_in" });
 }
 
 export function authApi(): ApiClient {
@@ -80,29 +102,40 @@ function LocationProbe() {
 }
 
 /**
- * The eight pages, at `path` (fragment included), with router `state` when a
+ * The pages, at `path` (fragment included), with router `state` when a
  * step hands one over -- and the query client, for what a page leaves in it.
+ * `strict`: inside `<StrictMode>`, as `main.tsx` mounts the console, so
+ * effects run twice on mount.
  */
-export function renderAuth(path: string, state?: unknown): RenderResult & { queryClient: QueryClient } {
+export function renderAuth(
+  path: string,
+  state?: unknown,
+  { strict = false }: { strict?: boolean } = {},
+): RenderResult & { queryClient: QueryClient } {
   const url = new URL(path, "https://itms.example");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const Mode = strict ? StrictMode : Fragment;
   const rendered = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[{ pathname: url.pathname, search: url.search, hash: url.hash, state }]}>
-        <Routes>
-          <Route path="/sign-in" element={<SignInPage />} />
-          <Route path="/sign-in/factor" element={<FactorPage />} />
-          <Route path="/sign-in/enroll" element={<EnrollPage />} />
-          <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path="/recover" element={<RecoverPage />} />
-          <Route path="*" element={<p data-testid="elsewhere" />} />
-        </Routes>
-        <LocationProbe />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <Mode>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname: url.pathname, search: url.search, hash: url.hash, state }]}>
+          <Routes>
+            <Route path="/sign-in" element={<SignInPage />} />
+            <Route path="/sign-in/factor" element={<FactorPage />} />
+            <Route path="/sign-in/enroll" element={<EnrollPage />} />
+            <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/invite" element={<InvitePage />} />
+            <Route path="/recover" element={<RecoverPage />} />
+            <Route path="/portal/sign-in" element={<PortalSignInPage />} />
+            <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
+            <Route path="*" element={<p data-testid="elsewhere" />} />
+          </Routes>
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </Mode>,
   );
   return { ...rendered, queryClient };
 }

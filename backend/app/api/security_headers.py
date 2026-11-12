@@ -36,6 +36,12 @@ NO_STORE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/users/{user_id}/invite/resend"): (
         "a new one-time invitation link, when no mail carried it"
     ),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
+        "a contact's one-time portal invitation link, when no mail carried it"
+    ),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"): (
+        "a contact's new one-time invitation link, when no mail carried it"
+    ),
 }
 
 

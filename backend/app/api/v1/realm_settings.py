@@ -5,7 +5,7 @@ Design `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` §7
 `docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §2.1.
 
     GET  /api/v1/settings/email        orgs.manage
-    PUT  /api/v1/settings/email        orgs.manage, on every client
+    PUT  /api/v1/settings/email        orgs.manage, on every client, and a recent second factor
     POST /api/v1/settings/email/test   orgs.manage, on every client
 
 WHAT CHANGED ON 2026-11-04. These settings used to be written into the
@@ -46,6 +46,12 @@ ONE ORGANIZATION'S SETTINGS. The realm was shared by every tenant; this row is
 not. Writing it still needs `orgs.manage` on every client: one relay serves
 every client of the organization (MSP clients spec §1.4).
 
+A SAVE NEEDS A RECENT SECOND FACTOR (design §2.5, widened by the operator on
+2026-11-08, S1): the relay carries every invitation and every reset link, so
+a session left idle must not be able to point it elsewhere. The test message
+does not (S4): it changes nothing. The save is no MCP tool any more: the
+channel has no second factor to confirm (`app/mcp/exclusions.py`).
+
 AUDIT (invariant 4). One `email.settings_updated` per accepted save, recording
 WHICH fields were supplied and none of their values (the log is append-only;
 a value written into it can never be redacted, and one of these fields is a
@@ -59,7 +65,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client,
+    require_permission_on_every_client_with_step_up,
+)
 from app.core import rate_limit
 from app.core.audit import audit_service
 from app.core.i18n import tr
@@ -436,10 +447,11 @@ async def read_email_settings(
 async def write_email_settings(
     body: EmailSettingsIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client_with_step_up("orgs.manage")),
 ) -> EmailSettingsOut:
     """Save the relay settings, and answer with what is stored afterwards --
-    never with what was typed (a fresh read, in its own session)."""
+    never with what was typed (a fresh read, in its own session). Needs a
+    second factor confirmed in the last ten minutes (design §2.5, S1)."""
     _refuse_unusable(body)
     state = request.app.state
     supplied = sorted(body.model_fields_set)

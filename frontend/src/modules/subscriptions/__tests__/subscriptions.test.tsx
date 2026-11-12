@@ -1149,7 +1149,7 @@ describe("SpendDashboard", () => {
       { id: "c2", name: "Globex", kind: "customer", enabled_modules: [], permissions: ME.permissions },
     ]);
     const client = (id: string, name: string): ClientOut => ({
-      id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
+      id, name, kind: "customer", status: "active", email_domains: [], microsoft_tenants: [], phone: "", address: "",
       website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,
     });
     api.me = vi.fn().mockResolvedValue({ ...ME, clients: [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions }, { id: "c2", name: "Globex", kind: "customer", enabled_modules: [], permissions: ME.permissions }] });

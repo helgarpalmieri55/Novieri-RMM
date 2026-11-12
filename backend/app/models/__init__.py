@@ -10,6 +10,8 @@ from app.models.approved_actions import ApprovedAction, ApprovedActionScriptExem
 from app.models.auth import (
     AccountMailSettings,
     AuthActionToken,
+    AuthEntraSettings,
+    AuthExternalIdentity,
     AuthFailure,
     AuthOrgSettings,
     AuthPasskey,
@@ -236,6 +238,8 @@ __all__ = [
     "AuditEvent",
     "AccountMailSettings",
     "AuthActionToken",
+    "AuthEntraSettings",
+    "AuthExternalIdentity",
     "AuthFailure",
     "AuthOrgSettings",
     "AuthPasskey",

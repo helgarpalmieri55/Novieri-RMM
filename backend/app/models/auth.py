@@ -13,6 +13,11 @@ and a recovery code's `code_hash` is its
 salted argon2id hash in the encoded form (NIST SP 800-63B-4 §3.1.2.2) --
 CHECKs in 0245 hold both lengths.
 
+`AuthExternalIdentity` (migration 0246) links a person to a Microsoft account
+by `tid` + `oid`; `AuthEntraSettings` is the organization's application
+registration, whose certificate's private key is the vault secret of its
+`credential_id`.
+
 A PERSON'S ROWS FOLLOW THEIR `users` ROW (catalog kind O, parent `users`
 through `user_id`): `client_id` is copied by the `its_client_from_parent`
 trigger -- NULL for a technician, the contact's client for a contact -- so it
@@ -41,6 +46,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
     true,
@@ -233,6 +239,11 @@ class AuthSession(Base):
         CheckConstraint(
             "(ended_at IS NULL) = (ended_reason IS NULL)", name="ck_auth_sessions_ended"
         ),
+        # Migration 0246 (phase 2, Task 9b): how the session started.
+        CheckConstraint(
+            "first_step IN ('password', 'passkey', 'microsoft', 'recovery')",
+            name="ck_auth_sessions_first_step",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -243,6 +254,13 @@ class AuthSession(Base):
     )
     token_hash: Mapped[bytes] = mapped_column(LargeBinary)
     kind: Mapped[str] = mapped_column(Text)
+    #: How the session started (phase 2, Task 9b): `password`, `passkey`,
+    #: `microsoft` or `recovery`. Only a session that started with the
+    #: password clears the "password set by mail" mark when it proves a
+    #: second factor (`failures.record_success`). Every session the code
+    #: starts says which (`sessions.start_session`); a row that does not reads
+    #: `recovery`, which never clears it (fail closed).
+    first_step: Mapped[str] = mapped_column(Text, server_default="recovery")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column()
@@ -428,13 +446,116 @@ class AccountMailSettings(Base):
     )
 
 
+#: `auth_external_identities.provider`: Microsoft Entra ID, the one outside
+#: identity provider (design §4, §11).
+ENTRA = "entra"
+IDENTITY_PROVIDERS = (ENTRA,)
+
+
+class AuthExternalIdentity(Base):
+    """A person's link to a Microsoft account (design §4, migration 0246): the
+    tenant (`tid`) and the account in it (`oid`), the two claims Microsoft says
+    do not change. Never an address. A person's row: NULL client for a
+    technician, the contact's client for a contact (module docstring)."""
+
+    __tablename__ = "auth_external_identities"
+    __table_args__ = (
+        client_org_fk("auth_external_identities"),
+        UniqueConstraint(
+            "org_id", "provider", "tenant_id", "subject", name="uq_auth_external_identities_subject"
+        ),
+        UniqueConstraint("user_id", "provider", name="uq_auth_external_identities_user"),
+        CheckConstraint("provider IN ('entra')", name="ck_auth_external_identities_provider"),
+    )
+
+    id: Mapped[UUID] = uuid7_pk()
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    client_id: Mapped[UUID | None] = _client_id()
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(Text)
+    #: The `tid` claim: the tenant the account signed in to.
+    tenant_id: Mapped[UUID] = mapped_column()
+    #: The `oid` claim: the account, immutable within its tenant.
+    subject: Mapped[UUID] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class AuthEntraSettings(Base):
+    """Settings → Microsoft sign-in (design §4; plan decisions D34, C4): the
+    organization's one application registration. The platform proves itself
+    to Microsoft with a certificate it made: the PRIVATE KEY is the vault
+    secret of `credential_id` (invariant 3), never a column; the certificate
+    is public and kept here, to be shown and uploaded to Entra."""
+
+    __tablename__ = "auth_entra_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "NOT enabled OR (app_client_id IS NOT NULL AND credential_id IS NOT NULL "
+            "AND certificate_pem IS NOT NULL)",
+            name="ck_auth_entra_settings_ready",
+        ),
+        CheckConstraint(
+            "(certificate_pem IS NULL) = (certificate_thumbprint IS NULL) "
+            "AND (certificate_pem IS NULL) = (certificate_expires_at IS NULL)",
+            name="ck_auth_entra_settings_certificate",
+        ),
+        CheckConstraint(
+            "(next_credential_id IS NULL AND next_certificate_pem IS NULL "
+            "AND next_certificate_thumbprint IS NULL AND next_certificate_expires_at IS NULL) "
+            "OR (next_credential_id IS NOT NULL AND next_certificate_pem IS NOT NULL "
+            "AND next_certificate_thumbprint IS NOT NULL "
+            "AND next_certificate_expires_at IS NOT NULL "
+            "AND certificate_pem IS NOT NULL)",
+            name="ck_auth_entra_settings_next_certificate",
+        ),
+        CheckConstraint(
+            "staff_tenant_id IS DISTINCT FROM '9188040d-6c67-4c5b-b112-36a304b66dad'::uuid",
+            name="ck_auth_entra_settings_no_consumers",
+        ),
+    )
+
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
+    #: The application (client) ID Microsoft assigned to the registration.
+    app_client_id: Mapped[UUID | None] = mapped_column(default=None)
+    #: The vault credential holding the certificate's private key (PEM, PKCS#8).
+    credential_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), default=None
+    )
+    #: The self-signed certificate, PEM: public, uploaded to Entra by a person.
+    certificate_pem: Mapped[str | None] = mapped_column(Text, default=None)
+    #: `x5t#S256`: base64url SHA-256 of the certificate's DER (the assertion header).
+    certificate_thumbprint: Mapped[str | None] = mapped_column(Text, default=None)
+    certificate_expires_at: Mapped[datetime | None] = mapped_column(default=None)
+    #: A new key and certificate waiting for a person to upload the certificate
+    #: to Entra; assertions keep using the current pair until it is activated
+    #: (Task 1, decision 5).
+    next_credential_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("credentials.id", ondelete="SET NULL"), default=None
+    )
+    next_certificate_pem: Mapped[str | None] = mapped_column(Text, default=None)
+    next_certificate_thumbprint: Mapped[str | None] = mapped_column(Text, default=None)
+    next_certificate_expires_at: Mapped[datetime | None] = mapped_column(default=None)
+    #: Novieri's own tenant: the only one technicians sign in from (design §4).
+    staff_tenant_id: Mapped[UUID | None] = mapped_column(default=None)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
 __all__ = [
     "ACTION_PURPOSES",
     "CHALLENGE_PURPOSES",
+    "ENTRA",
     "FACTORS",
+    "IDENTITY_PROVIDERS",
     "SESSION_KINDS",
     "AccountMailSettings",
     "AuthActionToken",
+    "AuthEntraSettings",
+    "AuthExternalIdentity",
     "AuthFailure",
     "AuthOrgSettings",
     "AuthPasskey",

@@ -1,12 +1,15 @@
-"""A technician's password: the rule of design §2.1 and where the hash goes.
+"""A person's password: the rule of design §2.1 (§3 for a contact) and where the hash goes.
 
-THE RULE IS TASK 2's (`passwords.check_new_password`): twelve characters at
-least, 128 at most, whole against the shipped blocklist and against the
-words of the context -- the address and its parts, the organization's name,
-the person's name and the platform's names (`passwords.context_words`; Task
-2's decision 5). This module applies it to a technician and says the reason
-(NIST SP 800-63B-4 §3.1.1.2; plan decision 11): `PasswordRejected.message` is
-already in the request's language.
+THE RULE IS TASK 2's (`passwords.check_new_password`): at least the person's
+minimum (`minimum_for(kind)`: 12 for a technician, who always has a second
+factor, design §2.1; 15 for a contact, whose second factor is optional,
+design §3 -- `passwords.STAFF_MINIMUM` and `passwords.CONTACT_MINIMUM`), 128
+at most, whole against the shipped blocklist and against the words of the
+context -- the address and its parts, the organization's name, the person's
+name and the platform's names (`passwords.context_words`; Task 2's decision
+5). This module applies it to a technician or a contact (own authentication
+phase 2) and says the reason (NIST SP 800-63B-4 §3.1.1.2; plan decision 11):
+`PasswordRejected.message` is already in the request's language.
 
 A PASSWORD IN A REQUEST BODY HAS NO PYDANTIC BOUND (plan decision 16): a field
 failure repeats its INPUT in the 422, and the input is the password. A new
@@ -27,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.passwords import (
+    CONTACT_MINIMUM,
     STAFF_MINIMUM,
     PasswordRejected,
     check_new_password,
@@ -34,6 +38,7 @@ from app.core.auth.passwords import (
     hash_password,
 )
 from app.core.auth.refusals import AuthRefusal
+from app.core.identity import CONTACT_KIND
 from app.models import Organization
 from app.models.auth import AuthPassword
 
@@ -42,6 +47,13 @@ from app.models.auth import AuthPassword
 #: code points after NFC, even typed decomposed), short enough that an
 #: anonymous caller cannot send OpenBao a megabyte to HMAC.
 SUBMITTED_MAX = 1024
+
+
+def minimum_for(kind: str) -> int:
+    """The shortest password a person of `kind` may choose: 12 for a
+    technician, who always has a second factor (design §2.1); 15 for a
+    contact, whose second factor is optional (design §3)."""
+    return CONTACT_MINIMUM if kind == CONTACT_KIND else STAFF_MINIMUM
 
 
 async def organization_name(session: AsyncSession, org_id: UUID) -> str:
@@ -55,16 +67,16 @@ async def organization_name(session: AsyncSession, org_id: UUID) -> str:
 
 
 async def require_acceptable(
-    plain: str, *, email: str, display_name: str, org_name: str
+    plain: str, *, email: str, display_name: str, org_name: str, minimum: int = STAFF_MINIMUM
 ) -> None:
-    """The rule of design §2.1 for a technician, or a 422 `password_rejected`
-    whose `detail` says why. The context is the address, the organization's
-    name and the person's name."""
+    """The rule of design §2.1 (§3 for a contact: `minimum_for`), or a 422
+    `password_rejected` whose `detail` says why. The context is the address,
+    the organization's name and the person's name."""
     try:
         await asyncio.to_thread(
             check_new_password,
             plain,
-            minimum=STAFF_MINIMUM,
+            minimum=minimum,
             context=context_words(email, org_name, display_name),
         )
     except PasswordRejected as exc:

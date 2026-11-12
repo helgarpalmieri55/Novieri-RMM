@@ -18,7 +18,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.sessions import end, mark_step_up
@@ -154,6 +154,54 @@ async def test_a_contact_session_never_passes_the_console_door(api_env: Any) -> 
     response = await _me(api_env, signed.headers)
     assert response.status_code == 403
     assert response.json()["detail"] == "this account can only use the portal"
+    assert response.json()["code"] == "portal_only"
+
+
+async def test_a_contacts_keep_alive_is_refused_and_still_renews_their_session(
+    api_env: Any,
+) -> None:
+    """Final review of phase 2, item 6, pinned. A contact's console
+    keep-alive is `GET /me`: it answers 403 `portal_only` and yet renews
+    their session, because the door resolves the session -- `sessions.
+    resolve(touch=True)`, committed in its own transaction -- before
+    `_admit_session` refuses the contact. That call order is what keeps an
+    open portal page alive; moved after the refusal, the touch would never
+    run for a contact, and their session would idle out under the page."""
+    org_id = await api_env.create_org("door-keep-alive")
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
+        client = Client(org_id=org_id, name="Acme", kind="customer")
+        s.add(client)
+        await s.flush()
+        contact = User(
+            org_id=org_id,
+            external_subject=f"contact-pending:{uuid4()}",
+            email=f"{uuid4().hex[:8]}@acme.example",
+            kind="contact",
+            client_id=client.id,
+        )
+        s.add(contact)
+        await s.commit()
+    signed = await sign_in(api_env, org_id, contact.external_subject)
+    # Last seen five minutes ago: inside the contact's idle limit (an hour),
+    # past `TOUCH_EVERY` (a minute), so a touch is due.
+    before = datetime.now(UTC) - timedelta(minutes=5)
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(
+            update(AuthSession)
+            .where(AuthSession.id == signed.session_id)
+            .values(last_seen_at=before)
+        )
+        await s.commit()
+
+    response = await _me(api_env, signed.headers)
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "portal_only"
+    async with AsyncSession(api_env.admin_engine) as s:
+        seen = await s.scalar(
+            select(AuthSession.last_seen_at).where(AuthSession.id == signed.session_id)
+        )
+    assert seen is not None and seen - before >= timedelta(minutes=4), (before, seen)
 
 
 async def test_the_console_domain_rule_holds_for_a_session(api_env: Any) -> None:

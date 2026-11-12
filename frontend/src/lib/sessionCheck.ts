@@ -17,6 +17,9 @@
  *     refused stays refused, and TanStack's retry asks a query again;
  *   - no answer at all (the network, an outage): nothing is decided.
  *
+ * A client's contact is answered 403 `portal_only` by `/me`; for them, and
+ * only then, `/portal/me` is asked instead (own-auth phase 2, Task 10).
+ *
  * ONE CHECK AT A TIME: a burst of 401s shares the one in flight. The check is
  * a raw `fetch`, not `ApiClient`, so its own 401 cannot start another check.
  * It carries the console's usual headers, the background mark included
@@ -27,16 +30,37 @@ import { isSessionEnded, sessionEnded, sessionPerson } from "./sessionEnd";
 
 let inFlight: Promise<void> | null = null;
 
-async function check(base: string): Promise<void> {
-  let response: Response;
+async function ask(base: string, path: string): Promise<Response | null> {
   try {
-    response = await fetch(`${base}/me`, {
-      // Global: `/me` is the person, whichever client the top bar names.
-      headers: requestHeaders(undefined, { method: "GET", path: "/me", client: null, global: true }),
+    return await fetch(`${base}${path}`, {
+      // Global: the person, whichever client the top bar names.
+      headers: requestHeaders(undefined, { method: "GET", path, client: null, global: true }),
       credentials: "same-origin",
     });
   } catch {
-    return;
+    return null;
+  }
+}
+
+/** The refusal's `code`, or `null` when the body says none. */
+async function codeOf(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.clone().json()) as { code?: unknown };
+    return typeof body.code === "string" ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
+async function check(base: string): Promise<void> {
+  let response = await ask(base, "/me");
+  if (response === null) return;
+  // A CLIENT'S CONTACT (own-auth phase 2, Task 10, decision 4): the console's
+  // door answers them 403 `portal_only`, which says nothing about their
+  // session; the portal's own `/me` does, under the same two rules.
+  if (response.status === 403 && (await codeOf(response)) === "portal_only") {
+    response = await ask(base, "/portal/me");
+    if (response === null) return;
   }
   if (response.status === 401) {
     sessionEnded();

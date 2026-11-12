@@ -10,7 +10,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ApiError } from "../lib/api";
+import { ApiError, apiErrorCode } from "../lib/api";
+import { fixtures as auth } from "../modules/auth/fixtures";
 import profile from "../modules/profile/fixtures";
 import settings from "../modules/settings/fixtures";
 
@@ -36,5 +37,17 @@ describe("the dev fixtures, against the server's answers", () => {
     const after = await profile.getMySecurity!();
     expect(after.sessions.map((session) => session.current)).toEqual([true]);
     expect(after.trusted_devices).toEqual([]);
+  });
+
+  it("say Microsoft is not set up, as the server does with it off, so a click never leaves the demo", async () => {
+    let refusal: unknown;
+    try {
+      await auth.microsoftStart!({ intent: "sign_in" }, {});
+    } catch (error: unknown) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect((refusal as ApiError).status).toBe(409);
+    expect(apiErrorCode(refusal)).toBe("microsoft_unavailable");
   });
 });

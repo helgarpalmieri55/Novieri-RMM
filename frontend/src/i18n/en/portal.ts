@@ -5,6 +5,11 @@
  */
 export const portal = {
   nav: { aria: "Portal", myTickets: "My tickets", newTicket: "New ticket" },
+  shell: {
+    meFailed: "Your details could not be loaded.",
+    brand: "Support portal",
+    security: "Sign-in and security",
+  },
   state: {
     groupIncident: "Report a problem",
     groupRequest: "Request something",

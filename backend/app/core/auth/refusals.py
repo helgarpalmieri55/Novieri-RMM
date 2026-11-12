@@ -22,6 +22,9 @@ from starlette.responses import JSONResponse
 AUTH_REQUIRED = "auth_required"
 STEP_UP_REQUIRED = "step_up_required"
 CSRF = "csrf"
+#: 403: the person is a client's contact, whom only the portal admits (design
+#: §3; plan decision D42). The console answers it by going to the portal.
+PORTAL_ONLY = "portal_only"
 
 
 class AuthRefusal(HTTPException):

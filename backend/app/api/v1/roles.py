@@ -4,10 +4,10 @@ Spec `docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §1.
 
     GET    /api/v1/permissions              roles.read
     GET    /api/v1/roles                    roles.read
-    POST   /api/v1/roles                    roles.manage
+    POST   /api/v1/roles                    roles.manage, and a recent second factor
     PATCH  /api/v1/roles/{role_id}          roles.manage
-    PUT    /api/v1/roles/{role_id}/permissions   roles.manage
-    DELETE /api/v1/roles/{role_id}          roles.manage
+    PUT    /api/v1/roles/{role_id}/permissions   roles.manage, and a recent second factor
+    DELETE /api/v1/roles/{role_id}          roles.manage, and a recent second factor
 
 Two codes, not one. `roles.read` answers "what does `technician` mean here";
 `roles.manage` REDEFINES it for everyone holding it. Deliberately NOT
@@ -16,6 +16,15 @@ roles" while what it gates is the org name/settings PATCH and remote-tunnel
 authorization -- attaching this surface to it would upgrade every current holder
 from "can rename the org" to "can mint a fleet admin", a privilege escalation
 delivered by a description string (spec §0.7).
+
+DEFINING A ROLE NEEDS A RECENT SECOND FACTOR (design §2.5, widened by the
+operator on 2026-11-09, S5): creating one, changing its codes and deleting it
+each ask for the administrator's own second factor confirmed in the last ten
+minutes (`_MANAGE_CONFIRMED`, before the body is read) -- a role's codes are
+what every person holding it may do, changed for all of them at once.
+Renaming or re-describing one does not: it changes nobody's access. The three
+are no MCP tools: the channel has no second factor to confirm
+(`app/mcp/exclusions.py`).
 
 THERE IS NO ROUTE THAT TAKES AN ORG ID, for the reason `app/api/v1/orgs.py`
 gives at length: `ctx.org_id` comes from the validated token and the body cannot
@@ -47,7 +56,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_permission,
+    require_permission_on_every_client,
+    require_permission_on_every_client_with_step_up,
+)
 from app.core import rbac_admin
 from app.core.i18n import tr
 from app.core.rbac_admin import RoleAdminError
@@ -60,6 +74,10 @@ from app.core.tenancy import org_session
 #: add to their own role a code that gates another global surface. Reads stay
 #: open to any scope.
 _MANAGE = require_permission_on_every_client("roles.manage")
+#: `_MANAGE`, and the caller's own second factor confirmed in the last ten
+#: minutes (design §2.5; operator 2026-11-09, S5): creating a role, changing
+#: its codes and deleting it. Renaming one stays on `_MANAGE`.
+_MANAGE_CONFIRMED = require_permission_on_every_client_with_step_up("roles.manage")
 
 router = APIRouter(tags=["roles"])
 
@@ -219,9 +237,10 @@ async def list_roles(
 async def create_role(
     body: RoleCreate,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> RoleOut:
-    """Create a role in this organization and set its permission codes."""
+    """Create a role in this organization and set its permission codes. Needs
+    your own second factor confirmed in the last ten minutes."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -279,10 +298,11 @@ async def set_role_permissions(
     role_id: UUID,
     body: RolePermissionsIn,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> RolePermissionsOut:
     """Replace the role's whole permission set, and report how many users in
-    this organization that changed things for.
+    this organization that changed things for. Needs your own second factor
+    confirmed in the last ten minutes.
 
     The write goes through the `set_role_permissions` database function, never
     the `role_permissions` table -- `app_user` has no write privilege on it, by
@@ -310,9 +330,10 @@ async def set_role_permissions(
 async def delete_role(
     role_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(_MANAGE),
+    ctx: AuthContext = Depends(_MANAGE_CONFIRMED),
 ) -> Response:
-    """Delete one of this organization's own roles.
+    """Delete one of this organization's own roles. Needs your own second
+    factor confirmed in the last ten minutes.
 
     A platform-wide role is refused (it is shared by every tenant), and so is a
     role users still hold -- with the count, so the operator knows what to do

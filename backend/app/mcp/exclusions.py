@@ -14,7 +14,23 @@ were (`app/mcp/guard.py`, and `auth_context`'s route-identity check in
 credential that would. Invariant 3 is not amended. `app/main.py` refuses to
 boot if a pair stops naming a real route, because a renamed route would
 otherwise silently fall out of the guard.
+
+SINCE 2026-11-08, ALSO EVERY ACT THAT NEEDS A RECENT SECOND FACTOR AS A WHOLE
+(design §2.5, widened by the operator, S1, and on 2026-11-09, S5): the
+organization's sign-in settings, the grants of a technician's access, the
+definition of a role and enabling a person again. The channel carries no
+session, so `deps.require_step_up` refuses each of them anyway; listing them
+here keeps them off the tool list rather than offering a tool that can only
+fail, and refuses them twice, like the rest (`deps.require_step_up`'s
+docstring). A route gated only for part of its requests keeps its tool, and
+its description says which part needs the console.
 """
+
+#: Why a route that needs a recent second factor as a whole is never a tool.
+_RECENT_FACTOR = (
+    "needs the administrator's own recent second-factor confirmation in the console "
+    "(design §2.5, as the operator widened it on 2026-11-08 and 2026-11-09)"
+)
 
 NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     # Stored credentials and license keys: the decrypted secret is the response.
@@ -62,6 +78,8 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
         ("POST", f"/api/v1/auth/{path}"): reason
         for path, reason in (
             ("login", "takes a password and mints a session cookie"),
+            ("passkey/options", "issues a passkey challenge for a sign-in without an address"),
+            ("passkey", "takes a passkey assertion and mints a session cookie"),
             ("factor/totp", "takes a second-factor code and mints a session cookie"),
             ("factor/recovery", "takes a recovery code and mints a session cookie"),
             ("factor/passkey/options", "issues a passkey challenge for a sign-in"),
@@ -75,6 +93,7 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
             ("step-up/recovery", "takes a recovery code"),
             ("step-up/passkey/options", "issues a passkey challenge"),
             ("step-up/passkey", "takes a passkey assertion"),
+            ("step-up/password", "takes the account's password"),
             ("logout", "ends the console session the cookie names"),
             ("logout-everywhere", "ends every console session of the person"),
             ("password/forgot", "mails a one-time password-reset link"),
@@ -90,10 +109,56 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
                 "invite/accept",
                 "consumes an invitation link, sets a password and mints a session cookie",
             ),
+            (
+                "invite/passkey/options",
+                "issues a passkey registration challenge from an invitation",
+            ),
+            (
+                "invite/passkey",
+                "consumes an invitation link, binds a passkey and mints a session cookie",
+            ),
+            (
+                "microsoft/start",
+                "starts a sign-in with Microsoft only the person's browser can finish; for a "
+                "technician's invitation it takes their new password and mints a session cookie",
+            ),
+            (
+                "microsoft/complete",
+                "redeems the code Microsoft's redirect gave the person's browser and mints a "
+                "session cookie",
+            ),
         )
     },
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
+    ("POST", "/api/v1/me/password"): "takes the first password of an account that has none",
     ("POST", "/api/v1/me/recovery-codes"): "returns new recovery codes for the account",
+    # Sign-in settings and technicians' access (design §2.5, widened by the
+    # operator on 2026-11-08, S1): each needs a recent second factor, which the
+    # MCP channel cannot confirm.
+    ("PUT", "/api/v1/settings/email"): (
+        f"sets the relay every invitation and reset link goes through; {_RECENT_FACTOR}"
+    ),
+    ("PUT", "/api/v1/settings/sessions"): (
+        "sets how long sign-ins last and whether a device skips the second factor; "
+        f"{_RECENT_FACTOR}"
+    ),
+    ("PUT", "/api/v1/settings/microsoft-sign-in"): (
+        f"sets which Microsoft application and tenant sign people in; {_RECENT_FACTOR}"
+    ),
+    ("POST", "/api/v1/users/{user_id}/roles"): f"grants a technician a role; {_RECENT_FACTOR}",
+    ("DELETE", "/api/v1/users/{user_id}/roles/{assignment_id}"): (
+        f"revokes a technician's role; {_RECENT_FACTOR}"
+    ),
+    # The definition of a role and enabling a person again (design §2.5,
+    # widened by the operator on 2026-11-09, S5): the same.
+    ("POST", "/api/v1/roles"): f"defines a new role and its permissions; {_RECENT_FACTOR}",
+    ("PUT", "/api/v1/roles/{role_id}/permissions"): (
+        f"changes what every holder of a role may do; {_RECENT_FACTOR}"
+    ),
+    ("DELETE", "/api/v1/roles/{role_id}"): f"deletes a role; {_RECENT_FACTOR}",
+    ("POST", "/api/v1/users/{user_id}/enable"): (
+        f"gives a disabled person their access back, with the roles they held; {_RECENT_FACTOR}"
+    ),
     # An invitation's answer carries its one-time link when no mail did: a
     # link that lets a person into the organization (1c(c), like an
     # enrollment token).
@@ -102,6 +167,15 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/v1/users/{user_id}/invite/resend"): (
         "returns a new one-time invitation link when no mail carried it, which lets a person in"
+    ),
+    # A client's contact's portal invitation (P2 phase 2, Task 8): the same
+    # link, into the portal.
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
+        "returns a one-time portal invitation link when no mail carried it, which lets a person in"
+    ),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"): (
+        "removes a contact's ways in and returns a new invitation link when no mail carried it; "
+        "needs the technician's own recent second-factor confirmation in the console"
     ),
 }
 
@@ -276,12 +350,21 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/mcp/connections"): _CONNECTIONS,
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): _CONNECTIONS,
     # My security (P2 phase 1): the person's own factors, remembered browsers
-    # and sessions; each needs the console session (`api/v1/auth.py::_console_ctx`).
+    # and sessions; each needs `api/v1/auth.py::_account_ctx`, a technician's
+    # or a contact's own browser session (phase 2, D26).
     ("GET", "/api/v1/me/security"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/passkeys/{passkey_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/trusted-devices/{device_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
+    # The person's own Microsoft link (phase 2, Task 9).
+    ("DELETE", "/api/v1/me/microsoft"): _MY_SECURITY,
+    # The portal page's own account summary (own authentication phase 2): read
+    # from the browser's session, which the MCP channel never has. An AI app
+    # asks `GET /me`.
+    ("GET", "/api/v1/portal/me"): (
+        "the portal page's own summary of the signed-in person, read from the browser's session"
+    ),
     # Needs the administrator's own second factor confirmed in the console in
     # the last ten minutes (design §2.5), which the MCP channel cannot do.
     ("POST", "/api/v1/users/{user_id}/factors/reset"): (

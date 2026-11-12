@@ -74,7 +74,7 @@ describe("the sign-in address", () => {
 
 describe("the pages reached without a session", () => {
   it("are the sign-in steps, the two password links, the invitation and the server's recovery link", () => {
-    expect([...PUBLIC_PATHS].sort()).toEqual(["/forgot-password", "/invite", "/recover", "/reset-password", "/sign-in"]);
+    expect([...PUBLIC_PATHS].sort()).toEqual(["/forgot-password", "/invite", "/portal/sign-in", "/recover", "/reset-password", "/sign-in"]);
   });
 
   it("match by whole segment, not by string prefix", () => {

@@ -82,7 +82,7 @@ async def test_my_security_needs_the_console_session(auth_env: Any) -> None:
     """The token the console used to send is no way into My security: 401
     `auth_required`. Minted here, because `auth_env.headers` makes a session
     cookie since own authentication Task 13 (and the door, not only
-    `_console_ctx`, now refuses the token)."""
+    `_account_ctx`, now refuses the token)."""
     org = await auth_env.create_org("mysec-bearer")
     sub = await auth_env.create_user(org, "technician")
     token = auth_env.idp.token(sub, await auth_env.org_slug(org), email=f"{sub}@test.local")
@@ -632,6 +632,7 @@ async def test_change_password_asks_for_a_recent_confirmation_itself(auth_env: A
     from app.core.auth import account
     from app.core.auth.refusals import AuthRefusal
     from app.core.auth.sessions import resolve
+    from app.core.client_scope import ClientScope
     from tests.session_support import cookie_header, http_request
 
     org = await auth_env.create_org("mysec-fresh")
@@ -649,7 +650,12 @@ async def test_change_password_asks_for_a_recent_confirmation_itself(auth_env: A
 
     with pytest.raises(AuthRefusal) as refused:
         await account.change_password(
-            request, principal, current=who.password, new="Pelican-Orbit-Lantern-58"
+            request,
+            principal,
+            current=who.password,
+            new="Pelican-Orbit-Lantern-58",
+            # A technician's own rows run under every client whatever is passed.
+            clients=ClientScope.all(),
         )
 
     assert refused.value.status_code == 403
@@ -746,3 +752,50 @@ async def test_a_password_change_from_the_remembered_browser_is_not_held_by_the_
     )
 
     assert response.status_code == 204, response.text
+
+
+async def test_a_session_ended_while_waiting_for_the_lock_gets_no_new_recovery_codes(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2-38 for the recovery codes (own authentication phase 2, Task 7 fix
+    round 1). A reset of the person's factors that wipes the codes and ends
+    the session after the door admitted the request, and before the
+    person's lock is taken, must not be followed by fresh codes for the
+    session it cut: `new_recovery_codes` checks under the lock that the
+    session is still live, as `add_password` does. Without the check the
+    codes the reset just wiped come back -- 200 and ten codes: red."""
+    from uuid import UUID
+
+    from sqlalchemy import func
+
+    from app.core.auth import account
+    from app.core.auth.factors import clear_second_factors
+    from app.models.auth import AuthRecoveryCode
+
+    org = await auth_env.create_org("mysec-codes-race")
+    who = await signed_in(auth_env, org, "technician")
+    real_lock = account.lock_person
+
+    async def reset_lands_first(session: AsyncSession, user_id: UUID) -> None:
+        async with AsyncSession(auth_env.admin_engine) as s:
+            await clear_second_factors(s, who.user_id)
+            await s.execute(
+                update(AuthSession)
+                .where(AuthSession.user_id == who.user_id)
+                .values(ended_at=datetime.now(UTC), ended_reason="factors_reset")
+            )
+            await s.commit()
+        await real_lock(session, user_id)
+
+    monkeypatch.setattr(account, "lock_person", reset_lands_first)
+    response = await auth_env.client.post("/api/v1/me/recovery-codes", headers=who.headers())
+
+    assert response.status_code == 401, response.text
+    assert response.json()["code"] == "auth_required"
+    async with AsyncSession(auth_env.admin_engine) as session:
+        left = await session.scalar(
+            select(func.count())
+            .select_from(AuthRecoveryCode)
+            .where(AuthRecoveryCode.user_id == who.user_id)
+        )
+    assert left == 0

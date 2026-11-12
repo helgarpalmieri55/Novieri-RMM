@@ -175,6 +175,13 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
+**NOW 109, own authentication phase 2, Task 5.** One site. A static WARNING in
+`app/core/auth/entra.py::exchange`, "microsoft sign-in: the token endpoint
+refused the code", when Microsoft's token endpoint refuses the authorization
+code or does not answer. `extra` = Microsoft's machine error code, or
+`transport` / `http_<status>` / `no_id_token`; never the body, whose
+`error_description` can quote what it refused.
+
 **NOW 108, own authentication phase 1, fix 3 review (Minor 2).** One site. A
 static WARNING in `app/core/mail.py::_sign_in`, "account mail not sent: the
 vault did not open the relay sign-in", when the vault's backend raises an

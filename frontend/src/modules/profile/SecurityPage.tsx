@@ -7,6 +7,7 @@
 //
 //   GET    /me/security                                        what this page shows
 //   PUT    /me/password                                        change the password
+//   POST   /me/password                                        the first password (own-auth phase 2)
 //   POST   /auth/enroll/passkey/options, /auth/enroll/passkey  add a passkey
 //   DELETE /me/passkeys/{id}                                   remove one
 //   POST   /auth/enroll/totp/start, /auth/enroll/totp/confirm  set up the app, or move it
@@ -14,10 +15,22 @@
 //   POST   /me/recovery-codes                                  ten new codes, shown once
 //   DELETE /me/trusted-devices/{id}                            forget a remembered device
 //   DELETE /me/sessions/{id}                                   sign out another session
+//   POST   /auth/microsoft/start, DELETE /me/microsoft         link or unlink a Microsoft account (own-auth phase 2)
+//
+// A CLIENT'S CONTACT HAS THE SAME PAGE IN THE PORTAL (`PortalSecurityPage`,
+// `/portal/security`; own-auth phase 2, Task 11). `GET /me/security` says
+// whose rules apply (`kind`): a contact's password is 15 characters or more,
+// their authenticator app is optional, their last way in -- a password, a
+// passkey or Microsoft -- is never offered for removal, and recovery codes
+// are shown only to one whose authenticator app is on: a contact's passkey is
+// another way in, not a second factor (operator decision C5, B2-06). The
+// time zone comes from `/portal/me`: a contact cannot read the
+// organisation's, nor `/me`. The server refuses all of it anyway.
 //
 // THE SERVER DECIDES EVERYTHING (invariant 6). The form checks a new password
-// with the sign-in pages' own rule (Task 11's `checkNewPassword`: 12 to 128
-// characters, each code point one), which only saves a round trip; the
+// with the sign-in pages' own rule (Task 11's `checkNewPassword`: 12 -- 15
+// for a contact -- to 128 characters, each code point one), which only saves
+// a round trip; the
 // blocklist, the context words and the bounds are the server's (§2.1), and its
 // refusal is shown in its own words. Removing the last second factor is
 // refused by the server; the console only says so before the click. A change
@@ -63,10 +76,14 @@ import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { checkNewPassword } from "../auth/errors";
 import { setupKeyOf } from "../auth/flow";
+import { describeMicrosoftError } from "../auth/microsoft";
+import { MicrosoftButton } from "../auth/MicrosoftButton";
 import { describePasskeyError } from "../auth/passkey";
+import { usePortalMe } from "../portal/usePortalMe";
 import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import {
   useAddPasskeyMutation,
+  useAddPasswordMutation,
   useChangePasswordMutation,
   useConfirmTotpMutation,
   useEndMySessionMutation,
@@ -76,6 +93,7 @@ import {
   useRemoveTotpMutation,
   useRevokeTrustedDeviceMutation,
   useStartTotpMutation,
+  useUnlinkMicrosoftMutation,
 } from "./api";
 import {
   RECOVERY_CODE_COUNT,
@@ -114,12 +132,31 @@ function Failure({ message }: { message: string }) {
   );
 }
 
+/** `/profile/security`, in the console's frame. */
 export function SecurityPage() {
+  const zone = useOrgZone();
+  return <SecurityBody zone={zone} back="/profile/security" />;
+}
+
+/** `/portal/security`, in the portal's: the zone of `/portal/me` (decision 3). */
+export function PortalSecurityPage() {
+  const me = usePortalMe();
+  return <SecurityBody zone={me.data?.timezone ?? null} back="/portal/security" />;
+}
+
+/** `back`: this page's own address, where linking a Microsoft account comes back to. */
+function SecurityBody({ zone, back }: { zone: string | null; back: string }) {
   const t = useT();
   const security = useMySecurity();
   const stepUp = useStepUp();
-  const zone = useOrgZone();
   const data = security.data;
+  const contact = data?.kind === "contact";
+  // A contact's second factor is the authenticator app alone (C5).
+  const secondFactor = data !== undefined && data.has_totp;
+  // "Your password was added." outlives the form that added it (fix round 1):
+  // the re-read page offers to CHANGE the password instead, and says so there
+  // until a change is asked for.
+  const [passwordAdded, setPasswordAdded] = useState(false);
 
   return (
     <>
@@ -137,10 +174,21 @@ export function SecurityPage() {
         </Panel>
       ) : data ? (
         <>
-          <PasswordPanel run={stepUp.run} />
+          {data.has_password ? (
+            <PasswordPanel
+              run={stepUp.run}
+              minimum={contact ? 15 : 12}
+              contact={contact}
+              added={passwordAdded}
+              onChanging={() => setPasswordAdded(false)}
+            />
+          ) : (
+            <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} onAdded={() => setPasswordAdded(true)} />
+          )}
           <PasskeysPanel security={data} run={stepUp.run} zone={zone} />
+          <MicrosoftPanel security={data} run={stepUp.run} zone={zone} back={back} />
           <TotpPanel security={data} run={stepUp.run} />
-          <RecoveryPanel security={data} run={stepUp.run} />
+          {!contact || secondFactor ? <RecoveryPanel security={data} run={stepUp.run} /> : null}
           <DevicesPanel security={data} run={stepUp.run} zone={zone} />
           <SessionsPanel security={data} run={stepUp.run} zone={zone} />
         </>
@@ -150,7 +198,20 @@ export function SecurityPage() {
   );
 }
 
-function PasswordPanel({ run }: { run: StepUpRun }) {
+function PasswordPanel({
+  run,
+  minimum,
+  contact,
+  added,
+  onChanging,
+}: {
+  run: StepUpRun;
+  minimum: number;
+  contact: boolean;
+  /** The password was just added (`AddPasswordPanel`): said here until a change is asked for. */
+  added: boolean;
+  onChanging: () => void;
+}) {
   const t = useT();
   const change = useChangePasswordMutation(run);
   const [current, setCurrent] = useState("");
@@ -170,12 +231,13 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
     : current === ""
       ? t("profile.securityPage.password.missingCurrent")
       : // Task 11's rule and sentences, the ones the sign-in pages say.
-        checkNewPassword(next, repeat);
+        checkNewPassword(next, repeat, minimum);
 
   function submit() {
     setOutcome(null);
+    onChanging();
     setChecked(true);
-    if (current === "" || checkNewPassword(next, repeat) !== null) return;
+    if (current === "" || checkNewPassword(next, repeat, minimum) !== null) return;
     change.mutate(
       { current, new: next },
       {
@@ -196,7 +258,10 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
   }
 
   return (
-    <Panel title={t("profile.securityPage.password.title")} subtitle={t("profile.securityPage.password.subtitle")}>
+    <Panel
+      title={t("profile.securityPage.password.title")}
+      subtitle={t(contact ? "profile.securityPage.password.subtitleContact" : "profile.securityPage.password.subtitle")}
+    >
       <Form onSubmit={submit}>
         <div className="form-grid" style={FOLDING_FORM_GRID}>
           <Field label={t("profile.securityPage.password.current")}>
@@ -256,6 +321,100 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
               {t("profile.securityPage.password.changed")}
             </span>
           ) : null}
+          {added && outcome === null ? (
+            <span role="status" className="form-saved">
+              <Icon name={KIND_ICON.ok} size={13} />
+              {t("profile.securityPage.password.added")}
+            </span>
+          ) : null}
+        </div>
+      </Form>
+    </Panel>
+  );
+}
+
+/**
+ * The FIRST password (own-auth phase 2): for someone who signed up with a
+ * passkey or Microsoft. No current password to give; the recent confirmation
+ * is the server's to ask (§2.5), and the boxes empty whatever it answers.
+ */
+function AddPasswordPanel({ run, minimum, onAdded }: { run: StepUpRun; minimum: number; onAdded: () => void }) {
+  const t = useT();
+  const add = useAddPasswordMutation(run);
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [checked, setChecked] = useState(false);
+  const [outcome, setOutcome] = useState<{ kind: "added" } | { kind: "failed"; error: unknown } | null>(null);
+  const refusal = checked ? checkNewPassword(next, repeat, minimum) : null;
+
+  function submit() {
+    setOutcome(null);
+    setChecked(true);
+    if (checkNewPassword(next, repeat, minimum) !== null) return;
+    // `useSecretMutation` forgets the body once this has run.
+    add.mutate(next, {
+      onSettled: (_data, error) => {
+        setNext("");
+        setRepeat("");
+        setChecked(false);
+        setOutcome(error ? { kind: "failed", error } : { kind: "added" });
+        if (!error) onAdded();
+      },
+    });
+  }
+
+  return (
+    <Panel
+      title={t("profile.securityPage.password.title")}
+      subtitle={t("profile.securityPage.password.addSubtitle", { min: minimum })}
+    >
+      <Form onSubmit={submit}>
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("profile.securityPage.password.next")}>
+            <input
+              className={inputClass}
+              type="password"
+              autoComplete="new-password"
+              value={next}
+              onChange={(event) => setNext(event.target.value)}
+            />
+          </Field>
+          <Field label={t("profile.securityPage.password.repeat")}>
+            <input
+              className={inputClass}
+              type="password"
+              autoComplete="new-password"
+              value={repeat}
+              onChange={(event) => setRepeat(event.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="form-actions">
+          <Btn
+            type="submit"
+            variant="primary"
+            icon="lock"
+            label={add.isPending ? t("profile.securityPage.password.adding") : t("profile.securityPage.password.add")}
+            disabled={add.isPending}
+          />
+          {refusal ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {refusal}
+            </span>
+          ) : null}
+          {outcome?.kind === "failed" ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {describeSubmitError(outcome.error)}
+            </span>
+          ) : null}
+          {outcome?.kind === "added" ? (
+            <span role="status" className="form-saved">
+              <Icon name={KIND_ICON.ok} size={13} />
+              {t("profile.securityPage.password.added")}
+            </span>
+          ) : null}
         </div>
       </Form>
     </Panel>
@@ -272,8 +431,16 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
   // was spent on the confirmation, and a browser creates a passkey only from a
   // click, so the page asks for one more ("Create the passkey").
   const [confirmed, setConfirmed] = useState(false);
-  // The server refuses removing the last second factor; this only says so first.
-  const onlyFactor = security.passkeys.length + (security.has_totp ? 1 : 0) <= 1;
+  // A technician never goes without a second factor; a contact, without a
+  // way in (own-auth phase 2: a password, a passkey or Microsoft). The
+  // server refuses both (`last_factor`, `last_method`); this only says so first.
+  const contact = security.kind === "contact";
+  const onlyFactor = contact
+    ? security.passkeys.length <= 1 && !security.has_password && security.microsoft === null
+    : security.passkeys.length + (security.has_totp ? 1 : 0) <= 1;
+  const onlyFactorText = t(
+    contact ? "profile.securityPage.passkeys.lastMethod" : "profile.securityPage.passkeys.onlyFactor",
+  );
   // The browser's refusal in Task 11's words (a passkey already on the
   // account, a closed prompt); anything else -- the server's refusal, a
   // closed confirmation -- as `describeSubmitError` words it. After the
@@ -304,7 +471,10 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
   }
 
   return (
-    <Panel title={t("profile.securityPage.passkeys.title")} subtitle={t("profile.securityPage.passkeys.subtitle")}>
+    <Panel
+      title={t("profile.securityPage.passkeys.title")}
+      subtitle={t(contact ? "profile.securityPage.passkeys.subtitleContact" : "profile.securityPage.passkeys.subtitle")}
+    >
       {security.passkeys.length === 0 ? (
         <p className="note">{t("profile.securityPage.passkeys.empty")}</p>
       ) : (
@@ -335,7 +505,7 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
                 label={t("profile.securityPage.passkeys.remove")}
                 ariaLabel={t("profile.securityPage.passkeys.removeAria", { name: passkey.name })}
                 disabled={onlyFactor || remove.isPending}
-                title={onlyFactor ? t("profile.securityPage.passkeys.onlyFactor") : undefined}
+                title={onlyFactor ? onlyFactorText : undefined}
                 onClick={() => setRemoving(passkey)}
               />
             </li>
@@ -344,7 +514,7 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
       )}
       {onlyFactor && security.passkeys.length === 1 ? (
         <p className="note" style={{ marginTop: 10 }}>
-          {t("profile.securityPage.passkeys.onlyFactor")}
+          {onlyFactorText}
         </p>
       ) : null}
       {remove.error ? <Failure message={describeSubmitError(remove.error)} /> : null}
@@ -416,7 +586,8 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   // so it is reset once it settles.
   const [confirmFailure, setConfirmFailure] = useState<unknown>(null);
   const [asking, setAsking] = useState(false);
-  const onlyFactor = security.has_totp && security.passkeys.length === 0;
+  // A contact's app is optional (own-auth phase 2, B2-28): never their only factor.
+  const onlyFactor = security.kind !== "contact" && security.has_totp && security.passkeys.length === 0;
 
   function begin() {
     confirm.reset();
@@ -455,7 +626,7 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   return (
     <Panel
       title={t("profile.securityPage.totp.title")}
-      subtitle={t("profile.securityPage.totp.subtitle")}
+      subtitle={t(security.kind === "contact" ? "profile.securityPage.totp.subtitleContact" : "profile.securityPage.totp.subtitle")}
       actions={
         <Badge variant={security.has_totp ? "success" : "muted"}>
           {security.has_totp ? t("profile.securityPage.totp.on") : t("profile.securityPage.totp.off")}
@@ -564,6 +735,87 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   );
 }
 
+/**
+ * The Microsoft account (design §4): linked the first time from here or from
+ * the invitation, by its `tid` + `oid`, never by address. Linking leaves for
+ * Microsoft after the server's recent confirmation and comes back to `back`,
+ * this page; unlinking is refused when it is the last way in (`last_method`),
+ * and this only says so first. A technician always keeps a password (operator
+ * decision C3); a contact keeps a password or a passkey.
+ */
+function MicrosoftPanel({
+  security,
+  run,
+  zone,
+  back,
+}: {
+  security: MySecurity;
+  run: StepUpRun;
+  zone: string | null;
+  back: string;
+}) {
+  const t = useT();
+  const unlink = useUnlinkMicrosoftMutation(run);
+  const [confirming, setConfirming] = useState(false);
+  const link = security.microsoft;
+  const lastWayIn =
+    security.kind === "contact" ? !security.has_password && security.passkeys.length === 0 : !security.has_password;
+
+  return (
+    <Panel title={t("profile.securityPage.microsoft.title")} subtitle={t("profile.securityPage.microsoft.subtitle")}>
+      {link ? (
+        <>
+          <div style={ROW}>
+            <div style={ROW_TEXT}>
+              <div className="cell-title" style={WRAP_ANYWHERE}>
+                {t("profile.securityPage.microsoft.linked", { tenant: link.tenant_id })}
+              </div>
+              <div className="cell-sub">
+                {`${t("profile.securityPage.microsoft.added", { when: describeWhen(link.created_at, undefined, zone) })} · ${
+                  link.last_used_at
+                    ? t("profile.securityPage.microsoft.lastUsed", { when: describeWhen(link.last_used_at, undefined, zone) })
+                    : t("profile.securityPage.microsoft.neverUsed")
+                }`}
+              </div>
+            </div>
+            <Btn
+              small
+              icon="trash"
+              label={t("profile.securityPage.microsoft.unlink")}
+              disabled={lastWayIn || unlink.isPending}
+              title={lastWayIn ? t("profile.securityPage.microsoft.lastWayIn") : undefined}
+              onClick={() => setConfirming(true)}
+            />
+          </div>
+          {lastWayIn ? (
+            <p className="note" style={{ marginTop: 10 }}>
+              {t("profile.securityPage.microsoft.lastWayIn")}
+            </p>
+          ) : null}
+          {unlink.error ? (
+            <Failure message={describeMicrosoftError(unlink.error) ?? describeSubmitError(unlink.error)} />
+          ) : null}
+        </>
+      ) : (
+        <MicrosoftButton start={{ intent: "link" }} back={back} labelKey="profile.securityPage.microsoft.link" run={run} />
+      )}
+      <ConfirmDialog
+        open={confirming}
+        title={t("profile.securityPage.microsoft.confirmTitle")}
+        body={t("profile.securityPage.microsoft.confirmBody")}
+        subject={link?.tenant_id ?? ""}
+        confirmLabel={t("profile.securityPage.microsoft.unlink")}
+        destructive
+        onConfirm={() => {
+          setConfirming(false);
+          unlink.mutate();
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </Panel>
+  );
+}
+
 function RecoveryPanel({ security, run }: { security: MySecurity; run: StepUpRun }) {
   const t = useT();
   const regenerate = useRegenerateRecoveryCodesMutation(run);
@@ -574,7 +826,10 @@ function RecoveryPanel({ security, run }: { security: MySecurity; run: StepUpRun
   const left = security.recovery_codes_left;
 
   return (
-    <Panel title={t("profile.securityPage.recovery.title")} subtitle={t("profile.securityPage.recovery.subtitle")}>
+    <Panel
+      title={t("profile.securityPage.recovery.title")}
+      subtitle={t(security.kind === "contact" ? "profile.securityPage.recovery.subtitleContact" : "profile.securityPage.recovery.subtitle")}
+    >
       {codes ? (
         <>
           <div className="notice gold" role="status">
@@ -618,7 +873,12 @@ function RecoveryPanel({ security, run }: { security: MySecurity; run: StepUpRun
       ) : (
         <>
           <p>{t("profile.securityPage.recovery.left", { count: left, total: RECOVERY_CODE_COUNT })}</p>
-          {left <= 3 ? (
+          {left === 0 ? (
+            <p className="notice gold" style={{ marginTop: 10 }}>
+              <Icon name={KIND_ICON.warn} size={16} />
+              <span>{t("profile.securityPage.recovery.none")}</span>
+            </p>
+          ) : left <= 3 ? (
             <p className="notice gold" style={{ marginTop: 10 }}>
               <Icon name={KIND_ICON.warn} size={16} />
               <span>{t("profile.securityPage.recovery.low")}</span>

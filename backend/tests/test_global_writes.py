@@ -71,6 +71,8 @@ GLOBAL_WRITES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/settings/email/test"): "orgs.manage",
     # how long a sign-in lasts (`auth_org_settings`, P2 design §2.4)
     ("PUT", "/api/v1/settings/sessions"): "orgs.manage",
+    # sign in with Microsoft (`auth_entra_settings`, P2 phase 2 design §4)
+    ("PUT", "/api/v1/settings/microsoft-sign-in"): "orgs.manage",
     # the platform error monitor (`platform_error_group`)
     ("POST", "/api/v1/platform/errors/{group_id}/resolve"): "platform.errors.write",
     ("POST", "/api/v1/platform/errors/{group_id}/unresolve"): "platform.errors.write",
@@ -241,6 +243,17 @@ NOT_GLOBAL: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/clients/{client_id}"): "clients: that client's own row",
     ("POST", "/api/v1/clients/{client_id}/contacts"): "O: users, a contact of that client",
     ("PATCH", "/api/v1/contacts/{contact_id}"): "O: users, a contact of that client",
+    # A contact's portal access (P2 phase 2, Task 8): `clients.manage` ON THAT
+    # CLIENT; the rows written are that contact's, which RLS confines.
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
+        "O: users/auth rows, a contact of that client"
+    ),
+    ("DELETE", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
+        "O: users/auth rows, a contact of that client"
+    ),
+    ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"): (
+        "O: users/auth rows, a contact of that client"
+    ),
     # `mcp.use` gates a person's own revocation; revoking an app for EVERYONE
     # is global and is refused inside the handler (tested below).
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): "personal, or global by body",

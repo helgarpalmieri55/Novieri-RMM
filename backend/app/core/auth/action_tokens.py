@@ -61,16 +61,24 @@ def link(console_url: str, page: str, token: str) -> str:
     return f"{console_url.rstrip('/')}/{page}#{token}"
 
 
-async def revoke_open(session: AsyncSession, *, user_id: UUID, purpose: str) -> None:
-    await session.execute(
+async def revoke_open(session: AsyncSession, *, user_id: UUID, purpose: str) -> int:
+    """Spend every unused link of `purpose` of a person, now -- one that ran
+    out too, dead already -- and say how many were STILL LIVE: the ones that
+    could have been used (Task 8, fix round 1). The audit of a contact's
+    address change says a link was revoked only when one could still have
+    been followed (`services.clients._revoke_links`)."""
+    now = datetime.now(UTC)
+    revoked = await session.execute(
         update(AuthActionToken)
         .where(
             AuthActionToken.user_id == user_id,
             AuthActionToken.purpose == purpose,
             AuthActionToken.used_at.is_(None),
         )
-        .values(used_at=datetime.now(UTC))
+        .values(used_at=now)
+        .returning(AuthActionToken.expires_at)
     )
+    return sum(1 for expires_at in revoked.scalars() if expires_at > now)
 
 
 async def issue(
@@ -100,30 +108,48 @@ async def issue(
     return token
 
 
-def _live(token: str, purposes: Sequence[str]) -> Select[tuple[AuthActionToken]]:
+def digest(token: str) -> bytes:
+    """What the database keeps of a link: its SHA-256. Public since phase 2:
+    a Microsoft invitation keeps only this while the browser is away (Task 9)."""
+    return _digest(token)
+
+
+def _live(value: bytes, purposes: Sequence[str]) -> Select[tuple[AuthActionToken]]:
     return select(AuthActionToken).where(
-        AuthActionToken.token_hash == _digest(token),
+        AuthActionToken.token_hash == value,
         AuthActionToken.purpose.in_(list(purposes)),
         AuthActionToken.used_at.is_(None),
         AuthActionToken.expires_at > datetime.now(UTC),
     )
 
 
+async def peek_digest(
+    session: AsyncSession, *, digest: bytes, purposes: Sequence[str]
+) -> AuthActionToken | None:
+    """The live row, left unused."""
+    return (await session.execute(_live(digest, purposes))).scalar_one_or_none()
+
+
+async def consume_digest(
+    session: AsyncSession, *, digest: bytes, purposes: Sequence[str]
+) -> AuthActionToken | None:
+    """The live row, marked used under a row lock: two requests with one link
+    cannot both get it. The caller's transaction decides: an exception after
+    this rolls the use back, so a refused new password leaves the link usable."""
+    row = (await session.execute(_live(digest, purposes).with_for_update())).scalar_one_or_none()
+    if row is not None:
+        row.used_at = datetime.now(UTC)
+        await session.flush()
+    return row
+
+
 async def peek(
     session: AsyncSession, *, token: str, purposes: Sequence[str]
 ) -> AuthActionToken | None:
-    """The live row, left unused."""
-    return (await session.execute(_live(token, purposes))).scalar_one_or_none()
+    return await peek_digest(session, digest=_digest(token), purposes=purposes)
 
 
 async def consume(
     session: AsyncSession, *, token: str, purposes: Sequence[str]
 ) -> AuthActionToken | None:
-    """The live row, marked used under a row lock: two requests with one link
-    cannot both get it. The caller's transaction decides: an exception after
-    this rolls the use back, so a refused new password leaves the link usable."""
-    row = (await session.execute(_live(token, purposes).with_for_update())).scalar_one_or_none()
-    if row is not None:
-        row.used_at = datetime.now(UTC)
-        await session.flush()
-    return row
+    return await consume_digest(session, digest=_digest(token), purposes=purposes)

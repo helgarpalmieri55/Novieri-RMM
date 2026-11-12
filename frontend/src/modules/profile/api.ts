@@ -29,6 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MY_SECURITY_KEY, type StepUpRun } from "../../components/stepUp";
 import type { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useSecretMutation } from "../../lib/secretMutation";
 import { createPasskey } from "../auth/passkey";
 import type { RecoveryCodes } from "../auth/types";
 import type { MySecurity, PasswordChange } from "./types";
@@ -59,6 +60,20 @@ export function useChangePasswordMutation(run: StepUpRun) {
     mutationFn: (body) => run(() => api.changePassword(body)),
     onSuccess: refetch,
     gcTime: 0,
+  });
+}
+
+/**
+ * The FIRST password, for someone who has none (own-auth phase 2): a recent
+ * confirmation, like a change. Its body is the password: `useSecretMutation`
+ * (A2-68; `test/secretMutations.test.ts`).
+ */
+export function useAddPasswordMutation(run: StepUpRun) {
+  const api = useApi();
+  const refetch = useRefetchSecurity();
+  return useSecretMutation<void, Error, string>({
+    mutationFn: (password) => run(() => api.addPassword(password)),
+    onSuccess: refetch,
   });
 }
 
@@ -174,6 +189,20 @@ export function useEndMySessionMutation(run: StepUpRun) {
   const refetch = useRefetchSecurity();
   return useMutation<void, Error, string>({
     mutationFn: (sessionId) => run(() => api.endMySession(sessionId)),
+    onSuccess: refetch,
+  });
+}
+
+/**
+ * Unlink the Microsoft account (own-auth phase 2): a recent confirmation,
+ * never the last way in (409 `last_method`). Linking is no mutation: it
+ * leaves for Microsoft (`modules/auth/MicrosoftButton.tsx`).
+ */
+export function useUnlinkMicrosoftMutation(run: StepUpRun) {
+  const api = useApi();
+  const refetch = useRefetchSecurity();
+  return useMutation<void, Error, void>({
+    mutationFn: () => run(() => api.unlinkMicrosoft()),
     onSuccess: refetch,
   });
 }

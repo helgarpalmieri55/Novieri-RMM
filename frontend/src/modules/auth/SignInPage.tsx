@@ -15,6 +15,10 @@
  * had is replaced. Bouncing them to the console would need a `/me` here, and
  * the harmony gate, whose fixture session is always signed in, could then
  * never see this page.
+ *
+ * SIGN IN WITH MICROSOFT (own-auth phase 2) is offered below the form,
+ * always: no anonymous route says whether it is set up here, and a click
+ * where it is not gets one sentence (Task 12, decision 1).
  */
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -23,11 +27,12 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
-import { enterConsole } from "../../lib/session";
+import { safeNext } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, useNext } from "./flow";
+import { MicrosoftButton } from "./MicrosoftButton";
 
 export function SignInPage() {
   const t = useT();
@@ -49,17 +54,7 @@ export function SignInPage() {
     setError(null);
     try {
       const result = await api.login({ email: email.trim(), password });
-      if (result.state === "signed_in") {
-        enterConsole(next);
-        return;
-      }
-      if (result.state === "enroll_required") {
-        navigate(carryNext("/sign-in/enroll", next));
-        return;
-      }
-      navigate(carryNext("/sign-in/factor", next), {
-        state: { methods: result.methods, rememberDays: result.remember_device_days ?? null },
-      });
+      afterLogin(result, next, navigate);
     } catch (cause: unknown) {
       setPassword("");
       setError(describeAuthError(cause, { rejected: "auth.signIn.rejected", canTimeOut: false }));
@@ -102,6 +97,7 @@ export function SignInPage() {
           />
         </div>
       </Form>
+      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/forgot-password", next)}>{t("auth.signIn.forgot")}</Link>
       </p>

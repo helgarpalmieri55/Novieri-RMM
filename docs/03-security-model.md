@@ -157,8 +157,52 @@ the system.
   factor at sign-in only, never for a recent-confirmation action, and **does
   not meet AAL2** on that device -- the operator accepted this knowingly
   (design §0, S2b). Not built: SAML and on-premises Active Directory
-  federation (out of scope); sign-in with Microsoft and the contacts' portal
-  are phase 2. MCP clients still authenticate through Keycloak until phase 3.
+  federation (out of scope).
+  MCP clients still authenticate through Keycloak; phase 3 replaces that, and
+  phase 4 removes Keycloak.
+- **Clients' contacts (own authentication phase 2):** a contact is invited
+  from their client's Contacts tab by someone with `clients.manage` on that
+  client, with a single-use link that lives 72 hours, and on accepting holds
+  the portal role on **their** client and no other. They sign in to the
+  portal -- never the console, whose door answers them 403 `portal_only` --
+  with a passkey, a password of at least 15 characters checked against the
+  same blocklist, or a linked Microsoft account (design §3, NIST SP
+  800-63B-4 §3.1.1.2). A passkey is another way in, not a second factor; an
+  authenticator app, if they turn one on, is their second factor, and then
+  confirming a sensitive change asks for it or their passkey, never the
+  password alone (design §2.6, §3). Their sessions are their own (60
+  minutes idle, 7 days at most by default). Their client's technician can
+  reset their access, which ends every way they had in and sends a new
+  invitation; without mail configured, that technician sees the new link
+  and could use it themselves, as they already could by changing the
+  contact's address and inviting -- the audit log records `link_shown`.
+  Design §10's falsifier 1 -- a contact's session passes no console door --
+  is held at every route under `/api/v1`, at both console sockets and in
+  the portal, by `backend/tests/test_auth_phase2_falsifiers.py`.
+- **Sign in with Microsoft (own authentication phase 2):** one multi-tenant
+  application in Microsoft Entra ID, at the `organizations` authority. The
+  platform proves itself to Microsoft with a certificate it made
+  (`private_key_jwt`); the private key is a vault credential, decrypted only
+  to sign, and every use is audited. The authorization-code flow with PKCE,
+  `state` and `nonce`; the ID token is validated here (signature, the
+  signing key's issuer, audience, issuer, nonce, times, `idp`) and the person
+  is identified by the immutable `tid` + `oid`, **never by email**, as
+  Microsoft says to. Nobody gets an account by signing in with Microsoft: a
+  person links it from their invitation or their own security page. A
+  technician signs in only from Novieri's tenant -- not as a B2B guest in it
+  -- always has a password as well, and is still asked for the platform's
+  own second factor (the token does not say whether Microsoft asked for
+  one) unless the browser is remembered (design §2.6), exactly as after the
+  password; Microsoft never resumes an idle session, which only the
+  password does (design §2.4). A contact signs in only from a tenant their
+  client lists. Design §10's falsifier 8 -- an unknown
+  Microsoft account is refused, and no account and no link is made -- is
+  `backend/tests/test_auth_entra_flows.py::test_falsifier_8_an_unknown_account_is_refused_and_nothing_is_made`.
+- **Retention:** sessions are deleted 90 days after they ended or expired;
+  remembered devices and one-time links 30 days after (a technician's
+  unused invitation never is: it is the pending invitation Users shows);
+  WebAuthn challenges after a day; each daily sweep that deletes anything
+  is audited (`auth.retention_applied`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):
@@ -212,6 +256,7 @@ the system.
 | An operator locked out by someone who knows their address (online guessing as denial of service) | The password's wait is per remembered browser for a browser the platform recognises, so the person's own remembered browser signs in while unrecognised ones wait (design §2.3). Not covered: a person with no remembered browser, or remembering switched off -- the edge, the reset link and the recovery command are the remedy. Nor the stop itself: anyone who knows the address can still reach the 100-failure stop from unrecognised browsers in about a day of paced attempts, if the person does not sign in with their password meanwhile; the password is then disabled for every browser and the reset link restores it |
 | An account taken over through its mailbox: a password reset by mail, then an administrator's factor reset | No reset link goes to an account without a second factor, and one sent before the factors went is refused and spent (design §2.8 and §7). An administrator's "Reset sign-in methods" is refused (409 `reset_needs_recovery`) while the person's password was set with an emailed link and no second factor has been used since (operator decision 2026-11-05, design §7; NIST SP 800-63B-4 §4.2.2.2): the server's recovery link, handed to the person directly, is the way back. The two checks share one per-person lock, and a second factor verified on a session the mail reset ended rolls back rather than clearing the refusal. On the MCP channel the route answers 403 `step_up_required` before the service runs. While that mark is set, the recovery link makes the person choose a new password before it finishes (409 `recovery_needs_password` without one, the link unspent; operator decision 2026-11-05, «Pedir contraseña nueva si hay marca», design §7), so the mailbox's password stops working rather than outliving the recovery and the mark; the mark is read under the same per-person lock, so a mail reset between opening the link and pressing it is caught. Every recovery also offers a new password and applies one that is given, mark or not (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»), so a mark cleared by someone holding the mailbox's password and a factor -- between opening the link and pressing it, or before a later recovery -- does not keep their password. Without the mark and with no password given, the password stays (plan decision 10) |
 | A console left signed in on an unattended computer | The 30-minute idle limit is enforced server-side and only the person's activity renews it: the console's background polls carry `X-ITMS-Background: 1` and do not, and neither does an open tab's socket or an open remote screen (design §2.4). After the limit the next request is a 401; within the maximum the password alone resumes the session |
+| An administrator's idle session used to change how the organization signs in, or who has access | A second factor confirmed in the last 10 minutes -- never a remembered device -- to save Settings → Email, Sessions or Microsoft sign-in, change a client's Microsoft tenants, invite a technician or send the invitation again, grant or remove a role, re-enable a disabled person, create a role, change a role's permissions or delete a role, and switch AI connections over MCP on (design §2.5, widened by the operator on 2026-11-08 and 2026-11-09). None of these is reachable over MCP: the channel carries no session to confirm. Not asked, on purpose: cancelling an invitation, disabling a person, signing them out, switching MCP off and revoking an AI app, which only take access away, and renaming a role, which changes nobody's access |
 | Theft of the platform database | Passwords stored only as peppered argon2id (pepper in OpenBao), TOTP secrets sealed by the vault, session and device identifiers stored only as SHA-256 |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |

@@ -129,6 +129,7 @@ describe("the settings page in Spanish", () => {
       "Roles",
       "Usuarios",
       "Sesiones",
+      "Entrar con Microsoft",
       "Asistente",
       "Conexiones de IA",
       "Notificaciones",

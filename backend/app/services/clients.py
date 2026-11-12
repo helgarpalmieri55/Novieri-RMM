@@ -22,8 +22,11 @@ live enrollment tokens and switches off the install links beneath it, in the
 same transaction, each audited -- and `enroll`, `live_link_for` and the MSI
 refuse an archived site or client whatever predates the archive.
 
-A CONTACT IS A `users` ROW OF KIND `contact` (spec §1.3) that cannot sign in
-yet: how a contact authenticates is project 2. Its `external_subject` -- NOT
+A CONTACT IS A `users` ROW OF KIND `contact` (spec §1.3) that signs in to the
+portal once invited (`app.services.contact_access`, own authentication phase
+2). Switching one off -- by hand or with its client's archive -- ends what it
+had open (`_cut_access`, D43), and a new address kills the links sent to the
+old one (`_revoke_links`, A2-44). Its `external_subject` -- NOT
 NULL and unique per organisation -- holds a placeholder no identity provider
 issues (`contact-pending:<uuid>`), never the email: an email there would make
 the organisation-wide key an oracle across clients (Task 8b), and would go
@@ -32,7 +35,7 @@ may not rewrite `external_subject` to follow (`its_user_identity_guard`).
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -44,6 +47,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import action_tokens
+from app.core.auth.devices import revoke_all_for_user
+from app.core.auth.entra import CONSUMER_TENANT
+from app.core.auth.sessions import end_all_for_user
 from app.core.i18n import tr
 from app.core.identity import CONTACT_KIND
 from app.models import Client, Device, Site, User
@@ -158,6 +165,21 @@ def _modules(modules: Sequence[str]) -> list[str]:
             ),
         )
     return sorted(set(modules))
+
+
+def _tenants(values: Sequence[UUID]) -> list[UUID]:
+    """Sorted, without repeats; never the personal-account tenant (plan D35)."""
+    tenants = sorted(set(values), key=str)
+    if CONSUMER_TENANT in tenants:
+        raise ClientError(422, tr("a personal Microsoft account tenant cannot sign anyone in here"))
+    return tenants
+
+
+def _plain(value: Any) -> Any:
+    """A value as the audit row keeps it: JSON has no UUID."""
+    if isinstance(value, list):
+        return [str(v) if isinstance(v, UUID) else v for v in value]
+    return value
 
 
 def _client_name(raw: str) -> str:
@@ -345,6 +367,7 @@ async def create_client(
 CLIENT_FIELDS = (
     "name",
     "email_domains",
+    "microsoft_tenants",
     "phone",
     "address",
     "website",
@@ -360,10 +383,16 @@ async def update_client(
     actor_id: UUID,
     client_id: UUID,
     changes: Mapping[str, Any],
+    confirm_tenants: Callable[[], None],
 ) -> Client:
     """A partial edit of one client (spec §3.2: name, contact details, domains,
     optional modules). Its kind and status are not fields: an archive is its
-    own act. An archived client is not edited (409)."""
+    own act. An archived client is not edited (409).
+
+    `confirm_tenants` is called before a change to `microsoft_tenants` is
+    written or audited, and raises to refuse it: the route's
+    `deps.require_step_up` (design §2.5; operator 2026-11-08, S1). A keyword
+    with no default, so no caller can forget it."""
     unknown = set(changes) - set(CLIENT_FIELDS)
     if unknown:
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
@@ -382,6 +411,8 @@ async def update_client(
             wanted[key] = _modules(value)
         elif key == "notes":
             wanted[key] = value
+        elif key == "microsoft_tenants":
+            wanted[key] = _tenants(value)
         else:
             wanted[key] = value.strip()
     # THE UNASSIGNED CLIENT (review 1, M6): unknown senders land there because
@@ -393,8 +424,10 @@ async def update_client(
             raise ClientError(422, tr("the unassigned client takes no email domains"))
         if wanted.get("enabled_modules"):
             raise ClientError(422, tr("the unassigned client has no optional modules"))
+        if wanted.get("microsoft_tenants"):
+            raise ClientError(422, tr("the unassigned client takes no Microsoft tenants"))
     changed = {
-        key: {"before": getattr(client, key), "after": value}
+        key: {"before": _plain(getattr(client, key)), "after": _plain(value)}
         for key, value in wanted.items()
         if getattr(client, key) != value
     }
@@ -404,8 +437,14 @@ async def update_client(
         raise _domain_refusal()
     if not changed:
         return client
-    for key, diff in changed.items():
-        setattr(client, key, diff["after"])
+    # WHO MAY SIGN IN FROM MICROSOFT FOR THIS CLIENT (design §2.5; operator
+    # 2026-11-08, S1): a change to the list needs the caller's second factor
+    # confirmed in the last ten minutes. Only a change -- the same tenants
+    # again, in any order, are not one -- and before anything is written.
+    if "microsoft_tenants" in changed:
+        confirm_tenants()
+    for key in changed:
+        setattr(client, key, wanted[key])
     await _flush_client(session)
     await audit_service.record(
         session,
@@ -473,6 +512,24 @@ async def archive_client(
                 count=active,
             ),
         )
+    # AND WHAT THEY HAD OPEN (Task 8, D43), AFTER THEIR ROWS AND BEFORE ANY
+    # AUDIT WRITE. Before the chain: a contact's own transaction may hold one
+    # of their session or device rows and then wait on the chain -- signing
+    # out everywhere does (`flows.logout_everywhere`) -- and with the chain
+    # held here first, each would wait on the other. After `_lock_contacts`:
+    # THE PERSON'S ROW COMES FIRST, here and in every use of their links
+    # (`flows._consumed`, fix round 1), so an acceptance or a reset link in
+    # flight holds the contact's row and the archive waits above for it to
+    # commit; its link is then already spent, or still here to revoke. The
+    # contact's own sign-in steps take their row first too since own
+    # authentication phase 2 Task 9b (`guards.lock_user_row`), and write the
+    # audit chain last: one in flight is waited for above, one that starts
+    # now waits for this archive and then finds the contact switched off
+    # (`tests/test_auth_sign_in_races.py`). A refusal after this point rolls
+    # it back with everything else.
+    for user in contacts:
+        if user.status == "active":
+            await _cut_access(session, user)
     client.status = CLIENT_ARCHIVED
     await session.flush()
     revoked = await enrollment_svc.revoke_tokens(
@@ -522,6 +579,27 @@ async def _lock_contacts(session: AsyncSession, org_id: UUID, client_id: UUID) -
     )
 
 
+async def _revoke_links(session: AsyncSession, user: User) -> int:
+    """A contact's open invitation and reset links die: they went to the
+    mailbox of then (decision 4, A2-44) or to a person switched off (D43).
+    How many were still live (`revoke_open`; one that had run out is spent
+    too, and not counted): the audit says a link died only when one did."""
+    revoked = 0
+    for purpose in (action_tokens.INVITE, action_tokens.RESET):
+        revoked += await action_tokens.revoke_open(session, user_id=user.id, purpose=purpose)
+    return revoked
+
+
+async def _cut_access(session: AsyncSession, user: User) -> None:
+    """A contact switched off -- by hand or with its client's archive -- signs
+    in no more, at once (design §2.4; plan D43): their sessions end, their
+    remembered devices are forgotten, and their open invitation and reset
+    links die."""
+    await end_all_for_user(session, user.id, "disabled")
+    await revoke_all_for_user(session, user.id)
+    await _revoke_links(session, user)
+
+
 async def _disable_contacts(
     session: AsyncSession, org_id: UUID, actor_id: UUID, client_id: UUID, contacts: list[User]
 ) -> int:
@@ -529,7 +607,9 @@ async def _disable_contacts(
     each audited `contact.updated` with `reason="client_archived"` -- the
     code a person's own switch-off records, so the contact's history reads as
     one list. Its people keep no way in through the portal (project 2) to a
-    client nobody serves. `contacts` are `_lock_contacts`' rows."""
+    client nobody serves: `archive_client` has already cut what they had
+    open (`_cut_access`, before the chain's lock). `contacts` are
+    `_lock_contacts`' rows."""
     count = 0
     for user in contacts:
         if user.status != "active":
@@ -973,6 +1053,15 @@ async def update_contact(
         for key, diff in changed.items():
             setattr(user, key, diff["after"])
         await _flush_contact(session)
+        meta: dict[str, Any] = {"client_id": str(user.client_id), "changed": changed}
+        if changed.get("status", {}).get("after") == "disabled":
+            await _cut_access(session, user)
+        elif "email" in changed:
+            # Task 8, decision 4: links sent to the old address die with it,
+            # and the immutable log says so only when one did (f2-3 M7).
+            revoked = await _revoke_links(session, user)
+            if revoked:
+                meta["links_revoked"] = revoked
         await audit_service.record(
             session,
             org_id=org_id,
@@ -981,6 +1070,6 @@ async def update_contact(
             action="contact.updated",
             target_type="user",
             target_id=str(user.id),
-            metadata={"client_id": str(user.client_id), "changed": changed},
+            metadata=meta,
         )
     return user

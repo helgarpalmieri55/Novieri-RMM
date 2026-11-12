@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, FormActions, attemptProblems } from "../../components/form";
@@ -8,9 +7,8 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Icon } from "../../shell/icons";
 import { ApiError } from "../../lib/api";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
 import { useCreatePortalTicketMutation, usePortalCategories, useUploadPortalAttachmentMutation } from "./api";
+import { usePortalMe } from "./usePortalMe";
 import { HelpArticleDialog, HelpSuggestions } from "./HelpSuggestions";
 import { PortalNav } from "./PortalNav";
 import {
@@ -51,9 +49,8 @@ const ticketRules = (files: ReadonlyArray<{ name: string; size: number }> = []):
 
 export function NewTicketPage() {
   const t = useT();
-  const api = useApi();
   const navigate = useNavigate();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const me = usePortalMe();
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("portal.ticket.read");
 

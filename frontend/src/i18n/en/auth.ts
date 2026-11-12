@@ -24,6 +24,12 @@ export const auth = {
     rejected: "That email address and password do not match an account here.",
     forgot: "Forgot your password?",
   },
+  portalSignIn: {
+    title: "Sign in to the portal",
+    intro: "Use a passkey, or your email address and password.",
+    usePasskey: "Sign in with a passkey",
+    passkeyRejected: "That passkey was not accepted. Try again, or use your email address and password.",
+  },
   factor: {
     title: "Confirm it is you",
     intro: "Use your second factor to finish signing in.",
@@ -105,6 +111,13 @@ export const auth = {
     intro: "You were invited to this console as <b>{email}</b>. Choose a password; adding your second factor comes next.",
     submit: "Set password and continue",
     invalid: "This invitation has expired, was already used, or was cancelled. Ask the person who invited you for a new one.",
+    introContact: "You were invited to the support portal as <b>{email}</b>. Choose a password, or use a passkey.",
+    usePasskey: "Use a passkey instead",
+    passkeyName: "Name for this passkey",
+    or: "or",
+    // A technician's invitation with Microsoft (operator decision C3).
+    microsoftWithPassword:
+      "Or accept with your Microsoft account. Choose the password above as well: it is your way back if Microsoft ever stops working.",
   },
   recover: {
     heading: "Account recovery",
@@ -124,9 +137,12 @@ export const auth = {
   password: {
     new: "New password",
     confirm: "The same password again",
-    rules: "At least 12 characters, any you like, spaces included. A phrase you can remember works well.",
+    rules: "At least {min} characters, any you like, spaces included. A phrase you can remember works well.",
+    // The reset link names no account: the rule for a technician and for a client's contact.
+    rulesReset:
+      "At least 12 characters (15 for the support portal), any you like, spaces included. A phrase you can remember works well.",
     mismatch: "The two passwords are not the same.",
-    too_short: "Use at least 12 characters.",
+    too_short: "Use at least {min} characters.",
     too_long: "Use at most 128 characters.",
   },
   passkey: {
@@ -146,5 +162,23 @@ export const auth = {
       "This passkey or device cannot confirm it is you with a fingerprint, face or PIN, which is required. Use another passkey or an authenticator app.",
     aborted: "Another passkey request replaced this one. Try again.",
     generic: "The passkey could not be used on this device. Try again, or use another method.",
+  },
+  // Sign in with Microsoft (own-auth phase 2, Task 12): the buttons, the
+  // return page, and each refusal in one sentence.
+  microsoft: {
+    signIn: "Sign in with Microsoft",
+    acceptInvite: "Accept with Microsoft",
+    returnTitle: "Signing in with Microsoft",
+    unavailable: "Signing in with Microsoft is not set up here.",
+    failed: "The sign-in with Microsoft did not finish. Start it again.",
+    refusedByMicrosoft: "Microsoft did not sign you in. Try again, or sign in another way.",
+    notLinked:
+      "This Microsoft account is not linked to anybody here. Sign in another way and link it from your profile, or use your invitation.",
+    tenantRefused: "Accounts from this Microsoft organization may not sign in here.",
+    lastMethod: "That is your last way to sign in. Add a password or a passkey first.",
+    passwordFirst: "A technician links Microsoft only beside a password of their own, and this account has none.",
+    stepUpAgain: "Too long passed since you confirmed it was you. Link the account again from Sign-in and security.",
+    backToSignIn: "Back to sign in",
+    backToSecurity: "Back to Sign-in and security",
   },
 } as const;

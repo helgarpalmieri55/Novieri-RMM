@@ -61,6 +61,8 @@ import type {
   InviteLinkOut,
   InviteOut,
   MeProfileUpdate,
+  MicrosoftSettingsOut,
+  MicrosoftSettingsUpdate,
   PermissionCatalogueOut,
   RoleAssign,
   RoleAssignmentOut,
@@ -77,7 +79,7 @@ import type {
   UserListOut,
   UserOut,
 } from "./types";
-import type { StepUpRun } from "../../components/stepUp";
+import { sendOnce, type StepUpRun } from "../../components/stepUp";
 import { useSecretMutation } from "../../lib/secretMutation";
 
 // A 403 is an answer, not a fault: retrying a permission wall changes nothing
@@ -95,6 +97,7 @@ export const BUDGET_SETTINGS_KEY = "budget-settings";
 export const EMAIL_SETTINGS_KEY = "email-settings";
 export const MCP_CONNECTIONS_KEY = "mcp-connections";
 export const SESSION_SETTINGS_KEY = "session-settings";
+export const MICROSOFT_SETTINGS_KEY = "microsoft-settings";
 
 // --------------------------------------------------------------------------
 // Organization profile — GET/PATCH /api/v1/orgs/current
@@ -132,11 +135,17 @@ export function useCurrentOrg() {
   });
 }
 
-export function useUpdateCurrentOrgMutation() {
+/**
+ * `run` is the caller's `useStepUp().run` where the save may switch AI access
+ * on, which the server answers 403 `step_up_required` unless the second
+ * factor was confirmed in the last 10 minutes (design §2.5, S3): the AI
+ * connections tab. The Organization tab never writes that key, and sends once.
+ */
+export function useUpdateCurrentOrgMutation(run: StepUpRun = sendOnce) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<CurrentOrgOut, ApiError, CurrentOrgUpdate>({
-    mutationFn: async (body) => toOrgOut(await api.updateCurrentOrg(toOrgRequest(body))),
+  return useMutation<CurrentOrgOut, Error, CurrentOrgUpdate>({
+    mutationFn: (body) => run(async () => toOrgOut(await api.updateCurrentOrg(toOrgRequest(body)))),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ORG_KEY] });
       // `mcp_enabled` is an org setting, and the connections read reports it.
@@ -485,12 +494,13 @@ export function useEmailSettings(enabled: boolean) {
   });
 }
 
-export function useUpdateEmailSettingsMutation() {
+/** Through the tab's `useStepUp().run`: a save needs the second factor confirmed in the last 10 minutes (§2.5, S1). */
+export function useUpdateEmailSettingsMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
   // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
-  return useSecretMutation<EmailSettingsOut, ApiError, EmailSettingsUpdate>({
-    mutationFn: (body) => api.updateEmailSettings(body),
+  return useSecretMutation<EmailSettingsOut, Error, EmailSettingsUpdate>({
+    mutationFn: (body) => run(() => api.updateEmailSettings(body)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [EMAIL_SETTINGS_KEY] });
     },
@@ -525,14 +535,48 @@ export function useSessionSettings(enabled: boolean) {
   });
 }
 
-export function useUpdateSessionSettingsMutation() {
+/** Through the tab's `useStepUp().run`: a save needs the second factor confirmed in the last 10 minutes (§2.5, S1). */
+export function useUpdateSessionSettingsMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<SessionSettingsOut, ApiError, SessionSettingsUpdate>({
-    mutationFn: (body) => api.putSessionSettings(body),
+  return useMutation<SessionSettingsOut, Error, SessionSettingsUpdate>({
+    mutationFn: (body) => run(() => api.putSessionSettings(body)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [SESSION_SETTINGS_KEY] });
     },
+  });
+}
+
+// --------------------------------------------------------------------------
+// Sign in with Microsoft -- GET/PUT /api/v1/settings/microsoft-sign-in
+// (own-auth phase 2, Task 12; operator decision C4)
+// --------------------------------------------------------------------------
+
+export function useMicrosoftSettings(enabled: boolean) {
+  const api = useApi();
+  return useQuery<MicrosoftSettingsOut, ApiError>({
+    queryKey: [MICROSOFT_SETTINGS_KEY],
+    queryFn: () => api.getMicrosoftSettings(),
+    enabled,
+    ...NO_RETRY,
+  });
+}
+
+/**
+ * No secret either way (C4): the body is the application, Novieri's tenant,
+ * the switch and the two acts; the answer, public certificates. So a plain
+ * mutation, not `useSecretMutation` (`test/secretMutations.test.ts` reads
+ * none of these names as a secret's).
+ *
+ * Through the tab's `useStepUp().run`: every save needs the second factor
+ * confirmed in the last 10 minutes (§2.5, S1).
+ */
+export function usePutMicrosoftSettingsMutation(run: StepUpRun) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<MicrosoftSettingsOut, Error, MicrosoftSettingsUpdate>({
+    mutationFn: (body) => run(() => api.putMicrosoftSettings(body)),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [MICROSOFT_SETTINGS_KEY] }),
   });
 }
 
@@ -580,11 +624,12 @@ export function useRoles(enabled: boolean) {
   });
 }
 
-export function useCreateRoleMutation() {
+/** Through the tab's `useStepUp().run`: creating a role needs the second factor confirmed in the last 10 minutes (§2.5, S5). */
+export function useCreateRoleMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<RoleOut, ApiError, RoleCreate>({
-    mutationFn: (body) => api.createRole(body),
+  return useMutation<RoleOut, Error, RoleCreate>({
+    mutationFn: (body) => run(() => api.createRole(body)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
     },
@@ -611,12 +656,15 @@ export function useUpdateRoleMutation() {
  * showing the old answer is exactly the "simulate it in your head" failure
  * spec §1.5 exists to remove. `/me` too: the operator may have just changed
  * their own reach, and the tab strip is drawn from it.
+ *
+ * Through the tab's `useStepUp().run`: it needs the second factor confirmed in
+ * the last 10 minutes (§2.5, S5).
  */
-export function useSetRolePermissionsMutation() {
+export function useSetRolePermissionsMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<RolePermissionsOut, ApiError, { roleId: string; codes: string[] }>({
-    mutationFn: ({ roleId, codes }) => api.setRolePermissions(roleId, codes),
+  return useMutation<RolePermissionsOut, Error, { roleId: string; codes: string[] }>({
+    mutationFn: ({ roleId, codes }) => run(() => api.setRolePermissions(roleId, codes)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
@@ -626,11 +674,12 @@ export function useSetRolePermissionsMutation() {
   });
 }
 
-export function useDeleteRoleMutation() {
+/** Through the tab's `useStepUp().run`: deleting a role needs the second factor confirmed in the last 10 minutes (§2.5, S5). */
+export function useDeleteRoleMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<void, ApiError, string>({
-    mutationFn: (roleId) => api.deleteRole(roleId),
+  return useMutation<void, Error, string>({
+    mutationFn: (roleId) => run(() => api.deleteRole(roleId)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
@@ -715,17 +764,20 @@ export function useEffectivePermissions(userId: string | null) {
 /**
  * The invitation (own authentication design §7). Invalidates the directory
  * (the person is listed, invited) and the roles (their holder counts moved).
+ * Through the tab's `useStepUp().run`: inviting, resending, granting and
+ * removing a role need the second factor confirmed in the last 10 minutes
+ * (§2.5, S1).
  *
  * `gcTime: 0`: without mail its answer is the one-time link. The tab moves it
  * into its own state and resets the mutation, and `reset()` alone only
  * detaches it -- TanStack would keep it for five minutes (Task 12 review,
  * Important 1).
  */
-export function useInviteUserMutation() {
+export function useInviteUserMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<InviteOut, ApiError, UserInvite>({
-    mutationFn: (body) => api.inviteUser(body),
+  return useMutation<InviteOut, Error, UserInvite>({
+    mutationFn: (body) => run(() => api.inviteUser(body)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
@@ -734,11 +786,11 @@ export function useInviteUserMutation() {
   });
 }
 
-export function useAssignRoleMutation() {
+export function useAssignRoleMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<RoleAssignmentOut, ApiError, { userId: string; body: RoleAssign }>({
-    mutationFn: ({ userId, body }) => api.assignUserRole(userId, body),
+  return useMutation<RoleAssignmentOut, Error, { userId: string; body: RoleAssign }>({
+    mutationFn: ({ userId, body }) => run(() => api.assignUserRole(userId, body)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
@@ -747,11 +799,11 @@ export function useAssignRoleMutation() {
   });
 }
 
-export function useRemoveRoleMutation() {
+export function useRemoveRoleMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<void, ApiError, { userId: string; assignmentId: string }>({
-    mutationFn: ({ userId, assignmentId }) => api.removeUserRole(userId, assignmentId),
+  return useMutation<void, Error, { userId: string; assignmentId: string }>({
+    mutationFn: ({ userId, assignmentId }) => run(() => api.removeUserRole(userId, assignmentId)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
@@ -760,11 +812,18 @@ export function useRemoveRoleMutation() {
   });
 }
 
-export function useSetUserEnabledMutation() {
+/**
+ * Enabling goes through the tab's `useStepUp().run`: it gives a disabled
+ * person their access back, with every role they held, and needs the second
+ * factor confirmed in the last 10 minutes (§2.5, S5). Disabling is sent once,
+ * outside it: stopping somebody never waits for a confirmation (S4).
+ */
+export function useSetUserEnabledMutation(run: StepUpRun) {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<UserOut, ApiError, { userId: string; enabled: boolean }>({
-    mutationFn: ({ userId, enabled }) => api.setUserEnabled(userId, enabled),
+  return useMutation<UserOut, Error, { userId: string; enabled: boolean }>({
+    mutationFn: ({ userId, enabled }) =>
+      enabled ? run(() => api.setUserEnabled(userId, true)) : api.setUserEnabled(userId, false),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
     },
@@ -776,10 +835,10 @@ export function useSetUserEnabledMutation() {
  * this page reads, so it invalidates nothing; its result is rendered where it
  * was triggered. `gcTime: 0` for the link, as for the invitation.
  */
-export function useResendInviteMutation() {
+export function useResendInviteMutation(run: StepUpRun) {
   const api = useApi();
-  return useMutation<InviteLinkOut, ApiError, string>({
-    mutationFn: (userId) => api.resendInvite(userId),
+  return useMutation<InviteLinkOut, Error, string>({
+    mutationFn: (userId) => run(() => api.resendInvite(userId)),
     gcTime: 0,
   });
 }

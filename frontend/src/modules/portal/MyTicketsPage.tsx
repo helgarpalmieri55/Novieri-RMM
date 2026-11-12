@@ -1,13 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Badge, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
 import { describeAge } from "../jobs/jobState";
 import { usePortalTickets } from "./api";
+import { usePortalMe } from "./usePortalMe";
 import { PortalNav } from "./PortalNav";
 import { PortalPrerequisites } from "./PortalPrerequisites";
 import { portalTicketStatusLabel, portalTicketStatusVariant } from "./portalState";
@@ -22,8 +20,7 @@ import { PageHead, Panel, QueryState } from "../../shell/components";
 // the state as a pill and when it last moved in mono.
 export function MyTicketsPage() {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const me = usePortalMe();
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("portal.ticket.read");
 

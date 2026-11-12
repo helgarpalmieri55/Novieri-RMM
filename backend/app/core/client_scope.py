@@ -94,9 +94,11 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "before the scope exists (spec §2.2)"
     ),
     "app/core/auth/sessions.py::resolve": (
-        "a session cookie names a row before anybody knows whose: a staff session has no "
-        "client, so it is read and touched under every client, after its_auth_session gave "
-        "the organisation (P2 design §6.2, §6.5)"
+        "a session cookie names a row before anybody knows whose: a session of either kind "
+        "-- a technician's, which has no client, or a contact's -- is read under every "
+        "client, after its_auth_session gave the organisation; a contact's is touched here "
+        "only as the row its own cookie's hash named, before its client is known (P2 design "
+        "§6.2, §6.5; phase 2 final review, item 8)"
     ),
     "app/api/deps.py::_admit_session": (
         "door 1 for a console session (P2 design §6.5): the person's row and grants, read "
@@ -141,20 +143,47 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # (O, `users.client_id` NULL) are global rows only an every-client scope
     # may write, and they are read before -- or regardless of -- the person's
     # scope. Each helper opens ONE organization's session over those rows
-    # alone; the organization comes from `its_auth_principal`, the session's
-    # own row or the link, never from a request field naming it.
+    # alone; the organization comes from `its_auth_principal`, `its_auth_org`
+    # (the deployment's slug, phase 2), the session's own row or the link,
+    # never from a request field naming it.
     "app/core/auth/flows.py::_identity_session": (
-        "sign-in before the door admits anybody: the password, the second factor, the "
-        "enrolment, the recent confirmation, the reset link -- a technician's own auth rows "
-        "and users row only (P2 phase 1 design §6.2)"
+        "sign-in where no signed-in contact is involved (P2 design §6.2; phase 2, D25, D28; "
+        "Task 9b item C): the steps before a session exists -- the password, a contact's "
+        "passkey alone -- and the use of a link -- reset, invitation, recovery -- over one "
+        "person's own auth rows and users row; a TECHNICIAN's own steps with a session (the "
+        "second factor, the enrolment, the recent confirmation, signing out: "
+        "`signed_in_session`), whose rows are global; and the one read keyed by the "
+        "session's own person that learns a signed-in CONTACT's client, whose steps then "
+        "run under that client alone, never here. Accepting a contact's invitation also "
+        "writes their portal role on their OWN client (`grant_portal`, D40) and reads that "
+        "client's Microsoft tenants (`microsoft_offered`, design §4)"
     ),
-    "app/core/auth/account.py::_own_session": (
-        "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
-        "session the door admitted (P2 phase 1 design §2.4-§2.6)"
+    "app/core/auth/account.py::own_session": (
+        "My security is personal, like /me: a TECHNICIAN's own auth rows, by the user id of "
+        "the session the door admitted (P2 phase 1 design §2.4-§2.6); their rows are global, "
+        "which a per-client scope may read and not change. The technician's path only: a "
+        "client's contact on the same routes (phase 2, D26) runs under the scope the door "
+        "pinned to their own client, and every client is refused for one, as is any other "
+        "kind (plan 2026-11-06, Task 7 fix rounds 1-2, invariant 5a). Unlinking Microsoft "
+        "(`entra_flows.unlink`, `DELETE /me/microsoft`, phase 2 Task 9) opens this same session"
     ),
     "app/core/auth/recover.py::issue_recovery_link": (
         "the server's own recovery command, never HTTP: one technician's recovery link, "
         "issued by whoever holds the server (P2 phase 1 design §7)"
+    ),
+    "app/core/auth/entra_flows.py::_entra_session": (
+        "sign-in with Microsoft's own steps where no signed-in person is involved "
+        "(`/auth/microsoft/start` and `/complete`, which no door admits): the sign-in before "
+        "anybody is known, an invitation accepted with Microsoft -- a link's use: one "
+        "person's link (tid, oid), users row and new session, a contact's portal role on "
+        "their OWN client (`contact_admitted`) and that client's Microsoft tenants (read), "
+        "found before their scope exists -- and the return's checkout of the platform's own "
+        "key, which reads and writes no person's rows. The organization from the "
+        "deployment's slug, the session or the invitation (P2 phase 2 design §4). NOT a "
+        "signed-in person's link, start or return, which runs in the scope of their kind -- "
+        "a contact's own client (`flows.signed_in_session`, Task 9b item C) -- and NOT "
+        "unlinking, under the scope the door established (`account.own_session`, "
+        "invariant 5a)"
     ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
@@ -235,6 +264,12 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "install_link_windows_signature",
     ),
     "app/core/ai/retention.py::sweep_all_orgs": "worker: AI transcript retention sweep",
+    "app/core/auth/retention.py::sweep_org": (
+        "worker: own authentication's retention (final review A-M6, operator decision C7) -- "
+        "one organization's old sessions, forgotten devices, spent links and old challenges, "
+        "whose technician rows only an every-client scope may delete; every step carries its "
+        "own org_id predicate, and the sweep is audited"
+    ),
     "app/modules/agent_update/reconcile.py::tick_all_orgs": "worker: agent-update rollout tick",
     "app/modules/email_intake/identity.py::_mint_email_token_committed": (
         "worker: mints a ticket's reply token for deliver_pending (send_test's synthetic "

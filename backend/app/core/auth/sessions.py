@@ -69,6 +69,10 @@ logger = logging.getLogger("its.auth.sessions")
 
 SESSION_COOKIE = "__Host-itms_session"
 DEVICE_COOKIE = "__Host-itms_device"
+#: Sign in with Microsoft's transaction (own authentication phase 2, plan
+#: decision D30): its value is the PKCE code verifier, so the transaction is
+#: bound to the browser that started it. Ten minutes, then gone.
+ENTRA_COOKIE = "__Host-itms_entra"
 #: Sent by the console, as `X-ITMS-Background: 1`, on a request no person
 #: caused in the last 60 s (a poll, a refetch): `resolve` does not renew the
 #: session for it (fix round 2; design §2.4).
@@ -86,6 +90,13 @@ STEP_UP_WINDOW = timedelta(minutes=10)
 TOUCH_EVERY = timedelta(seconds=60)
 #: What a request may say about itself, at most, in the session list.
 _USER_AGENT_MAX = 300
+
+#: How a session started (`auth_sessions.first_step`, phase 2 Task 9b): the
+#: password (a sign-in, a resumption, an invitation accepted with one), a
+#: contact's passkey alone (or an invitation accepted with one), Microsoft,
+#: or the server's recovery link. A second factor this session proves
+#: clears the "password set by mail" mark only after `password`.
+FirstStep = Literal["password", "passkey", "microsoft", "recovery"]
 
 EndReason = Literal[
     "signed_out",
@@ -115,6 +126,8 @@ class SessionPrincipal:
     email: str
     display_name: str
     expires_at: datetime
+    #: The person's saved time zone, for the portal's own pages (phase 2, `GET /portal/me`).
+    timezone: str | None = None
 
 
 def _now() -> datetime:
@@ -173,6 +186,15 @@ def set_device_cookie(response: Response, token: str, *, expires_at: datetime) -
 
 def clear_device_cookie(response: Response) -> None:
     _set(response, DEVICE_COOKIE, "", 0)
+
+
+def set_entra_cookie(response: Response, value: str, *, max_age: int) -> None:
+    """Sign in with Microsoft's cookie (D30), the same attributes as the others."""
+    _set(response, ENTRA_COOKIE, value, max_age)
+
+
+def clear_entra_cookie(response: Response) -> None:
+    _set(response, ENTRA_COOKIE, "", 0)
 
 
 def step_up_fresh(principal: SessionPrincipal, now: datetime) -> bool:
@@ -250,7 +272,9 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
             return None
         person = (
             await session.execute(
-                select(User.email, User.display_name).where(User.id == row.user_id)
+                select(User.email, User.display_name, User.timezone).where(
+                    User.id == row.user_id
+                )
             )
         ).one()
         if touch and now - row.last_seen_at >= TOUCH_EVERY:
@@ -269,6 +293,7 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
         email=person.email,
         display_name=person.display_name,
         expires_at=row.expires_at,
+        timezone=person.timezone,
     )
 
 
@@ -278,6 +303,10 @@ class NamedSession:
 
     session_id: UUID
     org_id: UUID
+    #: Whose it is, and of which kind: signing out takes the person's row
+    #: first (phase 2, Task 9b) and, for a contact, runs in their own client.
+    user_id: UUID
+    kind: str
 
 
 async def named(connection: HTTPConnection) -> NamedSession | None:
@@ -293,13 +322,18 @@ async def named(connection: HTTPConnection) -> NamedSession | None:
     async with AsyncSession(connection.app.state.app_engine) as lookup:
         row = (
             await lookup.execute(
-                text("SELECT session_id, org_id, ended_at FROM its_auth_session(:token_hash)"),
+                text(
+                    "SELECT session_id, org_id, user_id, kind, ended_at "
+                    "FROM its_auth_session(:token_hash)"
+                ),
                 {"token_hash": token_hash(token)},
             )
         ).one_or_none()
     if row is None or row.ended_at is not None:
         return None
-    return NamedSession(session_id=row.session_id, org_id=row.org_id)
+    return NamedSession(
+        session_id=row.session_id, org_id=row.org_id, user_id=row.user_id, kind=row.kind
+    )
 
 
 async def start_session(
@@ -310,10 +344,14 @@ async def start_session(
     request: Request,
     factor_done: bool,
     trusted_device_id: UUID | None,
+    first_step: FirstStep,
     resume: AuthSession | None = None,
 ) -> tuple[AuthSession, str]:
     """A new session for `user` and its cookie value (set it with
     `set_session_cookie`). A new identifier every time (design §2.4).
+
+    `first_step`: how it started (`FirstStep`), always said by the caller --
+    no default, so no new way to start one can leave it to chance.
 
     The session the request's cookie still names, if any, is ENDED
     (`replaced`): a sign-in never inherits an identifier somebody else may have
@@ -364,6 +402,7 @@ async def start_session(
         factor_at=factor_at,
         step_up_at=step_up_at,
         trusted_device_id=trusted_device_id,
+        first_step=first_step,
         user_agent=request.headers.get("user-agent", "")[:_USER_AGENT_MAX],
         ip="" if address is None else str(address),
     )

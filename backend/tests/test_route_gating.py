@@ -129,6 +129,13 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         # person to hold a code. Guarded by Task 6's CSRF rule, a per-IP limit
         # and the per-account counters (`flows.login`).
         ("POST", "/api/v1/auth/login"),
+        # A contact's passkey alone (P2 phase 2, D28): before there is a
+        # person; the CSRF rule, `_FACTOR` per address and the single-use
+        # challenge stand in for the gate.
+        ("POST", "/api/v1/auth/passkey/options"),
+        # Its assertion: the same, and only a contact's verified passkey
+        # signs anybody in (`flows.passkey_sign_in`).
+        ("POST", "/api/v1/auth/passkey"),
         # A pending session's second factor: `guards.session_of` + `require_pending`.
         ("POST", "/api/v1/auth/factor/totp"),
         # The same pending session, with a recovery code.
@@ -155,6 +162,9 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/step-up/passkey/options"),
         # The same, the passkey assertion.
         ("POST", "/api/v1/auth/step-up/passkey"),
+        # A contact confirms with the password (P2 phase 2, D29): the full
+        # session `guards.session_of` + `require_full`, the password's counters.
+        ("POST", "/api/v1/auth/step-up/password"),
         # Ends only the session the caller's own cookie names.
         ("POST", "/api/v1/auth/logout"),
         # The caller's full session, ending the caller's own sessions.
@@ -168,16 +178,34 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/invite/details"),
         # The same link, consumed with the invitee's password (`flows.accept_invite`).
         ("POST", "/api/v1/auth/invite/accept"),
+        # A contact's first passkey, from the invitation (P2 phase 2, D40):
+        # the 256-bit link, `_LINK` per address and the single-use challenge.
+        ("POST", "/api/v1/auth/invite/passkey/options"),
+        # The same link, consumed with the contact's first passkey
+        # (`flows.invite_passkey`); a refused passkey leaves it usable.
+        ("POST", "/api/v1/auth/invite/passkey"),
         # The server's recovery link is the credential, read and left unused
         # (`flows.recovery_details`); only the recovery command issues one.
         ("POST", "/api/v1/auth/recover/details"),
         # The same link, consumed: the factors go, a pending session opens.
         ("POST", "/api/v1/auth/recover/accept"),
-        # MY SECURITY: `bound_auth_context` + the console session
-        # (`auth.py::_console_ctx`); the caller's own rows only.
+        # Sign in with Microsoft (P2 phase 2, D30): before there is a person, or
+        # the caller's own session (`link`); the CSRF rule, `_MICROSOFT` per
+        # address and the transaction bound to the browser stand in for the gate.
+        ("POST", "/api/v1/auth/microsoft/start"),
+        # Its return: one use of the state, redeemed only with the verifier in
+        # the cookie of the browser that started it; a link, by the same live
+        # session, still recently confirmed (`entra_flows.complete`).
+        ("POST", "/api/v1/auth/microsoft/complete"),
+        # MY SECURITY: `bound_account_context` (`auth.py::_account_ctx`), a
+        # technician's or a contact's own browser session (phase 2, D26); the
+        # caller's own rows only.
         ("GET", "/api/v1/me/security"),
         # The caller's own password, after a recent confirmation (`require_step_up`).
         ("PUT", "/api/v1/me/password"),
+        # The first password of an account with none (P2 phase 2, D26): the
+        # caller's own account, `bound_account_context` + `require_step_up`.
+        ("POST", "/api/v1/me/password"),
         # One of the caller's own passkeys, matched with their user id.
         ("DELETE", "/api/v1/me/passkeys/{passkey_id}"),
         # The caller's own authenticator app, after a recent confirmation.
@@ -188,6 +216,9 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/v1/me/trusted-devices/{device_id}"),
         # One of the caller's own sessions, matched with their user id.
         ("DELETE", "/api/v1/me/sessions/{session_id}"),
+        # The caller's own Microsoft link (My security, D26), after a recent
+        # confirmation, in the scope `_account_ctx` established.
+        ("DELETE", "/api/v1/me/microsoft"),
     }
 )
 

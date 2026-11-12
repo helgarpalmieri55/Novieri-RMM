@@ -28,6 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from app.core.ai import retention as ai_retention_module
 from app.core.ai import sweep as ai_action_sweep_module
 from app.core.audit import MissingAuditKeyError, audit_service, load_audit_hmac_key
+
+# Imported as a module, like the sweeps above: the shell looks `sweep_org` up
+# on it at call time (`tests/test_worker_sweep_containment.py` patches it there).
+from app.core.auth import retention as auth_retention_module
 from app.core.client_scope import ClientScope
 from app.core.config import get_settings
 from app.core.errors.capture import capture_exception
@@ -713,6 +717,31 @@ async def ai_action_expiry_all_orgs(now: datetime | None = None) -> int:
                     total += await ai_action_sweep_module.expire_stale_actions(
                         scoped, org_id=org_id, now=now
                     )
+            except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
+                failures.contain(org_id, exc)
+        failures.raise_if_total(len(org_ids))
+    finally:
+        await app_engine.dispose()
+        await admin_engine.dispose()
+    return total
+
+
+async def auth_retention_all_orgs(now: datetime | None = None) -> int:
+    """Own authentication's retention in every org (`app/core/auth/
+    retention.py`, final review A-M6, operator decision C7): sessions after 90
+    days, forgotten devices and spent links after 30, old challenges after 1,
+    audited per org. One org's failure is contained; see `_OrgCycleFailures`."""
+    settings = get_settings()
+    app_engine = create_async_engine(settings.database_url)
+    admin_engine = create_async_engine(settings.database_admin_url)
+    failures = _OrgCycleFailures("auth.retention")
+    total = 0
+    try:
+        async with AsyncSession(admin_engine) as session:
+            org_ids = list((await session.execute(select(Organization.id))).scalars())
+        for org_id in org_ids:
+            try:
+                total += await auth_retention_module.sweep_org(org_id, app_engine, now=now)
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
                 failures.contain(org_id, exc)
         failures.raise_if_total(len(org_ids))
@@ -3389,6 +3418,13 @@ def create_celery() -> Celery:
             "task": "app.worker.ai_transcript_retention",
             "schedule": ai_retention_module.RETENTION_INTERVAL_S,
         },
+        # Own authentication's bookkeeping (final review A-M6, operator
+        # decision C7): sessions after 90 days, devices and links after 30,
+        # challenges after 1; audited when something goes.
+        "auth-retention": {
+            "task": "app.worker.auth_retention",
+            "schedule": auth_retention_module.SWEEP_INTERVAL_S,
+        },
         # docs/modules/ai-automation.md §6.4. The interval is the module's own
         # constant, not a literal, because it is tied to `ai_settings.
         # action_expiry_s`'s LOWER BOUND (60 s) -- a beat slower than the
@@ -3479,6 +3515,10 @@ try:  # pragma: no cover - the worker process needs settings; tests may not
     @celery_app.task(name="app.worker.ai_transcript_retention")  # type: ignore[misc, untyped-decorator, unused-ignore]
     def ai_transcript_retention() -> dict[str, int]:
         return {"deleted": asyncio.run(ai_transcript_retention_all_orgs())}
+
+    @celery_app.task(name="app.worker.auth_retention")  # type: ignore[misc, untyped-decorator, unused-ignore]
+    def auth_retention() -> dict[str, int]:
+        return {"deleted": asyncio.run(auth_retention_all_orgs())}
 
     @celery_app.task(name="app.worker.ai_action_expiry")  # type: ignore[misc, untyped-decorator, unused-ignore]
     def ai_action_expiry() -> dict[str, int]:

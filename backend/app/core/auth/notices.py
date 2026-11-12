@@ -57,6 +57,8 @@ def _factor_name(factor: str | None) -> str:
         return tr("a new set of recovery codes")
     if factor == "recovery":
         return tr("your recovery codes")
+    if factor == "microsoft":
+        return tr("a Microsoft account")
     return tr("your password")
 
 
@@ -144,17 +146,25 @@ def _compose(
     )
 
 
-def reset_mail(link: str) -> tuple[str, str]:
-    return (
-        tr("Reset your {product} password", product=PRODUCT),
-        tr(
+def reset_mail(link: str, *, second_factor: bool) -> tuple[str, str]:
+    """The reset link (design §2.8, §3). "You will still need your second
+    factor" only for somebody who has one (plan decision 3)."""
+    subject = tr("Reset your {product} password", product=PRODUCT)
+    if second_factor:
+        return subject, tr(
             "Someone asked to reset the password of your {product} account.\n\n"
             "Open this link within 30 minutes to choose a new one. You will still need your "
             "second factor to sign in.\n{link}\n\n"
             "If it was not you, ignore this message: your password has not changed.",
             product=PRODUCT,
             link=link,
-        ),
+        )
+    return subject, tr(
+        "Someone asked to reset the password of your {product} account.\n\n"
+        "Open this link within 30 minutes to choose a new one.\n{link}\n\n"
+        "If it was not you, ignore this message: your password has not changed.",
+        product=PRODUCT,
+        link=link,
     )
 
 
@@ -167,6 +177,36 @@ def invitation_mail(link: str, *, inviter: str) -> tuple[str, str]:
             "{inviter} invited you to {product}.\n\n"
             "Open this link within 72 hours to choose a password and set up your second "
             "factor:\n{link}\n\n"
+            "If you did not expect this, ignore this message.",
+            inviter=inviter,
+            product=PRODUCT,
+            link=link,
+        ),
+    )
+
+
+def contact_invitation_mail(link: str, *, inviter: str, reset: bool) -> tuple[str, str]:
+    """A contact's invitation to the portal (design §3; D39, D40). `reset`: a
+    technician reset the contact's access, so the old ways in are gone."""
+    if reset:
+        return (
+            tr("Your access to the {product} portal was reset", product=PRODUCT),
+            tr(
+                "{inviter} reset your access to the {product} portal: your previous password, "
+                "passkeys and linked accounts no longer work.\n\n"
+                "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
+                "If you did not expect this, tell {inviter}.",
+                inviter=inviter,
+                product=PRODUCT,
+                link=link,
+            ),
+        )
+    return (
+        tr("You are invited to the {product} portal", product=PRODUCT),
+        tr(
+            "{inviter} invited you to the {product} portal, where you can follow your "
+            "requests.\n\n"
+            "Open this link within 72 hours to choose how you will sign in:\n{link}\n\n"
             "If you did not expect this, ignore this message.",
             inviter=inviter,
             product=PRODUCT,

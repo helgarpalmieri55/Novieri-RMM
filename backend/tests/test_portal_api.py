@@ -63,6 +63,9 @@ def test_reads_use_ticket_read_and_writes_use_ticket_write() -> None:
 def test_the_routes_match_the_spec_table() -> None:
     declared = {(m, r.path) for r in _portal_routes() for m in r.methods if m != "HEAD"}
     expected = {
+        # Own authentication phase 2, Task 4 (decision 8): the person using
+        # the portal, read from the session that admitted the request.
+        ("GET", "/portal/me"),
         ("GET", "/portal/categories"),
         ("GET", "/portal/help/suggest"),
         ("GET", "/portal/help/articles/{article_id}"),

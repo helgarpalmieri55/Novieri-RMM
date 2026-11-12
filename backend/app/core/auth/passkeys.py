@@ -230,12 +230,16 @@ async def _spend(
 
 
 async def registration_options(
-    session: AsyncSession, user: User, *, rp_id: str, rp_name: str
+    session: AsyncSession, user: User, *, rp_id: str, rp_name: str, discoverable: bool = False
 ) -> dict[str, Any]:
     """`PublicKeyCredentialCreationOptionsJSON` for `user`, as
     `@simplewebauthn/browser`'s `startRegistration({ optionsJSON })` takes it:
-    user verification required, no attestation, a discoverable credential
-    preferred, the person's existing passkeys excluded."""
+    user verification required, no attestation, the person's existing passkeys
+    excluded, and a discoverable credential preferred -- or REQUIRED with
+    `discoverable` (a contact's, which signs in without an address: W3C
+    WebAuthn Level 3 §5.4.6, "The client MUST return an error if a
+    client-side discoverable credential cannot be created"; plan 2026-11-06,
+    Task 6, decision 3)."""
     existing = (
         await session.execute(
             select(AuthPasskey.credential_id, AuthPasskey.transports).where(
@@ -254,7 +258,11 @@ async def registration_options(
         timeout=CEREMONY_TIMEOUT_MS,
         attestation=AttestationConveyancePreference.NONE,
         authenticator_selection=AuthenticatorSelectionCriteria(
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            resident_key=(
+                ResidentKeyRequirement.REQUIRED
+                if discoverable
+                else ResidentKeyRequirement.PREFERRED
+            ),
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
         exclude_credentials=[_descriptor(cid, transports) for cid, transports in existing],
@@ -366,6 +374,23 @@ async def authentication_options(
         ).all()
         allowed = [_descriptor(cid, transports) for cid, transports in rows]
     challenge = await _issue(session, org_id=org_id, user_id=user_id, purpose=purpose)
+    return _request_options(rp_id=rp_id, challenge=challenge, allowed=allowed)
+
+
+def unanswerable_options(*, rp_id: str) -> dict[str, Any]:
+    """Request options shaped as `authentication_options(None, ...)` shapes
+    them, whose challenge is stored nowhere: no response can answer it
+    (`_spend` finds no row, `PasskeyRejected("challenge")`). What a sign-in
+    without an address is offered when the deployment's slug names no
+    organization to keep a challenge in (plan 2026-11-06, Task 6): the same
+    answer as anywhere else, and the response to it is refused at the
+    challenge, as a replayed one is."""
+    return _request_options(rp_id=rp_id, challenge=secrets.token_bytes(CHALLENGE_BYTES), allowed=[])
+
+
+def _request_options(
+    *, rp_id: str, challenge: bytes, allowed: list[PublicKeyCredentialDescriptor]
+) -> dict[str, Any]:
     options = generate_authentication_options(
         rp_id=rp_id,
         challenge=challenge,
@@ -376,6 +401,25 @@ async def authentication_options(
     return cast(dict[str, Any], json.loads(options_to_json(options)))
 
 
+async def credential_owner(session: AsyncSession, credential: dict[str, Any]) -> UUID | None:
+    """Whose passkey an assertion names (`rawId`), read WITHOUT A LOCK AND
+    VERIFYING NOTHING: never an answer to who signed. A sign-in without an
+    address learns from it which person's row to lock BEFORE
+    `verify_authentication` writes the passkey's counter -- the lock order
+    of a person's account, the person first (own authentication phase 2,
+    Task 9b; `guards.lock_user_row`) -- and then verifies everything as
+    before, under that lock. None for a malformed answer or a credential
+    nobody in the organization holds."""
+    try:
+        raw_id = base64url_to_bytes(credential["rawId"])
+    except _MALFORMED:
+        return None
+    owner: UUID | None = await session.scalar(
+        select(AuthPasskey.user_id).where(AuthPasskey.credential_id == raw_id)
+    )
+    return owner
+
+
 async def verify_authentication(
     session: AsyncSession,
     credential: dict[str, Any],
@@ -383,6 +427,7 @@ async def verify_authentication(
     expected_origin: str,
     rp_id: str,
     purpose: AssertionPurpose,
+    owner: UUID | None = None,
 ) -> AuthPasskey:
     """Verify `navigator.credentials.get()`'s answer; the passkey that signed.
 
@@ -391,12 +436,21 @@ async def verify_authentication(
     The challenge is spent in the caller's transaction: after a refusal the
     caller must COMMIT (module docstring) or the challenge stays live.
 
+    `owner`, when given, is the person the CHALLENGE must belong to: the
+    second factor and the recent confirmation pass theirs, so an anonymous
+    challenge (`/auth/passkey/options`, phase 2) cannot answer them (plan
+    2026-11-06, Task 6, decision 4). A sign-in without an address passes
+    none: its challenge is nobody's.
+
     Refused (`PasskeyRejected`): an unknown, spent, expired or other-purpose
-    challenge; a passkey that is not that person's; anything py_webauthn
-    refuses -- origin, RP ID, signature, presence, NO USER VERIFICATION, a
-    counter that did not move; a backup-eligibility flag that changed. On
-    success the counter, the backup state and `last_used_at` are updated."""
-    expected, owner = await _spend(session, credential, purpose=purpose)
+    challenge, or one that is not `owner`'s; a passkey that is not the
+    challenge's person's; anything py_webauthn refuses -- origin, RP ID,
+    signature, presence, NO USER VERIFICATION, a counter that did not move; a
+    backup-eligibility flag that changed. On success the counter, the backup
+    state and `last_used_at` are updated."""
+    expected, challenge_owner = await _spend(session, credential, purpose=purpose)
+    if owner is not None and challenge_owner != owner:
+        raise PasskeyRejected(reason="challenge")
     try:
         raw_id = base64url_to_bytes(credential["rawId"])
         sent_handle = credential["response"].get("userHandle")
@@ -404,10 +458,10 @@ async def verify_authentication(
     except _MALFORMED as exc:
         raise PasskeyRejected(reason="credential") from exc
     query = select(AuthPasskey).where(AuthPasskey.credential_id == raw_id)
-    if owner is not None:
-        query = query.where(AuthPasskey.user_id == owner)
+    if challenge_owner is not None:
+        query = query.where(AuthPasskey.user_id == challenge_owner)
     passkey = (await session.execute(query)).scalar_one_or_none()
-    if owner is None and handle is None:
+    if challenge_owner is None and handle is None:
         # A discoverable assertion names its person only through `userHandle`
         # (WebAuthn Level 3 §7.2).
         raise PasskeyRejected(reason="credential")

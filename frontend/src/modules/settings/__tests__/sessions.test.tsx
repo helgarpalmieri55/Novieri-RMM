@@ -10,12 +10,20 @@
  * And the trade "Remember this device" makes is said where it is switched on.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../lib/api";
-import { ALL_PERMISSIONS, ME_FIXTURE, apiClient, calls, installDefaults, renderSettings } from "./harness";
+import {
+  ALL_PERMISSIONS,
+  ME_FIXTURE,
+  apiClient,
+  calls,
+  installDefaults,
+  renderSettings,
+  stepUpRequired,
+} from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
@@ -137,5 +145,22 @@ describe("Settings — Sessions tab", () => {
     expect(
       await screen.findByText("Session settings are not available (insufficient permissions: orgs.manage)."),
     ).toBeInTheDocument();
+  });
+
+  it("asks for the second factor when the server says it is stale, then saves once more (§2.5, S1)", async () => {
+    calls.putSessionSettings.mockRejectedValueOnce(stepUpRequired());
+    const user = await openSessions();
+    const idle = await screen.findByLabelText("Sign out after inactivity");
+    await user.clear(idle);
+    await user.type(idle, "45");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(calls.putSessionSettings).toHaveBeenCalledTimes(2));
+    expect(calls.putSessionSettings.mock.calls[1]).toEqual(calls.putSessionSettings.mock.calls[0]);
+    expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
   });
 });

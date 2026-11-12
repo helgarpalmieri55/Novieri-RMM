@@ -87,12 +87,16 @@ export const ROUTES = [
   "/sign-in/factor",
   "/sign-in/enroll",
   "/sign-in/recovery-codes",
+  // Microsoft's return (own-auth phase 2, Task 12). Harmony cannot add the
+  // fragment Microsoft does, so it measures the page a reload shows.
+  "/sign-in/microsoft",
   "/forgot-password",
   // The emailed links carry their token in the fragment, which harmony cannot
   // add (`?__fixtures` would land inside it); the fixtures answer any token.
   "/reset-password",
   "/invite",
   "/recover",
+  "/portal/sign-in",
   "/devices",
   "/devices/onboard",
   "/devices/push-runs",
@@ -179,6 +183,7 @@ export const ROUTES = [
   "/portal",
   "/portal/new",
   "/portal/tickets/tkt-1",
+  "/portal/security",
   "/dashboard",
   "/audit",
   "/enrollment",
@@ -197,11 +202,20 @@ export const ROUTES = [
   // Settings -> Sessions (own authentication design §2.4) is walked for the
   // same reason: `/settings` alone never opens it.
   "/settings?tab=sessions",
+  // Settings -> Microsoft sign-in (own-auth phase 2, Task 12), for the same
+  // reason: the application, the redirect address and the certificate.
+  "/settings?tab=microsoft",
   // Settings -> Users (final review D2, Minor 5): the screen own
   // authentication changed most -- the invite form, the shown-once link,
   // and the row's actions, with Resend and Cancel for the fixtures' open
   // invitation (`usr-invited-seed`).
   "/settings?tab=users",
+  // Settings -> Email and -> Roles (own-auth phase 2, Task 14), for the same
+  // reason as Sessions: their saves now ask for a recent second factor, and
+  // `/settings` alone never opens either. No `<details>` to open: the Email
+  // fixture signs in with a password, and Roles has none.
+  "/settings?tab=email",
+  "/settings?tab=roles",
   "/admin",
   "/governance",
   "/assets",

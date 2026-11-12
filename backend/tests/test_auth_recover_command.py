@@ -26,10 +26,16 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import notices, recover
-from app.core.auth.sessions import SESSION_COOKIE
+from app.core.auth.sessions import SESSION_COOKIE, token_hash
 from app.core.router_inspect import flatten
 from app.models import AuditEvent, User
-from app.models.auth import AuthPasskey, AuthRecoveryCode, AuthTotp, AuthTrustedDevice
+from app.models.auth import (
+    AuthPasskey,
+    AuthRecoveryCode,
+    AuthSession,
+    AuthTotp,
+    AuthTrustedDevice,
+)
 from tests.auth_support import (
     CONSOLE,
     Staff,
@@ -44,6 +50,7 @@ from tests.auth_support import (
     login,
     signed_in,
 )
+from tests.race_helpers import backend_pid, until_blocked_by
 from tests.session_support import remembered_device
 from tests.test_auth_reset_needs_recovery import NEW_PASSWORD as MAILED
 from tests.test_auth_reset_needs_recovery import _has_totp, _mail_reset, _mark, _reset_links
@@ -146,6 +153,27 @@ async def test_the_link_forgets_every_remembered_device(auth_env: Any) -> None:
     async with AsyncSession(auth_env.admin_engine) as session:
         device = await session.get(AuthTrustedDevice, device_id)
     assert device is not None and device.revoked_at is not None
+
+
+async def test_the_session_the_link_opens_records_that_it_started_with_it(
+    auth_env: Any,
+) -> None:
+    """Task 9b, item B: `auth_sessions.first_step` is `recovery`, so no factor
+    this session proves later reads as one proved after the password."""
+    org = await auth_env.create_org("recover-first-step")
+    who = await signed_in(auth_env, org, "org-admin")
+    link = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+    accepted = await auth_env.client.post(
+        "/api/v1/auth/recover/accept", headers=browser(), json={"token": link.split("#", 1)[1]}
+    )
+    assert accepted.status_code == 200, accepted.text
+    token = cookie(accepted, SESSION_COOKIE)
+    assert token is not None
+    async with AsyncSession(auth_env.admin_engine) as session:
+        step = await session.scalar(
+            select(AuthSession.first_step).where(AuthSession.token_hash == token_hash(token))
+        )
+    assert step == "recovery"
 
 
 async def test_a_second_link_replaces_the_first(auth_env: Any) -> None:
@@ -505,10 +533,12 @@ async def test_a_mail_reset_between_the_details_and_the_press_is_caught(
     assert forgot.status_code == 202
     reset_token = link_token([m for m in _reset_links(auth_env) if m.to == who.email][-1].text)
     paused, release = asyncio.Event(), asyncio.Event()
+    holder: list[int] = []  # the paused reset's backend, which holds the lock
     real_tell = notices.tell
 
     async def held_tell(session: Any, user: Any, kind: Any, **kwargs: Any) -> bool:
         if kind == "password_changed":
+            holder.append(await backend_pid(session))
             paused.set()
             await release.wait()
         return await real_tell(session, user, kind, **kwargs)
@@ -523,7 +553,10 @@ async def test_a_mail_reset_between_the_details_and_the_press_is_caught(
     )
     await asyncio.wait_for(paused.wait(), timeout=10)
     pressed = asyncio.create_task(_accept(auth_env, token))
-    await asyncio.sleep(0.5)
+    # SEEN waiting on the reset, not given 0.5 s: held up longer than that
+    # (a pause in this process), it reached the lock after the release and
+    # read the committed mark, and the order this pins was never exercised.
+    await until_blocked_by(auth_env.app_engine, holder[0])
     assert not pressed.done(), "the recovery must wait for the person's lock"
     release.set()
 

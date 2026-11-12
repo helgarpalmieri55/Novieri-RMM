@@ -2,6 +2,8 @@
 design §2, §6.4).
 
     POST   /auth/login                      the password       -> factor | enrol | signed in
+    POST   /auth/passkey/options            a passkey alone: the request options (contacts)
+    POST   /auth/passkey                    the assertion      -> signed in (contacts)
     POST   /auth/factor/{totp,recovery}     the second factor  -> signed in
     POST   /auth/factor/passkey/options     the WebAuthn request options
     POST   /auth/factor/passkey             the assertion      -> signed in
@@ -13,15 +15,23 @@ design §2, §6.4).
     POST   /auth/step-up/{totp,recovery}    the recent confirmation (design §2.5)
     POST   /auth/step-up/passkey/options
     POST   /auth/step-up/passkey
+    POST   /auth/step-up/password           a contact's password, without a second factor
+                                            (design §3, §2.6)
     POST   /auth/logout, /auth/logout-everywhere
     POST   /auth/password/forgot            202 for every address (429 per IP)
     POST   /auth/password/reset             a one-time link
-    POST   /auth/invite/details             who a one-time invitation is for
-    POST   /auth/invite/accept              its password -> the first factor
+    POST   /auth/invite/details             who a one-time invitation is for, and how to accept it
+    POST   /auth/invite/accept              its password -> the first factor (a contact: signed in)
+    POST   /auth/invite/passkey/options     a contact's first passkey: the creation options
+    POST   /auth/invite/passkey             the attestation    -> signed in (contacts)
     POST   /auth/recover/details            who the server's recovery link is for
     POST   /auth/recover/accept             the factors go (a mailed password too) -> a new factor
+    POST   /auth/microsoft/start            Microsoft's sign-in URL (+ the transaction cookie)
+    POST   /auth/microsoft/complete         its code and state -> signed in | linked
+    DELETE /me/microsoft
     GET    /me/security                     the caller's factors, devices, sessions
     PUT    /me/password
+    POST   /me/password                     the first password, for an account with none
     DELETE /me/passkeys/{id}, /me/totp, /me/trusted-devices/{id}, /me/sessions/{id}
     POST   /me/recovery-codes
 
@@ -49,14 +59,16 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, bound_auth_context, require_step_up
-from app.core.auth import account, flows
-from app.core.auth.guards import session_of, sign_in_again
+from app.api.deps import AuthContext, bound_account_context, require_step_up
+from app.core.auth import account, entra_flows, flows
+from app.core.auth.guards import session_of
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import (
     SessionPrincipal,
+    clear_entra_cookie,
     clear_session_cookie,
     set_device_cookie,
+    set_entra_cookie,
     set_session_cookie,
 )
 from app.core.config import Settings
@@ -104,6 +116,10 @@ _LOGIN = _limit("auth-login", lambda settings: settings.auth_login_ip_limit, 600
 _FACTOR = _limit("auth-factor", lambda settings: settings.auth_factor_ip_limit, 600)
 _FORGOT = _limit("auth-forgot", 5, 3600)
 _LINK = _limit("auth-link", 20, 600)
+#: Sign in with Microsoft (P2 phase 2, Task 9, decision 7): the operator's
+#: `ITS_AUTH_LOGIN_IP_LIMIT`, in a bucket of its own; `/start` and
+#: `/complete` each count.
+_MICROSOFT = _limit("auth-microsoft", lambda settings: settings.auth_login_ip_limit, 600)
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +164,11 @@ class PasskeyIn(BaseModel):
     remember_device: bool = False
 
 
+class PasskeySignInIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    credential: dict[str, Any]
+
+
 class StepUpCodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
@@ -156,6 +177,13 @@ class StepUpCodeIn(BaseModel):
 class StepUpRecoveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
+
+
+class StepUpPasswordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A secret: no Pydantic bound (decision 16); `flows.step_up_password`
+    #: holds it to `SUBMITTED_MAX`.
+    password: str
 
 
 class StepUpPasskeyIn(BaseModel):
@@ -224,10 +252,14 @@ class RecoveryAcceptIn(BaseModel):
 
 
 class InviteOut(BaseModel):
-    """Who an invitation is for, for its page."""
+    """Who an invitation is for, and how they may accept it, for its page."""
 
     email: str
     display_name: str
+    kind: Literal["staff", "contact"] = Field(description="A technician or a client's contact.")
+    password_minimum: int = Field(description="The shortest password this person may choose.")
+    passkey: bool = Field(description="The invitation may be accepted with a passkey (contacts).")
+    microsoft: bool = Field(description="The invitation may be accepted with Microsoft.")
 
 
 class RecoveryOut(BaseModel):
@@ -305,14 +337,66 @@ class SessionOut(BaseModel):
     current: bool = Field(description="True for the session making this request.")
 
 
-class MySecurityOut(BaseModel):
-    """The caller's own second factors, remembered browsers and sessions."""
+class MicrosoftLinkOut(BaseModel):
+    """The Microsoft account linked to the caller (design §4): its tenant and
+    when it was linked and last used. Never the account's own id."""
 
+    tenant_id: UUID
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class MySecurityOut(BaseModel):
+    """The caller's own ways in, second factors, remembered browsers and sessions."""
+
+    kind: Literal["staff", "contact"] = Field(description="Technician or a client's contact.")
+    has_password: bool
     has_totp: bool
     passkeys: list[PasskeyOut]
     recovery_codes_left: int
     trusted_devices: list[TrustedDeviceOut]
     sessions: list[SessionOut]
+    microsoft: MicrosoftLinkOut | None = Field(description="The linked Microsoft account, or null.")
+
+
+class PasswordAddIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A secret: no Pydantic bound (decision 16); the rule bounds it.
+    new: str
+
+
+class MicrosoftStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent: Literal["sign_in", "link", "invite"]
+    #: An invitation's token, for `invite`: a secret, no Pydantic bound.
+    token: str | None = None
+    #: A technician's new password, for `invite` (operator decision C3): a
+    #: secret, no Pydantic bound -- the rule bounds it. Sent with any other
+    #: intent, or with a contact's invitation, it is a 422 `password_not_used`
+    #: (Task 9b, D4), never dropped.
+    password: str | None = None
+
+
+class MicrosoftStartOut(BaseModel):
+    """Where to send the browser. The transaction's key travels in the
+    `__Host-itms_entra` cookie, never here."""
+
+    authorize_url: str
+
+
+class MicrosoftCompleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Microsoft's one-time code and the state: secrets, no Pydantic bound.
+    code: str
+    state: str
+
+
+class MicrosoftCompleteOut(BaseModel):
+    """Where the sign-in with Microsoft stands; `linked` after linking from My security."""
+
+    state: Literal["factor_required", "enroll_required", "signed_in", "linked"]
+    methods: list[str] | None = None
+    remember_device_days: int | None = None
 
 
 def _answer(response: Response, step: flows.SignIn) -> SignInOut:
@@ -351,6 +435,25 @@ def _no_content() -> Response:
 async def login(body: LoginIn, request: Request, response: Response) -> SignInOut:
     """The address and the password. One answer for every refusal (design §2.3)."""
     step = await flows.login(request, email=body.email, password=body.password)
+    return _answer(response, step)
+
+
+@router.post("/passkey/options", dependencies=[Depends(_FACTOR)])
+async def passkey_sign_in_options(request: Request) -> dict[str, Any]:
+    """The WebAuthn request options of a sign-in with a passkey alone: no
+    address and no list of credentials (a contact's discoverable passkey)."""
+    return await flows.passkey_sign_in_options(request)
+
+
+@router.post(
+    "/passkey",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_FACTOR)],
+)
+async def passkey_sign_in(body: PasskeySignInIn, request: Request, response: Response) -> SignInOut:
+    """A contact's passkey, alone: signed in. Any other answer is the one 401."""
+    step = await flows.passkey_sign_in(request, credential=body.credential)
     return _answer(response, step)
 
 
@@ -491,6 +594,17 @@ async def step_up_passkey(body: StepUpPasskeyIn, request: Request) -> Response:
     return _no_content()
 
 
+@router.post(
+    "/step-up/password", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(_FACTOR)]
+)
+async def step_up_password(body: StepUpPasswordIn, request: Request) -> Response:
+    """A contact without a second factor confirms with the password, for ten
+    minutes (plan decisions D29 and 6). A technician, or a contact who turned
+    the app on, confirms with the second factor (409 `method_unavailable`)."""
+    await flows.step_up_password(request, await session_of(request), password=body.password)
+    return _no_content()
+
+
 # --------------------------------------------------------------------------- #
 # /auth -- signing out, forgot and reset
 # --------------------------------------------------------------------------- #
@@ -542,9 +656,9 @@ async def reset_password(body: ResetIn, request: Request) -> Response:
 
 @router.post("/invite/details", response_model=InviteOut, dependencies=[Depends(_LINK)])
 async def invite_details(body: LinkTokenIn, request: Request) -> InviteOut:
-    """The address and the name an invitation is for. Leaves the link unused."""
-    email, name = await flows.invite_details(request, token=body.token)
-    return InviteOut(email=email, display_name=name)
+    """The address and the name an invitation is for, and how it may be
+    accepted. Leaves the link unused."""
+    return InviteOut(**vars(await flows.invite_details(request, token=body.token)))
 
 
 @router.post(
@@ -554,8 +668,45 @@ async def invite_details(body: LinkTokenIn, request: Request) -> InviteOut:
     dependencies=[Depends(_LINK)],
 )
 async def accept_invite(body: InviteAcceptIn, request: Request, response: Response) -> SignInOut:
-    """Choose a password through an invitation; the first factor comes next."""
+    """Choose a password through an invitation. A technician's first factor
+    comes next; a contact is signed in."""
     step = await flows.accept_invite(request, token=body.token, password=body.password)
+    return _answer(response, step)
+
+
+class InvitePasskeyOptionsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A one-time link's token: a secret, no Pydantic bound (`LinkTokenIn`).
+    token: str
+
+
+class InvitePasskeyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A one-time link's token: a secret, no Pydantic bound (`LinkTokenIn`).
+    token: str
+    credential: dict[str, Any]
+    name: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/invite/passkey/options", dependencies=[Depends(_LINK)])
+async def invite_passkey_options(body: InvitePasskeyOptionsIn, request: Request) -> dict[str, Any]:
+    """A contact's first passkey, from the invitation: the creation options.
+    Leaves the link unused."""
+    return await flows.invite_passkey_options(request, token=body.token)
+
+
+@router.post(
+    "/invite/passkey",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_LINK)],
+)
+async def invite_passkey(body: InvitePasskeyIn, request: Request, response: Response) -> SignInOut:
+    """Accept a contact's invitation with a passkey: signed in. A refused
+    passkey leaves the link usable."""
+    step = await flows.invite_passkey(
+        request, token=body.token, credential=body.credential, name=body.name
+    )
     return _answer(response, step)
 
 
@@ -584,46 +735,95 @@ async def accept_recovery(
     return _answer(response, step)
 
 
+@router.post(
+    "/microsoft/start", response_model=MicrosoftStartOut, dependencies=[Depends(_MICROSOFT)]
+)
+async def microsoft_start(
+    body: MicrosoftStartIn, request: Request, response: Response
+) -> MicrosoftStartOut:
+    """Start a sign-in with Microsoft: to sign in, to link the caller's account
+    (a recent confirmation), or to accept an invitation -- a technician's
+    with their new password as well, which is stored now."""
+    started = await entra_flows.start(
+        request, intent=body.intent, token=body.token, password=body.password
+    )
+    if started.signed is not None:
+        _answer(response, started.signed)
+    set_entra_cookie(response, started.verifier, max_age=entra_flows.ENTRA_TTL_S)
+    return MicrosoftStartOut(authorize_url=started.authorize_url)
+
+
+@router.post(
+    "/microsoft/complete",
+    response_model=MicrosoftCompleteOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_MICROSOFT)],
+)
+async def microsoft_complete(
+    body: MicrosoftCompleteIn, request: Request, response: Response
+) -> MicrosoftCompleteOut:
+    """Finish it with the code and the state Microsoft handed the browser. An
+    unknown account is refused: nothing is created, nothing is linked by address."""
+    try:
+        step = await entra_flows.complete(request, code=body.code, state=body.state)
+    except AuthRefusal as refusal:
+        # A2-55: the transaction is over either way; its cookie goes with it.
+        gone = Response()
+        clear_entra_cookie(gone)
+        refusal.headers = {**(refusal.headers or {}), "set-cookie": gone.headers["set-cookie"]}
+        raise
+    clear_entra_cookie(response)
+    if step is None:
+        return MicrosoftCompleteOut(state="linked")
+    signed = _answer(response, step)
+    return MicrosoftCompleteOut(**signed.model_dump(exclude_unset=True))
+
+
 # --------------------------------------------------------------------------- #
 # /me -- my security
 # --------------------------------------------------------------------------- #
 
 
-async def _console_ctx(ctx: AuthContext = Depends(bound_auth_context)) -> AuthContext:
-    """The door admitted somebody; these routes need it to have been the
-    console session (`ctx.principal`, Task 6), not a token."""
-    if ctx.principal is None:
-        raise sign_in_again()
+async def _account_ctx(ctx: AuthContext = Depends(bound_account_context)) -> AuthContext:
+    """My security's door (phase 2, D26): a technician's or a contact's own
+    browser session; `bound_account_context` already refused anything else.
+    Every handler hands `ctx.clients` to `app.core.auth.account` -- or, to
+    unlink Microsoft, to `entra_flows.unlink`, which opens `account`'s own
+    session -- which runs a contact's request in that scope: their own client
+    (invariant 5a)."""
     return ctx
 
 
 def _me(ctx: AuthContext) -> SessionPrincipal:
-    assert ctx.principal is not None  # `_console_ctx` refused it otherwise
+    assert ctx.principal is not None  # `_account_ctx` refused it otherwise
     return ctx.principal
 
 
 @me_router.get("/security", response_model=MySecurityOut)
-async def my_security(request: Request, ctx: AuthContext = Depends(_console_ctx)) -> MySecurityOut:
+async def my_security(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> MySecurityOut:
     """The caller's second factors, remembered browsers and open sessions."""
-    mine = await account.my_security(request, _me(ctx))
+    mine = await account.my_security(request, _me(ctx), clients=ctx.clients)
     return MySecurityOut(
+        kind=mine.kind,
+        has_password=mine.has_password,
         has_totp=mine.has_totp,
         passkeys=[PasskeyOut(**vars(p)) for p in mine.passkeys],
         recovery_codes_left=mine.recovery_codes_left,
         trusted_devices=[TrustedDeviceOut(**vars(d)) for d in mine.trusted_devices],
         sessions=[SessionOut(**vars(s)) for s in mine.sessions],
+        microsoft=None if mine.microsoft is None else MicrosoftLinkOut(**vars(mine.microsoft)),
     )
 
 
 @me_router.put("/password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
-    body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """The current password and a new one, after a recent confirmation. The
     caller's session stays under a new cookie; every other session ends."""
     require_step_up(ctx)
     token, expires_at = await account.change_password(
-        request, _me(ctx), current=body.current, new=body.new
+        request, _me(ctx), current=body.current, new=body.new, clients=ctx.clients
     )
     response = _no_content()
     # The new identifier, expiring with the session as the change capped it.
@@ -631,46 +831,70 @@ async def change_password(
     return response
 
 
+@me_router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def add_password(
+    body: PasswordAddIn, request: Request, ctx: AuthContext = Depends(_account_ctx)
+) -> Response:
+    """The first password of an account that has none, after a recent
+    confirmation (409 `password_exists` when there is one)."""
+    require_step_up(ctx)
+    await account.add_password(request, _me(ctx), new=body.new, clients=ctx.clients)
+    return _no_content()
+
+
 @me_router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_passkey(
-    passkey_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    passkey_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
-    """Remove one of the caller's passkeys; never the last second factor."""
+    """Remove one of the caller's passkeys; never a technician's last second
+    factor (`last_factor`) nor a contact's last way in (`last_method`)."""
     require_step_up(ctx)
-    await account.remove_passkey(request, _me(ctx), passkey_id)
+    await account.remove_passkey(request, _me(ctx), passkey_id, clients=ctx.clients)
     return _no_content()
 
 
 @me_router.delete("/totp", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_totp(request: Request, ctx: AuthContext = Depends(_console_ctx)) -> Response:
-    """Remove the caller's authenticator app; never the last second factor."""
+async def remove_totp(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> Response:
+    """Remove the caller's authenticator app; never a technician's last second
+    factor. A contact's is optional, and their recovery codes go with it."""
     require_step_up(ctx)
-    await account.remove_totp(request, _me(ctx))
+    await account.remove_totp(request, _me(ctx), clients=ctx.clients)
     return _no_content()
 
 
 @me_router.post("/recovery-codes", response_model=RecoveryCodesOut)
 async def new_recovery_codes(
-    request: Request, ctx: AuthContext = Depends(_console_ctx)
+    request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> RecoveryCodesOut:
-    """Ten new recovery codes, once; the old ones stop working."""
+    """Ten new recovery codes, once; the old ones stop working. A contact has
+    them only with an authenticator app (409 `method_unavailable`)."""
     require_step_up(ctx)
-    return RecoveryCodesOut(recovery_codes=await account.new_recovery_codes(request, _me(ctx)))
+    codes = await account.new_recovery_codes(request, _me(ctx), clients=ctx.clients)
+    return RecoveryCodesOut(recovery_codes=codes)
 
 
 @me_router.delete("/trusted-devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def forget_device(
-    device_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    device_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """Stop remembering one browser."""
-    await account.forget_device(request, _me(ctx), device_id)
+    await account.forget_device(request, _me(ctx), device_id, clients=ctx.clients)
     return _no_content()
 
 
 @me_router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def end_my_session(
-    session_id: UUID, request: Request, ctx: AuthContext = Depends(_console_ctx)
+    session_id: UUID, request: Request, ctx: AuthContext = Depends(_account_ctx)
 ) -> Response:
     """End one of the caller's own sessions."""
-    await account.end_my_session(request, _me(ctx), session_id)
+    await account.end_my_session(request, _me(ctx), session_id, clients=ctx.clients)
+    return _no_content()
+
+
+@me_router.delete("/microsoft", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_microsoft(request: Request, ctx: AuthContext = Depends(_account_ctx)) -> Response:
+    """Unlink the caller's Microsoft account, after a recent confirmation;
+    never the last way in (409 `last_method`)."""
+    require_step_up(ctx)
+    await entra_flows.unlink(request, _me(ctx), clients=ctx.clients)
     return _no_content()

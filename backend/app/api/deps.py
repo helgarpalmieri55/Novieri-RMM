@@ -9,7 +9,8 @@ The same evaluation yields the request's CLIENT SCOPE (MSP clients spec
 §2.1-2.2): the clients where the person holds the route's code, narrowed --
 never widened -- by `X-Client-Id`. `AuthContext.clients` carries it to every
 `org_session`, where RLS enforces it. A contact (`users.kind = 'contact'`) is
-refused here; the portal admits one through `admit(..., contacts=True)`.
+refused here; the portal admits one through `admit(..., contacts=True)`, and so
+do the person's own account routes (`bound_account_context`, phase 2 D26).
 """
 
 import dataclasses
@@ -25,7 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import loopback
-from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
+from app.core.auth.guards import lock_user_row
+from app.core.auth.refusals import AUTH_REQUIRED, PORTAL_ONLY, STEP_UP_REQUIRED, AuthRefusal
 from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
 from app.core.i18n import N_, tr, tr_marked
@@ -373,6 +375,12 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
                 metadata={"first_seen": True, "email": claims.email},
             )
         else:
+            # An address to refresh writes the person's row: THE ROW FIRST
+            # (the refresh below says why), and before the status is read, so
+            # a switch-off committed while this waited is what is checked.
+            if claims.email and user.email != claims.email:
+                await lock_user_row(session, user.id)
+
             # `users.status`, the second admission rule, and the reason it is
             # checked here rather than trusted to Keycloak: disabling an
             # account there stops the NEXT token being issued, it does not
@@ -423,6 +431,19 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             # removed; it is evidence this token did not carry one, which is
             # true of any IdP or client scope that omits `email`. The refresh
             # exists to propagate a CHANGE, and "" is not a change.
+            #
+            # THE PERSON'S ROW FIRST, THE AUDIT CHAIN LAST (final review of
+            # own authentication phase 2, item 3; `guards.lock_user_row`).
+            # Audited straight away, the chain's advisory lock was taken here
+            # and the row written only later, at an autoflush: the door held
+            # the chain while waiting on the row, while an administrator's act
+            # on the same person (`end_sessions`, `reset_factors`, ...) or the
+            # person's own `PUT /me/password` held the row and then waited on
+            # the chain -- a 40P01, and a 500. So the row was locked and
+            # re-read above (`populate_existing` refreshes `user` in place),
+            # and the change is re-tested here on what it now says: two calls
+            # that both saw the old address queue on the row, and only the
+            # first records it (`tests/test_user_admin_races.py`).
             if claims.email and user.email != claims.email:
                 await audit_service.record(
                     session,
@@ -500,9 +521,10 @@ async def _admit_session(
     and the sign-in routes (Task 7) are the only ones that accept it. Then, in
     the order the MCP bearer path uses: the console's email-domain rule (staff
     only -- it says who may use the CONSOLE; a contact, from phase 2, uses the
-    portal), `users.status`, a contact refused unless `contacts`, and the
-    person's scope. Nothing is written and nothing is self-provisioned: a
-    session exists only for a person the platform already has."""
+    portal), `users.status`, a contact refused unless `contacts` -- with 403
+    `portal_only`, not logged (phase 2, Task 4) --, and the person's scope.
+    Nothing is written and nothing is self-provisioned: a session exists only
+    for a person the platform already has."""
     if not principal.factor_done:
         raise AuthRefusal(
             status.HTTP_401_UNAUTHORIZED,
@@ -524,19 +546,27 @@ async def _admit_session(
                 detail=tr("your session has ended; sign in again"),
             )
         who = f"user:{user.id}"
-        reasons = [
+        domain_reason = (
             None
             if user.kind == CONTACT_KIND
             else domain_refusal(
                 user.email, await resolve_console_domain(session, principal.org_id, settings)
-            ),
-            status_refusal(user.status),
-            None if contacts else contact_refusal(user.kind),
-        ]
-        for reason in reasons:
+            )
+        )
+        for reason in (domain_reason, status_refusal(user.status)):
             if reason is not None:
                 log_admission_refusal("session", sub=who, email=user.email, reason=reason)
                 raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(reason))
+        if not contacts:
+            reason = contact_refusal(user.kind)
+            if reason is not None:
+                # Not logged (plan 2026-11-06, Task 4, decision 7): a contact at
+                # the console's door is expected since phase 2 -- the console
+                # asks `/me` on every page -- and the console answers it by
+                # going to the portal (D42).
+                raise AuthRefusal(
+                    status.HTTP_403_FORBIDDEN, code=PORTAL_ONLY, detail=tr_marked(reason)
+                )
         if user.kind == CONTACT_KIND:
             scope = ClientScope.only([] if user.client_id is None else [user.client_id])
         else:
@@ -560,11 +590,14 @@ def require_step_up(ctx: AuthContext, *, now: datetime | None = None) -> None:
     console answers by asking for it (`/auth/step-up/*`, Task 7).
 
     A session on a remembered device starts without one, so the vault keeps
-    asking there (design §2.6, falsifier 5). A request with no session -- only
-    MCP enters without one since own authentication phase 1 -- is refused too:
-    the MCP channel never reaches these acts (`MCP_FORBIDDEN_CODES`, the
-    never-exposed table), and if it did, a refusal is the right way to be
-    wrong."""
+    asking there (design §2.6, falsifier 5).
+
+    A request with no session -- only MCP enters without one since own
+    authentication phase 1 -- is refused too. The MCP channel never performs
+    these acts: the routes that need the confirmation as a whole are no tools
+    (the never-exposed table, `NOT_FOR_MCP`, `MCP_FORBIDDEN_CODES`), and on
+    the two tools that need it only in part (a client's Microsoft tenants,
+    switching MCP on) this refusal is the bound (plan phase 2, Task 14)."""
     if ctx.principal is None or not step_up_fresh(ctx.principal, now or datetime.now(UTC)):
         raise AuthRefusal(
             status.HTTP_403_FORBIDDEN,
@@ -612,6 +645,31 @@ async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:
     it uses `request.state` instead.
     """
     ctx = await auth_context(request)
+    with bind(org_id=str(ctx.org_id), user_id=str(ctx.user_id)):
+        yield ctx
+
+
+async def bound_account_context(request: Request) -> AsyncIterator[AuthContext]:
+    """The routes of a person's OWN account -- My security: `/me/security`,
+    `/me/password`, `/me/passkeys/*`, `/me/totp`, `/me/recovery-codes`,
+    `/me/trusted-devices/*`, `/me/sessions/*` -- for a technician or a client's
+    contact (own authentication phase 2, plan decision D26). The portal's
+    door (`admit(contacts=True)`), and only for a browser session: a token is
+    refused. These routes touch only the caller's own auth rows
+    (`app.core.auth.account`), never a client's data; `GET /me` and the rest
+    of the console keep `bound_auth_context`, which refuses a contact."""
+    person = await admit(request, contacts=True)
+    if person.principal is None:
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED, code=AUTH_REQUIRED, detail=tr("sign in to continue")
+        )
+    ctx = AuthContext(
+        org_id=person.org_id,
+        user_id=person.user_id,
+        claims=person.claims,
+        clients=person.clients.narrow(person.requested_client),
+        principal=person.principal,
+    )
     with bind(org_id=str(ctx.org_id), user_id=str(ctx.user_id)):
         yield ctx
 
@@ -764,3 +822,27 @@ def require_permission_on_every_client(
         return ctx
 
     return on_every_client
+
+
+def require_permission_on_every_client_with_step_up(
+    code: str,
+) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
+    """`require_permission_on_every_client(code)`, then `require_step_up`.
+
+    For the global writes the operator put behind a recent second factor on
+    2026-11-08 and 2026-11-09 (design §2.5, decisions S1 and S5): the
+    organization's sign-in settings, who gets a technician's access and what a
+    role grants. (S3, switching MCP on, is asked in `orgs.py` itself.) A
+    DEPENDENCY, like the two it joins, so both refusals come before the body
+    is read -- the scope first: a per-client technician is told the act is not
+    theirs, never asked for a factor that could not make it so
+    (`tests/test_step_up_widened.py` pins the order). `route_permission` still
+    recovers `code` through both wrappers, and `tests/test_global_writes.py`
+    still finds `on_every_client` under this one."""
+    gate = require_permission_on_every_client(code)
+
+    async def on_every_client_with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
+        require_step_up(ctx)
+        return ctx
+
+    return on_every_client_with_step_up

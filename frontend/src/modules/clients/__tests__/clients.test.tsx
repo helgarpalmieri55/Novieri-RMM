@@ -50,6 +50,7 @@ const ANDES: ClientOut = {
   kind: "customer",
   status: "active",
   email_domains: ["andes.example"],
+  microsoft_tenants: [],
   phone: "+57 1 555 0100",
   address: "Calle 80 #10-20",
   website: "andes.example",
@@ -107,6 +108,8 @@ const ANA: ContactOut = {
   display_name: "Ana Rojas",
   phone: null,
   status: "active",
+  access: "active",
+  invite_expires_at: null,
 };
 
 const LINK: InstallLinkSettings = {
@@ -172,22 +175,37 @@ function api(overrides: Partial<ApiClient> = {}): ApiClient {
     listContacts: vi.fn().mockResolvedValue([ANA]),
     listHealthAssignments: vi.fn().mockResolvedValue([]),
     getInstallLink: vi.fn().mockResolvedValue(LINK),
+    getMySecurity: vi.fn().mockResolvedValue({
+      kind: "staff",
+      has_password: true,
+      microsoft: null,
+      has_totp: true,
+      passkeys: [],
+      recovery_codes_left: 8,
+      trusted_devices: [],
+      sessions: [],
+    }),
+    stepUpTotp: vi.fn().mockResolvedValue(undefined),
+    getCurrentOrg: vi.fn().mockResolvedValue({ id: "org-1", name: "Toeshee", settings: {} }),
     ...overrides,
   } as unknown as ApiClient;
 }
 
 function renderAt(entry: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/clients" element={<ClientsPage />} />
-          <Route path="/clients/:clientId" element={<ClientDetailPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/clients" element={<ClientsPage />} />
+            <Route path="/clients/:clientId" element={<ClientDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 beforeEach(() => {
@@ -611,5 +629,237 @@ describe("a client's Modules", () => {
     mockUseApi.mockReturnValue(api());
     renderAt("/clients/c-andes?tab=modules");
     expect(await screen.findByRole("switch", { name: "Changes" })).toBeDisabled();
+  });
+});
+
+const LUIS: ContactOut = {
+  ...ANA,
+  id: "ct-luis",
+  email: "luis@andes.example",
+  display_name: "Luis Pardo",
+  access: "none",
+};
+const MARTA: ContactOut = {
+  ...ANA,
+  id: "ct-marta",
+  email: "marta@andes.example",
+  display_name: "Marta Gil",
+  access: "invited",
+  invite_expires_at: "2026-11-09T12:00:00Z",
+};
+const STEP_UP = new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+
+/** What TanStack still holds of every mutation: its answers and its bodies. */
+function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
+  );
+}
+
+describe("a client's contacts' portal access", () => {
+  it("says each contact's access and offers the act that fits it", async () => {
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([ANA, LUIS, MARTA]) }));
+    renderAt("/clients/c-andes?tab=contacts");
+    const ana = (await screen.findByText("Ana Rojas")).closest("tr") as HTMLElement;
+    const luis = screen.getByText("Luis Pardo").closest("tr") as HTMLElement;
+    const marta = screen.getByText("Marta Gil").closest("tr") as HTMLElement;
+    expect(within(ana).getByText("Can sign in")).toBeInTheDocument();
+    expect(within(ana).getByRole("button", { name: "Reset portal access for Ana Rojas" })).toBeInTheDocument();
+    expect(within(luis).getByText("No access")).toBeInTheDocument();
+    expect(within(luis).getByRole("button", { name: "Invite Luis Pardo to the portal" })).toBeInTheDocument();
+    expect(within(marta).getByText(/^Invited/)).toBeInTheDocument();
+    expect(within(marta).getByRole("button", { name: "Send Marta Gil a new invitation" })).toBeInTheDocument();
+    expect(within(marta).getByRole("button", { name: "Cancel Marta Gil's invitation" })).toBeInTheDocument();
+  });
+
+  it("invites by email and says so", async () => {
+    const inviteContact = vi.fn().mockResolvedValue({ contact: { ...LUIS, access: "invited" }, invite_link: null });
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([LUIS]), inviteContact }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Invite Luis Pardo to the portal" }));
+    expect(inviteContact).toHaveBeenCalledExactlyOnceWith("c-andes", "ct-luis");
+    expect(await screen.findByText("Invitation sent to luis@andes.example.")).toBeInTheDocument();
+  });
+
+  it("without email, shows the link once and forgets it when done", async () => {
+    const link = "https://itms.example/invite#tok-contact-1";
+    const inviteContact = vi.fn().mockResolvedValue({ contact: { ...LUIS, access: "invited" }, invite_link: link });
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([LUIS]), inviteContact }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Invite Luis Pardo to the portal" }));
+    const shown = await screen.findByRole("region", { name: "Portal invitation for luis@andes.example" });
+    expect(within(shown).getByLabelText("Invitation link")).toHaveValue(link);
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+    expect(screen.queryByDisplayValue(link)).not.toBeInTheDocument();
+  });
+
+  it("keeps a shown link in no mutation, while it is on screen or after (A2-69)", async () => {
+    const link = "https://itms.example/invite#tok-contact-2";
+    const inviteContact = vi.fn().mockResolvedValue({ contact: { ...LUIS, access: "invited" }, invite_link: link });
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([LUIS]), inviteContact }));
+    const user = userEvent.setup();
+    const { queryClient } = renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Invite Luis Pardo to the portal" }));
+    await screen.findByRole("region", { name: "Portal invitation for luis@andes.example" });
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("tok-contact-2"));
+  });
+
+  it("cancels a pending invitation", async () => {
+    const cancelContactInvite = vi.fn().mockResolvedValue(undefined);
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([MARTA]), cancelContactInvite }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Cancel Marta Gil's invitation" }));
+    expect(cancelContactInvite).toHaveBeenCalledExactlyOnceWith("c-andes", "ct-marta");
+  });
+
+  it("resets access after a confirmation, asking for the technician's second factor when the server does", async () => {
+    const resetContactAccess = vi
+      .fn()
+      .mockRejectedValueOnce(STEP_UP)
+      .mockResolvedValue({ contact: { ...ANA, access: "invited" }, invite_link: null });
+    const stepUpTotp = vi.fn().mockResolvedValue(undefined);
+    mockUseApi.mockReturnValue(api({ resetContactAccess, stepUpTotp }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Reset portal access for Ana Rojas" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset this contact's portal access" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset access" }));
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(within(stepUp).getByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(resetContactAccess).toHaveBeenCalledTimes(2));
+    expect(stepUpTotp).toHaveBeenCalledWith("123456");
+    expect(resetContactAccess).toHaveBeenLastCalledWith("c-andes", "ct-ana");
+  });
+
+  it("says when the shown link was not copied, so it is not dismissed unseen (fix round 1)", async () => {
+    const link = "https://itms.example/invite#tok-contact-3";
+    const inviteContact = vi.fn().mockResolvedValue({ contact: { ...LUIS, access: "invited" }, invite_link: link });
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([LUIS]), inviteContact }));
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+    renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Invite Luis Pardo to the portal" }));
+    const shown = await screen.findByRole("region", { name: "Portal invitation for luis@andes.example" });
+    await user.click(within(shown).getByRole("button", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledWith(link);
+    expect(await within(shown).findByRole("alert")).toHaveTextContent(
+      "This browser would not copy it. Select the link and copy it by hand.",
+    );
+    writeText.mockResolvedValue(undefined);
+    await user.click(within(shown).getByRole("button", { name: "Copy link" }));
+    expect(await within(shown).findByText("Copied.")).toBeInTheDocument();
+    expect(within(shown).queryByRole("alert")).not.toBeInTheDocument();
+    writeText.mockRestore();
+  });
+
+  it("keeps a reset's new link in no mutation (A2-69)", async () => {
+    const link = "https://itms.example/invite#tok-reset-ana";
+    const resetContactAccess = vi.fn().mockResolvedValue({ contact: { ...ANA, access: "invited" }, invite_link: link });
+    mockUseApi.mockReturnValue(api({ resetContactAccess }));
+    const user = userEvent.setup();
+    const { queryClient } = renderAt("/clients/c-andes?tab=contacts");
+    await user.click(await screen.findByRole("button", { name: "Reset portal access for Ana Rojas" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset this contact's portal access" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset access" }));
+    await screen.findByRole("region", { name: "Portal invitation for ana@andes.example" });
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("tok-reset-ana"));
+  });
+
+  it("offers nothing to a contact that is turned off", async () => {
+    mockUseApi.mockReturnValue(api({ listContacts: vi.fn().mockResolvedValue([{ ...LUIS, status: "disabled" }]) }));
+    renderAt("/clients/c-andes?tab=contacts");
+    const luis = (await screen.findByText("Luis Pardo")).closest("tr") as HTMLElement;
+    expect(within(luis).queryByRole("button", { name: /Invite/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("a client's Microsoft organizations", () => {
+  it("are edited one per line and sent as a list", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi.fn().mockResolvedValue({ ...ANDES, microsoft_tenants: [tenant] });
+    mockUseApi.mockReturnValue(api({ updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), ` ${tenant} \n\n`);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateClient).toHaveBeenCalledWith("c-andes", expect.objectContaining({ microsoft_tenants: [tenant] })),
+    );
+  });
+
+  it("asks for the second factor when the server says it is stale, then sends the tenants once more (§2.5, S1)", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+      )
+      .mockResolvedValueOnce({ ...ANDES, microsoft_tenants: [tenant] });
+    const stepUpTotp = vi.fn().mockResolvedValue(undefined);
+    const getMySecurity = vi.fn().mockResolvedValue({
+      kind: "staff",
+      has_password: true,
+      microsoft: null,
+      has_totp: true,
+      passkeys: [],
+      recovery_codes_left: 0,
+      trusted_devices: [],
+      sessions: [],
+    });
+    mockUseApi.mockReturnValue(api({ updateClient, stepUpTotp, getMySecurity }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), tenant);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(updateClient).toHaveBeenCalledTimes(2));
+    expect(updateClient.mock.calls[1]).toEqual(updateClient.mock.calls[0]);
+    expect(stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+    // The second, confirmed save is the one the form answers: it closes.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit client" })).not.toBeInTheDocument());
+  });
+
+  // Fix round 1: the editor is not dismissible while the confirmation stands
+  // over it (`dismissible={!stepUp.open}`), so Escape answers the
+  // confirmation alone and the editor stays open with what was typed.
+  it("closes only the confirmation on Escape, and keeps the editor open with the tenants typed", async () => {
+    const tenant = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const updateClient = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+      );
+    mockUseApi.mockReturnValue(api({ updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit client" });
+    await user.type(within(dialog).getByLabelText("Microsoft organizations (tenant IDs)"), tenant);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await screen.findByRole("dialog", { name: "Confirm it's you" });
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument());
+    const editor = screen.getByRole("dialog", { name: "Edit client" });
+    expect(within(editor).getByLabelText("Microsoft organizations (tenant IDs)")).toHaveValue(tenant);
+    expect(within(editor).getByLabelText("Name")).toHaveValue(ANDES.name);
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
+    expect(updateClient).toHaveBeenCalledTimes(1);
   });
 });

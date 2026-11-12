@@ -97,6 +97,11 @@ describe("signOut", () => {
     expect(assign).toHaveBeenCalledWith("/sign-in");
   });
 
+  it("leaves for the page it is given", async () => {
+    await signOut({ logout: vi.fn().mockResolvedValue(undefined) }, "/portal/sign-in");
+    expect(assign).toHaveBeenCalledWith("/portal/sign-in");
+  });
+
   it("counts a 401 as signed out: the session had already ended", async () => {
     await signOut({ logout: vi.fn().mockRejectedValue(new ApiError(401, "")) });
     expect(assign).toHaveBeenCalledWith("/sign-in");
