@@ -1209,6 +1209,8 @@ import type {
 } from "../modules/site-servers/types";
 import type {
   AuthenticationResponseJSON,
+  ConsentAnswer,
+  ConsentDetails,
   EnrollFrom,
   InviteAccepted,
   InviteDetails,
@@ -2054,6 +2056,35 @@ export class ApiClient {
    */
   acceptRecovery(body: RecoveryAccept): Promise<void> {
     return this.request<void>("/auth/recover/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /**
+   * `POST /oauth/authorize/details`: what an AI app's authorization request
+   * asks, for the consent screen (own-auth design §5.2). `query` is
+   * `/oauth/authorize`'s, as the browser has it, without the `?`; the server
+   * validates it, and validates it again at the decision.
+   */
+  oauthAuthorizeDetails(query: string): Promise<ConsentDetails> {
+    return this.request<ConsentDetails>(
+      "/oauth/authorize/details",
+      { method: "POST", body: JSON.stringify({ query }) },
+      { global: true },
+    );
+  }
+
+  /**
+   * `POST /oauth/authorize/decision`: the person's answer. Approving needs the
+   * second factor confirmed in the last 10 minutes (operator decision C1): a
+   * 403 `step_up_required` the page answers with `useStepUp`. An approval's
+   * `redirect_to` carries a one-time authorization code -- a secret, so the
+   * page's mutation is `useSecretMutation` (`src/test/secretMutations.test.ts`).
+   */
+  oauthAuthorizeDecision(query: string, approve: boolean): Promise<ConsentAnswer> {
+    return this.request<ConsentAnswer>(
+      "/oauth/authorize/decision",
+      { method: "POST", body: JSON.stringify({ query, approve }) },
+      { global: true },
+    );
   }
 
   /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */

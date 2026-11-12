@@ -181,4 +181,36 @@ export const auth = {
     backToSignIn: "Back to sign in",
     backToSecurity: "Back to Sign-in and security",
   },
+  // The consent page at `/oauth/authorize` (own-auth phase 3, plan 2026-11-06,
+  // Task 4): an AI app asks to act as the person. The host it cannot fake
+  // heads it; the name it gave itself is its own claim.
+  consent: {
+    loading: "Checking the request…",
+    title: "Connect the app at {host}",
+    intro: "It asks to use ITMS as you.",
+    calledItself: "It calls itself “{name}”.",
+    unnamed: "It gave no name.",
+    selfRegistered: "It registered itself here, and any app can register with any name: trust the address, not the name.",
+    grants:
+      "If you approve, it can act as you in ITMS: everything your role allows, including running actions on managed computers.",
+    lasts:
+      "The connection lasts while the app uses it and ends after 30 days unused. You can end it at any time in Settings → AI connections.",
+    account: "You are signed in as {email}.",
+    returnsTo: "Your answer goes back to {host}.",
+    publishedBy: "Its description is published by {host}.",
+    appId: "App id: {id}",
+    loopbackOnly:
+      "This app only answers on this computer (localhost). Approve it only if you started it yourself, on this computer, just now.",
+    approve: "Approve",
+    deny: "Decline",
+    refusedTitle: "This connection request cannot be used",
+    unavailableTitle: "This request cannot be checked right now",
+    retry: "Try again",
+    deniedTitle: "You cannot connect AI apps here",
+    errorTitle: "This app's request cannot be used",
+    declinedTitle: "You did not connect this app",
+    backTo: "Back to {host}",
+    framedTitle: "Open this page on its own",
+    framed: "This page approves AI apps, so it never works inside another page. Open the link directly.",
+  },
 } as const;

@@ -180,4 +180,35 @@ export const auth: Shape<typeof en> = {
     backToSignIn: "Volver a entrar",
     backToSecurity: "Volver a Inicio de sesión y seguridad",
   },
+  // «Configuración → Conexiones de IA»: what `settings.ts` calls the tab in Spanish.
+  consent: {
+    loading: "Comprobando la solicitud…",
+    title: "Conectar la aplicación de {host}",
+    intro: "Pide usar ITMS en tu nombre.",
+    calledItself: "Dice llamarse «{name}».",
+    unnamed: "No ha dado ningún nombre.",
+    selfRegistered:
+      "Se registró ella misma aquí, y cualquier aplicación puede registrarse con cualquier nombre: fíate de la dirección, no del nombre.",
+    grants:
+      "Si la apruebas, podrá actuar como tú en ITMS: todo lo que permite tu rol, incluido ejecutar acciones en equipos gestionados.",
+    lasts:
+      "La conexión dura mientras la aplicación la use y termina tras 30 días sin uso. Puedes terminarla cuando quieras en Configuración → Conexiones de IA.",
+    account: "Has iniciado sesión como {email}.",
+    returnsTo: "Tu respuesta vuelve a {host}.",
+    publishedBy: "Su descripción la publica {host}.",
+    appId: "Id de la aplicación: {id}",
+    loopbackOnly:
+      "Esta aplicación solo responde en este equipo (localhost). Apruébala solo si la abriste tú, en este equipo, ahora mismo.",
+    approve: "Aprobar",
+    deny: "Rechazar",
+    refusedTitle: "Esta solicitud de conexión no se puede usar",
+    unavailableTitle: "Ahora mismo no se puede comprobar esta solicitud",
+    retry: "Intentarlo de nuevo",
+    deniedTitle: "No puedes conectar aplicaciones de IA aquí",
+    errorTitle: "La solicitud de esta aplicación no se puede usar",
+    declinedTitle: "No has conectado esta aplicación",
+    backTo: "Volver a {host}",
+    framedTitle: "Abre esta página sola",
+    framed: "Esta página aprueba aplicaciones de IA, así que nunca funciona dentro de otra página. Abre el enlace directamente.",
+  },
 };
