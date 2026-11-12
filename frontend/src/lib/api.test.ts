@@ -35,20 +35,26 @@ describe("ApiClient", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 
-  // The client id is whatever an AI app registered, and it is one path
-  // segment: a `/`, a space or a `?` in it must not become path or query.
-  it("puts an MCP client id in the revoke path as one encoded segment, with the scope in the body", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ revoked: true, keycloak_failures: 0 }), { status: 200 }),
+  // The app is named by its row id, one UUID path segment: a client id can be
+  // an https URL (a client metadata document), which no path segment holds.
+  it("puts the AI app's id in the revoke path, with the scope in the body", async () => {
+    // A fresh Response per call: a body can be read once.
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ revoked: true, grants_revoked: 2 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient(vi.fn());
-    const result = await client.revokeMcpConnection("my app/1?x", "everyone");
-    expect(result).toEqual({ revoked: true, keycloak_failures: 0 });
+    const result = await client.revokeMcpConnection("7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70", "everyone");
+    expect(result).toEqual({ revoked: true, grants_revoked: 2 });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/v1/mcp/connections/my%20app%2F1%3Fx/revoke");
+    expect(url).toBe("/api/v1/mcp/connections/7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70/revoke");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ scope: "everyone" });
+    // Whatever it is handed, the id travels as ONE encoded segment (A3-61): a
+    // slash or a query in it never reaches another route.
+    await client.revokeMcpConnection("a/b?c", "me");
+    const [odd] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(odd).toBe("/api/v1/mcp/connections/a%2Fb%3Fc/revoke");
   });
 
   it("reads the MCP connections", async () => {
