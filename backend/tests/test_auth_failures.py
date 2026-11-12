@@ -23,6 +23,7 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
 from app.models.auth import AuthFailure, AuthTrustedDevice
+from tests.race_helpers import backend_pid, until_blocked_by
 
 NOW = datetime(2026, 11, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -292,9 +293,12 @@ async def test_concurrent_attempts_at_99_failures_cannot_both_get_through(
             state = await failures.check_allowed(session, world.user_id, "totp", now=NOW)
             if first:
                 arrived.set()
-                # Hold the transaction open long enough for the other attempt
-                # to reach its own check_allowed (it must block on the lock).
-                await asyncio.sleep(0.5)
+                # Hold the transaction open until the other attempt is SEEN
+                # blocked on the lock in its own check_allowed. (A fixed 0.5 s
+                # let a pause in this process carry it past this commit: it
+                # then read the 100th failure without ever meeting the lock,
+                # and the test passed with the lock or without it.)
+                await until_blocked_by(world.app_engine, await backend_pid(session))
             if state.allowed:
                 await failures.record_failure(
                     session, org_id=world.org_id, user_id=world.user_id, factor="totp", now=NOW
