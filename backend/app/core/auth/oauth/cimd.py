@@ -11,7 +11,8 @@ only when:
 
 - the URL is a client identifier CIMD-03 §3 allows -- https, a path other than
   "/", no dot segment, no fragment, no user name or password -- with no query
-  (§3: "SHOULD NOT") and in ASCII (as a redirect, Task 1);
+  (§3: "SHOULD NOT"), in ASCII and with a host that passes `valid_host` (as a
+  redirect, Task 1);
 - the answer is a 200 JSON object of at most 5 KiB (§10.11: "The recommended
   maximum size to read is 5 kilobytes."), not compressed (Task 3, decision
   4), whatever its content type (below);
@@ -78,7 +79,7 @@ from app.core.auth.oauth.policy import (
     RESPONSE_TYPES,
     display_name,
 )
-from app.core.auth.oauth.redirects import RedirectRejected, check_registered
+from app.core.auth.oauth.redirects import RedirectRejected, check_registered, host_of
 
 logger = logging.getLogger("its.auth.oauth.cimd")
 
@@ -139,7 +140,14 @@ class ClientDocument:
 
 
 def is_document_client_id(client_id: str) -> bool:
-    """CIMD-03 §3, in ASCII, and no query."""
+    """CIMD-03 §3, in ASCII, no query, and a host every reader reads alike.
+
+    The host is `redirects.host_of`'s, the same `urlsplit` reading the consent
+    screen names, and it must pass `valid_host` (Task 1): no backslash, `%`
+    escape, quote, `_` or sub-delimiter, and no number a browser reads as an
+    IPv4 address (`0x7f000001`). An IPvFuture literal (`[v1.claude.ai]`) is
+    refused as `check_registered` refuses it: `urlsplit` unbrackets it into
+    a name that would otherwise pass (fix round 1b)."""
     if not isinstance(client_id, str) or len(client_id) > MAX_CLIENT_ID:
         return False
     if any(ord(ch) <= 0x20 or ord(ch) > 0x7E for ch in client_id):
@@ -152,6 +160,8 @@ def is_document_client_id(client_id: str) -> bool:
     except ValueError:
         return False
     if parts.scheme != "https" or not parts.hostname:
+        return False
+    if not host_of(client_id) or ("[" in parts.netloc and ":" not in parts.hostname):
         return False
     if parts.username is not None or parts.password is not None:
         return False

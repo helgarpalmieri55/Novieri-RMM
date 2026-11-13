@@ -196,6 +196,28 @@ async def test_a_global_answer_is_dialled(monkeypatch, address: str) -> None:
     assert len(seen) == 1
 
 
+@pytest.mark.parametrize("host", ["0x7f000001", "2130706433", "127.1", "0177.0.0.1", "0x0a000005"])
+async def test_a_host_spelled_as_a_number_is_judged_by_the_address_it_resolves_to(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """Nothing before DNS reads the host as an address: only the platform's
+    own names are compared as strings. The REAL resolver runs here (only the
+    transport is replaced), because the point is what it does with these
+    spellings: getaddrinfo reads them as inet_aton does (`0x7f000001` is
+    127.0.0.1, `0x0a000005` is 10.0.0.5) without asking DNS, and the address
+    it returns is the one refused (fix round 1b)."""
+    seen: list[httpx.Request] = []
+
+    def transport(_ip: str) -> httpx.AsyncBaseTransport:
+        return httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))
+
+    monkeypatch.setattr(egress_module, "_build_transport", transport)
+    with pytest.raises(EgressBlocked) as refused:
+        await get_bounded(f"https://{host}/m.json", max_bytes=10)
+    assert refused.value.reason == "blocked_private"
+    assert seen == []
+
+
 @pytest.mark.parametrize("pretend", [True, False])
 def test_the_verdict_does_not_read_pythons_own_table(
     monkeypatch: pytest.MonkeyPatch, pretend: bool

@@ -64,11 +64,31 @@ def _answer(
     return asked
 
 
+#: Hosts the consent screen, a browser and the fetch would not all read the
+#: same way (`redirects.valid_host`, Task 1; fix round 1b): a backslash, a `%`
+#: escape, a quote, `_` and sub-delimiters, a number WHATWG reads as IPv4, and
+#: an IPvFuture literal that `urlsplit` unbrackets into a name.
+BAD_HOSTS = [
+    "https://evil.com\\.claude.ai/x",
+    "https://claude.ai%2eevil.com/x",
+    'https://a"b.example/x',
+    "https://a_b!$.example/x",
+    "https://0x7f000001/x",
+    "https://[v1.claude.ai]/x",
+]
+
+
 @pytest.mark.parametrize(
     ("client_id", "ok"),
     [
         (URL, True),
         ("https://claude.example/c", True),
+        # Literals and a root dot stay accepted (fix round 1b): the host check
+        # refuses what is read two ways, not what is an address.
+        ("https://[2606:2800:220:1::1]/c.json", True),
+        ("https://93.184.216.34/c.json", True),
+        ("https://claude.example./c.json", True),
+        *((bad, False) for bad in BAD_HOSTS),
         ("http://claude.example/c.json", False),
         ("https://claude.example", False),
         ("https://claude.example/", False),
@@ -274,10 +294,13 @@ async def test_a_network_failure_is_transient(monkeypatch, error: Exception) -> 
     assert (refused.value.reason, refused.value.transient) == ("unavailable", True)
 
 
-async def test_a_client_id_that_names_no_document_is_never_fetched(monkeypatch) -> None:
+@pytest.mark.parametrize("client_id", ["http://claude.example/c.json", *BAD_HOSTS])
+async def test_a_client_id_that_names_no_document_is_never_fetched(
+    monkeypatch, client_id: str
+) -> None:
     asked = _answer(monkeypatch)
     with pytest.raises(cimd.DocumentRefused) as refused:
-        await cimd.fetch_document("http://claude.example/c.json")
+        await cimd.fetch_document(client_id)
     assert refused.value.reason == "not_a_document_url"
     assert asked == []
 
