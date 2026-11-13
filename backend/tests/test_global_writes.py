@@ -256,7 +256,7 @@ NOT_GLOBAL: dict[tuple[str, str], str] = {
     ),
     # `mcp.use` gates a person's own revocation; revoking an app for EVERYONE
     # is global and is refused inside the handler (tested below).
-    ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): "personal, or global by body",
+    ("POST", "/api/v1/mcp/connections/{app_id}/revoke"): "personal, or global by body",
     # A repository is one client's; the target it names must be global or
     # that client's (`backup.offsite.set_repository_target`).
     ("PUT", "/api/v1/backup/repositories/{repository_id}/offsite"): "C: backup_repository",
@@ -410,6 +410,7 @@ async def test_revoking_an_ai_app_for_everyone_needs_every_client(
     from sqlalchemy import update
 
     from app.models import Organization
+    from tests.mcp_support import mcp_app
 
     env = api_env
     env.settings.public_console_url = "https://itms.example.com"
@@ -427,7 +428,7 @@ async def test_revoking_an_ai_app_for_everyone_needs_every_client(
         await session.commit()
     every = await _actor(env, org_id, None)
     narrowed = {**every, "X-Client-Id": str(client.id)}
-    url = "/api/v1/mcp/connections/some-ai-app/revoke"
+    url = f"/api/v1/mcp/connections/{await mcp_app(env, org_id)}/revoke"
 
     response = await env.client.post(url, headers=narrowed, json={"scope": scope})
     if scope == "everyone":

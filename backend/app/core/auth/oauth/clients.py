@@ -49,7 +49,8 @@ ONE IDLE APP PER TRANSACTION, by `DELETE ... WHERE id = :id AND last_used_at
 inside the statement, so a use that commits while the DELETE waits on the
 app's hold spares the app. One app per transaction, because the purge's
 cascade takes a person's families, and a revocation across a person's apps
-(one UPDATE, Task 7's `grants.revoke_all_for_user`) locks those in no app's
+(Task 7's `grants.revoke_all_for_user`; since Task 10 an UPDATE of their
+live codes' expiry, then one of their live families) locks those in no app's
 order: a purge holding one app's cascade while waiting in another's could
 meet it in a cycle. That revocation can close one within a single app too,
 when the person holds two of its grants, so each app's DELETE waits at most

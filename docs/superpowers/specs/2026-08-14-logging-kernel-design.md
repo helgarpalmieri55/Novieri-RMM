@@ -175,7 +175,14 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 111, own authentication phase 3 (plan 2026-11-06, Task 7).** One site. A
+**NOW 108, own authentication phase 3 (plan 2026-11-06, Task 10).** Three
+sites fewer, all in `app/mcp/api.py`: the two WARNINGs of `remove_consents`
+and the one of `_record_incomplete`. Revoking an AI app no longer calls the
+identity provider; its grants end in the same transaction as the
+`mcp_revocation` row and the `mcp.app_revoked` event, so there is no
+best-effort half left to report.
+
+**BEFORE THAT, 111, own authentication phase 3 (plan 2026-11-06, Task 7).** One site. A
 static WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization
 code refused and spent", when a live code arrives with another app, another
 redirect or a wrong PKCE verifier. The code is used up (RFC 6749 §10.5, plan

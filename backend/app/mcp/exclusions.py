@@ -355,7 +355,7 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     # organization, and revoking one. An AI app listing or revoking AI apps
     # is the person's own decision made through one of the things it governs.
     ("GET", "/api/v1/mcp/connections"): _CONNECTIONS,
-    ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): _CONNECTIONS,
+    ("POST", "/api/v1/mcp/connections/{app_id}/revoke"): _CONNECTIONS,
     # My security (P2 phase 1): the person's own factors, remembered browsers
     # and sessions; each needs `api/v1/auth.py::_account_ctx`, a technician's
     # or a contact's own browser session (phase 2, D26).

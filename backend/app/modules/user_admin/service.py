@@ -36,6 +36,11 @@ DISABLE, DELETE AND A FACTOR RESET END THE PERSON'S SESSIONS AND FORGET THEIR
 REMEMBERED DEVICES in the same transaction as the change (design §2.4):
 `users.status` refuses the next admission at every door, and ending the
 sessions stops the cookie already in a browser -- at once, not at its expiry.
+Since own authentication phase 3 (plan 2026-11-06, Task 10) they also end the
+person's AI grants, and the codes an AI app has not exchanged yet
+(`oauth.grants.revoke_all_for_user`, imported as `ai_grants`: `delete_user`
+and `cancel_invite` have locals named `grants`), counted in the act's audit
+event as `ai_grants_revoked`.
 """
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -51,6 +56,7 @@ from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices
 from app.core.auth.devices import revoke_all_for_user
 from app.core.auth.factors import clear_second_factors, lock_person, set_by_mail
+from app.core.auth.oauth import grants as ai_grants
 from app.core.auth.sessions import end_all_for_user
 from app.core.i18n import tr
 from app.core.identity import STAFF_KIND, domain_refusal
@@ -1027,9 +1033,11 @@ async def set_enabled(
     """Turn an account off, or back on.
 
     OFF MEANS NOW (design §2.4). `users.status` refuses the next admission at
-    every door -- an AI app over MCP included -- and the person's sessions and
-    remembered devices end in this same transaction, so the cookie already in
-    a browser stops working too, and stays dead if the account is re-enabled.
+    every door -- an AI app over MCP included -- and the person's sessions,
+    remembered devices and AI grants (with any code an app has not exchanged
+    yet) end in this same transaction, so the cookie already in a browser and
+    the AI app's refresh token stop working too, and stay dead if the account
+    is re-enabled.
     ON restores the status only: the person signs in again, with their second
     factor.
 
@@ -1050,9 +1058,11 @@ async def set_enabled(
     user.status = ACTIVE if enabled else DISABLED
     session.add(user)
     await session.flush()
+    ai_ended = 0
     if not enabled:
         await end_all_for_user(session, user.id, "disabled")
         await revoke_all_for_user(session, user.id)
+        ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "disabled")
     await audit_service.record(
         session,
         org_id=org_id,
@@ -1061,7 +1071,11 @@ async def set_enabled(
         action="user.enabled" if enabled else "user.disabled",
         target_type="user",
         target_id=str(user.id),
-        metadata={"email": user.email, "status": user.status},
+        metadata={
+            "email": user.email,
+            "status": user.status,
+            **({} if enabled else {"ai_grants_revoked": ai_ended}),
+        },
     )
     return await _view(session, org_id, user)
 
@@ -1142,6 +1156,7 @@ async def reset_factors(
     await clear_second_factors(session, user.id)
     await end_all_for_user(session, user.id, "factors_reset")
     await revoke_all_for_user(session, user.id)
+    ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "factors_reset")
     await audit_service.record(
         session,
         org_id=org_id,
@@ -1150,7 +1165,7 @@ async def reset_factors(
         action="user.factors_reset",
         target_type="user",
         target_id=str(user.id),
-        metadata={"email": user.email, "via": "administrator"},
+        metadata={"email": user.email, "via": "administrator", "ai_grants_revoked": ai_ended},
     )
     await notices.tell(session, user, "factors_reset", vault=vault, actor_id=actor_id)
 
@@ -1239,6 +1254,7 @@ async def delete_user(
     await action_tokens.revoke_open(session, user_id=user.id, purpose=action_tokens.INVITE)
     await end_all_for_user(session, user.id, "disabled")
     await revoke_all_for_user(session, user.id)
+    ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "deleted")
     user.status = DELETED
     session.add(user)
     await session.flush()
@@ -1250,5 +1266,9 @@ async def delete_user(
         action="user.deleted",
         target_type="user",
         target_id=str(user.id),
-        metadata={"email": user.email, "roles_removed": len(grants)},
+        metadata={
+            "email": user.email,
+            "roles_removed": len(grants),
+            "ai_grants_revoked": ai_ended,
+        },
     )

@@ -153,6 +153,20 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       `end_sessions`, `delete_user`). `set_enabled`, `assign_role`,
       `remove_role` and `resend_invite` take it since the final review of
       phase 2 (items 1-2);
+    - THE ACTS THAT END A PERSON'S AI GRANTS (own authentication phase 3,
+      Task 10; operator decision D2, part c): a disable, a deletion, a
+      factor reset (`user_admin.service`), a password change (`account`,
+      or a mailed link in `flows.reset_password`), signing out everywhere
+      and the recovery link (`flows`). Each holds the row above first, then
+      forgets the devices, then `oauth.grants.revoke_all_for_user`: the
+      person's unspent codes end by their expiry, then their live families,
+      two UPDATEs -- and only then the act's audit, which counts them
+      (`ai_grants_revoked`). Before the chain, never after it: an act that
+      held the chain while waiting on a family a refresh holds FOR UPDATE
+      would meet that refresh's reuse or `person_inactive` branch waiting
+      on the chain (40P01). A code exchange of the person's meanwhile waits
+      on the row and then finds its code expired
+      (`tests/test_mcp_grant_lifecycle.py`);
     - every use of their links (`flows._consumed`) and the mailing of a
       reset link (`flows.send_reset_link`);
     - their own steps: sign-in, step-up and sign-out (`locked_user`, here),
@@ -213,10 +227,13 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       writer's late use (`clients.touch`, step 5) does not queue behind the
       waiting DELETE, and once it commits Postgres re-checks the condition
       on the row as it now is, finds it false, and the app survives. A
-      revocation -- one UPDATE of families and then only the chain
-      (`grants.revoke_family`, `revoke_all_for_user`, `revoke_app`) -- takes
-      no app row (`oauth.store`'s carve-out), so the DELETE may instead wait
-      IN ITS CASCADE for that writer's family rows. That UPDATE takes a
+      revocation -- one UPDATE of families, or (since Task 10) one of the
+      unspent codes' expiry and then one of the live families, and then
+      only the chain (`grants.revoke_family`, `revoke_all_for_user`,
+      `revoke_app`) -- takes no app row (`oauth.store`'s carve-out), so the
+      DELETE may instead wait IN ITS CASCADE for that writer's code or
+      family rows; it reaches only live ones, which an idle app all but
+      never has. That UPDATE takes a
       person's families in no app's order, which is why ONE APP PER
       TRANSACTION and never several, even in id order: a purge holding one
       app's cascade while waiting in another's would have the UPDATE wait on
@@ -233,6 +250,19 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       read unlocked, one UPDATE of its family (`grants.revoke_family`), then
       only the chain -- no person's row and no app row
       (`tests/test_oauth_token.py`);
+    - revoking an AI app in Settings (`oauth.connections.revoke_app_access`,
+      own authentication phase 3, Task 10), under the same carve-out: the
+      app read unlocked; `grants.revoke_app`'s two UPDATEs, the app's (or
+      one person's of it) unspent codes' expiry and then its live families,
+      many people's for "everyone"; the `mcp_revocation` row, flushed; the
+      chain last. No person's row -- "everyone" would otherwise take every
+      account of the organization in one act -- and no app row. It shares
+      rows with an account act only on that person's codes and families of
+      that app, which both reach in the same order, codes before families,
+      each UPDATE in the scan order of its table: a cycle between them
+      would need two of that person's rows of that app taken in opposite
+      orders by two scans of one table, which walk it in TID order
+      (`tests/test_mcp_admin_api.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);

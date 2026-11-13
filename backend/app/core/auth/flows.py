@@ -91,6 +91,7 @@ from app.core.auth.guards import (
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.lookup import find_person, org_of_slug
 from app.core.auth.methods import contact_may_reset, has_sign_in_method
+from app.core.auth.oauth import grants as ai_grants
 from app.core.auth.passkeys import (
     PasskeyRejected,
     authentication_options,
@@ -1290,7 +1291,13 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
         user = await locked_user(session, principal)
         await end_all_for_user(session, user.id, "signed_out_everywhere")
         await revoke_all_for_user(session, user.id)
-        await _audit(session, user, "auth.sessions_ended", {"by": "self", "scope": "everywhere"})
+        ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "signed_out_everywhere")
+        await _audit(
+            session,
+            user,
+            "auth.sessions_ended",
+            {"by": "self", "scope": "everywhere", "ai_grants_revoked": ai_ended},
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1451,7 +1458,13 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
             await reset_factor(session, user.id, "password")
             await end_all_for_user(session, user.id, "password_changed")
             await revoke_all_for_user(session, user.id)
-            await _audit(session, user, "auth.password_changed", {"via": row.purpose})
+            ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "password_changed")
+            await _audit(
+                session,
+                user,
+                "auth.password_changed",
+                {"via": row.purpose, "ai_grants_revoked": ai_ended},
+            )
             await notices.tell(
                 session, user, "password_changed", vault=_vault(request), actor_id=None
             )
@@ -1829,6 +1842,7 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         await clear_second_factors(session, user.id)
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
+        ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "factors_reset")
         signed = await started(
             session, request, user, state="enroll_required", first_step="recovery"
         )
@@ -1836,7 +1850,12 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         # order the acts were done.
         if password_set:
             await _audit(session, user, "auth.password_changed", {"via": action_tokens.RECOVER})
-        await _audit(session, user, "user.recovery_link_used", {"email": user.email})
+        await _audit(
+            session,
+            user,
+            "user.recovery_link_used",
+            {"email": user.email, "ai_grants_revoked": ai_ended},
+        )
         # The last acts (fix round 3): after the new session is made, so a
         # failure there cannot leave a mail -- and a relay checkout whose
         # audit row rolled back -- for a recovery that did not happen. The

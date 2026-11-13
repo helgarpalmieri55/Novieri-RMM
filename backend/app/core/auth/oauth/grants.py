@@ -83,20 +83,26 @@ use that commits first spares the app (race (b)).
 A REVOCATION TAKES NEITHER ROW (`store`'s carve-out). `revoke_presented`
 reads the grant unlocked, then makes one UPDATE of its family
 (`revoke_family`) and writes only the chain after it. `revoke_all_for_user`
-and `revoke_app` are the same one UPDATE; their callers (Task 10) hold what
-they hold, and nothing here takes a lock for them.
+and `revoke_app` (Task 10) are two UPDATEs: the unspent codes' expiry
+(`end_unspent_codes`), then the live families; their callers hold what they
+hold -- an account act, the person's row; Settings
+(`connections.revoke_app_access`), neither row -- and nothing here takes a
+lock for them.
 
 A CODE AN ACCOUNT ACT ENDED is one whose `expires_at` the act set to its
-own clock -- never its `used_at` (Task 10; operator decision D2, part c).
-The exchange answers it as any expired code: a plain `invalid_grant`, with
-nothing spent, logged, audited or revoked. Only a `used_at` already set is a
-reuse. The row lock alone does not stop an act that leaves the person active
-(signing out everywhere, a new password, a factor reset): the exchange waits
-for it and then runs. Ending the person's unspent codes in the same act
-does: the exchange re-reads its code at 3, after the act's commit, and
-compares it with a clock read after that re-read, so any `expires_at` the
-act wrote up to its commit reads as expired -- whether the exchange waited
-for the act or only arrived before it (review of Task 7, fix round 1).
+own clock -- never its `used_at` (Task 10; operator decision D2, part c;
+`end_unspent_codes`, which every revocation of a person's or an app's
+grants runs first). The exchange answers it as any expired code: a plain
+`invalid_grant`, with nothing spent, logged, audited or revoked. Only a
+`used_at` already set is a reuse. The row lock alone does not stop an act
+that leaves the person active (signing out everywhere, a new password, a
+factor reset): the exchange waits for it and then runs. Ending the person's
+unspent codes in the same act does: the exchange re-reads its code at 3,
+after the act's commit, and compares it with a clock read after that
+re-read, so any `expires_at` the act wrote up to its commit reads as
+expired -- whether the exchange waited for the act or only arrived before
+it (review of Task 7, fix round 1; `tests/test_mcp_grant_lifecycle.py`, the
+race with signing out everywhere).
 
 BULK STATEMENTS ON O TABLES (`update`) are invisible to
 `app.core.global_rows`'s listener; every one here runs under `oauth_session`
@@ -288,11 +294,65 @@ async def revoke_family(session: AsyncSession, family_id: UUID, reason: str, now
     return ended.first() is not None
 
 
+#: Where an ended code's expiry goes: the database's clock, the one the
+#: exchange compares it with after its locks (`_clock_after_the_locks`) --
+#: but never at or before the code's `created_at`, which
+#: `ck_oauth_codes_expiry` (`expires_at > created_at`) forbids.
+_ENDED_AT = func.greatest(func.clock_timestamp(), OAuthCode.created_at + timedelta(microseconds=1))
+
+
+async def end_unspent_codes(
+    session: AsyncSession, *, user_id: UUID | None = None, oauth_client_id: UUID | None = None
+) -> int:
+    """End the unspent, still-live codes of a person, of an app, or of one
+    person's for one app (operator decision D2, part c); how many.
+
+    BY THEIR EXPIRY, NEVER BY `used_at`: a set `used_at` is what the
+    exchange reads as a reuse (`mcp.code_reused`, an audit row, the grant it
+    opened revoked). Ended this way the code is what any expired code is: a
+    plain `invalid_grant`. An exchange waiting on the caller's locks re-reads
+    the code after its commit and compares it with a clock read after that
+    (`_clock_after_the_locks`), so whatever this writes up to the commit
+    reads as expired. Spent and already expired codes are left as they are.
+
+    The caller says whose: a person, an app, or both. With neither it would
+    end every code the session can see, so it refuses."""
+    if user_id is None and oauth_client_id is None:
+        raise ValueError(  # i18n-exempt: programmer error, unhandled 500
+            "name the person or the app whose codes end"
+        )
+    query = update(OAuthCode).where(
+        OAuthCode.used_at.is_(None), OAuthCode.expires_at > func.clock_timestamp()
+    )
+    if user_id is not None:
+        query = query.where(OAuthCode.user_id == user_id)
+    if oauth_client_id is not None:
+        query = query.where(OAuthCode.oauth_client_id == oauth_client_id)
+    ended = await session.execute(query.values(expires_at=_ENDED_AT).returning(OAuthCode.id))
+    return len(ended.all())
+
+
 async def revoke_all_for_user(session: AsyncSession, user_id: UUID, reason: str) -> int:
-    """End every live grant of a person (the lifecycle acts, Task 10); how many."""
+    """End every live grant of a person (the lifecycle acts, Task 10); how many.
+
+    TWO STATEMENTS, IN THIS ORDER, and nothing else (`store`'s carve-out):
+    the person's unspent codes end first (`end_unspent_codes`; operator
+    decision D2, part c), then their live families, in one UPDATE. The
+    caller holds the person's row (every act does, first), so an exchange of
+    one of those codes waits for it and then finds the code expired: an act
+    that leaves the person active opens no way back for a code approved a
+    moment before it. Only LIVE codes and families: an expired one is dead
+    already, and an idle app's have all but always expired with it, so this
+    keeps clear of a purge's cascade (`clients.purge_idle`) all but
+    entirely."""
+    await end_unspent_codes(session, user_id=user_id)
     ended = await session.execute(
         update(OAuthRefreshFamily)
-        .where(OAuthRefreshFamily.user_id == user_id, OAuthRefreshFamily.revoked_at.is_(None))
+        .where(
+            OAuthRefreshFamily.user_id == user_id,
+            OAuthRefreshFamily.revoked_at.is_(None),
+            OAuthRefreshFamily.expires_at > func.clock_timestamp(),
+        )
         .values(revoked_at=_now(), revoked_reason=reason)
         .returning(OAuthRefreshFamily.id)
     )
@@ -308,10 +368,22 @@ async def revoke_app(
     now: datetime,
 ) -> int:
     """End an app's live grants: one person's, or (`user_id` None) everyone's
-    in the session's organization (Task 10); how many."""
+    in the session's organization (Task 10); how many.
+
+    The same two statements as `revoke_all_for_user`, for the app: its
+    unspent codes end first, then its live families in a SEPARATE UPDATE.
+    The caller holds no person's row and no app row (`store`'s carve-out),
+    so an exchange of the app's code may be in flight. Under READ COMMITTED
+    each statement reads what committed before it began. An exchange that
+    holds its code when the codes UPDATE reaches it is waited for, and the
+    family it opened has committed before the families UPDATE begins, which
+    then reads it and ends it; one that has not locked its code yet waits on
+    the codes UPDATE's row lock, and then finds the code expired."""
+    await end_unspent_codes(session, user_id=user_id, oauth_client_id=oauth_client_id)
     query = update(OAuthRefreshFamily).where(
         OAuthRefreshFamily.oauth_client_id == oauth_client_id,
         OAuthRefreshFamily.revoked_at.is_(None),
+        OAuthRefreshFamily.expires_at > func.clock_timestamp(),
     )
     if user_id is not None:
         query = query.where(OAuthRefreshFamily.user_id == user_id)

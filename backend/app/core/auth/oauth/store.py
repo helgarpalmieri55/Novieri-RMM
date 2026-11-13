@@ -47,11 +47,20 @@ A row found by its hash before step 1 (whose code? whose token?) is read
 without a lock, and read again after step 3, before it is written: the purge
 may have taken it meanwhile, and a write to a row gone is a stale-row 500.
 
-REVOCATIONS TAKE NO APP ROW. A writer whose only statement on grant rows is
-one UPDATE of families -- `grants.revoke_family`, `revoke_all_for_user`,
-`revoke_app` (Tasks 7 and 10) -- with nothing after it but the audit chain,
-skips steps 3 and 5: the account acts revoke a person's grants across every
-app, and `revoke_app`'s "everyone" holds no person's row. An app's own RFC
+REVOCATIONS TAKE NO APP ROW. A writer whose only statements on grant rows are
+UPDATEs that END them -- one of a family (`grants.revoke_family`), or one of
+the unspent codes' expiry and then one of the live families
+(`revoke_all_for_user`, `revoke_app`; Tasks 7 and 10, operator decision D2
+part c) -- with nothing after them but the audit chain (a Settings
+revocation also inserts its `mcp_revocation` row, which refers to no grant
+row and no app row), skips steps 3 and 5: the account acts revoke a
+person's grants across every app, and `revoke_app`'s "everyone"
+(`connections.revoke_app_access`) holds no person's row. Both UPDATEs touch
+only LIVE rows (an unspent code not yet expired; a family neither revoked
+nor past its idle limit), and an idle app's codes and families have all but
+always expired with it (its use is written at most an hour behind a
+family's, `clients.TOUCH_EVERY`), so they meet a purge's cascade all but
+never. An app's own RFC
 7009 request, `grants.revoke_presented` (Task 7), is one of them and takes
 step 1 neither: the grant read unlocked, `revoke_family`, then the chain. An idle app's
 purge, already holding the app row, may then wait IN ITS CASCADE for such a

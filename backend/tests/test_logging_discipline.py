@@ -438,7 +438,14 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
+    NOW 108, own authentication phase 3 (plan 2026-11-06, Task 10): three
+    sites fewer, all in `app/mcp/api.py` -- the two WARNINGs of
+    `remove_consents` and the one of `_record_incomplete`. Revoking an AI app
+    no longer calls the identity provider: its grants end in the same
+    transaction as the revocation row and its audit event, so there is no
+    best-effort half left to report.
+
+    BEFORE THAT, 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
     WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization code
     refused and spent", when a live code arrives with another app, another
     redirect or a wrong PKCE verifier: the code is used up (RFC 6749 §10.5,
@@ -595,8 +602,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 111, (
-        f"the AST sweep found {total} log call sites, expected 111 -- if a log "
+    assert total == 108, (
+        f"the AST sweep found {total} log call sites, expected 108 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "
