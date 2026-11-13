@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import account
 from app.core.auth.refusals import AuthRefusal
 from app.core.client_scope import ClientScope
+from app.models import AuditEvent
 from app.models.auth import (
     ENTRA,
     AuthExternalIdentity,
@@ -409,6 +410,47 @@ async def test_a_contacts_own_changes_take_effect_in_their_clients_scope(auth_en
     assert (await login(auth_env, who)).status_code != 200
     who.password = new
     assert (await login(auth_env, who)).status_code == 200
+
+
+async def test_a_contacts_account_acts_say_they_ended_no_ai_grant(auth_env: Any) -> None:
+    """Own authentication phase 3 (Task 10 review, Minor 6). The acts that
+    end a person's AI grants reach a contact too -- a password change and
+    signing out everywhere, in the contact's own client scope -- and end
+    none: a contact never holds a grant (the consent refuses them,
+    `portal_only`). Their audit events carry the count all the same, exactly
+    as a technician's do."""
+    who, headers = await _signed(auth_env)
+    changed = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=headers,
+        json={"current": CONTACT_PASSWORD, "new": "Pelican-Orbit-Lantern-58-Quay"},
+    )
+    assert changed.status_code == 204, changed.text
+    again = await sign_in(auth_env, who.org_id, who.sub, step_up=True)
+    ended = await auth_env.client.post(
+        "/api/v1/auth/logout-everywhere", headers={**who.network, **again.headers}
+    )
+    assert ended.status_code == 204, ended.text
+
+    async with AsyncSession(auth_env.admin_engine) as s:
+
+        async def metadata(action: str) -> list[Any]:
+            return list(
+                (
+                    await s.execute(
+                        select(AuditEvent.meta)
+                        .where(AuditEvent.org_id == who.org_id, AuditEvent.action == action)
+                        .order_by(AuditEvent.id)
+                    )
+                ).scalars()
+            )
+
+        assert await metadata("auth.password_changed") == [
+            {"via": "self", "ai_grants_revoked": 0}
+        ]
+        assert await metadata("auth.sessions_ended") == [
+            {"by": "self", "scope": "everywhere", "ai_grants_revoked": 0}
+        ]
 
 
 async def test_a_contact_naming_another_client_is_refused(auth_env: Any) -> None:
