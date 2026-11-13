@@ -209,6 +209,8 @@ export const auth = {
     deniedTitle: "You cannot connect AI apps here",
     errorTitle: "This app's request cannot be used",
     declinedTitle: "You did not connect this app",
+    // A decline the server answered with a redirect: never followed (fix round 1).
+    declineUnfollowed: "The answer to your decline could not be used, so this page did not follow it. Start again from the app.",
     backTo: "Back to {host}",
     framedTitle: "Open this page on its own",
     framed: "This page approves AI apps, so it never works inside another page. Open the link directly.",

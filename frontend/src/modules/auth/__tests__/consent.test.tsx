@@ -10,13 +10,13 @@
  * The approval's redirect carries the authorization code, which must not stay
  * in the mutation cache.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../lib/api";
 import { navigation } from "../../../lib/session";
-import { APPROVED, CONSENT, authApi, calls, installDefaults, mutationCacheText, renderAuth } from "./harness";
+import { APPROVED, CONSENT, authApi, calls, installDefaults, mutationCacheText, renderAuth, where } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => authApi() }));
 
@@ -37,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -113,6 +114,25 @@ describe("approving an AI app", () => {
     expect(mutationCacheText(queryClient)).not.toContain("c0de-never-kept");
   });
 
+  it("approves the request it showed, even when the address changes under the page", async () => {
+    // Fix round 1: the query is read once, so the card and the decision
+    // always describe the same request.
+    const user = userEvent.setup();
+    renderAuth(PAGE);
+    expect(await screen.findByRole("heading", { name: "Connect the app at claude.ai" })).toBeInTheDocument();
+    const other = "?response_type=code&client_id=itms_other&state=sw4pped";
+    act(() => {
+      void where.navigate?.(`/oauth/authorize${other}`);
+    });
+    // Non-vacuity: the router did move, and the same page is still drawn.
+    expect(where.location?.search).toBe(other);
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(APPROVED));
+    expect(calls.oauthAuthorizeDecision).toHaveBeenCalledWith(QUERY, true);
+    expect(calls.oauthAuthorizeDetails).toHaveBeenCalledTimes(1);
+    expect(calls.oauthAuthorizeDetails).toHaveBeenCalledWith(QUERY);
+  });
+
   it("asks for the second factor when the server wants it, then sends the approval once more", async () => {
     calls.oauthAuthorizeDecision
       .mockRejectedValueOnce(STEP_UP())
@@ -151,6 +171,18 @@ describe("approving an AI app", () => {
     expect(screen.getByRole("button", { name: "Decline" })).toBeDisabled();
     expect(calls.oauthAuthorizeDecision).toHaveBeenCalledTimes(1);
   });
+
+  it("says it is working on the button that was pressed: a decline on its way", async () => {
+    // Fix round 1: "Working…" on Approve while a decline travels said the wrong thing.
+    calls.oauthAuthorizeDecision.mockReturnValue(new Promise(() => undefined));
+    const user = userEvent.setup();
+    renderAuth(PAGE);
+    await user.click(await screen.findByRole("button", { name: "Decline" }));
+    expect(screen.getByRole("button", { name: "Working…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Decline" })).toBeNull();
+    expect(calls.oauthAuthorizeDecision).toHaveBeenCalledWith(QUERY, false);
+  });
 });
 
 describe("everything else waits for the person (B3-15)", () => {
@@ -172,6 +204,24 @@ describe("everything else waits for the person (B3-15)", () => {
     expect(assign).toHaveBeenCalledWith(DENIED);
   });
 
+  it("a decline is never followed on its own, even when the server answers it with a redirect", async () => {
+    // Fix round 1: B3-15 holds in the console even if the server misbehaves.
+    // The redirect is not kept either: it may carry a code.
+    calls.oauthAuthorizeDecision.mockResolvedValue({ outcome: "redirect", redirect_to: APPROVED });
+    const user = userEvent.setup();
+    const { queryClient } = renderAuth(PAGE);
+    await user.click(await screen.findByRole("button", { name: "Decline" }));
+    expect(await screen.findByRole("heading", { name: "This connection request cannot be used" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The answer to your decline could not be used, so this page did not follow it. Start again from the app.",
+    );
+    expect(calls.oauthAuthorizeDecision).toHaveBeenCalledWith(QUERY, false);
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(document.body.textContent).not.toContain("c0de-never-kept");
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("c0de-never-kept"));
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it("an error the app should hear is shown with its host, and never followed on its own", async () => {
     calls.oauthAuthorizeDetails.mockResolvedValue({
       outcome: "back",
@@ -180,12 +230,18 @@ describe("everything else waits for the person (B3-15)", () => {
       redirect_host: "claude.ai",
       redirect_to: DENIED,
     });
-    const user = userEvent.setup();
+    // THE PAGE'S CLOCK, FROM BEFORE IT DRAWS (fix round 1): a timer it might
+    // start to leave on its own is one this test can run out. A real 50 ms
+    // wait let a 5 s auto-follow through.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderAuth(PAGE);
     expect(await screen.findByRole("heading", { name: "This app's request cannot be used" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("This AI app's request is malformed.");
-    // A beat later, still here: nothing navigated by itself.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // A minute later, still here: nothing navigated by itself.
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
     expect(assign).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Back to claude.ai" }));
     expect(assign).toHaveBeenCalledTimes(1);

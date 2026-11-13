@@ -7,7 +7,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import { Fragment, StrictMode } from "react";
-import { MemoryRouter, Route, Routes, useLocation, type Location } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  type Location,
+  type NavigateFunction,
+} from "react-router-dom";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../../lib/api";
@@ -136,11 +144,19 @@ export function authApi(): ApiClient {
   return calls as unknown as ApiClient;
 }
 
-/** Where the router is now. Set by `LocationProbe`, which renders nothing. */
-export const where: { location: Location | null } = { location: null };
+/**
+ * Where the router is now, and a way to move it while a page stays mounted
+ * (the consent page's query, Task 4 fix round 1). Set by `LocationProbe`,
+ * which renders nothing.
+ */
+export const where: { location: Location | null; navigate: NavigateFunction | null } = {
+  location: null,
+  navigate: null,
+};
 
 function LocationProbe() {
   where.location = useLocation();
+  where.navigate = useNavigate();
   return null;
 }
 

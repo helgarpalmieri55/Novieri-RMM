@@ -19,7 +19,8 @@
  * ONLY AN APPROVAL LEAVES ON ITS OWN (B3-15; RFC 9700 §4.11.2). An error the
  * app should hear, a decline and "you cannot connect apps here" show the host
  * and wait for "Back to <host>": with open registration no redirect is one the
- * platform trusts.
+ * platform trusts. The rule holds here even if the server breaks it: a
+ * redirect answering a decline is not followed (fix round 1).
  *
  * APPROVING ASKS FOR THE SECOND FACTOR when the server wants it (operator
  * decision C1): the decision goes through `stepUp.run`, which answers 403
@@ -90,7 +91,10 @@ function ConsentRequest() {
   const api = useApi();
   const stepUp = useStepUp();
   const { search } = useLocation();
-  const query = authorizationQuery(search);
+  // READ ONCE (fix round 1): the card's details and the decision always
+  // describe the same request, even if the address changes while the page
+  // stays mounted.
+  const [query] = useState(() => authorizationQuery(search));
   // ASKED ONCE, and the query is not part of the key: it is the request's,
   // not a cache entry's, and it leaves with the page.
   const details = useQuery({
@@ -104,31 +108,40 @@ function ConsentRequest() {
   const decision = useSecretMutation({
     mutationFn: (approve: boolean) => stepUp.run(() => api.oauthAuthorizeDecision(query, approve)),
   });
-  const [busy, setBusy] = useState(false);
+  // The answer on its way, if any: one at a time, and "Working…" on the
+  // button that sent it (fix round 1).
+  const [sending, setSending] = useState<"approve" | "decline" | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [answered, setAnswered] = useState<ConsentAnswer | null>(null);
+  // A decline the server answered with a redirect, which is not followed.
+  const [unfollowed, setUnfollowed] = useState(false);
   const inFlight = useRef(false);
 
   async function answer(approve: boolean) {
     if (inFlight.current) return;
     inFlight.current = true;
-    setBusy(true);
+    setSending(approve ? "approve" : "decline");
     setFailure(null);
     try {
       const outcome = await decision.mutateAsync(approve);
-      if (outcome.outcome === "redirect") {
+      if (outcome.outcome !== "redirect") {
+        setAnswered(outcome);
+      } else if (approve) {
         // THE ONE NAVIGATION THE PAGE MAKES ON ITS OWN: the approval's code.
         // The buttons stay disabled until the document has left.
         navigation.assign(outcome.redirect_to);
         return;
+      } else {
+        // A DECLINE NEVER LEAVES ON ITS OWN (B3-15, fix round 1), whatever
+        // the server answered. Not followed, and not kept: it may carry a code.
+        setUnfollowed(true);
       }
-      setAnswered(outcome);
     } catch (cause: unknown) {
       // A closed confirmation approved nothing, and says nothing.
       if (!(cause instanceof StepUpCancelled)) setFailure(describeSubmitError(cause));
     }
     inFlight.current = false;
-    setBusy(false);
+    setSending(null);
   }
 
   if (details.isPending || details.isFetching) {
@@ -157,6 +170,13 @@ function ConsentRequest() {
             <Btn label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
+      </AuthCard>
+    );
+  }
+  if (unfollowed) {
+    return (
+      <AuthCard title={t("auth.consent.refusedTitle")}>
+        <AuthAlert text={t("auth.consent.declineUnfollowed")} />
       </AuthCard>
     );
   }
@@ -225,11 +245,15 @@ function ConsentRequest() {
       <div className="form-actions">
         <Btn
           variant="primary"
-          label={busy && !stepUp.open ? t("auth.common.working") : t("auth.consent.approve")}
-          disabled={busy}
+          label={sending === "approve" && !stepUp.open ? t("auth.common.working") : t("auth.consent.approve")}
+          disabled={sending !== null}
           onClick={() => void answer(true)}
         />
-        <Btn label={t("auth.consent.deny")} disabled={busy} onClick={() => void answer(false)} />
+        <Btn
+          label={sending === "decline" && !stepUp.open ? t("auth.common.working") : t("auth.consent.deny")}
+          disabled={sending !== null}
+          onClick={() => void answer(false)}
+        />
       </div>
       {stepUp.dialog}
     </AuthCard>

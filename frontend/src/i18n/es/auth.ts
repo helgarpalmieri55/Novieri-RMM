@@ -207,6 +207,8 @@ export const auth: Shape<typeof en> = {
     deniedTitle: "No puedes conectar aplicaciones de IA aquí",
     errorTitle: "La solicitud de esta aplicación no se puede usar",
     declinedTitle: "No has conectado esta aplicación",
+    declineUnfollowed:
+      "La respuesta a tu rechazo no se pudo usar, así que esta página no la siguió. Empieza de nuevo desde la aplicación.",
     backTo: "Volver a {host}",
     framedTitle: "Abre esta página sola",
     framed: "Esta página aprueba aplicaciones de IA, así que nunca funciona dentro de otra página. Abre el enlace directamente.",
