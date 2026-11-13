@@ -1,8 +1,9 @@
 """Traefik routes the MCP server to the api, and nothing else is stolen by it.
 
 MCP spec 2026-10-09 §2. The api serves `/mcp` (the protocol endpoint) and
-`/.well-known/oauth-protected-resource[/mcp]` (RFC 9728 metadata, which names
-the realm as the authorization server). Neither lives under `/api`, so the api
+`/.well-known/oauth-protected-resource[/mcp]` (RFC 9728 metadata, which named
+the realm as the authorization server until own authentication phase 3, and
+names the platform since). Neither lives under `/api`, so the api
 router has to name them; without that Traefik hands both to `web`, whose nginx
 answers every unknown path with the SPA's `index.html` and a 200.
 
@@ -41,7 +42,13 @@ MCP_PATHS = (
     # The two discovery forms that sort before the realm's own (see above).
     "/.well-known/oauth-authorization-server/realms/it-suite",
     "/.well-known/openid-configuration/realms/it-suite",
+    # The platform's own RFC 8414 document (own authentication phase 3).
+    "/.well-known/oauth-authorization-server",
 )
+
+#: The OAuth server's machine endpoints (plan 2026-11-06, Task 6): the api's,
+#: by exact path. `/oauth/authorize` is a console page (plan D2).
+OAUTH_PATHS = ("/oauth/token", "/oauth/register", "/oauth/revoke")
 
 
 def _api() -> dict:
@@ -106,3 +113,20 @@ def test_the_api_is_given_longer_to_stop_than_a_running_write() -> None:
     grace = _api().get("stop_grace_period")
     assert grace is not None, "api has no stop_grace_period: Docker kills it at 10 s"
     assert _seconds(str(grace)) >= TOOL_TIMEOUT_S + _SHUTDOWN_GRACE_S + 5
+
+
+def test_the_oauth_endpoints_reach_the_api_by_exact_path() -> None:
+    rule = str(_api()["labels"]["traefik.http.routers.api.rule"])
+    for path in OAUTH_PATHS:
+        assert f"Path(`{path}`)" in rule, path
+        assert _winner(path) == "api", (path, _winner(path))
+    # Exact paths: nothing below them, and nothing beside them, moves.
+    assert _winner("/oauth/token/x") == "web"
+    assert _winner("/oauth/tokens") == "web"
+
+
+def test_the_consent_page_stays_the_consoles() -> None:
+    assert _winner("/oauth/authorize") == "web"
+    routes = ROUTES.read_text()
+    for path in OAUTH_PATHS:
+        assert f'"{path}"' not in routes and f"'{path}'" not in routes, path

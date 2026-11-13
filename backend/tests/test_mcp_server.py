@@ -4,7 +4,8 @@ The only door an external AI app has. What is pinned here:
 
 - with `ITS_PUBLIC_CONSOLE_URL` unset there is no MCP resource, and both `/mcp`
   and its protected-resource metadata say so with a 503;
-- the metadata (RFC 9728) names the resource and the realm, at both paths;
+- the metadata (RFC 9728) names the resource and the platform as its
+  authorization server, at both paths;
 - a request with no token, or a token that is refused, gets 401 carrying
   `WWW-Authenticate: Bearer resource_metadata=...` -- the one thing an OAuth
   client needs to start the flow, and nothing else;
@@ -147,11 +148,11 @@ async def test_the_protected_resource_metadata_is_served_at_both_paths(mcp_env) 
         assert resp.status_code == 200, path
         assert resp.json() == {
             "resource": "https://itms.example.com/mcp",
-            "authorization_servers": ["https://idp.test/realms/it-suite"],
+            "authorization_servers": ["https://itms.example.com"],
             "scopes_supported": ["mcp"],
             "bearer_methods_supported": ["header"],
         }
-        assert resp.json()["authorization_servers"] == [mcp_env.settings.oidc_issuer]
+        assert resp.json()["authorization_servers"] == ["https://itms.example.com"]
 
 
 async def test_a_trailing_slash_on_the_console_url_does_not_double_up(mcp_env) -> None:

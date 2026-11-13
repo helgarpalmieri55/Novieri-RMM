@@ -177,25 +177,41 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       dead that none of the above reads -- NOT an idle AI app, whose live
       grants go with it (the purge, below), even when the sweep deletes it;
     - the purge of an idle AI app (own authentication phase 3: Task 6's
-      `clients.purge_idle` and Task 13's retention step for apps), which
-      deletes a person's grant rows -- families, refresh tokens, codes -- by
-      cascade from `oauth_clients`, holding no person's row. Its shape:
-      `DELETE FROM oauth_clients WHERE id = ... AND last_used_at <= now -
-      CLIENT_IDLE` (`clients.is_idle`), the idle condition INSIDE the
-      statement; one app per transaction, or several locked in id order;
-      nothing after the cascade but the chain. A writer of grants holds the
-      app row FOR KEY SHARE before any grant row (`clients.hold`,
-      `oauth.store`'s lock order, step 3), so the DELETE waits for it on the
-      app row; that writer's late use (`clients.touch`, step 5) does not
-      queue behind the waiting DELETE, and once it commits Postgres
-      re-checks the condition on the row as it now is, finds it false, and
-      the app survives. A revocation -- one UPDATE of families and then only
-      the chain (`grants.revoke_family`, `revoke_all_for_user`,
-      `revoke_app`) -- takes no app row (`oauth.store`'s carve-out), so the
-      DELETE may instead wait IN ITS CASCADE for that writer's family rows:
-      safe, because after its UPDATE the revocation waits only for the
-      chain, which the purge takes only after its cascade
-      (`tests/test_oauth_schema.py`);
+      `clients.purge_idle`, and Task 13's retention step for apps, which
+      must keep the same shape), which deletes a person's grant rows --
+      families, refresh tokens, codes -- by cascade from `oauth_clients`,
+      holding no person's row. Its shape, as `clients.purge_idle` builds it:
+      the idle apps' ids read first, holding nothing; then, for each, in A
+      TRANSACTION OF ITS OWN (`clients._purge_one`), `DELETE FROM
+      oauth_clients WHERE id = ... AND last_used_at <= now - CLIENT_IDLE`
+      (`clients.idle_at`, `clients.is_idle` in SQL), the idle condition
+      INSIDE the statement, waiting at most half the server's
+      `deadlock_timeout` (`clients.bound_lock_wait`: read from `pg_settings`
+      in that transaction, at most 500 ms) and giving way on a timeout or a
+      40P01; no app started after `clients.PURGE_BUDGET_S`; nothing after
+      the cascade, not even the chain (a registration is not audited).
+      `clients.resolve_client` removes a document's idle row by the same
+      step before it stores a new copy. A writer of grants holds the app row
+      FOR KEY SHARE before any grant row (`clients.hold`, `oauth.store`'s
+      lock order, step 3), so the DELETE waits for it on the app row; that
+      writer's late use (`clients.touch`, step 5) does not queue behind the
+      waiting DELETE, and once it commits Postgres re-checks the condition
+      on the row as it now is, finds it false, and the app survives. A
+      revocation -- one UPDATE of families and then only the chain
+      (`grants.revoke_family`, `revoke_all_for_user`, `revoke_app`) -- takes
+      no app row (`oauth.store`'s carve-out), so the DELETE may instead wait
+      IN ITS CASCADE for that writer's family rows. That UPDATE takes a
+      person's families in no app's order, which is why ONE APP PER
+      TRANSACTION and never several, even in id order: a purge holding one
+      app's cascade while waiting in another's would have the UPDATE wait on
+      it in turn -- a cycle. And with the person's two families on the ONE
+      app, the cascade may hold the first while waiting on the second that
+      the UPDATE took first, and the UPDATE then reach the first: a cycle
+      inside one app, which is why the purge's wait is bounded by half the
+      server's `deadlock_timeout`, whatever it is set to. Its wait began first, so
+      it gives way before either side's deadlock check runs, and the
+      person's act completes (`tests/test_oauth_schema.py`,
+      `tests/test_oauth_registration.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);

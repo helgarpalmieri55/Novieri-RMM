@@ -150,6 +150,14 @@ class Settings(BaseSettings):
     # it. A setting, never derived from the request's Host header (host-header
     # injection).
     public_console_url: str | None = None
+    # The operator's opt-in to AI apps registering themselves anonymously
+    # (deploy/README.md "AI connections (MCP)"): only the exact word `open`
+    # opens RFC 7591 registration, and only while MCP is on. A client metadata
+    # document needs no opt-in (operator decision C2, 2026-11-06). Read since
+    # own authentication phase 3 by the platform's own authorization server
+    # (`app/core/auth/oauth/policy.py::registration_open`); keycloak-init reads
+    # the same `.env` line until phase 4 retires it.
+    mcp_registration: str = ""
     # The PUBLIC half of the offline release-signing key, base64 Ed25519: the
     # `release-signing-key.pub` asset of an agent release (release-agent.yml).
     # Not a secret. The Group Policy MSI verifies the agent it wraps against it

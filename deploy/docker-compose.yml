@@ -136,7 +136,14 @@ services:
       # `/.well-known/jwks.json` (own authentication, plan 2026-11-04 Task 2):
       # the public halves of the platform's token signing key. An exact
       # `Path`, so nothing else under `/.well-known/` moves.
-      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`)
+      # The platform's own OAuth server (own authentication phase 3, plan
+      # 2026-11-06 Task 6): its three machine endpoints, by exact `Path`.
+      # `/.well-known/oauth-authorization-server` (above) is now its RFC 8414
+      # document rather than a 404 fallback. `/oauth/authorize` is NOT here: it
+      # is the console's consent page, served by `web`, because the
+      # SameSite=Strict session cookie reaches the api only from a same-origin
+      # fetch (plan D2).
+      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`) || Path(`/oauth/token`) || Path(`/oauth/register`) || Path(`/oauth/revoke`)
       traefik.http.routers.api.entrypoints: websecure
       traefik.http.routers.api.tls: "true"
       traefik.http.services.api.loadbalancer.server.port: "8000"

@@ -215,6 +215,11 @@ def test_the_unnarrowed_scope_guard_is_not_vacuous() -> None:
 # it. No route file is here: a route calls a core function that is.
 OAUTH_SESSION_USERS: dict[str, str] = {
     "app/core/auth/oauth/store.py": "defines it",
+    "app/core/auth/oauth/clients.py": (
+        "an app's row: a registration (the purge, one idle app per transaction; the ceiling "
+        "and the write in one) and a metadata document read in a consent; the "
+        "organization's MCP switch for both"
+    ),
 }
 
 
