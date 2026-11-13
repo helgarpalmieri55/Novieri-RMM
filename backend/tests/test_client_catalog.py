@@ -230,6 +230,10 @@ OAUTH_SESSION_USERS: dict[str, str] = {
     "app/core/auth/oauth/consent.py": (
         "an approval: the person's code, its audit row and its notice in one transaction"
     ),
+    "app/core/auth/oauth/connections.py": (
+        "Settings -> AI connections: the apps holding a person's live grants, and revoking one "
+        "(its grants, the revocation row and the audit event in one transaction)"
+    ),
 }
 
 

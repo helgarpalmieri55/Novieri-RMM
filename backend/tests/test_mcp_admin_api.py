@@ -5,28 +5,33 @@ What is pinned here:
 
 - `GET /api/v1/mcp/connections` lists the apps that called tools in THIS org,
   from `mcp.tool_called`, with how many people used each and when, and whether
-  a revocation newer than that use stands;
-- `POST /api/v1/mcp/connections/{client_id}/revoke` writes the revocation row
-  and its audit event FIRST, then removes the app's consent in Keycloak per
-  person, best effort -- so the gate refuses old tokens even when Keycloak is
-  down, and the response counts what Keycloak did not do;
+  a revocation newer than that use stands; then the apps holding a live grant
+  that called nothing yet (plan B3-28);
+- `POST /api/v1/mcp/connections/{app_id}/revoke` ends the app's grants -- the
+  person's, or the organization's -- and writes the revocation row and its
+  audit event in ONE transaction; no identity provider is called (own
+  authentication phase 3, plan 2026-11-06 Task 10);
+- the same revocation ends the app's unspent authorization codes first, so a
+  code approved a moment before it no longer exchanges (operator decision D2,
+  part c);
 - "everyone" needs `orgs.manage` on top of the route's `mcp.use`, and is
   refused before anything is written;
 - one organization's revocation never reaches another's users;
 - `PATCH /orgs/current` audits `mcp.settings_changed` when the switch moves.
 
-Keycloak is `httpx.MockTransport` (the `tests/test_me_locale.py` pattern): it
-proves the requests sent, not what a real Keycloak does with them.
+Keycloak is still `httpx.MockTransport`: for `kc_client.revoke_consent`'s own
+tests, which stay until phase 4, and to prove that revoking sends it nothing.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
-import anyio
 import httpx
 import httpx2
 import pytest
@@ -36,9 +41,13 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.oauth import connections, grants
+from app.core.auth.oauth.store import oauth_session
+from app.core.mcp_channel import mcp_resource
 from app.mcp import exclusions
 from app.models import AuditEvent, Organization, Permission, Role, RolePermission, User, UserRole
 from app.models.mcp import McpRevocation
+from app.models.oauth import OAuthRefreshFamily
 from app.modules.user_admin import kc_client
 from app.modules.user_admin.kc_client import (
     KeycloakAdminConfig,
@@ -49,7 +58,9 @@ from app.modules.user_admin.kc_client import (
     set_enabled,
     set_locale_attribute,
 )
-from tests.mcp_support import mcp_client, mcp_token, running_mcp
+from tests.mcp_support import mcp_app, mcp_client, mcp_token, running_mcp
+from tests.oauth_support import authorize_query, code_of, connect, decide, pkce_pair, token_request
+from tests.race_helpers import normalised, pause_at, until_blocked_by
 
 BASE = "https://itms.example.com"
 _REAL_CLIENT = httpx.AsyncClient
@@ -79,7 +90,7 @@ INITIALIZE = {
 
 ROUTES = (
     ("GET", "/api/v1/mcp/connections"),
-    ("POST", "/api/v1/mcp/connections/{client_id}/revoke"),
+    ("POST", "/api/v1/mcp/connections/{app_id}/revoke"),
 )
 
 
@@ -253,12 +264,65 @@ async def _connections(env: Any, org_id: UUID, sub: str) -> httpx.Response:
 
 
 async def _revoke(
-    env: Any, org_id: UUID, sub: str, scope: str, client_id: str = "claude"
+    env: Any, org_id: UUID, sub: str, scope: str, app: UUID | str | None = None
 ) -> httpx.Response:
+    """Revoke `app` (the org's "claude" when None: registered here if it was
+    not yet) as `sub`."""
+    target = app if app is not None else await mcp_app(env.api, org_id)
     return await env.api.client.post(
-        f"/api/v1/mcp/connections/{client_id}/revoke",
+        f"/api/v1/mcp/connections/{target}/revoke",
         headers=await env.api.headers(org_id, sub),
         json={"scope": scope},
+    )
+
+
+async def _families(env: Any, org_id: UUID) -> list[OAuthRefreshFamily]:
+    async with AsyncSession(env.api.admin_engine) as session:
+        return list(
+            (
+                await session.execute(
+                    select(OAuthRefreshFamily)
+                    .where(OAuthRefreshFamily.org_id == org_id)
+                    .order_by(OAuthRefreshFamily.created_at)
+                )
+            ).scalars()
+        )
+
+
+async def _live(env: Any, org_id: UUID, sub: str) -> int:
+    user_id = await _user_id(env, sub)
+    return sum(
+        1 for f in await _families(env, org_id) if f.user_id == user_id and f.revoked_at is None
+    )
+
+
+async def _approved(env: Any, org_id: UUID, slug: str, sub: str) -> dict[str, Any]:
+    """The person approves "claude" on the consent screen and its code is
+    exchanged (Task 8): a live grant and its refresh token, and no tool called.
+    The consent is redeemed in the deployment's organization (plan B3-09)."""
+    env.api.settings.default_org_slug = slug
+    await mcp_app(env.api, org_id)
+    return await connect(env.api, org_id, sub, client_id="claude")
+
+
+async def _pending_code(env: Any, org_id: UUID, slug: str, sub: str) -> tuple[str, str]:
+    """The person approves "claude" on the consent screen and the app has not
+    exchanged the code yet: `(code, verifier)`."""
+    env.api.settings.default_org_slug = slug
+    await mcp_app(env.api, org_id)
+    verifier, challenge = pkce_pair()
+    approved = await decide(env.api, org_id, sub, authorize_query("claude", challenge=challenge))
+    assert approved.status_code == 200, approved.text
+    return code_of(approved.json()["redirect_to"]), verifier
+
+
+async def _exchange(env: Any, code: str, verifier: str) -> httpx.Response:
+    return await token_request(
+        env.api,
+        grant_type="authorization_code",
+        code=code,
+        client_id="claude",
+        code_verifier=verifier,
     )
 
 
@@ -287,10 +351,39 @@ async def test_two_people_using_one_app_list_as_one_app_with_two_people(env: Any
     assert body["address"] == f"{BASE}/mcp"
     (app,) = body["apps"]
     assert app["client_id"] == "claude"
+    assert app["id"] == str(await mcp_app(env.api, org_id))
+    assert app["name"] == "claude"
+    assert (app["host"], app["kind"]) == ("claude.ai", "registered")
     assert app["people"] == 2
     assert app["last_used_at"] is not None
     assert app["revoked_for_me"] is False
     assert app["revoked_for_everyone"] is False
+
+
+async def test_an_app_approved_and_not_yet_used_is_listed_and_can_be_revoked(env: Any) -> None:
+    """An app approved a moment ago has called no tool: it is listed all the
+    same, with the id revoking names, and revoking it ends its grant."""
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    await _approved(env, org_id, slug, me)
+
+    (app,) = (await _connections(env, org_id, me)).json()["apps"]
+    assert app == {
+        "client_id": "claude",
+        "id": str(await mcp_app(env.api, org_id)),
+        "name": "claude",
+        "host": "claude.ai",
+        "kind": "registered",
+        "people": 0,
+        "last_used_at": None,
+        "revoked_for_me": False,
+        "revoked_for_everyone": False,
+    }
+    resp = await _revoke(env, org_id, me, "me", app=app["id"])
+
+    assert resp.json() == {"revoked": True, "grants_revoked": 1}
+    assert await _live(env, org_id, me) == 0
+    assert (await _connections(env, org_id, me)).json()["apps"] == []
 
 
 async def test_the_list_says_when_the_switch_is_off_and_there_is_no_address(env: Any) -> None:
@@ -328,17 +421,23 @@ async def test_revoke_for_me_cuts_off_my_old_token_and_not_my_colleagues(env: An
         resp = await _revoke(env, org_id, me, "me")
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"revoked": True, "keycloak_failures": 0}
+        assert resp.json() == {"revoked": True, "grants_revoked": 1}
         (row,) = await _rows(env, org_id)
         assert row.user_id == await _user_id(env, me)
         assert row.client_id == "claude"
         assert row.revoked_by == await _user_id(env, me)
-        # My consent only; the Keycloak user id is my `external_subject`.
-        assert env.kc.deleted == [(me, "claude")]
+        # No identity provider is asked anything.
+        assert env.kc.requests == []
         (event,) = await _events(env, org_id, "mcp.app_revoked")
         assert event.actor_id == await _user_id(env, me)
-        assert event.meta == {"client_id": "claude", "scope": "me"}
-        assert await _events(env, org_id, "mcp.app_revoke_incomplete") == []
+        assert event.meta == {"client_id": "claude", "scope": "me", "grants_revoked": 1}
+        # My grant ended, my colleague's stands (before the `_old_token`s
+        # below: each opens a grant of its own).
+        assert await _live(env, org_id, me) == 0
+        assert await _live(env, org_id, colleague) == 1
+        assert {f.revoked_reason for f in await _families(env, org_id) if f.revoked_at} == {
+            "revoked_in_settings"
+        }
 
         assert await _initialize(env, await _old_token(env, slug, me)) == 401
         assert await _initialize(env, await _old_token(env, slug, colleague)) == 200
@@ -349,6 +448,53 @@ async def test_revoke_for_me_cuts_off_my_old_token_and_not_my_colleagues(env: An
     assert (theirs["revoked_for_me"], theirs["revoked_for_everyone"]) == (False, False)
 
 
+async def test_a_settings_revoke_also_ends_the_refresh_token(env: Any) -> None:
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    tokens = await _approved(env, org_id, slug, me)
+
+    assert (await _revoke(env, org_id, me, "me")).status_code == 200
+
+    resp = await token_request(
+        env.api,
+        grant_type="refresh_token",
+        refresh_token=tokens["refresh_token"],
+        client_id="claude",
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
+@pytest.mark.parametrize("scope", ["me", "everyone"])
+async def test_a_code_approved_before_a_revoke_no_longer_exchanges(env: Any, scope: str) -> None:
+    """Operator decision D2, part c, for Settings: the revocation ends the
+    app's unspent codes first -- the person's for "me", everyone's in the
+    organization for "everyone" -- by their expiry, never by `used_at`. A
+    code approved a moment before it is a plain `invalid_grant` and opens
+    no grant; a colleague's survives "me" and not "everyone"."""
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    colleague = await env.api.create_user(org_id, "org-admin")
+    mine = await _pending_code(env, org_id, slug, me)
+    theirs = await _pending_code(env, org_id, slug, colleague)
+
+    resp = await _revoke(env, org_id, me, scope)
+
+    assert resp.json() == {"revoked": True, "grants_revoked": 0}
+    refused = await _exchange(env, *mine)
+    assert (refused.status_code, refused.json()["error"]) == (400, "invalid_grant")
+    assert await _live(env, org_id, me) == 0
+    other = await _exchange(env, *theirs)
+    if scope == "me":
+        assert other.status_code == 200, other.text
+        assert await _live(env, org_id, colleague) == 1
+    else:
+        assert (other.status_code, other.json()["error"]) == (400, "invalid_grant")
+        assert await _live(env, org_id, colleague) == 0
+    # Ended, not spent: never read as a reuse.
+    assert await _events(env, org_id, "mcp.code_reused") == []
+
+
 # --------------------------------------------------------------------------- #
 # 3-4. Revoke for everyone
 # --------------------------------------------------------------------------- #
@@ -357,9 +503,11 @@ async def test_revoke_for_me_cuts_off_my_old_token_and_not_my_colleagues(env: An
 async def test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing(
     env: Any,
 ) -> None:
-    org_id, _ = await _org(env)
+    org_id, slug = await _org(env)
     tech = await env.api.create_user(org_id, "technician")
     await _grant(env, org_id, tech, "mcp.use")
+    # After `_grant`: without `mcp.use` the consent gives back no code.
+    await _approved(env, org_id, slug, tech)
 
     resp = await _revoke(env, org_id, tech, "everyone")
 
@@ -367,9 +515,32 @@ async def test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing
     assert resp.json()["detail"] == "requires orgs.manage"
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
-    assert env.kc.deleted == []
+    assert env.kc.requests == []
+    assert await _live(env, org_id, tech) == 1
     # Non-vacuity: the same person may revoke for themselves.
     assert (await _revoke(env, org_id, tech, "me")).status_code == 200
+
+
+async def test_revoking_for_me_an_app_only_a_colleague_holds_shows_it_revoked_for_me(
+    env: Any,
+) -> None:
+    """An `orgs.manage` holder lists the apps everyone holds. Revoking for
+    themselves one that only a colleague holds ends nothing, and the row says
+    "revoked for you"; the colleague's grant and row stand."""
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    colleague = await env.api.create_user(org_id, "org-admin")
+    await _approved(env, org_id, slug, colleague)
+    app_id = str(await mcp_app(env.api, org_id))
+
+    resp = await _revoke(env, org_id, me, "me", app=app_id)
+
+    assert resp.json() == {"revoked": True, "grants_revoked": 0}
+    (app,) = (await _connections(env, org_id, me)).json()["apps"]
+    assert (app["id"], app["revoked_for_me"], app["revoked_for_everyone"]) == (app_id, True, False)
+    (theirs,) = (await _connections(env, org_id, colleague)).json()["apps"]
+    assert (theirs["revoked_for_me"], theirs["revoked_for_everyone"]) == (False, False)
+    assert await _live(env, org_id, colleague) == 1
 
 
 async def test_revoke_for_everyone_cuts_off_the_whole_org_and_no_other(env: Any) -> None:
@@ -379,25 +550,30 @@ async def test_revoke_for_everyone_cuts_off_the_whole_org_and_no_other(env: Any)
     other_id, other_slug = await _org(env)
     stranger = await env.api.create_user(other_id, "org-admin")
     async with running_mcp(env.api):
+        await _call_a_tool(env, slug, admin)
+        await _call_a_tool(env, slug, colleague)
+        await _call_a_tool(env, other_slug, stranger)
+
         resp = await _revoke(env, org_id, admin, "everyone")
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"revoked": True, "keycloak_failures": 0}
+        assert resp.json() == {"revoked": True, "grants_revoked": 2}
         (row,) = await _rows(env, org_id)
         assert row.user_id is None
         assert row.revoked_by == await _user_id(env, admin)
         assert await _rows(env, other_id) == []
-        # Every person of THIS org, and nobody of the other.
-        assert sorted(env.kc.deleted) == sorted([(admin, "claude"), (colleague, "claude")])
-        # One admin token and one client for the whole run, not one per person.
-        assert env.kc.token_requests == 1
-        assert env.kc.clients == 1
+        assert env.kc.requests == []
         (event,) = await _events(env, org_id, "mcp.app_revoked")
-        assert event.meta == {"client_id": "claude", "scope": "everyone"}
+        assert event.meta == {"client_id": "claude", "scope": "everyone", "grants_revoked": 2}
+        # Before the `_old_token`s below: each opens a grant of its own.
+        assert await _live(env, org_id, admin) == 0
+        assert await _live(env, org_id, colleague) == 0
+        assert await _live(env, other_id, stranger) == 1
 
         assert await _initialize(env, await _old_token(env, slug, admin)) == 401
         assert await _initialize(env, await _old_token(env, slug, colleague)) == 401
-        # Registered apps are realm-wide: the same `azp` in another org is untouched.
+        # A metadata-document client has the same `client_id` in every org: the
+        # other org's grant and token are untouched.
         assert await _initialize(env, await _old_token(env, other_slug, stranger)) == 200
 
 
@@ -412,11 +588,11 @@ async def test_a_revocation_shows_as_revoked_for_everyone(env: Any) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 5. Keycloak down, or not configured
+# 5. No identity provider, one transaction
 # --------------------------------------------------------------------------- #
 
 
-async def test_keycloak_down_still_writes_the_revocation(env: Any) -> None:
+async def test_revoking_calls_no_identity_provider(env: Any) -> None:
     org_id, slug = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
     env.kc.raise_connect = True
@@ -424,109 +600,194 @@ async def test_keycloak_down_still_writes_the_revocation(env: Any) -> None:
     resp = await _revoke(env, org_id, me, "me")
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"revoked": True, "keycloak_failures": 1}
+    assert resp.json() == {"revoked": True, "grants_revoked": 0}
+    assert env.kc.requests == []
     (row,) = await _rows(env, org_id)
     assert row.user_id == await _user_id(env, me)
-    assert len(await _events(env, org_id, "mcp.app_revoked")) == 1
-    # What Keycloak did not do is on the record too, not only in the response.
-    (incomplete,) = await _events(env, org_id, "mcp.app_revoke_incomplete")
-    assert incomplete.actor_id == await _user_id(env, me)
-    assert incomplete.meta == {"client_id": "claude", "scope": "me", "keycloak_failures": 1}
     async with running_mcp(env.api):
         assert await _initialize(env, await _old_token(env, slug, me)) == 401
 
 
-async def test_a_keycloak_refusal_counts_as_a_failure(env: Any) -> None:
-    org_id, _ = await _org(env)
-    admin = await env.api.create_user(org_id, "org-admin")
-    await env.api.create_user(org_id, "org-admin")
-    env.kc.delete_status = 403
-    resp = await _revoke(env, org_id, admin, "everyone")
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"revoked": True, "keycloak_failures": 2}
-    (incomplete,) = await _events(env, org_id, "mcp.app_revoke_incomplete")
-    assert incomplete.meta == {
-        "client_id": "claude",
-        "scope": "everyone",
-        "keycloak_failures": 2,
-    }
+@pytest.mark.parametrize("fails", ["grants", "audit"])
+async def test_a_revocation_is_written_whole_or_not_at_all(
+    env: Any, monkeypatch: pytest.MonkeyPatch, fails: str
+) -> None:
+    """The grants, the row and the event are one transaction (plan D12): if
+    ending the grants or writing the event fails, nothing is written."""
+    from app.core.audit import audit_service
+
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    async with running_mcp(env.api):
+        await _call_a_tool(env, slug, me)
+
+    async def broken(*args: Any, **kw: Any) -> Any:
+        raise OSError("database went away")
+
+    if fails == "grants":
+        monkeypatch.setattr(connections.grants, "revoke_app", broken)
+    else:
+        real_record = audit_service.record
+
+        async def flaky_record(session: Any, **kw: Any) -> Any:
+            if kw.get("action") == "mcp.app_revoked":
+                raise OSError("database went away")
+            return await real_record(session, **kw)
+
+        monkeypatch.setattr(audit_service, "record", flaky_record)
+    app_id = await mcp_app(env.api, org_id)
+    transport = httpx.ASGITransport(app=env.api.app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as http:
+        resp = await http.post(
+            f"/api/v1/mcp/connections/{app_id}/revoke",
+            headers={**await env.api.headers(org_id, me), "Origin": BASE},
+            json={"scope": "me"},
+        )
+
+    assert resp.status_code == 500
+    assert await _rows(env, org_id) == []
+    assert await _events(env, org_id, "mcp.app_revoked") == []
+    assert await _live(env, org_id, me) == 1
 
 
-async def test_without_a_provisioning_client_every_person_is_a_failure(
+async def test_revoking_needs_no_provisioning_client(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No provisioning client means no consent was removed, so the app's
-    refresh token can still mint access tokens: that is a failure to report,
-    not a quiet success."""
     monkeypatch.setattr(
         KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: None)
     )
-    org_id, _ = await _org(env)
+    org_id, slug = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
+    async with running_mcp(env.api):
+        await _call_a_tool(env, slug, me)
     resp = await _revoke(env, org_id, me, "me")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"revoked": True, "keycloak_failures": 1}
+    assert resp.json() == {"revoked": True, "grants_revoked": 1}
     assert len(await _rows(env, org_id)) == 1
-    assert env.kc.deleted == []
+    assert env.kc.requests == []
 
 
-async def test_consent_removal_is_bounded_in_concurrency_and_time(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_revoking_for_a_large_organization_ends_every_grant_in_the_request(
+    env: Any,
 ) -> None:
-    """A large organization never has more than `KEYCLOAK_CONCURRENCY` calls in
-    flight, and a wedged Keycloak costs the request the budget, not one
-    timeout per person. Everyone not reached inside it is a failure."""
-    from app.mcp import api as mcp_api
-
-    in_flight = 0
-    peak = 0
-    reached: list[str] = []
-
-    async def slow_revoke(
-        config: Any, *, user_id: str, client_id: str, connection: Any = None
-    ) -> None:
-        nonlocal in_flight, peak
-        in_flight += 1
-        peak = max(peak, in_flight)
-        try:
-            if user_id.startswith("fast"):
-                reached.append(user_id)
-                return
-            await anyio.sleep(60)
-        finally:
-            in_flight -= 1
-
-    class OneConnection:
-        opened = 0
-
-        def __init__(self, config: Any) -> None:
-            pass
-
-        async def __aenter__(self) -> "OneConnection":
-            OneConnection.opened += 1
-            return self
-
-        async def __aexit__(self, *exc: object) -> None:
-            return None
-
-    monkeypatch.setattr(mcp_api, "revoke_consent", slow_revoke)
-    monkeypatch.setattr(mcp_api, "KeycloakAdminConnection", OneConnection)
-    monkeypatch.setattr(mcp_api, "KEYCLOAK_BUDGET_SECONDS", 0.2)
-    monkeypatch.setattr(
-        KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: CONFIG)
-    )
-    subjects = [f"fast-{i}" for i in range(10)] + [f"slow-{i}" for i in range(40)]
+    """Forty people with a grant each: one revocation ends all forty, inside
+    the request, with no call per person to anyone."""
+    org_id, _ = await _org(env)
+    admin = await env.api.create_user(org_id, "org-admin")
+    app_id = await mcp_app(env.api, org_id)
+    resource = mcp_resource(env.api.settings)
+    assert resource is not None
+    subs = [await env.api.create_user(org_id, "technician") for _ in range(40)]
+    people = [await _user_id(env, sub) for sub in subs]
+    async with oauth_session(org_id, env.api.app_engine) as session:
+        for user_id in people:
+            await grants.open_family(
+                session,
+                org_id=org_id,
+                user_id=user_id,
+                oauth_client_id=app_id,
+                resource=resource,
+                now=datetime.now(UTC),
+            )
 
     started = time.monotonic()
-    failures = await mcp_api.remove_consents(
-        SimpleNamespace(), org_id=uuid4(), subjects=subjects, client_id="claude"
-    )
+    resp = await _revoke(env, org_id, admin, "everyone")
 
     assert time.monotonic() - started < 5
-    assert peak == mcp_api.KEYCLOAK_CONCURRENCY
-    assert len(reached) == 10
-    assert failures == 40
-    assert OneConnection.opened == 1
+    assert resp.json() == {"revoked": True, "grants_revoked": 40}
+    assert all(f.revoked_at is not None for f in await _families(env, org_id))
+    assert env.kc.requests == []
+
+
+async def test_a_grant_past_its_idle_limit_is_neither_ended_nor_counted(env: Any) -> None:
+    """Dead already: a revocation leaves it as it is, and `grants_revoked`
+    counts the grants it ended, not those that had."""
+    org_id, slug = await _org(env)
+    admin = await env.api.create_user(org_id, "org-admin")
+    await _approved(env, org_id, slug, admin)
+    resource = mcp_resource(env.api.settings)
+    assert resource is not None
+    app_id = await mcp_app(env.api, org_id)
+    async with oauth_session(org_id, env.api.app_engine) as session:
+        await grants.open_family(
+            session,
+            org_id=org_id,
+            user_id=await _user_id(env, admin),
+            oauth_client_id=app_id,
+            resource=resource,
+            now=datetime.now(UTC) - timedelta(days=31),
+        )
+
+    resp = await _revoke(env, org_id, admin, "everyone")
+
+    assert resp.json() == {"revoked": True, "grants_revoked": 1}
+    expired, live = sorted(await _families(env, org_id), key=lambda f: f.expires_at)
+    assert (expired.revoked_at, expired.revoked_reason) == (None, None)
+    assert live.revoked_reason == "revoked_in_settings"
+
+
+async def test_an_exchange_in_flight_during_a_revoke_leaves_no_live_grant(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The coordinator's notes on `revoke_app_access`: the codes first, then
+    the families in SEPARATE statements. A colleague's app is exchanging its
+    code -- held where it opens the grant, the code locked FOR UPDATE --
+    when an administrator revokes the app for everyone. The codes' lock
+    waits for the exchange, which commits its grant; the families' lock
+    begins after that commit, reads the new grant and ends it. One statement
+    for both, or the families first, would have read the grant table before
+    the exchange committed and left its grant live -- and the tokens the
+    exchange returned with it."""
+    org_id, slug = await _org(env)
+    admin = await env.api.create_user(org_id, "org-admin")
+    colleague = await env.api.create_user(org_id, "org-admin")
+    code, verifier = await _pending_code(env, org_id, slug, colleague)
+    # Both read before the exchange holds the colleague's row and code.
+    headers = await env.api.headers(org_id, admin)
+    app_id = await mcp_app(env.api, org_id)
+    paused, go, seen = pause_at(monkeypatch, grants, "open_family")
+    exchanging = asyncio.create_task(_exchange(env, code, verifier))
+    await asyncio.wait_for(paused.wait(), 30)
+    revoking = asyncio.create_task(
+        env.api.client.post(
+            f"/api/v1/mcp/connections/{app_id}/revoke",
+            headers=headers,
+            json={"scope": "everyone"},
+        )
+    )
+    try:
+        waiting = await until_blocked_by(env.api.app_engine, seen["pid"])
+        held = not revoking.done()
+    finally:
+        go.set()
+    exchanged, revoked = await asyncio.wait_for(
+        asyncio.gather(exchanging, revoking, return_exceptions=True), timeout=60
+    )
+
+    assert held
+    # The revoke waits on the code, in its lock of the app's codes in id
+    # order (Task 10 review, Important 2), before any UPDATE.
+    assert len(waiting) == 1, waiting
+    assert "FROM OAUTH_CODES" in normalised(waiting[0]), waiting
+    assert "FOR NO KEY UPDATE" in normalised(waiting[0]), waiting
+    assert not isinstance(exchanged, BaseException), exchanged
+    assert exchanged.status_code == 200, exchanged.text
+    assert not isinstance(revoked, BaseException), revoked
+    assert revoked.json() == {"revoked": True, "grants_revoked": 1}
+    assert await _live(env, org_id, colleague) == 0
+    # What the in-flight exchange handed the app is worth nothing: its access
+    # token is refused at the door, and its refresh token mints nothing
+    # (Task 10 review, Minor 4).
+    tokens = exchanged.json()
+    async with running_mcp(env.api):
+        assert await _initialize(env, tokens["access_token"]) == 401
+    refreshed = await token_request(
+        env.api,
+        grant_type="refresh_token",
+        refresh_token=tokens["refresh_token"],
+        client_id="claude",
+    )
+    assert (refreshed.status_code, refreshed.json()["error"]) == (400, "invalid_grant")
 
 
 # --------------------------------------------------------------------------- #
@@ -535,14 +796,13 @@ async def test_consent_removal_is_bounded_in_concurrency_and_time(
 
 
 @pytest.mark.parametrize("dots", ["%2E%2E", "%2e%2e", ".%2E", "%2E.", "%2E", "..x", ".hidden"])
-async def test_a_dot_segment_client_id_is_422_and_reaches_nothing(env: Any, dots: str) -> None:
-    """THE CRITICAL ONE. `..` survives `quote(..., safe="")` and httpx resolves
-    `.../users/{sub}/consents/..` to `.../users/{sub}` -- a DELETE of the
-    person's whole Keycloak identity, for everyone in the org under
-    scope "everyone". Refused at the route, before anything is written."""
+async def test_a_dot_segment_is_no_app_id_and_reaches_nothing(env: Any, dots: str) -> None:
+    """A path segment that is not one UUID names no app: 422 before anything is
+    read or written. Until own authentication phase 3 a dot segment here
+    reached Keycloak's URL and deleted identities."""
     org_id, _ = await _org(env)
     admin = await env.api.create_user(org_id, "org-admin")
-    resp = await _revoke(env, org_id, admin, "everyone", client_id=dots)
+    resp = await _revoke(env, org_id, admin, "everyone", app=dots)
     assert resp.status_code == 422, resp.text
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
@@ -554,7 +814,7 @@ async def test_a_bare_dot_reaches_nothing(env: Any) -> None:
     names no route; nothing is written either way."""
     org_id, _ = await _org(env)
     admin = await env.api.create_user(org_id, "org-admin")
-    resp = await _revoke(env, org_id, admin, "everyone", client_id=".")
+    resp = await _revoke(env, org_id, admin, "everyone", app=".")
     assert resp.status_code in (404, 405, 422), resp.text
     assert await _rows(env, org_id) == []
     assert env.kc.requests == []
@@ -575,92 +835,68 @@ async def test_a_bare_dot_reaches_nothing(env: Any) -> None:
         "broker",
     ],
 )
-async def test_the_platforms_own_clients_cannot_be_revoked(
+async def test_the_platforms_own_clients_cannot_even_be_named(
     env: Any, first_party: str
 ) -> None:
-    """Revoking the console's own client for everyone would sign the whole
-    organization out of the console; it is not an AI app."""
+    """They have no registration in `oauth_clients`, and a name is no app id:
+    422, nothing written, nothing sent."""
     org_id, _ = await _org(env)
     admin = await env.api.create_user(org_id, "org-admin")
-    resp = await _revoke(env, org_id, admin, "everyone", client_id=first_party)
+    resp = await _revoke(env, org_id, admin, "everyone", app=first_party)
     assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"] == (
-        f"{first_party} is part of the platform, not an AI app, and cannot be revoked"
-    )
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
     assert env.kc.requests == []
 
 
-async def test_the_first_party_refusal_is_in_the_persons_language(env: Any) -> None:
+async def test_an_unknown_app_is_404_in_the_persons_language(env: Any) -> None:
     org_id, _ = await _org(env)
     admin = await env.api.create_user(org_id, "org-admin")
     resp = await env.api.client.post(
-        "/api/v1/mcp/connections/it-suite-web/revoke",
+        f"/api/v1/mcp/connections/{uuid4()}/revoke",
         headers={**await env.api.headers(org_id, admin), "Accept-Language": "es"},
         json={"scope": "me"},
     )
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"] == (
-        "it-suite-web forma parte de la plataforma, no es una aplicación de IA, y no se "
-        "puede revocar"
-    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "no existe esa aplicación de IA en esta organización"
+    assert await _rows(env, org_id) == []
 
 
-async def test_a_failed_incomplete_audit_never_fails_a_committed_revoke(
-    env: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The revocation row and `mcp.app_revoked` are committed before Keycloak
-    is called. If recording what Keycloak did not do then fails, the person
-    is still told the truth -- revoked, with the failure count -- not a 500
-    that reads as "nothing happened"."""
-    from app.core.audit import audit_service
-
-    real_record = audit_service.record
-
-    async def flaky_record(session: Any, **kw: Any) -> Any:
-        if kw.get("action") == "mcp.app_revoke_incomplete":
-            raise OSError("database went away")
-        return await real_record(session, **kw)
-
-    monkeypatch.setattr(audit_service, "record", flaky_record)
+async def test_another_organizations_app_is_404_and_writes_nothing(env: Any) -> None:
     org_id, _ = await _org(env)
-    me = await env.api.create_user(org_id, "org-admin")
-    env.kc.raise_connect = True
+    admin = await env.api.create_user(org_id, "org-admin")
+    other_id, other_slug = await _org(env)
+    stranger = await env.api.create_user(other_id, "org-admin")
+    async with running_mcp(env.api):
+        await _call_a_tool(env, other_slug, stranger)
+    theirs = await mcp_app(env.api, other_id)
 
-    resp = await _revoke(env, org_id, me, "me")
+    resp = await _revoke(env, org_id, admin, "everyone", app=theirs)
 
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"revoked": True, "keycloak_failures": 1}
-    assert len(await _rows(env, org_id)) == 1
-    assert len(await _events(env, org_id, "mcp.app_revoked")) == 1
-    assert await _events(env, org_id, "mcp.app_revoke_incomplete") == []
-    (warning,) = [
-        r for r in caplog.records if r.getMessage().startswith("could not record that")
-    ]
-    assert warning.client_id == "claude"  # type: ignore[attr-defined]
-    assert warning.org_id == org_id  # type: ignore[attr-defined]
+    assert resp.status_code == 404, resp.text
+    assert await _rows(env, org_id) == [] and await _rows(env, other_id) == []
+    assert await _live(env, other_id, stranger) == 1
 
 
 @pytest.mark.parametrize("bad", ["has space", "a+b", "a@b", "x" * 256, "ü"])
-async def test_a_malformed_client_id_is_422_and_writes_nothing(env: Any, bad: str) -> None:
+async def test_a_malformed_app_id_is_422_and_writes_nothing(env: Any, bad: str) -> None:
     org_id, _ = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
-    resp = await _revoke(env, org_id, me, "me", client_id=bad)
+    resp = await _revoke(env, org_id, me, "me", app=bad)
     assert resp.status_code == 422, resp.text
     assert await _rows(env, org_id) == []
-    assert env.kc.deleted == []
+    assert env.kc.requests == []
 
 
-async def test_a_client_id_cannot_add_a_path_segment(env: Any) -> None:
+async def test_an_app_id_cannot_add_a_path_segment(env: Any) -> None:
     """An encoded slash is decoded by the router before matching, so it names
     no route at all; either way nothing is written and Keycloak is not asked."""
     org_id, _ = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
-    resp = await _revoke(env, org_id, me, "me", client_id="a%2F..%2Fb")
+    resp = await _revoke(env, org_id, me, "me", app="a%2F..%2Fb")
     assert resp.status_code in (404, 422), resp.text
     assert await _rows(env, org_id) == []
-    assert env.kc.deleted == []
+    assert env.kc.requests == []
 
 
 @pytest.mark.parametrize("body", [{"scope": "all"}, {}, {"scope": "me", "user_id": "x"}])
@@ -668,7 +904,7 @@ async def test_a_malformed_body_is_422(env: Any, body: dict[str, Any]) -> None:
     org_id, _ = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
     resp = await env.api.client.post(
-        "/api/v1/mcp/connections/claude/revoke",
+        f"/api/v1/mcp/connections/{await mcp_app(env.api, org_id)}/revoke",
         headers=await env.api.headers(org_id, me),
         json=body,
     )

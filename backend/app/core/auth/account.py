@@ -50,6 +50,7 @@ from app.core.auth.guards import (
 )
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.methods import has_password, has_sign_in_method
+from app.core.auth.oauth import grants as ai_grants
 from app.core.auth.passwords import verify_password
 from app.core.auth.recovery import replace_codes
 from app.core.auth.refusals import AuthRefusal
@@ -170,7 +171,9 @@ def _vault(request: Request) -> VaultService:
     return vault
 
 
-async def _record(session: AsyncSession, user: User, action: str, meta: dict[str, str]) -> None:
+async def _record(
+    session: AsyncSession, user: User, action: str, meta: dict[str, str | int]
+) -> None:
     """The one audit wrapper of this file (plan decision 12)."""
     await audit_service.record(
         session,
@@ -389,6 +392,7 @@ async def change_password(
                 )
                 await _detach_from_device(session, principal, now=now)
                 await revoke_all_for_user(session, user.id)
+                ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "password_changed")
                 try:
                     token = await rotate(session, principal.session_id)
                 except LookupError as exc:
@@ -400,7 +404,12 @@ async def change_password(
                         )
                     )
                 ).scalar_one()
-                await _record(session, user, "auth.password_changed", {"via": "self"})
+                await _record(
+                    session,
+                    user,
+                    "auth.password_changed",
+                    {"via": "self", "ai_grants_revoked": ai_ended},
+                )
                 await notices.tell(
                     session, user, "password_changed", vault=_vault(request), actor_id=user.id
                 )
@@ -546,7 +555,7 @@ async def remove_totp(
         if user.kind != CONTACT_KIND and not has_passkey:
             raise _last_factor()
         await drop_totp(session, user.id)
-        meta = {"factor": "totp"}
+        meta: dict[str, str | int] = {"factor": "totp"}
         if user.kind == CONTACT_KIND:
             await session.execute(
                 delete(AuthRecoveryCode).where(AuthRecoveryCode.user_id == user.id)

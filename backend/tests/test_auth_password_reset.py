@@ -113,7 +113,7 @@ async def test_the_link_resets_once_ends_the_sessions_and_still_asks_for_the_fac
             ).scalars()
         )
     assert live == []
-    assert [e.meta for e in changed] == [{"via": "reset"}]
+    assert [e.meta for e in changed] == [{"via": "reset", "ai_grants_revoked": 0}]
     who.session, who.password = None, "Pelican-Orbit-Lantern-58"
     assert (await login(auth_env, who)).json()["state"] == "factor_required"
 

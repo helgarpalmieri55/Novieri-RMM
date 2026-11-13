@@ -5243,9 +5243,8 @@ CATALOG: dict[str, str] = {
         "activa en Configuración → Conexiones de IA."
     ),
     # MCP console admin API (app/mcp/api.py)
-    "{client_id} is part of the platform, not an AI app, and cannot be revoked": (
-        "{client_id} forma parte de la plataforma, no es una aplicación de IA, y no se "
-        "puede revocar"
+    "there is no such AI app in this organization": (
+        "no existe esa aplicación de IA en esta organización"
     ),
     "this AI app's access was revoked; connect it again to continue": (
         "se revocó el acceso de esta aplicación de IA; vuelve a conectarla para continuar"

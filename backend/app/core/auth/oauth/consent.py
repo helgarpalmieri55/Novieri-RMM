@@ -283,7 +283,6 @@ async def decide(request: Request, ctx: AuthContext, *, query: str, approve: boo
                 redirect_uri=checked.redirect_uri,
                 code_challenge=checked.code_challenge,
                 resource=checked.resource,
-                now=now,
             )
             # 4. The use, flushed: the chain's statement does not autoflush.
             touch(client, now)

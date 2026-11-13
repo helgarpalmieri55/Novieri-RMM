@@ -23,7 +23,7 @@ What is pinned here:
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -32,6 +32,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import deps
 from app.core.auth import keys
 from app.core.auth.oauth import grants
 from app.core.auth.oauth.access import verify_access_token
@@ -253,6 +254,41 @@ async def test_an_expired_grant_stops_the_next_call(mcp_env) -> None:
             )
         ).scalar_one()
     assert revoked_at is None  # nobody revoked it: it expired
+
+
+class _ApiClockBehind(datetime):
+    """`datetime`, whose `now` is the API host's clock running a minute
+    behind the database's."""
+
+    @classmethod
+    def now(cls, tz: Any = None) -> "_ApiClockBehind":
+        real = datetime.now(tz) - timedelta(minutes=1)
+        return cls.fromtimestamp(real.timestamp(), tz)
+
+
+async def test_the_door_reads_a_grants_idle_limit_on_the_databases_clock(
+    mcp_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 10 review, Minor 3: ONE CLOCK. Every grant time is the
+    database's -- a refresh writes `expires_at` from the clock it reads after
+    its locks -- so the door compares with the database's clock too. The API
+    host's runs a minute behind: a grant whose idle limit passed a moment ago
+    would still have had a minute to live on it, and every call in that
+    minute was admitted."""
+    _, slug, sub = await _admin(mcp_env)
+    token = await mcp_token(mcp_env, slug, sub)
+    family_id = UUID(mcp_claims(token)["fam"])
+    async with AsyncSession(mcp_env.admin_engine) as session:
+        await session.execute(
+            text("UPDATE oauth_refresh_families SET expires_at = now() WHERE id = :id"),
+            {"id": family_id},
+        )
+        await session.commit()
+    monkeypatch.setattr(deps, "datetime", _ApiClockBehind)
+    async with running_mcp(mcp_env):
+        after = await _initialize(mcp_env, token)
+    assert after.status_code == 401, after.text
+    assert after.json()["detail"] == REVOKED_EN
 
 
 async def test_another_apps_or_another_persons_grant_admits_nobody(mcp_env) -> None:

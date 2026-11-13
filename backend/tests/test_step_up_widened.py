@@ -48,6 +48,7 @@ from tests.entra_support import APP, TENANT
 from tests.mcp_support import (
     MCP_BASE,
     marked_client,
+    mcp_app,
     mcp_org,
     mcp_session,
     mcp_token,
@@ -649,7 +650,9 @@ async def _connected_ai_app(env: Any, org: UUID, sub: str, admin: dict[str, str]
     """An AI app `sub` really connected: AI access switched on with the
     administrator's fresh headers and one tool called over MCP as `claude`,
     so `GET /mcp/connections` lists it. The console becomes the MCP
-    resource's (`MCP_BASE`), as `mcp_env` does."""
+    resource's (`MCP_BASE`), as `mcp_env` does. Returned by its registration's
+    id, which revoking names since own authentication phase 3 (plan
+    2026-11-06, Task 10, D12): a client id can be a URL."""
     env.settings.public_console_url = MCP_BASE
     on = await env.client.patch(
         "/api/v1/orgs/current", headers=admin, json={"settings": {"mcp_enabled": True}}
@@ -659,7 +662,7 @@ async def _connected_ai_app(env: Any, org: UUID, sub: str, admin: dict[str, str]
     async with running_mcp(env), mcp_session(env, token) as session:
         called = await session.call_tool("me_get", {})
     assert called.is_error is False, called
-    return "claude"
+    return str(await mcp_app(env, org))
 
 
 async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
@@ -741,7 +744,11 @@ async def test_the_acts_left_without_a_confirmation_need_none(env: Any) -> None:
     listed = await client.get("/api/v1/mcp/connections", headers=await env.headers(org, sub))
     assert listed.status_code == 200, listed.text
     [connection] = listed.json()["apps"]
-    assert (connection["client_id"], connection["revoked_for_me"]) == (ai_app, True)
+    assert (connection["id"], connection["client_id"], connection["revoked_for_me"]) == (
+        ai_app,
+        "claude",
+        True,
+    )
     # Nothing saved to send through: past the gate, refused by the route.
     assert answers["send the test mail"].status_code == 409
     assert answers["rename a role"].status_code == 200

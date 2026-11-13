@@ -1040,7 +1040,9 @@ async def test_signing_out_ends_this_session_and_everywhere_ends_them_all(
         ).scalars().all()
     assert still == []
     ended = await _audit(auth_env, org, "auth.sessions_ended")
-    assert [e.meta for e in ended] == [{"by": "self", "scope": "everywhere"}]
+    assert [e.meta for e in ended] == [
+        {"by": "self", "scope": "everywhere", "ai_grants_revoked": 0}
+    ]
 
 
 async def test_signing_out_of_an_idle_session_ends_it(auth_env: Any) -> None:

@@ -49,8 +49,9 @@ ONE IDLE APP PER TRANSACTION, by `DELETE ... WHERE id = :id AND last_used_at
 inside the statement, so a use that commits while the DELETE waits on the
 app's hold spares the app. One app per transaction, because the purge's
 cascade takes a person's families, and a revocation across a person's apps
-(one UPDATE, Task 7's `grants.revoke_all_for_user`) locks those in no app's
-order: a purge holding one app's cascade while waiting in another's could
+(Task 7's `grants.revoke_all_for_user`; since Task 10 their live codes'
+expiry, then their live families, each locked in id order) locks those in
+no app's order: a purge holding one app's cascade while waiting in another's could
 meet it in a cycle. That revocation can close one within a single app too,
 when the person holds two of its grants, so each app's DELETE waits at most
 half the server's `deadlock_timeout` (`purge_lock_wait_ms`, read from the
@@ -415,8 +416,9 @@ async def _purge_one(
     that holds the app (`hold`) -- whose use, if it commits first, spares the
     app -- and in its cascade on a revocation that took one of the app's
     families first (`store`'s carve-out). With one person's two families on
-    the app, that revocation's one UPDATE may take the second and then reach
-    the first, which the cascade already holds: a cycle. So the DELETE waits
+    the app, that revocation (in id order, the cascade in its own) may take
+    the second and then reach the first, which the cascade already holds: a
+    cycle. So the DELETE waits
     at most half the server's `deadlock_timeout` (`bound_lock_wait`, read
     from the running server, not assumed). In that cycle its wait began
     first, so it times out before either side's deadlock check runs; the

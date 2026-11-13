@@ -322,7 +322,6 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             family_id=grant.family_id,
             user_id=user.id,
             client_id=grant.client_id,
-            now=datetime.now(UTC),
         ):
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
