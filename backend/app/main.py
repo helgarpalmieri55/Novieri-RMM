@@ -313,6 +313,12 @@ def create_app(
 
     app.add_exception_handler(AuthRefusal, auth_refusal_handler)
 
+    # The OAuth server's RFC 6749 error bodies (plan 2026-11-06, Task 1): the
+    # token, registration and revocation routes raise `OAuthError`.
+    from app.core.auth.oauth.errors import OAuthError, oauth_error_handler
+
+    app.add_exception_handler(OAuthError, oauth_error_handler)
+
     # OpenBao down (own authentication Task 2's `AuthKeysUnavailable`): one
     # 503 wherever a password is hashed or verified (plan decision 13).
     from app.core.auth.guards import keys_unavailable_handler
