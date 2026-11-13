@@ -91,9 +91,27 @@ async def test_a_document_is_read_through_the_pinned_address(monkeypatch) -> Non
     assert request.url.host == PUBLIC  # pinned: the validated answer is the one dialled
     assert request.url.path == "/oauth/metadata.json"
     assert request.headers["host"] == "client.example"
+    # The TLS name is the host's, not the pinned address's: the certificate is
+    # checked against the name the URL gave (fix round 1d).
+    assert request.extensions["sni_hostname"] == "client.example"
     assert request.headers["accept"] == "application/json"
     # What is measured is what is sent: nothing compressed (Task 3, decision 4).
     assert request.headers["accept-encoding"] == "identity"
+
+
+async def test_an_ipv6_literal_host_is_bracketed_in_host_and_bare_in_tls(monkeypatch) -> None:
+    """RFC 9110 §7.2's `Host = uri-host [ ":" port ]` is RFC 3986's host, where
+    an IPv6 address is "distinguished by enclosing the IP literal within square
+    brackets". The TLS name stays bare: `ssl` then checks the address against
+    the certificate and sends no SNI (RFC 6066 §3: "Literal IPv4 and IPv6
+    addresses are not permitted in "HostName"."), while a bracketed one would
+    go out as a name (fix round 1d)."""
+    address = "2606:2800:220:1::1"
+    seen = _serve(monkeypatch, lambda r: _streamed(200, b"{}"), resolved=[address])
+    await get_bounded(f"https://[{address}]/m.json", max_bytes=10)
+    (request,) = seen
+    assert request.headers["host"] == f"[{address}]"
+    assert request.extensions["sni_hostname"] == address
 
 
 async def test_a_body_over_the_cap_is_cut_and_says_so(monkeypatch) -> None:

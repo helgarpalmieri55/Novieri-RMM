@@ -809,7 +809,14 @@ async def get_bounded(
                 "refused: resolves to one of the platform's own hosts")
         pinned_netloc = f"[{pinned}]" if ":" in pinned else pinned
         pinned_url = parts._replace(netloc=f"{pinned_netloc}:{port}").geturl()
-        request_headers = {**(headers or {}), "Host": host, "Accept-Encoding": "identity"}
+        # `Host` is RFC 9110 §7.2's `uri-host [ ":" port ]`, RFC 3986's host, in
+        # which an IPv6 address is "distinguished by enclosing the IP literal
+        # within square brackets". The TLS name stays bare: `ssl` then checks
+        # the address against the certificate and sends no SNI (RFC 6066 §3:
+        # "Literal IPv4 and IPv6 addresses are not permitted in "HostName"."),
+        # whereas a bracketed one would go out as a name (Task 3 fix round 1d).
+        host_header = f"[{host}]" if ":" in host else host
+        request_headers = {**(headers or {}), "Host": host_header, "Accept-Encoding": "identity"}
         async with httpx.AsyncClient(
             transport=_build_transport(pinned), timeout=timeout, follow_redirects=False
         ) as client:

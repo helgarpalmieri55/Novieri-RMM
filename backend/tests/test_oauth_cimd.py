@@ -317,20 +317,34 @@ async def test_a_client_id_that_names_no_document_is_never_fetched(
     assert asked == []
 
 
+@pytest.mark.parametrize(
+    ("client_id", "reason", "host"),
+    [
+        (URL, "secret", "claude.example"),
+        # The host is the one the consent screen would name
+        # (`redirects.host_of`), never another reading of the URL: not the
+        # `v1.claude.ai` that `urlsplit` unbrackets, nor a backslash or `%2e`
+        # spelling that names one host to a browser and another to `urlsplit`
+        # (fix round 1d).
+        ("https://[v1.claude.ai]/x", "not_a_document_url", ""),
+        ("https://evil.com\\.claude.ai/x", "not_a_document_url", ""),
+        ("https://claude.ai%2eevil.com/x", "not_a_document_url", ""),
+    ],
+)
 async def test_a_refusal_is_logged_with_the_reason_and_the_host_only(
-    monkeypatch, caplog: pytest.LogCaptureFixture
+    monkeypatch, caplog: pytest.LogCaptureFixture, client_id: str, reason: str, host: str
 ) -> None:
     _answer(monkeypatch, {**GOOD, "client_secret": "s3cret"})
     with caplog.at_level(logging.WARNING, logger="its.auth.oauth.cimd"):
         with pytest.raises(cimd.DocumentRefused):
-            await cimd.fetch_document(URL)
+            await cimd.fetch_document(client_id)
     (record,) = [r for r in caplog.records if r.name == "its.auth.oauth.cimd"]
     assert record.getMessage() == "client metadata document refused"
-    assert record.__dict__["reason"] == "secret"
-    assert record.__dict__["host"] == "claude.example"
+    assert record.__dict__["reason"] == reason
+    assert record.__dict__["host"] == host
     assert record.__dict__["unlogged"] == 0
     assert "s3cret" not in caplog.text
-    assert URL not in caplog.text
+    assert client_id not in caplog.text
 
 
 async def test_refusals_are_logged_at_most_once_a_minute_with_a_count(

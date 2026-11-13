@@ -55,9 +55,10 @@ SHOULD NOT by itself invalidate a Client"): `unavailable` -- a timeout, a
 network error, a 5xx or a 429 -- is `transient`, and the caller keeps a valid
 copy it already has. Everything else is for good.
 
-A REFUSAL IS ONE LOG LINE, the reason and the host -- never the URL's path,
-never the body -- at most one a minute per process, saying how many were held
-(`loopback.RefusalThrottle`, the C-M8 precedent; plan B3-32).
+A REFUSAL IS ONE LOG LINE, the reason and the host -- `redirects.host_of`'s,
+the one the consent screen would name, or "" (fix round 1d) -- never the
+URL's path, never the body -- at most one a minute per process, saying how
+many were held (`loopback.RefusalThrottle`, the C-M8 precedent; plan B3-32).
 """
 
 import json
@@ -294,12 +295,10 @@ async def fetch_document(client_id: str) -> ClientDocument:
     except DocumentRefused as refused:
         unlogged = _refusals.admit()
         if unlogged is not None:
-            try:
-                host = urlsplit(client_id).hostname or ""
-            except ValueError:
-                host = ""
+            # The host the consent screen would name, or "": never another
+            # reading of a URL that was refused (fix round 1d).
             logger.warning(
                 "client metadata document refused",
-                extra={"reason": refused.reason, "host": host, "unlogged": unlogged},
+                extra={"reason": refused.reason, "host": host_of(client_id), "unlogged": unlogged},
             )
         raise
