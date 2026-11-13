@@ -20,10 +20,10 @@ new, live grant: the exchange waits on the person's row and then simply runs.
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import action_tokens, flows
@@ -41,7 +41,8 @@ from tests.oauth_support import (
     pkce_pair,
     token_request,
 )
-from tests.race_helpers import normalised, pause_at, until_blocked_by
+from tests.race_helpers import backend_pid, normalised, pause_at, until_blocked_by
+from tests.session_support import user_id_of
 
 NEW_PASSWORD = "Pelican-Orbit-Lantern-58"
 
@@ -565,3 +566,229 @@ async def test_a_code_approved_on_a_clock_ahead_of_the_databases_is_ended_all_th
             )
         ).all()
     assert live == []
+
+
+# --------------------------------------------------------------------------- #
+# The lock order (Task 10 review, Important 2)
+# --------------------------------------------------------------------------- #
+
+
+def _grant_row(
+    table: str, row_id: UUID, org_id: UUID, user_id: UUID, app_id: UUID, resource: str
+) -> OAuthCode | OAuthRefreshFamily:
+    """A live code or a live family of the person's for the app, by `row_id`."""
+    now = datetime.now(UTC)
+    if table == "codes":
+        return OAuthCode(
+            id=row_id,
+            org_id=org_id,
+            user_id=user_id,
+            oauth_client_id=app_id,
+            code_hash=grants.hash_secret(grants.new_secret()),
+            redirect_uri=CLAUDE_CALLBACK,
+            code_challenge=pkce_pair()[1],
+            resource=resource,
+            expires_at=func.now() + timedelta(seconds=60),
+        )
+    return OAuthRefreshFamily(
+        id=row_id,
+        org_id=org_id,
+        user_id=user_id,
+        oauth_client_id=app_id,
+        resource=resource,
+        created_at=now,
+        last_used_at=now,
+        expires_at=now + timedelta(days=30),
+    )
+
+
+@pytest.mark.parametrize("table", ["codes", "families"])
+@pytest.mark.parametrize("by", ["person", "app"])
+async def test_a_revocation_locks_its_rows_in_id_order(
+    lifecycle_env: Any, table: str, by: str
+) -> None:
+    """Two live rows of one person for one app -- two codes, or two grants
+    after a reconnect -- stored in the REVERSE of their id order. Another
+    transaction holds the lower id. An account act (`revoke_all_for_user`)
+    or a Settings revocation (`revoke_app`) then waits on that row WITHOUT
+    having taken the higher one: it locks its rows in id order, whatever
+    order its plan reads them in, so two revocations sharing rows (an act on
+    the person and a revoke of the app) take them in the same order and
+    cannot deadlock. A plain UPDATE took them as its scan met them -- here
+    the higher id first, then waited on the lower: the other order, which
+    against a statement in id order is a 40P01."""
+    env = lifecycle_env
+    org = await env.create_org("grant-order")
+    user_id = await user_id_of(env, await env.create_user(org, "technician"))
+    app_id = await mcp_app(env, org)
+    resource = mcp_resource(env.settings)
+    assert resource is not None
+    model: Any = OAuthCode if table == "codes" else OAuthRefreshFamily
+    low, high = sorted([uuid4(), uuid4()])
+    async with oauth_session(org, env.app_engine) as session:
+        for row_id in (high, low):
+            session.add(_grant_row(table, row_id, org, user_id, app_id, resource))
+            await session.flush()
+    async with AsyncSession(env.admin_engine) as session:
+        stored = (
+            await session.execute(
+                select(model.id).where(model.id.in_([low, high])).order_by(text("ctid"))
+            )
+        ).scalars()
+        assert list(stored) == [high, low]  # the scan's order is not the ids'
+
+    async def revoke() -> int:
+        async with oauth_session(org, env.app_engine) as session:
+            if by == "person":
+                return await grants.revoke_all_for_user(session, user_id, "signed_out_everywhere")
+            return await grants.revoke_app(
+                session,
+                oauth_client_id=app_id,
+                user_id=None,
+                reason="revoked_in_settings",
+                now=datetime.now(UTC),
+            )
+
+    async with AsyncSession(env.admin_engine) as blocker:
+        await blocker.execute(select(model.id).where(model.id == low).with_for_update())
+        revoking = asyncio.create_task(revoke())
+        try:
+            await until_blocked_by(env.app_engine, await backend_pid(blocker))
+            async with AsyncSession(env.admin_engine) as probe:
+                free = set(
+                    (
+                        await probe.execute(
+                            select(model.id)
+                            .where(model.id.in_([low, high]))
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalars()
+                )
+                await probe.rollback()
+            held = not revoking.done()
+        finally:
+            await blocker.rollback()
+    ended = await asyncio.wait_for(revoking, 30)
+
+    assert held
+    assert free == {high}, "the higher id was locked before the lower one"
+    async with AsyncSession(env.admin_engine) as session:
+        if table == "codes":
+            assert ended == 0
+            for code_id in (low, high):
+                assert await _ended(env, code_id)
+        else:
+            assert ended == 2
+            reasons = (
+                await session.execute(
+                    select(OAuthRefreshFamily.revoked_reason).where(
+                        OAuthRefreshFamily.id.in_([low, high])
+                    )
+                )
+            ).scalars()
+            assert set(reasons) == {
+                "signed_out_everywhere" if by == "person" else "revoked_in_settings"
+            }
+
+
+async def _blocked(env: Any, pid: int) -> None:
+    """Until backend `pid` waits on a lock."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 30
+    async with env.app_engine.connect() as conn:
+        while True:
+            blockers = (
+                await conn.execute(text("SELECT pg_blocking_pids(:p)"), {"p": pid})
+            ).scalar_one()
+            if blockers:
+                return
+            assert loop.time() < deadline, f"backend {pid} never waited"
+            await asyncio.sleep(0.02)
+            await conn.rollback()
+
+
+async def test_an_account_act_and_a_settings_revoke_of_one_app_never_deadlock(
+    lifecycle_env: Any,
+) -> None:
+    """The cross-order the review found, made to happen. A person holds two
+    live grants of one app, A then B in id order, stored in that order; A is
+    then updated in place (a HOT update: an index entry still finds A at its
+    first slot, a sequential scan meets it after B). The account act reads
+    the person's grants by index -- A, B; the Settings revoke for everyone
+    reads the app's by a sequential scan -- B, A. A third transaction holds
+    A. The act waits on A holding nothing; the revoke takes B, then waits on
+    A too. When A is let go, a plain UPDATE in each would close the cycle:
+    the act, holding A, waits on B, and the revoke, holding B, on A --
+    40P01, a 500 on "sign out everywhere" or on Settings. Locking in id
+    order, the revoke also waits on A first, holding nothing: the act ends
+    both grants, and the revoke, finding them ended, counts none."""
+    env = lifecycle_env
+    org = await env.create_org("grant-cycle")
+    user_id = await user_id_of(env, await env.create_user(org, "technician"))
+    app_id = await mcp_app(env, org)
+    resource = mcp_resource(env.settings)
+    assert resource is not None
+    a, b = sorted([uuid4(), uuid4()])
+    async with oauth_session(org, env.app_engine) as session:
+        for row_id in (a, b):
+            session.add(_grant_row("families", row_id, org, user_id, app_id, resource))
+            await session.flush()
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(
+            update(OAuthRefreshFamily)
+            .where(OAuthRefreshFamily.id == a)
+            .values(last_used_at=OAuthRefreshFamily.last_used_at)
+        )
+        await session.commit()
+        stored = (
+            await session.execute(
+                select(OAuthRefreshFamily.id)
+                .where(OAuthRefreshFamily.id.in_([a, b]))
+                .order_by(text("ctid"))
+            )
+        ).scalars()
+        assert list(stored) == [b, a]  # what a sequential scan meets
+
+    pids: dict[str, int] = {}
+
+    async def revoke(who: str, plan: tuple[str, ...]) -> int:
+        async with oauth_session(org, env.app_engine) as session:
+            for setting in plan:
+                await session.execute(text(setting))
+            pids[who] = await backend_pid(session)
+            if who == "act":
+                return await grants.revoke_all_for_user(session, user_id, "signed_out_everywhere")
+            return await grants.revoke_app(
+                session,
+                oauth_client_id=app_id,
+                user_id=None,
+                reason="revoked_in_settings",
+                now=datetime.now(UTC),
+            )
+
+    by_index = ("SET LOCAL enable_seqscan = off", "SET LOCAL enable_bitmapscan = off")
+    by_scan = ("SET LOCAL enable_indexscan = off", "SET LOCAL enable_bitmapscan = off")
+    async with AsyncSession(env.admin_engine) as blocker:
+        await blocker.execute(
+            select(OAuthRefreshFamily.id).where(OAuthRefreshFamily.id == a).with_for_update()
+        )
+        acting = asyncio.create_task(revoke("act", by_index))
+        revoking: asyncio.Task[int] | None = None
+        try:
+            await until_blocked_by(env.app_engine, await backend_pid(blocker))
+            revoking = asyncio.create_task(revoke("settings", by_scan))
+            while "settings" not in pids:
+                await asyncio.sleep(0.01)
+            await _blocked(env, pids["settings"])
+        finally:
+            await blocker.rollback()
+    assert revoking is not None
+    acted, revoked = await asyncio.wait_for(
+        asyncio.gather(acting, revoking, return_exceptions=True), timeout=60
+    )
+
+    assert not isinstance(acted, BaseException), acted
+    assert not isinstance(revoked, BaseException), revoked
+    assert (acted, revoked) == (2, 0)
+    for family_id in (a, b):
+        assert await _reason(env, family_id) == "signed_out_everywhere"

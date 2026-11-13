@@ -730,13 +730,14 @@ async def test_an_exchange_in_flight_during_a_revoke_leaves_no_live_grant(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The coordinator's notes on `revoke_app_access`: the codes first, then
-    the families in a SEPARATE UPDATE. A colleague's app is exchanging its
+    the families in SEPARATE statements. A colleague's app is exchanging its
     code -- held where it opens the grant, the code locked FOR UPDATE --
-    when an administrator revokes the app for everyone. The codes UPDATE
-    waits for the exchange, which commits its grant; the families UPDATE
-    begins after that commit, reads the new grant and ends it. One UPDATE
+    when an administrator revokes the app for everyone. The codes' lock
+    waits for the exchange, which commits its grant; the families' lock
+    begins after that commit, reads the new grant and ends it. One statement
     for both, or the families first, would have read the grant table before
-    the exchange committed and left its grant live."""
+    the exchange committed and left its grant live -- and the tokens the
+    exchange returned with it."""
     org_id, slug = await _org(env)
     admin = await env.api.create_user(org_id, "org-admin")
     colleague = await env.api.create_user(org_id, "org-admin")
@@ -764,12 +765,29 @@ async def test_an_exchange_in_flight_during_a_revoke_leaves_no_live_grant(
     )
 
     assert held
-    assert [normalised(q).split(" ")[:2] for q in waiting] == [["UPDATE", "OAUTH_CODES"]], waiting
+    # The revoke waits on the code, in its lock of the app's codes in id
+    # order (Task 10 review, Important 2), before any UPDATE.
+    assert len(waiting) == 1, waiting
+    assert "FROM OAUTH_CODES" in normalised(waiting[0]), waiting
+    assert "FOR NO KEY UPDATE" in normalised(waiting[0]), waiting
     assert not isinstance(exchanged, BaseException), exchanged
     assert exchanged.status_code == 200, exchanged.text
     assert not isinstance(revoked, BaseException), revoked
     assert revoked.json() == {"revoked": True, "grants_revoked": 1}
     assert await _live(env, org_id, colleague) == 0
+    # What the in-flight exchange handed the app is worth nothing: its access
+    # token is refused at the door, and its refresh token mints nothing
+    # (Task 10 review, Minor 4).
+    tokens = exchanged.json()
+    async with running_mcp(env.api):
+        assert await _initialize(env, tokens["access_token"]) == 401
+    refreshed = await token_request(
+        env.api,
+        grant_type="refresh_token",
+        refresh_token=tokens["refresh_token"],
+        client_id="claude",
+    )
+    assert (refreshed.status_code, refreshed.json()["error"]) == (400, "invalid_grant")
 
 
 # --------------------------------------------------------------------------- #

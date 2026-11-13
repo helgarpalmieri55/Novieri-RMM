@@ -83,11 +83,13 @@ use that commits first spares the app (race (b)).
 A REVOCATION TAKES NEITHER ROW (`store`'s carve-out). `revoke_presented`
 reads the grant unlocked, then makes one UPDATE of its family
 (`revoke_family`) and writes only the chain after it. `revoke_all_for_user`
-and `revoke_app` (Task 10) are two UPDATEs: the unspent codes' expiry
-(`end_unspent_codes`), then the live families; their callers hold what they
+and `revoke_app` (Task 10) end the unspent codes' expiry
+(`end_unspent_codes`), then the live families, each table's rows LOCKED IN
+ID ORDER first (`_lock_in_id_order`; Task 10 review, Important 2) and then
+ended by id: two of them sharing rows take those rows in one order, codes
+before families, whatever plan reads them. Their callers hold what they
 hold -- an account act, the person's row; Settings
-(`connections.revoke_app_access`), neither row -- and nothing here takes a
-lock for them.
+(`connections.revoke_app_access`), neither row.
 
 A CODE AN ACCOUNT ACT ENDED is one whose `expires_at` the act set to its
 own clock -- never its `used_at` (Task 10; operator decision D2, part c;
@@ -112,6 +114,7 @@ writing a technician's global rows is allowed.
 
 import logging
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -313,6 +316,30 @@ async def revoke_family(session: AsyncSession, family_id: UUID, reason: str, now
 _ENDED_AT = func.greatest(func.clock_timestamp(), OAuthCode.created_at + timedelta(microseconds=1))
 
 
+async def _lock_in_id_order(
+    session: AsyncSession, id_column: Any, conditions: Sequence[Any]
+) -> list[UUID]:
+    """Lock the rows `conditions` select, IN ID ORDER, and say which they are
+    (Task 10 review, Important 2).
+
+    `SELECT id … ORDER BY id FOR NO KEY UPDATE`: the row-locking step sits
+    above the sort, so the rows are locked in id order whatever plan reads
+    them -- an index whose ties hold a HOT chain's root slot, a sequential
+    scan that meets the live version at its own slot, another predicate's
+    index. Two revocations that share rows (an act on a person and a revoke
+    of one of their apps) therefore take them in the same order and cannot
+    close a cycle; a plain UPDATE takes them in its scan's order, which two
+    plans need not share (`tests/test_mcp_grant_lifecycle.py`, the
+    cross-order). NO KEY UPDATE, the lock the UPDATE would take: a refresh
+    token or a code that refers to a grant takes KEY SHARE on it, which this
+    does not block. A row that a writer this waited for has ended meanwhile
+    is re-checked, found ended, and not returned."""
+    locked = await session.execute(
+        select(id_column).where(*conditions).order_by(id_column).with_for_update(key_share=True)
+    )
+    return list(locked.scalars())
+
+
 async def end_unspent_codes(
     session: AsyncSession, *, user_id: UUID | None = None, oauth_client_id: UUID | None = None
 ) -> int:
@@ -327,48 +354,73 @@ async def end_unspent_codes(
     (`_clock_after_the_locks`), so whatever this writes up to the commit
     reads as expired. Spent and already expired codes are left as they are.
 
+    LOCKED IN ID ORDER FIRST (`_lock_in_id_order`), then ended by id, the
+    live condition checked again under the lock.
+
     The caller says whose: a person, an app, or both. With neither it would
     end every code the session can see, so it refuses."""
     if user_id is None and oauth_client_id is None:
         raise ValueError(  # i18n-exempt: programmer error, unhandled 500
             "name the person or the app whose codes end"
         )
-    query = update(OAuthCode).where(
-        OAuthCode.used_at.is_(None), OAuthCode.expires_at > func.clock_timestamp()
-    )
+    live = [OAuthCode.used_at.is_(None), OAuthCode.expires_at > func.clock_timestamp()]
+    whose: list[Any] = []
     if user_id is not None:
-        query = query.where(OAuthCode.user_id == user_id)
+        whose.append(OAuthCode.user_id == user_id)
     if oauth_client_id is not None:
-        query = query.where(OAuthCode.oauth_client_id == oauth_client_id)
-    ended = await session.execute(query.values(expires_at=_ENDED_AT).returning(OAuthCode.id))
+        whose.append(OAuthCode.oauth_client_id == oauth_client_id)
+    ids = await _lock_in_id_order(session, OAuthCode.id, [*whose, *live])
+    if not ids:
+        return 0
+    ended = await session.execute(
+        update(OAuthCode)
+        .where(OAuthCode.id.in_(ids), *live)
+        .values(expires_at=_ENDED_AT)
+        .returning(OAuthCode.id)
+    )
+    return len(ended.all())
+
+
+async def _end_live_families(
+    session: AsyncSession, whose: Sequence[Any], *, reason: str, revoked_at: datetime
+) -> int:
+    """End the live families `whose` selects, locked in id order first
+    (`_lock_in_id_order`); how many. LIVE: neither revoked nor past their idle
+    limit, by the database's clock -- an expired grant is dead already and
+    is neither marked nor counted, and an idle app's grants have all but
+    always expired with it, which keeps this clear of a purge's cascade
+    (`clients.purge_idle`). Checked again under the lock: a grant a refresh
+    or another revocation ended while this waited is not counted."""
+    live = [
+        OAuthRefreshFamily.revoked_at.is_(None),
+        OAuthRefreshFamily.expires_at > func.clock_timestamp(),
+    ]
+    ids = await _lock_in_id_order(session, OAuthRefreshFamily.id, [*whose, *live])
+    if not ids:
+        return 0
+    ended = await session.execute(
+        update(OAuthRefreshFamily)
+        .where(OAuthRefreshFamily.id.in_(ids), *live)
+        .values(revoked_at=revoked_at, revoked_reason=reason)
+        .returning(OAuthRefreshFamily.id)
+    )
     return len(ended.all())
 
 
 async def revoke_all_for_user(session: AsyncSession, user_id: UUID, reason: str) -> int:
     """End every live grant of a person (the lifecycle acts, Task 10); how many.
 
-    TWO STATEMENTS, IN THIS ORDER, and nothing else (`store`'s carve-out):
-    the person's unspent codes end first (`end_unspent_codes`; operator
-    decision D2, part c), then their live families, in one UPDATE. The
-    caller holds the person's row (every act does, first), so an exchange of
-    one of those codes waits for it and then finds the code expired: an act
-    that leaves the person active opens no way back for a code approved a
-    moment before it. Only LIVE codes and families: an expired one is dead
-    already, and an idle app's have all but always expired with it, so this
-    keeps clear of a purge's cascade (`clients.purge_idle`) all but
-    entirely."""
+    IN THIS ORDER, and nothing else (`store`'s carve-out): the person's
+    unspent codes end first (`end_unspent_codes`; operator decision D2, part
+    c), then their live families -- each table's rows locked in id order,
+    then ended by id. The caller holds the person's row (every act does,
+    first), so an exchange of one of those codes waits for it and then finds
+    the code expired: an act that leaves the person active opens no way back
+    for a code approved a moment before it."""
     await end_unspent_codes(session, user_id=user_id)
-    ended = await session.execute(
-        update(OAuthRefreshFamily)
-        .where(
-            OAuthRefreshFamily.user_id == user_id,
-            OAuthRefreshFamily.revoked_at.is_(None),
-            OAuthRefreshFamily.expires_at > func.clock_timestamp(),
-        )
-        .values(revoked_at=_now(), revoked_reason=reason)
-        .returning(OAuthRefreshFamily.id)
+    return await _end_live_families(
+        session, [OAuthRefreshFamily.user_id == user_id], reason=reason, revoked_at=_now()
     )
-    return len(ended.all())
 
 
 async def revoke_app(
@@ -382,27 +434,21 @@ async def revoke_app(
     """End an app's live grants: one person's, or (`user_id` None) everyone's
     in the session's organization (Task 10); how many.
 
-    The same two statements as `revoke_all_for_user`, for the app: its
-    unspent codes end first, then its live families in a SEPARATE UPDATE.
-    The caller holds no person's row and no app row (`store`'s carve-out),
-    so an exchange of the app's code may be in flight. Under READ COMMITTED
-    each statement reads what committed before it began. An exchange that
-    holds its code when the codes UPDATE reaches it is waited for, and the
-    family it opened has committed before the families UPDATE begins, which
-    then reads it and ends it; one that has not locked its code yet waits on
-    the codes UPDATE's row lock, and then finds the code expired."""
+    The same steps as `revoke_all_for_user`, for the app: its unspent codes
+    end first, then its live families, in SEPARATE statements, each table's
+    rows locked in id order. The caller holds no person's row and no app row
+    (`store`'s carve-out), so an exchange of the app's code may be in flight.
+    Under READ COMMITTED each statement reads what committed before it
+    began. An exchange that holds its code when the codes' lock reaches it
+    is waited for, and the family it opened has committed before the
+    families' lock begins, which then reads it and ends it; one that has not
+    locked its code yet waits on that lock, and then finds the code
+    expired."""
     await end_unspent_codes(session, user_id=user_id, oauth_client_id=oauth_client_id)
-    query = update(OAuthRefreshFamily).where(
-        OAuthRefreshFamily.oauth_client_id == oauth_client_id,
-        OAuthRefreshFamily.revoked_at.is_(None),
-        OAuthRefreshFamily.expires_at > func.clock_timestamp(),
-    )
+    whose = [OAuthRefreshFamily.oauth_client_id == oauth_client_id]
     if user_id is not None:
-        query = query.where(OAuthRefreshFamily.user_id == user_id)
-    ended = await session.execute(
-        query.values(revoked_at=now, revoked_reason=reason).returning(OAuthRefreshFamily.id)
-    )
-    return len(ended.all())
+        whose.append(OAuthRefreshFamily.user_id == user_id)
+    return await _end_live_families(session, whose, reason=reason, revoked_at=now)
 
 
 async def family_is_live(

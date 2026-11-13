@@ -159,9 +159,10 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       or a mailed link in `flows.reset_password`), signing out everywhere
       and the recovery link (`flows`). Each holds the row above first, then
       forgets the devices, then `oauth.grants.revoke_all_for_user`: the
-      person's unspent codes end by their expiry, then their live families,
-      two UPDATEs -- and only then the act's audit, which counts them
-      (`ai_grants_revoked`). Before the chain, never after it: an act that
+      person's unspent codes end by their expiry, then their live families
+      -- each table's rows LOCKED IN ID ORDER first (`grants.
+      _lock_in_id_order`), then ended by id -- and only then the act's
+      audit, which counts them (`ai_grants_revoked`). Before the chain, never after it: an act that
       held the chain while waiting on a family a refresh holds FOR UPDATE
       would meet that refresh's reuse or `person_inactive` branch waiting
       on the chain (40P01). A code exchange of the person's meanwhile waits
@@ -227,19 +228,20 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       writer's late use (`clients.touch`, step 5) does not queue behind the
       waiting DELETE, and once it commits Postgres re-checks the condition
       on the row as it now is, finds it false, and the app survives. A
-      revocation -- one UPDATE of families, or (since Task 10) one of the
-      unspent codes' expiry and then one of the live families, and then
-      only the chain (`grants.revoke_family`, `revoke_all_for_user`,
-      `revoke_app`) -- takes no app row (`oauth.store`'s carve-out), so the
-      DELETE may instead wait IN ITS CASCADE for that writer's code or
-      family rows; it reaches only live ones, which an idle app all but
-      never has. That UPDATE takes a
+      revocation -- one UPDATE of a family, or (since Task 10) the unspent
+      codes' expiry and then the live families, each locked in id order
+      and then ended, and then only the chain (`grants.revoke_family`,
+      `revoke_all_for_user`, `revoke_app`) -- takes no app row
+      (`oauth.store`'s carve-out), so the DELETE may instead wait IN ITS
+      CASCADE for that writer's code or family rows; it reaches only live
+      ones, which an idle app all but never has. That revocation takes a
       person's families in no app's order, which is why ONE APP PER
       TRANSACTION and never several, even in id order: a purge holding one
-      app's cascade while waiting in another's would have the UPDATE wait on
-      it in turn -- a cycle. And with the person's two families on the ONE
-      app, the cascade may hold the first while waiting on the second that
-      the UPDATE took first, and the UPDATE then reach the first: a cycle
+      app's cascade while waiting in another's would have the revocation
+      wait on it in turn -- a cycle. And with the person's two families on
+      the ONE app, the cascade (in its own order, not the ids') may hold the
+      first while waiting on the second that the revocation locked first,
+      and the revocation then reach the first: a cycle
       inside one app, which is why the purge's wait is bounded by half the
       server's `deadlock_timeout`, whatever it is set to. Its wait began first, so
       it gives way before either side's deadlock check runs, and the
@@ -252,17 +254,25 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       (`tests/test_oauth_token.py`);
     - revoking an AI app in Settings (`oauth.connections.revoke_app_access`,
       own authentication phase 3, Task 10), under the same carve-out: the
-      app read unlocked; `grants.revoke_app`'s two UPDATEs, the app's (or
-      one person's of it) unspent codes' expiry and then its live families,
-      many people's for "everyone"; the `mcp_revocation` row, flushed; the
-      chain last. No person's row -- "everyone" would otherwise take every
-      account of the organization in one act -- and no app row. It shares
-      rows with an account act only on that person's codes and families of
-      that app, which both reach in the same order, codes before families,
-      each UPDATE in the scan order of its table: a cycle between them
-      would need two of that person's rows of that app taken in opposite
-      orders by two scans of one table, which walk it in TID order
-      (`tests/test_mcp_admin_api.py`);
+      app read unlocked; `grants.revoke_app`, the app's (or one person's of
+      it) unspent codes' expiry and then its live families, many people's
+      for "everyone"; the `mcp_revocation` row, flushed; the chain last. No
+      person's row -- "everyone" would otherwise take every account of the
+      organization in one act -- and no app row. IT SHARES ROWS WITH AN
+      ACCOUNT ACT on that person's codes and families of that app (two
+      grants after a reconnect, two codes approved within a minute), and
+      both take them IN ID ORDER: each table's rows locked by `SELECT id …
+      ORDER BY id FOR NO KEY UPDATE` (`grants._lock_in_id_order`), whose
+      locking step sits above the sort, before they are ended by id -- codes
+      before families in both. One order over every row they share, so no
+      cycle. Not the scans' order, which no plan promises the two share: an
+      index returns a HOT chain at its root slot and a sequential scan the
+      live version at its own, and the person's predicate and the app's can
+      take different plans. With a plain UPDATE in each, the act read the
+      person's two grants by index, A then B, and the revoke the app's by a
+      sequential scan, B then A: a 40P01, a 500 on either side
+      (`tests/test_mcp_grant_lifecycle.py`, the cross-order and the id
+      order; `tests/test_mcp_admin_api.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);

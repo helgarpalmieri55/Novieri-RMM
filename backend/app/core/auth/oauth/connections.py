@@ -25,16 +25,25 @@ OAUTH_SESSION_USERS`).
 
 THE APP'S UNSPENT CODES END FIRST (operator decision D2, part c, through
 `grants.revoke_app`): their expiry set to the database's clock, never their
-`used_at`, and then, in a SEPARATE UPDATE, the app's live families. A code
-approved a moment before the revocation is then a plain `invalid_grant`,
-and an exchange already past its code committed a family the second UPDATE
-reads and ends.
+`used_at`, and then, in SEPARATE statements, the app's live families. A
+code approved a moment before the revocation is then a plain
+`invalid_grant`, and an exchange already past its code committed a family
+the families' statements read and end.
 
 A REVOCATION TAKES NO PERSON'S ROW AND NO APP ROW (`oauth.store`'s
 carve-out; `guards.lock_user_row`'s lock map): the app is read unlocked,
-then the two UPDATEs, the revocation row, and the audit chain last. "For
-everyone" ends many people's grants, and taking each person's row would put
-one act across every account of the organization.
+then its codes and its families, the revocation row, and the audit chain
+last. "For everyone" ends many people's grants, and taking each person's
+row would put one act across every account of the organization.
+
+IN ID ORDER (Task 10 review, Important 2). An account act on a person ends
+that person's codes and grants while this ends the app's: the two share the
+person's rows of this app -- two grants after a reconnect, two codes
+approved within a minute. Each locks its rows of each table by `SELECT id …
+ORDER BY id FOR NO KEY UPDATE` before ending them by id
+(`grants._lock_in_id_order`), codes before families, so both take the
+shared rows in one order and cannot deadlock -- whatever plan reads them,
+which is not the case for the scans' own order.
 """
 
 from collections.abc import Sequence
@@ -179,7 +188,7 @@ async def revoke_app_access(
                 status.HTTP_404_NOT_FOUND, tr("there is no such AI app in this organization")
             )
         whose = None if scope == "everyone" else actor_id
-        # The app's unspent codes, then its live families: two UPDATEs.
+        # The app's unspent codes, then its live families, each locked in id order.
         ended = await grants.revoke_app(
             session, oauth_client_id=app.id, user_id=whose, reason="revoked_in_settings", now=now
         )
