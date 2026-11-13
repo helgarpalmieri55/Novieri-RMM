@@ -25,10 +25,10 @@ tests, which stay until phase 4, and to prove that revoking sends it nothing.
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -60,7 +60,7 @@ from app.modules.user_admin.kc_client import (
 )
 from tests.mcp_support import mcp_app, mcp_client, mcp_token, running_mcp
 from tests.oauth_support import authorize_query, code_of, connect, decide, pkce_pair, token_request
-from tests.race_helpers import backend_pid, normalised, until_blocked_by
+from tests.race_helpers import normalised, pause_at, until_blocked_by
 
 BASE = "https://itms.example.com"
 _REAL_CLIENT = httpx.AsyncClient
@@ -726,26 +726,6 @@ async def test_a_grant_past_its_idle_limit_is_neither_ended_nor_counted(env: Any
     assert live.revoked_reason == "revoked_in_settings"
 
 
-def _pause(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType, name: str
-) -> tuple[asyncio.Event, asyncio.Event, dict[str, int]]:
-    """Hold a transaction at its first call to `<module>.<name>`, inside it:
-    (paused, go, {"pid": its backend})."""
-    paused, go = asyncio.Event(), asyncio.Event()
-    seen: dict[str, int] = {}
-    real: Callable[..., Awaitable[Any]] = getattr(module, name)
-
-    async def held(session: AsyncSession, *args: Any, **kwargs: Any) -> Any:
-        if "pid" not in seen:
-            seen["pid"] = await backend_pid(session)
-            paused.set()
-            await go.wait()
-        return await real(session, *args, **kwargs)
-
-    monkeypatch.setattr(module, name, held)
-    return paused, go, seen
-
-
 async def test_an_exchange_in_flight_during_a_revoke_leaves_no_live_grant(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -764,7 +744,7 @@ async def test_an_exchange_in_flight_during_a_revoke_leaves_no_live_grant(
     # Both read before the exchange holds the colleague's row and code.
     headers = await env.api.headers(org_id, admin)
     app_id = await mcp_app(env.api, org_id)
-    paused, go, seen = _pause(monkeypatch, grants, "open_family")
+    paused, go, seen = pause_at(monkeypatch, grants, "open_family")
     exchanging = asyncio.create_task(_exchange(env, code, verifier))
     await asyncio.wait_for(paused.wait(), 30)
     revoking = asyncio.create_task(

@@ -18,9 +18,7 @@ new, live grant: the exchange waits on the person's row and then simply runs.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from types import ModuleType
 from typing import Any
 from uuid import UUID
 
@@ -37,7 +35,7 @@ from app.models.oauth import OAuthCode, OAuthRefreshFamily
 from tests.auth_support import browser, capture_mail, console_ready, link_token, signed_in
 from tests.mcp_support import mcp_app
 from tests.oauth_support import CLAUDE_CALLBACK, pkce_pair, token_request
-from tests.race_helpers import backend_pid, normalised, until_blocked_by
+from tests.race_helpers import normalised, pause_at, until_blocked_by
 
 NEW_PASSWORD = "Pelican-Orbit-Lantern-58"
 
@@ -403,26 +401,6 @@ async def test_an_act_ends_and_counts_only_live_grants(lifecycle_env: Any) -> No
 # --------------------------------------------------------------------------- #
 
 
-def _pause(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType, name: str
-) -> tuple[asyncio.Event, asyncio.Event, dict[str, int]]:
-    """Hold a transaction at its first call to `<module>.<name>`, inside it:
-    (paused, go, {"pid": its backend})."""
-    paused, go = asyncio.Event(), asyncio.Event()
-    seen: dict[str, int] = {}
-    real: Callable[..., Awaitable[Any]] = getattr(module, name)
-
-    async def held(session: AsyncSession, *args: Any, **kwargs: Any) -> Any:
-        if "pid" not in seen:
-            seen["pid"] = await backend_pid(session)
-            paused.set()
-            await go.wait()
-        return await real(session, *args, **kwargs)
-
-    monkeypatch.setattr(module, name, held)
-    return paused, go, seen
-
-
 async def test_an_exchange_waiting_on_signing_out_everywhere_opens_no_grant(
     lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -441,7 +419,7 @@ async def test_an_exchange_waiting_on_signing_out_everywhere_opens_no_grant(
     who = await signed_in(env, org, "technician")
     verifier, challenge = pkce_pair()
     code, code_id = await _issue(env, org, who.user_id, challenge)
-    paused, go, seen = _pause(monkeypatch, flows, "end_all_for_user")
+    paused, go, seen = pause_at(monkeypatch, flows, "end_all_for_user")
     signing_out = asyncio.create_task(
         env.client.post("/api/v1/auth/logout-everywhere", headers=who.headers())
     )
