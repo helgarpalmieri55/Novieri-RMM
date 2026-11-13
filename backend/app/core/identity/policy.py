@@ -145,7 +145,11 @@ async def resolve_console_domain(
     an unknown slug is refused as "unknown organization" (401 / 4401) while
     the same address against a known slug is refused as "email domain not
     permitted" (403 / 4403). So a caller can learn which org slugs exist on
-    this deployment.
+    this deployment. (Since own authentication phase 3 no door reads a slug
+    from a token: the MCP token names its organization by an id the platform
+    signed, and one naming no organization here is the 401 "this access
+    token was refused" before any domain rule. The order stays; the slug
+    oracle below is the Keycloak era's.)
 
     THAT IS ACCEPTED, DELIBERATELY, and pinned by
     `tests/test_domain_policy.py::test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403`

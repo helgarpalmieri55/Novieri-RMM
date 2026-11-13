@@ -58,7 +58,13 @@ from app.core.identity.policy import OVERRIDE_ENV_VAR
 from app.models import Client, Device, RemoteSession, User
 from app.models.auth import AuthSession
 from app.modules.remote.tunnel import TunnelAuthError
-from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
+from tests.mcp_support import (
+    MCP_BASE,
+    marked_client,
+    mcp_claims,
+    mcp_token,
+    signed_mcp_token,
+)
 from tests.session_support import (
     CONSOLE,
     SignedIn,
@@ -149,8 +155,14 @@ def _over_mcp(api_env) -> None:
     api_env.settings.public_console_url = MCP_BASE
 
 
-def _mcp_token(api_env, sub: str, slug: str, email: str) -> str:
-    return api_env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=email)
+async def _mcp_token(api_env, sub: str, slug: str, email: str) -> str:
+    """The platform's own MCP token for `sub`, whose row now holds `email`: the
+    token carries no address since own authentication phase 3, and the door
+    reads the row's, as for a session."""
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(update(User).where(User.external_subject == sub).values(email=email))
+        await s.commit()
+    return await mcp_token(api_env, slug, sub)
 
 
 async def _session_row(api_env, org_id: UUID, technician_id: UUID) -> UUID:
@@ -268,26 +280,29 @@ async def test_http_refuses_a_foreign_domain_with_403_not_401(api_env) -> None:
 
 
 async def test_http_refusal_does_not_create_a_user_row(api_env) -> None:
-    """`admit` self-heals an unknown `sub` into a `users` row -- on the MCP
-    channel, the only door that still provisions from a token since own
-    authentication phase 1 (D5). A refused identity must not get one --
-    otherwise every refused token leaves a provisioned account behind, and
-    the preflight's count grows on attack traffic."""
+    """A refused token leaves no `users` row -- otherwise every refused token
+    would leave a provisioned account, and the preflight's count would grow on
+    attack traffic. Since own authentication phase 3 the MCP door provisions
+    nobody at all: the token names a person by id, and a person with no row is
+    a 401, never a self-heal."""
     _over_mcp(api_env)
     api_env.settings.console_email_domain = BASE_DOMAIN
     org_id = await api_env.create_org("dom")
     slug = await api_env.org_slug(org_id)
-    sub = f"never-seen-{uuid4().hex[:8]}"
-    token = _mcp_token(api_env, sub, slug, f"u@evil{BASE_DOMAIN}")
+    sub = await api_env.create_user(org_id, "read-only")
+    claims = mcp_claims(await mcp_token(api_env, slug, sub))
+    nobody = uuid4()
+    claims["sub"] = str(nobody)
+    token = await signed_mcp_token(claims)
 
     async with marked_client(api_env) as client:
         response = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
-    assert response.status_code == 403
+    assert response.status_code == 401
     async with AsyncSession(api_env.admin_engine) as s:
-        found = (
-            await s.execute(select(User.id).where(User.external_subject == sub))
-        ).scalar_one_or_none()
+        found = (await s.execute(select(User.id).where(User.id == nobody))).scalar_one_or_none()
+        rows = (await s.execute(select(User.id).where(User.org_id == org_id))).scalars().all()
     assert found is None
+    assert len(rows) == 1
 
 
 async def test_http_refuses_a_disabled_user(api_env) -> None:
@@ -766,8 +781,8 @@ def _one_refusal(records: list[logging.LogRecord], *, door: str, sub: str, email
 
     All four, because each answers a different question the locked-out
     operator has: WHICH door turned them away (the three fail independently),
-    WHO was turned away (`sub` is what survives in Keycloak for an MCP token,
-    `user:<id>` for a session; `email` is what the §3.3 preflight prints, and
+    WHO was turned away (`sub` is `user:<id>` at every door that reads the
+    person's row; `email` is what the §3.3 preflight prints, and
     matching the two is the whole diagnosis), and WHY (domain rule or account
     status — different remedies entirely).
     """
@@ -799,24 +814,26 @@ async def test_http_logs_the_domain_refusal(api_env) -> None:
 
 
 async def test_mcp_logs_the_domain_refusal(api_env) -> None:
-    """The same rule's call site on the MCP channel (`admit`'s token branch),
-    which `test_http_logs_the_domain_refusal` covered while the console used
-    that branch too (until own authentication Task 13)."""
+    """The same rule's call site on the MCP channel (`admit`'s branch for the
+    platform's own MCP token), which `test_http_logs_the_domain_refusal`
+    covered while the console used that branch too (until own authentication
+    Task 13)."""
     _over_mcp(api_env)
     api_env.settings.console_email_domain = BASE_DOMAIN
     org_id = await api_env.create_org("dom-log-mcp")
     sub = await api_env.create_user(org_id, "read-only")
     slug = await api_env.org_slug(org_id)
-    email = f"u@evil{BASE_DOMAIN}"
+    email = _addr("u", f"evil{BASE_DOMAIN}")
+    token = await _mcp_token(api_env, sub, slug, email)
 
     with _capture_refusals() as records:
         async with marked_client(api_env) as client:
             response = await client.get(
-                "/api/v1/me",
-                headers={"Authorization": f"Bearer {_mcp_token(api_env, sub, slug, email)}"},
+                "/api/v1/me", headers={"Authorization": f"Bearer {token}"}
             )
     assert response.status_code == 403
-    record = _one_refusal(records, door="http", sub=sub, email=email)
+    who = f"user:{await _user_id_of(api_env, sub)}"
+    record = _one_refusal(records, door="mcp", sub=who, email=email)
     assert record.reason == response.json()["detail"]
 
 
@@ -831,17 +848,19 @@ async def test_http_logs_the_status_refusal(api_env) -> None:
     org_id = await api_env.create_org("dom-log")
     sub = await api_env.create_user(org_id, "read-only")
     slug = await api_env.org_slug(org_id)
-    email = f"u@{BASE_DOMAIN}"
+    email = _addr("u", BASE_DOMAIN)
     await _set_status(api_env, sub, "disabled")
+    token = await _mcp_token(api_env, sub, slug, email)
 
     with _capture_refusals() as records:
         async with marked_client(api_env) as client:
             response = await client.get(
-                "/api/v1/me",
-                headers={"Authorization": f"Bearer {_mcp_token(api_env, sub, slug, email)}"},
+                "/api/v1/me", headers={"Authorization": f"Bearer {token}"}
             )
     assert response.status_code == 403
-    record = _one_refusal(records, door="http", sub=sub, email=email)
+    record = _one_refusal(
+        records, door="mcp", sub=f"user:{await _user_id_of(api_env, sub)}", email=email
+    )
     # The two rules are distinguishable in the log, or the operator cannot
     # tell "fix the allowlist" from "re-enable the account".
     assert record.reason != "email domain not permitted for this console"
@@ -1088,27 +1107,27 @@ async def test_http_honours_the_org_setting_with_no_env_var_at_all(api_env) -> N
 
 
 async def test_http_org_setting_refusal_still_creates_no_user_row(api_env) -> None:
-    """THE PROPERTY THE MOVE COULD HAVE COST. The refusal used to happen before
-    the org was even resolved; reading a per-org setting makes that impossible.
-    It now happens as the first statement INSIDE the tenant transaction and
-    raises, so the self-heal never runs and nothing commits. The self-heal
-    lives on the MCP channel only since own authentication phase 1 (D5), so
-    the request goes there."""
+    """THE PROPERTY THE MOVE COULD HAVE COST: the refusal is the first thing
+    inside the tenant transaction and raises, so nothing commits. The MCP door
+    provisions nobody since own authentication phase 3, so what it could still
+    write is a login: the refused person's row is exactly as it was."""
     _over_mcp(api_env)
     org_id = await api_env.create_org("dom-orgset-row")
     slug = await api_env.org_slug(org_id)
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
-    sub = f"never-seen-{uuid4().hex[:8]}"
+    sub = await api_env.create_user(org_id, "read-only")
+    bad = await _mcp_token(api_env, sub, slug, _addr("u", f"evil{BASE_DOMAIN}"))
 
-    bad = _mcp_token(api_env, sub, slug, _addr("u", f"evil{BASE_DOMAIN}"))
+    async def row() -> tuple[Any, ...]:
+        async with AsyncSession(api_env.admin_engine) as s:
+            user = (await s.execute(select(User).where(User.external_subject == sub))).scalar_one()
+            return (user.email, user.last_login_at, user.status)
+
+    seen = await row()
     async with marked_client(api_env) as client:
         response = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {bad}"})
     assert response.status_code == 403
-    async with AsyncSession(api_env.admin_engine) as s:
-        found = (
-            await s.execute(select(User.id).where(User.external_subject == sub))
-        ).scalar_one_or_none()
-    assert found is None
+    assert await row() == seen
 
 
 async def test_http_applies_a_changed_setting_without_a_restart(api_env) -> None:

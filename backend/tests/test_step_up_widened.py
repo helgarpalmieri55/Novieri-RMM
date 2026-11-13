@@ -655,7 +655,7 @@ async def _connected_ai_app(env: Any, org: UUID, sub: str, admin: dict[str, str]
         "/api/v1/orgs/current", headers=admin, json={"settings": {"mcp_enabled": True}}
     )
     assert on.status_code == 200, on.text
-    token = mcp_token(env, await env.org_slug(org), sub)
+    token = await mcp_token(env, await env.org_slug(org), sub)
     async with running_mcp(env), mcp_session(env, token) as session:
         called = await session.call_tool("me_get", {})
     assert called.is_error is False, called
@@ -797,7 +797,7 @@ async def test_over_mcp_a_tenant_change_is_refused_and_the_rest_of_the_edit_is_n
         acme = Client(org_id=org, name="Acme", kind="customer")
         s.add(acme)
         await s.commit()
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_session(mcp_env, token) as session:
         names = {tool.name for tool in (await session.list_tools()).tools}
         tenants = await session.call_tool(
@@ -826,7 +826,8 @@ async def test_on_the_mcp_channel_switching_ai_access_on_is_refused(mcp_env: Any
     that asks for a second factor, because the channel never carries one."""
     org = await mcp_env.create_org("mcp-off")
     sub = await mcp_env.create_user(org, "org-admin")
-    bearer = {"Authorization": f"Bearer {mcp_token(mcp_env, await mcp_env.org_slug(org), sub)}"}
+    token = await mcp_token(mcp_env, await mcp_env.org_slug(org), sub)
+    bearer = {"Authorization": f"Bearer {token}"}
     async with marked_client(mcp_env) as client:
         on = await client.patch(
             "/api/v1/orgs/current", headers=bearer, json={"settings": {"mcp_enabled": True}}

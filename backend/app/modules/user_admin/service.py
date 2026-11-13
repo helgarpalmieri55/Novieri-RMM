@@ -1117,9 +1117,10 @@ async def reset_factors(
     person's live rows keeps that takes the row at all: each act in this
     module (`_target`, since the final review of phase 2), the acts on a
     contact, each use of their links, their own sign-in steps and profile
-    (`PATCH /me`), and the MCP door (`guards.lock_user_row` lists them, and
-    the writers that take no person's row, each of which takes the chain
-    last or not at all). A passkey step in flight
+    (`PATCH /me`) (`guards.lock_user_row` lists them, the writers that take
+    no person's row, each of which takes the chain last or not at all, and
+    the MCP door, which since own authentication phase 3 writes nothing and
+    takes no lock). A passkey step in flight
     read the passkey this deletes and waited to write its counter on the
     deleted row: a StaleDataError, a 500. Now it waits on the person's row
     and then finds its session ended."""

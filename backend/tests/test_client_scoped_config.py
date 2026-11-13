@@ -1168,7 +1168,7 @@ async def test_an_ai_app_files_documentation_under_the_person_s_client(mcp_env: 
             s.add(RolePermission(role_id=role.id, permission_id=permission_id))
         s.add(UserRole(org_id=org, user_id=user_id, role_id=role.id, client_id=x))
         await s.commit()
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_session(mcp_env, token) as session:
         mine = await session.call_tool(
             "docs_articles_create", {"body": {"title": "VPN", "body": "", "client_id": str(x)}}

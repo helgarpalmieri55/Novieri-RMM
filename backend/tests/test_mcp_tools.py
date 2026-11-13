@@ -214,7 +214,7 @@ async def _events(env: Any, org_id: UUID, action: str) -> list[AuditEvent]:
 async def _admin(env: Any) -> tuple[UUID, str, str]:
     org_id, slug = await _org(env)
     sub = await env.create_user(org_id, "org-admin")
-    return org_id, sub, mcp_token(env, slug, sub)
+    return org_id, sub, await mcp_token(env, slug, sub)
 
 
 async def _fresh_window(
@@ -288,7 +288,7 @@ async def test_a_technician_does_not_see_or_call_an_org_admin_tool(mcp_env) -> N
         s.add(role)
         await s.commit()
     await _grant(mcp_env, org_id, sub, "mcp.use")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), _session(mcp_env, token) as session:
         catalog = mcp_env.app.state.mcp_catalog
         # `roles_update`, not `roles_create`: creating a role is no tool since
@@ -1001,7 +1001,7 @@ async def test_the_audit_row_is_written_even_when_the_handler_is_cancelled(
     row is written all the same, shielded, as 499 with an unknown outcome."""
     import app.mcp.invoke as invoke_mod
     import app.mcp.server as server
-    from app.core.security import TokenClaims
+    from app.core.auth.oauth.access import McpGrant
 
     started = anyio.Event()
 
@@ -1011,10 +1011,13 @@ async def test_the_audit_row_is_written_even_when_the_handler_is_cancelled(
 
     monkeypatch.setattr(invoke_mod, "invoke", hang)
     org_id, sub, _ = await _admin(mcp_env)
+    user_id = await _user_id(mcp_env, sub)
     principal = server.McpPrincipal(
         org_id=org_id,
-        user_id=await _user_id(mcp_env, sub),
-        claims=TokenClaims(sub=sub, email="", name="", org_slug="", azp="claude"),
+        user_id=user_id,
+        claims=McpGrant(
+            user_id=user_id, org_id=org_id, client_id="claude", family_id=uuid4(), iat=0, exp=600
+        ),
         bearer="Bearer x",
         areas=None,
         accept_language="",
@@ -1039,12 +1042,14 @@ def _direct_call(env: Any, org_id: UUID, user_id: UUID, sub: str) -> tuple[Any, 
     """`(handlers, ctx, params)` for calling the SDK handler directly, with a
     principal the gate would have admitted."""
     import app.mcp.server as server
-    from app.core.security import TokenClaims
+    from app.core.auth.oauth.access import McpGrant
 
     principal = server.McpPrincipal(
         org_id=org_id,
         user_id=user_id,
-        claims=TokenClaims(sub=sub, email="", name="", org_slug="", azp="claude"),
+        claims=McpGrant(
+            user_id=user_id, org_id=org_id, client_id="claude", family_id=uuid4(), iat=0, exp=600
+        ),
         bearer="Bearer x",
         areas=None,
         accept_language="",

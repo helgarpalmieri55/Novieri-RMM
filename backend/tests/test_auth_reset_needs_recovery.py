@@ -373,7 +373,7 @@ async def test_the_mcp_channel_is_refused_too(
     who = await signed_in(auth_env, org, "technician")
     await _mail_reset(auth_env, who)
     monkeypatch.setattr(auth_env.app.state.settings, "public_console_url", MCP_BASE)
-    token = mcp_token(auth_env, await auth_env.org_slug(org), admin.sub)
+    token = await mcp_token(auth_env, await auth_env.org_slug(org), admin.sub)
 
     async with marked_client(auth_env) as client:
         refused = await client.post(

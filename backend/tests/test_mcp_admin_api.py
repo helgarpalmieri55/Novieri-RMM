@@ -49,7 +49,7 @@ from app.modules.user_admin.kc_client import (
     set_enabled,
     set_locale_attribute,
 )
-from tests.mcp_support import MCP_AUD, mcp_client, running_mcp
+from tests.mcp_support import mcp_client, mcp_token, running_mcp
 
 BASE = "https://itms.example.com"
 _REAL_CLIENT = httpx.AsyncClient
@@ -209,16 +209,9 @@ async def _events(env: Any, org_id: UUID, action: str) -> list[AuditEvent]:
         )
 
 
-def _old_token(env: Any, slug: str, sub: str, azp: str = "claude") -> str:
+async def _old_token(env: Any, slug: str, sub: str, azp: str = "claude") -> str:
     """An MCP access token issued a minute ago, before any revocation below."""
-    return env.api.idp.token(
-        sub,
-        slug,
-        aud=MCP_AUD,
-        azp=azp,
-        email=f"{sub}@test.local",
-        extra={"iat": int(time.time()) - 60},
-    )
+    return await mcp_token(env.api, slug, sub, azp, iat=int(time.time()) - 60)
 
 
 async def _initialize(env: Any, token: str) -> int:
@@ -247,7 +240,7 @@ async def _session(env: Any, token: str) -> AsyncIterator[ClientSession]:
 
 
 async def _call_a_tool(env: Any, slug: str, sub: str, azp: str = "claude") -> None:
-    token = env.api.idp.token(sub, slug, aud=MCP_AUD, azp=azp, email=f"{sub}@test.local")
+    token = await mcp_token(env.api, slug, sub, azp)
     async with _session(env, token) as session:
         result = await session.call_tool("me_get", {})
     assert result.is_error is False, result
@@ -347,8 +340,8 @@ async def test_revoke_for_me_cuts_off_my_old_token_and_not_my_colleagues(env: An
         assert event.meta == {"client_id": "claude", "scope": "me"}
         assert await _events(env, org_id, "mcp.app_revoke_incomplete") == []
 
-        assert await _initialize(env, _old_token(env, slug, me)) == 401
-        assert await _initialize(env, _old_token(env, slug, colleague)) == 200
+        assert await _initialize(env, await _old_token(env, slug, me)) == 401
+        assert await _initialize(env, await _old_token(env, slug, colleague)) == 200
 
     mine = (await _connections(env, org_id, me)).json()["apps"][0]
     theirs = (await _connections(env, org_id, colleague)).json()["apps"][0]
@@ -402,10 +395,10 @@ async def test_revoke_for_everyone_cuts_off_the_whole_org_and_no_other(env: Any)
         (event,) = await _events(env, org_id, "mcp.app_revoked")
         assert event.meta == {"client_id": "claude", "scope": "everyone"}
 
-        assert await _initialize(env, _old_token(env, slug, admin)) == 401
-        assert await _initialize(env, _old_token(env, slug, colleague)) == 401
+        assert await _initialize(env, await _old_token(env, slug, admin)) == 401
+        assert await _initialize(env, await _old_token(env, slug, colleague)) == 401
         # Registered apps are realm-wide: the same `azp` in another org is untouched.
-        assert await _initialize(env, _old_token(env, other_slug, stranger)) == 200
+        assert await _initialize(env, await _old_token(env, other_slug, stranger)) == 200
 
 
 async def test_a_revocation_shows_as_revoked_for_everyone(env: Any) -> None:
@@ -440,7 +433,7 @@ async def test_keycloak_down_still_writes_the_revocation(env: Any) -> None:
     assert incomplete.actor_id == await _user_id(env, me)
     assert incomplete.meta == {"client_id": "claude", "scope": "me", "keycloak_failures": 1}
     async with running_mcp(env.api):
-        assert await _initialize(env, _old_token(env, slug, me)) == 401
+        assert await _initialize(env, await _old_token(env, slug, me)) == 401
 
 
 async def test_a_keycloak_refusal_counts_as_a_failure(env: Any) -> None:

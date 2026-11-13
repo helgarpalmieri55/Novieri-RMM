@@ -33,13 +33,13 @@ import app as app_package
 from app.api.deps import AuthContext, require_step_up
 from app.core.auth import passkeys
 from app.core.auth.loopback import LOOPBACK_HEADER
+from app.core.auth.oauth.access import McpGrant
 from app.core.auth.passwords import hash_password
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import DEVICE_COOKIE, SessionPrincipal
 from app.core.client_address import parse_trusted_proxies
 from app.core.client_scope import ClientScope
 from app.core.router_inspect import flatten
-from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Client, User
 from app.models.auth import AuthFailure, AuthPasskey, AuthPassword, AuthSession
@@ -719,7 +719,8 @@ async def test_the_mcp_channel_refuses_a_request_claiming_the_assistant(
     monkeypatch.setattr(api_env.settings, "public_console_url", MCP_BASE)
     org_id = await api_env.create_org("door-mcp-loopback")
     sub = await api_env.create_user(org_id, "org-admin")
-    bearer = {"Authorization": f"Bearer {mcp_token(api_env, await api_env.org_slug(org_id), sub)}"}
+    token = await mcp_token(api_env, await api_env.org_slug(org_id), sub)
+    bearer = {"Authorization": f"Bearer {token}"}
 
     async with marked_client(api_env) as client:
         claimed = await client.get("/api/v1/me", headers={**bearer, LOOPBACK_HEADER: "1"})
@@ -747,7 +748,18 @@ def test_require_step_up_admits_no_request_without_a_session() -> None:
     )
 
     def ctx(principal: SessionPrincipal | None) -> AuthContext:
-        claims = None if principal else TokenClaims(sub="s", email="", name="", org_slug="o")
+        claims = (
+            None
+            if principal
+            else McpGrant(
+                user_id=uuid4(),
+                org_id=uuid4(),
+                client_id="claude",
+                family_id=uuid4(),
+                iat=0,
+                exp=600,
+            )
+        )
         return AuthContext(
             org_id=uuid4(),
             user_id=uuid4(),

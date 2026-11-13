@@ -659,10 +659,11 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
 #: existing, fails `test_the_org_wide_keys_have_not_rotted`.
 ORG_WIDE_KEYS: dict[str, str] = {
     "users_org_id_external_subject_key": (
-        "an identity, not a name: one subject of the identity provider is one person in "
-        "the organisation, and `deps.admit` finds the user by it. Per client, one login "
-        "could hold a row in each client. Written only under scope all (first-login "
-        "provisioning, `POST /users`), and the value is an opaque id the IdP issues"
+        "an identity, not a name: one subject of the identity provider was one person in "
+        "the organisation. No door reads it since own authentication phase 3 (the MCP token "
+        "names the person by id); the Keycloak event ingest still does until phase 4 removes "
+        "both. Per client, one login could hold a row in each client. Written only under "
+        "scope all (`POST /users`, a contact's placeholder), and the value is an opaque id"
     ),
     "uq_inbound_message_org_message_id": (
         "the poller's idempotency key: an RFC 5322 Message-ID names one email, fetched "

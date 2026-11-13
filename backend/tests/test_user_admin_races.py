@@ -30,7 +30,16 @@ switched back on, holding a live grant, sent a new invitation, or audited
 for a removal that never happened. Each now takes the row first and finds
 the account deleted. And the MCP door (item 3), which refreshed a person's
 address by taking the audit chain BEFORE their row: against an
-administrator holding the row and waiting on the chain, a 40P01.
+administrator holding the row and waiting on the chain, a 40P01. It took the
+row first from then on.
+
+SINCE OWN AUTHENTICATION PHASE 3 THE MCP DOOR IS NO WRITER AT ALL (operator
+decision D1, 2026-11-12). The email refresh is retired with Keycloak: the
+platform's own token carries no address to refresh from, the door records no
+login, and it reads the person's row and their grant unlocked. The two tests
+that pinned the door's place in the lock order now pin that it has none: an
+MCP call never waits on the person's row an administrator holds, and never
+writes it (`guards.lock_user_row`).
 """
 
 import asyncio
@@ -45,13 +54,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import action_tokens
 from app.core.client_scope import ClientScope
-from app.core.mcp_channel import mcp_resource
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Role, User, UserRole
 from app.models.auth import AuthActionToken, AuthPassword
 from app.modules.user_admin import service as ua
 from tests.auth_support import add_passkey, browser, capture_mail, console_ready, staff
-from tests.mcp_support import marked_client
+from tests.mcp_support import marked_client, mcp_token
 from tests.race_helpers import backend_pid, normalised, until_blocked_by
 from tests.session_support import sign_in
 
@@ -446,45 +454,72 @@ async def test_resend_invite_vs_admin_cancel(
     assert await _actions(env, org, "user.invite_resent") == []
 
 
-def _mcp_call(env: Any, slug: str, sub: str, email: str) -> "asyncio.Task[Any]":
-    """`GET /me` over the MCP channel with a token whose address claim is
-    `email` -- the first call after the address changed at the identity
-    provider, which the door writes to the person's row."""
-    token = env.idp.token(sub, slug, aud=mcp_resource(env.settings), azp="claude", email=email)
+async def _mcp_bearer(env: Any, slug: str, sub: str) -> dict[str, str]:
+    """The Authorization header of the platform's own MCP token for `sub` --
+    what `/oauth/token` handed their AI app. Minted BEFORE any act is held: the
+    grant is the consent's result, not part of the race."""
+    return {"Authorization": f"Bearer {await mcp_token(env, slug, sub)}"}
+
+
+def _mcp_call(env: Any, bearer: dict[str, str]) -> "asyncio.Task[Any]":
+    """`GET /me` over the MCP channel, started as a task. `GET /me` itself
+    only reads (`app/api/v1/me.py`): whatever this call writes or locks, the
+    door does."""
 
     async def call() -> Any:
         async with marked_client(env) as client:
-            return await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+            return await client.get("/api/v1/me", headers=bearer)
 
     return asyncio.create_task(call())
 
 
-async def _until_waiting_on_people(env: Any, count: int, *, timeout_s: float = 30.0) -> list[str]:
-    """The queries of `count` backends of this database blocked on a
-    person's `users` row FOR NO KEY UPDATE -- whoever blocks them: the second
-    of two waiters on one row queues behind the first, not the holder."""
+async def _finished_unblocked(
+    env: Any, blocker: int, calls: list["asyncio.Task[Any]"], *, timeout_s: float = 30.0
+) -> list[str]:
+    """`until_blocked_by`, turned round. Polls `pg_stat_activity` until every
+    call is done -- [] -- or a backend is SEEN waiting on `blocker`: then its
+    query text, at once, without waiting for a timeout. While the holder is
+    paused, a call that waits on it cannot finish, so [] means none did."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     async with env.app_engine.connect() as conn:
         while True:
-            blocked = [
+            waiting = [
                 str(query)
                 for query in (
                     await conn.execute(
                         text(
                             "SELECT query FROM pg_stat_activity "
-                            "WHERE datname = current_database() "
-                            "AND cardinality(pg_blocking_pids(pid)) > 0"
-                        )
+                            "WHERE CAST(:b AS integer) = ANY (pg_blocking_pids(pid))"
+                        ),
+                        {"b": blocker},
                     )
                 ).scalars()
             ]
-            people = [query for query in blocked if _on_the_person([query])]
-            if len(people) >= count:
-                return people
-            assert loop.time() < deadline, f"never {count} waiting on a person: {blocked}"
+            if waiting:
+                return waiting
+            if all(call.done() for call in calls):
+                return []
+            assert loop.time() < deadline, "the calls never finished, and none waited on the holder"
             await asyncio.sleep(0.02)
-            await conn.rollback()
+            await conn.rollback()  # a fresh snapshot of pg_stat_activity
+
+
+async def _person_row(env: Any, user_id: UUID) -> tuple[Any, ...]:
+    """The person's row as the door could change it, with its `xmin`: any
+    UPDATE of the row, even one that writes the same values, gives it a new
+    one."""
+    async with AsyncSession(env.admin_engine) as s:
+        row = (
+            await s.execute(
+                text(
+                    "SELECT xmin::text, email, display_name, last_login_at, status "
+                    "FROM users WHERE id = :id"
+                ),
+                {"id": user_id},
+            )
+        ).one()
+    return tuple(row)
 
 
 def _ending_sessions(env: Any, org: UUID, admin_id: UUID, user_id: UUID) -> "asyncio.Task[str]":
@@ -541,87 +576,101 @@ async def test_patch_me_vs_admin_end_sessions(
     assert len(await _actions(env, org, "auth.sessions_ended")) == 1
 
 
-async def test_mcp_door_email_refresh_vs_admin_end_sessions(
+async def test_the_mcp_door_neither_waits_on_nor_writes_a_persons_row(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Final review, item 3. An administrator ends a technician's sessions
-    and is held after it took the row, before the chain. The technician's AI
-    app makes its first MCP call since their address changed at the identity
-    provider. At ab0d7aa the door audited the change -- taking the chain --
-    and only then wrote the row, at an autoflush: it held the chain while
-    waiting on the row, the administrator held the row and then waited on
-    the chain -- a 40P01, a 500 for one of them. Now the door takes the
-    person's ROW first and the chain last, like every other writer: it waits
-    on the row, both finish, and the change is audited once."""
+    """Final review, item 3, after own authentication phase 3 (operator
+    decision D1). An administrator ends a technician's sessions and is held
+    after it took the row, before the chain. The technician's AI app calls
+    meanwhile. At ab0d7aa the door audited an address change before it wrote
+    the row -- a 40P01 against this act -- and from the final review on it
+    waited on the row; now it refreshes nothing and records no login, so it
+    neither waits nor writes: the call answers while the row is still held,
+    and the row is as it was. Lock the row in the door, or write it (its
+    `last_login_at`, an address), and the call is seen waiting here.
+
+    Non-vacuity: the row IS held. The technician's own `PATCH /me`, a writer
+    of the row, sent after the call, is seen waiting on the administrator."""
     env = auth_env
     org = await env.create_org("tech-race")
     slug = await env.org_slug(org)
     admin_id = await _id(env, await env.create_user(org, "org-admin"))
     tech_sub = await env.create_user(org, "technician")
     tech_id = await _id(env, tech_sub)
+    bearer = await _mcp_bearer(env, slug, tech_sub)
+    console = await env.headers(org, tech_sub)
+    before = await _person_row(env, tech_id)
     paused, go, seen = _pause(monkeypatch, "end_all_for_user")
     ending = _ending_sessions(env, org, admin_id, tech_id)
     await asyncio.wait_for(paused.wait(), 30)
-    calling = _mcp_call(env, slug, tech_sub, "renamed@test.local")
+    calling = _mcp_call(env, bearer)
+    saving: asyncio.Task[Any] | None = None
     try:
-        waiting = await until_blocked_by(env.app_engine, seen["pid"])
-        held = not calling.done()
+        waited = await _finished_unblocked(env, seen["pid"], [calling])
+        held = not ending.done()
+        during = await _person_row(env, tech_id)
+        saving = asyncio.create_task(
+            env.client.patch("/api/v1/me", headers=console, json={"display_name": "New Name"})
+        )
+        writer_waits = await until_blocked_by(env.app_engine, seen["pid"])
     finally:
         go.set()
-    ended, called = await asyncio.wait_for(
-        asyncio.gather(ending, calling, return_exceptions=True), timeout=30
+    ended, called, saved = await asyncio.wait_for(
+        asyncio.gather(ending, calling, saving, return_exceptions=True), timeout=30
     )
+    assert waited == [], waited
     assert held
-    assert _on_the_person(waiting), (waiting, ended, called)
-    assert ended == "end_sessions committed", ended
     assert not isinstance(called, BaseException), called
     assert called.status_code == 200, called.text
-    changed = await _actions(env, org, "auth.email_changed")
-    assert [(event.meta["from"], event.meta["to"]) for event in changed] == [
-        (f"{tech_sub}@test.local", "renamed@test.local")
-    ]
-    async with AsyncSession(env.admin_engine) as s:
-        email = await s.scalar(select(User.email).where(User.id == tech_id))
-    assert email == "renamed@test.local"
+    assert called.json()["user_id"] == str(tech_id)
+    assert during == before, (before, during)
+    assert _on_the_person(writer_waits), writer_waits
+    assert ended == "end_sessions committed", ended
+    assert not isinstance(saved, BaseException), saved
+    assert saved.status_code == 200, saved.text
+    assert await _actions(env, org, "auth.email_changed") == []
+    assert await _actions(env, org, "auth.login") == []
 
 
-async def test_two_mcp_calls_audit_one_email_change(
+async def test_two_mcp_calls_during_an_admin_act_neither_queue_nor_write(
     auth_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Final review, item 3. Two MCP calls of the same person after their
-    address changed, both arriving while an administrator holds the row. At
-    ab0d7aa each read the old address unlocked and set out to audit the
-    change -- the second with a `from` the first was replacing -- and
-    neither queued on the row (the first waited at its UPDATE, the second on
-    the chain the first held). Now both queue on the person's ROW, and the
-    second re-reads it after the first committed: one `auth.email_changed`."""
+    """Final review, item 3, after own authentication phase 3 (operator
+    decision D1). Two MCP calls of the same person, both arriving while an
+    administrator holds the row. At ab0d7aa both set out to audit an address
+    change, the second with a `from` the first was replacing; from the final
+    review on both queued on the row and the second found nothing to record.
+    Now neither queues: both answer while the row is still held, the row
+    takes no UPDATE (its `xmin` is unchanged), and no identity event is
+    written -- not one per call, not one between them."""
     env = auth_env
     org = await env.create_org("tech-race")
     slug = await env.org_slug(org)
     admin_id = await _id(env, await env.create_user(org, "org-admin"))
     tech_sub = await env.create_user(org, "technician")
     tech_id = await _id(env, tech_sub)
-    paused, go, _seen = _pause(monkeypatch, "end_all_for_user")
+    bearer = await _mcp_bearer(env, slug, tech_sub)
+    before = await _person_row(env, tech_id)
+    paused, go, seen = _pause(monkeypatch, "end_all_for_user")
     ending = _ending_sessions(env, org, admin_id, tech_id)
     await asyncio.wait_for(paused.wait(), 30)
-    first = _mcp_call(env, slug, tech_sub, "renamed@test.local")
-    second = _mcp_call(env, slug, tech_sub, "renamed@test.local")
+    first = _mcp_call(env, bearer)
+    second = _mcp_call(env, bearer)
     try:
-        waiting = await _until_waiting_on_people(env, 2)
+        waited = await _finished_unblocked(env, seen["pid"], [first, second])
+        held = not ending.done()
+        during = await _person_row(env, tech_id)
     finally:
         go.set()
     ended, one, two = await asyncio.wait_for(
         asyncio.gather(ending, first, second, return_exceptions=True), timeout=30
     )
-    assert len(waiting) == 2, waiting
-    assert ended == "end_sessions committed", ended
+    assert waited == [], waited
+    assert held
     for answer in (one, two):
         assert not isinstance(answer, BaseException), answer
         assert answer.status_code == 200, answer.text
-    changed = await _actions(env, org, "auth.email_changed")
-    assert [(event.meta["from"], event.meta["to"]) for event in changed] == [
-        (f"{tech_sub}@test.local", "renamed@test.local")
-    ]
-    async with AsyncSession(env.admin_engine) as s:
-        email = await s.scalar(select(User.email).where(User.id == tech_id))
-    assert email == "renamed@test.local"
+    assert during == before, (before, during)
+    assert ended == "end_sessions committed", ended
+    assert await _actions(env, org, "auth.email_changed") == []
+    assert await _actions(env, org, "auth.login") == []

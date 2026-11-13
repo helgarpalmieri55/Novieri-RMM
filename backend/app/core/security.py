@@ -1,8 +1,9 @@
-"""Operator token validation. The MCP door is an OIDC resource server: the
-console signs in with the platform's own session (`app.core.auth`) since own
-authentication phase 1. Keycloak (or any OIDC IdP) issues RS256 access tokens
-for MCP; we validate signature, issuer, audience, and expiry against the IdP's
-JWKS."""
+"""Keycloak token validation, kept until own authentication phase 4 removes
+it. No door calls it since phase 3: the console signs in with the platform's
+own session (`app.core.auth`) since phase 1, and the MCP door verifies an
+access token of the platform's own OAuth server (`app.core.auth.oauth.access`)
+since phase 3. Keycloak (or any OIDC IdP) issues RS256 access tokens; this
+validates signature, issuer, audience, and expiry against the IdP's JWKS."""
 
 import asyncio
 import json
