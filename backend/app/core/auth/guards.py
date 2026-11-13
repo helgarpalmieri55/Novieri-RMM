@@ -164,7 +164,16 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
     - the MCP door (`deps.admit`): its refresh of their address locks the
       row first since the final review (item 3), having taken the chain
       before the row until then; its `last_login_at` is an UPDATE of the
-      row and nothing after it in that transaction audits.
+      row and nothing after it in that transaction audits;
+    - an AI app's token requests (own authentication phase 3, Task 7;
+      operator decision D2): `oauth.grants._exchange` and `_refresh` read
+      the code, or the refresh token, unlocked only to learn whose it is;
+      then the row; then the app's (`clients.hold`, FOR KEY SHARE); then the
+      code, or the token and its family, FOR UPDATE, re-read; the grant
+      rows, the access token's signature, the app's use (`clients.touch`,
+      flushed), the chain last. A code exchanged while an act on the person
+      is in flight waits here and reads the act's outcome, so it opens no
+      grant the act's revocation could miss (`tests/test_oauth_token.py`).
     THESE WRITERS take the chain last, so none of them holds it while
     waiting on a person's row; it is not a claim about every transaction
     that audits. Two of them that both take the row wait for each other
@@ -212,6 +221,11 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       it gives way before either side's deadlock check runs, and the
       person's act completes (`tests/test_oauth_schema.py`,
       `tests/test_oauth_registration.py`);
+    - an AI app's RFC 7009 revocation (`oauth.grants.revoke_presented`,
+      own authentication phase 3, Task 7), under that carve-out: the grant
+      read unlocked, one UPDATE of its family (`grants.revoke_family`), then
+      only the chain -- no person's row and no app row
+      (`tests/test_oauth_token.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);

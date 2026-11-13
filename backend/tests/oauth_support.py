@@ -101,3 +101,60 @@ async def register(env: Any, **metadata: Any) -> dict[str, Any]:
     assert resp.status_code == 201, resp.text
     answer: dict[str, Any] = resp.json()
     return answer
+
+
+def pkce_pair() -> tuple[str, str]:
+    """`(verifier, S256 challenge)`; 48 random bytes, a 64-character verifier."""
+    import secrets
+
+    from app.core.auth.oauth import pkce
+
+    verifier = secrets.token_urlsafe(48)
+    return verifier, pkce.s256(verifier)
+
+
+async def seed_code(
+    env: Any,
+    org_id: UUID,
+    sub: str,
+    *,
+    app: OAuthClient,
+    challenge: str,
+    redirect_uri: str = CLAUDE_CALLBACK,
+    now: datetime | None = None,
+) -> str:
+    """A code the person `sub` approved for `app`, as the consent route issues it."""
+    from app.core.auth.oauth import grants
+    from tests.session_support import user_id_of
+
+    user_id = await user_id_of(env, sub)
+    async with oauth_session(org_id, env.app_engine) as session:
+        return await grants.issue_code(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            oauth_client_id=app.id,
+            redirect_uri=redirect_uri,
+            code_challenge=challenge,
+            resource=RESOURCE,
+            now=now or datetime.now(UTC),
+        )
+
+
+#: `oauth_tokens`' bucket (B3-24): every in-process request comes from
+#: 127.0.0.1, so one file's token requests would spend the next one's minute.
+TOKEN_BUCKETS = "ratelimit:oauth-token:*"
+
+
+async def forget_token_limit(env: Any) -> None:
+    redis = env.app.state.redis
+    async for key in redis.scan_iter(TOKEN_BUCKETS):
+        await redis.delete(key)
+
+
+async def token_request(env: Any, **form: str) -> httpx.Response:
+    """`POST /oauth/token`, form-encoded, as an AI app sends it [S33], in a
+    fresh minute of the network's limit."""
+    await forget_token_limit(env)
+    async with oauth_http(env) as client:
+        return await client.post("/oauth/token", data=form)

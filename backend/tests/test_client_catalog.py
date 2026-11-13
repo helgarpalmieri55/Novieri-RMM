@@ -220,6 +220,10 @@ OAUTH_SESSION_USERS: dict[str, str] = {
         "and the write in one) and a metadata document read in a consent; the "
         "organization's MCP switch for both"
     ),
+    "app/core/auth/oauth/grants.py": (
+        "a person's codes and refresh families: one transaction per token, revocation or "
+        "consent request, and the MCP door's check that a grant still stands"
+    ),
 }
 
 

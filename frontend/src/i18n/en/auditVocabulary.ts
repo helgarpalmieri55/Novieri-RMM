@@ -315,6 +315,10 @@ export const auditActions = {
   // (auditVocabulary.english.test.ts, HAND_WORDED).
   mcp_app_revoke_incomplete: "AI app revoke incomplete",
   mcp_app_revoked: "AI app revoked",
+  mcp_code_reused: "MCP code reused",
+  mcp_grant_ended: "MCP grant ended",
+  mcp_grant_revoked: "MCP grant revoked",
+  mcp_refresh_reused: "MCP refresh reused",
   mcp_settings_changed: "MCP settings changed",
   mcp_tool_called: "MCP tool called",
   notification_allowlist_added: "Notification allowlist added",
