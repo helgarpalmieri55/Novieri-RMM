@@ -310,6 +310,7 @@ export const auditActions: Shape<typeof enActions> = {
   license_updated: "Licencia actualizada",
   license_vendor_created: "Proveedor creado",
   license_vendor_updated: "Proveedor actualizado",
+  mcp_app_authorized: "Aplicación de IA autorizada",
   mcp_app_revoke_incomplete: "Revocación de aplicación de IA incompleta",
   mcp_app_revoked: "Aplicación de IA revocada",
   mcp_code_reused: "Código de autorización de MCP reutilizado",

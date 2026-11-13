@@ -168,6 +168,13 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/users/{user_id}/invite/resend"): (
         "returns a new one-time invitation link when no mail carried it, which lets a person in"
     ),
+    # The consent screen (P2 phase 3): approving an AI app answers the code
+    # that becomes the person's MCP tokens -- an AI app must never approve
+    # one, itself or another (1c(c)).
+    ("POST", "/api/v1/oauth/authorize/decision"): (
+        "approves an AI app and returns its one-time authorization code, which becomes the "
+        "person's MCP tokens"
+    ),
     # A client's contact's portal invitation (P2 phase 2, Task 8): the same
     # link, into the portal.
     ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"): (
@@ -359,6 +366,11 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
     # The person's own Microsoft link (phase 2, Task 9).
     ("DELETE", "/api/v1/me/microsoft"): _MY_SECURITY,
+    # The consent screen's question (P2 phase 3): the person's, in the console
+    # with their session (`api/v1/oauth_consent.py::_console_ctx`).
+    ("POST", "/api/v1/oauth/authorize/details"): (
+        "the consent screen is the person's, asked in the console with their own session"
+    ),
     # The portal page's own account summary (own authentication phase 2): read
     # from the browser's session, which the MCP channel never has. An AI app
     # asks `GET /me`.

@@ -39,6 +39,8 @@ SECRET_ONCE: frozenset[tuple[str, str]] = frozenset(
         # A client's contact's invitation link (own authentication phase 2).
         ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"),
         ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"),
+        # Own authentication phase 3: an AI app's one-time authorization code.
+        ("POST", "/api/v1/oauth/authorize/decision"),
         # A stored credential's plaintext and a licence key (invariant 3).
         ("POST", "/api/v1/credentials/{credential_id}/checkout"),
         ("GET", "/api/v1/licenses/{license_id}/key"),

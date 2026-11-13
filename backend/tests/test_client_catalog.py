@@ -224,6 +224,9 @@ OAUTH_SESSION_USERS: dict[str, str] = {
         "a person's codes and refresh families: one transaction per token, revocation or "
         "consent request, and the MCP door's check that a grant still stands"
     ),
+    "app/core/auth/oauth/consent.py": (
+        "an approval: the person's code, its audit row and its notice in one transaction"
+    ),
 }
 
 

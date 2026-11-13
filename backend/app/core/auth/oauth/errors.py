@@ -129,3 +129,14 @@ BAD_TARGET = Problem(
     "invalid_target", "the only resource this server issues tokens for is its MCP server"
 )
 BAD_SCOPE = Problem("invalid_scope", "the only scope this server grants is mcp")
+
+# The authorization endpoint's (RFC 6749 §4.1.2.1), sent back to the app in
+# the redirect when the person clicks (Task 8).
+AUTHZ_REPEATED = Problem("invalid_request", "a parameter appears more than once")
+AUTHZ_RESPONSE_TYPE = Problem("unsupported_response_type", "only response_type=code is supported")
+AUTHZ_CHALLENGE = Problem(
+    "invalid_request", "code_challenge is required: 43 base64url characters, method S256"
+)
+AUTHZ_METHOD = Problem("invalid_request", "code_challenge_method must be S256")
+PERSON_CANNOT = Problem("access_denied", "this person cannot connect AI apps here")
+DECLINED = Problem("access_denied", "the person declined the request")

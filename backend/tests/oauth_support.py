@@ -1,5 +1,7 @@
 """Shared helpers for the OAuth server's tests (autenticación propia plan
-2026-11-06). Tasks 6 to 10 add their own helpers at the end of this file.
+2026-11-06). Tasks 6 to 10 add their own helpers at the end of this file:
+Task 8's `authorize_query`, `decide`, `code_of` and `connect` drive the
+consent screen's two routes as the console page does.
 
 `oauth_org` makes an organization the deployment signs in to (`ITS_DEFAULT_
 ORG_SLUG`, plan D3) at the console address the MCP tests already use, with
@@ -158,3 +160,67 @@ async def token_request(env: Any, **form: str) -> httpx.Response:
     await forget_token_limit(env)
     async with oauth_http(env) as client:
         return await client.post("/oauth/token", data=form)
+
+
+def authorize_query(
+    client_id: str,
+    *,
+    challenge: str,
+    redirect_uri: str = CLAUDE_CALLBACK,
+    state: str = "st4te",
+    **extra: str,
+) -> str:
+    """The query of `/oauth/authorize` as an MCP client sends it."""
+    from urllib.parse import urlencode
+
+    return urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": state,
+            "resource": RESOURCE,
+            **extra,
+        }
+    )
+
+
+async def decide(
+    env: Any, org_id: UUID, sub: str, query: str, *, approve: bool = True
+) -> httpx.Response:
+    """The consent page's decision, with the person's console session (its
+    second factor just confirmed: `ApiEnv.headers`)."""
+    return await env.client.post(
+        "/api/v1/oauth/authorize/decision",
+        json={"query": query, "approve": approve},
+        headers=await env.headers(org_id, sub),
+    )
+
+
+def code_of(redirect_to: str) -> str:
+    from urllib.parse import parse_qs, urlsplit
+
+    return parse_qs(urlsplit(redirect_to).query)["code"][0]
+
+
+async def connect(
+    env: Any, org_id: UUID, sub: str, *, client_id: str | None = None
+) -> dict[str, Any]:
+    """An AI app connected by the person, the whole way: registered (unless
+    `client_id` names one), approved, its code exchanged."""
+    if client_id is None:
+        client_id = (await register(env))["client_id"]
+    verifier, challenge = pkce_pair()
+    approved = await decide(env, org_id, sub, authorize_query(client_id, challenge=challenge))
+    assert approved.status_code == 200, approved.text
+    resp = await token_request(
+        env,
+        grant_type="authorization_code",
+        code=code_of(approved.json()["redirect_to"]),
+        client_id=client_id,
+        code_verifier=verifier,
+    )
+    assert resp.status_code == 200, resp.text
+    return {"client_id": client_id, **resp.json()}

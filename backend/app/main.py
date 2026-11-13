@@ -387,6 +387,11 @@ def create_app(
     app.include_router(realm_settings_router, prefix="/api/v1")
     app.include_router(session_settings_router, prefix="/api/v1")
     app.include_router(entra_settings_router, prefix="/api/v1")
+    # The consent screen's two routes (own authentication phase 3, Task 8):
+    # the console page `/oauth/authorize` asks them with the person's session.
+    from app.api.v1.oauth_consent import router as oauth_consent_router
+
+    app.include_router(oauth_consent_router, prefix="/api/v1")
     # The platform's own sign-in (P2 phase 1): `/auth/*` answers before there
     # is a session; `/me/*` is the caller's own security. Both ungated by
     # design -- see app/api/v1/auth.py.
