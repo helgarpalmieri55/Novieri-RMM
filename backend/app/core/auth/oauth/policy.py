@@ -69,6 +69,7 @@ MAX_REQUEST_BYTES = 16 * 1024
 
 
 _LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_HEX_NUMBER = re.compile(r"0x[0-9a-f]*", re.IGNORECASE)
 
 
 def valid_host(host: str) -> bool:
@@ -79,8 +80,11 @@ def valid_host(host: str) -> bool:
     or trailing hyphen, at most 253 in all, one root dot allowed) whose last
     label is not all digits; an IPv6 literal without a zone; a canonical
     dotted-quad IPv4 address. Refused: anything a browser's URL parser decodes
-    differently from Python's -- a backslash, `%` escapes, `127.1`,
-    `2130706433`, `0x7f.0.0.1`, `_`, quotes, braces."""
+    differently from Python's -- a backslash, `%` escapes, `_`, quotes, braces,
+    and every host whose last label (root dot aside) is all digits or `0x`
+    plus hex digits, which WHATWG reads as an IPv4 number (`127.1`,
+    `2130706433`, `0x7f000001`, `0x`, `1.0x2`), and an `xn--` label that is
+    not valid punycode."""
     if not isinstance(host, str) or not host:
         return False
     if "%" in host:
@@ -104,13 +108,27 @@ def valid_host(host: str) -> bool:
     labels = name.split(".")
     if not all(_LABEL.fullmatch(label) for label in labels):
         return False
-    return not labels[-1].isdigit()
+    last = labels[-1]
+    if last.isdigit() or _HEX_NUMBER.fullmatch(last):
+        return False
+    return all(_punycode_ok(label) for label in labels)
+
+
+def _punycode_ok(label: str) -> bool:
+    """A label is not an `xn--` one, or it decodes and encodes back to itself."""
+    if not label.lower().startswith("xn--"):
+        return True
+    try:
+        decoded = label.encode("ascii").decode("idna")
+        return not decoded.isascii() and decoded.encode("idna").decode("ascii") == label.lower()
+    except (UnicodeError, ValueError):
+        return False
 
 
 def issuer(settings: object) -> str | None:
     """The issuer identifier, or None when the console address cannot be one."""
     raw = (getattr(settings, "public_console_url", None) or "").strip().rstrip("/")
-    if not raw:
+    if not raw or any(ord(ch) <= 0x20 or ord(ch) > 0x7E for ch in raw):
         return None
     try:
         parts = urlsplit(raw)

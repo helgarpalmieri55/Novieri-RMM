@@ -405,3 +405,48 @@ def test_a_128_character_verifier_and_its_punctuation_verify() -> None:
 
 async def test_create_app_registers_the_oauth_error_handler(api_env) -> None:  # type: ignore[no-untyped-def]
     assert api_env.app.exception_handlers[OAuthError] is errors.oauth_error_handler
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 2
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://0x7f000001/cb",
+        "https://0x/cb",
+        "https://0x0/cb",
+        "https://127.0.0.0x1/cb",
+        "https://1.0x2/cb",
+        "https://0x7f000001./cb",
+        "https://0X5DB8D822/cb",
+        "https://[v1.claude.ai]/cb",
+        "https://xn--a.example/cb",
+        "https://xn--/cb",
+    ],
+)
+def test_round_two_hosts_a_browser_reads_as_numbers_or_junk_are_refused(uri: str) -> None:
+    with pytest.raises(redirects.RedirectRejected) as refused:
+        redirects.check_registered(uri)
+    assert refused.value.reason == "malformed"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    ["https://0x1.example/cb", "https://xn--bcher-kva.example/cb", "https://0xg/cb"],
+)
+def test_round_two_hosts_still_accepted(uri: str) -> None:
+    assert redirects.check_registered(uri) == uri
+
+
+def test_round_two_issuer_and_host_of() -> None:
+    assert policy.issuer(_settings("https://0x7f000001")) is None
+    assert policy.issuer(_settings("https://itms.exa\tmple.com")) is None
+    assert redirects.host_of("https://[2001:0db8:0:0:0:0:0:1]/cb") == "2001:db8::1"
+
+
+def test_round_two_redirects_exports_its_public_names() -> None:
+    assert redirects.valid_host is policy.valid_host
+    assert not hasattr(redirects, "__all__")

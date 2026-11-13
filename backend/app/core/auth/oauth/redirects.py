@@ -1,10 +1,15 @@
 """Redirect URIs: which may be registered, and when a request's matches
 (design §5.2; plan D8).
 
-- ASCII only: RFC 6749 §3.1.2 wants "an absolute URI as defined by [RFC3986]",
-  and RFC 3986 §2 makes a URI of "a limited set of characters". So a host that
-  only looks like another (`сlaude.ai`, with a Cyrillic "с") is not one the
-  consent screen can show as `claude.ai` (plan B3-10);
+- RFC 3986 characters only: RFC 6749 §3.1.2 wants "an absolute URI as defined
+  by [RFC3986]", and RFC 3986 §2 makes a URI of "a limited set of characters"
+  (unreserved, reserved, and `%XX` escapes). So a host that only looks like
+  another (`сlaude.ai`, with a Cyrillic "с") is not one the consent screen can
+  show as `claude.ai` (plan B3-10), and a backslash, which a browser reads as
+  the end of an https host, never registers;
+- a host both readings agree on (`policy.valid_host`, re-exported here): a DNS
+  name of LDH labels, a bracketed IPv6 literal or a canonical dotted-quad, and
+  never a name a browser reads as an IPv4 number (`0x7f000001`, `127.1`);
 - https to any host, or http to the machine itself. MCP: "All redirect URIs
   MUST be either localhost or use HTTPS" [S30];
 - no fragment: RFC 6749 §3.1.2, "The endpoint URI MUST NOT include a fragment
@@ -12,7 +17,7 @@
 - no response parameter in the query: OAuth 2.1-17 §2.3, "The query string
   component MUST NOT include any parameters defined for use in the
   authorization response";
-- no user name or password, no `*`, no white space or control character, at
+- no user name or password, no `*`, at
   most `MAX_URI_LENGTH` characters;
 - compared EXACTLY, as strings, but for the port of a loopback redirect
   (OAuth 2.1-17 §4.1.1: "simple string comparison … The only exception is
@@ -31,7 +36,8 @@ import re
 from collections.abc import Mapping, Sequence
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.core.auth.oauth.policy import MAX_URI_LENGTH, valid_host
+from app.core.auth.oauth.policy import MAX_URI_LENGTH
+from app.core.auth.oauth.policy import valid_host as valid_host
 
 #: `urlsplit` gives an IPv6 literal without its brackets.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -45,8 +51,6 @@ RESPONSE_PARAMETERS = frozenset({"code", "state", "iss", "error", "error_descrip
 #: parser reads some of those differently from `urlsplit` (a backslash ends an
 #: https host).
 _URI_CHARS = re.compile(r"(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()+,;=]|%[0-9A-Fa-f]{2})*")
-
-__all__ = ["valid_host"]
 
 
 class RedirectRejected(ValueError):
@@ -84,6 +88,8 @@ def check_registered(uri: object) -> str:
         raise RedirectRejected("query")  # i18n-exempt: a reason code
     host = parts.hostname or ""
     if host and not valid_host(host):
+        raise RedirectRejected("malformed")  # i18n-exempt: a reason code
+    if "[" in parts.netloc and ":" not in host:  # IPvFuture, `[v1.claude.ai]`
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if parts.scheme == "https" and host:
         return uri
@@ -150,7 +156,11 @@ def host_of(uri: str) -> str:
         host = _split(uri).hostname or ""
     except RedirectRejected:
         return ""
-    return host if valid_host(host) else ""
+    if not valid_host(host):
+        return ""
+    if ":" in host:
+        return ipaddress.ip_address(host).compressed
+    return host
 
 
 def with_params(uri: str, params: Mapping[str, str]) -> str:
