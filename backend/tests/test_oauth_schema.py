@@ -32,10 +32,11 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.guards import lock_user_row
 from app.core.auth.oauth import clients
 from app.core.auth.oauth.store import deployment_org, oauth_session
 from app.core.client_scope import ClientScope
@@ -383,21 +384,29 @@ async def test_a_use_is_written_at_most_once_an_hour(api_env) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The app row's place in the lock order (`store.py`, step 3; fix round 1).
+# The app row's place in the lock order (`store.py`, steps 3 and 5; fix
+# rounds 1 and 2).
 # --------------------------------------------------------------------------- #
 
 
+async def _stored_use(env, org_id: UUID, app_id: UUID) -> datetime:
+    async with oauth_session(org_id, env.app_engine) as session:
+        return (
+            await session.execute(select(OAuthClient.last_used_at).where(OAuthClient.id == app_id))
+        ).scalar_one()
+
+
 async def test_a_held_app_keeps_its_purge_waiting_and_none_of_its_users(api_env) -> None:
-    """`clients.hold` takes the app row FOR KEY SHARE: the lock an idle app's
-    purge (a DELETE, FOR UPDATE) must wait for, and one that neither another
-    person's token request (`hold` again) nor a use being written waits for
-    (A3-37). Here no use is due, so nothing is written."""
+    """`clients.hold` takes the app row FOR KEY SHARE and writes nothing, even
+    with a use due: the lock an idle app's purge (a DELETE, FOR UPDATE) must
+    wait for, and one that neither another person's token request (`hold`
+    again) nor a use being written waits for (A3-37)."""
     org_id, _ = await oauth_org(api_env)
     now = datetime.now(UTC)
-    app = await seed_client(api_env, org_id, last_used_at=now - timedelta(minutes=5))
+    app = await seed_client(api_env, org_id, last_used_at=now - timedelta(hours=2))
     async with oauth_session(org_id, api_env.app_engine) as session:
         held = await clients.hold(session, org_id=org_id, app_id=app.id, now=now)
-        assert held is not None and held.last_used_at == now - timedelta(minutes=5)
+        assert held is not None and held.last_used_at == now - timedelta(hours=2)
         with pytest.raises(DBAPIError, match="lock timeout"):
             async with oauth_session(org_id, api_env.app_engine) as purge:
                 await purge.execute(text(NO_WAITING))
@@ -413,34 +422,49 @@ async def test_a_held_app_keeps_its_purge_waiting_and_none_of_its_users(api_env)
             )
 
 
-async def test_a_held_app_due_a_use_has_it_written_at_once(api_env) -> None:
-    """When a use is due, `hold` writes it and flushes: the UPDATE is sent
-    then, before the caller writes any grant row, not at the commit."""
+async def test_the_use_is_written_by_a_touch_after_the_hold(api_env) -> None:
+    """Plan Task 7, decision 9: the use is written last, after the access
+    token is signed -- `touch`, flushed before the chain. Until then another
+    request's use does not wait on this one; from then to the commit, it
+    does."""
     org_id, _ = await oauth_org(api_env)
     now = datetime.now(UTC)
     app = await seed_client(api_env, org_id, last_used_at=now - timedelta(hours=2))
+    rival_use = text("UPDATE oauth_clients SET last_used_at = :t WHERE id = :id")
     async with oauth_session(org_id, api_env.app_engine) as session:
         held = await clients.hold(session, org_id=org_id, app_id=app.id, now=now)
-        assert held is not None and held.last_used_at == now
+        assert held is not None
+        async with oauth_session(org_id, api_env.app_engine) as rival:
+            await rival.execute(text(NO_WAITING))
+            await rival.execute(rival_use, {"t": now - timedelta(hours=2), "id": app.id})
+        clients.touch(held, now)
+        await session.flush()
         with pytest.raises(DBAPIError, match="lock timeout"):
             async with oauth_session(org_id, api_env.app_engine) as rival:
                 await rival.execute(text(NO_WAITING))
-                await rival.execute(
-                    text("UPDATE oauth_clients SET last_used_at = :t WHERE id = :id"),
-                    {"t": now, "id": app.id},
-                )
+                await rival.execute(rival_use, {"t": now, "id": app.id})
+    assert await _stored_use(api_env, org_id, app.id) == now
+
+
+async def test_a_hold_records_no_use(api_env) -> None:
+    """A refused request holds the app and writes no use, whether its
+    transaction commits (a spent code, plan Task 7's B3-21) or rolls back."""
+    org_id, _ = await oauth_org(api_env)
+    then = datetime.now(UTC) - timedelta(hours=2)
+    app = await seed_client(api_env, org_id, last_used_at=then)
     async with oauth_session(org_id, api_env.app_engine) as session:
-        stored = (
-            await session.execute(
-                select(OAuthClient.last_used_at).where(OAuthClient.id == app.id)
-            )
-        ).scalar_one()
-    assert stored == now
+        assert await clients.hold(session, org_id=org_id, app_id=app.id, now=datetime.now(UTC))
+    assert await _stored_use(api_env, org_id, app.id) == then
+    with pytest.raises(RuntimeError, match="refused"):
+        async with oauth_session(org_id, api_env.app_engine) as session:
+            await clients.hold(session, org_id=org_id, app_id=app.id, now=datetime.now(UTC))
+            raise RuntimeError("refused")
+    assert await _stored_use(api_env, org_id, app.id) == then
 
 
 async def test_an_app_gone_idle_or_of_another_org_is_not_held(api_env) -> None:
     """A purge that committed after the app was looked up leaves nothing to
-    hold -- None, not a stale-row 500 at the flush."""
+    hold -- None, not a stale-row 500 at a later flush."""
     org_id, _ = await oauth_org(api_env)
     other_org = await api_env.create_org("oauth-b")
     now = datetime.now(UTC)
@@ -456,26 +480,23 @@ async def test_an_app_gone_idle_or_of_another_org_is_not_held(api_env) -> None:
         assert await clients.hold(session, org_id=org_id, app_id=purged.id, now=now) is None
         assert await clients.hold(session, org_id=org_id, app_id=idle.id, now=now) is None
         assert await clients.hold(session, org_id=org_id, app_id=foreign.id, now=now) is None
-    async with oauth_session(org_id, api_env.app_engine) as session:
-        untouched = (
-            await session.execute(
-                select(OAuthClient.last_used_at).where(OAuthClient.id == idle.id)
-            )
-        ).scalar_one()
-    assert untouched == now - timedelta(days=30, minutes=1)
+    assert await _stored_use(api_env, org_id, idle.id) == now - timedelta(days=30, minutes=1)
 
 
-async def test_a_purge_that_waited_on_a_use_spares_the_app(api_env) -> None:
-    """The purge in `guards.lock_user_row`'s lock map: one app per statement,
-    the idle condition inside it. It meets a holder of the app row, waits on
-    the row and not in the cascade, and once the holder's use commits,
-    Postgres re-checks the condition on the row as it now is: the app and its
-    grants survive."""
+async def test_a_late_use_does_not_wait_on_a_queued_purge_and_spares_the_app(api_env) -> None:
+    """The purge in `guards.lock_user_row`'s lock map, the idle condition
+    inside its DELETE, meets a holder of the app row and queues on the row.
+    The holder then writes its grant rows and its use (`touch`, after the
+    signature) WITHOUT WAITING on the queued purge -- PostgreSQL does not
+    queue a transaction that already holds the row behind a waiter for it
+    (the re-review's probe P6) -- and once the use commits, the purge's
+    re-check of its condition fails: the app and its grants survive."""
     org_id, _ = await oauth_org(api_env)
     user_id = await user_id_of(api_env, await api_env.create_user(org_id, "org-admin"))
     then = datetime.now(UTC) - timedelta(days=30)
     app = await seed_client(api_env, org_id, last_used_at=then)
     family_id = await _grant(api_env, org_id, user_id, app)
+    now = then + timedelta(days=29)
 
     async def purge() -> int:
         async with oauth_session(org_id, api_env.app_engine) as session:
@@ -487,21 +508,95 @@ async def test_a_purge_that_waited_on_a_use_spares_the_app(api_env) -> None:
             return int(result.rowcount)
 
     async with oauth_session(org_id, api_env.app_engine) as session:
-        held = await clients.hold(
-            session, org_id=org_id, app_id=app.id, now=then + timedelta(days=29)
-        )
+        await lock_user_row(session, user_id)
+        held = await clients.hold(session, org_id=org_id, app_id=app.id, now=now)
         assert held is not None
         waiting = asyncio.create_task(purge())
         blocked = await until_blocked_by(api_env.app_engine, await backend_pid(session))
         assert [normalised(q).split(" ")[0] for q in blocked] == ["DELETE"]
+        await session.execute(text(NO_WAITING))
+        await session.execute(
+            update(OAuthRefreshFamily)
+            .where(OAuthRefreshFamily.id == family_id)
+            .values(last_used_at=now)
+        )
+        clients.touch(held, now)
+        await session.flush()
     assert await waiting == 0
     async with oauth_session(org_id, api_env.app_engine) as session:
         survivors = (
-            await session.execute(select(OAuthRefreshFamily.id).where(
-                OAuthRefreshFamily.oauth_client_id == app.id
-            ))
+            await session.execute(
+                select(OAuthRefreshFamily.id).where(OAuthRefreshFamily.oauth_client_id == app.id)
+            )
         ).scalars().all()
     assert survivors == [family_id]
+
+
+async def test_a_revocation_holds_no_app_and_a_purge_waits_in_its_cascade(api_env) -> None:
+    """The carve-out in `store.py`'s lock order: a revocation -- one UPDATE of
+    a person's families, then only the chain -- takes no app row, so an idle
+    app's purge, holding the app row, waits for it IN ITS CASCADE (the
+    re-review's probe P4). Safe: after its UPDATE the revocation waits only
+    for the chain, which the purge takes only after its cascade. Both
+    commit; the purge's cascade then takes the revoked family."""
+    org_id, _ = await oauth_org(api_env)
+    user_id = await user_id_of(api_env, await api_env.create_user(org_id, "org-admin"))
+    then = datetime.now(UTC) - timedelta(days=31)
+    app = await seed_client(api_env, org_id, last_used_at=then)
+    await _grant(api_env, org_id, user_id, app)
+    chain = text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))")
+    key = {"k": f"oauth-test-chain:{org_id}"}
+
+    async def purge() -> int:
+        async with oauth_session(org_id, api_env.app_engine) as session:
+            result = await session.execute(
+                delete(OAuthClient).where(
+                    OAuthClient.id == app.id, OAuthClient.last_used_at <= then
+                )
+            )
+            await session.execute(chain, key)
+            return int(result.rowcount)
+
+    async with oauth_session(org_id, api_env.app_engine) as session:
+        await lock_user_row(session, user_id)
+        revoked = await session.execute(
+            update(OAuthRefreshFamily)
+            .where(OAuthRefreshFamily.user_id == user_id, OAuthRefreshFamily.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(UTC), revoked_reason="disabled")
+        )
+        assert revoked.rowcount == 1
+        waiting = asyncio.create_task(purge())
+        blocked = await until_blocked_by(api_env.app_engine, await backend_pid(session))
+        assert [normalised(q).split(" ")[0] for q in blocked] == ["DELETE"]
+        await session.execute(chain, key)
+    assert await waiting == 1
+    async with oauth_session(org_id, api_env.app_engine) as session:
+        left = (await session.execute(select(OAuthRefreshFamily.id))).scalars().all()
+    assert left == []
+
+
+async def test_two_apps_held_in_either_order_wait_for_nothing(api_env) -> None:
+    """A hold writes nothing, so two transactions that each hold two apps --
+    in opposite orders here, which the lock order forbids (id order) -- still
+    meet no conflict: the deadlock of the re-review's probe P5 came from a
+    hold that wrote the use."""
+    org_id, _ = await oauth_org(api_env)
+    now = datetime.now(UTC)
+    first = await seed_client(api_env, org_id, last_used_at=now - timedelta(hours=2))
+    second = await seed_client(api_env, org_id, last_used_at=now - timedelta(hours=2))
+    async with (
+        oauth_session(org_id, api_env.app_engine) as one,
+        oauth_session(org_id, api_env.app_engine) as two,
+    ):
+        await one.execute(text(NO_WAITING))
+        await two.execute(text(NO_WAITING))
+        held = [
+            await clients.hold(one, org_id=org_id, app_id=first.id, now=now),
+            await clients.hold(two, org_id=org_id, app_id=second.id, now=now),
+            await clients.hold(one, org_id=org_id, app_id=second.id, now=now),
+            await clients.hold(two, org_id=org_id, app_id=first.id, now=now),
+        ]
+    assert None not in held
 
 
 # --------------------------------------------------------------------------- #
@@ -518,7 +613,12 @@ async def test_the_deployment_org_is_the_default_slugs(api_env) -> None:
     assert await deployment_org(api_env.app) is None
 
 
-PACKAGE = Path(__file__).resolve().parents[1] / "app" / "core" / "auth" / "oauth"
+BACKEND = Path(__file__).resolve().parents[1]
+PACKAGE = BACKEND / "app" / "core" / "auth" / "oauth"
+#: The OAuth server's sources: its package, and the route modules Tasks 6-8
+#: add (`app/api/oauth_registration.py`, `app/api/oauth_tokens.py`,
+#: `app/api/v1/oauth_consent.py`), which join the scan once they exist.
+OAUTH_SOURCES = ("app/core/auth/oauth/*.py", "app/api/oauth_*.py", "app/api/v1/oauth_*.py")
 #: The RLS-bypassing role's doors: its engine (`app.state.admin_engine`,
 #: `db.get_admin_engine()`), its session (`tenancy.admin_session()`, which
 #: defaults to that engine) and its URL (`settings.database_admin_url`).
@@ -546,11 +646,14 @@ def _admin_doors(sources: list[tuple[str, ast.Module]]) -> list[str]:
 def test_the_oauth_server_never_opens_the_admin_engine() -> None:
     """Design §6.2: before the organization is known, only a SECURITY DEFINER
     function reads; the admin engine bypasses RLS altogether."""
-    files = sorted(PACKAGE.glob("*.py"))
-    assert _admin_doors([(p.name, ast.parse(p.read_text())) for p in files]) == []
+    files = sorted({p for pattern in OAUTH_SOURCES for p in BACKEND.glob(pattern)})
+    named = [(str(p.relative_to(BACKEND)), p) for p in files]
+    assert _admin_doors([(name, ast.parse(p.read_text())) for name, p in named]) == []
     # And the text, for a name the syntax does not show: `getattr(x, "...")`.
-    assert [p.name for p in files if any(door in p.read_text() for door in ADMIN_DOORS)] == []
-    assert {"store.py", "clients.py"} <= {p.name for p in files}  # the scan sees the package
+    assert [n for n, p in named if any(door in p.read_text() for door in ADMIN_DOORS)] == []
+    # The scan sees at least the whole package, `store.py` and `clients.py` among it.
+    assert set(PACKAGE.glob("*.py")) <= set(files)
+    assert {PACKAGE / "store.py", PACKAGE / "clients.py"} <= set(files)
 
 
 def test_the_admin_engine_guard_is_not_vacuous() -> None:
