@@ -438,7 +438,17 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 110, own authentication phase 3 (plan 2026-11-06, Task 3): one static
+    NOW 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
+    WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization code
+    refused and spent", when a live code arrives with another app, another
+    redirect or a wrong PKCE verifier: the code is used up (RFC 6749 §10.5,
+    plan B3-21), and a legitimate client never sends any of the three wrong,
+    so the line is the trace of a stolen or forged one. No throttle: each line
+    costs a code, and each code a signed-in person's approval. `extra` = the
+    reason ("client", "redirect" or "verifier") and the presenting app's
+    client_id; never the code or the verifier.
+
+    BEFORE THAT, 110, own authentication phase 3 (plan 2026-11-06, Task 3): one static
     WARNING in `app/core/auth/oauth/cimd.py::fetch_document`, "client metadata
     document refused", when an AI app's client metadata document cannot be its
     client (unreachable, not JSON, a mismatched client_id, a secret...). Without
@@ -585,8 +595,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 110, (
-        f"the AST sweep found {total} log call sites, expected 110 -- if a log "
+    assert total == 111, (
+        f"the AST sweep found {total} log call sites, expected 111 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

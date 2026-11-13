@@ -415,6 +415,11 @@ def create_app(
     from app.api.well_known import router as well_known_router
 
     app.include_router(well_known_router)
+    # The OAuth server's token and revocation endpoints (plan 2026-11-06,
+    # Task 7): public, outside `/api/v1`, form-encoded, RFC 6749 errors.
+    from app.api.oauth_tokens import router as oauth_tokens_router
+
+    app.include_router(oauth_tokens_router)
     app.router.routes.extend(mcp.routes())
     # The console's side of it: Settings → AI connections (`app/mcp/api.py`).
     from app.mcp.api import router as mcp_admin_router

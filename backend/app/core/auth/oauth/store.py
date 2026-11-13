@@ -51,7 +51,9 @@ REVOCATIONS TAKE NO APP ROW. A writer whose only statement on grant rows is
 one UPDATE of families -- `grants.revoke_family`, `revoke_all_for_user`,
 `revoke_app` (Tasks 7 and 10) -- with nothing after it but the audit chain,
 skips steps 3 and 5: the account acts revoke a person's grants across every
-app, and `revoke_app`'s "everyone" holds no person's row. An idle app's
+app, and `revoke_app`'s "everyone" holds no person's row. An app's own RFC
+7009 request, `grants.revoke_presented` (Task 7), is one of them and takes
+step 1 neither: the grant read unlocked, `revoke_family`, then the chain. An idle app's
 purge, already holding the app row, may then wait IN ITS CASCADE for such a
 writer's family rows. No cycle closes: after its UPDATE that writer waits
 only for the chain, which the purge takes only after its cascade (the

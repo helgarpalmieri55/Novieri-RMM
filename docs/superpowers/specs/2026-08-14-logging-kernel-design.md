@@ -175,7 +175,17 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 110, own authentication phase 3 (plan 2026-11-06, Task 3).** One site. A
+**NOW 111, own authentication phase 3 (plan 2026-11-06, Task 7).** One site. A
+static WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization
+code refused and spent", when a live code arrives with another app, another
+redirect or a wrong PKCE verifier. The code is used up (RFC 6749 §10.5, plan
+B3-21), and a legitimate client never sends any of the three wrong, so the line
+is the trace of a stolen or forged code. No throttle: each line costs a code,
+and each code a signed-in person's approval. `extra` = the reason (`client`,
+`redirect` or `verifier`) and the presenting app's `client_id`; never the code
+or the verifier.
+
+**BEFORE THAT, 110, own authentication phase 3 (plan 2026-11-06, Task 3).** One site. A
 static WARNING in `app/core/auth/oauth/cimd.py::fetch_document`, "client
 metadata document refused", when an AI app's client metadata document cannot
 be its client -- unreachable, not JSON, a mismatched `client_id`, a shared
