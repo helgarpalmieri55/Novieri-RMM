@@ -229,8 +229,8 @@ async def update_own_profile(
     written at the record's next ORM read: the chain held while waiting on
     the row, against any writer of the person's rows that holds the row and
     audits last (an administrator's act on them, their own sign-in steps; the
-    MCP door's address refresh too, until own authentication phase 3 retired
-    it): a 40P01, and a 500. So the row is locked first
+    MCP door's address refresh too, which own authentication phase 3
+    retired): a 40P01, and a 500. So the row is locked first
     (`tests/test_user_admin_races.py`)."""
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         user = await _own_row(session, user_id, lock=True)

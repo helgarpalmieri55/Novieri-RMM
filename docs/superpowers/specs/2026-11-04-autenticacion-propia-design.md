@@ -216,6 +216,10 @@ acceso, y son lo que se hace con prisa para parar a alguien. Ni el correo de pru
 nada. Ni renombrar o redescribir un rol (`PATCH /roles/{id}`), que no cambia lo que nadie puede (decisión del operador
 S5, 2026-11-09).
 
+> **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También **la pide** aprobar una aplicación de
+> IA en la pantalla de consentimiento, en un equipo recordado también: aprobarla le entrega toda la autoridad de la
+> persona (`CLAUDE.md` 1c) mientras se use. Rechazarla no la pide.
+
 ### 2.6 Recordar este equipo (decisión S2b)
 
 - Una cookie aparte, `__Host-itms_device` (`HttpOnly`, `Secure`, `SameSite=Strict`), con un identificador aleatorio
@@ -232,6 +236,9 @@ S5, 2026-11-09).
 
 Al cambiar la contraseña, añadir o quitar un factor, recordar un equipo y usar un código de recuperación [S7]; toda
 recuperación avisa al titular [S1 §4.2.3].
+
+> **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También al aprobar una aplicación
+> de IA: «Has conectado <host de la app>», con el host que encabeza la pantalla de consentimiento y cómo revocarla.
 
 ### 2.8 Restablecer la contraseña por correo
 
@@ -337,6 +344,12 @@ tiempo.
 - Un registro sin uso en 30 días caduca (RFC 7591 lo permite [S19]; Anthropic avisa de que el registro abierto crea un
   cliente en cada conexión nueva [S33]).
 - MCP sigue apagado hasta que un org-admin lo enciende (1c(d)).
+
+> **Enmienda 2026-11-06 (decisión del operador C2; plan de la fase 3, Tasks 6 y 12).** El registro dinámico se
+> abre solo con `ITS_MCP_REGISTRATION=open`; un cliente CIMD (§5.5) se acepta siempre que MCP esté encendido, sin
+> esa opción. Los metadatos anuncian CIMD siempre que hay emisor, y `registration_endpoint` solo con el registro
+> abierto y MCP encendido en la organización del despliegue. Límites: 20 por hora y red (IPv6 por /64), 200
+> registros vivos y el registro cerrado mientras MCP esté apagado (plan B3-02).
 
 ### 5.5 CIMD
 

@@ -2,7 +2,7 @@
 
 MCP spec 2026-10-09 §2. The api serves `/mcp` (the protocol endpoint) and
 `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728 metadata, which named
-the realm as the authorization server until own authentication phase 3, and
+the realm as the authorization server before own authentication phase 3, and
 names the platform since). Neither lives under `/api`, so the api
 router has to name them; without that Traefik hands both to `web`, whose nginx
 answers every unknown path with the SPA's `index.html` and a 200.

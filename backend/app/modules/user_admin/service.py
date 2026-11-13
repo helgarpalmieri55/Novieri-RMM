@@ -28,9 +28,9 @@ below but collected here because they are the reason the module exists:
 3. **It never calls an identity provider.** Since P2 phase 1 the platform is
    its own. A technician invited here has no Keycloak identity --
    `external_subject` is a placeholder no provider issued
-   (`LOCAL_SUBJECT_PREFIX`) -- so until phase 3 moves the MCP server onto the
-   platform's own sign-in they cannot connect an AI app over MCP (plan
-   decision D5, accepted: nothing is deployed before the four projects end).
+   (`LOCAL_SUBJECT_PREFIX`) -- and since phase 3, which moved the MCP server
+   onto the platform's own OAuth server, that is no obstacle: they connect an
+   AI app like anybody else (`tests/test_oauth_falsifiers.py`).
 
 DISABLE, DELETE AND A FACTOR RESET END THE PERSON'S SESSIONS AND FORGET THEIR
 REMEMBERED DEVICES in the same transaction as the change (design §2.4):
