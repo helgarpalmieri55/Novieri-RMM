@@ -65,6 +65,7 @@ from app.models.inventory import (
     InventorySnapshot,
 )
 from app.models.mcp import McpRevocation
+from app.models.oauth import OAuthClient, OAuthCode, OAuthRefreshFamily, OAuthRefreshToken
 from app.models.platform_error import PlatformErrorEvent, PlatformErrorGroup
 from app.models.platform_health import PlatformHealthSample, PlatformProbeNotice
 from app.models.security import SecurityEvent
@@ -333,6 +334,10 @@ __all__ = [
     "JobStatus",
     "KeycloakEventIngest",
     "McpRevocation",
+    "OAuthClient",
+    "OAuthCode",
+    "OAuthRefreshFamily",
+    "OAuthRefreshToken",
     "License",
     "LicenseAllocation",
     "LicenseComplianceSnapshot",

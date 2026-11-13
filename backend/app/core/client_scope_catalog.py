@@ -6,9 +6,10 @@ H  client_id NOT NULL, set by the `its_client_from_parent` trigger from
 O  client_id nullable: NULL means "every client" (config). When `fk` is set
    and non-null on a row, the trigger derives the client from it.
 G  no client scoping. A column named client_id there means something else:
-   the grant scope on `user_roles`, an OAuth client on `mcp_revocation`
-   and `email_oauth_app`. On `audit_events` it is the informative client of
-   the event's subject (hashed when set, read by no policy: phase 2 C6).
+   the grant scope on `user_roles`, an OAuth client on `mcp_revocation`,
+   `oauth_clients` and `email_oauth_app`. On `audit_events` it is the
+   informative client of the event's subject (hashed when set, read by no
+   policy: phase 2 C6).
 
 `SCOPED` is every C, H and O table: each one carries the restrictive
 `client_isolation` policy (migrations 0231 to 0243), and no family is pending
@@ -58,6 +59,12 @@ CATALOG: dict[str, Entry] = {
     # follows their `users` row like every credential above; the application
     # registration is the org's.
     "auth_external_identities": O("users", "user_id"), "auth_entra_settings": G,
+    # own authentication phase 3 (migration 0247): the AI apps an organization
+    # knows are the org's (G: `client_id` there is the OAuth client id); a
+    # person's grants, codes and refresh tokens follow their `users` row.
+    "oauth_clients": G, "oauth_codes": O("users", "user_id"),
+    "oauth_refresh_families": O("users", "user_id"),
+    "oauth_refresh_tokens": O("users", "user_id"),
     # clients themselves
     "clients": G, "sites": C,
     # fleet
