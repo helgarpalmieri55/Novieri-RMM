@@ -154,12 +154,16 @@ def test_no_route_opens_a_raw_session_without_a_recorded_reason() -> None:
 def test_only_the_errors_routes_reach_for_the_app_engine_without_a_tenant() -> None:
     """The two classes of exception are not equally serious and the test says so.
 
-    `admin_engine` is BYPASSRLS but the two sites that use it read ONE column
-    of `organizations` before any tenant exists. `app_engine` with no GUC is the
-    F1 shape: the session is exactly the one every request uses, minus the
-    setting that makes RLS mean anything. Today that shape lives in two
-    functions, both in the error monitor, both gated on a permission no tenant
-    administrator holds. A third would be a finding, not a style question."""
+    `admin_engine` is BYPASSRLS, but its two sites are the agent release
+    catalogue's (`agent_distribution`'s `_unpublish` and
+    `delete_version_route`): `agent_releases` has no org_id, both routes need
+    `agent.release.manage` on every client, and their reasons are recorded in
+    `RAW_SESSIONS_BY_DESIGN`, which the test above holds exactly. `app_engine`
+    with no GUC is the F1 shape: the session is exactly the one every request
+    uses, minus the setting that makes RLS mean anything. Today that shape
+    lives in two functions, both in the error monitor, both gated on a
+    permission no tenant administrator holds, and this test pins them by name.
+    A third would be a finding, not a style question."""
     app_engine_sites = sorted(
         key for key, engine in _raw_session_sites().items() if "app_engine" in engine
     )
