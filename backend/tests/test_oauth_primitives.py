@@ -286,3 +286,122 @@ def test_a_challenge_is_43_base64url_characters() -> None:
     assert not pkce.valid_challenge(CHALLENGE + "=")
     assert not pkce.valid_challenge(CHALLENGE[:-1])
     assert not pkce.valid_challenge("plain-text-is-not-a-challenge-of-any-kind!!")
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1 (review of be9e584)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://evil.example\\.claude.ai/cb",
+        "https://claude%2Eai/cb",
+        "https://claude.ai/cb%zz",
+        "https://127.1/cb",
+        "https://2130706433/cb",
+        "https://0x7f.0.0.1/cb",
+        "https://010.0.0.1/cb",
+        "https://256.1.1.1/cb",
+        'https://a"b.example/cb',
+        "https://a{b.example/cb",
+        "https://a|b.example/cb",
+        "https://-a.example/cb",
+        "https://a_b.example/cb",
+        "https://a..example/cb",
+        "https://claude.ai/c`b",
+        "https://claude.ai/c<b",
+        "https://[::1%25eth0]/cb",
+        "https://" + "a" * 64 + ".example/cb",
+    ],
+)
+def test_a_host_the_browser_would_read_differently_is_refused(uri: str) -> None:
+    with pytest.raises(redirects.RedirectRejected) as refused:
+        redirects.check_registered(uri)
+    assert refused.value.reason == "malformed"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://xn--bcher-kva.example/cb",
+        "https://a-b.example1.com/cb?x=%20y",
+        "https://203.0.113.9/cb",
+        "https://[2001:db8::1]:8443/cb",
+        "http://127.0.0.1:5/cb",
+        "http://[::1]:5/cb",
+        "http://localhost:5/cb",
+    ],
+)
+def test_ordinary_and_loopback_hosts_still_register(uri: str) -> None:
+    assert redirects.check_registered(uri) == uri
+
+
+def test_valid_host_is_public() -> None:
+    assert redirects.valid_host("claude.ai")
+    assert redirects.valid_host("::1")
+    assert redirects.valid_host("127.0.0.1")
+    assert not redirects.valid_host("127.1")
+    assert not redirects.valid_host("")
+    assert not redirects.valid_host("a b")
+    assert not redirects.valid_host("a\\b")
+    assert not redirects.valid_host("a" * 254)
+
+
+def test_the_displayed_host_is_one_the_browser_agrees_with() -> None:
+    assert redirects.host_of("https://evil.example\\.claude.ai/cb") == ""
+
+
+async def test_error_headers_cannot_unset_no_store() -> None:
+    exc = OAuthError(
+        errors.CLIENT_AUTH,
+        headers={"cache-control": "public", "PRAGMA": "x", "WWW-Authenticate": "Basic"},
+    )
+    resp = await errors.oauth_error_handler(None, exc)  # type: ignore[arg-type]
+    assert resp.headers.getlist("cache-control") == ["no-store"]
+    assert resp.headers.getlist("pragma") == ["no-cache"]
+    assert resp.headers["www-authenticate"] == "Basic"
+
+
+@pytest.mark.parametrize(
+    ("uri", "here"),
+    [
+        ("https://[::ffff:127.0.0.1]/cb", True),
+        ("https://app.localhost/cb", True),
+        ("https://localhost.example/cb", False),
+        ("https://[::ffff:8.8.8.8]/cb", False),
+    ],
+)
+def test_more_ways_to_spell_this_computer(uri: str, here: bool) -> None:
+    assert redirects.stays_on_this_computer(uri) is here
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://itms.example.com#",
+        "https://itms.example.com?",
+        "https://itms.example.com:",
+        "https://itms .example.com",
+        "https://itms.example.com\\x",
+        "https://127.1",
+    ],
+)
+def test_an_issuer_with_leftovers_or_a_bad_host_is_none(url: str) -> None:
+    assert policy.issuer(_settings(url)) is None
+
+
+def test_an_ipv4_mapped_address_counts_as_its_ipv4() -> None:
+    import ipaddress
+
+    assert policy.network_of(ipaddress.ip_address("::ffff:1.2.3.4")) == "ip:1.2.3.4"
+
+
+def test_a_128_character_verifier_and_its_punctuation_verify() -> None:
+    for verifier in ("a" * 128, "a.b~c-d_e" + "x" * 40):
+        assert pkce.verify(verifier, pkce.s256(verifier))
+
+
+async def test_create_app_registers_the_oauth_error_handler(api_env) -> None:  # type: ignore[no-untyped-def]
+    assert api_env.app.exception_handlers[OAuthError] is errors.oauth_error_handler

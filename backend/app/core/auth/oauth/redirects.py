@@ -27,16 +27,26 @@ be retained when adding additional query parameters").
 """
 
 import ipaddress
+import re
 from collections.abc import Mapping, Sequence
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.core.auth.oauth.policy import MAX_URI_LENGTH
+from app.core.auth.oauth.policy import MAX_URI_LENGTH, valid_host
 
 #: `urlsplit` gives an IPv6 literal without its brackets.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 #: The parameters of an authorization response (RFC 6749 §4.1.2, §4.1.2.1;
 #: RFC 9207 §2), which a registered redirect's query may not hold.
 RESPONSE_PARAMETERS = frozenset({"code", "state", "iss", "error", "error_description", "error_uri"})
+
+
+#: RFC 3986's characters (unreserved, reserved, and `%` only as a `%XX`
+#: escape). Not backslash, quotes, `< > ^ ` { | }` nor `*`: a browser's URL
+#: parser reads some of those differently from `urlsplit` (a backslash ends an
+#: https host).
+_URI_CHARS = re.compile(r"(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()+,;=]|%[0-9A-Fa-f]{2})*")
+
+__all__ = ["valid_host"]
 
 
 class RedirectRejected(ValueError):
@@ -62,7 +72,7 @@ def check_registered(uri: object) -> str:
     """`uri` unchanged when it may be registered; `RedirectRejected` if not."""
     if not isinstance(uri, str) or not uri or len(uri) > MAX_URI_LENGTH:
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
-    if any(ord(ch) <= 0x20 or ord(ch) > 0x7E for ch in uri) or "*" in uri:
+    if _URI_CHARS.fullmatch(uri) is None:
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if "#" in uri:
         raise RedirectRejected("fragment")  # i18n-exempt: a reason code
@@ -73,6 +83,8 @@ def check_registered(uri: object) -> str:
     if names & RESPONSE_PARAMETERS:
         raise RedirectRejected("query")  # i18n-exempt: a reason code
     host = parts.hostname or ""
+    if host and not valid_host(host):
+        raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if parts.scheme == "https" and host:
         return uri
     if parts.scheme == "http" and host in LOOPBACK_HOSTS:
@@ -97,10 +109,13 @@ def stays_on_this_computer(uri: str) -> bool:
     warning (MCP [S30]: "SHOULD display additional warnings for
     localhost-only redirect URIs")."""
     host = host_of(uri).rstrip(".")
-    if host == "localhost":
+    if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        address = ipaddress.ip_address(host)
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        return address.is_loopback
     except ValueError:
         return False
 
@@ -132,9 +147,10 @@ def host_of(uri: str) -> str:
     """The host name, as the consent screen shows it ("" if there is none).
     ASCII, because a registered redirect is (`check_registered`)."""
     try:
-        return _split(uri).hostname or ""
+        host = _split(uri).hostname or ""
     except RedirectRejected:
         return ""
+    return host if valid_host(host) else ""
 
 
 def with_params(uri: str, params: Mapping[str, str]) -> str:

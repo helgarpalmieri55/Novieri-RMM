@@ -25,6 +25,7 @@ from starlette.responses import JSONResponse
 #: RFC 6749 §5.2's character set for `error` and `error_description`.
 ALLOWED = re.compile(r"[\x20-\x21\x23-\x5b\x5d-\x7e]+")
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+_NO_STORE_KEYS = frozenset(k.lower() for k in NO_STORE)
 
 
 class Problem(NamedTuple):
@@ -56,7 +57,10 @@ async def oauth_error_handler(_request: Request, exc: Exception) -> JSONResponse
     return JSONResponse(
         {"error": exc.problem.error, "error_description": exc.problem.description},
         status_code=exc.problem.status,
-        headers={**NO_STORE, **exc.headers},
+        headers={
+            **{k: v for k, v in exc.headers.items() if k.lower() not in _NO_STORE_KEYS},
+            **NO_STORE,
+        },
     )
 
 
