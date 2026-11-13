@@ -16,7 +16,12 @@ import asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-__all__ = ["backend_pid", "normalised", "until_blocked_by"]
+__all__ = ["NO_WAITING", "backend_pid", "normalised", "until_blocked_by"]
+
+#: A statement that would wait on a row lock fails at once instead: executed
+#: in a transaction the test holds, it turns a wait the test says must not
+#: happen into an error, not a hang.
+NO_WAITING = "SET LOCAL lock_timeout = '500ms'"
 
 
 async def backend_pid(session: AsyncSession) -> int:

@@ -279,7 +279,8 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "phase 3 plan 2026-11-06, Task 13) -- one organization's old sessions, forgotten "
         "devices, spent links and old challenges, and its AI apps' spent codes and ended "
         "grants with their refresh tokens, whose technician rows only an every-client scope "
-        "may delete (its idle AI apps go by clients.purge_idle, under oauth_session); every "
+        "may delete (its idle AI apps go by clients.purge_idle, under oauth_session, and "
+        "when the sweep then fails a second transaction writes their audit row alone); every "
         "step carries its own org_id predicate, and the sweep is audited"
     ),
     "app/modules/agent_update/reconcile.py::tick_all_orgs": "worker: agent-update rollout tick",

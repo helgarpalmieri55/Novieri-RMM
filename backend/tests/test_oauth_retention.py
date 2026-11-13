@@ -2,8 +2,8 @@
 propia plan 2026-11-06, Task 13; phase 2's `app/core/auth/retention.py`).
 
 - a code goes ten minutes after it expired, used or not; a live one stays;
-- a grant goes a day after it was revoked or lapsed, its refresh tokens with
-  it; a live one, and one revoked an hour ago, stay;
+- a grant goes a day after it was revoked or lapsed, its refresh tokens
+  first; a live one, and one revoked an hour ago, stay;
 - an app unused for 30 days goes, its grants and codes with it; a used one
   stays;
 - the sweep's one audit row counts each step (`auth.retention_applied`);
@@ -13,19 +13,27 @@ propia plan 2026-11-06, Task 13; phase 2's `app/core/auth/retention.py`).
 And what the coordinator's integration notes for Task 13 add, each pair of
 the lock map met deterministically (`tests/race_helpers.py`):
 
-- THE SWEEP WAITS ON NO GRANT ROW. Its codes and grants steps lock what they
-  delete FOR UPDATE SKIP LOCKED, leaves first: a revocation across two ended
-  grants, a refresh holding its token, an exchange holding its spent code and
-  an idle app's purge leave it nothing to wait for, so it closes no cycle
-  with them; what they hold is left to the next sweep. The other way round
-  they may wait on the open sweep, and then find nothing (a refresh:
-  `invalid_grant`; a purge: the rest of the app);
+- THE SWEEP WAITS ON NO GRANT ROW. Its codes, refresh-token and grants steps
+  lock what they delete FOR UPDATE SKIP LOCKED, leaves first, and these tests
+  run the sweep under a lock timeout, which a wait trips: a revocation across
+  two ended grants, a refresh holding its token, an exchange holding its
+  spent code and an idle app's purge leave it nothing to wait for, so it
+  closes no cycle with them; what they hold is left to the next sweep. The
+  other way round they may wait on the open sweep, and then find nothing (a
+  refresh: `invalid_grant`; a purge: the rest of the app);
 - THE APPS STEP IS THE REGISTRATION'S PURGE (`clients.purge_idle`), outside
   the sweep's transaction: a held app is given way on and the rest of the
   sweep goes on, and the step is bounded by the purge's own budget.
+
+And the review's fix round 1: EVERY ROW THAT WENT IS IN THAT DAY'S AUDIT ROW.
+Refresh tokens are counted on their own, so a day when only tokens went is
+audited; and apps purged before a sweep that then failed are recorded by a
+row of their own, the sweep's error still propagating -- logged, if even that
+row cannot be written.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -47,13 +55,18 @@ from app.core.tenancy import org_session
 from app.models import AuditEvent
 from app.models.oauth import OAuthClient, OAuthCode, OAuthRefreshFamily, OAuthRefreshToken
 from tests.oauth_support import RESOURCE, oauth_org, pkce_pair, seed_client, seed_code
-from tests.race_helpers import backend_pid, normalised, until_blocked_by
+from tests.race_helpers import NO_WAITING, backend_pid, normalised, until_blocked_by
 from tests.session_support import user_id_of
-from tests.test_oauth_schema import NO_WAITING
 
 NOW = datetime.now(UTC)
 #: Lapsed, unrevoked, two days ago: an ended grant the sweep takes.
 LAPSED = {"expires_at": NOW - timedelta(days=2)}
+#: The OAuth counts of `auth.retention_applied`, in the order they run.
+OAUTH_KEYS = ("oauth_codes", "oauth_refresh_tokens", "oauth_grants", "oauth_apps")
+#: A code issued then is spent: the codes step takes it.
+AN_HOUR_AGO = NOW - timedelta(hours=1)
+#: Phase 2's four counts, none of which this file's worlds feed.
+PHASE_2_KEYS = ("sessions", "devices", "links", "challenges")
 
 
 async def _open(
@@ -124,9 +137,9 @@ async def test_the_sweep_removes_what_can_no_longer_serve_anyone(api_env) -> Non
 
     swept = await retention.sweep_org(org_id, api_env.app_engine, now=NOW)
 
-    # One expired code, two ended grants, one idle app (whose grant and code
-    # went with it, uncounted).
-    assert swept == 4
+    # One expired code, the two ended grants' refresh tokens, the two ended
+    # grants, one idle app (whose grant and code went with it, uncounted).
+    assert swept == 6
     assert await _ids(api_env, OAuthClient, org_id) == {w["app"]}
     assert await _ids(api_env, OAuthRefreshFamily, org_id) == {w["live"], w["revoked_recent"]}
     async with AsyncSession(api_env.admin_engine) as session:
@@ -154,13 +167,15 @@ async def test_the_sweep_removes_what_can_no_longer_serve_anyone(api_env) -> Non
             .all()
         )
     assert len(codes) == 1 and codes[0] > NOW  # the live one; the idle app's went with it
-    assert tokens == {w["live"], w["revoked_recent"]}  # the ended grants' tokens cascaded
+    # The ended grants' tokens went first, by a statement of their own.
+    assert tokens == {w["live"], w["revoked_recent"]}
     assert (event.actor_type, event.actor_id) == ("system", None)
-    assert (event.meta["oauth_codes"], event.meta["oauth_grants"], event.meta["oauth_apps"]) == (
-        1,
-        2,
-        1,
-    )
+    assert {key: event.meta[key] for key in OAUTH_KEYS} == {
+        "oauth_codes": 1,
+        "oauth_refresh_tokens": 2,
+        "oauth_grants": 2,
+        "oauth_apps": 1,
+    }
 
 
 async def test_every_oauth_step_names_its_organization(api_env, bypassrls_session) -> None:
@@ -172,8 +187,8 @@ async def test_every_oauth_step_names_its_organization(api_env, bypassrls_sessio
     mine = await _world(api_env, "oauth-ret-a")
     theirs = await _world(api_env, "oauth-ret-b")
     # An ended grant whose tokens an earlier sweep already took (it left the
-    # grant, which a held code still named): nothing but its `org_id` keeps
-    # another organization's grants step off it.
+    # grant, which a revocation held): nothing but its `org_id` keeps another
+    # organization's grants step off it.
     async with AsyncSession(api_env.admin_engine) as session:
         await session.execute(
             delete(OAuthRefreshToken).where(OAuthRefreshToken.family_id == theirs["revoked_old"])
@@ -191,15 +206,16 @@ async def test_every_oauth_step_names_its_organization(api_env, bypassrls_sessio
 
     for model, ids in before.items():
         assert await _ids(api_env, model, theirs["org_id"]) == ids, model
-    assert (swept.counts["oauth_codes"], swept.counts["oauth_grants"]) == (1, 2)
+    assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [1, 2, 2]
     assert mine["idle"] not in await _ids(api_env, OAuthClient, mine["org_id"])
 
 
 def test_the_oauth_steps_close_the_registries() -> None:
-    """Codes and grants close `STEPS`, in the sweep's transaction; the idle
-    apps are `APART_STEPS`' one step, outside it (coordinator's notes for
-    Task 13: the purge's shape)."""
-    assert [name for name, _ in retention.STEPS][-2:] == ["oauth_codes", "oauth_grants"]
+    """Codes, the ended grants' refresh tokens and the grants close `STEPS`,
+    leaves first, in the sweep's transaction; the idle apps are
+    `APART_STEPS`' one step, outside it (coordinator's notes for Task 13: the
+    purge's shape)."""
+    assert [name for name, _ in retention.STEPS][-3:] == list(OAUTH_KEYS[:-1])
     assert [name for name, _ in retention.APART_STEPS] == ["oauth_apps"]
     assert retention.OAUTH_CODE_RETENTION == timedelta(minutes=10)
     assert retention.OAUTH_GRANT_RETENTION == timedelta(days=1)
@@ -302,33 +318,72 @@ async def test_an_exchange_holding_its_spent_code_meets_the_sweep_without_a_cycl
     skips the code, and a grant a remaining code still names: deleting it
     would empty that code's `family_id` (ON DELETE SET NULL) and wait on the
     exchange, which would then wait on the grant. So the exchange ends the
-    grant without waiting, and both are left to the next sweep."""
+    grant without waiting, and the code and the grant -- its refresh token
+    with it, so the two go on one day -- are left to the next sweep."""
     org_id, sub, user_id, app = await _person(api_env, "oauth-ret-exchange")
     family_id, _ = await _open(api_env, org_id, user_id, app, **LAPSED)
+    digest = await _spent_opener(api_env, org_id, sub, app, family_id)
+
+    await _exchange_meets_the_sweep(api_env, org_id, user_id, app, digest, family_id)
+    assert await _ids(api_env, OAuthRefreshFamily, org_id) == {family_id}
+    assert len(await _ids(api_env, OAuthCode, org_id)) == 1
+    assert len(await _ids(api_env, OAuthRefreshToken, org_id)) == 1
+
+
+async def test_the_grants_step_leaves_a_grant_a_held_code_names_with_no_token_left(
+    api_env,
+) -> None:
+    """The grants step does not lean on the tokens step to keep its cascade
+    off a held code: a grant whose tokens are already gone, and whose spent
+    code an exchange holds, is still left -- its own `no code names it`
+    condition, not the tokens step's, is what this pins."""
+    org_id, sub, user_id, app = await _person(api_env, "oauth-ret-tokenless")
+    family_id, _ = await _open(api_env, org_id, user_id, app, **LAPSED)
+    digest = await _spent_opener(api_env, org_id, sub, app, family_id)
+    async with AsyncSession(api_env.admin_engine) as session:
+        await session.execute(
+            delete(OAuthRefreshToken).where(OAuthRefreshToken.family_id == family_id)
+        )
+        await session.commit()
+
+    await _exchange_meets_the_sweep(api_env, org_id, user_id, app, digest, family_id)
+    assert await _ids(api_env, OAuthRefreshFamily, org_id) == {family_id}
+
+
+async def _spent_opener(
+    env: Any, org_id: UUID, sub: str, app: OAuthClient, family_id: UUID
+) -> bytes:
+    """The code that opened `family_id` 40 days ago, spent; its digest."""
     _, challenge = pkce_pair()
     opened = NOW - timedelta(days=40)
-    code = await seed_code(api_env, org_id, sub, app=app, challenge=challenge, now=opened)
+    code = await seed_code(env, org_id, sub, app=app, challenge=challenge, now=opened)
     digest = grants.hash_secret(code)
-    async with oauth_session(org_id, api_env.app_engine) as session:
+    async with oauth_session(org_id, env.app_engine) as session:
         await session.execute(
             update(OAuthCode)
             .where(OAuthCode.code_hash == digest)
             .values(used_at=opened, family_id=family_id)
         )
+    return digest
 
-    async with oauth_session(org_id, api_env.app_engine) as exchange:
+
+async def _exchange_meets_the_sweep(
+    env: Any, org_id: UUID, user_id: UUID, app: OAuthClient, digest: bytes, family_id: UUID
+) -> None:
+    """An exchange holds the spent code, the sweep runs under a lock timeout
+    and takes none of the OAuth rows, and the exchange then ends the grant
+    without waiting."""
+    async with oauth_session(org_id, env.app_engine) as exchange:
         await lock_user_row(exchange, user_id)
         assert await clients.hold(exchange, org_id=org_id, app_id=app.id, now=NOW)
         await exchange.execute(
             select(OAuthCode.id).where(OAuthCode.code_hash == digest).with_for_update()
         )
-        async with _sweeping(api_env, org_id) as sweeping:
+        async with _sweeping(env, org_id) as sweeping:
             swept = await retention.sweep(sweeping, org_id, now=NOW)
-        assert (swept.counts["oauth_codes"], swept.counts["oauth_grants"]) == (0, 0)
+        assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [0, 0, 0]
         await exchange.execute(text(NO_WAITING))
         assert await grants.revoke_family(exchange, family_id, "code_reused", NOW)
-    assert await _ids(api_env, OAuthRefreshFamily, org_id) == {family_id}
-    assert len(await _ids(api_env, OAuthCode, org_id)) == 1
 
 
 async def test_a_refresh_of_a_grant_the_sweep_took_waits_on_it_and_is_refused(api_env) -> None:
@@ -424,7 +479,7 @@ async def test_the_apps_step_gives_way_on_a_held_app_and_the_sweep_goes_on(api_e
         swept = await asyncio.wait_for(
             retention.sweep_org(org_id, api_env.app_engine, now=NOW), timeout=30
         )
-    assert swept == 1
+    assert swept == 2  # the ended grant and its refresh token
     assert idle.id in await _ids(api_env, OAuthClient, org_id)
     assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
     assert await _ids(api_env, OAuthClient, org_id) == {app.id}
@@ -448,5 +503,136 @@ async def test_the_apps_step_is_bounded_by_the_purges_budget(api_env, monkeypatc
     org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-budget")
     idle = await seed_client(api_env, org_id, last_used_at=NOW - timedelta(days=31))
     await _open(api_env, org_id, user_id, app, **LAPSED)
-    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 2
     assert idle.id in await _ids(api_env, OAuthClient, org_id)
+
+
+# --------------------------------------------------------------------------- #
+# Every deleted row is in that day's audit row (review fix round 1)
+# --------------------------------------------------------------------------- #
+
+
+async def _retention_rows(env: Any, org_id: UUID) -> list[dict[str, Any]]:
+    async with AsyncSession(env.admin_engine) as session:
+        events = (
+            await session.execute(
+                select(AuditEvent)
+                .where(AuditEvent.org_id == org_id, AuditEvent.action == "auth.retention_applied")
+                .order_by(AuditEvent.id)
+            )
+        ).scalars()
+        return [dict(event.meta) for event in events]
+
+
+async def test_a_day_when_only_refresh_tokens_went_is_audited(api_env) -> None:
+    """An ended grant with two refresh tokens, one of them held by a refresh:
+    the sweep takes the other token and leaves the grant (a token is still
+    left). Only a token went, and the day's audit row says so."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-tokens")
+    family_id, secret = await _open(api_env, org_id, user_id, app, **LAPSED)
+    async with oauth_session(org_id, api_env.app_engine) as session:
+        session.add(
+            OAuthRefreshToken(
+                org_id=org_id,
+                user_id=user_id,
+                family_id=family_id,
+                token_hash=grants.hash_secret(grants.new_secret()),
+                created_at=NOW - timedelta(days=39),
+            )
+        )
+
+    async with oauth_session(org_id, api_env.app_engine) as refresh:
+        await refresh.execute(
+            select(OAuthRefreshToken.id)
+            .where(OAuthRefreshToken.token_hash == grants.hash_secret(secret))
+            .with_for_update()
+        )
+        assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+    (row,) = await _retention_rows(api_env, org_id)
+    assert {key: row[key] for key in OAUTH_KEYS} == {
+        "oauth_codes": 0,
+        "oauth_refresh_tokens": 1,
+        "oauth_grants": 0,
+        "oauth_apps": 0,
+    }
+    assert await _ids(api_env, OAuthRefreshFamily, org_id) == {family_id}
+
+
+async def _failing(session: AsyncSession, org_id: UUID, now: datetime) -> int:
+    raise RuntimeError("a step of the sweep failed")
+
+
+def _fail_the_grants_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sweep's last step raises, after the others ran in its transaction."""
+    steps = [(name, _failing if name == "oauth_grants" else step) for name, step in retention.STEPS]
+    monkeypatch.setattr(retention, "STEPS", tuple(steps))
+
+
+async def test_apps_purged_before_a_sweep_that_failed_are_still_audited(
+    api_env, monkeypatch
+) -> None:
+    """The apps go in transactions of their own BEFORE the sweep's, so when
+    that one fails they are gone already: one `auth.retention_applied` still
+    records them, every `STEPS` count at 0 -- the failed transaction deleted
+    nothing, its spent code is still there -- and the sweep's own error is
+    what propagates."""
+    _fail_the_grants_step(monkeypatch)
+    org_id, sub, _user_id, app = await _person(api_env, "oauth-ret-fallback")
+    idle = await seed_client(api_env, org_id, last_used_at=NOW - timedelta(days=31))
+    _, challenge = pkce_pair()
+    await seed_code(api_env, org_id, sub, app=app, challenge=challenge, now=AN_HOUR_AGO)
+
+    with pytest.raises(RuntimeError, match="a step of the sweep failed"):
+        await retention.sweep_org(org_id, api_env.app_engine, now=NOW)
+
+    assert await _retention_rows(api_env, org_id) == [
+        {
+            "at": NOW.isoformat(),
+            **{key: 0 for key in PHASE_2_KEYS + OAUTH_KEYS[:-1]},
+            "oauth_apps": 1,
+        }
+    ]
+    assert idle.id not in await _ids(api_env, OAuthClient, org_id)
+    assert len(await _ids(api_env, OAuthCode, org_id)) == 1
+
+
+async def test_a_failed_sweep_that_purged_no_app_writes_no_row(api_env, monkeypatch) -> None:
+    _fail_the_grants_step(monkeypatch)
+    org_id, sub, _user_id, app = await _person(api_env, "oauth-ret-no-fallback")
+    _, challenge = pkce_pair()
+    await seed_code(api_env, org_id, sub, app=app, challenge=challenge, now=AN_HOUR_AGO)
+
+    with pytest.raises(RuntimeError, match="a step of the sweep failed"):
+        await retention.sweep_org(org_id, api_env.app_engine, now=NOW)
+
+    assert await _retention_rows(api_env, org_id) == []
+
+
+async def test_when_the_apps_row_fails_too_the_sweeps_own_error_propagates(
+    api_env, monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The fallback row cannot be written either (here the chain refuses):
+    that failure is logged -- a static line naming the organization, the
+    apps and the error's type -- and the sweep's OWN error still propagates."""
+    _fail_the_grants_step(monkeypatch)
+
+    async def chain_refuses(*_args: Any, **_kwargs: Any) -> None:
+        raise ConnectionError("the audit chain is unreachable")
+
+    monkeypatch.setattr(retention.audit_service, "record", chain_refuses)
+    org_id, _sub, _user_id, _app = await _person(api_env, "oauth-ret-no-chain")
+    await seed_client(api_env, org_id, last_used_at=NOW - timedelta(days=31))
+
+    with (
+        caplog.at_level(logging.ERROR, logger="its.auth.retention"),
+        pytest.raises(RuntimeError, match="a step of the sweep failed"),
+    ):
+        await retention.sweep_org(org_id, api_env.app_engine, now=NOW)
+
+    (record,) = [r for r in caplog.records if r.name == "its.auth.retention"]
+    assert record.getMessage() == (
+        "auth retention: idle AI apps were purged but the sweep failed, and their audit row "
+        "could not be written"
+    )
+    assert (record.org_id, record.apps, record.error) == (org_id, 1, "ConnectionError")
+    assert "unreachable" not in caplog.text

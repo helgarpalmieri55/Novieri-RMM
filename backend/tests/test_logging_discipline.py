@@ -438,7 +438,16 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
+    NOW 112, own authentication phase 3 (plan 2026-11-06, Task 13, review
+    fix round 1): one static ERROR in `app/core/auth/retention.py::sweep_org`,
+    "auth retention: idle AI apps were purged but the sweep failed, and their
+    audit row could not be written". Idle AI apps go in transactions of their
+    own before the sweep's; when that one fails, a row of their own records
+    them, and when even that row cannot be written this line is the only
+    trace that apps went unaudited. `extra` = the org id, how many apps, and
+    the error's type; never the error's text, which can quote SQL.
+
+    BEFORE THAT, 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
     WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization code
     refused and spent", when a live code arrives with another app, another
     redirect or a wrong PKCE verifier: the code is used up (RFC 6749 §10.5,
@@ -595,8 +604,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 111, (
-        f"the AST sweep found {total} log call sites, expected 111 -- if a log "
+    assert total == 112, (
+        f"the AST sweep found {total} log call sites, expected 112 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

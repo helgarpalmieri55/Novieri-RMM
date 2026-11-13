@@ -52,13 +52,11 @@ from app.models.oauth import (
     OAuthRefreshToken,
 )
 from tests.oauth_support import CLAUDE_CALLBACK, RESOURCE, oauth_org, seed_client
-from tests.race_helpers import backend_pid, normalised, until_blocked_by
+from tests.race_helpers import NO_WAITING, backend_pid, normalised, until_blocked_by
 from tests.session_support import user_id_of
 
 TABLES = ("oauth_clients", "oauth_codes", "oauth_refresh_families", "oauth_refresh_tokens")
 CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-#: A statement that would wait on a row lock fails at once instead.
-NO_WAITING = "SET LOCAL lock_timeout = '500ms'"
 
 
 async def test_the_four_tables_are_tenant_scoped_and_forced(admin_engine) -> None:

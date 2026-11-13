@@ -50,9 +50,9 @@ from tests.oauth_support import (
     register,
     seed_client,
 )
-from tests.race_helpers import backend_pid, normalised, until_blocked_by
+from tests.race_helpers import NO_WAITING, backend_pid, normalised, until_blocked_by
 from tests.session_support import user_id_of
-from tests.test_oauth_schema import NO_WAITING, _grant
+from tests.test_oauth_schema import _grant
 
 DOCUMENT_URL = "https://claude.example/oauth/client-metadata.json"
 

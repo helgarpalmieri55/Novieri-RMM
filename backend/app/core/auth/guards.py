@@ -197,16 +197,19 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       grant that lapsed unrevoked -- so they WAIT ON NO ROW. Each statement
       locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
       inside it, leaves first: `oauth_codes` expired more than ten minutes
-      ago; then the refresh tokens of the grants ended more than a day ago;
-      then those grants (`oauth_refresh_families`) that no token and no code
+      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
+      ended more than a day ago that no code still names; then those grants
+      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
       still names, so their cascade reaches no row they did not lock. A row
       another transaction holds is left to the next day's sweep. They hold no
       person's row and no app row, and the chain comes last: a writer above
       may wait on them and then find the row gone, never the other way round
-      (`tests/test_oauth_retention.py`). NOT an idle AI app, whose live
-      grants go with it: the sweep's `oauth_apps` step is the purge, below
-      (`clients.purge_idle`), run before the sweep's transaction and outside
-      it;
+      (`tests/test_oauth_retention.py`; `oauth.store`'s lock order says the
+      same). NOT an idle AI app, whose live grants go with it: the sweep's
+      `oauth_apps` step is the purge, below (`clients.purge_idle`), run
+      before the sweep's transaction and outside it. If that transaction
+      then fails, the apps' own audit row is written in a transaction that
+      takes nothing but the chain;
     - the purge of an idle AI app (own authentication phase 3: Task 6's
       `clients.purge_idle`, and Task 13's retention step for apps, which
       must keep the same shape), which deletes a person's grant rows --

@@ -280,6 +280,7 @@ async def test_a_sweep_that_deleted_something_is_audited_and_one_that_did_not_is
         "links": 4,
         "challenges": 1,
         "oauth_codes": 0,
+        "oauth_refresh_tokens": 0,
         "oauth_grants": 0,
         "oauth_apps": 0,
     }
