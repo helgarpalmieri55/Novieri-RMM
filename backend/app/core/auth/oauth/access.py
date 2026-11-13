@@ -16,8 +16,9 @@ from: revoking it stops the token at the next call, plan D6). No address and
 no name: the door reads them from the person's row (Task 9).
 
 VERIFIED WITH EVERYTHING FIXED (RFC 8725 [S38]): `alg` ES256 and nothing else
-(§3.1); `typ` exactly `at+jwt` (§3.11; RFC 9068 §4: "reject tokens carrying
-any other value"), so the internal token (`loopback+jwt`) never passes for
+(§3.1); `typ` exactly `at+jwt` (§3.11; RFC 9068 §4 also allows
+`application/at+jwt`, and this check is deliberately stricter: the platform is
+the only issuer and emits only `at+jwt`), so the internal token (`loopback+jwt`) never passes for
 one, nor one for it (§3.12); `kid` naming a published key; `iss` this
 platform (§3.8); `aud` EXACTLY the MCP resource, a string and not a list
 holding it with others (§3.9; 1c(a): "carrying the MCP audience and no other
@@ -130,6 +131,17 @@ def unverified_client_id(token: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _canonical_uuid(value: object) -> UUID:
+    """A UUID in its one canonical spelling (lower-case, hyphenated): `urn:uuid:`,
+    braces and unhyphenated forms are refused. Raises ValueError."""
+    if not isinstance(value, str):
+        raise ValueError("not a string")  # i18n-exempt: caught by the caller
+    parsed = UUID(value)
+    if str(parsed) != value:
+        raise ValueError("not canonical")  # i18n-exempt: caught by the caller
+    return parsed
+
+
 def _find(document: dict[str, Any], kid: str) -> jwt.PyJWK | None:
     try:
         return jwt.PyJWKSet.from_dict(document)[kid]
@@ -185,13 +197,11 @@ async def verify_access_token(token: str, *, settings: object) -> McpGrant | Non
             return None
         if not isinstance(client_id, str) or not client_id:
             return None
-        if not isinstance(claims["org"], str) or not isinstance(claims["fam"], str):
-            return None
         return McpGrant(
-            user_id=UUID(str(claims["sub"])),
-            org_id=UUID(claims["org"]),
+            user_id=_canonical_uuid(claims["sub"]),
+            org_id=_canonical_uuid(claims["org"]),
             client_id=client_id,
-            family_id=UUID(claims["fam"]),
+            family_id=_canonical_uuid(claims["fam"]),
             iat=iat,
             exp=exp,
         )

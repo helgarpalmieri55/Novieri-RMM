@@ -14,6 +14,8 @@ What is pinned here:
   `REFRESH_EVERY_S` (plan D14).
 """
 
+import base64
+import json
 import time
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -128,6 +130,12 @@ CHANGES: dict[str, Any] = {
     "bad-org": lambda c: {"org": 7},
     "no-client": lambda c: {"client_id": ""},
     "too-long": lambda c: {"exp": c["iat"] + 601},
+    "future-iat": lambda c: {"iat": c["iat"] + 3600, "exp": c["iat"] + 4200},
+    "aud-list": lambda c: {"aud": [RESOURCE]},
+    "sub-urn": lambda c: {"sub": f"urn:uuid:{c['sub']}"},
+    "sub-braces": lambda c: {"sub": "{" + c["sub"] + "}"},
+    "org-unhyphenated": lambda c: {"org": c["org"].replace("-", "")},
+    "fam-upper": lambda c: {"fam": c["fam"].upper()},
     "expired": lambda c: {"iat": c["iat"] - 700, "exp": c["iat"] - 100},
 }
 
@@ -149,9 +157,13 @@ async def test_every_claim_is_required(missing: str) -> None:
     assert await access.verify_access_token(await _signed(claims), settings=SETTINGS) is None
 
 
-@pytest.mark.parametrize("typ", ["JWT", "loopback+jwt", "application/jwt", "at+JWT"])
+@pytest.mark.parametrize(
+    "typ", ["JWT", "loopback+jwt", "application/jwt", "application/at+jwt", "at+JWT"]
+)
 async def test_another_typ_is_refused(typ: str) -> None:
-    """RFC 9068 §4: "reject tokens carrying any other value"."""
+    """RFC 9068 §4 allows "at+jwt" or "application/at+jwt"; this check is
+    deliberately stricter: the platform is the only issuer and emits only
+    `at+jwt`, so `application/at+jwt` is refused too."""
     token = await _signed(_base_claims(), typ=typ)
     assert await access.verify_access_token(token, settings=SETTINGS) is None
 
@@ -174,6 +186,38 @@ async def test_a_signature_by_another_key_is_refused(local_keys: keys.LocalAuthK
     stranger = await _signed(_base_claims())
     keys.set_backend(local_keys)
     assert await access.verify_access_token(stranger, settings=SETTINGS) is None
+
+
+def _b64(data: dict[str, Any]) -> str:
+    return (
+        base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode())
+        .rstrip(b"=")
+        .decode()
+    )
+
+
+async def test_a_genuine_header_over_a_strangers_payload_and_signature_is_refused(
+    local_keys: keys.LocalAuthKeys,
+) -> None:
+    """Reaches `jwt.decode` (the kid is real): only the signature check stops it."""
+    genuine = await _signed(_base_claims())
+    keys.set_backend(keys.LocalAuthKeys.generate())
+    stranger = await _signed(_base_claims())
+    keys.set_backend(local_keys)
+    header = genuine.split(".")[0]
+    _, sp, ss = stranger.split(".")
+    assert await access.verify_access_token(genuine, settings=SETTINGS) is not None
+    assert await access.verify_access_token(f"{header}.{sp}.{ss}", settings=SETTINGS) is None
+
+
+@pytest.mark.parametrize("change", [{"sub": str(uuid4())}, {"exp": int(time.time()) + 590}])
+async def test_a_modified_payload_under_the_genuine_signature_is_refused(
+    change: dict[str, Any],
+) -> None:
+    good = _base_claims()
+    h, _, sig = (await _signed(good)).split(".")
+    forged = f"{h}.{_b64({**good, **change})}.{sig}"
+    assert await access.verify_access_token(forged, settings=SETTINGS) is None
 
 
 async def test_the_assistants_internal_token_is_never_an_mcp_token() -> None:
