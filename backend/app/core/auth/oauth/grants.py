@@ -452,10 +452,15 @@ async def revoke_app(
 
 
 async def family_is_live(
-    session: AsyncSession, *, family_id: UUID, user_id: UUID, client_id: str, now: datetime
+    session: AsyncSession, *, family_id: UUID, user_id: UUID, client_id: str
 ) -> bool:
     """The grant an access token names still stands, for that person and that
-    app (the MCP door, Task 9; plan D6)."""
+    app (the MCP door, Task 9; plan D6). A READ: no lock, no write.
+
+    ITS IDLE LIMIT ON THE DATABASE'S CLOCK (Task 10 review, Minor 3), the
+    clock a refresh writes `expires_at` from (`_clock_after_the_locks`) and
+    an account act reads: compared with the API host's, a host running
+    behind admitted a grant past its limit for as long as it ran behind."""
     found = (
         await session.execute(
             select(OAuthRefreshFamily.id)
@@ -465,7 +470,7 @@ async def family_is_live(
                 OAuthRefreshFamily.user_id == user_id,
                 OAuthClient.client_id == client_id,
                 OAuthRefreshFamily.revoked_at.is_(None),
-                OAuthRefreshFamily.expires_at > now,
+                OAuthRefreshFamily.expires_at > func.clock_timestamp(),
             )
         )
     ).scalar_one_or_none()
