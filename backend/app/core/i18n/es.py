@@ -1063,6 +1063,10 @@ CATALOG: dict[str, str] = {
         "las aplicaciones de IA se conectan a la organización de esta instalación, y has "
         "iniciado sesión en otra"
     ),
+    "MCP is not available: ITS_DEFAULT_ORG_SLUG names no organization on this installation.": (
+        "MCP no está disponible: ITS_DEFAULT_ORG_SLUG no nombra ninguna organización de esta "
+        "instalación."
+    ),
     "You connected {host}": "Has conectado {host}",
     "On {when} you approved {host} to act for you over MCP, with everything your {product} "
     "account may do. It keeps that access for as long as it is used, until you revoke it "

@@ -22,6 +22,9 @@ THE ANSWERS (Appendix A.2; the console page, Task 4):
   user agent if it trusts the redirection URI"; B3-15);
 - `redirect`: only an approval, whose redirect carries the code. `details`
   never answers it, and neither does a decline.
+An installation that cannot connect anybody -- a console address with no
+issuer (`_ready`), no deployment organization (`_refusal`) -- answers 503
+instead, to everybody alike.
 
 AN APPROVAL needs the second factor confirmed in the last ten minutes (the
 route's `require_step_up`; C1). It issues a 60-second code (Task 7's
@@ -77,6 +80,7 @@ from app.core.auth.oauth.authorize import (
     NotRedirectable,
     Redirectable,
     answer,
+    not_registered,
     validate,
 )
 from app.core.auth.oauth.clients import hold, mcp_switched_on, touch
@@ -114,14 +118,31 @@ def _ready(request: Request) -> str:
 
 async def _not_read(client_id: str) -> cimd.ClientDocument:
     """The fetch while the person may not connect AI apps: nothing is read
-    (A3-31). A stored copy still answers (`resolve_client` keeps one on a
-    transient failure), so the way back can be offered."""
+    (A3-31). Defence in depth, never reached today: it goes with
+    `record_use=False`, and with that `resolve_client` answers before any
+    fetch -- the stored copy of a document, expired or not, so the way back
+    can be offered, or `unavailable` without one. Should that order ever
+    change, this still reads nothing."""
     raise cimd.DocumentRefused("unavailable")  # i18n-exempt: a reason code
 
 
 async def _refusal(request: Request, ctx: AuthContext) -> str | None:
-    """Why this person may not connect AI apps here, or None (plan D11, B3-09)."""
-    if ctx.org_id != await deployment_org(request.app):
+    """Why this person may not connect AI apps here, or None (plan D11, B3-09).
+
+    An installation with no deployment organization -- `ITS_DEFAULT_ORG_SLUG`
+    unset, or naming none -- is nobody's refusal: the token endpoint redeems
+    codes in that organization only, so nobody can connect here. The
+    installation's 503, as `_ready`'s (Task 8 review, fix round 1)."""
+    deployment = await deployment_org(request.app)
+    if deployment is None:
+        raise HTTPException(
+            503,
+            tr(
+                "MCP is not available: ITS_DEFAULT_ORG_SLUG names no organization on this "
+                "installation."
+            ),
+        )
+    if ctx.org_id != deployment:
         return tr(
             "AI apps connect to this installation's own organization, and you are signed in to "
             "another one"
@@ -214,14 +235,10 @@ def _client_out(checked: AuthorizationRequest) -> Answer:
 
 
 def _gone() -> Answer:
-    return {
-        "outcome": "refused",
-        "error": "invalid_client",
-        "detail": tr(
-            "this AI app is not registered here, or its registration expired. Connect it "
-            "again from the app."
-        ),
-    }
+    """The app was purged, or went idle, between the question and the
+    approval's hold: what the question itself answers for an app this
+    organization does not have (`authorize.not_registered`)."""
+    return {"outcome": "refused", "error": "invalid_client", "detail": not_registered()}
 
 
 async def details(request: Request, ctx: AuthContext, *, query: str) -> Answer:

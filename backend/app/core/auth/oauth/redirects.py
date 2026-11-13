@@ -25,7 +25,9 @@
   specified at the time of the request for loopback IP redirect URIs").
   `localhost`, `127.0.0.1` and `[::1]` are each matched as registered, never as
   one another, and `localhost` is allowed although RFC 8252 §8.3 calls it
-  "NOT RECOMMENDED": Claude Code registers it (plan B3-19, [S33]).
+  "NOT RECOMMENDED": Claude Code registers it (plan B3-19, [S33]). The
+  requested redirect is held to the same RFC 3986 characters first, and port 0
+  never matches (`matches`; Task 8 review, fix round 1).
 
 The answer keeps the redirect's own query as written (OAuth 2.1-17 §2.3: "MUST
 be retained when adding additional query parameters").
@@ -151,9 +153,28 @@ def _without_port(uri: str) -> tuple[str, str, str, str]:
     return uri[: uri.index(":")], netloc, parts.path, parts.query
 
 
+def _port_zero(uri: str) -> bool:
+    """`uri` names port 0 (`:0`, `:00`, ...), which no browser connects to."""
+    try:
+        return _split(uri).port == 0
+    except RedirectRejected:
+        return False
+
+
 def matches(registered: Sequence[str], requested: str) -> bool:
     """`requested` is one of `registered`, or the same loopback redirect on
-    another port."""
+    another port.
+
+    `requested` is first held to the characters a registered redirect is
+    (`valid_uri_characters`; Task 8 review, fix round 1): `urlsplit` silently
+    drops TAB, CR and LF, so a loopback request with one inside compared
+    equal to the registered shape, and the code was bound to that string
+    while the answer (`with_params`, which splits it again) sent the browser
+    to the one without it. Held to RFC 3986, "exact but for the port" is
+    literally true. And port 0 never matches, registered or not: no browser
+    connects to it, so a code bound to it could only be lost."""
+    if not valid_uri_characters(requested) or _port_zero(requested):
+        return False
     if requested in registered:
         return True
     if not is_loopback(requested) or "#" in requested:

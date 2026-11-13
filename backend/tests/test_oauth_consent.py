@@ -2,9 +2,11 @@
 2026-11-06, Task 8).
 
 - who may connect is asked first: the deployment's organization, MCP on,
-  `mcp.use` (plan D11, B3-09); while they may not, no document is read;
+  `mcp.use` (plan D11, B3-09); while they may not, no document is read; with
+  no deployment organization at all, the installation's 503;
 - the request is validated in RFC 6749 §4.1.2.1's two halves: a bad client or
-  redirect is shown and sent nowhere; an error the app should hear, a decline
+  redirect (one outside RFC 3986, or on port 0, included) is shown and sent
+  nowhere; an error the app should hear, a decline
   and a person who may not connect are shown with their host and go back only
   on a click (B3-15); only an approval is a `redirect`;
 - the consent names the app, the host its answer goes to, the host of its
@@ -26,10 +28,10 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth.oauth import cimd
+from app.core.auth.oauth import cimd, consent
 from app.core.auth.oauth.store import oauth_session
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
@@ -204,17 +206,24 @@ async def test_with_one_registered_redirect_the_request_may_leave_it_out(env: En
 
 
 @pytest.mark.parametrize(
-    "case",
+    ("case", "error"),
     [
-        "no-client",
-        "unknown-client",
-        "two-clients",
-        "no-redirect",
-        "unregistered-redirect",
-        "two-redirects",
+        ("no-client", "invalid_request"),
+        ("unknown-client", "invalid_client"),
+        ("two-clients", "invalid_request"),
+        ("no-redirect", "invalid_request"),
+        ("unregistered-redirect", "invalid_redirect_uri"),
+        ("two-redirects", "invalid_request"),
+        # Task 8 review, fix round 1: `%0A` decodes to a line feed that
+        # `urlsplit` drops, so the code would be bound to one string and the
+        # browser sent to another; and no browser connects to port 0.
+        ("loopback-line-feed", "invalid_redirect_uri"),
+        ("loopback-port-zero", "invalid_redirect_uri"),
     ],
 )
-async def test_a_bad_client_or_redirect_is_shown_and_never_redirected(env: Env, case: str) -> None:
+async def test_a_bad_client_or_redirect_is_shown_and_never_redirected(
+    env: Env, case: str, error: str
+) -> None:
     app = await _registered(env, CLAUDE_CALLBACK, "http://127.0.0.1/callback")
     _, challenge = pkce_pair()
     good = authorize_query(app.client_id, challenge=challenge)
@@ -227,6 +236,12 @@ async def test_a_bad_client_or_redirect_is_shown_and_never_redirected(env: Env, 
             app.client_id, challenge=challenge, redirect_uri="https://evil.example/cb"
         ),
         "two-redirects": good + "&redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
+        "loopback-line-feed": authorize_query(
+            app.client_id, challenge=challenge, redirect_uri="http://127.0.0.1:5000/call\nback"
+        ),
+        "loopback-port-zero": authorize_query(
+            app.client_id, challenge=challenge, redirect_uri="http://127.0.0.1:0/callback"
+        ),
     }[case]
     for route in ("details", "decision"):
         resp = await env.api.client.post(
@@ -237,9 +252,11 @@ async def test_a_bad_client_or_redirect_is_shown_and_never_redirected(env: Env, 
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["outcome"] == "refused", (route, body)
+        assert body["error"] == error, (route, body)
         assert "redirect_to" not in body
         assert body["detail"]
     assert await _codes(env) == []
+    assert await _authorized(env) == []
 
 
 async def test_an_unreadable_metadata_document_is_shown(env: Env, monkeypatch) -> None:
@@ -396,6 +413,62 @@ async def test_without_mcp_use_the_person_is_told(env: Env) -> None:
     body = (await _details(env, query, sub=technician)).json()
     assert (body["outcome"], body["reason"]) == ("back", "denied")
     assert body["detail"] == "requires mcp.use"
+
+
+async def test_without_mcp_use_no_metadata_document_is_read_or_stored(
+    env: Env, monkeypatch
+) -> None:
+    """A3-31 with MCP on (Task 8 review, fix round 1): a person who may not
+    connect makes the server fetch nothing, however the switch stands --
+    neither the question nor the answer, approving or declining."""
+
+    async def never(client_id: str) -> cimd.ClientDocument:
+        raise AssertionError("a document was read for a person without mcp.use")
+
+    monkeypatch.setattr(cimd, "fetch_document", never)
+    technician = await env.api.create_user(env.org_id, "technician")
+    _, challenge = pkce_pair()
+    query = authorize_query(DOCUMENT_URL, challenge=challenge)
+    asked = (await _details(env, query, sub=technician)).json()
+    assert (asked["outcome"], asked["error"], asked["detail"]) == (
+        "refused",
+        "access_denied",
+        "requires mcp.use",
+    )
+    for approve in (True, False):
+        answered = (await decide(env.api, env.org_id, technician, query, approve=approve)).json()
+        assert (answered["outcome"], answered["error"]) == ("refused", "access_denied")
+    async with oauth_session(env.org_id, env.api.app_engine) as session:
+        assert (await session.execute(select(OAuthClient))).scalars().all() == []
+
+
+@pytest.mark.parametrize("slug", ["", "no-such-organization"])
+async def test_without_a_deployment_organization_the_consent_is_unavailable(
+    env: Env, slug: str
+) -> None:
+    """Task 8 review, fix round 1. With `ITS_DEFAULT_ORG_SLUG` unset, or
+    naming no organization, nobody can connect an AI app here -- the token
+    endpoint redeems codes in that organization only. Every person was told
+    they were "signed in to another one"; it is the installation's 503,
+    as `_ready` answers a console address with no issuer."""
+    app = await _registered(env)
+    _, challenge = pkce_pair()
+    query = authorize_query(app.client_id, challenge=challenge)
+    headers = await env.api.headers(env.org_id, env.sub)
+    env.api.settings.default_org_slug = slug
+    for route, extra in (
+        ("details", {}),
+        ("decision", {"approve": True}),
+        ("decision", {"approve": False}),
+    ):
+        resp = await env.api.client.post(
+            f"/api/v1/oauth/authorize/{route}", json={"query": query, **extra}, headers=headers
+        )
+        assert resp.status_code == 503, (route, extra, resp.text)
+        assert resp.json()["detail"] == (
+            "MCP is not available: ITS_DEFAULT_ORG_SLUG names no organization on this installation."
+        )
+    assert await _codes(env) == []
 
 
 async def test_a_person_of_another_organization_cannot_connect_here(env: Env) -> None:
@@ -588,7 +661,43 @@ async def test_declining_is_shown_with_its_host_and_issues_nothing(env: Env) -> 
     )
     params = _params(body["redirect_to"])
     assert params["error"] == ["access_denied"]
+    assert params["state"] == ["st4te"] and params["iss"] == [BASE]
     assert "code" not in params
+    assert await _codes(env) == []
+    assert await _authorized(env) == []
+    assert env.api.mail.sent == []
+
+
+async def test_an_app_purged_between_the_question_and_the_hold_issues_nothing(
+    env: Env, monkeypatch
+) -> None:
+    """Task 8 review, fix round 1. The request is validated and its app
+    resolved; then, before the approval holds the app's row, an idle app's
+    purge takes it (`clients.hold` re-reads it: None). The approval is
+    refused as an app not registered here -- the same sentence the request's
+    validation gives -- and issues, audits and mails nothing."""
+    app = await _registered(env)
+    _, challenge = pkce_pair()
+    query = authorize_query(app.client_id, challenge=challenge)
+    real = consent.validate
+
+    async def then_purged(*args: Any, **kwargs: Any) -> Any:
+        checked = await real(*args, **kwargs)
+        async with oauth_session(env.org_id, env.api.app_engine) as session:
+            await session.execute(delete(OAuthClient).where(OAuthClient.id == app.id))
+        return checked
+
+    monkeypatch.setattr(consent, "validate", then_purged)
+    resp = await decide(env.api, env.org_id, env.sub, query)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "outcome": "refused",
+        "error": "invalid_client",
+        "detail": (
+            "this AI app is not registered here, or its registration expired. Connect it again "
+            "from the app."
+        ),
+    }
     assert await _codes(env) == []
     assert await _authorized(env) == []
     assert env.api.mail.sent == []

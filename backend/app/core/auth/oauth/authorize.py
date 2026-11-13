@@ -111,6 +111,17 @@ def parse_query(query: str) -> dict[str, list[str]]:
     return params
 
 
+def not_registered() -> str:
+    """The person's sentence for an app this organization does not have:
+    never registered, idle past `CLIENT_IDLE`, or purged between the
+    question and the approval's hold (`consent._gone`). One sentence, one
+    place."""
+    return tr(
+        "this AI app is not registered here, or its registration expired. Connect it again "
+        "from the app."
+    )
+
+
 def answer(redirect_uri: str, state: str | None, iss: str, **params: str) -> str:
     """The redirect back to the app: its own query kept, then `params`, then
     `state` when the request had one, then `iss`."""
@@ -170,13 +181,7 @@ async def validate(
             error="invalid_client",
         ) from exc
     if client is None:
-        raise NotRedirectable(
-            tr(
-                "this AI app is not registered here, or its registration expired. Connect it "
-                "again from the app."
-            ),
-            error="invalid_client",
-        )
+        raise NotRedirectable(not_registered(), error="invalid_client")
     redirect_uri = once("redirect_uri")
     if redirect_uri is None:
         if len(client.redirect_uris) != 1:

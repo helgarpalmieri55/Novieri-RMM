@@ -221,6 +221,46 @@ def test_a_loopback_redirect_matches_on_any_port_and_nothing_else() -> None:
     assert not redirects.matches(["http://localhost/cb"], "http://LOCALHOST:5/cb")
 
 
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "http://127.0.0.1:5000/call\nback",
+        "http://127.0.0.1:5000/call\tback",
+        "http://127.0.0.1:5000/call\rback",
+        "http://127.0.0.1:5000/callback\n",
+        "http://127.0.0.1:50\n00/callback",
+        "http://127.0.0.1:5000/call back",
+        "http://127.0.0.1:5000/call\\back",
+    ],
+)
+def test_a_requested_redirect_outside_rfc_3986_never_matches(requested: str) -> None:
+    """Task 8 review, fix round 1. `urlsplit` silently drops TAB, CR and LF,
+    so a loopback request with one inside compared equal to the registered
+    shape: the code was bound to that string while the answer sent the
+    browser to the one without it. The request is held to the characters a
+    registered redirect is (`valid_uri_characters`), so "exact but for the
+    port" is literally true."""
+    assert not redirects.matches(["http://127.0.0.1/callback"], requested)
+
+
+@pytest.mark.parametrize(
+    ("registered", "requested"),
+    [
+        ("http://127.0.0.1/callback", "http://127.0.0.1:0/callback"),
+        ("http://127.0.0.1/callback", "http://127.0.0.1:00/callback"),
+        ("http://localhost/callback", "http://localhost:0/callback"),
+        ("http://[::1]/callback", "http://[::1]:0/callback"),
+        # Registering it is no way round: no browser connects to port 0.
+        ("http://127.0.0.1:0/callback", "http://127.0.0.1:0/callback"),
+    ],
+)
+def test_a_redirect_on_port_zero_never_matches(registered: str, requested: str) -> None:
+    """Task 8 review, fix round 1: port 0 is no port a browser can connect
+    to, so a code bound to it could only ever be lost."""
+    assert not redirects.matches([registered], requested)
+    assert redirects.matches([registered], requested.replace(":00/", ":1/").replace(":0/", ":1/"))
+
+
 def test_the_answer_adds_to_the_redirects_own_query_as_written() -> None:
     added = redirects.with_params("https://h.example/cb?x=1", {"code": "c d", "iss": "https://i"})
     assert added == "https://h.example/cb?x=1&code=c+d&iss=https%3A%2F%2Fi"
