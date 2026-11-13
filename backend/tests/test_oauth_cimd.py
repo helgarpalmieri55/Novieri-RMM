@@ -76,6 +76,14 @@ BAD_HOSTS = [
     "https://0x7f000001/x",
     "https://[v1.claude.ai]/x",
 ]
+#: Characters outside RFC 3986, or `*`, anywhere in the URL: the rule a
+#: redirect is held to (`redirects.valid_uri_characters`; fix round 1c).
+BAD_CHARACTERS = [
+    "https://claude.example/a\\b.json",
+    'https://claude.example/a"b.json',
+    "https://claude.example/a%zzb.json",
+    "https://claude.example/a*.json",
+]
 
 
 @pytest.mark.parametrize(
@@ -89,6 +97,8 @@ BAD_HOSTS = [
         ("https://93.184.216.34/c.json", True),
         ("https://claude.example./c.json", True),
         *((bad, False) for bad in BAD_HOSTS),
+        *((bad, False) for bad in BAD_CHARACTERS),
+        ("https://claude.example/a%20b.json", True),  # a `%XX` escape is RFC 3986
         ("http://claude.example/c.json", False),
         ("https://claude.example", False),
         ("https://claude.example/", False),
@@ -294,7 +304,9 @@ async def test_a_network_failure_is_transient(monkeypatch, error: Exception) -> 
     assert (refused.value.reason, refused.value.transient) == ("unavailable", True)
 
 
-@pytest.mark.parametrize("client_id", ["http://claude.example/c.json", *BAD_HOSTS])
+@pytest.mark.parametrize(
+    "client_id", ["http://claude.example/c.json", *BAD_HOSTS, *BAD_CHARACTERS]
+)
 async def test_a_client_id_that_names_no_document_is_never_fetched(
     monkeypatch, client_id: str
 ) -> None:

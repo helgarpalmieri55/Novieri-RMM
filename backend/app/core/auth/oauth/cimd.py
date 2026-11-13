@@ -11,8 +11,8 @@ only when:
 
 - the URL is a client identifier CIMD-03 §3 allows -- https, a path other than
   "/", no dot segment, no fragment, no user name or password -- with no query
-  (§3: "SHOULD NOT"), in ASCII and with a host that passes `valid_host` (as a
-  redirect, Task 1);
+  (§3: "SHOULD NOT"), made of a redirect's characters and with a host that
+  passes `valid_host` (as a redirect, Task 1; `is_document_client_id`);
 - the answer is a 200 JSON object of at most 5 KiB (§10.11: "The recommended
   maximum size to read is 5 kilobytes."), not compressed (Task 3, decision
   4), whatever its content type (below);
@@ -79,7 +79,12 @@ from app.core.auth.oauth.policy import (
     RESPONSE_TYPES,
     display_name,
 )
-from app.core.auth.oauth.redirects import RedirectRejected, check_registered, host_of
+from app.core.auth.oauth.redirects import (
+    RedirectRejected,
+    check_registered,
+    host_of,
+    valid_uri_characters,
+)
 
 logger = logging.getLogger("its.auth.oauth.cimd")
 
@@ -140,17 +145,20 @@ class ClientDocument:
 
 
 def is_document_client_id(client_id: str) -> bool:
-    """CIMD-03 §3, in ASCII, no query, and a host every reader reads alike.
+    """CIMD-03 §3, held to a redirect's rules: no query, and a host every
+    reader reads alike.
 
-    The host is `redirects.host_of`'s, the same `urlsplit` reading the consent
-    screen names, and it must pass `valid_host` (Task 1): no backslash, `%`
-    escape, quote, `_` or sub-delimiter, and no number a browser reads as an
-    IPv4 address (`0x7f000001`). An IPvFuture literal (`[v1.claude.ai]`) is
-    refused as `check_registered` refuses it: `urlsplit` unbrackets it into
-    a name that would otherwise pass (fix round 1b)."""
+    - Every character is one `check_registered` allows
+      (`redirects.valid_uri_characters`): RFC 3986's, `%` only as a `%XX`
+      escape, and no `*` (fix round 1c).
+    - The host is `redirects.host_of`'s, the same `urlsplit` reading the
+      consent screen names, so it passes `valid_host` (Task 1) and is never a
+      bracketed name such as the IPvFuture `[v1.claude.ai]`: no backslash,
+      `%` escape, quote, `_` or sub-delimiter, and no number a browser reads
+      as an IPv4 address (`0x7f000001`) (fix rounds 1b and 1c)."""
     if not isinstance(client_id, str) or len(client_id) > MAX_CLIENT_ID:
         return False
-    if any(ord(ch) <= 0x20 or ord(ch) > 0x7E for ch in client_id):
+    if not valid_uri_characters(client_id):
         return False
     if "#" in client_id or "?" in client_id:
         return False
@@ -161,7 +169,7 @@ def is_document_client_id(client_id: str) -> bool:
         return False
     if parts.scheme != "https" or not parts.hostname:
         return False
-    if not host_of(client_id) or ("[" in parts.netloc and ":" not in parts.hostname):
+    if not host_of(client_id):
         return False
     if parts.username is not None or parts.password is not None:
         return False
