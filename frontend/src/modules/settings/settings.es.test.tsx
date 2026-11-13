@@ -32,6 +32,7 @@ import {
   EMAIL_SETTINGS_FIXTURE,
   EMAIL_UNCONFIGURED_FIXTURE,
   HEALTH_SETTINGS_FIXTURE,
+  MCP_APP_FIXTURE,
   MCP_CONNECTIONS_FIXTURE,
   OPERATOR_USER,
   ORG_FIXTURE,
@@ -848,15 +849,15 @@ describe("the AI connections tab in Spanish", () => {
     expect(screen.getByRole("list", { name: "Conectar una aplicación de IA" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Aplicación" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Último uso" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Revocar para mí: claude" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Revocar para todos: claude" }));
+    expect(screen.getByRole("button", { name: "Revocar para mí: claude.ai" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Revocar para todos: claude.ai" }));
     const dialog = await screen.findByRole("dialog", { name: "Revocar esta aplicación de IA para todos" });
     expect(
       within(dialog).getByText(
         "Se cierran todas las sesiones actuales de esta aplicación en esta organización; las personas tendrán que volver a aprobarla para reconectarla.",
       ),
     ).toBeInTheDocument();
-    expectNoEnglish(container.ownerDocument.body, [...RECORDED, "claude"]);
+    expectNoEnglish(container.ownerDocument.body, [...RECORDED, "claude", "claude.ai"]);
   });
 
   it("words the read-only view, the unset address and the empty list", async () => {
@@ -872,26 +873,34 @@ describe("the AI connections tab in Spanish", () => {
     calls.getMcpConnections.mockResolvedValue({ ...MCP_CONNECTIONS_FIXTURE, address: null, apps: [] });
     const { container } = await openIn("ai-connections");
     expect(await screen.findByText(/ITS_PUBLIC_CONSOLE_URL no está configurada/)).toBeInTheDocument();
-    expect(screen.getByText("Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días.")).toBeInTheDocument();
+    expect(screen.getByText("Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días, y ninguna tiene acceso.")).toBeInTheDocument();
     expect(screen.getByText(permissionReason("orgs.manage"))).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 
-  it("words the warning when sign-in could not be withdrawn, for one person and for you", async () => {
-    calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 1 });
+  it("words a revoke and an app with no registration, in Spanish", async () => {
+    calls.revokeMcpConnection.mockResolvedValue({ revoked: true, grants_revoked: 1 });
     const user = userEvent.setup();
-    const { container } = await openIn("ai-connections");
-    await user.click(await screen.findByRole("button", { name: "Revocar para todos: claude" }));
+    const { container, unmount } = await openIn("ai-connections");
+    await user.click(await screen.findByRole("button", { name: "Revocar para todos: claude.ai" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Revocar para todos" }));
-    const warning = await screen.findByText(/es posible que vuelva a conectarse sin preguntar/);
-    expect(warning.textContent).toBe(
-      "Se revocó claude y se rechaza cualquier sesión que ya tenga. Sin embargo, con 1 persona todavía no se pudo retirar el permiso de la aplicación para volver a iniciar sesión, así que es posible que vuelva a conectarse sin preguntar. Vuelve a intentar la revocación.",
-    );
-    expectNoEnglish(container, [...RECORDED, "claude"]);
+    expect(
+      await screen.findByText("Se revocó claude.ai para todas las personas de esta organización."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Revocar para mí: claude.ai" }));
+    expect(await screen.findByText("Se revocó claude.ai para ti.")).toBeInTheDocument();
+    expect(screen.getByText("Se registró sola aquí: cualquier aplicación puede, con cualquier nombre.")).toBeInTheDocument();
+    expectNoEnglish(container, [...RECORDED, "claude", "claude.ai"]);
+    unmount();
 
-    await user.click(screen.getByRole("button", { name: "Revocar para mí: claude" }));
-    expect(await screen.findByText(/^Se revocó claude para ti y/)).toBeInTheDocument();
-    expectNoEnglish(container, [...RECORDED, "claude"]);
+    calls.getMcpConnections.mockResolvedValue({
+      ...MCP_CONNECTIONS_FIXTURE,
+      apps: [{ ...MCP_APP_FIXTURE, id: null, host: null, kind: null, name: "Claude" }],
+    });
+    const again = await openIn("ai-connections");
+    expect(await screen.findByText("Ya no está registrada aquí, así que no tiene acceso.")).toBeInTheDocument();
+    expect(screen.getByText("Dice llamarse «Claude».")).toBeInTheDocument();
+    expectNoEnglish(again.container, [...RECORDED, "claude", "Claude"]);
   });
 
   it("asks before turning the switch on, in Spanish", async () => {
@@ -911,12 +920,12 @@ describe("the AI connections tab in Spanish", () => {
   it("re-words a revoke's outcome on a live switch", async () => {
     const user = userEvent.setup();
     await openIn("ai-connections");
-    await user.click(await screen.findByRole("button", { name: "Revocar para mí: claude" }));
-    expect(await screen.findByText("Se revocó claude para ti.")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Revocar para mí: claude.ai" }));
+    expect(await screen.findByText("Se revocó claude.ai para ti.")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("claude is revoked for you.")).toBeInTheDocument();
+    expect(screen.getByText("claude.ai is revoked for you.")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
-    expect(screen.getByText("Se revocó claude para ti.")).toBeInTheDocument();
+    expect(screen.getByText("Se revocó claude.ai para ti.")).toBeInTheDocument();
   });
 
   it("re-words the tab on a live switch", async () => {
@@ -926,7 +935,7 @@ describe("the AI connections tab in Spanish", () => {
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("switch", { name: "Allow AI apps to connect over MCP" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Connect an AI app" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Revoke for everyone: claude" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke for everyone: claude.ai" })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("columnheader", { name: "Personas" })).toBeInTheDocument();
   });

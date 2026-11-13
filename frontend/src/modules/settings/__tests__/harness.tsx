@@ -204,10 +204,18 @@ export const EMAIL_UNCONFIGURED_FIXTURE = {
 /**
  * `GET /api/v1/mcp/connections`: the switch on, an address configured, and
  * one AI app that called tools here. The client id is what the app
- * registered, recorded rather than translated.
+ * registered, recorded rather than translated; `name` null: an app that gave
+ * itself no name, so the row is titled by its host.
  */
+/** The `oauth_clients` row of `MCP_APP_FIXTURE` (`id`): what a revoke names. */
+export const MCP_APP_ID = "7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70";
+
 export const MCP_APP_FIXTURE = {
+  id: MCP_APP_ID,
   client_id: "claude",
+  name: null,
+  host: "claude.ai",
+  kind: "registered" as const,
   people: 3,
   last_used_at: "2026-10-01T09:30:00Z",
   revoked_for_me: false,
@@ -676,7 +684,7 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   calls.getSessionSettings.mockResolvedValue(SESSION_SETTINGS_FIXTURE);
   calls.putSessionSettings.mockResolvedValue(SESSION_SETTINGS_FIXTURE);
   calls.getMcpConnections.mockResolvedValue(MCP_CONNECTIONS_FIXTURE);
-  calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 0 });
+  calls.revokeMcpConnection.mockResolvedValue({ revoked: true, grants_revoked: 1 });
   calls.portalMe.mockResolvedValue({
     user_id: "contact-1",
     kind: "contact",

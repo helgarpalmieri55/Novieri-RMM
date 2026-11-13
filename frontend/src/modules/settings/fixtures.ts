@@ -493,13 +493,28 @@ const deleteUser: FixtureMap["deleteUser"] = (userId) => {
 /**
  * `GET /mcp/connections` over the shell's org, whose settings carry no
  * `mcp_enabled` — the state an organization starts in, so `enabled` is false
- * here as it is on the switch. The apps are ones used before it was turned
- * off: the list is derived from audited use, not from the switch.
+ * here as it is on the switch. The apps
+ * are ones used, or approved, before it was turned off: the list is derived from audited use and live grants, not from
+ * the switch.
  */
 const MCP_APPS: McpAppOut[] = [
-  { client_id: "claude", people: 4, last_used_at: ago(12), revoked_for_me: false, revoked_for_everyone: false },
   {
-    client_id: "helpdesk-assistant",
+    id: "0b6f3c1e-8d2a-4e7b-9c5f-1a2b3c4d5e6f",
+    client_id: "itms_Q2xhdWRlRGVza3RvcEZpeHR1cmU",
+    name: "Claude",
+    host: "claude.ai",
+    kind: "registered",
+    people: 4,
+    last_used_at: ago(12),
+    revoked_for_me: false,
+    revoked_for_everyone: false,
+  },
+  {
+    id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+    client_id: "https://helpdesk.example/oauth/client.json",
+    name: "Helpdesk assistant",
+    host: "helpdesk.example",
+    kind: "metadata_document",
     people: 1,
     last_used_at: ago(3 * 24 * 60),
     revoked_for_me: true,
@@ -513,12 +528,12 @@ const getMcpConnections: FixtureMap["getMcpConnections"] = () => ({
   apps: MCP_APPS.map((app) => ({ ...app })),
 });
 
-const revokeMcpConnection: FixtureMap["revokeMcpConnection"] = (clientId, scope) => {
-  const app = MCP_APPS.find((candidate) => candidate.client_id === clientId);
+const revokeMcpConnection: FixtureMap["revokeMcpConnection"] = (appId, scope) => {
+  const app = MCP_APPS.find((candidate) => candidate.id === appId);
   if (!app) throw notFound("AI app");
   if (scope === "everyone") app.revoked_for_everyone = true;
   else app.revoked_for_me = true;
-  return { revoked: true, keycloak_failures: 0 };
+  return { revoked: true, grants_revoked: app.people };
 };
 
 /* ------------------------------------------------------------------ health */
