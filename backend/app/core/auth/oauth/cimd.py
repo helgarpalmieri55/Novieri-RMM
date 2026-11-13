@@ -12,8 +12,9 @@ only when:
 - the URL is a client identifier CIMD-03 §3 allows -- https, a path other than
   "/", no dot segment, no fragment, no user name or password -- with no query
   (§3: "SHOULD NOT") and in ASCII (as a redirect, Task 1);
-- the answer is a 200 JSON object of at most 5 KiB, not compressed (§6.6;
-  Task 3, decision 4);
+- the answer is a 200 JSON object of at most 5 KiB (§10.11: "The recommended
+  maximum size to read is 5 kilobytes."), not compressed (Task 3, decision
+  4), whatever its content type (below);
 - its `client_id` is the URL, exactly ("MUST match the URL of the document
   using simple string comparison"; MCP: "MUST validate" [S29]);
 - it has `client_name` and `redirect_uris` (MCP: "MUST include at least the
@@ -27,6 +28,18 @@ only when:
 - it names no shared secret: `token_endpoint_auth_method` absent or `none`,
   no `client_secret`, no `client_secret_expires_at`. This server has public
   clients only (plan D4, B3-20), so `private_key_jwt` is refused too.
+
+THE CONTENT TYPE IS NOT JUDGED (Task 3 fix round 1). CIMD-03, at the URL
+above, asks for a JSON document, not for a media type. §4: "The Client ID
+Metadata Document is a JSON ([RFC8259]) document containing the metadata of
+the client." and "The Client ID Metadata Document MAY also be served with
+more specific content types as long as the response is JSON and conforms to
+application/<AS-defined>+json." §6 asks only the authorization server for a
+header: "The Authorization Server SHOULD send an Accept header of
+application/json as described in Section 12.5.1 of [RFC9110] when fetching
+the client metadata." `_read` sends it. No sentence of the draft requires a
+Content-Type, so what the body parses to decides, and `EgressBody.
+content_type` is not read here.
 
 CACHED FOR `clamp(max-age or 0, 5 min, 24 h)`, WHATEVER ELSE THE HEADERS SAY
 (plan B3-03; CIMD-03 §6.2: "SHOULD enforce a maximum effective cache duration
@@ -48,6 +61,7 @@ never the body -- at most one a minute per process, saying how many were held
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
@@ -72,6 +86,14 @@ MAX_DOCUMENT_BYTES = 5 * 1024
 FETCH_TIMEOUT_S = 5.0
 MIN_CACHE = timedelta(minutes=5)
 MAX_CACHE = timedelta(hours=24)
+_MIN_CACHE_S = int(MIN_CACHE.total_seconds())
+_MAX_CACHE_S = int(MAX_CACHE.total_seconds())
+#: RFC 9111 §1.2.2's delta-seconds, ASCII digits only (`cache_lifetime`).
+_DELTA_SECONDS = re.compile(r"[0-9]+")
+#: Significant digits `cache_lifetime` parses: ten hold 9,999,999,999 s, far
+#: past `MAX_CACHE`. A longer value is `_SATURATED`, RFC 9111 §1.2.2's 2^31.
+_MAX_DIGITS = 10
+_SATURATED = 2**31
 
 Reason = Literal[
     "not_a_document_url",
@@ -155,14 +177,28 @@ def _origin(parts: SplitResult) -> tuple[str, str, int]:
 
 
 def cache_lifetime(cache_control: str) -> timedelta:
-    """How long a valid document is reused (module docstring)."""
+    """How long a valid document is reused (module docstring): a `timedelta`
+    in [`MIN_CACHE`, `MAX_CACHE`] whatever the document's server sent, and
+    never an exception (Task 3 fix round 1).
+
+    A max-age is RFC 9111 §1.2.2's `delta-seconds = 1*DIGIT`, DIGIT being
+    ASCII (RFC 5234): `str.isdigit` also accepts "²", which `int` then
+    refuses. One too large to hold is saturated, never parsed, as §1.2.2
+    requires: "the cache MUST consider the value to be 2147483648 (2^31) or
+    the greatest positive integer it can conveniently represent", which the
+    clamp makes the ceiling. The clamp is applied to the integer, before the
+    `timedelta` exists."""
     seconds = 0
     for part in cache_control.split(","):
         name, _, value = part.strip().partition("=")
         if name.strip().lower() == "max-age":
             raw = value.strip().strip('"')
-            seconds = int(raw) if raw.isdigit() else 0
-    return min(max(timedelta(seconds=seconds), MIN_CACHE), MAX_CACHE)
+            if _DELTA_SECONDS.fullmatch(raw):
+                digits = raw.lstrip("0") or "0"
+                seconds = int(digits) if len(digits) <= _MAX_DIGITS else _SATURATED
+            else:
+                seconds = 0
+    return timedelta(seconds=min(max(seconds, _MIN_CACHE_S), _MAX_CACHE_S))
 
 
 def _types(document: dict[str, object], name: str, default: tuple[str, ...]) -> set[str]:

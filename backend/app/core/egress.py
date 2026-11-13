@@ -647,9 +647,69 @@ async def post_json(
 # Reading a document (own authentication phase 3, design §5.5)
 # --------------------------------------------------------------------------- #
 
-#: RFC 8215's local-use NAT64 prefix: on a site that uses it, `64:ff9b:1::a00:5`
-#: is 10.0.0.5, and `_NAT64_NET` does not unwrap it.
-_LOCAL_NAT64_NET = ipaddress.ip_network("64:ff9b:1::/48")
+# THE SPECIAL-USE VERDICT IS WRITTEN HERE, NEVER READ FROM PYTHON (Task 3 fix
+# round 1). `ipaddress`'s `is_global` calls global whatever is missing from
+# Python's own table, and that table changes between releases, patch releases
+# of 3.12 included (3.12.3 calls `3fff::1`, RFC 9637's documentation prefix,
+# global; 3.13.16 does not), while production (`python:3.12-slim`) and CI
+# (`setup-python` "3.12") both float. So the
+# tables below are copied from the IANA Special-Purpose Address Registries
+# that RFC 6890 restructured ("instructs IANA to restructure its IPv4 and IPv6
+# Special-Purpose Address Registries"), read on 2026-11-13:
+#   https://www.iana.org/assignments/iana-ipv4-special-registry/
+#   https://www.iana.org/assignments/iana-ipv6-special-registry/
+# and nothing in `_is_special_use` calls `is_global` or `is_private`.
+
+#: Every IPv4 block of the registry whose "Globally Reachable" is False, or
+#: that is deprecated. Multicast (224.0.0.0/4) is not in that registry; it is
+#: in `_DENIED_V4`, which the IPv4 rule reads as well.
+_SPECIAL_V4 = [
+    ipaddress.ip_network("0.0.0.0/8"),  # "This network" (RFC 791)
+    ipaddress.ip_network("10.0.0.0/8"),  # private use (RFC 1918)
+    ipaddress.ip_network("100.64.0.0/10"),  # shared address space (RFC 6598)
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("169.254.0.0/16"),  # link local (RFC 3927)
+    ipaddress.ip_network("172.16.0.0/12"),  # private use
+    # IETF protocol assignments, whole: its two global anycast entries
+    # (192.0.0.9, PCP; 192.0.0.10, TURN) serve no client's document.
+    ipaddress.ip_network("192.0.0.0/24"),
+    ipaddress.ip_network("192.0.2.0/24"),  # documentation, TEST-NET-1 (RFC 5737)
+    ipaddress.ip_network("192.88.99.0/24"),  # deprecated 6to4 relay anycast (RFC 7526)
+    ipaddress.ip_network("192.168.0.0/16"),  # private use
+    ipaddress.ip_network("198.18.0.0/15"),  # benchmarking (RFC 2544)
+    ipaddress.ip_network("198.51.100.0/24"),  # documentation, TEST-NET-2
+    ipaddress.ip_network("203.0.113.0/24"),  # documentation, TEST-NET-3
+    ipaddress.ip_network("240.0.0.0/4"),  # reserved
+    ipaddress.ip_network("255.255.255.255/32"),  # limited broadcast
+]
+
+#: IPv6 global unicast. An IPv6 answer is accepted only inside it (and outside
+#: `_SPECIAL_V6`), or as one of the two IPv4 translations below: a positive
+#: rule, so deprecated site-local (fec0::/10), SRv6 SIDs (5f00::/16, RFC
+#: 9602), the dummy prefix (100:0:0:1::/64, RFC 9780), whatever the registry
+#: adds next and unallocated space are refused without being listed.
+_GLOBAL_UNICAST_V6 = ipaddress.ip_network("2000::/3")
+#: The registry's blocks inside 2000::/3 that are not globally reachable.
+_SPECIAL_V6 = [
+    # IETF protocol assignments (Teredo included), whole: its global entries
+    # (PCP, TURN and DNS-SD anycast, AMT, AS112, ORCHIDv2, DETs) serve no
+    # client's document.
+    ipaddress.ip_network("2001::/23"),
+    ipaddress.ip_network("2001:db8::/32"),  # documentation (RFC 3849)
+    ipaddress.ip_network("2002::/16"),  # 6to4 (RFC 3056)
+    ipaddress.ip_network("3fff::/20"),  # documentation (RFC 9637)
+]
+#: IPv4-mapped (RFC 4291): judged by the IPv4 address it carries, as the
+#: well-known NAT64 prefix (`_NAT64_NET`, RFC 6052) is.
+_MAPPED_NET = ipaddress.ip_network("::ffff:0:0/96")
+#: IPv4 translations refused whatever they carry, because a site may route
+#: them to its own IPv4 network: SIIT's IPv4-translated form
+#: (`::ffff:0:a.b.c.d`, RFC 2765), which is neither mapped nor NAT64, and RFC
+#: 8215's local-use NAT64 prefix (`64:ff9b:1::a00:5` is 10.0.0.5 there).
+_REFUSED_TRANSLATIONS_V6 = [
+    ipaddress.ip_network("::ffff:0:0:0/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+]
 
 
 @dataclass(frozen=True)
@@ -667,20 +727,31 @@ class EgressBody:
     content_encoding: str = ""
 
 
+def _is_special_use_v4(ip: ipaddress.IPv4Address) -> bool:
+    return any(ip in net for net in _DENIED_V4) or any(ip in net for net in _SPECIAL_V4)
+
+
 def _is_special_use(ip_str: str) -> bool:
-    """Not a global unicast address, nor carrying one inside (CIMD-03 §10.7,
-    RFC 6890): `_is_denied` and then `is_global`, of the address and of every
-    IPv4 it embeds, and never RFC 8215's local-use NAT64 prefix."""
+    """A special-use address (CIMD-03 §10.7: "special-use IP addresses as
+    defined in [RFC6890]"), by the registry tables above and never by
+    Python's `is_global`:
+
+    - IPv4: in `_DENIED_V4` or `_SPECIAL_V4`;
+    - IPv6: refused unless it is global unicast outside `_SPECIAL_V6`, or
+      IPv4-mapped or well-known NAT64 carrying an IPv4 address that is not
+      special-use. `_REFUSED_TRANSLATIONS_V6` never passes.
+
+    `_is_denied` runs first, so nothing `post_json` refuses passes here."""
     if _is_denied(ip_str):
         return True
     ip = ipaddress.ip_address(ip_str)
-    if not ip.is_global:
+    if isinstance(ip, ipaddress.IPv4Address):
+        return _is_special_use_v4(ip)
+    if any(ip in net for net in _REFUSED_TRANSLATIONS_V6):
         return True
-    if isinstance(ip, ipaddress.IPv6Address):
-        if ip in _LOCAL_NAT64_NET:
-            return True
-        return any(not embedded.is_global for embedded in _ipv4_embedded_addresses(ip))
-    return False
+    if ip in _MAPPED_NET or ip in _NAT64_NET:
+        return _is_special_use_v4(ipaddress.IPv4Address(ip.packed[12:16]))
+    return ip not in _GLOBAL_UNICAST_V6 or any(ip in net for net in _SPECIAL_V6)
 
 
 async def get_bounded(

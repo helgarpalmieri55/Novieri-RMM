@@ -6,6 +6,7 @@ Same seams as `tests/test_egress_guard.py`: `_resolve_all` answers DNS and
 `_build_transport` the connection, so nothing leaves the machine.
 """
 
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -137,31 +138,48 @@ async def test_what_the_guard_refuses_before_any_connection(
     assert seen == []
 
 
-@pytest.mark.parametrize(
-    "address",
-    [
-        "10.0.0.5",
-        "127.0.0.1",
-        "169.254.169.254",
-        "::1",
-        # CIMD-03 §10.7: RFC 6890's special-use addresses, which `post_json`'s
-        # table lets through (Task 3, decision 3).
-        "0.1.2.3",
-        "192.0.2.1",
-        "198.51.100.1",
-        "203.0.113.1",
-        "2001:db8::1",
-        "2001:2::1",
-        "2001:10::1",
-        "100::1",
-        "64:ff9b:1::a00:5",
-        "64:ff9b::a00:5",
-        # NAT64 of TEST-NET-1: `is_global` counts it as global; only the
-        # embedded-IPv4 branch of `_is_special_use` refuses it (re-review
-        # f3-1, Minor 2).
-        "64:ff9b::c000:201",
-    ],
-)
+SPECIAL_USE = [
+    "10.0.0.5",
+    "127.0.0.1",
+    "169.254.169.254",
+    "::1",
+    # CIMD-03 §10.7: RFC 6890's special-use addresses, which `post_json`'s
+    # table lets through (Task 3, decision 3).
+    "0.1.2.3",
+    "192.0.2.1",
+    "198.51.100.1",
+    "203.0.113.1",
+    "2001:db8::1",
+    "2001:2::1",
+    "2001:10::1",
+    "100::1",
+    "64:ff9b:1::a00:5",
+    "64:ff9b::a00:5",
+    # NAT64 of TEST-NET-1: `is_global` counts it as global; only the
+    # embedded-IPv4 branch of `_is_special_use` refuses it (re-review
+    # f3-1, Minor 2).
+    "64:ff9b::c000:201",
+    # Fix round 1: what `is_global` let through. IPv6 outside 2000::/3 --
+    # deprecated site-local, SRv6 SIDs (RFC 9602), the dummy prefix (RFC
+    # 9780) and unallocated space -- and the documentation prefix inside it
+    # that Python 3.12.3 counts as global (RFC 9637).
+    "fec0::1",
+    "5f00::1",
+    "100:0:0:1::1",
+    "4000::1",
+    "8000::1",
+    "e000::1",
+    "3fff::1",
+    # SIIT's IPv4-translated form of 10.0.0.5 (`::ffff:0:0:0/96`), which is
+    # neither IPv4-mapped nor NAT64, so nothing unwrapped it.
+    "::ffff:0:a00:5",
+    # The deprecated 6to4 relay anycast block of the IPv4 registry.
+    "192.88.99.1",
+]
+GLOBAL = ["2606:2800:220:1::1", "::ffff:93.184.216.34", "64:ff9b::5db8:d822", PUBLIC]
+
+
+@pytest.mark.parametrize("address", SPECIAL_USE)
 async def test_a_special_use_answer_is_never_dialled(monkeypatch, address: str) -> None:
     seen = _serve(monkeypatch, lambda r: httpx.Response(200), resolved=[PUBLIC, address])
     with pytest.raises(EgressBlocked) as refused:
@@ -170,12 +188,28 @@ async def test_a_special_use_answer_is_never_dialled(monkeypatch, address: str) 
     assert seen == []
 
 
-@pytest.mark.parametrize("address", ["2606:2800:220:1::1", "::ffff:93.184.216.34"])
+@pytest.mark.parametrize("address", GLOBAL)
 async def test_a_global_answer_is_dialled(monkeypatch, address: str) -> None:
     seen = _serve(monkeypatch, lambda r: _streamed(200, b"{}"), resolved=[address])
     body = await get_bounded("https://client.example/m.json", max_bytes=10)
     assert body.status_code == 200
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("pretend", [True, False])
+def test_the_verdict_does_not_read_pythons_own_table(
+    monkeypatch: pytest.MonkeyPatch, pretend: bool
+) -> None:
+    """`is_global` and `is_private` follow a table that changes between
+    Python releases (3.12.3 calls `3fff::1` global, 3.13.16 does not), and
+    production and CI run a floating 3.12. The verdict is the IANA registry's,
+    written in `egress.py`, so Python's answer -- whatever it is -- changes
+    nothing (fix round 1)."""
+    for cls in (ipaddress.IPv4Address, ipaddress.IPv6Address):
+        for name in ("is_global", "is_private", "is_reserved", "is_site_local"):
+            monkeypatch.setattr(cls, name, property(lambda self: pretend), raising=False)
+    assert [a for a in SPECIAL_USE if not egress_module._is_special_use(a)] == []
+    assert [a for a in GLOBAL if egress_module._is_special_use(a)] == []
 
 
 async def test_a_redirect_is_refused_and_never_followed(monkeypatch) -> None:

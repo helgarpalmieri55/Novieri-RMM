@@ -43,6 +43,7 @@ def _answer(
     cache_control: str = "max-age=3600",
     encoding: str = "",
     raw: bytes | None = None,
+    content_type: str = "application/json",
 ) -> list[str]:
     asked: list[str] = []
 
@@ -54,7 +55,7 @@ def _answer(
             status_code=status,
             content=content,
             truncated=truncated,
-            content_type="application/json",
+            content_type=content_type,
             cache_control=cache_control,
             content_encoding=encoding,
         )
@@ -117,6 +118,16 @@ def test_a_document_on_the_issuers_own_origin_is_known_as_such() -> None:
         ("no-cache, max-age=3600", 3600),
         ("", 300),
         ("max-age=abc", 300),
+        # Fix round 1: what the document's server writes cannot raise. A value
+        # too large to hold is RFC 9111 §1.2.2's "2147483648 (2^31)", so the
+        # ceiling, however many digits it has; a digit that is not ASCII is
+        # not RFC 5234's DIGIT, so no max-age at all; leading zeros are not
+        # size.
+        ("max-age=100000000000000", 86400),
+        pytest.param("max-age=" + "9" * 5000, 86400, id="max-age=9{5000}"),
+        ("max-age=²", 300),
+        ("max-age=٣٦٠٠", 300),
+        ("max-age=" + "0" * 40 + "600", 600),
     ],
 )
 def test_a_valid_document_is_cached_within_bounds_whatever_its_headers(
@@ -127,6 +138,35 @@ def test_a_valid_document_is_cached_within_bounds_whatever_its_headers(
     "when none is otherwise indicated", and fetching "less often than
     requested by the cache headers" allowed)."""
     assert cimd.cache_lifetime(header) == timedelta(seconds=seconds)
+
+
+@pytest.mark.parametrize(
+    ("header", "seconds"),
+    [
+        ("max-age=100000000000000", 86400),
+        pytest.param("max-age=" + "9" * 5000, 86400, id="max-age=9{5000}"),
+        ("max-age=²", 300),
+    ],
+)
+async def test_a_cache_header_never_escapes_as_an_error(
+    monkeypatch, header: str, seconds: int
+) -> None:
+    """`fetch_document` returns a `ClientDocument` or raises `DocumentRefused`,
+    nothing else: a `Cache-Control` the document's own server chose must not
+    come out as an `OverflowError` or a `ValueError` -- a 500 at the consent
+    screen, past the throttled log line (fix round 1)."""
+    _answer(monkeypatch, cache_control=header)
+    document = await cimd.fetch_document(URL)
+    assert document.client_id == URL
+    assert document.cache_for == timedelta(seconds=seconds)
+
+
+@pytest.mark.parametrize("content_type", ["text/plain", "application/octet-stream", ""])
+async def test_the_content_type_is_not_judged(monkeypatch, content_type: str) -> None:
+    """CIMD-03 wants a JSON document, not a media type (`cimd.py`'s docstring
+    quotes it): what the body parses to decides (fix round 1)."""
+    _answer(monkeypatch, content_type=content_type)
+    assert (await cimd.fetch_document(URL)).client_id == URL
 
 
 async def test_a_valid_document_is_its_client(monkeypatch) -> None:
