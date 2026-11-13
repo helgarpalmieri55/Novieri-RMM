@@ -208,6 +208,51 @@ def test_the_unnarrowed_scope_guard_is_not_vacuous() -> None:
     ]
 
 
+# Who may open `oauth_session`, the every-client session over the OAuth
+# server's rows (own authentication phase 3, plan 2026-11-06 B3-31). CLAUDE.md
+# 5a: "cada uso está en una lista revisada" -- `ALL_SCOPE_ALLOWLIST` reviews
+# the function that calls `ClientScope.all()`, this list the files that call
+# it. No route file is here: a route calls a core function that is.
+OAUTH_SESSION_USERS: dict[str, str] = {
+    "app/core/auth/oauth/store.py": "defines it",
+}
+
+
+def _oauth_session_uses(sources: list[tuple[str, ast.Module]]) -> list[str]:
+    found: list[str] = []
+    for path, tree in sources:
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.Name):
+                names = [node.id]
+            elif isinstance(node, ast.Attribute):
+                names = [node.attr]
+            found.extend(f"{path}:{node.lineno}" for name in names if name == "oauth_session")
+    return found
+
+
+def test_only_the_reviewed_files_open_the_oauth_session() -> None:
+    outside = [
+        use
+        for use in _oauth_session_uses(_app_sources())
+        if use.split(":")[0] not in OAUTH_SESSION_USERS
+    ]
+    assert not outside, (
+        "oauth_session opens every client over a person's grants; add the file to "
+        f"OAUTH_SESSION_USERS with its reason, or call a function that is there: {outside}"
+    )
+
+
+def test_the_oauth_session_guard_is_not_vacuous() -> None:
+    # The scan reads the package (its definition is a `def`, not a use) and
+    # flags the shape it exists to forbid.
+    assert "app/core/auth/oauth/store.py" in {path for path, _ in _app_sources()}
+    bad = ast.parse("from app.core.auth.oauth.store import oauth_session\n")
+    assert _oauth_session_uses([("app/api/v1/x.py", bad)]) == ["app/api/v1/x.py:1"]
+
+
 def test_every_table_is_classified() -> None:
     live = {t.name for t in Base.metadata.sorted_tables}
     assert live - set(CATALOG) == set(), "unclassified tables (spec §5 test 1)"
@@ -593,6 +638,10 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
         "a WebAuthn credential id: at least 16 random bytes the authenticator chose, and "
         "W3C WebAuthn §7.1 refuses one already registered to anyone"
     ),
+    # Own authentication phase 3 (migration 0247): the SHA-256 of a random
+    # 256-bit value the AI app holds, found by it before anybody's scope exists.
+    ("oauth_codes", "code_hash"): "the SHA-256 of a random 256-bit authorization code",
+    ("oauth_refresh_tokens", "token_hash"): "the SHA-256 of a random 256-bit refresh token",
 }
 
 #: Unique keys on scoped tables that are deliberately organisation-wide.

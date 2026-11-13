@@ -185,6 +185,14 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "unlinking, under the scope the door established (`account.own_session`, "
         "invariant 5a)"
     ),
+    "app/core/auth/oauth/store.py::oauth_session": (
+        "the platform's own OAuth server (P2 phase 3 design §5): an AI app's registration (G) "
+        "and a technician's grants, codes and refresh tokens -- global rows only an every-client "
+        "scope may write, read by a code or token hash before anybody's scope exists, or by "
+        "the id of the person the console session or the verified access token named. Also "
+        "holds Settings -> AI connections' revoke (Task 10): the caller's own grants, or with "
+        "orgs.manage on every client everyone's"
+    ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
         "app/worker.py",
