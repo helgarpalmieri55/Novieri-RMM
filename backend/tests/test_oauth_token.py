@@ -32,6 +32,18 @@ And, from the coordinator's integration notes (operator decision D2,
   `invalid_grant`: never `mcp.code_reused`, never a family revoked;
 - a console address that names no issuer is a 503 before any signature;
 - a revocation holds neither the person's row nor the app's (the carve-out).
+
+And from the review's fix round 1:
+
+- THE CLOCK IS READ AFTER THE LOCKS. A code an act ended while the exchange
+  was on its way to its locks, or waiting on the act, is refused: any
+  `expires_at` the act wrote up to its commit is in the past by then;
+- every value the two endpoints read is in its RFC character set, or the
+  request is `invalid_request` -- a NUL or a non-ASCII character never
+  reaches a query (a 500 until then);
+- two requests with one code, or one refresh token, meet on the person's row:
+  one wins, the other ends the grant it opened, audited;
+- a used code another app presents names both apps in its audit row.
 """
 
 import asyncio
@@ -845,3 +857,292 @@ async def test_a_revocation_holds_neither_the_persons_row_nor_the_apps(env: Env)
         assert resp.status_code == 200, resp.text
     (family,) = await _families(env)
     assert family.revoked_reason == "revoked_by_app"
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1 (the review of Task 7).
+# --------------------------------------------------------------------------- #
+
+BAD_CODE_BODY = {
+    "error": "invalid_grant",
+    "error_description": "the authorization code is not valid",
+}
+
+
+def _end_codes(user_id: UUID, clock: str) -> Any:
+    """What an account act does to a person's unspent codes (Task 10; D2,
+    part c): `expires_at` set to the act's clock, `used_at` left alone."""
+    value = func.now() if clock == "now" else func.clock_timestamp()
+    return (
+        update(OAuthCode)
+        .where(OAuthCode.user_id == user_id, OAuthCode.used_at.is_(None))
+        .values(expires_at=value)
+    )
+
+
+async def _live_families(env: Env) -> list[OAuthRefreshFamily]:
+    return [f for f in await _families(env) if f.revoked_at is None]
+
+
+@pytest.mark.parametrize("clock", ["now", "clock_timestamp"])
+async def test_a_code_ended_while_the_exchange_reaches_its_locks_is_refused(
+    env: Env, clock: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review, Important 1 (the reviewer's probe). The exchange is held just
+    before it locks the person -- its request read, its code looked up. An
+    account act ends the person's unspent codes and commits. Released, the
+    exchange checks the code against a clock read AFTER its locks: expired, a
+    plain `invalid_grant`, and no grant. With the clock it read on arrival it
+    found the code live and opened one after the act."""
+    code, verifier = await _code(env)
+    person_id = await user_id_of(env.api, env.sub)
+    paused, go, _seen = _pause(monkeypatch, grants, "lock_user_row")
+    exchanging = asyncio.create_task(_exchange(env, code, verifier))
+    try:
+        await asyncio.wait_for(paused.wait(), 30)
+        async with oauth_session(env.org_id, env.api.app_engine) as act:
+            assert (await act.execute(_end_codes(person_id, clock))).rowcount == 1
+    finally:
+        go.set()
+    resp = await asyncio.wait_for(exchanging, 30)
+    assert (resp.status_code, resp.json()) == (400, BAD_CODE_BODY), resp.text
+    assert await _live_families(env) == []
+
+
+@pytest.mark.parametrize("clock", ["now", "clock_timestamp"])
+async def test_a_code_ended_by_an_act_the_exchange_waited_on_is_refused(
+    env: Env, clock: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review, Important 1. The act holds the person's row, as Task 10's acts
+    do; the exchange, arrived before the act's clock, waits on that row. The
+    act ends the person's unspent codes and grants and commits. The exchange
+    reads its clock after the lock it waited for: the code is expired, a plain
+    `invalid_grant`, and no live grant is left."""
+    code, verifier = await _code(env)
+    person_id = await user_id_of(env.api, env.sub)
+    paused, go, _seen = _pause(monkeypatch, grants, "lock_user_row")
+    exchanging = asyncio.create_task(_exchange(env, code, verifier))
+    try:
+        await asyncio.wait_for(paused.wait(), 30)
+        async with oauth_session(env.org_id, env.api.app_engine) as act:
+            assert await lock_user_row(act, person_id) is not None
+            go.set()
+            waiting = await until_blocked_by(env.api.app_engine, await backend_pid(act))
+            held = not exchanging.done()
+            assert (await act.execute(_end_codes(person_id, clock))).rowcount == 1
+            await grants.revoke_all_for_user(act, person_id, "signed_out_everywhere")
+    finally:
+        go.set()
+    resp = await asyncio.wait_for(exchanging, 30)
+    assert held
+    assert _on_the_person(waiting), waiting
+    assert (resp.status_code, resp.json()) == (400, BAD_CODE_BODY), resp.text
+    assert await _live_families(env) == []
+
+
+async def test_a_refresh_reads_its_clock_after_its_locks(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review, Important 1, the refresh's side: a family whose idle limit
+    falls while the refresh is on its way to its locks is dead when it gets
+    there."""
+    first = await _tokens(env)
+    paused, go, _seen = _pause(monkeypatch, grants, "lock_user_row")
+    refreshing = asyncio.create_task(_refresh(env, first["refresh_token"]))
+    try:
+        await asyncio.wait_for(paused.wait(), 30)
+        async with oauth_session(env.org_id, env.api.app_engine) as act:
+            await act.execute(update(OAuthRefreshFamily).values(expires_at=func.clock_timestamp()))
+    finally:
+        go.set()
+    resp = await asyncio.wait_for(refreshing, 30)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"] == "invalid_grant"
+
+
+#: One valid request per (endpoint, grant), every value inside its set.
+def _valid_form(env: Env, grant: str) -> dict[str, str]:
+    if grant == "authorization_code":
+        return {
+            "grant_type": "authorization_code",
+            "client_id": env.app.client_id,
+            "code": "c" * 43,
+            "code_verifier": "v" * 43,
+            "redirect_uri": CLAUDE_CALLBACK,
+            "resource": RESOURCE,
+        }
+    if grant == "refresh_token":
+        return {
+            "grant_type": "refresh_token",
+            "client_id": env.app.client_id,
+            "refresh_token": "r" * 43,
+            "scope": "mcp",
+        }
+    return {"client_id": env.app.client_id, "token": "t" * 43}
+
+
+READ_PARAMETERS = [
+    ("/oauth/token", "authorization_code", "grant_type"),
+    ("/oauth/token", "authorization_code", "client_id"),
+    ("/oauth/token", "authorization_code", "code"),
+    ("/oauth/token", "authorization_code", "code_verifier"),
+    ("/oauth/token", "authorization_code", "redirect_uri"),
+    ("/oauth/token", "authorization_code", "resource"),
+    ("/oauth/token", "refresh_token", "refresh_token"),
+    ("/oauth/token", "refresh_token", "scope"),
+    ("/oauth/revoke", "revoke", "client_id"),
+    ("/oauth/revoke", "revoke", "token"),
+]
+
+
+@pytest.mark.parametrize("value", ["a\x00b", "café", "a\x7fb"], ids=["nul", "non-ascii", "del"])
+@pytest.mark.parametrize(("path", "grant", "name"), READ_PARAMETERS)
+async def test_a_value_outside_its_character_set_is_invalid_request(
+    env: Env, path: str, grant: str, name: str, value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Review, Important 2 (the reviewer's probe). `parse_qsl` decodes `%00`,
+    and PostgreSQL refuses a NUL in text: a 500 and an ERROR line on two
+    unauthenticated endpoints. Every value these routes read is VSCHAR
+    (`%x20-7E`; RFC 6749 Appendix A: `client_id` A.1, `code` A.11,
+    `refresh_token` A.17), the verifier unreserved (RFC 7636 §4.1);
+    anything else is `invalid_request`, before any query reads it."""
+    caplog.set_level(logging.ERROR)
+    form = {**_valid_form(env, grant), name: value}
+    await forget_token_limit(env.api)
+    async with oauth_http(env.api) as client:
+        resp = await client.post(path, data=form)
+    assert resp.status_code == 400, resp.text
+    assert resp.json() == {
+        "error": "invalid_request",
+        "error_description": "the request is malformed",
+    }
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"grant_type=refresh_token&refresh_token=%FF&client_id=x",  # not UTF-8
+        b"grant_type=refresh_token&refresh_token=a%0Ab&client_id=x",  # a line feed
+    ],
+)
+async def test_an_escape_that_decodes_outside_the_set_is_invalid_request(
+    env: Env, body: bytes
+) -> None:
+    async with oauth_http(env.api) as client:
+        resp = await client.post(
+            "/oauth/token",
+            content=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_request"
+
+
+@pytest.mark.parametrize("verifier", ["!" * 43, "a" * 42, "a" * 129])
+async def test_a_verifier_outside_rfc_7636_is_invalid_request_and_spends_nothing(
+    env: Env, verifier: str
+) -> None:
+    """RFC 7636 §4.1: `code-verifier = 43*128unreserved`. A value outside that
+    grammar is malformed, refused before the code is read."""
+    code, right = await _code(env)
+    resp = await _exchange(env, code, verifier)
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_request"
+    assert (await _exchange(env, code, right)).status_code == 200
+
+
+async def test_a_parameter_the_revocation_does_not_read_is_ignored(env: Env) -> None:
+    """RFC 6749 §3.2: "MUST ignore unrecognized request parameters", and RFC
+    7009 §2.2 ignores `token_type_hint`'s value: neither is held to a set."""
+    tokens = await _tokens(env)
+    resp = await _revoke(env, tokens["refresh_token"], token_type_hint="\x00", other="café")
+    assert resp.status_code == 200, resp.text
+    (family,) = await _families(env)
+    assert family.revoked_reason == "revoked_by_app"
+
+
+async def test_two_exchanges_of_one_code_meet_on_the_person_and_one_wins(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review, Minor 3. The first exchange is held where it opens its grant;
+    the second, with the same code, waits on the person's row. Released, the
+    first gets the tokens; the second finds the code used, ends the grant
+    the first opened and says so: RFC 6749 §4.1.2."""
+    code, verifier = await _code(env)
+    paused, go, seen = _pause(monkeypatch, grants, "open_family")
+    first = asyncio.create_task(_exchange(env, code, verifier))
+    second: asyncio.Task[Any] | None = None
+    try:
+        await asyncio.wait_for(paused.wait(), 30)
+        second = asyncio.create_task(_exchange(env, code, verifier))
+        waiting = await until_blocked_by(env.api.app_engine, seen["pid"])
+        held = not second.done()
+    finally:
+        go.set()
+    assert second is not None
+    won, lost = await asyncio.wait_for(asyncio.gather(first, second), timeout=60)
+    assert held
+    assert _on_the_person(waiting), waiting
+    assert won.status_code == 200, won.text
+    assert (lost.status_code, lost.json()) == (400, BAD_CODE_BODY)
+    grant = await access.verify_access_token(won.json()["access_token"], settings=env.api.settings)
+    (family,) = await _families(env)
+    assert grant is not None and grant.family_id == family.id
+    assert family.revoked_reason == "code_reused"
+    (event,) = await _events(env, "mcp.code_reused")
+    assert event.meta == {"app": env.app.client_id, "family": str(family.id)}
+
+
+async def test_two_refreshes_of_one_token_meet_on_the_person_and_one_wins(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review, Minor 3. The first refresh is held where it writes its new
+    token; the second, with the same token, waits on the person's row.
+    Released, the first rotates; the second finds the token used and ends the
+    family, the first's new token with it (design §5.3, no grace)."""
+    tokens = await _tokens(env)
+    paused, go, seen = _pause(monkeypatch, grants, "_new_refresh_token")
+    first = asyncio.create_task(_refresh(env, tokens["refresh_token"]))
+    second: asyncio.Task[Any] | None = None
+    try:
+        await asyncio.wait_for(paused.wait(), 30)
+        second = asyncio.create_task(_refresh(env, tokens["refresh_token"]))
+        waiting = await until_blocked_by(env.api.app_engine, seen["pid"])
+        held = not second.done()
+    finally:
+        go.set()
+    assert second is not None
+    won, lost = await asyncio.wait_for(asyncio.gather(first, second), timeout=60)
+    assert held
+    assert _on_the_person(waiting), waiting
+    assert won.status_code == 200, won.text
+    assert lost.status_code == 400 and lost.json()["error"] == "invalid_grant"
+    (family,) = await _families(env)
+    assert family.revoked_reason == "refresh_reused"
+    (event,) = await _events(env, "mcp.refresh_reused")
+    assert event.meta == {"app": env.app.client_id, "family": str(family.id)}
+    rotated = won.json()["refresh_token"]
+    assert (await _refresh(env, rotated)).json()["error"] == "invalid_grant"
+
+
+@pytest.mark.parametrize("presenter", ["its-own-app", "another-app"])
+async def test_a_reused_codes_audit_row_names_the_app_that_presented_it(
+    env: Env, presenter: str
+) -> None:
+    """Review, Minor 4. `app` is the app whose grant ended; when another app
+    presents the used code -- the likeliest trace of a stolen one --
+    `presented_by` names it too."""
+    code, verifier = await _code(env)
+    assert (await _exchange(env, code, verifier)).status_code == 200
+    other = await seed_client(env.api, env.org_id)
+    extra = {} if presenter == "its-own-app" else {"client_id": other.client_id}
+    again = await _exchange(env, code, verifier, **extra)
+    assert (again.status_code, again.json()) == (400, BAD_CODE_BODY)
+    (family,) = await _families(env)
+    assert family.revoked_reason == "code_reused"
+    (event,) = await _events(env, "mcp.code_reused")
+    expected = {"app": env.app.client_id, "family": str(family.id)}
+    if presenter == "another-app":
+        expected["presented_by"] = other.client_id
+    assert event.meta == expected

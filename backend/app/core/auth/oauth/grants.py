@@ -31,8 +31,10 @@ longer valid: invalid_grant" [S33]).
 WHAT IS AUDITED (§7, "consentimientos y revocaciones de clientes de IA"; plan
 B3-22): every end of a grant the person did not cause -- a reused code, a
 reused refresh token, the app's own RFC 7009 request, a person no longer
-active -- as "system", the person as the target, the app in `metadata.app`.
-NOT a refresh, which continues a consent already audited
+active -- as "system", the person as the target, the app whose grant ended
+in `metadata.app`. A used code presented by ANOTHER app also names that one
+(`metadata.presented_by`): the likeliest trace of a stolen code. NOT a
+refresh, which continues a consent already audited
 (`mcp.app_authorized`, Task 8) every five to ten minutes while the app is in
 use, and NOT a registration (Task 6), a stranger's claim that grants nothing
 until a person approves it. Each action is a literal at its call: the audit
@@ -58,8 +60,10 @@ app (the `flows._consumed` pattern). Then, in this order:
 1. the person's `users` row FOR NO KEY UPDATE, re-read (`lock_user_row`);
 2. the app's row, `clients.hold`: FOR KEY SHARE, re-read, the idle condition
    re-checked, nothing written;
-3. the code, or the token and its family, FOR UPDATE, re-read, and every
-   condition checked again on what was re-read. Whether the person is active
+3. the code, or the token and its family, FOR UPDATE, re-read; THEN THE
+   CLOCK, the database's (`_clock_after_the_locks`), and every condition
+   checked again on what was re-read against that clock -- the arrival time
+   serves only the lookups before the locks. Whether the person is active
    and staff is read from the row locked at 1, never from an unlocked one;
 4. the grant rows written: the family and its token, the code's `used_at`;
 5. the access token signed;
@@ -82,14 +86,17 @@ reads the grant unlocked, then makes one UPDATE of its family
 and `revoke_app` are the same one UPDATE; their callers (Task 10) hold what
 they hold, and nothing here takes a lock for them.
 
-A CODE AN ACCOUNT ACT ENDED is one whose `expires_at` the act set to now --
-never its `used_at` (Task 10; operator decision D2, part c). The exchange
-answers it as any expired code: a plain `invalid_grant`, with nothing spent,
-logged, audited or revoked. Only a `used_at` already set is a reuse. The row
-lock alone does not stop an act that leaves the person active (signing out
-everywhere, a new password, a factor reset): the exchange waits for it and
-then runs. Ending the person's unspent codes in the same act does: the
-exchange that waited re-reads its code at 3 and finds it expired.
+A CODE AN ACCOUNT ACT ENDED is one whose `expires_at` the act set to its
+own clock -- never its `used_at` (Task 10; operator decision D2, part c).
+The exchange answers it as any expired code: a plain `invalid_grant`, with
+nothing spent, logged, audited or revoked. Only a `used_at` already set is a
+reuse. The row lock alone does not stop an act that leaves the person active
+(signing out everywhere, a new password, a factor reset): the exchange waits
+for it and then runs. Ending the person's unspent codes in the same act
+does: the exchange re-reads its code at 3, after the act's commit, and
+compares it with a clock read after that re-read, so any `expires_at` the
+act wrote up to its commit reads as expired -- whether the exchange waited
+for the act or only arrived before it (review of Task 7, fix round 1).
 
 BULK STATEMENTS ON O TABLES (`update`) are invisible to
 `app.core.global_rows`'s listener; every one here runs under `oauth_session`
@@ -106,7 +113,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -177,6 +184,26 @@ def _active(person: User | None, org_id: UUID) -> bool:
         and person.status == ACTIVE_STATUS
         and person.kind == STAFF_KIND
     )
+
+
+async def _clock_after_the_locks(session: AsyncSession) -> datetime:
+    """The time every check and write of `_exchange` and `_refresh` uses,
+    READ AFTER THEIR LOCKS (the review of Task 7, fix round 1) and FROM THE
+    DATABASE.
+
+    After: a clock read on arrival is older than whatever an account act
+    committed while this request waited for the person's row, or was on its
+    way to it -- a code the act ended at its own clock (`expires_at =
+    now()`, D2 part c) still looked live, and the exchange opened a grant
+    after the act had ended the person's grants. Read here, it is later than
+    the commit of any act this transaction waited for or now sees, so every
+    `expires_at` such an act wrote, up to its commit, is in the past.
+
+    From the database: the acts write that clock (`now()`,
+    `clock_timestamp()`), and comparing it with the API process's would let
+    a skew between the two hosts reopen the window by its size."""
+    clock: datetime = (await session.execute(select(func.clock_timestamp()))).scalar_one()
+    return clock
 
 
 async def issue_code(
@@ -342,9 +369,9 @@ async def _exchange(
     code: str,
     redirect_uri: str | None,
     code_verifier: str,
-    now: datetime,
+    arrived: datetime,
 ) -> IssuedTokens | Problem:
-    client = await clients.find_client(session, org_id=org_id, client_id=client_id, now=now)
+    client = await clients.find_client(session, org_id=org_id, client_id=client_id, now=arrived)
     if client is None:
         return UNKNOWN_CLIENT  # no app: no code is read (Task 7, decision 2)
     digest = hash_secret(code)
@@ -360,7 +387,7 @@ async def _exchange(
         return BAD_CODE
     person = await lock_user_row(session, seen.user_id)  # 1. the person
     # 2. The code's app: the one whose purge would take the code by cascade.
-    app = await clients.hold(session, org_id=org_id, app_id=seen.oauth_client_id, now=now)
+    app = await clients.hold(session, org_id=org_id, app_id=seen.oauth_client_id, now=arrived)
     if app is None:
         return BAD_CODE  # its app went idle or was purged: the code with it
     row = (  # 3. the code, re-read under its lock
@@ -371,12 +398,17 @@ async def _exchange(
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+    now = await _clock_after_the_locks(session)
     if row is None or row.user_id != seen.user_id or row.oauth_client_id != app.id:
         return BAD_CODE
     if row.used_at is not None:
         if row.family_id is not None and await revoke_family(
             session, row.family_id, "code_reused", now
         ):
+            reused: dict[str, str] = {"app": app.client_id, "family": str(row.family_id)}
+            if client.id != app.id:
+                # Another app holds the code: the likeliest trace of a theft.
+                reused["presented_by"] = client.client_id
             await audit_service.record(  # 7. the chain, last
                 session,
                 org_id=org_id,
@@ -385,12 +417,14 @@ async def _exchange(
                 action="mcp.code_reused",
                 target_type="user",
                 target_id=str(row.user_id),
-                metadata={"app": app.client_id, "family": str(row.family_id)},
+                metadata=reused,
             )
         return BAD_CODE
     if row.expires_at <= now:
-        # Expired, or ended by an account act (`expires_at = now()`; D2, part
-        # c): a plain refusal that spends, logs, audits and revokes nothing.
+        # Expired, or ended by an account act (`expires_at` set to the act's
+        # clock; D2, part c) at any moment up to its commit, which this
+        # clock follows: a plain refusal that spends, logs, audits and
+        # revokes nothing.
         return BAD_CODE
     refused = _refusal(row, client, redirect_uri, code_verifier)
     row.used_at = now  # 4. spent, whatever follows (B3-21)
@@ -443,7 +477,7 @@ async def exchange_code(
             code=code,
             redirect_uri=redirect_uri,
             code_verifier=code_verifier,
-            now=_now(),
+            arrived=_now(),
         )
     if isinstance(outcome, Problem):
         raise OAuthError(outcome)
@@ -457,9 +491,9 @@ async def _refresh(
     org_id: UUID,
     client_id: str,
     refresh_token: str,
-    now: datetime,
+    arrived: datetime,
 ) -> IssuedTokens | Problem:
-    client = await clients.find_client(session, org_id=org_id, client_id=client_id, now=now)
+    client = await clients.find_client(session, org_id=org_id, client_id=client_id, now=arrived)
     if client is None:
         return UNKNOWN_CLIENT
     digest = hash_secret(refresh_token)
@@ -478,7 +512,7 @@ async def _refresh(
         # anything is locked, and a family's app never changes.
         return BAD_REFRESH
     person = await lock_user_row(session, seen.user_id)  # 1. the person
-    app = await clients.hold(session, org_id=org_id, app_id=client.id, now=now)  # 2. the app
+    app = await clients.hold(session, org_id=org_id, app_id=client.id, now=arrived)  # 2. the app
     if app is None:
         return BAD_REFRESH  # it went idle or was purged since: its grants with it
     found = (  # 3. the token and its family, re-read under their locks
@@ -490,6 +524,7 @@ async def _refresh(
             .execution_options(populate_existing=True)
         )
     ).one_or_none()
+    now = await _clock_after_the_locks(session)
     if found is None:
         return BAD_REFRESH
     token, family = found
@@ -553,7 +588,7 @@ async def refresh_grant(
             org_id=org_id,
             client_id=client_id,
             refresh_token=refresh_token,
-            now=_now(),
+            arrived=_now(),
         )
     if isinstance(outcome, Problem):
         raise OAuthError(outcome)
