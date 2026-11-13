@@ -642,7 +642,11 @@ async def test_two_mcp_calls_during_an_admin_act_neither_queue_nor_write(
     review on both queued on the row and the second found nothing to record.
     Now neither queues: both answer while the row is still held, the row
     takes no UPDATE (its `xmin` is unchanged), and no identity event is
-    written -- not one per call, not one between them."""
+    written -- not one per call, not one between them.
+
+    Non-vacuity, this test's own: the row IS held while they answer. The
+    technician's own `PATCH /me`, a writer of the row, sent after both calls
+    finished, is seen waiting on the administrator."""
     env = auth_env
     org = await env.create_org("tech-race")
     slug = await env.org_slug(org)
@@ -650,20 +654,26 @@ async def test_two_mcp_calls_during_an_admin_act_neither_queue_nor_write(
     tech_sub = await env.create_user(org, "technician")
     tech_id = await _id(env, tech_sub)
     bearer = await _mcp_bearer(env, slug, tech_sub)
+    console = await env.headers(org, tech_sub)
     before = await _person_row(env, tech_id)
     paused, go, seen = _pause(monkeypatch, "end_all_for_user")
     ending = _ending_sessions(env, org, admin_id, tech_id)
     await asyncio.wait_for(paused.wait(), 30)
     first = _mcp_call(env, bearer)
     second = _mcp_call(env, bearer)
+    saving: asyncio.Task[Any] | None = None
     try:
         waited = await _finished_unblocked(env, seen["pid"], [first, second])
         held = not ending.done()
         during = await _person_row(env, tech_id)
+        saving = asyncio.create_task(
+            env.client.patch("/api/v1/me", headers=console, json={"display_name": "New Name"})
+        )
+        writer_waits = await until_blocked_by(env.app_engine, seen["pid"])
     finally:
         go.set()
-    ended, one, two = await asyncio.wait_for(
-        asyncio.gather(ending, first, second, return_exceptions=True), timeout=30
+    ended, one, two, saved = await asyncio.wait_for(
+        asyncio.gather(ending, first, second, saving, return_exceptions=True), timeout=30
     )
     assert waited == [], waited
     assert held
@@ -671,6 +681,9 @@ async def test_two_mcp_calls_during_an_admin_act_neither_queue_nor_write(
         assert not isinstance(answer, BaseException), answer
         assert answer.status_code == 200, answer.text
     assert during == before, (before, during)
+    assert _on_the_person(writer_waits), writer_waits
     assert ended == "end_sessions committed", ended
+    assert not isinstance(saved, BaseException), saved
+    assert saved.status_code == 200, saved.text
     assert await _actions(env, org, "auth.email_changed") == []
     assert await _actions(env, org, "auth.login") == []

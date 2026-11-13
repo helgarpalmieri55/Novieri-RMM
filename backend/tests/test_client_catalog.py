@@ -221,8 +221,11 @@ OAUTH_SESSION_USERS: dict[str, str] = {
         "organization's MCP switch for both"
     ),
     "app/core/auth/oauth/grants.py": (
-        "a person's codes and refresh families: one transaction per token, revocation or "
-        "consent request, and the MCP door's check that a grant still stands"
+        "a person's codes and refresh families: one transaction per token request "
+        "(`exchange_code`, `refresh_grant`) and per RFC 7009 revocation (`revoke_presented`). "
+        "Not the MCP door's check that a grant still stands: `family_is_live` takes the "
+        "caller's session, and the door reads the family in its own every-client "
+        "`org_session` (`deps.admit`, in `ALL_SCOPE_ALLOWLIST`)"
     ),
 }
 

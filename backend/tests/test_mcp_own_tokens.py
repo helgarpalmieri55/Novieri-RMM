@@ -7,29 +7,36 @@ What is pinned here:
   `/mcp` and on an in-process call, as that person, with their row's address;
 - a Keycloak token is refused whatever its audience (§5.3: "otro token se
   rechaza"), and so is one of ours for any audience but the MCP resource;
-- the grant the token names is read on every call (plan D6): ending it stops
-  the next call, not the next token; another app's or another person's grant
-  admits nobody;
+- the grant the token names is read on every call (plan D6): ending it --
+  revoked, or expired by itself -- stops the next call, not the next token;
+  another app's or another person's grant admits nobody;
 - the channel marker must name the token's app;
-- the door provisions nobody and writes nothing about the person;
+- the door provisions nobody and writes nothing: not the person's row, not
+  their grant, not the app's row;
+- a contact's grant -- one no consent can issue -- is a logged 403;
+- with OpenBao down the door answers the app's 503, never a 500;
 - the grant admits the person, never their second factor: an MCP call
   never counts as a recent confirmation (phase 2's Task 14);
 - with no https console there is no issuer, and the channel says so (503).
 """
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from mcp.types import LATEST_PROTOCOL_VERSION
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import keys
 from app.core.auth.oauth import grants
 from app.core.auth.oauth.access import verify_access_token
 from app.core.auth.oauth.store import oauth_session
-from app.models import AuditEvent, User
+from app.models import AuditEvent, Client, User
 from tests.mcp_support import (
     MCP_AUD,
     MCP_BASE,
@@ -53,6 +60,8 @@ NO_ISSUER_EN = (
     "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address without a path."
 )
 CONFIRM_AGAIN = "confirm your second factor again to do this"
+PORTAL_ONLY_EN = "this account can only use the portal"
+KEYS_DOWN_EN = "signing in is not available right now; try again in a moment"
 MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
     "Content-Type": "application/json",
@@ -100,6 +109,27 @@ async def _users(env: Any, org_id: UUID) -> int:
                 select(func.count()).select_from(User).where(User.org_id == org_id)
             )
         ).scalar_one()
+
+
+@contextmanager
+def _refusals() -> Iterator[list[logging.LogRecord]]:
+    """The identity logger's admission refusals (`log_admission_refusal`),
+    captured on that logger itself: `create_app` rewires the root's handlers."""
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    logger = logging.getLogger("its.identity")
+    handler, level = _Collect(level=logging.DEBUG), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
 
 
 async def _auth_events(env: Any, org_id: UUID) -> list[str]:
@@ -192,6 +222,39 @@ async def test_ending_the_grant_stops_the_next_call(mcp_env) -> None:
     assert await verify_access_token(token, settings=mcp_env.settings) is not None
 
 
+async def test_an_expired_grant_stops_the_next_call(mcp_env) -> None:
+    """A grant unused for `REFRESH_IDLE` ends by itself (design §5.3), with no
+    revocation: the door reads `expires_at` against its clock on every call, as
+    it reads `revoked_at`. Drop `expires_at > now` from `family_is_live` and the
+    second call is admitted."""
+    _, slug, sub = await _admin(mcp_env)
+    token = await mcp_token(mcp_env, slug, sub)
+    family_id = UUID(mcp_claims(token)["fam"])
+    async with running_mcp(mcp_env):
+        before = await _initialize(mcp_env, token)
+        async with AsyncSession(mcp_env.admin_engine) as session:
+            await session.execute(
+                text("UPDATE oauth_refresh_families SET expires_at = now() WHERE id = :id"),
+                {"id": family_id},
+            )
+            await session.commit()
+        after = await _initialize(mcp_env, token)
+    me = await _me(mcp_env, token)
+    assert before.status_code == 200, before.text
+    assert after.status_code == 401
+    assert after.headers["www-authenticate"] == REFUSED_CHALLENGE
+    assert after.json()["detail"] == REVOKED_EN
+    assert (me.status_code, me.json()["detail"]) == (401, REVOKED_EN)
+    async with AsyncSession(mcp_env.admin_engine) as session:
+        revoked_at = (
+            await session.execute(
+                text("SELECT revoked_at FROM oauth_refresh_families WHERE id = :id"),
+                {"id": family_id},
+            )
+        ).scalar_one()
+    assert revoked_at is None  # nobody revoked it: it expired
+
+
 async def test_another_apps_or_another_persons_grant_admits_nobody(mcp_env) -> None:
     org_id, slug, sub = await _admin(mcp_env)
     colleague = await mcp_env.create_user(org_id, "org-admin")
@@ -229,15 +292,44 @@ async def test_a_token_for_nobody_provisions_nobody(mcp_env) -> None:
 
 
 async def test_an_mcp_call_writes_nothing_about_the_person(mcp_env) -> None:
+    """Not the person's row, not the grant the token names, not the app's row:
+    each with its `xmin`, which any UPDATE changes, even one writing the same
+    values. A `last_used_at` touch on the grant would also be a row lock on
+    every call against the refresh's FOR UPDATE of the same family."""
     org_id, slug, sub = await _admin(mcp_env)
     token = await mcp_token(mcp_env, slug, sub)
+    family_id = UUID(mcp_claims(token)["fam"])
 
     async def row() -> tuple[Any, ...]:
         async with AsyncSession(mcp_env.admin_engine) as session:
-            user = (
-                await session.execute(select(User).where(User.external_subject == sub))
-            ).scalar_one()
-            return (user.email, user.display_name, user.last_login_at, user.status)
+            person = (
+                await session.execute(
+                    text(
+                        "SELECT xmin::text, email, display_name, last_login_at, status "
+                        "FROM users WHERE external_subject = :sub"
+                    ),
+                    {"sub": sub},
+                )
+            ).one()
+            grant = (
+                await session.execute(
+                    text(
+                        "SELECT xmin::text, last_used_at, expires_at, revoked_at "
+                        "FROM oauth_refresh_families WHERE id = :id"
+                    ),
+                    {"id": family_id},
+                )
+            ).one()
+            app = (
+                await session.execute(
+                    text(
+                        "SELECT xmin::text, last_used_at FROM oauth_clients "
+                        "WHERE org_id = :org AND client_id = 'claude'"
+                    ),
+                    {"org": org_id},
+                )
+            ).one()
+            return (tuple(person), tuple(grant), tuple(app))
 
     seen = await row()
     async with running_mcp(mcp_env):
@@ -267,6 +359,70 @@ async def test_an_mcp_call_never_counts_as_a_recent_confirmation(mcp_env) -> Non
     # Non-vacuity: the same person's console session gets past the question,
     # to the unknown person the path names.
     assert in_console.status_code == 404, in_console.text
+
+
+async def test_a_contacts_grant_is_a_logged_403(mcp_env) -> None:
+    """No consent issues a contact a grant: both consent routes answer a
+    contact `portal_only` before they read the request (Task 8). A grant for
+    one is therefore an anomaly, and the door answers it as `_admit_session`'s
+    order says, with the log line (Task 9, decision 2): 403, door "mcp". At
+    `/mcp` and on an in-process call alike; and since `/mcp` admits through
+    `auth_context` (no contacts), no tool call of a contact is ever made."""
+    org_id, slug, _ = await _admin(mcp_env)
+    contact = f"contact-{uuid4().hex[:10]}"
+    async with AsyncSession(mcp_env.admin_engine) as session:
+        client = Client(org_id=org_id, name=f"Acme {contact}", kind="customer")
+        session.add(client)
+        await session.flush()
+        session.add(
+            User(
+                org_id=org_id,
+                external_subject=contact,
+                email=f"{contact}@acme.example",
+                kind="contact",
+                client_id=client.id,
+            )
+        )
+        await session.commit()
+    token = await mcp_token(mcp_env, slug, contact)
+    who = f"user:{await user_id_of(mcp_env, contact)}"
+    with _refusals() as at_mcp:
+        resp = await _initialize(mcp_env, token)
+    with _refusals() as in_process:
+        me = await _me(mcp_env, token)
+    assert (resp.status_code, resp.json()["detail"]) == (403, PORTAL_ONLY_EN)
+    assert (me.status_code, me.json()["detail"]) == (403, PORTAL_ONLY_EN)
+    for records in (at_mcp, in_process):
+        assert [(r.door, r.sub, r.email, r.reason) for r in records] == [
+            ("mcp", who, f"{contact}@acme.example", PORTAL_ONLY_EN)
+        ]
+    assert await _auth_events(mcp_env, org_id) == []
+
+
+async def test_with_openbao_down_the_door_answers_the_apps_503(
+    mcp_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifying the token reads the platform's public keys (`access._key_for`).
+    OpenBao not answering is `keys.AuthKeysUnavailable`, which the app answers
+    with one 503 (`guards.keys_unavailable_handler`) -- at `/mcp` too, whose
+    gate catches only `HTTPException`: never a 500, and never the 401 of a
+    token refused, which would send the app round OAuth for nothing."""
+    _, slug, sub = await _admin(mcp_env)
+    token = await mcp_token(mcp_env, slug, sub)
+
+    async def down(*args: Any, **kwargs: Any) -> Any:
+        raise keys.AuthKeysUnavailable("down")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(keys, "jwks", down)
+        resp = await _initialize(mcp_env, token)
+        me = await _me(mcp_env, token)
+    for answer in (resp, me):
+        assert answer.status_code == 503, answer.text
+        assert answer.json() == {"code": "sign_in_unavailable", "detail": KEYS_DOWN_EN}
+    # Non-vacuity: with the keys back, the same token is admitted.
+    async with running_mcp(mcp_env):
+        assert (await _initialize(mcp_env, token)).status_code == 200
 
 
 async def test_without_an_https_console_there_is_no_issuer_and_mcp_is_503(mcp_env) -> None:
