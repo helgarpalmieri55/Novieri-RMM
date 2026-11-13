@@ -22,6 +22,10 @@ A GRANT NAMES AN APP OF ITS OWN ORGANIZATION: `(oauth_client_id, org_id) ->
 oauth_clients (id, org_id)`, because a foreign key ignores RLS (the 0231
 reason for `fk_*_client_org`). An app's grants and codes go with it (ON
 DELETE CASCADE): an expired registration takes its grants along (plan D10).
+A refresh token and a code name a family of their own person, `(family_id,
+user_id) -> oauth_refresh_families (id, user_id)`: a family's end takes its
+tokens and empties its codes' `family_id` alone. Every foreign key that
+deletes or empties rows here has an index led by its columns.
 
 NO SECRET IN CLEAR. A code and a refresh token are stored as the SHA-256 of a
 random 256-bit value (`code_hash`, `token_hash`, CHECKs of 32 bytes); the
@@ -62,6 +66,9 @@ NULL_ALL = f"(client_id IS NULL AND {SCOPE} = 'all')"
 
 #: A person's tables, in creation order. Each is O under `users` through `user_id`.
 PERSON_TABLES = ("oauth_refresh_families", "oauth_refresh_tokens", "oauth_codes")
+
+#: What an app is: registered (RFC 7591) or a client metadata document.
+CLIENT_KINDS = ("registered", "metadata_document")
 
 #: Why a family stopped (plan Task 5, decision 3).
 REVOKE_REASONS = (
@@ -152,6 +159,10 @@ def _person_scope(table: str) -> None:
     )
 
 
+def _one_of(column: str, values: tuple[str, ...]) -> str:
+    return f"{column} IN (" + ", ".join(f"'{v}'" for v in values) + ")"
+
+
 def upgrade() -> None:
     op.create_table(
         "oauth_clients",
@@ -167,9 +178,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("org_id", "client_id", name="uq_oauth_clients_org_client"),
         # The key the grants' `_app_org` foreign keys reference.
         sa.UniqueConstraint("id", "org_id", name="uq_oauth_clients_id_org"),
-        sa.CheckConstraint(
-            "kind IN ('registered', 'metadata_document')", name="ck_oauth_clients_kind"
-        ),
+        sa.CheckConstraint(_one_of("kind", CLIENT_KINDS), name="ck_oauth_clients_kind"),
         sa.CheckConstraint(
             "char_length(client_id) BETWEEN 1 AND 255", name="ck_oauth_clients_client_id"
         ),
@@ -190,7 +199,6 @@ def upgrade() -> None:
     )
     _tenant("oauth_clients")
 
-    reasons = ", ".join(f"'{r}'" for r in REVOKE_REASONS)
     op.create_table(
         "oauth_refresh_families",
         _uuid("id", primary_key=True),
@@ -211,7 +219,7 @@ def upgrade() -> None:
             name="ck_oauth_refresh_families_revoked",
         ),
         sa.CheckConstraint(
-            f"revoked_reason IS NULL OR revoked_reason IN ({reasons})",
+            "revoked_reason IS NULL OR " + _one_of("revoked_reason", REVOKE_REASONS),
             name="ck_oauth_refresh_families_reason",
         ),
         sa.CheckConstraint("expires_at > created_at", name="ck_oauth_refresh_families_expiry"),
@@ -255,11 +263,9 @@ def upgrade() -> None:
         _when("created_at", now=True),
         _when("expires_at"),
         _when("used_at", nullable=True),
-        _uuid(
-            "family_id",
-            sa.ForeignKey("oauth_refresh_families.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
+        # The family the code opened, once it is exchanged:
+        # `fk_oauth_codes_family_user` below.
+        _uuid("family_id", nullable=True),
         _app_of_the_org("oauth_codes"),
         sa.UniqueConstraint("code_hash", name="uq_oauth_codes_code_hash"),
         sa.CheckConstraint("octet_length(code_hash) = 32", name="ck_oauth_codes_code_hash"),
@@ -268,7 +274,19 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("expires_at > created_at", name="ck_oauth_codes_expiry"),
     )
+    # A code's family is its own person's, as a token's is. The family's end
+    # empties `family_id` alone: a bare SET NULL on the composite key would
+    # empty `user_id` too (PostgreSQL 15+'s column list; the platform runs 16).
+    op.execute(
+        "ALTER TABLE oauth_codes ADD CONSTRAINT fk_oauth_codes_family_user "
+        "FOREIGN KEY (family_id, user_id) REFERENCES oauth_refresh_families (id, user_id) "
+        "ON DELETE SET NULL (family_id)"
+    )
     op.create_index("ix_oauth_codes_user_id", "oauth_codes", ["user_id"])
+    # Every foreign key that deletes or empties a code finds it by an index:
+    # an app's purge, a family's end.
+    op.create_index("ix_oauth_codes_oauth_client_id", "oauth_codes", ["oauth_client_id"])
+    op.create_index("ix_oauth_codes_family_id", "oauth_codes", ["family_id"])
     for table in PERSON_TABLES:
         _person_scope(table)
 

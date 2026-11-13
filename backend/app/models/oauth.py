@@ -8,8 +8,8 @@ from `users`, never sent; the AI app is `oauth_client_id`. Only
 `OAuthClient.client_id` is an OAuth client id.
 
 NOTHING HERE HOLDS A SECRET IN CLEAR: `code_hash` and `token_hash` are the
-SHA-256 of a random 256-bit value (`app.core.auth.oauth.grants.hash_secret`);
-the access token is never stored.
+SHA-256 of a random 256-bit value (`app.core.auth.oauth.grants.hash_secret`,
+which arrives with plan Task 7); the access token is never stored.
 """
 
 from datetime import datetime
@@ -48,6 +48,10 @@ REVOKE_REASONS = (
 )
 
 
+def _one_of(column: str, values: tuple[str, ...]) -> str:
+    return f"{column} IN (" + ", ".join(f"'{v}'" for v in values) + ")"
+
+
 def _client_id() -> Mapped[UUID | None]:
     """The trigger's: copied from `users.client_id`, never sent
     (`app.models.auth._client_id`, the same column)."""
@@ -75,9 +79,7 @@ class OAuthClient(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "client_id", name="uq_oauth_clients_org_client"),
         UniqueConstraint("id", "org_id", name="uq_oauth_clients_id_org"),
-        CheckConstraint(
-            "kind IN ('registered', 'metadata_document')", name="ck_oauth_clients_kind"
-        ),
+        CheckConstraint(_one_of("kind", CLIENT_KINDS), name="ck_oauth_clients_kind"),
         CheckConstraint(
             "char_length(client_id) BETWEEN 1 AND 255", name="ck_oauth_clients_client_id"
         ),
@@ -120,9 +122,7 @@ class OAuthRefreshFamily(Base):
             name="ck_oauth_refresh_families_revoked",
         ),
         CheckConstraint(
-            "revoked_reason IS NULL OR revoked_reason IN ("
-            + ", ".join(f"'{r}'" for r in REVOKE_REASONS)
-            + ")",
+            "revoked_reason IS NULL OR " + _one_of("revoked_reason", REVOKE_REASONS),
             name="ck_oauth_refresh_families_reason",
         ),
         CheckConstraint("expires_at > created_at", name="ck_oauth_refresh_families_expiry"),
@@ -182,6 +182,16 @@ class OAuthCode(Base):
     __table_args__ = (
         client_org_fk("oauth_codes"),
         _app_of_the_org("oauth_codes"),
+        # A code's family is its own person's. The family's end empties
+        # `family_id` alone (PostgreSQL 15+'s column list): a bare SET NULL on
+        # this composite key would empty `user_id` too. Written exactly as the
+        # database has it, which autogenerate reflects and compares equal.
+        ForeignKeyConstraint(
+            ["family_id", "user_id"],
+            ["oauth_refresh_families.id", "oauth_refresh_families.user_id"],
+            name="fk_oauth_codes_family_user",
+            ondelete="SET NULL (family_id)",
+        ),
         UniqueConstraint("code_hash", name="uq_oauth_codes_code_hash"),
         CheckConstraint("octet_length(code_hash) = 32", name="ck_oauth_codes_code_hash"),
         CheckConstraint(
@@ -196,7 +206,7 @@ class OAuthCode(Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    oauth_client_id: Mapped[UUID] = mapped_column()
+    oauth_client_id: Mapped[UUID] = mapped_column(index=True)
     code_hash: Mapped[bytes] = mapped_column(LargeBinary)
     redirect_uri: Mapped[str] = mapped_column(Text)
     code_challenge: Mapped[str] = mapped_column(Text)
@@ -204,6 +214,4 @@ class OAuthCode(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column()
     used_at: Mapped[datetime | None] = mapped_column(default=None)
-    family_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("oauth_refresh_families.id", ondelete="SET NULL"), default=None
-    )
+    family_id: Mapped[UUID | None] = mapped_column(index=True, default=None)

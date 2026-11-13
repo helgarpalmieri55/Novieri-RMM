@@ -25,11 +25,23 @@ authentication phase 2's rule, `guards.lock_user_row`; operator decision D2
 for phase 3). Nothing here takes a lock: `oauth_session` pins the
 organization and the scope, and `deployment_org` reads on a connection of
 its own. A transaction that writes a person's codes, families or refresh
-tokens takes, in order, their `users` row FOR NO KEY UPDATE
-(`guards.lock_user_row`), their advisory lock (`factors.lock_person`) when it
-needs one, then their rows, and the organization's audit chain last. A row
-found by its hash before that (whose code? whose token?) is read without a
-lock, and read again after the person's row is held, before it is written.
+tokens takes, in this order:
+
+1. the person's `users` row FOR NO KEY UPDATE (`guards.lock_user_row`);
+2. their advisory lock (`factors.lock_person`), when it takes one;
+3. THE AI APP'S `oauth_clients` ROW: `clients.hold` (FOR KEY SHARE, its use
+   written and flushed when due), or, in the same transaction, a metadata
+   document's refresh of that row, flushed. Before any grant row, because an
+   idle app's purge (Task 6's `purge_idle`, Task 13's retention) deletes the
+   app row first and its grant rows after, by cascade: a writer that held a
+   grant row and then waited for the app row would close a cycle with it
+   (40P01);
+4. the person's codes, families and refresh tokens;
+5. the organization's audit chain, last.
+
+A row found by its hash before step 1 (whose code? whose token?) is read
+without a lock, and read again after step 3, before it is written: the purge
+may have taken it meanwhile, and a write to a row gone is a stale-row 500.
 """
 
 from collections.abc import AsyncIterator
@@ -54,7 +66,8 @@ async def deployment_org(app: Any) -> UUID | None:
 @asynccontextmanager
 async def oauth_session(org_id: UUID, engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     """One transaction in `org_id` over every client (module docstring). It
-    takes no lock: a caller that writes a person's rows locks that person's
-    `users` row first, inside it (THE LOCK ORDER, above)."""
+    takes no lock: a caller that writes a person's rows takes, inside it, that
+    person's `users` row first and the app's row (`clients.hold`) before any
+    grant row (THE LOCK ORDER, above)."""
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         yield session

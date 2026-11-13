@@ -174,7 +174,21 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
     The writers that take NO person's row, each with the chain last or not
     at all, so none of them can close a cycle with the above:
     - the retention sweep (`retention.py`), which deletes only rows long
-      dead that none of the above reads;
+      dead that none of the above reads -- NOT an idle AI app, whose live
+      grants go with it (the purge, below), even when the sweep deletes it;
+    - the purge of an idle AI app (own authentication phase 3: Task 6's
+      `clients.purge_idle` and Task 13's retention step for apps), which
+      deletes a person's grant rows -- families, refresh tokens, codes -- by
+      cascade from `oauth_clients`, holding no person's row. Its shape:
+      `DELETE FROM oauth_clients WHERE id = ... AND last_used_at <= now -
+      CLIENT_IDLE` (`clients.is_idle`), the idle condition INSIDE the
+      statement; one app per transaction; nothing after the cascade but the
+      chain. A writer of grants holds the app row before any grant row
+      (`clients.hold`, `oauth.store`'s lock order, step 3), so the DELETE
+      waits for it on the app row, never in the cascade; and when that
+      writer's use commits first, Postgres re-checks the condition on the
+      row as it now is, finds it false, and the app survives
+      (`tests/test_oauth_schema.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);
