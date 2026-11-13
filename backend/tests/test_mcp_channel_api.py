@@ -98,6 +98,9 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
     # same way, and the reset of their access that issues a new one.
     ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/invite"),
     ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"),
+    # Own authentication phase 3 (plan 2026-11-06, Task 8): approving an AI app
+    # answers its one-time authorization code.
+    ("POST", "/api/v1/oauth/authorize/decision"),
 }
 
 # Own authentication phase 2, Task 14 (design §2.5, widened by the operator on
@@ -218,7 +221,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 55
+    assert len(NEVER_EXPOSED) == 56
     assert set(NEVER_EXPOSED) == (
         GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED | RECENT_FACTOR_NEVER_EXPOSED
     )

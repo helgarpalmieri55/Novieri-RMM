@@ -41,6 +41,7 @@ Notice = Literal[
     "recovery_code_used",
     "factors_reset",
     "recovery_link_issued",
+    "app_connected",
 ]
 
 
@@ -63,7 +64,7 @@ def _factor_name(factor: str | None) -> str:
 
 
 def _compose(
-    kind: Notice, *, factor: str | None, days: int | None, left: int | None
+    kind: Notice, *, factor: str | None, days: int | None, left: int | None, host: str | None
 ) -> tuple[str, str]:
     when = _when()
     if kind == "password_changed":
@@ -133,6 +134,19 @@ def _compose(
                 "your account. It works for 15 minutes.\n\n"
                 "If you did not ask for this, tell whoever runs this installation now.",
                 when=when,
+            ),
+        )
+    if kind == "app_connected":
+        return (
+            tr("You connected {host}", host=host),
+            tr(
+                "On {when} you approved {host} to act for you over MCP, with everything your "
+                "{product} account may do. It keeps that access for as long as it is used, until "
+                "you revoke it under Settings → AI connections.\n\n"
+                "If it was not you, revoke it there now and tell your administrator.",
+                when=when,
+                host=host,
+                product=PRODUCT,
             ),
         )
     return (
@@ -257,9 +271,10 @@ async def tell(
     factor: str | None = None,
     days: int | None = None,
     left: int | None = None,
+    host: str | None = None,
 ) -> bool:
     with use_locale(user.locale or locale_var.get()):
-        subject, text = _compose(kind, factor=factor, days=days, left=left)
+        subject, text = _compose(kind, factor=factor, days=days, left=left, host=host)
     return await deliver(
         session,
         org_id=user.org_id,

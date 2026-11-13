@@ -1023,6 +1023,60 @@ CATALOG: dict[str, str] = {
     ),
     # --- api ---
     "missing bearer token": "falta el token de portador",
+    # The consent screen (own authentication phase 3, Task 8:
+    # app/core/auth/oauth/authorize.py, consent.py, notices.py).
+    "this connection request names its AI app or its return address twice": (
+        "esta solicitud de conexión nombra dos veces su aplicación de IA o su dirección de vuelta"
+    ),
+    "this connection request names no AI app": (
+        "esta solicitud de conexión no nombra ninguna aplicación de IA"
+    ),
+    "this AI app's description could not be read from {host}": (
+        "no se pudo leer la descripción de esta aplicación de IA en {host}"
+    ),
+    "this AI app's description could not be read from {host} just now; try again in a moment": (
+        "ahora mismo no se pudo leer la descripción de esta aplicación de IA en {host}; vuelve a "
+        "intentarlo dentro de un momento"
+    ),
+    "this AI app is not registered here, or its registration expired. Connect it again from "
+    "the app.": (
+        "esta aplicación de IA no está registrada aquí o su registro caducó. Vuelve a "
+        "conectarla desde la aplicación."
+    ),
+    "this connection request names no return address, and its AI app registered more than "
+    "one": (
+        "esta solicitud de conexión no nombra ninguna dirección de vuelta, y su aplicación de IA "
+        "registró más de una"
+    ),
+    "the address this AI app asked to go back to is not one it registered": (
+        "la dirección a la que esta aplicación de IA pidió volver no es una de las que registró"
+    ),
+    "this AI app's request is malformed; going back tells the app what was wrong": (
+        "la solicitud de esta aplicación de IA está mal formada; al volver, la aplicación sabrá "
+        "qué falló"
+    ),
+    "you did not connect this AI app; going back tells it so": (
+        "no conectaste esta aplicación de IA; al volver, se le dirá"
+    ),
+    "AI apps connect to this installation's own organization, and you are signed in to "
+    "another one": (
+        "las aplicaciones de IA se conectan a la organización de esta instalación, y has "
+        "iniciado sesión en otra"
+    ),
+    "MCP is not available: ITS_DEFAULT_ORG_SLUG names no organization on this installation.": (
+        "MCP no está disponible: ITS_DEFAULT_ORG_SLUG no nombra ninguna organización de esta "
+        "instalación."
+    ),
+    "You connected {host}": "Has conectado {host}",
+    "On {when} you approved {host} to act for you over MCP, with everything your {product} "
+    "account may do. It keeps that access for as long as it is used, until you revoke it "
+    "under Settings → AI connections.\n\nIf it was not you, revoke it there now and tell your "
+    "administrator.": (
+        "El {when} aprobaste que {host} actúe por ti mediante MCP, con todo lo que puede hacer "
+        "tu cuenta de {product}. Conserva ese acceso mientras se use, hasta que lo revoques en "
+        "Configuración → Conexiones de IA.\n\nSi no fuiste tú, revócalo allí ahora y avisa a tu "
+        "administrador."
+    ),
     "the assistant's internal token was refused": "se rechazó el token interno del asistente",
     "unknown organization": "organización desconocida",
     "requires {code}": "requiere {code}",

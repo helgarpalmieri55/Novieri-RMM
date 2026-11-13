@@ -39,6 +39,7 @@ const HAND_WORDED: Record<string, string> = {
   // New with the MCP server, never shown as the derivation on main. The page
   // names them as Settings -> AI connections does: what was revoked is an AI
   // app, and "MCP app" is the protocol's name for it, not the person's.
+  mcp_app_authorized: "AI app authorized",
   mcp_app_revoked: "AI app revoked",
   mcp_app_revoke_incomplete: "AI app revoke incomplete",
 };

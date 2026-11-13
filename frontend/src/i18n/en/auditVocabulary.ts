@@ -313,6 +313,7 @@ export const auditActions = {
   license_vendor_updated: "License vendor updated",
   // Worded by hand, as Settings -> AI connections names them
   // (auditVocabulary.english.test.ts, HAND_WORDED).
+  mcp_app_authorized: "AI app authorized",
   mcp_app_revoke_incomplete: "AI app revoke incomplete",
   mcp_app_revoked: "AI app revoked",
   mcp_code_reused: "MCP code reused",

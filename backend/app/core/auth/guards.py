@@ -173,7 +173,18 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       rows, the access token's signature, the app's use (`clients.touch`,
       flushed), the chain last. A code exchanged while an act on the person
       is in flight waits here and reads the act's outcome, so it opens no
-      grant the act's revocation could miss (`tests/test_oauth_token.py`).
+      grant the act's revocation could miss (`tests/test_oauth_token.py`);
+    - a person's approval of an AI app (own authentication phase 3, Task 8;
+      operator decision D2): `oauth.consent.decide` resolves the app first,
+      outside its transaction (`clients.resolve_client`, whose purge of an
+      idle document gives way on a lock wait); then, in one transaction, the
+      row with the session still live under it (`locked_user`, here); the
+      app's (`clients.hold`, FOR KEY SHARE); the code (`grants.issue_code`,
+      no lock of its own); the app's use (`clients.touch`, flushed); the
+      chain; and the "You connected" notice last. An approval that waited
+      on an act which ended the session -- signing out everywhere, a
+      disable -- is refused and issues nothing
+      (`tests/test_oauth_consent.py`).
     THESE WRITERS take the chain last, so none of them holds it while
     waiting on a person's row; it is not a claim about every transaction
     that audits. Two of them that both take the row wait for each other
