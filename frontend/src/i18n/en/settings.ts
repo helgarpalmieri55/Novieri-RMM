@@ -455,8 +455,8 @@ export const settings = {
     },
     apps: {
       title: "AI apps with access",
-      subtitle: "Apps people here used in the last 90 days, most recent first",
-      empty: "No AI app has been used in this organization in the last 90 days.",
+      subtitle: "Apps people here used in the last 90 days, most recent first, then apps holding access that have not been used yet",
+      empty: "No AI app has been used in this organization in the last 90 days, and none holds access.",
       columns: {
         app: "App",
         people: "People",
@@ -469,6 +469,9 @@ export const settings = {
       revokeMeAria: "Revoke for me: {app}",
       revokeEveryone: "Revoke for everyone",
       revokeEveryoneAria: "Revoke for everyone: {app}",
+      calledItself: "It calls itself “{name}”.",
+      selfRegistered: "It registered itself here: any app can, under any name.",
+      unregistered: "No longer registered here, so it holds no access.",
     },
     enable: {
       title: "Allow AI apps to connect",
@@ -483,11 +486,6 @@ export const settings = {
     revoked: {
       me: "{app} is revoked for you.",
       everyone: "{app} is revoked for everyone in this organization.",
-    },
-    partialMe: "{app} is revoked for you, and every sign-in it already holds is refused. Your permission for the app to sign in again could not be withdrawn yet, though, so it may still reconnect for you without asking. Try revoking again.",
-    partial: {
-      one: "{app} is revoked, and every sign-in it already holds is refused. For {count} person, though, the app's permission to sign in again could not be withdrawn yet, so it may still reconnect without asking. Try revoking again.",
-      other: "{app} is revoked, and every sign-in it already holds is refused. For {count} people, though, the app's permission to sign in again could not be withdrawn yet, so it may still reconnect without asking. Try revoking again.",
     },
   },
   notifications: {

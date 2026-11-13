@@ -436,8 +436,8 @@ export const settings: Shape<typeof en> = {
     },
     apps: {
       title: "Aplicaciones de IA con acceso",
-      subtitle: "Aplicaciones que las personas de esta organización han usado en los últimos 90 días, las más recientes primero",
-      empty: "Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días.",
+      subtitle: "Aplicaciones que las personas de esta organización han usado en los últimos 90 días, las más recientes primero, y después las que tienen acceso y aún no se han usado",
+      empty: "Ninguna aplicación de IA se ha usado en esta organización en los últimos 90 días, y ninguna tiene acceso.",
       columns: {
         app: "Aplicación",
         people: "Personas",
@@ -450,6 +450,9 @@ export const settings: Shape<typeof en> = {
       revokeMeAria: "Revocar para mí: {app}",
       revokeEveryone: "Revocar para todos",
       revokeEveryoneAria: "Revocar para todos: {app}",
+      calledItself: "Dice llamarse «{name}».",
+      selfRegistered: "Se registró sola aquí: cualquier aplicación puede, con cualquier nombre.",
+      unregistered: "Ya no está registrada aquí, así que no tiene acceso.",
     },
     enable: {
       title: "Permitir que se conecten aplicaciones de IA",
@@ -464,11 +467,6 @@ export const settings: Shape<typeof en> = {
     revoked: {
       me: "Se revocó {app} para ti.",
       everyone: "Se revocó {app} para todas las personas de esta organización.",
-    },
-    partialMe: "Se revocó {app} para ti y se rechaza cualquier sesión que ya tenga. Sin embargo, todavía no se pudo retirar tu permiso para que la aplicación vuelva a iniciar sesión, así que es posible que vuelva a conectarse sin preguntarte. Vuelve a intentar la revocación.",
-    partial: {
-      one: "Se revocó {app} y se rechaza cualquier sesión que ya tenga. Sin embargo, con {count} persona todavía no se pudo retirar el permiso de la aplicación para volver a iniciar sesión, así que es posible que vuelva a conectarse sin preguntar. Vuelve a intentar la revocación.",
-      other: "Se revocó {app} y se rechaza cualquier sesión que ya tenga. Sin embargo, con {count} personas todavía no se pudo retirar el permiso de la aplicación para volver a iniciar sesión, así que es posible que vuelva a conectarse sin preguntar. Vuelve a intentar la revocación.",
     },
   },
   notifications: {

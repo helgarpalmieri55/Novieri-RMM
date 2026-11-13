@@ -1087,15 +1087,28 @@ export interface OrgSettings {
 }
 
 /**
- * One AI app that called tools in this organization in the last 90 days
- * (`backend/app/mcp/api.py::McpAppOut`).
+ * One AI app that called tools in this organization in the last 90 days, or
+ * that holds a live grant here and has not yet (`backend/app/mcp/api.py::
+ * McpAppOut`; B3-28).
  */
 export interface McpAppOut {
-  /** The app's OAuth client id, as the identity provider registered it. */
+  /** Its registration here (`oauth_clients`), what a revoke names; null when it has none any more. */
+  id: string | null;
+  /** The app's OAuth client id: what it registered, or its metadata document's URL. */
   client_id: string;
-  /** How many people of this organization used it in the last 90 days. */
+  /** The name the app gave itself, or null. Anyone can call an app anything. */
+  name: string | null;
+  /**
+   * What the row is titled by, which the app cannot fake: its metadata
+   * document's host, or the host(s) its registered redirects go to; null
+   * without a registration (B3-10).
+   */
+  host: string | null;
+  /** `registered`: it registered itself here (any app can, under any name). */
+  kind: "registered" | "metadata_document" | null;
+  /** How many people of this organization used it in the last 90 days; 0 for one approved and not used yet. */
   people: number;
-  /** When anyone here last called a tool through it. */
+  /** When anyone here last called a tool through it; null when nobody has yet. */
   last_used_at: string | null;
   /** You revoked it for yourself after your last use of it. */
   revoked_for_me: boolean;
@@ -1115,14 +1128,14 @@ export interface McpConnectionsOut {
 export type McpRevokeScope = "me" | "everyone";
 
 /**
- * `POST /mcp/connections/{client_id}/revoke`. The revocation is in force when
- * this returns; `keycloak_failures` counts the people whose consent could not
- * be withdrawn at the identity provider, for whom the app could still obtain
- * NEW tokens until a revoke succeeds.
+ * `POST /mcp/connections/{app_id}/revoke`. In force when it returns: every
+ * sign-in the app held for whom it was revoked is ended in the same
+ * transaction (own-auth plan 2026-11-06, D12), so there is no half that can
+ * fail. `grants_revoked` counts them.
  */
 export interface McpRevokeOut {
   revoked: boolean;
-  keycloak_failures: number;
+  grants_revoked: number;
 }
 
 /**
@@ -1209,6 +1222,8 @@ import type {
 } from "../modules/site-servers/types";
 import type {
   AuthenticationResponseJSON,
+  ConsentAnswer,
+  ConsentDetails,
   EnrollFrom,
   InviteAccepted,
   InviteDetails,
@@ -1717,7 +1732,7 @@ export interface RequestRoute {
   client: string | null;
   /**
    * Global BY ITS BODY, which `globalRoutes.json` cannot see: it lists methods
-   * and paths, never bodies. `POST /mcp/connections/{client_id}/revoke` is the
+   * and paths, never bodies. `POST /mcp/connections/{app_id}/revoke` is the
    * person's own with `scope: "me"`, and withdraws the app from the whole
    * organization with `scope: "everyone"` -- refused narrowed (403
    * ALL_CLIENTS_REQUIRED, `backend/tests/test_global_writes.py`). `true` never
@@ -2054,6 +2069,35 @@ export class ApiClient {
    */
   acceptRecovery(body: RecoveryAccept): Promise<void> {
     return this.request<void>("/auth/recover/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /**
+   * `POST /oauth/authorize/details`: what an AI app's authorization request
+   * asks, for the consent screen (own-auth design §5.2). `query` is
+   * `/oauth/authorize`'s, as the browser has it, without the `?`; the server
+   * validates it, and validates it again at the decision.
+   */
+  oauthAuthorizeDetails(query: string): Promise<ConsentDetails> {
+    return this.request<ConsentDetails>(
+      "/oauth/authorize/details",
+      { method: "POST", body: JSON.stringify({ query }) },
+      { global: true },
+    );
+  }
+
+  /**
+   * `POST /oauth/authorize/decision`: the person's answer. Approving needs the
+   * second factor confirmed in the last 10 minutes (operator decision C1): a
+   * 403 `step_up_required` the page answers with `useStepUp`. An approval's
+   * `redirect_to` carries a one-time authorization code -- a secret, so the
+   * page's mutation is `useSecretMutation` (`src/test/secretMutations.test.ts`).
+   */
+  oauthAuthorizeDecision(query: string, approve: boolean): Promise<ConsentAnswer> {
+    return this.request<ConsentAnswer>(
+      "/oauth/authorize/decision",
+      { method: "POST", body: JSON.stringify({ query, approve }) },
+      { global: true },
+    );
   }
 
   /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */
@@ -6216,18 +6260,17 @@ export class ApiClient {
   }
 
   /**
-   * Revoke an AI app for the caller or for the whole organization. The client
-   * id is whatever the app registered, so it is encoded as ONE path segment:
-   * a `/` or `?` in it must never become path or query.
+   * Revoke an AI app for the caller or for the whole organization, by its
+   * registration's id (a UUID: a client id can be a URL).
    *
    * FOR EVERYONE IT IS GLOBAL, BY ITS BODY (phase 3 design §1.2): the server
    * refuses `scope: "everyone"` narrowed by `X-Client-Id` (403
    * ALL_CLIENTS_REQUIRED), and `globalRoutes.json` cannot tell the two scopes
    * apart, so this request says it. `scope: "me"` is narrowed like any other.
    */
-  revokeMcpConnection(clientId: string, scope: McpRevokeScope): Promise<McpRevokeOut> {
+  revokeMcpConnection(appId: string, scope: McpRevokeScope): Promise<McpRevokeOut> {
     return this.request<McpRevokeOut>(
-      `/mcp/connections/${encodeURIComponent(clientId)}/revoke`,
+      `/mcp/connections/${encodeURIComponent(appId)}/revoke`,
       { method: "POST", body: JSON.stringify({ scope }) },
       { global: scope === "everyone" },
     );

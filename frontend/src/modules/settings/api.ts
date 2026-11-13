@@ -248,14 +248,14 @@ export function useMcpConnections(enabled: boolean) {
 
 /**
  * A revoke. The result is kept on the mutation (`data`, `variables`) and
- * worded at render, so the outcome — including how many people's sign-in
- * could not be withdrawn — re-words on a language switch.
+ * worded at render, so the outcome re-words on a language switch. `label` is
+ * the app as the row shows it, for that sentence.
  */
 export function useRevokeMcpConnection() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<McpRevokeOut, ApiError, { clientId: string; scope: McpRevokeScope }>({
-    mutationFn: ({ clientId, scope }) => api.revokeMcpConnection(clientId, scope),
+  return useMutation<McpRevokeOut, ApiError, { appId: string; label: string; scope: McpRevokeScope }>({
+    mutationFn: ({ appId, scope }) => api.revokeMcpConnection(appId, scope),
     onSuccess: () => {
       // The row's "revoked for you / for everyone" flags moved.
       void queryClient.invalidateQueries({ queryKey: [MCP_CONNECTIONS_KEY] });

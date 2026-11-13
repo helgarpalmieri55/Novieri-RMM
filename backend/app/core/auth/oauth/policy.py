@@ -28,6 +28,7 @@ names no issuer, and every OAuth route and `/mcp` answer 503 (B3-18).
 """
 
 import ipaddress
+import re
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -67,17 +68,76 @@ TOKEN_REQUESTS_PER_MINUTE = 600
 MAX_REQUEST_BYTES = 16 * 1024
 
 
+_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_HEX_NUMBER = re.compile(r"0x[0-9a-f]*", re.IGNORECASE)
+
+
+def valid_host(host: str) -> bool:
+    """A host the person and the browser read the same way (plan B3-10, A3-01).
+
+    `host` is what `urlsplit(...).hostname` gives: an IPv6 literal without its
+    brackets. Accepted: a DNS name of LDH labels (1-63 characters, no leading
+    or trailing hyphen, at most 253 in all, one root dot allowed) whose last
+    label is not all digits; an IPv6 literal without a zone; a canonical
+    dotted-quad IPv4 address. Refused: anything a browser's URL parser decodes
+    differently from Python's -- a backslash, `%` escapes, `_`, quotes, braces,
+    and every host whose last label (root dot aside) is all digits or `0x`
+    plus hex digits, which WHATWG reads as an IPv4 number (`127.1`,
+    `2130706433`, `0x7f000001`, `0x`, `1.0x2`), and an `xn--` label that is
+    not valid punycode."""
+    if not isinstance(host, str) or not host:
+        return False
+    if "%" in host:
+        return False
+    if ":" in host:
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            return False
+        return True
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isascii() and p.isdigit() for p in parts):
+        try:
+            ipaddress.IPv4Address(host)  # refuses leading zeros and octets over 255
+        except ValueError:
+            return False
+        return True
+    name = host[:-1] if host.endswith(".") else host
+    if not name or len(name) > 253:
+        return False
+    labels = name.split(".")
+    if not all(_LABEL.fullmatch(label) for label in labels):
+        return False
+    last = labels[-1]
+    if last.isdigit() or _HEX_NUMBER.fullmatch(last):
+        return False
+    return all(_punycode_ok(label) for label in labels)
+
+
+def _punycode_ok(label: str) -> bool:
+    """A label is not an `xn--` one, or it decodes and encodes back to itself."""
+    if not label.lower().startswith("xn--"):
+        return True
+    try:
+        decoded = label.encode("ascii").decode("idna")
+        return not decoded.isascii() and decoded.encode("idna").decode("ascii") == label.lower()
+    except (UnicodeError, ValueError):
+        return False
+
+
 def issuer(settings: object) -> str | None:
     """The issuer identifier, or None when the console address cannot be one."""
     raw = (getattr(settings, "public_console_url", None) or "").strip().rstrip("/")
-    if not raw:
+    if not raw or any(ord(ch) <= 0x20 or ord(ch) > 0x7E for ch in raw):
         return None
     try:
         parts = urlsplit(raw)
         parts.port  # noqa: B018 - raises ValueError on a malformed port
     except ValueError:
         return None
-    if parts.scheme != "https" or not parts.hostname:
+    if parts.scheme != "https" or not parts.hostname or not valid_host(parts.hostname):
+        return None
+    if "?" in raw or "#" in raw or parts.netloc.endswith(":"):
         return None
     if parts.path or parts.query or parts.fragment or parts.username is not None:
         return None
@@ -106,6 +166,8 @@ def network_of(address: ipaddress.IPv4Address | ipaddress.IPv6Address | None) ->
     one, the bucket every unplaceable request shares."""
     if address is None:
         return "ip:unknown"
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
     if address.version == 6:
         network = ipaddress.ip_network(f"{address}/{IPV6_NETWORK_BITS}", strict=False)
         return f"net:{network}"

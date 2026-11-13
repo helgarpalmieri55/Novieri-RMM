@@ -93,6 +93,48 @@ export interface RecoveryLink {
 }
 
 /**
+ * The AI app a consent screen names (`backend/app/core/auth/oauth/consent.py`,
+ * plan 2026-11-06 Appendix A.2). `name` is the app's own claim (RFC 7591 §5);
+ * `client_host` is the host of a client metadata document's URL (`kind:
+ * "metadata_document"`), null for an app that registered; `redirect_host` is
+ * where the answer goes; `loopback_only` when every address it registered is
+ * this computer. Hosts are ASCII (plan Task 1, decision 3).
+ */
+export interface ConsentClient {
+  name: string | null;
+  client_id: string;
+  kind: "registered" | "metadata_document";
+  client_host: string | null;
+  redirect_host: string;
+  loopback_only: boolean;
+}
+
+/**
+ * What the server answers about an authorization request, other than "ask
+ * the person". `refused` is shown and never sent anywhere (RFC 6749 §4.1.2.1:
+ * a bad client or redirect; `temporarily_unavailable` says to try again);
+ * `back` is shown with the host it goes to, and goes there only on the
+ * person's click (RFC 9700 §4.11.2): an error the app should hear, the
+ * person's decline, or a person who may not connect apps; `redirect` is where
+ * to go now, with the code, after an approval -- and only then.
+ */
+export type ConsentAnswer =
+  | { outcome: "refused"; error: string; detail: string }
+  | {
+      outcome: "back";
+      reason: "error" | "declined" | "denied";
+      detail: string;
+      redirect_host: string;
+      redirect_to: string;
+    }
+  | { outcome: "redirect"; redirect_to: string };
+
+/** `POST /oauth/authorize/details`: `consent` asks the person; the rest is `ConsentAnswer`, never `redirect`. */
+export type ConsentDetails =
+  | { outcome: "consent"; client: ConsentClient; scope: string; account: string }
+  | Exclude<ConsentAnswer, { outcome: "redirect" }>;
+
+/**
  * `POST /auth/recover/accept`: the link's token, and a new password -- needed
  * while the server asks for one (`RecoveryLink.password_required`, or a 409
  * `recovery_needs_password`), optional otherwise, and applied whenever it is

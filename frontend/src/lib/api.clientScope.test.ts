@@ -110,7 +110,7 @@ describe("X-Client-Id", () => {
 
 /**
  * A route that is global BY ITS BODY, not by its path: `POST
- * /mcp/connections/{client_id}/revoke` with `scope: "everyone"` withdraws an AI
+ * /mcp/connections/{app_id}/revoke` with `scope: "everyone"` withdraws an AI
  * app from the whole organization, so the server refuses it narrowed (403
  * ALL_CLIENTS_REQUIRED, `backend/tests/test_global_writes.py`), while the same
  * path with `scope: "me"` is the person's own and is narrowed like any other.
@@ -124,8 +124,8 @@ describe("X-Client-Id on a route global by its body", () => {
     // Wired as `ApiContext.tsx` wires it: the top bar's choice, read per request.
     const api = new ApiClient(vi.fn(), "/api/v1", selectedClient);
 
-    await api.revokeMcpConnection("some-ai-app", "everyone");
-    await api.revokeMcpConnection("some-ai-app", "me");
+    await api.revokeMcpConnection("7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70", "everyone");
+    await api.revokeMcpConnection("7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70", "me");
 
     expect(sent(fetchMock, 0).has("X-Client-Id")).toBe(false);
     expect(sent(fetchMock, 1).get("X-Client-Id")).toBe(ACME);
@@ -136,7 +136,7 @@ describe("X-Client-Id on a route global by its body", () => {
     expect(
       requestHeaders(own, {
         method: "POST",
-        path: "/mcp/connections/some-ai-app/revoke",
+        path: "/mcp/connections/7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70/revoke",
         client: ACME,
         global: true,
       }).has("X-Client-Id"),
@@ -144,7 +144,7 @@ describe("X-Client-Id on a route global by its body", () => {
     expect(
       requestHeaders(own, {
         method: "POST",
-        path: "/mcp/connections/some-ai-app/revoke",
+        path: "/mcp/connections/7a1c2e9b-4f3d-4c55-9a0e-2b6d8f1e3c70/revoke",
         client: ACME,
       }).get("X-Client-Id"),
     ).toBe(ACME);

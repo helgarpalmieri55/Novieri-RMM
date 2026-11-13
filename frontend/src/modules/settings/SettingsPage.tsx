@@ -17,7 +17,7 @@
  * | Sessions       | `GET /settings/sessions`      | `PUT /settings/sessions`           | `orgs.manage` / `orgs.manage`    |
  * | Microsoft sign-in | `GET /settings/microsoft-sign-in` | `PUT /settings/microsoft-sign-in` | `orgs.manage` / `orgs.manage` |
  * | Assistant      | `GET /ai/settings`, `/ai/providers` | `PUT /ai/settings`           | `ai.admin` / `ai.admin`          |
- * | AI connections | `GET /orgs/current`, `GET /mcp/connections` | `PATCH /orgs/current` (`mcp_enabled` only), `POST /mcp/connections/{client_id}/revoke` | `mcp.use` OR `orgs.manage` / switch and "for everyone" `orgs.manage`, "for me" `mcp.use` |
+ * | AI connections | `GET /orgs/current`, `GET /mcp/connections` | `PATCH /orgs/current` (`mcp_enabled` only), `POST /mcp/connections/{app_id}/revoke` | `mcp.use` OR `orgs.manage` / switch and "for everyone" `orgs.manage`, "for me" `mcp.use` |
  * | Notifications  | `GET /notifications/channels`, `/rules` | `POST`/`PATCH` both, `POST .../test` | `notification.read` / `notification.admin` |
  * | Service levels | `GET /sla/settings`           | `PUT /sla/settings`                | `sla.read` / `sla.admin`         |
  * | Health         | `GET /health/settings`        | `PUT /health/settings`             | `health.read` / `health.admin`   |
