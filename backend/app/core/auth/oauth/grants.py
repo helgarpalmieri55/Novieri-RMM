@@ -221,9 +221,19 @@ async def issue_code(
     redirect_uri: str,
     code_challenge: str,
     resource: str,
-    now: datetime,
 ) -> str:
-    """A one-time code for what the person just approved (Task 8)."""
+    """A one-time code for what the person just approved (Task 8).
+
+    ITS TIMES ARE THE DATABASE'S (Task 10 review, Important 1): `created_at`
+    is the column's own default and `expires_at` that same `now()` plus
+    `CODE_TTL_S`, never the API host's clock. Everything that reads them
+    reads the database's: the exchange after its locks
+    (`_clock_after_the_locks`), and an act ending the person's codes
+    (`end_unspent_codes`). From the API's clock, a host running Δ ahead put
+    `created_at` Δ in the database's future; the act's floor (`created_at`
+    + 1 µs, for `ck_oauth_codes_expiry`) then left the code live for Δ after
+    the act, and an exchange inside it opened a grant
+    (`tests/test_mcp_grant_lifecycle.py`, the clock ahead)."""
     code = new_secret()
     session.add(
         OAuthCode(
@@ -234,8 +244,7 @@ async def issue_code(
             redirect_uri=redirect_uri,
             code_challenge=code_challenge,
             resource=resource,
-            created_at=now,
-            expires_at=now + timedelta(seconds=CODE_TTL_S),
+            expires_at=func.now() + timedelta(seconds=CODE_TTL_S),
         )
     )
     await session.flush()
@@ -297,7 +306,10 @@ async def revoke_family(session: AsyncSession, family_id: UUID, reason: str, now
 #: Where an ended code's expiry goes: the database's clock, the one the
 #: exchange compares it with after its locks (`_clock_after_the_locks`) --
 #: but never at or before the code's `created_at`, which
-#: `ck_oauth_codes_expiry` (`expires_at > created_at`) forbids.
+#: `ck_oauth_codes_expiry` (`expires_at > created_at`) forbids. `created_at`
+#: is the database's own `now()` at the approval (`issue_code`), which
+#: committed before this statement could see the code, so the floor never
+#: lifts the expiry past this clock: it only keeps the CHECK true.
 _ENDED_AT = func.greatest(func.clock_timestamp(), OAuthCode.created_at + timedelta(microseconds=1))
 
 

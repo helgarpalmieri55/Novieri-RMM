@@ -125,13 +125,20 @@ async def seed_code(
     redirect_uri: str = CLAUDE_CALLBACK,
     now: datetime | None = None,
 ) -> str:
-    """A code the person `sub` approved for `app`, as the consent route issues it."""
+    """A code the person `sub` approved for `app`, as the consent route issues it.
+
+    The consent route takes the code's times from the database (Task 10
+    review, Important 1). A test that wants an older code passes `now`: its
+    `created_at` is then moved there and `expires_at` with it, the code's
+    `CODE_TTL_S` later."""
     from app.core.auth.oauth import grants
+    from app.core.auth.oauth.policy import CODE_TTL_S
+    from app.models.oauth import OAuthCode
     from tests.session_support import user_id_of
 
     user_id = await user_id_of(env, sub)
     async with oauth_session(org_id, env.app_engine) as session:
-        return await grants.issue_code(
+        code = await grants.issue_code(
             session,
             org_id=org_id,
             user_id=user_id,
@@ -139,8 +146,14 @@ async def seed_code(
             redirect_uri=redirect_uri,
             code_challenge=challenge,
             resource=RESOURCE,
-            now=now or datetime.now(UTC),
         )
+        if now is not None:
+            await session.execute(
+                update(OAuthCode)
+                .where(OAuthCode.code_hash == grants.hash_secret(code))
+                .values(created_at=now, expires_at=now + timedelta(seconds=CODE_TTL_S))
+            )
+    return code
 
 
 #: `oauth_tokens`' bucket (B3-24): every in-process request comes from

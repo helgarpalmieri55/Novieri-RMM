@@ -27,14 +27,20 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import action_tokens, flows
-from app.core.auth.oauth import grants
+from app.core.auth.oauth import consent, grants
 from app.core.auth.oauth.store import oauth_session
 from app.core.mcp_channel import mcp_resource
-from app.models import AuditEvent
+from app.models import AuditEvent, Organization
 from app.models.oauth import OAuthCode, OAuthRefreshFamily
 from tests.auth_support import browser, capture_mail, console_ready, link_token, signed_in
 from tests.mcp_support import mcp_app
-from tests.oauth_support import CLAUDE_CALLBACK, pkce_pair, token_request
+from tests.oauth_support import (
+    CLAUDE_CALLBACK,
+    authorize_query,
+    code_of,
+    pkce_pair,
+    token_request,
+)
 from tests.race_helpers import normalised, pause_at, until_blocked_by
 
 NEW_PASSWORD = "Pelican-Orbit-Lantern-58"
@@ -105,7 +111,6 @@ async def _issue(env: Any, org_id: UUID, user_id: UUID, challenge: str) -> tuple
             redirect_uri=CLAUDE_CALLBACK,
             code_challenge=challenge,
             resource=resource,
-            now=datetime.now(UTC),
         )
         row_id: UUID = (
             await session.execute(
@@ -480,3 +485,83 @@ async def test_an_exchange_waiting_on_signing_out_everywhere_opens_no_grant(
             )
         ).all()
     assert reused == []
+
+
+# --------------------------------------------------------------------------- #
+# One clock (Task 10 review, Important 1)
+# --------------------------------------------------------------------------- #
+
+#: How far ahead of the database the API host's clock runs below.
+AHEAD = timedelta(seconds=5)
+
+
+class _ApiClockAhead(datetime):
+    """`datetime`, whose `now` is the API host's clock running `AHEAD` of
+    the database's."""
+
+    @classmethod
+    def now(cls, tz: Any = None) -> "_ApiClockAhead":
+        real = datetime.now(tz) + AHEAD
+        return cls.fromtimestamp(real.timestamp(), tz)
+
+
+async def test_a_code_approved_on_a_clock_ahead_of_the_databases_is_ended_all_the_same(
+    lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API host's clock runs five seconds ahead of the database's. A
+    technician approves "claude" on the consent screen, then signs out
+    everywhere at once; the app exchanges the code a moment later. The act
+    ended the code at the database's clock, and the exchange compares with
+    the database's clock -- so the code's own times must come from it too.
+    Written from the API's, `created_at` sat five seconds in the database's
+    future, the act's floor (`created_at` + 1 µs, for `ck_oauth_codes_expiry`)
+    put the code's end there, and the exchange inside those five seconds
+    opened a live grant after the act."""
+    env = lifecycle_env
+    org = await env.create_org("grant-clock")
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={"mcp_enabled": True})
+        )
+        await session.commit()
+    who = await signed_in(env, org, "org-admin")
+    await mcp_app(env, org)
+    resource = mcp_resource(env.settings)
+    assert resource is not None
+    verifier, challenge = pkce_pair()
+    monkeypatch.setattr(consent, "datetime", _ApiClockAhead)
+    approved = await env.client.post(
+        "/api/v1/oauth/authorize/decision",
+        headers=who.headers(),
+        json={
+            "query": authorize_query("claude", challenge=challenge, resource=resource),
+            "approve": True,
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    code = code_of(approved.json()["redirect_to"])
+
+    signed_out = await env.client.post("/api/v1/auth/logout-everywhere", headers=who.headers())
+    exchanged = await token_request(
+        env,
+        grant_type="authorization_code",
+        code=code,
+        client_id="claude",
+        code_verifier=verifier,
+    )
+
+    assert signed_out.status_code == 204, signed_out.text
+    assert exchanged.status_code == 400, exchanged.text
+    assert exchanged.json()["error"] == "invalid_grant"
+    async with oauth_session(org, env.app_engine) as session:
+        live = (
+            await session.execute(
+                select(OAuthRefreshFamily.id).where(
+                    OAuthRefreshFamily.user_id == who.user_id,
+                    OAuthRefreshFamily.revoked_at.is_(None),
+                )
+            )
+        ).all()
+    assert live == []
