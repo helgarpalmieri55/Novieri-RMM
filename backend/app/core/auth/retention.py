@@ -20,10 +20,19 @@ WHAT GOES, AND AFTER HOW LONG:
   previous one);
 - a WebAuthn challenge used or expired more than `CHALLENGE_RETENTION` (1 day)
   ago (`passkeys._issue` sweeps those of a person who comes back; this is for
-  whoever does not).
+  whoever does not);
+- an OAuth authorization code `OAUTH_CODE_RETENTION` (10 minutes) after it
+  expired, used or not: while it lasts, a second exchange finds it and ends
+  the grant it opened (own authentication phase 3, plan 2026-11-06, Task 13);
+- an AI app's grant (`oauth_refresh_families`) `OAUTH_GRANT_RETENTION` (1 day)
+  after it was revoked or lapsed, its refresh tokens first; its reason is also
+  in the audit event of the act that ended it;
+- an AI app unused for `CLIENT_IDLE` (30 days), with its grants and codes (ON
+  DELETE CASCADE).
 
 WHAT STAYS: everything live, the failure counters (one row per person and
-factor), passwords, factors, Microsoft links, and the audit chain.
+factor), passwords, factors, Microsoft links, the record of what was revoked
+from AI apps (`mcp_revocation`), and the audit chain.
 
 THE SWEEP IS AUDITED (plan decision 2; invariant 4): deleting evidence is a
 privileged act, as `ipam.retention` and `security_logs.retention` hold. One
@@ -40,14 +49,56 @@ THE REGISTRY (`STEPS`) IS WHERE A NEW TABLE JOINS (plan decision 4): a
 is given, with its own `org_id` predicate, and returns how many rows went.
 Phase 3 adds its authorization codes, its grants (refresh-token families,
 whose tokens cascade) and its idle apps (`oauth_clients`) here.
+Two of them in the end differ (THE OAUTH STEPS, below): the grants' tokens
+go first, not by cascade; and the idle apps, whose rows may not go in the
+sweep's transaction, join `APART_STEPS` instead, as such a table does.
+
+THE OAUTH STEPS (own authentication phase 3, plan 2026-11-06, Task 13; the
+lock map in `guards.lock_user_row`). The codes and the grants go in the
+sweep's transaction, the apps before it and outside it:
+
+- `oauth_codes` and `oauth_grants` hold no person's row and no app row, and
+  WAIT ON NO ROW: each statement locks what it deletes FOR UPDATE SKIP
+  LOCKED, with the ended condition inside it, and leaves a row another
+  transaction holds to the next day's sweep. Its `org_id` predicate is where
+  it chooses and locks those rows, so on a session RLS does not filter it
+  does not even lock another organization's. They go leaves first -- the
+  codes; the ended grants' refresh tokens; then the ended grants no token
+  or code still names -- so no cascade of theirs reaches a row they did not
+  lock. Plain DELETEs closed cycles (40P01; `tests/test_oauth_retention.py`):
+  a revocation's one UPDATE (`revoked_at IS NULL`) also matches a grant that
+  lapsed unrevoked, in no order of the sweep's, and a refresh locks a token
+  and then its family, the other way round from a family's cascading
+  DELETE. Waiting on nothing, with the chain last, the sweep can close no
+  cycle with an exchange, a refresh, a revocation or an idle app's purge;
+  each of them may wait on the sweep, and then find the row gone.
+- `oauth_apps` is the registration's own purge (`clients.purge_idle`, the
+  purge's shape in the lock map): one idle app per transaction, the idle
+  condition inside its DELETE, a bounded wait and then giving way. Not in
+  the sweep's transaction, which would hold one app's cascade while waiting
+  in the next one's -- the cycle that shape exists to avoid -- and before
+  it, so the sweep's one audit row counts the apps too. What an app's
+  cascade takes, a spent code or an ended grant among it, no step counts.
+  Its batch and budget are the registration's (`PURGE_BATCH`, 100 apps;
+  `PURGE_BUDGET_S`, 2 s), not larger ones of its own, although no request
+  waits on the sweep: an app it leaves is inert (`find_client` and `hold`
+  read an idle app as absent) and goes the next day, oldest first; the
+  ceiling of live registrations (200) bounds how many registrations can go
+  idle in any thirty days; uncontended, one app costs milliseconds, so the
+  budget covers the batch; contended, each costs up to the bounded wait,
+  and a larger budget would only keep the worker's daily task, which sweeps
+  every organization in turn, waiting on apps somebody is using.
 
 ONE ORGANIZATION, EVERY CLIENT. A technician's rows have no client and only
 an every-client scope deletes them (migration 0231), so `sweep_org` holds
-`ClientScope.all()` (`ALL_SCOPE_ALLOWLIST`), over these tables only. The
-worker runs it daily (`app/worker.py`, `auth-retention`); no person is behind
-it. No index helps these scans (`auth_sessions` has none on `ended_at` or
-`expires_at`): one sequential scan per organization per day is fine at this
-size, and a step on a large table decides for itself.
+`ClientScope.all()` (`ALL_SCOPE_ALLOWLIST`), over these tables only: phase
+2's four and, since phase 3, `oauth_codes`, `oauth_refresh_tokens` and
+`oauth_refresh_families`. The idle apps go by `clients.purge_idle`, under
+`oauth_session` (its own entry in that list). The worker runs it daily
+(`app/worker.py`, `auth-retention`); no person is behind it. No index helps
+these scans (`auth_sessions` has none on `ended_at` or `expires_at`): one
+sequential scan per organization per day is fine at this size, and a step
+on a large table decides for itself.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -56,15 +107,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import ColumnElement, and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.audit import audit_service
 from app.core.auth.action_tokens import INVITE, RECOVER, RESET
+from app.core.auth.oauth import clients
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
 from app.models.auth import AuthActionToken, AuthSession, AuthTrustedDevice, AuthWebauthnChallenge
+from app.models.oauth import OAuthCode, OAuthRefreshFamily, OAuthRefreshToken
 
 #: How long an ended or expired session is kept, with its address and browser (C7).
 SESSION_RETENTION = timedelta(days=90)
@@ -72,6 +126,10 @@ SESSION_RETENTION = timedelta(days=90)
 RETENTION = timedelta(days=30)
 #: How long a used or expired WebAuthn challenge is kept (C7).
 CHALLENGE_RETENTION = timedelta(days=1)
+#: How long an OAuth code is kept after it expires, and an ended grant after
+#: it ended (plan 2026-11-06, Task 13; B3-25).
+OAUTH_CODE_RETENTION = timedelta(minutes=10)
+OAUTH_GRANT_RETENTION = timedelta(days=1)
 #: The beat interval (`app/worker.py`).
 SWEEP_INTERVAL_S = 86400.0
 #: The audit action of a sweep that deleted something (plan decision 2).
@@ -79,11 +137,15 @@ AUDIT_ACTION = "auth.retention_applied"
 
 #: One step of the sweep: delete in `session`, for `org_id`, as of `now`; how many went.
 Step = Callable[[AsyncSession, UUID, datetime], Awaitable[int]]
+#: One step that may not run in the sweep's transaction: given the engine, it
+#: opens transactions of its own, for `org_id`, as of `now`; how many went.
+ApartStep = Callable[[AsyncEngine, UUID, datetime], Awaitable[int]]
 
 
 @dataclass(frozen=True)
 class Swept:
-    #: Rows deleted, per step name, in `STEPS` order.
+    #: Rows deleted, per step name, in `STEPS` order (and, from `sweep_org`,
+    #: `APART_STEPS`' after them).
     counts: Mapping[str, int]
 
     @property
@@ -171,6 +233,77 @@ async def _challenges(session: AsyncSession, org_id: UUID, now: datetime) -> int
     )
 
 
+async def _oauth_codes(session: AsyncSession, org_id: UUID, now: datetime) -> int:
+    """Codes expired more than `OAUTH_CODE_RETENTION` ago, used or not, each
+    locked FOR UPDATE SKIP LOCKED: one an exchange holds is left (THE OAUTH
+    STEPS). A code is a leaf -- nothing refers to it -- so its DELETE
+    cascades nowhere."""
+    code = aliased(OAuthCode)
+    spent = (
+        select(code.id)
+        .where(code.org_id == org_id, code.expires_at < now - OAUTH_CODE_RETENTION)
+        .with_for_update(skip_locked=True)
+    )
+    return await _deleted(
+        session, delete(OAuthCode).where(OAuthCode.id.in_(spent)).returning(OAuthCode.id)
+    )
+
+
+def _ended(family: type[OAuthRefreshFamily], cutoff: datetime) -> ColumnElement[bool]:
+    """Revoked, or lapsed, before `cutoff`: whichever came first counts."""
+    return or_(family.revoked_at < cutoff, family.expires_at < cutoff)
+
+
+async def _oauth_grants(session: AsyncSession, org_id: UUID, now: datetime) -> int:
+    """Grants revoked or lapsed more than `OAUTH_GRANT_RETENTION` ago; how
+    many. Leaves first, each statement FOR UPDATE SKIP LOCKED (THE OAUTH
+    STEPS):
+
+    1. their refresh tokens, before the grant, as a refresh locks them --
+       counted by no step: a grant's tokens are its own. One a refresh
+       holds is left;
+    2. the grants no token and no code still names, so the DELETE's cascade
+       -- the tokens, and the `family_id` of a code that opened the grant
+       (ON DELETE SET NULL) -- finds nothing to wait on. A grant whose token
+       a refresh holds, or whose spent code an exchange holds (the codes
+       step left it), is left to the next sweep with them."""
+    cutoff = now - OAUTH_GRANT_RETENTION
+    family = aliased(OAuthRefreshFamily)
+    token = aliased(OAuthRefreshToken)
+    code = aliased(OAuthCode)
+    of_ended = (
+        select(token.id)
+        .join(family, family.id == token.family_id)
+        .where(token.org_id == org_id, _ended(family, cutoff))
+        .with_for_update(of=token, skip_locked=True)
+    )
+    await session.execute(delete(OAuthRefreshToken).where(OAuthRefreshToken.id.in_(of_ended)))
+    unnamed = (
+        select(family.id)
+        .where(
+            family.org_id == org_id,
+            _ended(family, cutoff),
+            ~exists().where(token.family_id == family.id),
+            ~exists().where(code.family_id == family.id),
+        )
+        .with_for_update(of=family, skip_locked=True)
+    )
+    return await _deleted(
+        session,
+        delete(OAuthRefreshFamily)
+        .where(OAuthRefreshFamily.id.in_(unnamed))
+        .returning(OAuthRefreshFamily.id),
+    )
+
+
+async def _oauth_apps(engine: AsyncEngine, org_id: UUID, now: datetime) -> int:
+    """Apps unused for `CLIENT_IDLE`, registered or known by their document,
+    with their grants and codes: the registration's own purge
+    (`clients.purge_idle`), its shape, its batch and its budget (THE OAUTH
+    STEPS); how many apps went. What their cascade took, no step counts."""
+    return (await clients.purge_idle(engine, org_id=org_id, now=now)).removed
+
+
 #: The sweep, in order: sessions first, because a device is kept while a
 #: remaining session names it. A new table joins by appending a pair here
 #: (plan decision 4; phase 3).
@@ -179,7 +312,17 @@ STEPS: tuple[tuple[str, Step], ...] = (
     ("devices", _devices),
     ("links", _links),
     ("challenges", _challenges),
+    # Own authentication phase 3 (plan 2026-11-06, Task 13): the codes, then
+    # the grants, their tokens first -- leaves first, each statement SKIP
+    # LOCKED (THE OAUTH STEPS). The idle apps are `APART_STEPS`'.
+    ("oauth_codes", _oauth_codes),
+    ("oauth_grants", _oauth_grants),
 )
+
+#: The steps that may not run in the sweep's transaction: each opens
+#: transactions of its own, and `sweep_org` runs them BEFORE that one, so its
+#: one audit row counts them too (THE OAUTH STEPS).
+APART_STEPS: tuple[tuple[str, ApartStep], ...] = (("oauth_apps", _oauth_apps),)
 
 
 async def sweep(session: AsyncSession, org_id: UUID, *, now: datetime) -> Swept:
@@ -191,11 +334,14 @@ async def sweep(session: AsyncSession, org_id: UUID, *, now: datetime) -> Swept:
 
 
 async def sweep_org(org_id: UUID, engine: AsyncEngine, *, now: datetime | None = None) -> int:
-    """One organization's sweep, and its audit row when something went, in
-    one transaction; how many rows went."""
+    """One organization's sweep; how many rows went. First `APART_STEPS`,
+    each in transactions of its own, holding nothing once done; then
+    `STEPS` and, when something went, the audit row counting both -- the
+    chain last -- in one transaction."""
     stamp = now or datetime.now(UTC)
+    apart = {name: await step(engine, org_id, stamp) for name, step in APART_STEPS}
     async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
-        swept = await sweep(session, org_id, now=stamp)
+        swept = Swept(counts={**(await sweep(session, org_id, now=stamp)).counts, **apart})
         if swept.total:
             await audit_service.record(
                 session,
