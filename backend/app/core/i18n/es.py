@@ -5172,6 +5172,9 @@ CATALOG: dict[str, str] = {
     "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not set.": (
         "MCP no está disponible: ITS_PUBLIC_CONSOLE_URL no está configurado."
     ),
+    "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address without a path.": (
+        "MCP no está disponible: ITS_PUBLIC_CONSOLE_URL no es una dirección https sin ruta."
+    ),
     "the MCP channel marker is malformed": "la marca del canal MCP está mal formada",
     "this token also grants the console and is not accepted over MCP": (
         "este token también da acceso a la consola y no se acepta por MCP"

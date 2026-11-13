@@ -6,7 +6,9 @@ Same seams as `tests/test_egress_guard.py`: `_resolve_all` answers DNS and
 `_build_transport` the connection, so nothing leaves the machine.
 """
 
+import asyncio
 import ipaddress
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -272,3 +274,52 @@ async def test_the_whole_exchange_has_one_deadline(monkeypatch) -> None:
     monkeypatch.setattr(egress_module, "_resolve_all", slow)
     with pytest.raises(TimeoutError):
         await get_bounded("https://client.example/m.json", max_bytes=10, timeout_s=0.1)
+
+
+async def test_a_lookup_that_never_answers_holds_a_thread_of_its_own(monkeypatch) -> None:
+    """The deadline returns, but `getaddrinfo` cannot be cancelled: its thread
+    runs on. A signed-in person opening consent pages for a domain whose DNS
+    never answers would otherwise fill the default executor, which password
+    hashing shares (`app/core/auth/passwords.py`; plan Task 6, coordinator's
+    note). So a document's host is resolved on `DOCUMENT_RESOLVER_THREADS`
+    threads of its own: lookups past them queue and are dropped at their
+    deadline, never started, and the default executor stays free."""
+    release = threading.Event()
+    lock = threading.Lock()
+    inside = most = 0
+
+    def stuck(_host: str, _port: int) -> list[str]:
+        nonlocal inside, most
+        with lock:
+            inside += 1
+            most = max(most, inside)
+        release.wait(10)
+        with lock:
+            inside -= 1
+        return [PUBLIC]
+
+    threads = egress_module.DOCUMENT_RESOLVER_THREADS
+    # Every thread of the pool free first: an earlier test's lookup may still
+    # be running out past its deadline -- the very property under test.
+    every_thread = threading.Barrier(threads)
+    loop = asyncio.get_running_loop()
+    await asyncio.gather(
+        *(
+            loop.run_in_executor(egress_module._document_resolver, every_thread.wait, 10)
+            for _ in range(threads)
+        )
+    )
+    monkeypatch.setattr(egress_module, "_resolve_all", stuck)
+    try:
+        answers = await asyncio.gather(
+            *(
+                get_bounded(f"https://c{n}.example/m.json", max_bytes=10, timeout_s=0.3)
+                for n in range(threads * 3)
+            ),
+            return_exceptions=True,
+        )
+        assert all(isinstance(answer, TimeoutError) for answer in answers), answers
+        assert most == threads
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: "free"), 2.0) == "free"
+    finally:
+        release.set()

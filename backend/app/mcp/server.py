@@ -64,6 +64,7 @@ from starlette.types import Receive, Scope, Send
 
 from app.api.deps import AuthContext, auth_context, requested_client
 from app.core.audit import audit_service
+from app.core.auth.oauth.policy import issuer
 from app.core.client_scope import ClientScope
 from app.core.i18n import parse_accept_language, tr, use_locale
 from app.core.mcp_channel import EXTENSION_KEY, McpCall, mcp_resource, use_mcp_call
@@ -413,16 +414,27 @@ metadata_router = APIRouter()
 @metadata_router.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
 async def protected_resource(request: Request) -> JSONResponse:
     """Public by necessity: it is how an OAuth client learns where to sign in.
-    It names the resource and the realm, both of which the 401 challenge and
-    the realm's own discovery document already publish."""
+    It names the resource and the platform as its authorization server (own
+    authentication design §5.1: "El servidor MCP sigue publicando RFC 9728,
+    apuntando a la plataforma"), both of which the 401 challenge and the
+    platform's own metadata already publish."""
     settings = request.app.state.settings
     resource = mcp_resource(settings)
     if resource is None:
         raise HTTPException(503, tr("MCP is not available: ITS_PUBLIC_CONSOLE_URL is not set."))
+    authority = issuer(settings)
+    if authority is None:
+        raise HTTPException(
+            503,
+            tr(
+                "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address "
+                "without a path."
+            ),
+        )
     return JSONResponse(
         {
             "resource": resource,
-            "authorization_servers": [settings.oidc_issuer],
+            "authorization_servers": [authority],
             "scopes_supported": ["mcp"],
             "bearer_methods_supported": ["header"],
         }

@@ -53,10 +53,14 @@ one UPDATE of families -- `grants.revoke_family`, `revoke_all_for_user`,
 skips steps 3 and 5: the account acts revoke a person's grants across every
 app, and `revoke_app`'s "everyone" holds no person's row. An idle app's
 purge, already holding the app row, may then wait IN ITS CASCADE for such a
-writer's family rows. No cycle closes: after its UPDATE that writer waits
-only for the chain, which the purge takes only after its cascade (the
-revocation test in `tests/test_oauth_schema.py`). A transaction that holds
-several apps takes them in id order and touches none of them.
+writer's family rows. After its UPDATE that writer waits only for the chain,
+which a purge takes, if at all, only after its cascade (the revocation test in
+`tests/test_oauth_schema.py`). The UPDATE itself, though, takes families in
+no app's order and can meet the cascade from the other side: so the purge
+deletes one app per transaction, and waits at most
+`clients.PURGE_LOCK_WAIT` before it gives way (Task 6; the purge's entry in
+`guards.lock_user_row`'s lock map). A transaction that holds several apps
+takes them in id order and touches none of them.
 """
 
 from collections.abc import AsyncIterator

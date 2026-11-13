@@ -77,3 +77,27 @@ async def seed_client(
 
 def oauth_http(env: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=env.app), base_url=BASE)
+
+
+#: `oauth_registration`'s buckets (`policy.network_of`): every in-process
+#: request comes from 127.0.0.1, so one file's registrations would spend the
+#: next file's hour.
+REGISTER_BUCKETS = "ratelimit:oauth-register:*"
+
+
+async def forget_registration_limit(env: Any) -> None:
+    redis = env.app.state.redis
+    async for key in redis.scan_iter(REGISTER_BUCKETS):
+        await redis.delete(key)
+
+
+async def register(env: Any, **metadata: Any) -> dict[str, Any]:
+    """`POST /oauth/register` as an AI app sends it; the 201's body."""
+    env.settings.mcp_registration = "open"
+    await forget_registration_limit(env)
+    body = {"redirect_uris": [CLAUDE_CALLBACK], "client_name": "Claude", **metadata}
+    async with oauth_http(env) as client:
+        resp = await client.post("/oauth/register", json=body)
+    assert resp.status_code == 201, resp.text
+    answer: dict[str, Any] = resp.json()
+    return answer

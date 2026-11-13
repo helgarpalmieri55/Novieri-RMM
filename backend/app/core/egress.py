@@ -92,6 +92,7 @@ import json
 import socket
 import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -494,6 +495,29 @@ async def resolve(host: str, port: int) -> list[str]:
     return await asyncio.to_thread(_resolve_all, host, port)
 
 
+#: Threads that resolve the host of a document `get_bounded` reads, and
+#: nothing else (own authentication phase 3, Task 6). Its own pool, never the
+#: default executor: `getaddrinfo` cannot be cancelled, so a lookup that never
+#: answers keeps its thread after `get_bounded`'s deadline has returned. On
+#: the default executor, a signed-in person opening consent pages for a
+#: domain whose DNS never answers would fill the pool that password hashing
+#: also runs on (`app/core/auth/passwords.py`). Here they fill at most these
+#: threads: a lookup past them waits in the queue and is dropped, never
+#: started, when its deadline cancels it. What that costs is bounded too:
+#: while all of them are stuck, other documents cannot be read just now
+#: (`cimd`'s transient `unavailable`, and a stored copy is kept).
+DOCUMENT_RESOLVER_THREADS = 4
+_document_resolver = ThreadPoolExecutor(
+    max_workers=DOCUMENT_RESOLVER_THREADS, thread_name_prefix="its-document-dns"
+)
+
+
+async def _resolve_document_host(host: str, port: int) -> list[str]:
+    """`resolve`, on `_document_resolver`'s threads (above)."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_document_resolver, _resolve_all, host, port)
+
+
 def _build_transport(_pinned_ip: str) -> httpx.AsyncBaseTransport:
     """A plain, no-retry transport -- deliberately NOT where pinning happens.
 
@@ -772,7 +796,9 @@ async def get_bounded(
     hosts are refused by name and by address; the connection is pinned to the
     validated answer; no redirect; nothing compressed is asked for, and at most
     `max_bytes` are read off the wire, counted as they arrive (`aiter_raw`);
-    one deadline for all of it, DNS included.
+    one deadline for all of it, DNS included. The DNS lookup runs on threads
+    of its own (`DOCUMENT_RESOLVER_THREADS`), so one that never answers holds
+    none of the default executor's.
 
     Only reasons `post_json` already raises: `tests/test_notification_
     delivery.py` reads every one from this file and holds it terminal."""
@@ -799,7 +825,7 @@ async def get_bounded(
     timeout = httpx.Timeout(timeout_s, connect=min(_CONNECT_TIMEOUT_S, timeout_s))
 
     async def _do_request() -> EgressBody:
-        resolved = await resolve(host, port)
+        resolved = await _resolve_document_host(host, port)
         pinned = check_host(host, resolved, allowlisted=False)
         if any(_is_special_use(addr) for addr in resolved):
             raise EgressBlocked("blocked_private",  # i18n-exempt: machine code

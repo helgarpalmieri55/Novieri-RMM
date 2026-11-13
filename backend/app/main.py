@@ -415,6 +415,11 @@ def create_app(
     from app.api.well_known import router as well_known_router
 
     app.include_router(well_known_router)
+    # The platform's own OAuth server (plan 2026-11-06, Task 6): its RFC 8414
+    # metadata and RFC 7591 registration. Public, outside `/api/v1`.
+    from app.api.oauth_registration import router as oauth_registration_router
+
+    app.include_router(oauth_registration_router)
     app.router.routes.extend(mcp.routes())
     # The console's side of it: Settings → AI connections (`app/mcp/api.py`).
     from app.mcp.api import router as mcp_admin_router
