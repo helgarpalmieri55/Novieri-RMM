@@ -155,8 +155,18 @@ export function safeNext(raw: unknown): string {
 /** Paths the edge serves itself, never the console's router. */
 const EDGE_PREFIXES: readonly string[] = ["/i", "/api", "/enroll", "/mcp", "/.well-known", "/realms", "/resources", "/js"];
 
+/**
+ * Exact paths the edge sends to the api (`deploy/docker-compose.yml`, plan
+ * 2026-11-06 Task 6): the OAuth server's machine endpoints. `/oauth/authorize`
+ * is the console's own consent page and stays a page.
+ */
+const EDGE_PATHS: readonly string[] = ["/oauth/token", "/oauth/register", "/oauth/revoke"];
+
 function isEdgePath(pathname: string): boolean {
-  return EDGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return (
+    EDGE_PATHS.includes(pathname) ||
+    EDGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+  );
 }
 
 /**

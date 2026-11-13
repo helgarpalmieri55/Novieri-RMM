@@ -82,6 +82,7 @@ const SECRET_METHODS: Record<string, string> = {
   generateAgentInstallCommand: "the install command's enrollment token",
   saveInstallLink: "the install link, with its code, when one is generated",
   regenerateInstallLink: "the new install link, with its code",
+  oauthAuthorizeDecision: "the answer's redirect carries a one-time authorization code",
 };
 
 /** Named like a secret, carrying none: reviewed, with the reason. */
@@ -151,6 +152,9 @@ const SECRET_SITES: Record<string, { reviewed?: string }> = {
   "modules/credentials/CredentialsPage.tsx checkoutCredential": { reviewed: "modules/credentials/CredentialsPage.test.tsx" },
   // `useSecretMutation`; its test reads the mutation cache after a refused new password.
   "modules/auth/RecoverPage.tsx acceptRecovery": { reviewed: "modules/auth/__tests__/recover.test.tsx" },
+  // `useSecretMutation`, through `stepUp.run` (C1); its test reads the mutation
+  // cache after an approval.
+  "modules/auth/ConsentPage.tsx oauthAuthorizeDecision": { reviewed: "modules/auth/__tests__/consent.test.tsx" },
   // `useSecretMutation`; their tests read the mutation cache after a link was shown.
   "modules/clients/api.ts inviteContact": { reviewed: "modules/clients/__tests__/clients.test.tsx" },
   "modules/clients/api.ts resetContactAccess": { reviewed: "modules/clients/__tests__/clients.test.tsx" },

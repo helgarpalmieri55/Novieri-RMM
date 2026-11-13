@@ -115,3 +115,35 @@ describe("the sign-in routes", () => {
     });
   });
 });
+
+/**
+ * The consent page's two routes (plan 2026-11-06, Task 4; Appendix A.2): the
+ * query travels as the browser had it, in the body, and the request is the
+ * person's session's -- no client, and a 401 is that session ending.
+ */
+const QUERY = "response_type=code&client_id=itms_x&state=s";
+const CONSENT_ROUTES: [string, (api: ApiClient) => Promise<unknown>, string, unknown][] = [
+  ["oauthAuthorizeDetails", (api) => api.oauthAuthorizeDetails(QUERY), "/api/v1/oauth/authorize/details", { query: QUERY }],
+  ["oauthAuthorizeDecision approving", (api) => api.oauthAuthorizeDecision(QUERY, true), "/api/v1/oauth/authorize/decision", { query: QUERY, approve: true }],
+  ["oauthAuthorizeDecision declining", (api) => api.oauthAuthorizeDecision(QUERY, false), "/api/v1/oauth/authorize/decision", { query: QUERY, approve: false }],
+];
+
+describe("the consent page's routes", () => {
+  it.each(CONSENT_ROUTES)("%s: POST, path and body, and no X-Client-Id", async (_name, call, url, body) => {
+    const fetchMock = stubFetch();
+    await call(new ApiClient(vi.fn(), "/api/v1", () => CLIENT));
+    const [sentUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(sentUrl).toBe(url);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+    expect(new Headers(init.headers).has("X-Client-Id")).toBe(false);
+  });
+
+  it.each(CONSENT_ROUTES)("%s: a 401 is the session ending, so it reaches onUnauthorized", async (_name, call) => {
+    stubFetch(401, { code: "auth_required" });
+    const onUnauthorized = vi.fn();
+    const failure = await call(new ApiClient(onUnauthorized)).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});

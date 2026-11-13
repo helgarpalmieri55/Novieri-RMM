@@ -95,6 +95,14 @@ describe("?next=, which anyone can write into a link", () => {
     expect(safeNext("/docs/a%20b?x=1#h")).toBe("/docs/a%20b?x=1#h");
   });
 
+  it("keeps the consent page and its query, and refuses the OAuth server's own endpoints", () => {
+    expect(safeNext("/oauth/authorize?client_id=itms_x&state=s")).toBe("/oauth/authorize?client_id=itms_x&state=s");
+    for (const edge of ["/oauth/token", "/oauth/register", "/oauth/revoke"]) {
+      expect(safeNext(edge)).toBe(DEFAULT_AFTER_SIGN_IN);
+      expect(safeNext(`${edge}?x=1`)).toBe(DEFAULT_AFTER_SIGN_IN);
+    }
+  });
+
   it("falls back to the root when there is none", () => {
     // Non-vacuity for the refusals below: they would all pass on a filter
     // that ignored `next` entirely.

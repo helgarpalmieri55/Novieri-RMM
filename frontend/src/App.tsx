@@ -138,6 +138,7 @@ import { SettingsPage } from "./modules/settings/SettingsPage";
 import { ClientDetailPage } from "./modules/clients/ClientDetailPage";
 import { ClientsPage } from "./modules/clients/ClientsPage";
 import { SetupPage, fetchSetupStatus } from "./modules/setup/SetupPage";
+import { ConsentPage } from "./modules/auth/ConsentPage";
 import { EnrollPage } from "./modules/auth/EnrollPage";
 import { FactorPage } from "./modules/auth/FactorPage";
 import { ForgotPasswordPage } from "./modules/auth/ForgotPasswordPage";
@@ -460,8 +461,14 @@ export function Landing() {
  * (`fixtures/core.ts`), so the review harness renders every route signed in;
  * a real API would still answer every request it makes with 401, because the
  * console gates nothing (invariant 6).
+ *
+ * `bare` (plan 2026-11-06, Task 4): the same guard, and with a session the
+ * page alone -- no shell, no client selector. For `/oauth/authorize`, a card
+ * like the sign-in pages that still needs a session: an AI app's grant is the
+ * person's, no client's. Only a signed-in technician gets the bare page; a
+ * client's contact still takes the contact branch below, to the portal.
  */
-export function RequireAuth({ children }: { children: React.ReactNode }) {
+export function RequireAuth({ children, bare = false }: { children: React.ReactNode; bare?: boolean }) {
   const t = useT();
   const api = useApi();
   const location = useLocation();
@@ -531,6 +538,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   // only a signed-in session can ask, and a change of client starts the shell
   // and the page again (`lib/clientScope.tsx`).
   if (session.me !== undefined) {
+    if (bare) return <>{children}</>;
     return (
       <ClientScopeProvider>
         <Shell>{children}</Shell>
@@ -750,6 +758,11 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/invite" element={<InvitePage />} />
             <Route path="/recover" element={<RecoverPage />} />
+            {/* An AI app's authorization request (plan 2026-11-06, Task 4):
+                a session, no shell. NOT a public path: with no session
+                `RequireAuth` sends the person to sign in and back here, query
+                and all. */}
+            <Route path="/oauth/authorize" element={<RequireAuth bare><ConsentPage /></RequireAuth>} />
             <Route path="/portal/sign-in" element={<PortalSignInPage />} />
             <Route
               path="/devices"
