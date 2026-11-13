@@ -204,6 +204,8 @@ async def test_the_answer_is_201_json_and_never_cached(env) -> None:
         ({"redirect_uris": ["https://claude.ai/cb#frag"]}, "invalid_redirect_uri"),
         ({"redirect_uris": ["https://сlaude.ai/cb"]}, "invalid_redirect_uri"),
         ({"redirect_uris": ["https://claude.ai/cb?code=x"]}, "invalid_redirect_uri"),
+        # No browser connects to port 0 (Task 8 review, fix round 2).
+        ({"redirect_uris": ["http://127.0.0.1:0/callback"]}, "invalid_redirect_uri"),
         (
             {"redirect_uris": [CLAUDE_CALLBACK], "grant_types": ["client_credentials"]},
             "invalid_client_metadata",

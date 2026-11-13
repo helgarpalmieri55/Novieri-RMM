@@ -182,6 +182,11 @@ def test_an_https_or_loopback_redirect_registers(uri: str) -> None:
         ("https://*.claude.ai/cb", "malformed"),
         ("https://claude.ai/ cb", "malformed"),
         ("https://claude.ai:99999/cb", "malformed"),
+        # No browser connects to port 0: registering it is refused as matching
+        # it is (`matches`; Task 8 review, fix round 2).
+        ("http://127.0.0.1:0/callback", "malformed"),
+        ("http://localhost:00/callback", "malformed"),
+        ("https://claude.ai:0/cb", "malformed"),
         ("https://claude.ai/" + "a" * 2000, "malformed"),
         # A Cyrillic "с" (U+0441): it looks like claude.ai and is not (RFC 3986 §2).
         ("https://сlaude.ai/api/mcp/auth_callback", "malformed"),

@@ -27,7 +27,8 @@
   one another, and `localhost` is allowed although RFC 8252 §8.3 calls it
   "NOT RECOMMENDED": Claude Code registers it (plan B3-19, [S33]). The
   requested redirect is held to the same RFC 3986 characters first, and port 0
-  never matches (`matches`; Task 8 review, fix round 1).
+  never matches (`matches`; Task 8 review, fix round 1) nor registers
+  (`check_registered`, fix round 2): the same rule at both ends.
 
 The answer keeps the redirect's own query as written (OAuth 2.1-17 §2.3: "MUST
 be retained when adding additional query parameters").
@@ -99,6 +100,8 @@ def check_registered(uri: object) -> str:
     if "#" in uri:
         raise RedirectRejected("fragment")  # i18n-exempt: a reason code
     parts = _split(uri)
+    if parts.port == 0:  # no browser connects to it; `matches` refuses it too
+        raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if parts.username is not None or parts.password is not None:
         raise RedirectRejected("credentials")  # i18n-exempt: a reason code
     names = {name for name, _ in parse_qsl(parts.query, keep_blank_values=True)}
