@@ -221,8 +221,11 @@ OAUTH_SESSION_USERS: dict[str, str] = {
         "organization's MCP switch for both"
     ),
     "app/core/auth/oauth/grants.py": (
-        "a person's codes and refresh families: one transaction per token, revocation or "
-        "consent request, and the MCP door's check that a grant still stands"
+        "a person's codes and refresh families: one transaction per token request "
+        "(`exchange_code`, `refresh_grant`) and per RFC 7009 revocation (`revoke_presented`). "
+        "Not the MCP door's check that a grant still stands: `family_is_live` takes the "
+        "caller's session, and the door reads the family in its own every-client "
+        "`org_session` (`deps.admit`, in `ALL_SCOPE_ALLOWLIST`)"
     ),
     "app/core/auth/oauth/consent.py": (
         "an approval: the person's code, its audit row and its notice in one transaction"
@@ -662,10 +665,11 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
 #: existing, fails `test_the_org_wide_keys_have_not_rotted`.
 ORG_WIDE_KEYS: dict[str, str] = {
     "users_org_id_external_subject_key": (
-        "an identity, not a name: one subject of the identity provider is one person in "
-        "the organisation, and `deps.admit` finds the user by it. Per client, one login "
-        "could hold a row in each client. Written only under scope all (first-login "
-        "provisioning, `POST /users`), and the value is an opaque id the IdP issues"
+        "an identity, not a name: one subject of the identity provider was one person in "
+        "the organisation. No door reads it since own authentication phase 3 (the MCP token "
+        "names the person by id); the Keycloak event ingest still does until phase 4 removes "
+        "both. Per client, one login could hold a row in each client. Written only under "
+        "scope all (`POST /users`, a contact's placeholder), and the value is an opaque id"
     ),
     "uq_inbound_message_org_message_id": (
         "the poller's idempotency key: an RFC 5322 Message-ID names one email, fetched "

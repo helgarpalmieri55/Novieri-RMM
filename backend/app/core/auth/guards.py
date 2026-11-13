@@ -161,10 +161,6 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       the same locked statement written out there), since the final
       review's round 2: it assigned its fields to an unlocked row and then
       audited -- the chain before the row;
-    - the MCP door (`deps.admit`): its refresh of their address locks the
-      row first since the final review (item 3), having taken the chain
-      before the row until then; its `last_login_at` is an UPDATE of the
-      row and nothing after it in that transaction audits;
     - an AI app's token requests (own authentication phase 3, Task 7;
       operator decision D2): `oauth.grants._exchange` and `_refresh` read
       the code, or the refresh token, unlocked only to learn whose it is;
@@ -249,6 +245,16 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       the session the request's cookie names -- somebody else's, when a
       cookie was planted -- in one UPDATE, under the row of the person
       signing in and before their chain.
+
+    NOT A WRITER AT ALL since own authentication phase 3 (Task 9): the MCP
+    door (`deps.admit`). Until then it refreshed the person's address from
+    the token's claim -- taking the row first since the final review of
+    phase 2 (item 3), the chain before the row until then -- and wrote
+    `last_login_at` on every call. The platform's own token carries no
+    address: the door reads the person's row and their grant
+    (`grants.family_is_live`) unlocked and writes nothing, so it takes no
+    lock and cannot close a cycle with any of the above
+    (`tests/test_user_admin_races.py`).
 
     NO KEY UPDATE, not UPDATE: a row inserted meanwhile that refers to the
     person (a session, a link) takes KEY SHARE on it, which this does not

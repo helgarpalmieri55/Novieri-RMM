@@ -4,16 +4,12 @@
 falsifiers 11-14.
 
 TWO CLAIMS, ONE FILE, BECAUSE THEY ARE THE SAME CLAIM SEEN FROM TWO SIDES.
-`PATCH /api/v1/me` gives ITMS a writable `display_name`; `app/api/deps.py`
-refreshes `email` from the token claim on every admission -- on the MCP
-channel, the only one that still carries a token since own authentication
-phase 1 (Task 13), so the refresh tests below go through it. The asymmetry is
-the design (§7.2): Keycloak is authoritative for the identity fact, ITMS for
-the presentation preference. A test suite that checked only one of them would
-pass on an implementation that refreshed both -- which would silently undo the
-profile form on the next sign-in -- or on one that refreshed neither, which
-leaves the security decision (`claims.email`, live) and the displayed fact
-(`users.email`, stale) reading from different sources.
+`PATCH /api/v1/me` gives ITMS a writable `display_name`; since own
+authentication phase 3 ITMS owns the address too: no token carries one, and
+every door reads the row's. What §7.2 asked for -- the security decision and
+the displayed fact read from ONE source -- holds by construction now, and the
+tests below hold it over the MCP channel, the door that used to refresh from a
+claim.
 
 WHY THE ROUTE FORBIDS UNKNOWN FIELDS RATHER THAN IGNORING THEM. §7.3 says the
 route "takes no `user_id`: the target is `ctx.user_id` from the validated
@@ -30,11 +26,11 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.models import AuditEvent, User
-from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
+from tests.mcp_support import MCP_BASE, marked_client, mcp_claims, mcp_token
 
 
 async def _row(engine: AsyncEngine, sub: str) -> User:
@@ -59,19 +55,15 @@ async def _audit(engine: AsyncEngine, org_id: UUID, action: str) -> list[AuditEv
 
 async def _headers(env: Any, org_id: UUID, sub: str) -> dict[str, str]:
     """The console's session for the seeded user (`ApiEnv.headers`). It
-    carries no claim -- the row's address is the only one -- so the profile
-    tests are not entangled with the §7.2 refresh; the staleness tests below
-    reach it with an MCP token (`_mcp_me`)."""
+    carries no claim -- the row's address is the only one."""
     return await env.headers(org_id, sub)
 
 
-async def _mcp_me(env: Any, org_id: UUID, sub: str, *, email: str) -> httpx.Response:
-    """`GET /api/v1/me` on the MCP channel with a token whose email claim is
-    `email`: the door that still refreshes `users.email` from a claim."""
-    # The MCP resource is `MCP_AUD` there (tests/mcp_support.py).
+async def _mcp_me(env: Any, org_id: UUID, sub: str) -> httpx.Response:
+    """`GET /api/v1/me` on the MCP channel with the platform's own token, which
+    carries no address: the row's is the only one there is."""
     env.settings.public_console_url = MCP_BASE
-    slug = await env.org_slug(org_id)
-    token = env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=email)
+    token = await mcp_token(env, await env.org_slug(org_id), sub)
     async with marked_client(env) as client:
         return await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
 
@@ -324,46 +316,73 @@ async def test_patch_me_is_audited(api_env) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Falsifier 13 -- a changed email claim reaches the row, and is audited
+# Falsifier 13 -- the address the door tests is the address the row holds
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_changed_email_claim_updates_the_row(api_env) -> None:
+async def test_an_address_changed_in_itms_is_the_one_mcp_sees(api_env) -> None:
     org_id = await api_env.create_org("stale")
     sub = await api_env.create_user(org_id, "technician")
-    assert (await _row(api_env.admin_engine, sub)).email == f"{sub}@test.local"
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(
+            update(User).where(User.external_subject == sub).values(email="ada.new@toeshee.com")
+        )
+        await s.commit()
 
-    response = await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
+    response = await _mcp_me(api_env, org_id, sub)
     assert response.status_code == 200
     assert response.json()["email"] == "ada.new@toeshee.com"
     assert (await _row(api_env.admin_engine, sub)).email == "ada.new@toeshee.com"
 
 
-async def test_a_changed_email_claim_is_audited_with_both_values(api_env) -> None:
+async def test_an_mcp_call_records_no_identity_change(api_env) -> None:
     org_id = await api_env.create_org("stale")
     sub = await api_env.create_user(org_id, "technician")
-    old = f"{sub}@test.local"
 
-    await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
+    await _mcp_me(api_env, org_id, sub)
 
-    events = await _audit(api_env.admin_engine, org_id, "auth.email_changed")
-    assert len(events) == 1
-    assert events[0].meta["from"] == old
-    assert events[0].meta["to"] == "ada.new@toeshee.com"
-    assert events[0].target_id == str((await _row(api_env.admin_engine, sub)).id)
+    assert await _audit(api_env.admin_engine, org_id, "auth.email_changed") == []
+    assert (await _row(api_env.admin_engine, sub)).email == f"{sub}@test.local"
 
 
-async def test_an_unchanged_email_claim_writes_nothing(api_env) -> None:
-    """Every request re-runs admission. A refresh that fired on equality would
+async def test_repeated_mcp_calls_write_nothing(api_env) -> None:
+    """Every request re-runs admission. A door that wrote on admission would
     append an audit event per HTTP call and fill the chain with noise."""
     org_id = await api_env.create_org("stale")
     sub = await api_env.create_user(org_id, "technician")
 
     for _ in range(3):
-        await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
+        await _mcp_me(api_env, org_id, sub)
 
-    events = await _audit(api_env.admin_engine, org_id, "auth.email_changed")
-    assert len(events) == 1
+    assert await _audit(api_env.admin_engine, org_id, "auth.email_changed") == []
+    assert await _audit(api_env.admin_engine, org_id, "auth.login") == []
+
+
+async def test_the_door_decides_on_the_address_the_row_holds(api_env) -> None:
+    """Falsifier 13, the decision's side (§7.2: "The security decision and the
+    displayed fact come from different sources" was the bug): the domain rule
+    reads the address the row holds, the one `/me` shows."""
+    org_id = await api_env.create_org("decide")
+    sub = await api_env.create_user(org_id, "technician")
+
+    async def set_address(address: str) -> None:
+        async with AsyncSession(api_env.admin_engine) as s:
+            await s.execute(
+                update(User).where(User.external_subject == sub).values(email=address)
+            )
+            await s.commit()
+
+    api_env.settings.console_email_domain = "toeshee.com"
+    try:
+        await set_address("ada@elsewhere.example")
+        refused = await _mcp_me(api_env, org_id, sub)
+        await set_address("ada@toeshee.com")
+        admitted = await _mcp_me(api_env, org_id, sub)
+    finally:
+        api_env.settings.console_email_domain = None
+    assert refused.status_code == 403
+    assert "email domain not permitted" in refused.json()["detail"]
+    assert (admitted.status_code, admitted.json()["email"]) == (200, "ada@toeshee.com")
 
 
 # --------------------------------------------------------------------------- #
@@ -371,59 +390,35 @@ async def test_an_unchanged_email_claim_writes_nothing(api_env) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_display_name_set_in_itms_survives_the_next_sign_in(api_env) -> None:
+async def test_a_display_name_set_in_itms_survives_mcp_calls(api_env) -> None:
     org_id = await api_env.create_org("override")
     sub = await api_env.create_user(org_id, "technician")
     headers = await _headers(api_env, org_id, sub)
 
     await api_env.client.patch("/api/v1/me", headers=headers, json={"display_name": "Ada L."})
-
-    # A later sign-in, with a token whose `name` claim says something else --
-    # which is what Keycloak sends for everybody by default.
-    body = (await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")).json()
+    body = (await _mcp_me(api_env, org_id, sub)).json()
 
     assert body["display_name"] == "Ada L."
     assert (await _row(api_env.admin_engine, sub)).display_name == "Ada L."
-    # ... while the email DID move. The asymmetry is the design.
-    assert body["email"] == "ada.new@toeshee.com"
+    assert body["email"] == f"{sub}@test.local"
 
 
-async def test_a_token_with_no_email_claim_does_not_blank_the_stored_address(
-    api_env,
-) -> None:
-    """DATA LOSS ON THE SHIPPED DEFAULT, and no other test reaches it.
-
-    `validate_token` yields `claims.get("email", "")`, so a token carrying no
-    address presents one as the empty string. With `console_email_domain`
-    unset -- which IS the default, and the state of every deployment that has
-    not opted into the allowlist -- `domain_refusal` admits it. The refresh
-    then compared `""` against the stored address, found them unequal, and
-    overwrote a real address with nothing.
-
-    AN ABSENT CLAIM IS NOT EVIDENCE THE ADDRESS WAS REMOVED. It is evidence
-    that this particular token did not carry one, which happens for any IdP
-    or client scope that omits `email`. The refresh is for propagating a
-    CHANGE, and "" is not a change.
-
-    What made it invisible: every other refresh test passes an explicit
-    `email=`, because they are about an address that moved. The full backend
-    suite is green with this bug present.
-    """
+async def test_an_mcp_token_carries_no_address_and_blanks_nothing(api_env) -> None:
+    """DATA LOSS ON THE SHIPPED DEFAULT, as it was: a token with no address
+    must never blank the stored one. The platform's token never carries one, so
+    the property is now that the door does not read an address from a token."""
     org_id = await api_env.create_org("noclaim")
     sub = await api_env.create_user(org_id, "technician")
     stored = f"{sub}@test.local"
-    assert (await _row(api_env.admin_engine, sub)).email == stored
+    api_env.settings.public_console_url = MCP_BASE
+    token = await mcp_token(api_env, await api_env.org_slug(org_id), sub)
+    assert "email" not in mcp_claims(token)
 
-    # An EMPTY claim, sent as one (`_mcp_me` passes `email` through as is).
-    response = await _mcp_me(api_env, org_id, sub, email="")
+    response = await _mcp_me(api_env, org_id, sub)
 
     assert response.status_code == 200
-    assert (await _row(api_env.admin_engine, sub)).email == stored, (
-        "an absent email claim blanked the stored address"
-    )
-    assert await _audit(api_env.admin_engine, org_id, "auth.email_changed") == [], (
-        "nothing changed, so nothing may be recorded as an identity change"
-    )
+    assert (await _row(api_env.admin_engine, sub)).email == stored
+    assert await _audit(api_env.admin_engine, org_id, "auth.email_changed") == []
 
 
 # --- the role names the chrome shows (UX remediation cycle 2) --------------

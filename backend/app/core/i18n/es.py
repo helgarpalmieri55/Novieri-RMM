@@ -1078,7 +1078,6 @@ CATALOG: dict[str, str] = {
         "administrador."
     ),
     "the assistant's internal token was refused": "se rechazó el token interno del asistente",
-    "unknown organization": "organización desconocida",
     "requires {code}": "requiere {code}",
     "X-Client-Id must be one client id": "X-Client-Id debe ser el id de un solo cliente",
     "this account can only use the portal": "esta cuenta solo puede usar el portal",
@@ -5230,9 +5229,7 @@ CATALOG: dict[str, str] = {
         "MCP no está disponible: ITS_PUBLIC_CONSOLE_URL no es una dirección https sin ruta."
     ),
     "the MCP channel marker is malformed": "la marca del canal MCP está mal formada",
-    "this token also grants the console and is not accepted over MCP": (
-        "este token también da acceso a la consola y no se acepta por MCP"
-    ),
+    "this access token was refused": "se rechazó este token de acceso",
     "this token was issued to the console and is not accepted over MCP": (
         "este token se emitió para la consola y no se acepta por MCP"
     ),

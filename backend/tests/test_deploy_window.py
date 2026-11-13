@@ -132,7 +132,7 @@ async def test_the_mcp_tool_meets_the_same_check(mcp_env: Any) -> None:
     org, slug = await mcp_org(mcp_env)
     sub = await mcp_env.create_user(org, "org-admin")
     package, device = await _target(mcp_env.admin_engine, org)
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_session(mcp_env, token) as session:
         for cron in [*BAD, *UNREAD, *NEVER]:
             result = await session.call_tool(

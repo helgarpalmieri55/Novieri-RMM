@@ -91,7 +91,9 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # -- (c) identity resolution: the scope is computed from what these read --
     "app/api/deps.py::admit": (
         "door 1 (HTTP, MCP and the portal's sign-in): resolves the user and their grants "
-        "before the scope exists (spec §2.2)"
+        "before the scope exists (spec §2.2); on the MCP channel also the AI app's grant "
+        "(the refresh family) the access token names, read and never written (own "
+        "authentication phase 3, `grants.family_is_live`)"
     ),
     "app/core/auth/sessions.py::resolve": (
         "a session cookie names a row before anybody knows whose: a session of either kind "
