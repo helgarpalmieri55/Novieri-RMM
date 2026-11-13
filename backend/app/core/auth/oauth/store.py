@@ -57,9 +57,9 @@ writer's family rows. After its UPDATE that writer waits only for the chain,
 which a purge takes, if at all, only after its cascade (the revocation test in
 `tests/test_oauth_schema.py`). The UPDATE itself, though, takes families in
 no app's order and can meet the cascade from the other side: so the purge
-deletes one app per transaction, and waits at most
-`clients.PURGE_LOCK_WAIT` before it gives way (Task 6; the purge's entry in
-`guards.lock_user_row`'s lock map). A transaction that holds several apps
+deletes one app per transaction, and waits at most half the server's
+`deadlock_timeout` before it gives way (Task 6, `clients.bound_lock_wait`;
+the purge's entry in `guards.lock_user_row`'s lock map). A transaction that holds several apps
 takes them in id order and touches none of them.
 """
 

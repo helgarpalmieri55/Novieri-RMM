@@ -185,9 +185,11 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       TRANSACTION OF ITS OWN (`clients._purge_one`), `DELETE FROM
       oauth_clients WHERE id = ... AND last_used_at <= now - CLIENT_IDLE`
       (`clients.idle_at`, `clients.is_idle` in SQL), the idle condition
-      INSIDE the statement, waiting at most `clients.PURGE_LOCK_WAIT`
-      (500 ms) and giving way on a timeout or a 40P01; nothing after the
-      cascade, not even the chain (a registration is not audited).
+      INSIDE the statement, waiting at most half the server's
+      `deadlock_timeout` (`clients.bound_lock_wait`: read from `pg_settings`
+      in that transaction, at most 500 ms) and giving way on a timeout or a
+      40P01; no app started after `clients.PURGE_BUDGET_S`; nothing after
+      the cascade, not even the chain (a registration is not audited).
       `clients.resolve_client` removes a document's idle row by the same
       step before it stores a new copy. A writer of grants holds the app row
       FOR KEY SHARE before any grant row (`clients.hold`, `oauth.store`'s
@@ -205,8 +207,8 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       it in turn -- a cycle. And with the person's two families on the ONE
       app, the cascade may hold the first while waiting on the second that
       the UPDATE took first, and the UPDATE then reach the first: a cycle
-      inside one app, which is why the purge's wait is bounded below
-      Postgres' default `deadlock_timeout` (1 s). Its wait began first, so
+      inside one app, which is why the purge's wait is bounded by half the
+      server's `deadlock_timeout`, whatever it is set to. Its wait began first, so
       it gives way before either side's deadlock check runs, and the
       person's act completes (`tests/test_oauth_schema.py`,
       `tests/test_oauth_registration.py`);

@@ -53,9 +53,11 @@ cascade takes a person's families, and a revocation across a person's apps
 order: a purge holding one app's cascade while waiting in another's could
 meet it in a cycle. That revocation can close one within a single app too,
 when the person holds two of its grants, so each app's DELETE waits at most
-`PURGE_LOCK_WAIT` and then gives way, leaving the app for later
-(`_purge_one`). The same step removes a document's idle row before a new
-copy is stored (`resolve_client`).
+half the server's `deadlock_timeout` (`purge_lock_wait_ms`, read from the
+running server) and then gives way, leaving the app for later
+(`_purge_one`); and one registration stops purging after `PURGE_BUDGET_S`.
+The same step removes a document's idle row before a new copy is stored
+(`resolve_client`).
 
 A DOCUMENT'S ROW IS REFRESHED UNDER A HOLD (`store`'s LOCK ORDER, step 3):
 an expired copy is rewritten only after `hold` has re-read it, and a use
@@ -64,11 +66,13 @@ revived: it goes as the purge would take it, grants and all (plan D10), and
 the document is stored as a new app.
 """
 
+import asyncio
 import secrets
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple, TypeGuard
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, delete, func, select, text
@@ -218,11 +222,20 @@ def touch(row: OAuthClient, now: datetime) -> None:
 
 #: How many idle apps one registration removes (plan D10).
 PURGE_BATCH = 100
-#: The longest one app's purge waits on a lock before it gives way
-#: (`_purge_one`): under Postgres' default `deadlock_timeout` of 1 s.
-PURGE_LOCK_WAIT = "500ms"
+#: The longest one app's purge waits on a lock before it gives way, in ms,
+#: and never more than half the server's `deadlock_timeout`
+#: (`purge_lock_wait_ms`).
+PURGE_LOCK_WAIT_MS = 500
+#: How long one registration may spend purging: no app's purge starts after
+#: it, so a registration under contention waits at most this and one wait.
+PURGE_BUDGET_S = 2.0
 #: lock_not_available (the wait above ran out) and deadlock_detected.
 _GAVE_WAY = frozenset({"55P03", "40P01"})
+#: How long one process keeps `registration_offered`'s reading of the
+#: database: the metadata that asks is public and not rate-limited.
+OFFERED_FOR_S = 30.0
+#: The clock of that cache, a seam for its test.
+_monotonic = time.monotonic
 #: Registrations one network may make per hour (`policy`), read here by the
 #: route so that a test lowers it in one place.
 REGISTRATIONS_PER_HOUR = policy.REGISTRATIONS_PER_HOUR
@@ -234,9 +247,22 @@ class Registration:
     redirect_uris: tuple[str, ...]
 
 
+def _texts(value: object) -> TypeGuard[list[str]]:
+    """A JSON array of strings, and nothing else: checked before any member
+    is hashed (`set`), so a member that is an object or an array is a 400,
+    never a TypeError and a 500 (fix round 1)."""
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def parse_registration(body: object) -> Registration:
     """A registration request this server can honour (plan D4, D9), or the
-    RFC 7591 §3.2.2 error. What it does not understand is ignored (§2)."""
+    RFC 7591 §3.2.2 error. What it does not understand is ignored (§2).
+
+    Every list it reads is checked member by member before it is used:
+    `grant_types` and `response_types` must hold strings only
+    (`invalid_client_metadata`), and each redirect URI must be one
+    (`check_registered`, which refuses a non-string: `invalid_redirect_uri`).
+    `scope` is never read: the scope granted is `mcp` (plan D7)."""
     if not isinstance(body, dict):
         raise OAuthError(NOT_JSON)
     uris = body.get("redirect_uris")
@@ -248,13 +274,13 @@ def parse_registration(body: object) -> Registration:
         raise OAuthError(BAD_REDIRECT) from exc
     grants = body.get("grant_types", list(GRANT_TYPES))
     if (
-        not isinstance(grants, list)
+        not _texts(grants)
         or "authorization_code" not in grants
         or not set(grants) <= set(GRANT_TYPES)
     ):
         raise OAuthError(BAD_GRANT_TYPES)
     responses = body.get("response_types", ["code"])
-    if not isinstance(responses, list) or set(responses) != {"code"}:
+    if not _texts(responses) or set(responses) != {"code"}:
         raise OAuthError(BAD_RESPONSE_TYPES)
     name = body.get("client_name")
     if name is not None and not isinstance(name, str):
@@ -273,20 +299,69 @@ async def mcp_switched_on(session: AsyncSession, org_id: UUID) -> bool:
 
 async def registration_offered(app: Any) -> bool:
     """Dynamic registration is open: the operator's opt-in, a deployment
-    organization, and MCP switched on there (plan Task 6, decision 1)."""
-    if not registration_open(app.state.settings):
+    organization, and MCP switched on there (plan Task 6, decision 1).
+
+    The opt-in is a setting, read every time. The database's part -- the
+    organization and its switch -- is read at most once per `OFFERED_FOR_S`
+    per process and per slug (fix round 1): the metadata that asks is public
+    and not rate-limited, and would otherwise cost two round trips per
+    request. A failed read is not kept. So turning MCP on or off shows here
+    up to `OFFERED_FOR_S` late; registering reads the switch itself
+    (`register_new`)."""
+    settings = app.state.settings
+    if not registration_open(settings):
         return False
+    slug, now = settings.default_org_slug, _monotonic()
+    kept = getattr(app.state, "oauth_registration_offered", None)
+    if kept is not None and kept[0] == slug and now - kept[1] < OFFERED_FOR_S:
+        return bool(kept[2])
+    offered = False
     org_id = await deployment_org(app)
-    if org_id is None:
-        return False
-    async with oauth_session(org_id, app.state.app_engine) as session:
-        return await mcp_switched_on(session, org_id)
+    if org_id is not None:
+        async with oauth_session(org_id, app.state.app_engine) as session:
+            offered = await mcp_switched_on(session, org_id)
+    app.state.oauth_registration_offered = (slug, now, offered)
+    return offered
 
 
-async def purge_idle(engine: AsyncEngine, *, org_id: UUID, now: datetime) -> int:
+def purge_lock_wait_ms(deadlock_ms: int) -> int:
+    """How long one app's purge waits on a lock (`_purge_one`): half the
+    server's `deadlock_timeout`, so in the cycle the purge gives way to it
+    times out before any deadlock check runs; at least 1 ms, because 0 would
+    be no limit at all; at most `PURGE_LOCK_WAIT_MS`. Derived from the
+    running server's setting, never assumed (fix round 1)."""
+    return max(1, min(PURGE_LOCK_WAIT_MS, deadlock_ms // 2))
+
+
+async def bound_lock_wait(session: AsyncSession) -> int:
+    """Set the transaction's `lock_timeout` (SET LOCAL) to
+    `purge_lock_wait_ms` of the server's `deadlock_timeout`, which
+    `pg_settings` gives in ms; the wait set, in ms."""
+    deadlock_ms = (
+        await session.execute(
+            text("SELECT setting::bigint FROM pg_settings WHERE name = 'deadlock_timeout'")
+        )
+    ).scalar_one()
+    wait_ms = purge_lock_wait_ms(int(deadlock_ms))
+    await session.execute(
+        text("SELECT set_config('lock_timeout', :wait, true)"), {"wait": f"{wait_ms}ms"}
+    )
+    return wait_ms
+
+
+class Purged(NamedTuple):
+    """What one `purge_idle` did: apps removed, apps it gave way on, and
+    apps it did not try because its budget was spent."""
+
+    removed: int
+    gave_way: int
+    not_tried: int
+
+
+async def purge_idle(engine: AsyncEngine, *, org_id: UUID, now: datetime) -> Purged:
     """Remove up to `PURGE_BATCH` apps of `org_id` unused for `CLIENT_IDLE`,
     registered or known by their document, with their grants and codes (ON
-    DELETE CASCADE; plan D10). How many went.
+    DELETE CASCADE; plan D10). What it did (`Purged`).
 
     ONE APP PER TRANSACTION, THE IDLE CONDITION INSIDE ITS DELETE
     (`guards.lock_user_row`'s lock map; module docstring). The candidates are
@@ -297,10 +372,15 @@ async def purge_idle(engine: AsyncEngine, *, org_id: UUID, now: datetime) -> int
     DELETE's condition fails on the row as it now is: the app survives.
     While a DELETE waits it holds no other app's cascade, so a revocation
     across a person's apps cannot wait on this purge while this purge waits
-    on it. And it waits at most `PURGE_LOCK_WAIT` (`_purge_one`), for the
-    cycle one app can still close with a revocation of two of its grants.
-    Nothing follows the cascade, not even the chain: a registration and its
-    purge are not audited (B3-22)."""
+    on it. And it waits at most half the server's `deadlock_timeout`
+    (`_purge_one`), for the cycle one app can still close with a revocation
+    of two of its grants. No app's purge starts once `PURGE_BUDGET_S` has
+    passed (fix round 1): under contention every app could cost a wait, and
+    the registration waiting on this goes on. Nothing follows the cascade,
+    not even the chain: a registration and its purge are not audited
+    (B3-22)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PURGE_BUDGET_S
     async with oauth_session(org_id, engine) as session:
         candidates = list(
             (
@@ -312,17 +392,24 @@ async def purge_idle(engine: AsyncEngine, *, org_id: UUID, now: datetime) -> int
                 )
             ).scalars()
         )
-    removed = 0
-    for app_id in candidates:
-        removed += await _purge_one(engine, org_id=org_id, which=OAuthClient.id == app_id, now=now)
-    return removed
+    removed = gave_way = 0
+    for tried, app_id in enumerate(candidates):
+        if loop.time() >= deadline:
+            return Purged(removed, gave_way, len(candidates) - tried)
+        outcome = await _purge_one(engine, org_id=org_id, which=OAuthClient.id == app_id, now=now)
+        if outcome is None:
+            gave_way += 1
+        else:
+            removed += outcome
+    return Purged(removed, gave_way, 0)
 
 
 async def _purge_one(
     engine: AsyncEngine, *, org_id: UUID, which: ColumnElement[bool], now: datetime
-) -> int:
+) -> int | None:
     """The one app `which` names, if idle by `now`, gone with its grants, in
-    a transaction of its own: 1, or 0 when it was not idle or gave way.
+    a transaction of its own: 1, 0 when it was not idle, None when it gave
+    way.
 
     IT GIVES WAY RATHER THAN WAIT LONG. Its DELETE waits on a token request
     that holds the app (`hold`) -- whose use, if it commits first, spares the
@@ -330,16 +417,14 @@ async def _purge_one(
     families first (`store`'s carve-out). With one person's two families on
     the app, that revocation's one UPDATE may take the second and then reach
     the first, which the cascade already holds: a cycle. So the DELETE waits
-    at most `PURGE_LOCK_WAIT`, below Postgres' default `deadlock_timeout`
-    (1 s). In that cycle its wait began first, so it times out before either
-    side's deadlock check runs; the person's act completes, and the app is
-    left to the next purge or the daily sweep. A 40P01 the purge meets
-    anyway (a lower `deadlock_timeout`) is given way to the same."""
+    at most half the server's `deadlock_timeout` (`bound_lock_wait`, read
+    from the running server, not assumed). In that cycle its wait began
+    first, so it times out before either side's deadlock check runs; the
+    person's act completes, and the app is left to the next purge or the
+    daily sweep. A 40P01 the purge meets anyway is given way to the same."""
     try:
         async with oauth_session(org_id, engine) as session:
-            await session.execute(
-                text("SELECT set_config('lock_timeout', :wait, true)"), {"wait": PURGE_LOCK_WAIT}
-            )
+            await bound_lock_wait(session)
             gone = await session.execute(
                 delete(OAuthClient)
                 .where(OAuthClient.org_id == org_id, which, idle_at(now))
@@ -349,7 +434,7 @@ async def _purge_one(
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) not in _GAVE_WAY:
             raise
-        return 0
+        return None
 
 
 async def lock_registrations(session: AsyncSession, org_id: UUID) -> None:
@@ -482,7 +567,10 @@ async def resolve_client(
 
     `fetch` defaults to `cimd.fetch_document`, looked up at call time so a
     test can replace it on the module. `record_use=False` WRITES NOTHING, and
-    so reads no document: what a person who may not connect AI apps here
+    so reads no document -- and MCP switched off in the organization is
+    `record_use=False`, read here in the transaction this opens anyway, as
+    defence in depth for 1c(d) ("con MCP apagado no se registra nada ni se
+    descarga ningún documento"; fix round 1): what a person who may not connect AI apps here
     asks about neither keeps an idle app alive nor downloads anything
     (re-review f3-2, M-3; A3-31). A stored copy still answers, expired or
     not; without one the document is `unavailable`, as if it could not be
@@ -490,6 +578,9 @@ async def resolve_client(
     (Task 8)."""
     engine = app.state.app_engine
     async with oauth_session(org_id, engine) as session:
+        # Defence in depth for 1c(d), whatever the caller checked (fix round
+        # 1): with MCP off nothing is written and no document is fetched.
+        record_use = record_use and await mcp_switched_on(session, org_id)
         row = await find_client(session, org_id=org_id, client_id=client_id, now=now)
         if row is not None and record_use:
             row = await hold(session, org_id=org_id, app_id=row.id, now=now)

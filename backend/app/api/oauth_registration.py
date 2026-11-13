@@ -24,7 +24,10 @@ endpoint only while registration is offered; `S256` alone in
 `authorization_response_iss_parameter_supported`. It is cached for 300
 seconds, so turning MCP on or off shows in `registration_endpoint` up to five
 minutes late; and a database that does not answer leaves the endpoint out
-rather than turning the metadata into a 500 (re-review f3-2, M-2).
+rather than turning the metadata into a 500 (re-review f3-2, M-2). Being
+public and not rate-limited, it reads the database at most once per
+`clients.OFFERED_FOR_S` (30 s) per process (fix round 1), which adds up to
+that much to the five minutes.
 
 THE NETWORK'S LIMIT IS COUNTED BEFORE ANYTHING IS READ (re-review f3-2, M-2):
 its key needs no organization, so a flood of registrations costs Redis, never
@@ -134,7 +137,9 @@ async def register_client(request: Request) -> JSONResponse:
         raise OAuthError(TOO_LARGE) from exc
     try:
         body = json.loads(raw)
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        # RecursionError: 16 KiB of `[` nests past the parser's depth, and is
+        # not a ValueError (fix round 1).
         raise OAuthError(NOT_JSON) from exc
     registration = clients.parse_registration(body)
     answer = await clients.register_new(

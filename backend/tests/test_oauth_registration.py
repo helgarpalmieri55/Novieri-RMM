@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.guards import lock_user_row
 from app.core.auth.oauth import cimd, clients
+from app.core.auth.oauth.clients import Purged
 from app.core.auth.oauth.errors import REGISTRATIONS_FULL, OAuthError
 from app.core.auth.oauth.policy import CLIENT_IDLE
 from app.core.auth.oauth.store import deployment_org, oauth_session
@@ -220,6 +221,27 @@ async def test_the_answer_is_201_json_and_never_cached(env) -> None:
             "invalid_client_metadata",
         ),
         ({"redirect_uris": [CLAUDE_CALLBACK], "client_name": 7}, "invalid_client_metadata"),
+        # Fix round 1: a list member that is not text is refused, never a
+        # 500 (an unhashable one used to reach `set()` unchecked).
+        (
+            {"redirect_uris": [CLAUDE_CALLBACK], "grant_types": ["authorization_code", {}]},
+            "invalid_client_metadata",
+        ),
+        (
+            {"redirect_uris": [CLAUDE_CALLBACK], "grant_types": ["authorization_code", 7]},
+            "invalid_client_metadata",
+        ),
+        ({"redirect_uris": [CLAUDE_CALLBACK], "response_types": [[]]}, "invalid_client_metadata"),
+        ({"redirect_uris": [CLAUDE_CALLBACK], "response_types": [{}]}, "invalid_client_metadata"),
+        (
+            {"redirect_uris": [CLAUDE_CALLBACK], "response_types": ["code", None]},
+            "invalid_client_metadata",
+        ),
+        # RFC 7591 §3.2.2: a redirect URI that is not one is
+        # `invalid_redirect_uri`, whatever its type.
+        ({"redirect_uris": [{}]}, "invalid_redirect_uri"),
+        ({"redirect_uris": [[CLAUDE_CALLBACK]]}, "invalid_redirect_uri"),
+        ({"redirect_uris": [CLAUDE_CALLBACK, 7]}, "invalid_redirect_uri"),
     ],
 )
 async def test_a_registration_this_server_cannot_honour_is_refused(
@@ -243,6 +265,26 @@ async def test_a_body_that_is_not_one_json_object_is_refused(env) -> None:
     for resp in (listed, broken, form):
         assert resp.status_code == 400
         assert resp.json()["error"] == "invalid_client_metadata"
+
+
+async def test_a_body_nested_past_the_parsers_depth_is_refused(env) -> None:
+    """Fix round 1: 16 KiB of `[` is under the size limit, and `json.loads`
+    answers it with RecursionError, which is not a ValueError -- it was a
+    500 on the public, anonymous endpoint."""
+    async with oauth_http(env) as client:
+        resp = await client.post(
+            "/oauth/register", content=b"[" * 16000, headers={"Content-Type": "application/json"}
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_client_metadata"
+
+
+@pytest.mark.parametrize("scope", [[{}], 7, {"mcp": True}, None, "openid profile"])
+async def test_a_requested_scope_of_any_shape_is_replaced(env, scope: object) -> None:
+    """Plan D7: the scope granted is `mcp` whatever was asked, so the asked
+    value is never read -- nor able to crash anything (fix round 1)."""
+    answer = await register(env, scope=scope)
+    assert answer["scope"] == "mcp"
 
 
 async def test_a_body_over_16_kib_is_an_rfc_error(env) -> None:
@@ -309,6 +351,57 @@ async def test_the_limit_is_counted_before_the_database_is_read(env, monkeypatch
         second = await client.post("/oauth/register", json={"redirect_uris": [CLAUDE_CALLBACK]})
     assert first.status_code == 201, first.text
     assert second.status_code == 429
+
+
+async def test_the_metadata_reads_the_database_once_per_window(env, monkeypatch) -> None:
+    """Fix round 1: the metadata is public and unlimited, so one process
+    reads the deployment's organization and its MCP switch at most once per
+    `OFFERED_FOR_S`. Turning MCP off shows when the window ends; turning the
+    opt-in off shows at once (a setting, read every time)."""
+    reads = 0
+    real = clients.mcp_switched_on
+
+    async def counted(session: AsyncSession, org_id: Any) -> bool:
+        nonlocal reads
+        reads += 1
+        return await real(session, org_id)
+
+    clock = [1000.0]
+    monkeypatch.setattr(clients, "mcp_switched_on", counted)
+    monkeypatch.setattr(clients, "_monotonic", lambda: clock[0])
+    offered = [("registration_endpoint" in (await _metadata(env)).json()) for _ in range(3)]
+    assert (offered, reads) == ([True, True, True], 1)
+
+    await _switch(env, await _org(env), False)
+    clock[0] += clients.OFFERED_FOR_S - 1
+    assert "registration_endpoint" in (await _metadata(env)).json()
+    clock[0] += 1
+    assert "registration_endpoint" not in (await _metadata(env)).json()
+    assert reads == 2
+
+    env.settings.mcp_registration = ""
+    await _switch(env, await _org(env), True)
+    assert "registration_endpoint" not in (await _metadata(env)).json()
+    assert reads == 2
+
+
+async def test_a_failed_read_is_not_kept(env, monkeypatch) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    calls = 0
+    real = clients.mcp_switched_on
+
+    async def once_down(session: AsyncSession, org_id: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OperationalError("SELECT settings", {}, OSError("down"))
+        return await real(session, org_id)
+
+    monkeypatch.setattr(clients, "mcp_switched_on", once_down)
+    assert "registration_endpoint" not in (await _metadata(env)).json()
+    assert "registration_endpoint" in (await _metadata(env)).json()
+    assert calls == 2
 
 
 async def test_a_database_that_does_not_answer_leaves_registration_out_of_the_metadata(
@@ -510,6 +603,74 @@ async def _families(env, org_id) -> list[Any]:
         return list((await session.execute(select(OAuthRefreshFamily.id))).scalars().all())
 
 
+async def _deadlock_ms(env) -> int:
+    async with env.app_engine.connect() as conn:
+        return int(
+            (
+                await conn.execute(
+                    text("SELECT setting FROM pg_settings WHERE name = 'deadlock_timeout'")
+                )
+            ).scalar_one()
+        )
+
+
+@pytest.mark.parametrize(
+    ("deadlock_ms", "wait_ms"),
+    [(1000, 500), (300, 150), (5000, 500), (3, 1), (2, 1), (1, 1)],
+)
+def test_a_purge_waits_half_the_deadlock_timeout(deadlock_ms: int, wait_ms: int) -> None:
+    """Fix round 1: the give-way holds only while the purge's wait is under
+    the server's `deadlock_timeout`, so it is derived from it, not assumed:
+    half, never 0 (which would be no limit at all), never over
+    `PURGE_LOCK_WAIT_MS`."""
+    assert clients.purge_lock_wait_ms(deadlock_ms) == wait_ms
+
+
+async def test_the_purges_wait_is_set_from_the_servers_deadlock_timeout(env) -> None:
+    org_id = await _org(env)
+    expected = clients.purge_lock_wait_ms(await _deadlock_ms(env))
+    async with oauth_session(org_id, env.app_engine) as session:
+        assert await clients.bound_lock_wait(session) == expected
+        shown = (await session.execute(text("SHOW lock_timeout"))).scalar_one()
+    assert shown == f"{expected}ms"
+    async with oauth_session(org_id, env.app_engine) as session:
+        # SET LOCAL: the next transaction on the connection waits as before.
+        assert (await session.execute(text("SHOW lock_timeout"))).scalar_one() == "0"
+
+
+async def test_a_purge_stops_at_its_budget(env, monkeypatch) -> None:
+    """Fix round 1: under contention each app may cost the purge its wait, so
+    `PURGE_BATCH` apps could hold one registration for ~50 s. The purge
+    starts no app once `PURGE_BUDGET_S` has passed: here three idle apps are
+    all held, each costs the wait (500 ms), and a 0.7 s budget lets two be
+    tried and leaves the third."""
+    monkeypatch.setattr(clients, "purge_lock_wait_ms", lambda _deadlock_ms: 500)
+    monkeypatch.setattr(clients, "PURGE_BUDGET_S", 0.7)
+    org_id, now = await _org(env), datetime.now(UTC)
+    apps = [
+        await seed_client(env, org_id, last_used_at=now - timedelta(days=d)) for d in (33, 32, 31)
+    ]
+    async with oauth_session(org_id, env.app_engine) as session:
+        for app in apps:
+            # FOR KEY SHARE, re-checked against a clock 30 days back: held.
+            assert await clients.hold(
+                session, org_id=org_id, app_id=app.id, now=now - timedelta(days=30)
+            )
+        purged = await clients.purge_idle(env.app_engine, org_id=org_id, now=now)
+    assert purged == Purged(removed=0, gave_way=2, not_tried=1)
+
+
+async def test_a_registration_goes_on_when_the_purge_is_out_of_time(env, monkeypatch) -> None:
+    monkeypatch.setattr(clients, "PURGE_BUDGET_S", 0.0)
+    org_id, now = await _org(env), datetime.now(UTC)
+    idle = await seed_client(env, org_id, last_used_at=now - timedelta(days=31))
+    answer = await register(env)
+    async with oauth_session(org_id, env.app_engine) as session:
+        ids = set((await session.execute(select(OAuthClient.id))).scalars())
+    assert idle.id in ids
+    assert len(ids) == 2 and answer["client_id"].startswith("itms_")
+
+
 async def test_the_purge_takes_only_what_is_idle_by_its_own_now(env) -> None:
     """`<=`, as `find_client` reads idle: thirty days to the second goes, a
     document's row as well as a registration's."""
@@ -523,7 +684,7 @@ async def test_the_purge_takes_only_what_is_idle_by_its_own_now(env) -> None:
         kind="metadata_document",
         last_used_at=now - CLIENT_IDLE,
     )
-    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == 2
+    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == Purged(2, 0, 0)
     async with oauth_session(org_id, env.app_engine) as session:
         ids = set((await session.execute(select(OAuthClient.id))).scalars())
     assert ids == {kept.id}
@@ -535,8 +696,8 @@ async def test_a_purge_removes_at_most_its_batch(env, monkeypatch) -> None:
     org_id, now = await _org(env), datetime.now(UTC)
     for days in (31, 32, 33):
         await seed_client(env, org_id, last_used_at=now - timedelta(days=days))
-    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == 2
-    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == 1
+    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == Purged(2, 0, 0)
+    assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == Purged(1, 0, 0)
 
 
 async def test_a_use_that_commits_first_spares_its_app_from_the_purge(env, monkeypatch) -> None:
@@ -547,9 +708,10 @@ async def test_a_use_that_commits_first_spares_its_app_from_the_purge(env, monke
     its use WITHOUT waiting on the queued DELETE (NO_WAITING would turn a
     wait into an error) and commits; the DELETE's own idle condition then
     fails on the row as it now is. No 40P01: the app and its grant survive.
-    The purge's wait is lengthened here (`PURGE_LOCK_WAIT`), so the app is
-    spared by that re-check, never by the purge giving way."""
-    monkeypatch.setattr(clients, "PURGE_LOCK_WAIT", "30s")
+    The purge's wait is lengthened here (`purge_lock_wait_ms`), and its
+    result says the app was spared by that re-check: not removed, and the
+    purge never gave way."""
+    monkeypatch.setattr(clients, "purge_lock_wait_ms", lambda _deadlock_ms: 30_000)
     org_id = await _org(env)
     user_id = await user_id_of(env, await env.create_user(org_id, "org-admin"))
     then = datetime.now(UTC) - CLIENT_IDLE
@@ -575,7 +737,7 @@ async def test_a_use_that_commits_first_spares_its_app_from_the_purge(env, monke
         )
         clients.touch(held, request_now)
         await session.flush()
-    assert await purging == 0
+    assert await purging == Purged(removed=0, gave_way=0, not_tried=0)
     async with oauth_session(org_id, env.app_engine) as session:
         stored = (
             await session.execute(select(OAuthClient.last_used_at).where(OAuthClient.id == app.id))
@@ -591,7 +753,7 @@ async def test_a_purge_that_commits_first_leaves_the_request_nothing_to_hold(env
     org_id, now = await _org(env), datetime.now(UTC)
     app = await seed_client(env, org_id, last_used_at=now - CLIENT_IDLE)
     async with oauth_session(org_id, env.app_engine) as session:
-        assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == 1
+        assert await clients.purge_idle(env.app_engine, org_id=org_id, now=now) == Purged(1, 0, 0)
         held = await clients.hold(
             session, org_id=org_id, app_id=app.id, now=now - timedelta(seconds=1)
         )
@@ -610,9 +772,9 @@ async def test_a_purge_of_two_apps_meets_a_revocation_across_them_without_a_dead
     Each app in a transaction of its own, the purge holds nothing while it
     waits: the first app is already gone, the revocation finds nothing there
     to wait for, commits, and the purge then takes the second. The purge's
-    wait is lengthened here, so that is the shape at work, not the purge
-    giving way (`PURGE_LOCK_WAIT`)."""
-    monkeypatch.setattr(clients, "PURGE_LOCK_WAIT", "30s")
+    wait is lengthened here (`purge_lock_wait_ms`), and its result says it
+    never gave way: that is the shape at work."""
+    monkeypatch.setattr(clients, "purge_lock_wait_ms", lambda _deadlock_ms: 30_000)
     org_id = await _org(env)
     user_id = await user_id_of(env, await env.create_user(org_id, "org-admin"))
     now = datetime.now(UTC)
@@ -631,7 +793,7 @@ async def test_a_purge_of_two_apps_meets_a_revocation_across_them_without_a_dead
         await session.execute(text(NO_WAITING))
         reached = await session.execute(revoke.where(OAuthRefreshFamily.id == first_family))
         assert reached.rowcount == 0  # the first app went in a transaction of its own
-    assert await purging == 2
+    assert await purging == Purged(removed=2, gave_way=0, not_tried=0)
     assert await _families(env, org_id) == []
 
 
@@ -640,12 +802,14 @@ async def test_a_purge_yields_to_a_revocation_of_two_grants_on_its_app(env) -> N
     person's two families on the one idle app, the revocation's UPDATE
     reaching the second first. The purge's cascade takes the first and waits
     on the second; the revocation then reaches the first and waits on the
-    purge. So a purge waits at most `PURGE_LOCK_WAIT`, below Postgres'
-    default `deadlock_timeout` (1 s): its wait began first, so it gives up
-    before either side's deadlock check runs, and leaves the app to the next
-    purge. The revocation -- a person's act -- completes; nobody gets 40P01.
-    (Were the cascade to scan the second family first, there would be no
-    cycle and the first purge would take the app; the sum says either.)"""
+    purge. So a purge waits at most half of Postgres' `deadlock_timeout`
+    (`purge_lock_wait_ms`): its wait began first, so it gives up before
+    either side's deadlock check runs, and leaves the app to the next purge.
+    The revocation -- a person's act -- completes; nobody gets 40P01. (Were
+    the cascade to scan the second family first, there would be no cycle and
+    the first purge would take the app.) Either way the purge's result says
+    which path ran: a first try that removed nothing gave way (fix round 1),
+    and took at least its wait to do so."""
     org_id = await _org(env)
     user_id = await user_id_of(env, await env.create_user(org_id, "org-admin"))
     now = datetime.now(UTC)
@@ -654,17 +818,27 @@ async def test_a_purge_yields_to_a_revocation_of_two_grants_on_its_app(env) -> N
     second = await _grant(env, org_id, user_id, app)
     revoke = update(OAuthRefreshFamily).values(revoked_at=now, revoked_reason="disabled")
 
+    wait_s = clients.purge_lock_wait_ms(await _deadlock_ms(env)) / 1000
+    loop = asyncio.get_running_loop()
+
     async with oauth_session(org_id, env.app_engine) as session:
         await lock_user_row(session, user_id)
         await session.execute(revoke.where(OAuthRefreshFamily.id == second))
+        started = loop.time()
         purging = asyncio.create_task(clients.purge_idle(env.app_engine, org_id=org_id, now=now))
         blocked = await until_blocked_by(env.app_engine, await backend_pid(session))
         assert [normalised(q).split(" ")[0] for q in blocked] == ["DELETE"]
         reached = await session.execute(revoke.where(OAuthRefreshFamily.id == first))
         assert reached.rowcount in (0, 1)
     first_try = await purging
+    took = loop.time() - started
     later = await clients.purge_idle(env.app_engine, org_id=org_id, now=now)
-    assert first_try + later == 1
+    if first_try.removed == 0:
+        # The give-way path ran, and waited its wait out before giving way.
+        assert (first_try, later) == (Purged(0, 1, 0), Purged(1, 0, 0))
+        assert took >= wait_s
+    else:
+        assert (first_try, later) == (Purged(1, 0, 0), Purged(0, 0, 0))
     assert await _families(env, org_id) == []
 
 
@@ -726,6 +900,38 @@ async def test_without_record_use_nothing_is_written_and_no_document_is_read(env
             fetch=fetch,
             record_use=False,
         )
+    assert unread.value.reason == "unavailable"
+    assert fetch.calls == 0
+    async with oauth_session(org_id, env.app_engine) as session:
+        used = (await session.execute(select(OAuthClient.last_used_at))).scalars().all()
+    assert used == [long_ago, long_ago]
+
+
+async def test_with_mcp_off_no_document_is_read_and_nothing_is_written(env) -> None:
+    """Fix round 1, defence in depth for 1c(d) ("con MCP apagado no se
+    registra nada ni se descarga ningún documento"): `resolve_client` reads
+    the switch itself, in the transaction it already opens, whatever its
+    caller checked. With MCP off it answers as `record_use=False` does: what
+    is stored still answers, nothing is written, no document is fetched, and
+    one never stored is "unavailable"."""
+    org_id, now = await _org(env), datetime.now(UTC)
+    long_ago = now - timedelta(days=20)
+    registered = await seed_client(env, org_id, last_used_at=long_ago)
+    await seed_client(
+        env,
+        org_id,
+        client_id=DOCUMENT_URL,
+        kind="metadata_document",
+        last_used_at=long_ago,
+        metadata_expires_at=now - timedelta(minutes=1),
+    )
+    await _switch(env, org_id, False)
+    fetch = FakeFetch()
+    for client_id in (registered.client_id, DOCUMENT_URL):
+        found = await _resolve(env, fetch, now, client_id=client_id)
+        assert found is not None and found.client_id == client_id
+    with pytest.raises(cimd.DocumentRefused) as unread:
+        await _resolve(env, fetch, now, client_id="https://other.example/client.json")
     assert unread.value.reason == "unavailable"
     assert fetch.calls == 0
     async with oauth_session(org_id, env.app_engine) as session:
