@@ -175,7 +175,17 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 109, own authentication phase 2, Task 5.** One site. A static WARNING in
+**NOW 110, own authentication phase 3 (plan 2026-11-06, Task 3).** One site. A
+static WARNING in `app/core/auth/oauth/cimd.py::fetch_document`, "client
+metadata document refused", when an AI app's client metadata document cannot
+be its client -- unreachable, not JSON, a mismatched `client_id`, a shared
+secret. Without it a connection that fails on the document is invisible to the
+operator. At most one a minute per process, saying how many were held (the
+C-M8 throttle, `loopback.RefusalThrottle`), because any signed-in person can
+cause one. `extra` = the reason code, the document's host and `unlogged`; never
+the URL's path, and never the body, which a stranger wrote.
+
+**BEFORE THAT, 109, own authentication phase 2, Task 5.** One site. A static WARNING in
 `app/core/auth/entra.py::exchange`, "microsoft sign-in: the token endpoint
 refused the code", when Microsoft's token endpoint refuses the authorization
 code or does not answer. `extra` = Microsoft's machine error code, or

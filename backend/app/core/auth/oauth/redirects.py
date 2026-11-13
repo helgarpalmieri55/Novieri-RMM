@@ -53,6 +53,22 @@ RESPONSE_PARAMETERS = frozenset({"code", "state", "iss", "error", "error_descrip
 _URI_CHARS = re.compile(r"(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()+,;=]|%[0-9A-Fa-f]{2})*")
 
 
+def valid_uri_characters(uri: str) -> bool:
+    """`uri` is made only of `_URI_CHARS`: the rule a registered redirect is
+    held to, and a client metadata document URL too (`cimd`, Task 3 fix round
+    1c)."""
+    return _URI_CHARS.fullmatch(uri) is not None
+
+
+def _bracketed_name(parts: SplitResult) -> bool:
+    """The authority's host is bracketed but is not an IPv6 literal: an
+    IPvFuture literal such as `[v1.claude.ai]` (RFC 3986 §3.2.2). `urlsplit`
+    accepts it and unbrackets it into a name, `v1.claude.ai`; a WHATWG URL
+    parser puts only an IPv6 address in brackets, so a browser never uses
+    that name (Task 3 fix round 1c)."""
+    return "[" in parts.netloc.rpartition("@")[2] and ":" not in (parts.hostname or "")
+
+
 class RedirectRejected(ValueError):
     """Why a redirect cannot be registered: `malformed`, `fragment`,
     `credentials`, `query` or `scheme`. A reason code, never shown to a
@@ -76,7 +92,7 @@ def check_registered(uri: object) -> str:
     """`uri` unchanged when it may be registered; `RedirectRejected` if not."""
     if not isinstance(uri, str) or not uri or len(uri) > MAX_URI_LENGTH:
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
-    if _URI_CHARS.fullmatch(uri) is None:
+    if not valid_uri_characters(uri):
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if "#" in uri:
         raise RedirectRejected("fragment")  # i18n-exempt: a reason code
@@ -89,7 +105,7 @@ def check_registered(uri: object) -> str:
     host = parts.hostname or ""
     if host and not valid_host(host):
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
-    if "[" in parts.netloc and ":" not in host:  # IPvFuture, `[v1.claude.ai]`
+    if _bracketed_name(parts):  # IPvFuture, `[v1.claude.ai]`
         raise RedirectRejected("malformed")  # i18n-exempt: a reason code
     if parts.scheme == "https" and host:
         return uri
@@ -151,12 +167,16 @@ def matches(registered: Sequence[str], requested: str) -> bool:
 
 def host_of(uri: str) -> str:
     """The host name, as the consent screen shows it ("" if there is none).
-    ASCII, because a registered redirect is (`check_registered`)."""
+    ASCII, because a registered redirect is (`check_registered`). Never a
+    host a browser would not use, whatever the caller checked before: one
+    that fails `valid_host`, or a bracketed one that is not IPv6
+    (`_bracketed_name`), is "" (Task 3 fix round 1c)."""
     try:
-        host = _split(uri).hostname or ""
+        parts = _split(uri)
     except RedirectRejected:
         return ""
-    if not valid_host(host):
+    host = parts.hostname or ""
+    if not valid_host(host) or _bracketed_name(parts):
         return ""
     if ":" in host:
         return ipaddress.ip_address(host).compressed

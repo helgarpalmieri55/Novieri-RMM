@@ -353,6 +353,26 @@ def test_the_displayed_host_is_one_the_browser_agrees_with() -> None:
     assert redirects.host_of("https://evil.example\\.claude.ai/cb") == ""
 
 
+@pytest.mark.parametrize(
+    "uri",
+    ["https://[v1.claude.ai]/cb", "https://[v1.claude.ai]:443/cb", "https://x@[v1.a]/cb"],
+)
+def test_host_of_never_names_a_bracketed_host_that_is_not_ipv6(uri: str) -> None:
+    """`urlsplit` accepts an IPvFuture literal and unbrackets it into a name
+    (`v1.claude.ai`) that a browser never uses: a WHATWG parser puts only an
+    IPv6 address in brackets. So `host_of` names none, for every caller (Task
+    3 fix round 1c)."""
+    assert redirects.host_of(uri) == ""
+
+
+def test_the_uri_character_rule_is_public() -> None:
+    """`check_registered`'s RFC 3986 character rule, under a public name, so a
+    client metadata document URL is held to it too (Task 3 fix round 1c)."""
+    assert redirects.valid_uri_characters("https://h.example/a%20b?x=1&y=[2]#f")
+    for bad in ("a\\b", 'a"b', "a%zzb", "a%2", "a*b", "a b", "a{b}", "сlaude"):
+        assert not redirects.valid_uri_characters(f"https://h.example/{bad}"), bad
+
+
 async def test_error_headers_cannot_unset_no_store() -> None:
     exc = OAuthError(
         errors.CLIENT_AUTH,
