@@ -42,6 +42,7 @@ NO_STORE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/clients/{client_id}/contacts/{contact_id}/access/reset"): (
         "a contact's new one-time invitation link, when no mail carried it"
     ),
+    ("POST", "/api/v1/oauth/authorize/decision"): "an AI app's one-time authorization code",
 }
 
 

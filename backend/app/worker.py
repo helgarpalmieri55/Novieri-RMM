@@ -729,8 +729,10 @@ async def ai_action_expiry_all_orgs(now: datetime | None = None) -> int:
 async def auth_retention_all_orgs(now: datetime | None = None) -> int:
     """Own authentication's retention in every org (`app/core/auth/
     retention.py`, final review A-M6, operator decision C7): sessions after 90
-    days, forgotten devices and spent links after 30, old challenges after 1,
-    audited per org. One org's failure is contained; see `_OrgCycleFailures`."""
+    days, forgotten devices and spent links after 30, old challenges after 1;
+    since phase 3 (Task 13), AI apps' codes 10 minutes after they expire,
+    used or not, ended grants after 1 day and apps idle for 30; audited per
+    org. One org's failure is contained; see `_OrgCycleFailures`."""
     settings = get_settings()
     app_engine = create_async_engine(settings.database_url)
     admin_engine = create_async_engine(settings.database_admin_url)

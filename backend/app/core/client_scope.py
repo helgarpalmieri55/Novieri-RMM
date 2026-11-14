@@ -91,7 +91,9 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # -- (c) identity resolution: the scope is computed from what these read --
     "app/api/deps.py::admit": (
         "door 1 (HTTP, MCP and the portal's sign-in): resolves the user and their grants "
-        "before the scope exists (spec §2.2)"
+        "before the scope exists (spec §2.2); on the MCP channel also the AI app's grant "
+        "(the refresh family) the access token names, read and never written (own "
+        "authentication phase 3, `grants.family_is_live`)"
     ),
     "app/core/auth/sessions.py::resolve": (
         "a session cookie names a row before anybody knows whose: a session of either kind "
@@ -185,6 +187,14 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "unlinking, under the scope the door established (`account.own_session`, "
         "invariant 5a)"
     ),
+    "app/core/auth/oauth/store.py::oauth_session": (
+        "the platform's own OAuth server (P2 phase 3 design §5): an AI app's registration (G) "
+        "and a technician's grants, codes and refresh tokens -- global rows only an every-client "
+        "scope may write, read by a code or token hash before anybody's scope exists, or by "
+        "the id of the person the console session or the verified access token named. Also "
+        "holds Settings -> AI connections' revoke (Task 10): the caller's own grants, or with "
+        "orgs.manage on every client everyone's"
+    ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
         "app/worker.py",
@@ -265,10 +275,13 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     ),
     "app/core/ai/retention.py::sweep_all_orgs": "worker: AI transcript retention sweep",
     "app/core/auth/retention.py::sweep_org": (
-        "worker: own authentication's retention (final review A-M6, operator decision C7) -- "
-        "one organization's old sessions, forgotten devices, spent links and old challenges, "
-        "whose technician rows only an every-client scope may delete; every step carries its "
-        "own org_id predicate, and the sweep is audited"
+        "worker: own authentication's retention (final review A-M6, operator decision C7; "
+        "phase 3 plan 2026-11-06, Task 13) -- one organization's old sessions, forgotten "
+        "devices, spent links and old challenges, and its AI apps' spent codes and ended "
+        "grants with their refresh tokens, whose technician rows only an every-client scope "
+        "may delete (its idle AI apps go by clients.purge_idle, under oauth_session, and "
+        "when the sweep then fails a second transaction writes their audit row alone); every "
+        "step carries its own org_id predicate, and the sweep is audited"
     ),
     "app/modules/agent_update/reconcile.py::tick_all_orgs": "worker: agent-update rollout tick",
     "app/modules/email_intake/identity.py::_mint_email_token_committed": (

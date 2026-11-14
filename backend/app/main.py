@@ -313,6 +313,12 @@ def create_app(
 
     app.add_exception_handler(AuthRefusal, auth_refusal_handler)
 
+    # The OAuth server's RFC 6749 error bodies (plan 2026-11-06, Task 1): the
+    # token, registration and revocation routes raise `OAuthError`.
+    from app.core.auth.oauth.errors import OAuthError, oauth_error_handler
+
+    app.add_exception_handler(OAuthError, oauth_error_handler)
+
     # OpenBao down (own authentication Task 2's `AuthKeysUnavailable`): one
     # 503 wherever a password is hashed or verified (plan decision 13).
     from app.core.auth.guards import keys_unavailable_handler
@@ -381,6 +387,11 @@ def create_app(
     app.include_router(realm_settings_router, prefix="/api/v1")
     app.include_router(session_settings_router, prefix="/api/v1")
     app.include_router(entra_settings_router, prefix="/api/v1")
+    # The consent screen's two routes (own authentication phase 3, Task 8):
+    # the console page `/oauth/authorize` asks them with the person's session.
+    from app.api.v1.oauth_consent import router as oauth_consent_router
+
+    app.include_router(oauth_consent_router, prefix="/api/v1")
     # The platform's own sign-in (P2 phase 1): `/auth/*` answers before there
     # is a session; `/me/*` is the caller's own security. Both ungated by
     # design -- see app/api/v1/auth.py.
@@ -409,6 +420,17 @@ def create_app(
     from app.api.well_known import router as well_known_router
 
     app.include_router(well_known_router)
+    # The platform's own OAuth server (plan 2026-11-06, Task 6): its RFC 8414
+    # metadata and RFC 7591 registration. Public, outside `/api/v1`.
+    from app.api.oauth_registration import router as oauth_registration_router
+
+    app.include_router(oauth_registration_router)
+
+    # The OAuth server's token and revocation endpoints (plan 2026-11-06,
+    # Task 7): public, outside `/api/v1`, form-encoded, RFC 6749 errors.
+    from app.api.oauth_tokens import router as oauth_tokens_router
+
+    app.include_router(oauth_tokens_router)
     app.router.routes.extend(mcp.routes())
     # The console's side of it: Settings → AI connections (`app/mcp/api.py`).
     from app.mcp.api import router as mcp_admin_router

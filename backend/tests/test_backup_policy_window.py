@@ -219,7 +219,7 @@ async def test_the_mcp_tool_meets_the_same_check(mcp_env: Any) -> None:
     async with org_session(org, clients=ClientScope.all(), engine=mcp_env.app_engine) as s:
         repo = await create_repository(s, mcp_env.app.state.vault, org_id=org, actor_id=actor,
                                        client_id=org, name="r")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     before = await _written(mcp_env, org)
     async with running_mcp(mcp_env), mcp_session(mcp_env, token) as session:
         for cron in [*BAD, *UNREAD, *NEVER]:

@@ -392,10 +392,13 @@ async def test_with_the_mark_a_good_password_replaces_the_mailboxs(auth_env: Any
     assert (await login(auth_env, who, password=MAILED)).status_code == 401
     assert (await login(auth_env, who, password=RECOVERED)).json() == {"state": "enroll_required"}
     changed = await _events(auth_env, org, "auth.password_changed")
-    assert [e.meta for e in changed] == [{"via": "reset"}, {"via": "recover"}]
+    assert [e.meta for e in changed] == [
+        {"via": "reset", "ai_grants_revoked": 0},
+        {"via": "recover"},
+    ]
     assert (changed[-1].actor_type, changed[-1].actor_id) == ("user", who.user_id)
     used = await _events(auth_env, org, "user.recovery_link_used")
-    assert [e.meta for e in used] == [{"email": who.email}]
+    assert [e.meta for e in used] == [{"email": who.email, "ai_grants_revoked": 0}]
     for event in [*changed, *used]:
         assert RECOVERED not in str(event.meta) and token not in str(event.meta)
     subjects = [m.subject.lower() for m in auth_env.mail.sent if m.to == who.email]
@@ -510,7 +513,10 @@ async def test_a_mark_cleared_between_the_details_and_the_press_still_takes_the_
     assert (await login(auth_env, who, password=MAILED)).status_code == 401
     assert (await login(auth_env, who, password=RECOVERED)).json() == {"state": "enroll_required"}
     changed = await _events(auth_env, org, "auth.password_changed")
-    assert [e.meta for e in changed] == [{"via": "reset"}, {"via": "recover"}]
+    assert [e.meta for e in changed] == [
+        {"via": "reset", "ai_grants_revoked": 0},
+        {"via": "recover"},
+    ]
 
 
 async def test_a_mail_reset_between_the_details_and_the_press_is_caught(

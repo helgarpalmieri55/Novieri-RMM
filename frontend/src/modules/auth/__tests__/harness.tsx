@@ -7,10 +7,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import { Fragment, StrictMode } from "react";
-import { MemoryRouter, Route, Routes, useLocation, type Location } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  type Location,
+  type NavigateFunction,
+} from "react-router-dom";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../../lib/api";
+import { ConsentPage } from "../ConsentPage";
 import { EnrollPage } from "../EnrollPage";
 import { FactorPage } from "../FactorPage";
 import { ForgotPasswordPage } from "../ForgotPasswordPage";
@@ -45,6 +54,14 @@ export const calls = {
   acceptRecovery: vi.fn(),
   microsoftStart: vi.fn(),
   microsoftComplete: vi.fn(),
+  oauthAuthorizeDetails: vi.fn(),
+  oauthAuthorizeDecision: vi.fn(),
+  // The step-up dialog the consent page opens (C1): `components/stepUp.tsx`.
+  getMySecurity: vi.fn(),
+  stepUpTotp: vi.fn(),
+  stepUpPasskeyOptions: vi.fn(),
+  stepUpPasskey: vi.fn(),
+  stepUpRecovery: vi.fn(),
 };
 
 export const TEN_CODES = [
@@ -54,6 +71,25 @@ export const TEN_CODES = [
 
 export const OTPAUTH =
   "otpauth://totp/ITMS:dana%40example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=ITMS";
+
+/** What `POST /oauth/authorize/details` answers for a registered app (plan 2026-11-06, Appendix A.2). */
+export const CONSENT = {
+  outcome: "consent",
+  client: {
+    name: "Claude",
+    client_id: "itms_Zm9vYmFyYmF6cXV4cXV1eGNvcmdlZ3JhdWx0",
+    kind: "registered",
+    client_host: null,
+    redirect_host: "claude.ai",
+    loopback_only: false,
+  },
+  scope: "mcp",
+  account: "dana@example.test",
+} as const;
+
+/** The redirect an approval answers: it carries the one-time code. */
+export const APPROVED =
+  "https://claude.ai/api/mcp/auth_callback?code=c0de-never-kept&state=st4te&iss=https%3A%2F%2Fitms.example";
 
 /** Every method back to a successful answer, as the server gives it. */
 export function installDefaults(): void {
@@ -87,17 +123,40 @@ export function installDefaults(): void {
   // (Task 12, decision 1), and a test that leaves for Microsoft says so.
   calls.microsoftStart.mockRejectedValue(new ApiError(409, '{"code":"microsoft_unavailable"}'));
   calls.microsoftComplete.mockResolvedValue({ state: "signed_in" });
+  calls.oauthAuthorizeDetails.mockResolvedValue(CONSENT);
+  calls.oauthAuthorizeDecision.mockResolvedValue({ outcome: "redirect", redirect_to: APPROVED });
+  // A technician with the authenticator app: `kind: "staff"` sends the
+  // step-up dialog down the technician's path on purpose, not by `undefined`.
+  calls.getMySecurity.mockResolvedValue({
+    kind: "staff",
+    has_password: true,
+    microsoft: null,
+    has_totp: true,
+    passkeys: [],
+    recovery_codes_left: 0,
+    trusted_devices: [],
+    sessions: [],
+  });
+  calls.stepUpTotp.mockResolvedValue(undefined);
 }
 
 export function authApi(): ApiClient {
   return calls as unknown as ApiClient;
 }
 
-/** Where the router is now. Set by `LocationProbe`, which renders nothing. */
-export const where: { location: Location | null } = { location: null };
+/**
+ * Where the router is now, and a way to move it while a page stays mounted
+ * (the consent page's query, Task 4 fix round 1). Set by `LocationProbe`,
+ * which renders nothing.
+ */
+export const where: { location: Location | null; navigate: NavigateFunction | null } = {
+  location: null,
+  navigate: null,
+};
 
 function LocationProbe() {
   where.location = useLocation();
+  where.navigate = useNavigate();
   return null;
 }
 
@@ -130,6 +189,7 @@ export function renderAuth(
             <Route path="/recover" element={<RecoverPage />} />
             <Route path="/portal/sign-in" element={<PortalSignInPage />} />
             <Route path="/sign-in/microsoft" element={<MicrosoftCallbackPage />} />
+            <Route path="/oauth/authorize" element={<ConsentPage />} />
             <Route path="*" element={<p data-testid="elsewhere" />} />
           </Routes>
           <LocationProbe />

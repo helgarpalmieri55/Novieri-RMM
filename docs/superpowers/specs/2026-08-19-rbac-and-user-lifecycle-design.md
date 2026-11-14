@@ -353,6 +353,12 @@ of self-service.
 
 ### 7.2 The staleness bug this uncovered, which is not cosmetic
 
+> **Amended 2026-11-06 (autenticación propia, phase 3).** There is no claim
+> to refresh from any more: the console signs in by session since phase 1,
+> and since phase 3 the MCP door admits only the platform's own token, which
+> carries no address. The `users` row is the one source of the address, for
+> the domain rule and for every screen alike -- what this section asked for.
+
 `app/api/deps.py` writes `email` and `display_name` **only** in the
 `if user is None` branch. They are never refreshed. Change an address in
 Keycloak and ITMS shows the old one for ever.
@@ -383,6 +389,14 @@ never the body — the same rule `orgs.py` states for the org PATCH, and the
 reason an admin cannot escalate through it.
 
 ### 7.4 Falsifiers
+
+> **Amended 2026-11-06 (autenticación propia, phase 3).** 13 and 14 now read
+> against the row, since no sign-in carries an address or a name to refresh
+> from: 13 is "the address the MCP door decides on is not the one the row
+> holds, or an MCP call writes an identity change", and 14 is "an MCP call
+> changes a `display_name` set in ITMS". `backend/tests/test_me_profile.py`
+> holds both, the decision's side of 13 included
+> (`test_the_door_decides_on_the_address_the_row_holds`).
 
 11. **`PATCH /api/v1/me` alters another user** when handed an id in the body.
 12. **The profile route writes `email`, `status`, or anything role-shaped** —

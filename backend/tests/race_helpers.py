@@ -12,16 +12,48 @@ backends -- the API's, in these tests.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from types import ModuleType
+from typing import Any
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-__all__ = ["backend_pid", "normalised", "until_blocked_by"]
+__all__ = ["NO_WAITING", "backend_pid", "normalised", "pause_at", "until_blocked_by"]
+
+#: A statement that would wait on a row lock fails at once instead: executed
+#: in a transaction the test holds, it turns a wait the test says must not
+#: happen into an error, not a hang.
+NO_WAITING = "SET LOCAL lock_timeout = '500ms'"
 
 
 async def backend_pid(session: AsyncSession) -> int:
     """The server process id of the connection `session` is using."""
     return int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
+
+
+def pause_at(
+    monkeypatch: pytest.MonkeyPatch, module: ModuleType, name: str
+) -> tuple[asyncio.Event, asyncio.Event, dict[str, int]]:
+    """Hold a transaction at its first call to `<module>.<name>` -- an async
+    function whose first argument is the transaction's session -- inside it,
+    before the call runs: `(paused, go, {"pid": its backend})`. The test
+    waits for `paused`, does what it races, and sets `go`; later calls pass
+    straight through."""
+    paused, go = asyncio.Event(), asyncio.Event()
+    seen: dict[str, int] = {}
+    real: Callable[..., Awaitable[Any]] = getattr(module, name)
+
+    async def held(session: AsyncSession, *args: Any, **kwargs: Any) -> Any:
+        if "pid" not in seen:
+            seen["pid"] = await backend_pid(session)
+            paused.set()
+            await go.wait()
+        return await real(session, *args, **kwargs)
+
+    monkeypatch.setattr(module, name, held)
+    return paused, go, seen
 
 
 async def until_blocked_by(

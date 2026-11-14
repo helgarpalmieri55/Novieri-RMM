@@ -73,15 +73,6 @@ RAW_SESSIONS_BY_DESIGN: dict[str, str] = {
         "admin_engine, READ-ONLY, one query: the ids of one version's catalogue "
         "rows, which carry no org_id. The removal itself is `_unpublish`."
     ),
-    "api/deps.py::admit": (
-        "admin_engine, and it is the ONE pre-tenant step in the request path "
-        "(`auth_context` and the portal principal both admit through it): "
-        "on the MCP channel -- the only one that still carries a token -- the "
-        "org is looked up BY SLUG from the validated token, so there is no "
-        "org_id to pin a tenant session with yet. Read-only, one column, and "
-        "the very next statement opens `org_session(org_id)` for everything "
-        "else the dependency does."
-    ),
     "api/v1/errors.py::list_error_groups": (
         "app_engine WITHOUT a tenant GUC, deliberately: `platform_error_group` "
         "is platform-scoped by design (error-monitoring spec §4.1) and pinning "
@@ -163,12 +154,16 @@ def test_no_route_opens_a_raw_session_without_a_recorded_reason() -> None:
 def test_only_the_errors_routes_reach_for_the_app_engine_without_a_tenant() -> None:
     """The two classes of exception are not equally serious and the test says so.
 
-    `admin_engine` is BYPASSRLS but the two sites that use it read ONE column
-    of `organizations` before any tenant exists. `app_engine` with no GUC is the
-    F1 shape: the session is exactly the one every request uses, minus the
-    setting that makes RLS mean anything. Today that shape lives in two
-    functions, both in the error monitor, both gated on a permission no tenant
-    administrator holds. A third would be a finding, not a style question."""
+    `admin_engine` is BYPASSRLS, but its two sites are the agent release
+    catalogue's (`agent_distribution`'s `_unpublish` and
+    `delete_version_route`): `agent_releases` has no org_id, both routes need
+    `agent.release.manage` on every client, and their reasons are recorded in
+    `RAW_SESSIONS_BY_DESIGN`, which the test above holds exactly. `app_engine`
+    with no GUC is the F1 shape: the session is exactly the one every request
+    uses, minus the setting that makes RLS mean anything. Today that shape
+    lives in two functions, both in the error monitor, both gated on a
+    permission no tenant administrator holds, and this test pins them by name.
+    A third would be a finding, not a style question."""
     app_engine_sites = sorted(
         key for key, engine in _raw_session_sites().items() if "app_engine" in engine
     )

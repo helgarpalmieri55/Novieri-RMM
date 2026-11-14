@@ -11,6 +11,7 @@ import { formatDateTime } from "../../../lib/datetime";
 import { permissionReason } from "../settingsState";
 import {
   MCP_APP_FIXTURE,
+  MCP_APP_ID,
   MCP_CONNECTIONS_FIXTURE,
   ME_FIXTURE,
   ORG_FIXTURE,
@@ -56,7 +57,7 @@ describe("Settings — AI connections tab", () => {
     });
 
     // The table: app, people, last used, actions.
-    const row = (await screen.findByText("claude")).closest("tr");
+    const row = (await screen.findByText("claude.ai")).closest("tr");
     expect(row).not.toBeNull();
     const cells = within(row as HTMLElement);
     expect(cells.getByText("3")).toBeInTheDocument();
@@ -65,7 +66,7 @@ describe("Settings — AI connections tab", () => {
 
     await user.click(cells.getByRole("button", { name: /Revoke for everyone: claude/ }));
     const dialog = await screen.findByRole("dialog", { name: "Revoke this AI app for everyone" });
-    expect(within(dialog).getByText("claude")).toBeInTheDocument();
+    expect(within(dialog).getByText("claude.ai")).toBeInTheDocument();
     // What it does, and only that: revoking is not a block-list.
     expect(
       within(dialog).getByText(
@@ -75,8 +76,8 @@ describe("Settings — AI connections tab", () => {
     // Nothing is sent until the dialog is confirmed.
     expect(calls.revokeMcpConnection).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Revoke for everyone" }));
-    await waitFor(() => expect(calls.revokeMcpConnection).toHaveBeenCalledWith("claude", "everyone"));
-    expect(await screen.findByText("claude is revoked for everyone in this organization.")).toBeInTheDocument();
+    await waitFor(() => expect(calls.revokeMcpConnection).toHaveBeenCalledWith(MCP_APP_ID, "everyone"));
+    expect(await screen.findByText("claude.ai is revoked for everyone in this organization.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -90,13 +91,13 @@ describe("Settings — AI connections tab", () => {
     expect(toggle).toBeDisabled();
     expect(screen.getByText(permissionReason("orgs.manage"))).toBeInTheDocument();
 
-    const row = (await screen.findByText("claude")).closest("tr") as HTMLElement;
+    const row = (await screen.findByText("claude.ai")).closest("tr") as HTMLElement;
     expect(within(row).queryByRole("button", { name: /for everyone/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /for everyone/ })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: /Revoke for me: claude/ }));
-    await waitFor(() => expect(calls.revokeMcpConnection).toHaveBeenCalledWith("claude", "me"));
-    expect(await screen.findByText("claude is revoked for you.")).toBeInTheDocument();
+    await waitFor(() => expect(calls.revokeMcpConnection).toHaveBeenCalledWith(MCP_APP_ID, "me"));
+    expect(await screen.findByText("claude.ai is revoked for you.")).toBeInTheDocument();
     expect(calls.updateCurrentOrg).not.toHaveBeenCalled();
   });
 
@@ -124,36 +125,74 @@ describe("Settings — AI connections tab", () => {
     expect(screen.queryByRole("button", { name: /Revoke/ })).toBeNull();
   });
 
-  it("warns when sign-in for some people could not be withdrawn, and says the app may reconnect", async () => {
-    calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 2 });
-    const user = userEvent.setup();
-    openTab();
-
-    await user.click(await screen.findByRole("button", { name: /Revoke for everyone: claude/ }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Revoke for everyone" }));
-    const warning = await screen.findByText(/may still reconnect without asking/);
-    expect(warning.textContent).toContain("For 2 people");
-    expect(warning.textContent).toContain("Try revoking again");
-    expect(screen.queryByText("claude is revoked for everyone in this organization.")).toBeNull();
+  it("never announces a partial revoke: the app is revoked, however many sign-ins it held", async () => {
+    for (const grants of [0, 2]) {
+      calls.revokeMcpConnection.mockResolvedValue({ revoked: true, grants_revoked: grants });
+      const user = userEvent.setup();
+      const { unmount } = openTab();
+      await user.click(await screen.findByRole("button", { name: /Revoke for everyone: claude/ }));
+      await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Revoke for everyone" }));
+      expect(await screen.findByText("claude.ai is revoked for everyone in this organization.")).toBeInTheDocument();
+      expect(screen.queryByText(/reconnect without asking/)).toBeNull();
+      unmount();
+    }
   });
 
-  it("words a one-person failure in the singular", async () => {
-    calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 1 });
+  it("names an app by its host, with the name it gave itself as its own claim", async () => {
+    // B3-10: anyone can register any name; the host is what the app cannot fake.
+    calls.getMcpConnections.mockResolvedValue({
+      ...MCP_CONNECTIONS_FIXTURE,
+      apps: [{ ...MCP_APP_FIXTURE, name: "Claude", client_id: "itms_Zm9vYmFy" }],
+    });
     const user = userEvent.setup();
     openTab();
-    await user.click(await screen.findByRole("button", { name: /Revoke for everyone: claude/ }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Revoke for everyone" }));
-    expect((await screen.findByText(/may still reconnect without asking/)).textContent).toContain("For 1 person,");
+    const row = (await screen.findByText("claude.ai")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("It calls itself “Claude”.")).toBeInTheDocument();
+    expect(within(row).getByText("It registered itself here: any app can, under any name.")).toBeInTheDocument();
+    expect(within(row).getByText("itms_Zm9vYmFy")).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Revoke for me: claude.ai" }));
+    await waitFor(() => expect(calls.revokeMcpConnection).toHaveBeenCalledWith(MCP_APP_ID, "me"));
+    expect(await screen.findByText("claude.ai is revoked for you.")).toBeInTheDocument();
   });
 
-  it("words a failed revoke for me as being about you, not a count of people", async () => {
-    calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 1 });
-    const user = userEvent.setup();
+  it("names a metadata-document app by its document's host, with no self-registered mark", async () => {
+    calls.getMcpConnections.mockResolvedValue({
+      ...MCP_CONNECTIONS_FIXTURE,
+      apps: [
+        {
+          ...MCP_APP_FIXTURE,
+          client_id: "https://claude.example/oauth/client.json",
+          name: "Claude Code",
+          host: "claude.example",
+          kind: "metadata_document",
+        },
+      ],
+    });
     openTab();
-    await user.click(await screen.findByRole("button", { name: /Revoke for me: claude/ }));
-    const warning = await screen.findByText(/may still reconnect for you without asking/);
-    expect(warning.textContent).toContain("claude is revoked for you");
-    expect(warning.textContent).not.toMatch(/person|people/);
+    const row = (await screen.findByText("claude.example")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("It calls itself “Claude Code”.")).toBeInTheDocument();
+    expect(within(row).queryByText(/registered itself/)).toBeNull();
+  });
+
+  it("shows an app approved a moment ago, which has called nothing yet", async () => {
+    calls.getMcpConnections.mockResolvedValue({
+      ...MCP_CONNECTIONS_FIXTURE,
+      apps: [{ ...MCP_APP_FIXTURE, people: 0, last_used_at: null }],
+    });
+    openTab();
+    const row = (await screen.findByText("claude.ai")).closest("tr") as HTMLElement;
+    expect(within(row).getByRole("button", { name: /Revoke for me: claude\.ai/ })).toBeInTheDocument();
+  });
+
+  it("offers no revoke for an app that no longer has a registration here", async () => {
+    calls.getMcpConnections.mockResolvedValue({
+      ...MCP_CONNECTIONS_FIXTURE,
+      apps: [{ ...MCP_APP_FIXTURE, id: null, host: null, kind: null }],
+    });
+    openTab();
+    const row = (await screen.findByText("claude")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("No longer registered here, so it holds no access.")).toBeInTheDocument();
+    expect(within(row).queryByRole("button")).toBeNull();
   });
 
   it("says so when a revoke fails, and claims nothing", async () => {
@@ -165,7 +204,7 @@ describe("Settings — AI connections tab", () => {
     await user.click(await screen.findByRole("button", { name: /Revoke for me: claude/ }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("The revocation store is unavailable.");
-    expect(screen.queryByText("claude is revoked for you.")).toBeNull();
+    expect(screen.queryByText("claude.ai is revoked for you.")).toBeNull();
   });
 
   it("says so when saving the switch fails", async () => {
@@ -272,11 +311,11 @@ describe("Settings — AI connections tab", () => {
     expect(await screen.findByText(/ITS_PUBLIC_CONSOLE_URL is not set/)).toBeInTheDocument();
   });
 
-  it("says so when no AI app has been used here", async () => {
+  it("says so when no AI app has been used here or holds access", async () => {
     calls.getMcpConnections.mockResolvedValue({ ...MCP_CONNECTIONS_FIXTURE, apps: [] });
     openTab();
     expect(
-      await screen.findByText("No AI app has been used in this organization in the last 90 days."),
+      await screen.findByText("No AI app has been used in this organization in the last 90 days, and none holds access."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
   });

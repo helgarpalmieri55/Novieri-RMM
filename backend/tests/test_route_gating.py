@@ -219,6 +219,17 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         # The caller's own Microsoft link (My security, D26), after a recent
         # confirmation, in the scope `_account_ctx` established.
         ("DELETE", "/api/v1/me/microsoft"),
+        # THE CONSENT SCREEN (P2 phase 3, plan 2026-11-06 Task 8): the caller's
+        # own console session (`oauth_consent.py::_console_ctx`); the
+        # deployment's organization, `mcp.use` and the org switch are checked
+        # in the service (`consent._refusal`, plan D11), so a person without
+        # them is told so and offered the way back to the AI app with
+        # `access_denied` instead of a 403 that could not be.
+        ("POST", "/api/v1/oauth/authorize/details"),
+        # The same, and the only one that mints anything: a 60-second code for
+        # what the person just approved, with their second factor confirmed in
+        # the last ten minutes (operator decision C1). Never exposed over MCP.
+        ("POST", "/api/v1/oauth/authorize/decision"),
     }
 )
 

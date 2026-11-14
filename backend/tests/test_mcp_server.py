@@ -4,10 +4,12 @@ The only door an external AI app has. What is pinned here:
 
 - with `ITS_PUBLIC_CONSOLE_URL` unset there is no MCP resource, and both `/mcp`
   and its protected-resource metadata say so with a 503;
-- the metadata (RFC 9728) names the resource and the realm, at both paths;
+- the metadata (RFC 9728) names the resource and the platform as its
+  authorization server, at both paths;
 - a request with no token, or a token that is refused, gets 401 carrying
   `WWW-Authenticate: Bearer resource_metadata=...` -- the one thing an OAuth
-  client needs to start the flow, and nothing else;
+  client needs to start the flow, and nothing else; a token is refused when
+  the platform did not issue it, for the MCP resource;
 - a valid MCP token is then held to the org switch (403), `mcp.use` (403) and
   `mcp_revocation` (401, so the client signs in again), in that order, and the
   refusals are in the request's language;
@@ -18,22 +20,31 @@ The only door an external AI app has. What is pinned here:
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import anyio
 import pytest
 from mcp.types import LATEST_PROTOCOL_VERSION
 from mcp_types import CLIENT_CAPABILITIES_META_KEY, PROTOCOL_VERSION_META_KEY
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditEvent, Organization, User
 from app.models.mcp import McpRevocation
-from tests.mcp_support import MCP_AUD, MCP_BASE, mcp_client, mcp_token, running_mcp
+from tests.mcp_support import (
+    MCP_AUD,
+    MCP_BASE,
+    mcp_claims,
+    mcp_client,
+    mcp_token,
+    running_mcp,
+    signed_mcp_token,
+)
 
 METADATA_URL = "https://itms.example.com/.well-known/oauth-protected-resource/mcp"
 CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}"'
 REFUSED_CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}", error="invalid_token"'
+REFUSED_EN = "this access token was refused"
 
 UNSET_EN = "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not set."
 SWITCH_OFF_EN = (
@@ -110,10 +121,19 @@ async def _revoke(
         await session.commit()
 
 
-def _token_issued_at(env: Any, slug: str, sub: str, iat: int, azp: str = "claude") -> str:
-    return env.idp.token(
-        sub, slug, aud=MCP_AUD, azp=azp, email=f"{sub}@test.local", extra={"iat": iat}
-    )
+async def _token_issued_at(
+    env: Any, slug: str, sub: str, iat: int, azp: str = "claude"
+) -> str:
+    return await mcp_token(env, slug, sub, azp, iat=iat)
+
+
+async def _org_users(env: Any, org_id: UUID) -> int:
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(
+                select(func.count()).select_from(User).where(User.org_id == org_id)
+            )
+        ).scalar_one()
 
 
 # --------------------------------------------------------------------------- #
@@ -147,11 +167,11 @@ async def test_the_protected_resource_metadata_is_served_at_both_paths(mcp_env) 
         assert resp.status_code == 200, path
         assert resp.json() == {
             "resource": "https://itms.example.com/mcp",
-            "authorization_servers": ["https://idp.test/realms/it-suite"],
+            "authorization_servers": ["https://itms.example.com"],
             "scopes_supported": ["mcp"],
             "bearer_methods_supported": ["header"],
         }
-        assert resp.json()["authorization_servers"] == [mcp_env.settings.oidc_issuer]
+        assert resp.json()["authorization_servers"] == ["https://itms.example.com"]
 
 
 async def test_a_trailing_slash_on_the_console_url_does_not_double_up(mcp_env) -> None:
@@ -189,18 +209,28 @@ async def test_a_non_bearer_authorization_is_treated_as_no_token(mcp_env) -> Non
     assert resp.headers["www-authenticate"] == CHALLENGE
 
 
-async def test_a_console_token_is_401(mcp_env) -> None:
-    """The token the console's own client obtained. Minted here: since own
-    authentication Task 13 `mcp_env.headers` is a session cookie, which
-    `test_the_session_cookie_is_401` holds."""
+async def test_a_keycloak_token_is_401_whatever_its_audience(mcp_env) -> None:
+    """The console client's token, and one Keycloak issued for the MCP
+    resource itself: since own authentication phase 3 only the platform's own
+    OAuth server issues MCP tokens (design §5.3: "otro token se rechaza")."""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
-    console = {"Authorization": f"Bearer {token}"}
-    async with mcp_client(mcp_env) as client:
-        resp = await client.post("/mcp", json=INITIALIZE, headers={**MCP_HEADERS, **console})
-    assert resp.status_code == 401
-    assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+    for token in (
+        mcp_env.idp.token(sub, slug, email=f"{sub}@test.local", extra={"client_id": "claude"}),
+        mcp_env.idp.token(
+            sub,
+            slug,
+            aud=MCP_AUD,
+            azp="claude",
+            email=f"{sub}@test.local",
+            extra={"client_id": "claude"},
+        ),
+    ):
+        async with mcp_client(mcp_env) as client:
+            resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
+        assert resp.status_code == 401
+        assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+        assert resp.json()["detail"] == REFUSED_EN
 
 
 async def test_the_session_cookie_is_401(mcp_env) -> None:
@@ -222,44 +252,54 @@ async def test_the_session_cookie_is_401(mcp_env) -> None:
 async def test_a_token_with_both_audiences_is_401(mcp_env) -> None:
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_env.idp.token(
-        sub,
-        slug,
-        aud=MCP_AUD,
-        azp="claude",
-        email=f"{sub}@test.local",
-        extra={"aud": [MCP_AUD, "it-suite"]},
-    )
-    async with mcp_client(mcp_env) as client:
-        resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
+    genuine = mcp_claims(await mcp_token(mcp_env, slug, sub))
+    claims = {**genuine, "aud": [MCP_AUD, MCP_BASE]}
+    async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
+        resp = await client.post(
+            "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
+        )
+        control = await client.post(
+            "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(genuine))
+        )
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+    assert resp.json()["detail"] == REFUSED_EN
+    assert control.status_code == 200, control.text
 
 
 async def test_a_token_that_names_no_app_is_401(mcp_env) -> None:
-    """Revocation is keyed on `azp`. A token that names no app could not be
+    """Revocation is keyed on the app. A token that names none could not be
     revoked before it expired, so it is not admitted at all."""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_env.idp.token(sub, slug, aud=MCP_AUD, azp=None, email=f"{sub}@test.local")
+    claims = mcp_claims(await mcp_token(mcp_env, slug, sub))
+    del claims["client_id"]
     async with mcp_client(mcp_env) as client:
-        resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
+        resp = await client.post(
+            "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
+        )
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+    assert resp.json()["detail"] == "this token does not name the AI app it was issued to"
 
 
-async def test_a_token_without_an_org_claim_is_401_in_multi_tenant_mode(mcp_env) -> None:
+async def test_a_token_without_an_org_claim_is_401(mcp_env) -> None:
+    """The organization is the token's `org`, which the platform signed. Without
+    it the token does not verify, whatever `ITS_DEFAULT_ORG_SLUG` and the
+    multi-tenant switch say."""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    # A default org would admit a claimless token in single-tenant mode; it is
-    # multi-tenant mode, and nothing else, that refuses it here.
     mcp_env.settings.default_org_slug = slug
-    mcp_env.settings.multi_tenant = True
-    token = mcp_env.idp.token(sub, None, aud=MCP_AUD, azp="claude", email=f"{sub}@test.local")
-    async with mcp_client(mcp_env) as client:
-        resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
-    assert resp.status_code == 401
-    assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+    claims = mcp_claims(await mcp_token(mcp_env, slug, sub))
+    del claims["org"]
+    for multi_tenant in (False, True):
+        mcp_env.settings.multi_tenant = multi_tenant
+        async with mcp_client(mcp_env) as client:
+            resp = await client.post(
+                "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
+            )
+        assert resp.status_code == 401
+        assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
 
 
 # --------------------------------------------------------------------------- #
@@ -272,7 +312,7 @@ async def test_the_org_switch_off_is_403(mcp_env) -> None:
     sub = await mcp_env.create_user(org_id, "org-admin")
     async with mcp_client(mcp_env) as client:
         resp = await client.post(
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, slug, sub))
+            "/mcp", json=INITIALIZE, headers=_bearer(await mcp_token(mcp_env, slug, sub))
         )
     assert resp.status_code == 403
     assert resp.json()["detail"] == SWITCH_OFF_EN
@@ -281,7 +321,7 @@ async def test_the_org_switch_off_is_403(mcp_env) -> None:
 async def test_turning_the_switch_off_stops_the_next_request(mcp_env) -> None:
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         first = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
         assert first.status_code == 200, first.text
@@ -295,7 +335,7 @@ async def test_without_mcp_use_is_403(mcp_env) -> None:
     sub = await mcp_env.create_user(org_id, "technician")
     async with mcp_client(mcp_env) as client:
         resp = await client.post(
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, slug, sub))
+            "/mcp", json=INITIALIZE, headers=_bearer(await mcp_token(mcp_env, slug, sub))
         )
     assert resp.status_code == 403
     assert resp.json()["detail"] == "requires mcp.use"
@@ -307,13 +347,11 @@ async def test_the_403s_are_in_the_requests_language(mcp_env) -> None:
     on_id, on_slug = await _org(mcp_env, mcp_enabled=True)
     tech = await mcp_env.create_user(on_id, "technician")
     es = {"Accept-Language": "es"}
+    off_token = await mcp_token(mcp_env, off_slug, off_sub)
+    tech_token = await mcp_token(mcp_env, on_slug, tech)
     async with mcp_client(mcp_env) as client:
-        off = await client.post(
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, off_slug, off_sub), **es)
-        )
-        denied = await client.post(
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, on_slug, tech), **es)
-        )
+        off = await client.post("/mcp", json=INITIALIZE, headers=_bearer(off_token, **es))
+        denied = await client.post("/mcp", json=INITIALIZE, headers=_bearer(tech_token, **es))
     assert off.status_code == 403
     assert off.json()["detail"] == SWITCH_OFF_ES
     assert denied.status_code == 403
@@ -334,9 +372,9 @@ async def test_an_org_wide_revocation_refuses_earlier_tokens_and_admits_later_on
     await _revoke(
         mcp_env, org_id, client_id="claude", at=datetime.fromtimestamp(now - 30, UTC)
     )
-    before = _token_issued_at(mcp_env, slug, sub, now - 60)
-    after = _token_issued_at(mcp_env, slug, sub, now)
-    other_app = _token_issued_at(mcp_env, slug, sub, now - 60, azp="another-app")
+    before = await _token_issued_at(mcp_env, slug, sub, now - 60)
+    after = await _token_issued_at(mcp_env, slug, sub, now)
+    other_app = await _token_issued_at(mcp_env, slug, sub, now - 60, azp="another-app")
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         refused = await client.post("/mcp", json=INITIALIZE, headers=_bearer(before))
         refused_es = await client.post(
@@ -370,12 +408,12 @@ async def test_a_per_user_revocation_affects_only_that_user(mcp_env) -> None:
         mine = await client.post(
             "/mcp",
             json=INITIALIZE,
-            headers=_bearer(_token_issued_at(mcp_env, slug, revoked, now - 60)),
+            headers=_bearer(await _token_issued_at(mcp_env, slug, revoked, now - 60)),
         )
         theirs = await client.post(
             "/mcp",
             json=INITIALIZE,
-            headers=_bearer(_token_issued_at(mcp_env, slug, colleague, now - 60)),
+            headers=_bearer(await _token_issued_at(mcp_env, slug, colleague, now - 60)),
         )
     assert mine.status_code == 401
     assert mine.json()["detail"] == REVOKED_EN
@@ -383,7 +421,7 @@ async def test_a_per_user_revocation_affects_only_that_user(mcp_env) -> None:
 
 
 async def test_one_organizations_revocation_never_reaches_another(mcp_env) -> None:
-    """Registered apps are realm-wide, so the same `azp` is in use in every
+    """A metadata-document client has the same `client_id` in every
     organization. Org A revoking "claude" says nothing about org B's users."""
     a_id, a_slug = await _org(mcp_env, mcp_enabled=True)
     b_id, b_slug = await _org(mcp_env, mcp_enabled=True)
@@ -396,12 +434,12 @@ async def test_one_organizations_revocation_never_reaches_another(mcp_env) -> No
         in_a = await client.post(
             "/mcp",
             json=INITIALIZE,
-            headers=_bearer(_token_issued_at(mcp_env, a_slug, a_user, now - 60)),
+            headers=_bearer(await _token_issued_at(mcp_env, a_slug, a_user, now - 60)),
         )
         in_b = await client.post(
             "/mcp",
             json=INITIALIZE,
-            headers=_bearer(_token_issued_at(mcp_env, b_slug, b_user, now - 60)),
+            headers=_bearer(await _token_issued_at(mcp_env, b_slug, b_user, now - 60)),
         )
     # Non-vacuity: the row does refuse in the org that wrote it.
     assert in_a.status_code == 401
@@ -413,29 +451,40 @@ async def test_one_organizations_revocation_never_reaches_another(mcp_env) -> No
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_first_seen_sign_in_over_mcp_is_audited_as_via_mcp(mcp_env) -> None:
+async def test_a_token_for_nobody_provisions_nobody(mcp_env) -> None:
+    """The MCP door provisioned a first-seen person until own authentication
+    phase 3 (and audited it as `via: "mcp"`). It provisions nobody now: a token
+    for a person with no row is a 401, and nothing is written."""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
-    sub = "sub-first-seen-over-mcp"
+    sub = await mcp_env.create_user(org_id, "org-admin")
+    claims = mcp_claims(await mcp_token(mcp_env, slug, sub))
+    nobody = uuid4()
+    claims["sub"] = str(nobody)
+    before = await _org_users(mcp_env, org_id)
     async with mcp_client(mcp_env) as client:
-        # No role yet, so the gate refuses -- after admission has provisioned
-        # the person, which is the event under test.
         resp = await client.post(
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, slug, sub))
+            "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
         )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == REFUSED_EN
+    assert await _org_users(mcp_env, org_id) == before  # A3-51: nobody, under any id
     async with AsyncSession(mcp_env.admin_engine) as session:
-        events = list(
+        provisioned = (
+            await session.execute(select(User.id).where(User.id == nobody))
+        ).scalar_one_or_none()
+        logins = (
             (
                 await session.execute(
                     select(AuditEvent).where(
                         AuditEvent.org_id == org_id, AuditEvent.action == "auth.login"
                     )
                 )
-            ).scalars()
+            )
+            .scalars()
+            .all()
         )
-    assert len(events) == 1
-    assert events[0].meta["via"] == "mcp"
-    assert events[0].meta["mcp_app"] == "claude"
+    assert provisioned is None
+    assert logins == []
 
 
 # --------------------------------------------------------------------------- #
@@ -446,7 +495,7 @@ async def test_a_first_seen_sign_in_over_mcp_is_audited_as_via_mcp(mcp_env) -> N
 async def test_an_admitted_request_reaches_the_sdk_at_both_paths(mcp_env) -> None:
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         for path in ("/mcp", "/mcp/"):
             resp = await client.post(path, json=INITIALIZE, headers=_bearer(token))
@@ -470,7 +519,7 @@ async def test_the_tool_handlers_read_the_principal_from_the_scope(
     monkeypatch.setattr(server, "principal_from", spy)
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         resp = await client.post(
             "/mcp?areas=devices,,patch",
@@ -522,7 +571,7 @@ async def test_the_tool_handlers_read_the_principal_on_the_2026_wire_too(
             "/mcp",
             json=body,
             headers=_bearer(
-                mcp_token(mcp_env, slug, sub),
+                await mcp_token(mcp_env, slug, sub),
                 **{"MCP-Protocol-Version": LATEST_PROTOCOL_VERSION, "Mcp-Method": "tools/list"},
             ),
         )
@@ -536,7 +585,7 @@ async def test_only_post_reaches_the_sdk(mcp_env) -> None:
     never carries anything and never closes. Refused, with `Allow: POST`."""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         with anyio.fail_after(10):
             got = await client.get("/mcp", headers=_bearer(token))
@@ -560,7 +609,7 @@ async def test_another_host_is_421_before_anything_else(mcp_env) -> None:
     sub = await mcp_env.create_user(org_id, "org-admin")
     async with running_mcp(mcp_env):
         resp = await mcp_env.client.post(  # Host: api.test
-            "/mcp", json=INITIALIZE, headers=_bearer(mcp_token(mcp_env, slug, sub))
+            "/mcp", json=INITIALIZE, headers=_bearer(await mcp_token(mcp_env, slug, sub))
         )
     assert resp.status_code == 421
 
@@ -568,7 +617,7 @@ async def test_another_host_is_421_before_anything_else(mcp_env) -> None:
 async def test_a_foreign_origin_is_403_and_the_consoles_own_is_admitted(mcp_env) -> None:
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         foreign = await client.post(
             "/mcp", json=INITIALIZE, headers=_bearer(token, Origin="https://evil.example")

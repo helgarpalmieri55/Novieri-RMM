@@ -438,7 +438,43 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 109, own authentication phase 2 Task 5: one static WARNING in
+    NOW 109, own authentication phase 3 (plan 2026-11-06, Task 13, review
+    fix round 1, merged after Task 10): one static ERROR in `app/core/auth/retention.py::sweep_org`,
+    "auth retention: idle AI apps were purged but the sweep failed, and their
+    audit row could not be written". Idle AI apps go in transactions of their
+    own before the sweep's; when that one fails, a row of their own records
+    them, and when even that row cannot be written this line is the only
+    trace that apps went unaudited. `extra` = the org id, how many apps, and
+    the error's type; never the error's text, which can quote SQL.
+
+    BEFORE THAT, 108, own authentication phase 3 (plan 2026-11-06, Task 10): three
+    sites fewer, all in `app/mcp/api.py` -- the two WARNINGs of
+    `remove_consents` and the one of `_record_incomplete`. Revoking an AI app
+    no longer calls the identity provider: its grants end in the same
+    transaction as the revocation row and its audit event, so there is no
+    best-effort half left to report.
+
+    BEFORE THAT, 111, own authentication phase 3 (plan 2026-11-06, Task 7): one static
+    WARNING in `app/core/auth/oauth/grants.py::_exchange`, "authorization code
+    refused and spent", when a live code arrives with another app, another
+    redirect or a wrong PKCE verifier: the code is used up (RFC 6749 §10.5,
+    plan B3-21), and a legitimate client never sends any of the three wrong,
+    so the line is the trace of a stolen or forged one. No throttle: each line
+    costs a code, and each code a signed-in person's approval. `extra` = the
+    reason ("client", "redirect" or "verifier") and the presenting app's
+    client_id; never the code or the verifier.
+
+    BEFORE THAT, 110, own authentication phase 3 (plan 2026-11-06, Task 3): one static
+    WARNING in `app/core/auth/oauth/cimd.py::fetch_document`, "client metadata
+    document refused", when an AI app's client metadata document cannot be its
+    client (unreachable, not JSON, a mismatched client_id, a secret...). Without
+    it a connection that fails on the document is invisible to the operator.
+    At most one a minute per process, saying how many were held (the C-M8
+    throttle, `loopback.RefusalThrottle`): any signed-in person can cause one.
+    `extra` = the reason code, the document's host and `unlogged`; never the
+    URL's path, never the body, which a stranger wrote.
+
+    BEFORE THAT, 109, own authentication phase 2 Task 5: one static WARNING in
     `app/core/auth/entra.py::exchange`, "microsoft sign-in: the token endpoint
     refused the code". `extra` = Microsoft's machine error code, or
     `transport` / `http_<status>` / `no_id_token`; never the body, whose

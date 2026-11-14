@@ -34,16 +34,25 @@ class Settings(BaseSettings):
     oidc_jwks_url: str
     oidc_org_claim: str = "org"
     # The OIDC client the console's SPA signed in with at Keycloak until own
-    # authentication phase 1: `/mcp` refuses a token whose `azp` is this client
-    # (`app.core.security.require_person_mcp_token`), so a grant consented to
-    # for the console is never an MCP one. No non-MCP door reads a bearer at
-    # all since phase 1's Task 13 -- the console signs in with the platform's
-    # own session. Optional: nothing under deploy/ overrides the default, so
-    # no `.env` change is needed.
+    # authentication phase 1. Read only by
+    # `app.core.security.require_person_mcp_token`, which refused at `/mcp` a
+    # Keycloak token whose `azp` is this client, so a grant consented to for
+    # the console was never an MCP one. UNUSED SINCE PHASE 3: `/mcp` accepts
+    # only the platform's own access tokens, and nothing in `backend/app`
+    # calls `require_person_mcp_token`, `security.validate_token` or
+    # `deps.jwks`; this setting, `multi_tenant` below and those functions go
+    # with Keycloak in phase 4. No non-MCP door reads a bearer at all since
+    # phase 1's Task 13 -- the console signs in with the platform's own
+    # session. Optional: nothing under deploy/ overrides the default, so no
+    # `.env` change is needed.
     oidc_console_client_id: str = "it-suite-web"
-    default_org_slug: str | None = None  # single-org on-prem fallback when the claim is absent
-    # When true (multi-tenant deployments), a token missing the org claim is
-    # rejected rather than falling back to default_org_slug.
+    # The organization this deployment signs people in to (`flows.login`, the
+    # OAuth server's `store.deployment_org`); until phase 3 also the fallback
+    # `security.validate_token` gave a Keycloak token with no org claim.
+    default_org_slug: str | None = None
+    # When true (multi-tenant deployments), `security.validate_token` rejects a
+    # Keycloak token missing the org claim rather than falling back to
+    # default_org_slug. Unused since phase 3, with that function (above).
     multi_tenant: bool = False
 
     signing_backend: Literal["local", "openbao"] = "local"
@@ -150,6 +159,14 @@ class Settings(BaseSettings):
     # it. A setting, never derived from the request's Host header (host-header
     # injection).
     public_console_url: str | None = None
+    # The operator's opt-in to AI apps registering themselves anonymously
+    # (deploy/README.md "AI connections (MCP)"): only the exact word `open`
+    # opens RFC 7591 registration, and only while MCP is on. A client metadata
+    # document needs no opt-in (operator decision C2, 2026-11-06). Read since
+    # own authentication phase 3 by the platform's own authorization server
+    # (`app/core/auth/oauth/policy.py::registration_open`); keycloak-init reads
+    # the same `.env` line until phase 4 retires it.
+    mcp_registration: str = ""
     # The PUBLIC half of the offline release-signing key, base64 Ed25519: the
     # `release-signing-key.pub` asset of an agent release (release-agent.yml).
     # Not a secret. The Group Policy MSI verifies the agent it wraps against it

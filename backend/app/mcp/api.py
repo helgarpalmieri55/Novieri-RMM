@@ -1,19 +1,24 @@
 """The console's side of the MCP server: Settings → AI connections
-(MCP server design §3.4, §7, §8).
+(MCP server design §3.4, §7, §8; own authentication phase 3, plan 2026-11-06
+Task 10).
 
-    GET  /api/v1/mcp/connections                      `mcp.use`
-    POST /api/v1/mcp/connections/{client_id}/revoke   `mcp.use`; "everyone"
-                                                      also needs `orgs.manage`
+    GET  /api/v1/mcp/connections                   `mcp.use`
+    POST /api/v1/mcp/connections/{app_id}/revoke   `mcp.use`; "everyone"
+                                                   also needs `orgs.manage`
 
 Neither route is a tool (`app/mcp/exclusions.py::NOT_FOR_MCP`): the person
 manages their AI connections in the console, not through one of them.
 
-THE LIST IS DERIVED, NOT REGISTERED. An app "has access in this organization"
-when it has acted here: the apps are the `app` (the token's `azp`) of this
-org's `mcp.tool_called` audit events, read under `org_session`, so RLS keeps
-another tenant's use out as well as the `WHERE` clause does. Registered apps are
-realm-wide in Keycloak, shared by every organization, so the realm's client
-list would show one tenant another's apps.
+THE LIST IS DERIVED FROM USE, AND FROM GRANTS (plan B3-28). An app is listed
+when it has acted here -- the `app` (the token's `client_id`) of this org's
+`mcp.tool_called` audit events, read under `org_session`, so RLS keeps another
+tenant's use out as well as the `WHERE` clause does -- or when it holds a live
+grant here and has not acted yet: the person's own, and everyone's for an
+`orgs.manage` holder. An app approved a moment ago has called no tool, and must
+be revocable (1c(d)). Each one carries the `id` and `name` of its registration
+here (`oauth_clients`, G) when it has one; revoking names that `id`, because a
+metadata-document client's `client_id` is a URL, which is no path segment
+(plan D12).
 
 THE READ IS BOUNDED TO THE LAST 90 DAYS (`USAGE_WINDOW`) and to `MAX_APPS`
 rows, AND INDEXED. `audit_events` is the largest table in the platform and
@@ -24,82 +29,50 @@ alone would still read the org's whole audit history. Migration 0220 adds
 'mcp.tool_called'`: this read is a range scan of one org's tool calls in the
 window, and the index carries no other action's rows. The predicate here is
 an inline SQL literal, never a bound parameter, so the planner can prove the
-partial index applies even under a generic prepared-statement plan. An app
-last used before the window drops off the list; revoking it still works,
-because revocation is keyed on the client id and needs no listing.
+partial index applies even under a generic prepared-statement plan.
 
-REVOKE WRITES FIRST AND CALLS KEYCLOAK AFTER (design §3.4). The
-`mcp_revocation` row and the `mcp.app_revoked` audit event commit together,
-and only then is the app's consent removed in Keycloak, per person, best
-effort, OUTSIDE the transaction (a slow Keycloak must not hold a database
-connection or the audit chain's per-org lock). The two halves close different
-doors:
+REVOKE IS ONE TRANSACTION (plan D12), in `app.core.auth.oauth.connections`,
+which holds the every-client scope over a person's grants; this module opens
+none (plan B3-31). The app's grants end -- the person's for "me", everyone's in
+the organization for "everyone" -- together with the `mcp_revocation` row and
+the `mcp.app_revoked` event, or none of them does:
 
-- the ROW is what `/mcp` checks on every request (`app/mcp/server.py::_gate`):
-  any token for that app issued before it is refused at once, Keycloak or no
-  Keycloak;
-- the CONSENT is what stops the app's refresh token minting a NEW access token,
-  which the row alone would admit, because it was issued after the row.
+- a grant that ended stops every token it issued at its next call, and its
+  refresh token mints nothing (`deps.admit` reads the grant on every call,
+  plan D6; `grants.refresh_grant`);
+- the app's unspent authorization codes end first, by their expiry, so a code
+  approved a moment before the revocation opens no grant after it (operator
+  decision D2, part c);
+- the ROW keeps doing what it did (`app/mcp/server.py::_gate`): any token of
+  that app issued before it is refused, and the listing says the app was
+  revoked until it is used again.
 
-So a Keycloak failure leaves the revocation in force for every token that
-exists, and is reported (`keycloak_failures`) because the next refresh would
-bring access back. "Everyone" removes consent for every person of the org with
-a Keycloak identity, which extends the design's "Revoke for one person removes
-consent" to the org-wide case: without it an org-wide revoke would last one
-token lifetime.
-
-A FAILED KEYCLOAK HALF IS ON THE RECORD. When any consent was not removed, a
-second event, `mcp.app_revoke_incomplete`, says how many, so the audit log does
-not read "revoked" for an app whose refresh tokens still work.
-
-THE CLIENT ID IS ONE PATH SEGMENT AND NOT ONE OF THE PLATFORM'S OWN. It is put
-in a Keycloak URL path, and `..` there once resolved to the user itself -- a
-revoke for everyone deleted every identity in the organization. The route
-refuses a leading dot (so `.`, `..` and every dot segment) and
-`kc_client._user_url` refuses it again. The console's own client, the
-provisioning and events clients and Keycloak's built-ins are refused too:
-removing the console client's consent for everyone would sign the whole
-organization out, and none of them is an AI app.
-
-REVOKE NEVER DELETES THE KEYCLOAK CLIENT. It is shared by every organization
-in a multi-tenant install; one organization's revocation never reaches
-another's users (design §3.4).
+No identity provider is called: the platform issued the grants, and ends them
+itself. One organization's revocation never reaches another's users -- the
+grants are read under its own `org_id` and RLS.
 """
 
-import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Select, func, literal_column, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.api.deps import AuthContext, require_all_clients, require_permission
-from app.core.audit import audit_service
-from app.core.config import Settings
-from app.core.i18n import tr
+from app.core.auth.oauth import connections
+from app.core.client_scope import ClientScope
 from app.core.mcp_channel import mcp_resource
-from app.core.rbac import has_permission
 from app.core.tenancy import org_session
-from app.models import AuditEvent, Organization, User
+from app.models import AuditEvent, Organization
 from app.models.mcp import McpRevocation
-from app.modules.user_admin.kc_client import (
-    KeycloakAdminConfig,
-    KeycloakAdminConnection,
-    KeycloakAdminError,
-    revoke_consent,
-)
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 #: Both routes' gate. "Everyone" additionally needs `orgs.manage`, checked in
-#: the handler because a route dependency can name one code.
+#: `connections.revoke_app_access` because a route dependency can name one code.
 _MCP_USE = Depends(require_permission("mcp.use"))
 
 #: How far back `GET /connections` looks for tool calls. See the module docstring.
@@ -109,38 +82,10 @@ MAX_APPS = 200
 #: `ix_audit_mcp_tool_called`'s predicate value, as SQL (migration 0220).
 _TOOL_CALLED_SQL = "'mcp.tool_called'"
 
-#: The shape a client id may take. Keycloak's dynamic client registration
-#: issues UUIDs; this admits the general shape of a client id, but it must
-#: START with a letter or digit, so no dot segment (`.`, `..`) can ever be one.
-#: `kc_client._user_url` refuses dot segments again before any request.
-CLIENT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$"
-
-#: Clients that are the platform's own or Keycloak's, never an AI app. Revoking
-#: one is refused; the deployment's configured ids are added at request time.
-FIRST_PARTY_CLIENTS = frozenset(
-    {
-        "it-suite",  # the console's token audience, reserved in the realm
-        "it-suite-web",  # the console
-        "it-suite-provisioning",
-        "it-suite-events",
-        "account",
-        "account-console",
-        "admin-cli",
-        "security-admin-console",
-        "realm-management",
-        "broker",
-    }
-)
-
-#: Keycloak calls in flight at once for one revoke, and the time all of them
-#: together may take. People not reached inside the budget are counted as
-#: failures; the revocation row is already committed.
-KEYCLOAK_CONCURRENCY = 4
-KEYCLOAK_BUDGET_SECONDS = 30.0
-
 
 class McpAppOut(BaseModel):
-    """One AI app that has called tools in this organization.
+    """One AI app that has called tools in this organization, or that holds a
+    live grant here and has not yet.
 
     The revocation flags are true when a revocation of this app is NEWER than
     its last use: `revoked_for_me` compares your own revocation with your own
@@ -151,13 +96,49 @@ class McpAppOut(BaseModel):
     """
 
     client_id: str = Field(
-        description="The app's OAuth client id, as the identity provider registered it."
+        description=(
+            "The app's OAuth client id: the one this platform issued when it registered, "
+            "or the address of its client metadata document."
+        )
+    )
+    id: UUID | None = Field(
+        description=(
+            "The app's registration in this organization, which revoking names; null when it "
+            "has none (an app last used before it registered here, or a registration that "
+            "expired), and then there is nothing left to revoke."
+        )
+    )
+    name: str | None = Field(
+        description=(
+            "The name the app gave itself, as it gave it (anyone can call an app anything); "
+            "null when it gave none."
+        )
+    )
+    host: str | None = Field(
+        description=(
+            "What the app is named by, which it cannot fake: the host of its client metadata "
+            "document, or the host(s) its registered redirects go to; null when it has no "
+            "registration here."
+        )
+    )
+    kind: Literal["registered", "metadata_document"] | None = Field(
+        description=(
+            "`registered` when it registered itself here (any app can, under any name), "
+            "`metadata_document` when a document at its client id describes it; null when "
+            "it has no registration here."
+        )
     )
     people: int = Field(
-        description="How many people of this organization used the app in the last 90 days."
+        description=(
+            "How many people of this organization used the app in the last 90 days; 0 for an "
+            "app that holds a grant and has not called a tool yet."
+        )
     )
     last_used_at: datetime | None = Field(
-        description="When anyone in this organization last called a tool through the app."
+        description=(
+            "When anyone in this organization last called a tool through the app; null when "
+            "nobody has yet."
+        )
     )
     revoked_for_me: bool = Field(
         description="True when you revoked the app for yourself after your last use of it."
@@ -169,7 +150,8 @@ class McpAppOut(BaseModel):
 
 class McpConnectionsOut(BaseModel):
     """This organization's MCP switch, the address AI apps connect to, and the
-    apps that used it in the last 90 days, most recently used first."""
+    apps that used it in the last 90 days, most recently used first, then the
+    apps holding a live grant that have not used it yet."""
 
     enabled: bool = Field(description="Whether AI apps may connect to this organization.")
     address: str | None = Field(
@@ -179,7 +161,10 @@ class McpConnectionsOut(BaseModel):
         )
     )
     apps: list[McpAppOut] = Field(
-        description=f"The apps that called tools here, at most {MAX_APPS}."
+        description=(
+            f"The apps that called tools here, most recently used first, then the apps holding "
+            f"a live grant that have not yet; at most {MAX_APPS}."
+        )
     )
 
 
@@ -197,16 +182,15 @@ class RevokeIn(BaseModel):
 
 
 class RevokeOut(BaseModel):
-    """The revocation is in force; the identity provider's half may not be."""
+    """The revocation is in force: the app's tokens stop at their next call."""
 
     revoked: bool = Field(
-        description="Always true: the revocation is recorded and refuses existing tokens."
+        description="Always true: the revocation is recorded and the app's grants have ended."
     )
-    keycloak_failures: int = Field(
+    grants_revoked: int = Field(
         description=(
-            "How many people's consent for the app could not be removed in the identity "
-            "provider. Their existing tokens are still refused, but the app could obtain "
-            "new ones until the consent is removed."
+            "How many of the app's grants ended: yours for `me`, everyone's in this "
+            "organization for `everyone`."
         )
     )
 
@@ -251,18 +235,31 @@ def usage_query(*, org_id: UUID, user_id: UUID, since: datetime) -> Select[Any]:
     )
 
 
-async def list_connections(
-    session: AsyncSession, *, org_id: UUID, user_id: UUID, now: datetime
-) -> list[McpAppOut]:
-    """The apps that called tools in this org inside `USAGE_WINDOW`."""
-    usage = (
-        await session.execute(
-            usage_query(org_id=org_id, user_id=user_id, since=now - USAGE_WINDOW)
-        )
-    ).all()
-    if not usage:
-        return []
+def _kind(kind: str) -> Literal["registered", "metadata_document"]:
+    return "metadata_document" if kind == "metadata_document" else "registered"
 
+
+async def _usage_and_revocations(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    user_id: UUID,
+    now: datetime,
+    held: list[connections.HeldApp],
+) -> tuple[list[Any], dict[str, datetime], dict[str, datetime]]:
+    """The use (`usage_query`) and, for every app it or `held` names, the
+    latest revocation for everyone and for `user_id`."""
+    usage = list(
+        (
+            await session.execute(
+                usage_query(org_id=org_id, user_id=user_id, since=now - USAGE_WINDOW)
+            )
+        ).all()
+    )
+    # The held rows read the revocations too (re-review f3-3, N4).
+    asked = [row[0] for row in usage] + [held_app.registration.client_id for held_app in held]
+    if not asked:
+        return usage, {}, {}
     revocations = (
         await session.execute(
             select(
@@ -272,7 +269,7 @@ async def list_connections(
             )
             .where(
                 McpRevocation.org_id == org_id,
-                McpRevocation.client_id.in_([row[0] for row in usage]),
+                McpRevocation.client_id.in_(asked),
                 or_(McpRevocation.user_id.is_(None), McpRevocation.user_id == user_id),
             )
             .group_by(McpRevocation.client_id, McpRevocation.user_id)
@@ -280,116 +277,76 @@ async def list_connections(
     ).all()
     for_everyone = {client: at for client, who, at in revocations if who is None}
     for_me = {client: at for client, who, at in revocations if who is not None}
+    return usage, for_everyone, for_me
+
+
+async def list_connections(
+    engine: AsyncEngine, *, clients: ClientScope, org_id: UUID, user_id: UUID, now: datetime
+) -> list[McpAppOut]:
+    """The apps that called tools in this org inside `USAGE_WINDOW`, most
+    recently used first, then those holding a live grant here that have not
+    (plan B3-28); at most `MAX_APPS` in all.
+
+    ONE TRANSACTION AT A TIME, never one inside another (the rule
+    `flows.signed_in_session` states: a request never holds two connections
+    at once, so a burst of these cannot drain the pool waiting on itself).
+    The live grants first, in `connections`' every-client session; then the
+    use and the revocations in the caller's scope (`clients`), where RLS
+    keeps another tenant's audit rows out; then the registrations of the
+    apps that use names."""
+    held = await connections.held_apps(
+        engine, org_id=org_id, user_id=user_id, now=now, limit=MAX_APPS
+    )
+    async with org_session(org_id, engine=engine, clients=clients) as session:
+        usage, for_everyone, for_me = await _usage_and_revocations(
+            session, org_id=org_id, user_id=user_id, now=now, held=held
+        )
+    used = [row[0] for row in usage]
+    known = await connections.registrations(engine, org_id=org_id, client_ids=used)
 
     apps: list[McpAppOut] = []
     for client_id, people, last, mine in usage:
+        registration = known.get(client_id)
         everyone_at = for_everyone.get(client_id)
         me_at = for_me.get(client_id)
         apps.append(
             McpAppOut(
                 client_id=client_id,
+                id=registration.id if registration else None,
+                name=registration.name if registration else None,
+                host=registration.host if registration else None,
+                kind=_kind(registration.kind) if registration else None,
                 people=people,
                 last_used_at=last,
                 revoked_for_everyone=everyone_at is not None and everyone_at > last,
                 revoked_for_me=me_at is not None and (mine is None or me_at > mine),
             )
         )
+    listed = set(used)
+    for held_app in held:
+        registration = held_app.registration
+        if len(apps) >= MAX_APPS:
+            break
+        if registration.client_id in listed:
+            continue
+        me_at = for_me.get(registration.client_id)
+        apps.append(
+            McpAppOut(
+                client_id=registration.client_id,
+                id=registration.id,
+                name=registration.name,
+                host=registration.host,
+                kind=_kind(registration.kind),
+                people=0,
+                last_used_at=None,
+                # A live grant is newer than any revocation for everyone,
+                # which ends every grant in its own transaction (D12).
+                revoked_for_everyone=False,
+                # Revoked for me, and no grant of mine since.
+                revoked_for_me=me_at is not None and not held_app.mine,
+            )
+        )
     return apps
-
-
-async def record_revocation(
-    session: AsyncSession,
-    *,
-    org_id: UUID,
-    actor_id: UUID,
-    client_id: str,
-    scope: Literal["me", "everyone"],
-) -> list[str]:
-    """Write the revocation row and its audit event, and return the Keycloak
-    user ids whose consent is to be removed: the actor's own for "me", every
-    person of the org who has one for "everyone" (RLS scopes that read too).
-    The caller commits before calling Keycloak."""
-    session.add(
-        McpRevocation(
-            org_id=org_id,
-            user_id=None if scope == "everyone" else actor_id,
-            client_id=client_id,
-            revoked_by=actor_id,
-        )
-    )
-    await audit_service.record(
-        session,
-        org_id=org_id,
-        actor_type="user",
-        actor_id=actor_id,
-        action="mcp.app_revoked",
-        metadata={"client_id": client_id, "scope": scope},
-    )
-    query = select(User.external_subject).where(
-        User.org_id == org_id, User.external_subject.is_not(None)
-    )
-    if scope == "me":
-        query = query.where(User.id == actor_id)
-    subjects = (await session.execute(query.order_by(User.id))).scalars().all()
-    return [s for s in subjects if s]
-
-
-async def remove_consents(
-    settings: Settings, *, org_id: UUID, client_id: str, subjects: list[str]
-) -> int:
-    """Remove the app's consent for each person, over ONE admin connection
-    (one client, one token), `KEYCLOAK_CONCURRENCY` calls at a time, inside
-    `KEYCLOAK_BUDGET_SECONDS` in all. Returns how many were NOT removed. Never
-    raises: the revocation is already committed, and a failure here is a
-    number in the answer and an audit event, not a failed request.
-
-    A deployment with no provisioning client removes nothing, so the app's
-    refresh tokens still work for everyone: each person is a failure to
-    report, not a quiet success."""
-    removed = 0
-    try:
-        config = KeycloakAdminConfig.from_settings(settings)
-        if config is None:
-            return len(subjects)
-        pending = iter(subjects)
-        async with (
-            asyncio.timeout(KEYCLOAK_BUDGET_SECONDS),
-            KeycloakAdminConnection(config) as connection,
-        ):
-
-            async def worker() -> None:
-                nonlocal removed
-                # One shared iterator: each worker takes the next person, so
-                # at most KEYCLOAK_CONCURRENCY calls are in flight however
-                # large the organization is.
-                for subject in pending:
-                    try:
-                        await revoke_consent(
-                            config,
-                            user_id=subject,
-                            client_id=client_id,
-                            connection=connection,
-                        )
-                    except Exception:  # noqa: BLE001 - best effort after commit; counted
-                        logger.warning(
-                            "could not remove an AI app's consent at the identity provider",
-                            extra={"org_id": org_id, "client_id": client_id},
-                            exc_info=True,
-                        )
-                        continue
-                    removed += 1
-
-            await asyncio.gather(*(worker() for _ in range(KEYCLOAK_CONCURRENCY)))
-    except (TimeoutError, OSError, ValueError, KeyError, httpx.HTTPError, KeycloakAdminError):
-        # Out of time; the admin token could not be had; or the provisioning
-        # client is configured but its secret file is missing or empty
-        # (`KeycloakAdminConfig.from_settings`).
-        logger.warning(
-            "an AI app's consent was not removed for everyone at the identity provider",
-            extra={"org_id": org_id, "client_id": client_id},
-            exc_info=True,
-        )
-    return len(subjects) - removed
 
 
 # --------------------------------------------------------------------------- #
@@ -403,18 +360,22 @@ async def get_connections(
     ctx: AuthContext = _MCP_USE,
 ) -> McpConnectionsOut:
     """This organization's AI connections: the switch, the address to give an
-    AI app, and the apps that called tools here in the last 90 days."""
-    async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-    ) as session:
+    AI app, and the apps that called tools here in the last 90 days or hold a
+    live grant."""
+    engine: AsyncEngine = request.app.state.app_engine
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         org_settings = (
             await session.execute(
                 select(Organization.settings).where(Organization.id == ctx.org_id)
             )
         ).scalar_one_or_none()
-        apps = await list_connections(
-            session, org_id=ctx.org_id, user_id=ctx.user_id, now=datetime.now(UTC)
-        )
+    apps = await list_connections(
+        engine,
+        clients=ctx.clients,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        now=datetime.now(UTC),
+    )
     return McpConnectionsOut(
         # `is True`, as the gate reads it: a malformed value is off.
         enabled=(org_settings or {}).get("mcp_enabled") is True,
@@ -423,100 +384,29 @@ async def get_connections(
     )
 
 
-@router.post("/connections/{client_id}/revoke", response_model=RevokeOut)
+@router.post("/connections/{app_id}/revoke", response_model=RevokeOut)
 async def revoke_connection(
     body: RevokeIn,
     request: Request,
-    client_id: str = Path(pattern=CLIENT_ID_PATTERN, max_length=255),
+    app_id: UUID,
     ctx: AuthContext = _MCP_USE,
 ) -> RevokeOut:
     """Revoke an AI app for yourself, or (with orgs.manage) for everyone in
-    this organization. Tokens the app already holds are refused at once; its
-    consent is then removed in the identity provider, and any person for whom
-    that failed is counted in `keycloak_failures`."""
-    settings: Settings = request.app.state.settings
-    first_party = FIRST_PARTY_CLIENTS | {
-        settings.oidc_audience,
-        settings.oidc_console_client_id,
-        settings.keycloak_admin_client_id,
-        settings.keycloak_events_client_id,
-    }
-    if client_id in first_party:
-        # Not an AI app: refused before anything is written or sent.
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            tr(
-                "{client_id} is part of the platform, not an AI app, and cannot be revoked",
-                client_id=client_id,
-            ),
-        )
-    async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-    ) as session:
-        # The route is gated on `mcp.use`, which "me" needs; "everyone" also
-        # needs `orgs.manage`, and -- because it writes the organization's
-        # revocation list, which is no one client's -- a scope of every client
-        # (MSP clients spec §2.2). Refused before anything is written.
-        if body.scope == "everyone":
-            require_all_clients(ctx)
-        # NO CLIENT, BY DESIGN (plan 2026-10-26 Task 14 keeps it): revoking
-        # everyone writes the organisation's revocation list, which is no one
-        # client's, so `orgs.manage` is asked on every client.
-        if body.scope == "everyone" and not await has_permission(
-            session, ctx.user_id, "orgs.manage"
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, tr("requires {code}", code="orgs.manage")
-            )
-        subjects = await record_revocation(
-            session,
-            org_id=ctx.org_id,
-            actor_id=ctx.user_id,
-            client_id=client_id,
-            scope=body.scope,
-        )
-    # Committed. Keycloak now, outside the transaction.
-    failures = await remove_consents(
-        settings, org_id=ctx.org_id, client_id=client_id, subjects=subjects
+    this organization: its grants end, and the tokens it holds stop at their
+    next call."""
+    # The route is gated on `mcp.use`, which "me" needs; "everyone" also needs
+    # `orgs.manage` (checked in `connections.revoke_app_access`) and -- because
+    # it writes the organization's revocation list, which is no one client's --
+    # a scope of every client (MSP clients spec §2.2). Refused before anything
+    # is written.
+    if body.scope == "everyone":
+        require_all_clients(ctx)
+    ended = await connections.revoke_app_access(
+        request.app.state.app_engine,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        app_id=app_id,
+        scope=body.scope,
+        now=datetime.now(UTC),
     )
-    if failures:
-        await _record_incomplete(
-            request, ctx, client_id=client_id, scope=body.scope, failures=failures
-        )
-    return RevokeOut(revoked=True, keycloak_failures=failures)
-
-
-async def _record_incomplete(
-    request: Request,
-    ctx: AuthContext,
-    *,
-    client_id: str,
-    scope: Literal["me", "everyone"],
-    failures: int,
-) -> None:
-    """`mcp.app_revoke_incomplete`, after the revocation is committed. Never
-    raises: a failure here must not turn a revocation that is in force into a
-    500 that reads as "nothing happened". The response still carries the
-    failure count, and the WARNING says which org and app went unrecorded."""
-    try:
-        async with org_session(
-            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-        ) as session:
-            await audit_service.record(
-                session,
-                org_id=ctx.org_id,
-                actor_type="user",
-                actor_id=ctx.user_id,
-                action="mcp.app_revoke_incomplete",
-                metadata={
-                    "client_id": client_id,
-                    "scope": scope,
-                    "keycloak_failures": failures,
-                },
-            )
-    except Exception:  # noqa: BLE001 - after commit; the answer still says it
-        logger.warning(
-            "could not record that an AI app's consent was not removed for everyone",
-            extra={"org_id": ctx.org_id, "client_id": client_id},
-            exc_info=True,
-        )
+    return RevokeOut(revoked=True, grants_revoked=ended)

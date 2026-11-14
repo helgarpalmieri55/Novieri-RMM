@@ -9,13 +9,15 @@ metadata below, and nothing else.
 
 ORDER OF THE GATE, and why:
 
-1. no MCP resource (`ITS_PUBLIC_CONSOLE_URL` unset) -> 503;
+1. no MCP resource (`ITS_PUBLIC_CONSOLE_URL` unset), or no issuer (it is not
+   an https address without a path) -> 503;
 2. the request is not addressed to the public host -> 421, or comes from a
    foreign browser origin -> 403 (DNS rebinding; see `_off_host` below);
 3. no bearer -> 401 with the challenge;
-4. `auth_context` on a scope this gate marks itself: the MCP audience only, and
-   the console's whole admission path (org lookup, email domain, user status,
-   self-provisioning) -> 401 / 403 / 503 as it decides;
+4. `auth_context` on a scope this gate marks itself: an access token the
+   platform's own OAuth server issued for the MCP resource, the grant it
+   names still standing, and the console's admission rules (email domain,
+   user status) read from the person's row -> 401 / 403 / 503 as it decides;
 5. the org switch `mcp_enabled` -> 403;
 6. `mcp.use` -> 403;
 7. `mcp_revocation` -> 401, so the client runs the OAuth flow again and the
@@ -40,7 +42,6 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import anyio
-import jwt
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from mcp.server.lowlevel.server import Server
@@ -64,12 +65,13 @@ from starlette.types import Receive, Scope, Send
 
 from app.api.deps import AuthContext, auth_context, requested_client
 from app.core.audit import audit_service
+from app.core.auth.oauth.access import McpGrant, unverified_client_id
+from app.core.auth.oauth.policy import issuer
 from app.core.client_scope import ClientScope
 from app.core.i18n import parse_accept_language, tr, use_locale
 from app.core.mcp_channel import EXTENSION_KEY, McpCall, mcp_resource, use_mcp_call
 from app.core.rbac import codes_held_anywhere
 from app.core.router_inspect import flatten
-from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.mcp import invoke as _invoke
 from app.mcp.catalog import Tool, build_catalog
@@ -117,7 +119,7 @@ class McpPrincipal:
 
     org_id: UUID
     user_id: UUID
-    claims: TokenClaims
+    claims: McpGrant
     bearer: str = field(repr=False)
     areas: frozenset[str] | None
     accept_language: str
@@ -231,16 +233,6 @@ def _off_host(headers: Headers, console_url: str, resource: str) -> tuple[int, s
 # --------------------------------------------------------------------------- #
 
 
-def _unverified_azp(token: str) -> str:
-    """The app a token claims to be for, WITHOUT verifying it -- used only to
-    label the scope marker before `auth_context` verifies the same token."""
-    try:
-        azp = jwt.decode(token, options={"verify_signature": False}).get("azp")
-    except Exception:  # noqa: BLE001 - a label, never a decision; validation follows
-        return ""
-    return azp if isinstance(azp, str) else ""
-
-
 async def _gate(fastapi_app: FastAPI, ctx: AuthContext) -> tuple[int, str] | None:
     """The org switch, `mcp.use` and revocation, in that order; None when all
     three allow the call. Checked on EVERY request (design §6): turning the
@@ -311,6 +303,12 @@ class McpAsgi:
         if resource is None:
             detail = tr("MCP is not available: ITS_PUBLIC_CONSOLE_URL is not set.")
             return await _json(send, 503, {"detail": detail})
+        if issuer(settings) is None:
+            detail = tr(
+                "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address "
+                "without a path."
+            )
+            return await _json(send, 503, {"detail": detail})
         request = Request(scope, receive)
         off_host = _off_host(request.headers, settings.public_console_url, resource)
         if off_host is not None:
@@ -319,22 +317,18 @@ class McpAsgi:
         if not authorization.startswith("Bearer "):
             return await _unauthorised(send, resource)
 
-        # REUSE THE CONSOLE'S WHOLE ADMISSION PATH (org lookup, email domain,
-        # user status, self-provisioning) with the MCP audience, by marking the
-        # scope the way an in-process MCP call is marked.
+        # REUSE THE CONSOLE'S ADMISSION PATH (the grant, the person's row, the
+        # email domain, the user status) by marking the scope the way an
+        # in-process MCP call is marked.
         #
-        # THE APP LABEL IS READ FROM THE TOKEN UNVERIFIED, and that is safe:
-        # it only labels the marker, so that an admission audit event written
-        # inside `auth_context` (a first-seen `auth.login`) says `via: "mcp"`
-        # and which app. `auth_context` verifies the token -- signature,
-        # issuer, MCP audience, expiry -- before it writes anything, in the
-        # same call, so a forged token is refused before its label is used.
-        # And the label is compared with the verified `azp` below.
-        label = _unverified_azp(authorization.removeprefix("Bearer "))
-        # Revocation is keyed on `azp`: a token that names no app could not be
-        # revoked before it expired, so it is not admitted at all. Refused
-        # before admission, so it provisions nobody; the check after admission
-        # (`claims.azp != label`) makes the unverified read binding.
+        # THE APP LABEL IS READ FROM THE TOKEN UNVERIFIED, and that is safe: it
+        # only labels the marker, and `admit` verifies the same token --
+        # signature, issuer, MCP audience, expiry -- and refuses a marker that
+        # names another app than the verified one before it reads anything else.
+        # The label is compared with the verified `azp` below as well.
+        label = unverified_client_id(authorization.removeprefix("Bearer "))
+        # Revocation is keyed on the app: a token that names none could not be
+        # revoked, so it is not admitted at all, before admission.
         if not label:
             return await _unauthorised(
                 send, resource, detail=tr("this token does not name the AI app it was issued to")
@@ -413,16 +407,27 @@ metadata_router = APIRouter()
 @metadata_router.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
 async def protected_resource(request: Request) -> JSONResponse:
     """Public by necessity: it is how an OAuth client learns where to sign in.
-    It names the resource and the realm, both of which the 401 challenge and
-    the realm's own discovery document already publish."""
+    It names the resource and the platform as its authorization server (own
+    authentication design §5.1: "El servidor MCP sigue publicando RFC 9728,
+    apuntando a la plataforma"), both of which the 401 challenge and the
+    platform's own metadata already publish."""
     settings = request.app.state.settings
     resource = mcp_resource(settings)
     if resource is None:
         raise HTTPException(503, tr("MCP is not available: ITS_PUBLIC_CONSOLE_URL is not set."))
+    authority = issuer(settings)
+    if authority is None:
+        raise HTTPException(
+            503,
+            tr(
+                "MCP is not available: ITS_PUBLIC_CONSOLE_URL is not an https address "
+                "without a path."
+            ),
+        )
     return JSONResponse(
         {
             "resource": resource,
-            "authorization_servers": [settings.oidc_issuer],
+            "authorization_servers": [authority],
             "scopes_supported": ["mcp"],
             "bearer_methods_supported": ["header"],
         }

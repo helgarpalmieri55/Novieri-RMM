@@ -56,7 +56,7 @@ from app.core.identity.policy import (
 )
 from app.core.tenancy import org_session
 from app.models import Organization, User
-from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
+from tests.mcp_support import MCP_BASE, marked_client, mcp_claims, mcp_token, signed_mcp_token
 
 BASE_DOMAIN = "toeshee.com"
 
@@ -589,20 +589,30 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
     This test exists so the next person cannot flip it back by accident: they
     have to come here and change an assertion that says why.
 
-    ON THE MCP CHANNEL since own authentication phase 1 (Task 13): it is the
-    one door left that reads an org slug from a token. The console's session
-    names its organisation itself, so there is no unknown slug to answer.
+    ON THE MCP CHANNEL: since own authentication phase 3 the organization is
+    a signed id in the platform's own token, so the unknown slug has no oracle
+    left; what stays is the order -- a token naming no organization this
+    platform has is a 401 before any domain rule.
     """
     # The MCP resource is `MCP_AUD` there (tests/mcp_support.py).
     api_env.settings.public_console_url = MCP_BASE
 
-    def mcp_token(sub: str, slug: str, email: str) -> str:
-        return api_env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=email)
-
     org_id = await api_env.create_org("policy-order")
     slug = await api_env.org_slug(org_id)
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
+
+    async def token_for(address: str) -> str:
+        sub = await api_env.create_user(org_id)
+        async with AsyncSession(api_env.admin_engine) as s:
+            await s.execute(update(User).where(User.external_subject == sub).values(email=address))
+            await s.commit()
+        return await mcp_token(api_env, slug, sub)
+
     stranger = f"eve-{uuid4().hex[:8]}@elsewhere.example"
+    known = await token_for(stranger)
+    claims = mcp_claims(known)
+    claims["org"] = str(uuid4())
+    unknown = await signed_mcp_token(claims)
 
     # The PLATFORM DEFAULT is set too, and that is what makes this an ordering
     # test rather than a coincidence: a door that refused on the domain FIRST
@@ -610,10 +620,6 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
     # unknown, and would answer 403 below instead of 401.
     api_env.settings.console_email_domain = BASE_DOMAIN
     try:
-        unknown = mcp_token(
-            f"sub-{uuid4().hex[:10]}", f"no-such-org-{uuid4().hex[:8]}", stranger
-        )
-        known = mcp_token(f"sub-{uuid4().hex[:10]}", slug, stranger)
         async with marked_client(api_env) as client:
             unknown_org = await client.get(
                 "/api/v1/orgs/current", headers={"Authorization": f"Bearer {unknown}"}
@@ -625,27 +631,24 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
         api_env.settings.console_email_domain = None
 
     assert unknown_org.status_code == 401, unknown_org.text
-    assert unknown_org.json()["detail"] == "unknown organization"
+    assert unknown_org.json()["detail"] == "this access token was refused"
 
     assert refused_domain.status_code == 403, refused_domain.text
     assert "email domain not permitted" in refused_domain.json()["detail"]
 
     # The two answers are DIFFERENT, which is the whole subject: a single
-    # indistinguishable refusal would hide the slug and would also merge "your
-    # token is not genuine" with "your identity is not admitted" -- the
-    # distinction all three doors keep so an operator debugging a lockout can
-    # tell them apart from the wire alone.
+    # indistinguishable refusal would merge "your token is not genuine" with
+    # "your identity is not admitted" -- the distinction all three doors keep
+    # so an operator debugging a lockout can tell them apart from the wire
+    # alone.
     assert unknown_org.status_code != refused_domain.status_code
 
-    # Non-vacuity: with the allowlist satisfied, the same known slug is admitted
-    # -- so the 403 above is the domain rule answering and not the route.
+    # Non-vacuity: with the allowlist satisfied, a person of the same org is
+    # admitted -- so the 403 above is the domain rule answering and not the route.
+    admitted_token = await token_for(f"ada-{uuid4().hex[:8]}@{BASE_DOMAIN}")
     async with marked_client(api_env) as client:
         admitted = await client.get(
-            "/api/v1/orgs/current",
-            headers={
-                "Authorization": f"Bearer "
-                f"{mcp_token(f'sub-{uuid4().hex[:10]}', slug, f'ada@{BASE_DOMAIN}')}"
-            },
+            "/api/v1/orgs/current", headers={"Authorization": f"Bearer {admitted_token}"}
         )
     assert admitted.status_code == 200, admitted.text
 

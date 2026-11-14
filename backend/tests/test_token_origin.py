@@ -16,9 +16,11 @@ So, pinned here:
   and a token with no `typ`, are refused on every door;
 - no non-MCP door reads a bearer at all: the console signs in by cookie since
   own authentication phase 1 (Task 13);
-- `/mcp` refuses a token the console's client obtained, and any service-account
-  token, before admission provisions anything: an MCP session is a token issued
-  to a person after their own sign-in (invariant 1c, MCP server design §9).
+- `/mcp` refuses every token the platform's own OAuth server did not issue --
+  Keycloak's for the console's client, a service account's, an ID token --
+  before the door reads anything (own authentication phase 3), and provisions
+  nobody: an MCP session is a token issued to a person after their own
+  sign-in (invariant 1c, MCP server design §9).
 """
 
 import ast
@@ -64,6 +66,10 @@ NOT_ACCESS_ES = "este token no es un token de acceso"
 CONSOLE_OVER_MCP_EN = "this token was issued to the console and is not accepted over MCP"
 NOT_A_PERSON_EN = "MCP access must be granted by a person signing in"
 NOT_A_PERSON_ES = "el acceso por MCP debe concederlo una persona al iniciar sesión"
+NO_APP_EN = "this token does not name the AI app it was issued to"
+NO_APP_ES = "este token no indica la aplicación de IA para la que se emitió"
+REFUSED_EN = "this access token was refused"
+REFUSED_ES = "se rechazó este token de acceso"
 
 METADATA_URL = "https://itms.example.com/.well-known/oauth-protected-resource/mcp"
 REFUSED_CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}", error="invalid_token"'
@@ -206,7 +212,7 @@ async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
     no bearer is read at all, so an MCP grant is still never replayable
     against the console."""
     _, slug, sub = await _person(mcp_env)
-    token = mcp_env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=f"{sub}@test.local")
+    token = await mcp_token(mcp_env, slug, sub)
     resp = await mcp_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
     assert refusal_code(resp) == "auth_required"
@@ -251,19 +257,21 @@ def _called(node: ast.AST) -> str | None:
     return None
 
 
-def _unruled_validations(source: str) -> list[int]:
-    """Lines of `validate_token(` calls whose enclosing function calls no
-    origin rule after them."""
+def _unruled_validations(
+    source: str, call: str = "validate_token", rules: frozenset[str] = ORIGIN_RULES
+) -> list[int]:
+    """Lines of `call(` sites whose enclosing function calls none of `rules`
+    after them."""
     tree = ast.parse(source)
     found: list[int] = []
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         calls = [n for n in ast.walk(fn) if _called(n) is not None]
-        rules = [n.lineno for n in calls if _called(n) in ORIGIN_RULES]
-        for call in calls:
-            if _called(call) == "validate_token" and not any(r >= call.lineno for r in rules):
-                found.append(call.lineno)
+        ruled = [n.lineno for n in calls if _called(n) in rules]
+        for site in calls:
+            if _called(site) == call and not any(r >= site.lineno for r in ruled):
+                found.append(site.lineno)
     return found
 
 
@@ -291,16 +299,54 @@ def test_every_validate_token_call_in_app_is_followed_by_an_origin_rule() -> Non
         sites += source.count("validate_token(")
         rel = path.relative_to(APP.parent)
         offenders += [f"{rel}:{line}" for line in _unruled_validations(source)]
-    # Exactly one since own authentication phase 1 (Task 13), which took the
-    # console's bearer out of the API, the UI WebSocket and the remote tunnel.
-    assert sites == 1, (
-        f"{sites}: the MCP branch of admit() is the only door that validates a "
-        "token; a second one is a decision"
-    )
+    # None since own authentication phase 3 (plan 2026-11-06, Task 9): the MCP
+    # door verifies the platform's own token. A new one is a decision.
+    assert sites == 0, f"{sites}: a door validates a Keycloak token again; that is a decision"
     assert offenders == [], (
         "validate_token( with no require_person_mcp_token( "
         f"after it in the same function: {offenders}"
     )
+
+
+#: Every caller of `verify_access_token(` in `app/`, outside its definition.
+#: A door (it admits a person) must read the grant the token names after it.
+VERIFY_SITES = {
+    "app/api/deps.py": "the MCP door: admit() reads the grant (family_is_live) after it",
+    "app/core/auth/oauth/grants.py": (
+        "RFC 7009: revoke_presented ends the grant a token names; it admits nobody"
+    ),
+}
+GRANT_RULES = frozenset({"family_is_live"})
+
+
+def test_the_grant_sweep_catches_a_verification_with_no_grant_check() -> None:
+    bad = "async def door(t):\n    grant = await verify_access_token(t)\n    return grant\n"
+    good = (
+        "async def door(t, s):\n    grant = await verify_access_token(t)\n"
+        "    await family_is_live(s, grant)\n"
+    )
+    assert _unruled_validations(bad, "verify_access_token", GRANT_RULES) == [2]
+    assert _unruled_validations(good, "verify_access_token", GRANT_RULES) == []
+
+
+def test_every_door_that_verifies_an_mcp_token_reads_its_grant() -> None:
+    callers: set[str] = set()
+    offenders: list[str] = []
+    for path in sorted(APP.rglob("*.py")):
+        if path == APP / "core" / "auth" / "oauth" / "access.py":
+            continue  # the definition
+        source = path.read_text()
+        if "verify_access_token(" not in source:
+            continue
+        rel = str(path.relative_to(APP.parent))
+        callers.add(rel)
+        if rel == "app/api/deps.py":
+            offenders += [
+                f"{rel}:{line}"
+                for line in _unruled_validations(source, "verify_access_token", GRANT_RULES)
+            ]
+    assert callers == set(VERIFY_SITES), callers
+    assert offenders == [], f"verify_access_token( with no family_is_live( after it: {offenders}"
 
 
 # --------------------------------------------------------------------------- #
@@ -528,31 +574,33 @@ def _bearer(token: str, **extra: str) -> dict[str, str]:
 async def test_a_persons_mcp_token_is_admitted(mcp_env) -> None:
     org_id, slug = await _mcp_org(mcp_env)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    token = mcp_token(mcp_env, slug, sub)
+    token = await mcp_token(mcp_env, slug, sub)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
     assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.parametrize(
-    ("kw", "detail"),
+    "kw",
     [
-        ({"azp": "claude", "extra": {"preferred_username": "service-account-x"}}, NOT_A_PERSON_EN),
-        ({"azp": "claude", "extra": {"client_id": "claude"}}, NOT_A_PERSON_EN),
-        ({"azp": "it-suite-web"}, CONSOLE_OVER_MCP_EN),
-        ({"azp": "claude", "typ": "ID"}, NOT_ACCESS_EN),
+        {
+            "azp": "claude",
+            "extra": {"preferred_username": "service-account-x", "client_id": "claude"},
+        },
+        {"azp": "claude", "extra": {"client_id": "claude"}},
+        {"azp": "it-suite-web", "extra": {"client_id": "it-suite-web"}},
+        {"azp": "claude", "typ": "ID", "extra": {"client_id": "claude"}},
         # Proven live (deploy/keycloak/ci_mcp_flow.py): a person's token always
         # carries `sid`, a `client_credentials` token never does.
-        ({"azp": "claude", "sid": None}, NOT_A_PERSON_EN),
+        {"azp": "claude", "sid": None, "extra": {"client_id": "claude"}},
     ],
     ids=["service-account-username", "client-id-claim", "console-azp", "id-token", "no-sid"],
 )
 async def test_a_token_no_person_signed_in_for_is_refused_at_mcp(
-    mcp_env, kw: dict[str, Any], detail: str
+    mcp_env, kw: dict[str, Any]
 ) -> None:
     org_id, slug = await _mcp_org(mcp_env)
-    # A sub with no `users` row: a refusal must come before admission, which
-    # would otherwise provision one (and write its first-seen `auth.login`).
+    # A sub with no `users` row: nothing may be provisioned for it.
     sub = f"svc-{uuid4()}"
     token = mcp_env.idp.token(sub, slug, aud=MCP_AUD, email=f"{sub}@test.local", **kw)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
@@ -562,9 +610,8 @@ async def test_a_token_no_person_signed_in_for_is_refused_at_mcp(
         )
     assert resp.status_code == 401, resp.text
     assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
-    assert resp.json()["detail"] == detail
-    if detail == NOT_A_PERSON_EN:
-        assert resp_es.json()["detail"] == NOT_A_PERSON_ES
+    assert resp.json()["detail"] == REFUSED_EN
+    assert resp_es.json()["detail"] == REFUSED_ES
     assert await _users_with_sub(mcp_env, sub) == 0
 
 
@@ -609,7 +656,11 @@ async def test_a_legacy_client_id_claim_is_refused_at_mcp(mcp_env) -> None:
     )
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
+        resp_es = await client.post(
+            "/mcp", json=INITIALIZE, headers=_bearer(token, **{"Accept-Language": "es"})
+        )
     assert resp.status_code == 401, resp.text
     assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
-    assert resp.json()["detail"] == NOT_A_PERSON_EN
+    assert resp.json()["detail"] == NO_APP_EN
+    assert resp_es.json()["detail"] == NO_APP_ES
     assert await _users_with_sub(mcp_env, sub) == 0

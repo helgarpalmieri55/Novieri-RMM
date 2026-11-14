@@ -1,19 +1,29 @@
-"""Traefik routes the MCP server to the api, and nothing else is stolen by it.
+"""Traefik routes the MCP server and the platform's OAuth server to the api,
+and nothing else is stolen by them.
 
-MCP spec 2026-10-09 §2. The api serves `/mcp` (the protocol endpoint) and
-`/.well-known/oauth-protected-resource[/mcp]` (RFC 9728 metadata, which names
-the realm as the authorization server). Neither lives under `/api`, so the api
-router has to name them; without that Traefik hands both to `web`, whose nginx
-answers every unknown path with the SPA's `index.html` and a 200.
+MCP spec 2026-10-09 §2; own authentication phase 3. The api serves `/mcp`
+(the protocol endpoint), `/.well-known/oauth-protected-resource[/mcp]` (RFC
+9728 metadata, which names the platform as the authorization server), the
+platform's own RFC 8414 document at `/.well-known/oauth-authorization-server`
+and its machine endpoints `/oauth/token`, `/oauth/register` and
+`/oauth/revoke`, these three by exact path. None lives under `/api`, so the
+api router has to name them; without that Traefik hands them to `web`, whose
+nginx answers every unknown path with the SPA's `index.html` and a 200. The
+consent page, `/oauth/authorize`, stays the console's, and so does every
+console page.
 
-THAT 200 IS ALSO WHY THE DISCOVERY FALLBACKS ARE ROUTED. An MCP client given
-`authorization_servers: ["https://host/realms/it-suite"]` tries RFC 8414's
-path-insertion form first -- `/.well-known/oauth-authorization-server/realms/
-it-suite` -- then OIDC's `/.well-known/openid-configuration/realms/it-suite`,
-and only then the realm's own `/realms/it-suite/.well-known/...`. Clients move
-on after a 4xx; given a 200 they parse the body, and an HTML page fails that
-parse and ends the sign-in. Routed to the api, both answer FastAPI's 404 and the
-client falls through to Keycloak's real document.
+THAT 200 IS ALSO WHY THE DISCOVERY FALLBACKS ARE STILL ROUTED. A client that
+tries a path-inserted form first --
+`/.well-known/oauth-authorization-server/realms/it-suite`, or OIDC's
+`/.well-known/openid-configuration[/realms/it-suite]` -- moves on after a 4xx;
+given a 200 it parses the body, and an HTML page fails that parse and ends
+the sign-in. Routed to the api, they answer FastAPI's JSON 404
+(`test_mcp_discovery_fallbacks.py` holds the answers). Keycloak keeps its own
+documents under `/realms/<realm>/` until phase 4 removes it.
+
+Also: no console route begins with `/mcp` or `/.well-known` or names an
+OAuth machine endpoint, and the api is given longer to stop than a running
+write tool call.
 
 The router model (priority, then first match) is the one
 `test_deploy_keycloak_registration_edge.py` already holds to the compose file.
@@ -38,10 +48,16 @@ MCP_PATHS = (
     "/mcp/",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/mcp",
-    # The two discovery forms that sort before the realm's own (see above).
+    # The two path-inserted discovery forms, a JSON 404 (see above).
     "/.well-known/oauth-authorization-server/realms/it-suite",
     "/.well-known/openid-configuration/realms/it-suite",
+    # The platform's own RFC 8414 document (own authentication phase 3).
+    "/.well-known/oauth-authorization-server",
 )
+
+#: The OAuth server's machine endpoints (plan 2026-11-06, Task 6): the api's,
+#: by exact path. `/oauth/authorize` is a console page (plan D2).
+OAUTH_PATHS = ("/oauth/token", "/oauth/register", "/oauth/revoke")
 
 
 def _api() -> dict:
@@ -106,3 +122,20 @@ def test_the_api_is_given_longer_to_stop_than_a_running_write() -> None:
     grace = _api().get("stop_grace_period")
     assert grace is not None, "api has no stop_grace_period: Docker kills it at 10 s"
     assert _seconds(str(grace)) >= TOOL_TIMEOUT_S + _SHUTDOWN_GRACE_S + 5
+
+
+def test_the_oauth_endpoints_reach_the_api_by_exact_path() -> None:
+    rule = str(_api()["labels"]["traefik.http.routers.api.rule"])
+    for path in OAUTH_PATHS:
+        assert f"Path(`{path}`)" in rule, path
+        assert _winner(path) == "api", (path, _winner(path))
+    # Exact paths: nothing below them, and nothing beside them, moves.
+    assert _winner("/oauth/token/x") == "web"
+    assert _winner("/oauth/tokens") == "web"
+
+
+def test_the_consent_page_stays_the_consoles() -> None:
+    assert _winner("/oauth/authorize") == "web"
+    routes = ROUTES.read_text()
+    for path in OAUTH_PATHS:
+        assert f'"{path}"' not in routes and f"'{path}'" not in routes, path

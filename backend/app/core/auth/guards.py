@@ -153,6 +153,27 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       `end_sessions`, `delete_user`). `set_enabled`, `assign_role`,
       `remove_role` and `resend_invite` take it since the final review of
       phase 2 (items 1-2);
+    - THE ACTS THAT END A PERSON'S AI GRANTS (own authentication phase 3,
+      Task 10; operator decision D2, part c): a disable, a deletion, a
+      factor reset (`user_admin.service`), a password change (`account`,
+      or a mailed link in `flows.reset_password`), signing out everywhere
+      and the recovery link (`flows`). Each holds the row above first, then
+      forgets the devices, then `oauth.grants.revoke_all_for_user`: the
+      person's unspent codes end by their expiry, then their live families
+      -- each table's rows LOCKED IN ID ORDER first (`grants.
+      _lock_in_id_order`), then ended by id -- and only then the act's
+      audit, which counts them (`ai_grants_revoked`). Before the chain,
+      never after it, because of the writers that end a family WITHOUT the
+      person's row and then take the chain: an app's RFC 7009 request
+      (`grants.revoke_presented`: `revoke_family`, then the chain) and a
+      revocation in Settings (`connections.revoke_app_access`: the app's
+      codes and families locked in id order, then the chain). An act that
+      held the chain while waiting on a family one of them had locked would
+      close a cycle with it (40P01). Not a refresh or an exchange: each
+      takes the person's row first, so while the act holds that row neither
+      holds a family of the person's. A code exchange of the person's
+      meanwhile waits on the row and then finds its code expired
+      (`tests/test_mcp_grant_lifecycle.py`);
     - every use of their links (`flows._consumed`) and the mailing of a
       reset link (`flows.send_reset_link`);
     - their own steps: sign-in, step-up and sign-out (`locked_user`, here),
@@ -161,10 +182,26 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       the same locked statement written out there), since the final
       review's round 2: it assigned its fields to an unlocked row and then
       audited -- the chain before the row;
-    - the MCP door (`deps.admit`): its refresh of their address locks the
-      row first since the final review (item 3), having taken the chain
-      before the row until then; its `last_login_at` is an UPDATE of the
-      row and nothing after it in that transaction audits.
+    - an AI app's token requests (own authentication phase 3, Task 7;
+      operator decision D2): `oauth.grants._exchange` and `_refresh` read
+      the code, or the refresh token, unlocked only to learn whose it is;
+      then the row; then the app's (`clients.hold`, FOR KEY SHARE); then the
+      code, or the token and its family, FOR UPDATE, re-read; the grant
+      rows, the access token's signature, the app's use (`clients.touch`,
+      flushed), the chain last. A code exchanged while an act on the person
+      is in flight waits here and reads the act's outcome, so it opens no
+      grant the act's revocation could miss (`tests/test_oauth_token.py`);
+    - a person's approval of an AI app (own authentication phase 3, Task 8;
+      operator decision D2): `oauth.consent.decide` resolves the app first,
+      outside its transaction (`clients.resolve_client`, whose purge of an
+      idle document gives way on a lock wait); then, in one transaction, the
+      row with the session still live under it (`locked_user`, here); the
+      app's (`clients.hold`, FOR KEY SHARE); the code (`grants.issue_code`,
+      no lock of its own); the app's use (`clients.touch`, flushed); the
+      chain; and the "You connected" notice last. An approval that waited
+      on an act which ended the session -- signing out everywhere, a
+      disable -- is refused and issues nothing
+      (`tests/test_oauth_consent.py`).
     THESE WRITERS take the chain last, so none of them holds it while
     waiting on a person's row; it is not a claim about every transaction
     that audits. Two of them that both take the row wait for each other
@@ -173,8 +210,93 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
 
     The writers that take NO person's row, each with the chain last or not
     at all, so none of them can close a cycle with the above:
-    - the retention sweep (`retention.py`), which deletes only rows long
-      dead that none of the above reads;
+    - the retention sweep (`retention.py`). Its phase 2 steps delete only
+      rows long dead that none of the above reads. Its OAuth steps (own
+      authentication phase 3, Task 13), in the same transaction, delete rows
+      long dead that a writer above may still lock -- a refresh or an
+      exchange presenting an old secret, a revocation's UPDATE reaching a
+      grant that lapsed unrevoked -- so they WAIT ON NO ROW. Each statement
+      locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
+      inside it, leaves first: `oauth_codes` expired more than ten minutes
+      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
+      ended more than a day ago that no code still names; then those grants
+      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
+      still names, so their cascade reaches no row they did not lock. A row
+      another transaction holds is left to the next day's sweep. They hold no
+      person's row and no app row, and the chain comes last: a writer above
+      may wait on them and then find the row gone, never the other way round
+      (`tests/test_oauth_retention.py`; `oauth.store`'s lock order says the
+      same). NOT an idle AI app, whose live grants go with it: the sweep's
+      `oauth_apps` step is the purge, below (`clients.purge_idle`), run
+      before the sweep's transaction and outside it. If that transaction
+      then fails, the apps' own audit row is written in a transaction that
+      takes nothing but the chain;
+    - the purge of an idle AI app (own authentication phase 3: Task 6's
+      `clients.purge_idle`, and Task 13's retention step for apps, which
+      must keep the same shape), which deletes a person's grant rows --
+      families, refresh tokens, codes -- by cascade from `oauth_clients`,
+      holding no person's row. Its shape, as `clients.purge_idle` builds it:
+      the idle apps' ids read first, holding nothing; then, for each, in A
+      TRANSACTION OF ITS OWN (`clients._purge_one`), `DELETE FROM
+      oauth_clients WHERE id = ... AND last_used_at <= now - CLIENT_IDLE`
+      (`clients.idle_at`, `clients.is_idle` in SQL), the idle condition
+      INSIDE the statement, waiting at most half the server's
+      `deadlock_timeout` (`clients.bound_lock_wait`: read from `pg_settings`
+      in that transaction, at most 500 ms) and giving way on a timeout or a
+      40P01; no app started after `clients.PURGE_BUDGET_S`; nothing after
+      the cascade, not even the chain (a registration is not audited).
+      `clients.resolve_client` removes a document's idle row by the same
+      step before it stores a new copy. A writer of grants holds the app row
+      FOR KEY SHARE before any grant row (`clients.hold`, `oauth.store`'s
+      lock order, step 3), so the DELETE waits for it on the app row; that
+      writer's late use (`clients.touch`, step 5) does not queue behind the
+      waiting DELETE, and once it commits Postgres re-checks the condition
+      on the row as it now is, finds it false, and the app survives. A
+      revocation -- one UPDATE of a family, or (since Task 10) the unspent
+      codes' expiry and then the live families, each locked in id order
+      and then ended, and then only the chain (`grants.revoke_family`,
+      `revoke_all_for_user`, `revoke_app`) -- takes no app row
+      (`oauth.store`'s carve-out), so the DELETE may instead wait IN ITS
+      CASCADE for that writer's code or family rows; it reaches only live
+      ones, which an idle app all but never has. That revocation takes a
+      person's families in no app's order, which is why ONE APP PER
+      TRANSACTION and never several, even in id order: a purge holding one
+      app's cascade while waiting in another's would have the revocation
+      wait on it in turn -- a cycle. And with the person's two families on
+      the ONE app, the cascade (in its own order, not the ids') may hold the
+      first while waiting on the second that the revocation locked first,
+      and the revocation then reach the first: a cycle
+      inside one app, which is why the purge's wait is bounded by half the
+      server's `deadlock_timeout`, whatever it is set to. Its wait began first, so
+      it gives way before either side's deadlock check runs, and the
+      person's act completes (`tests/test_oauth_schema.py`,
+      `tests/test_oauth_registration.py`);
+    - an AI app's RFC 7009 revocation (`oauth.grants.revoke_presented`,
+      own authentication phase 3, Task 7), under that carve-out: the grant
+      read unlocked, one UPDATE of its family (`grants.revoke_family`), then
+      only the chain -- no person's row and no app row
+      (`tests/test_oauth_token.py`);
+    - revoking an AI app in Settings (`oauth.connections.revoke_app_access`,
+      own authentication phase 3, Task 10), under the same carve-out: the
+      app read unlocked; `grants.revoke_app`, the app's (or one person's of
+      it) unspent codes' expiry and then its live families, many people's
+      for "everyone"; the `mcp_revocation` row, flushed; the chain last. No
+      person's row -- "everyone" would otherwise take every account of the
+      organization in one act -- and no app row. IT SHARES ROWS WITH AN
+      ACCOUNT ACT on that person's codes and families of that app (two
+      grants after a reconnect, two codes approved within a minute), and
+      both take them IN ID ORDER: each table's rows locked by `SELECT id …
+      ORDER BY id FOR NO KEY UPDATE` (`grants._lock_in_id_order`), whose
+      locking step sits above the sort, before they are ended by id -- codes
+      before families in both. One order over every row they share, so no
+      cycle. Not the scans' order, which no plan promises the two share: an
+      index returns a HOT chain at its root slot and a sequential scan the
+      live version at its own, and the person's predicate and the app's can
+      take different plans. With a plain UPDATE in each, the act read the
+      person's two grants by index, A then B, and the revoke the app's by a
+      sequential scan, B then A: a 40P01, a 500 on either side
+      (`tests/test_mcp_grant_lifecycle.py`, the cross-order and the id
+      order; `tests/test_mcp_admin_api.py`);
     - the server's recovery command (`recover.py`), which issues its link
       and then audits -- link before chain -- and whose link is checked
       against the locked row when it is used (`flows._consumed`);
@@ -187,6 +309,16 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       the session the request's cookie names -- somebody else's, when a
       cookie was planted -- in one UPDATE, under the row of the person
       signing in and before their chain.
+
+    NOT A WRITER AT ALL since own authentication phase 3 (Task 9): the MCP
+    door (`deps.admit`). Until then it refreshed the person's address from
+    the token's claim -- taking the row first since the final review of
+    phase 2 (item 3), the chain before the row until then -- and wrote
+    `last_login_at` on every call. The platform's own token carries no
+    address: the door reads the person's row and their grant
+    (`grants.family_is_live`) unlocked and writes nothing, so it takes no
+    lock and cannot close a cycle with any of the above
+    (`tests/test_user_admin_races.py`).
 
     NO KEY UPDATE, not UPDATE: a row inserted meanwhile that refers to the
     person (a session, a link) takes KEY SHARE on it, which this does not

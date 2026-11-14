@@ -14,8 +14,9 @@ with Microsoft" is the platform's own -- an application in Microsoft Entra
 ID configured in Settings -> Microsoft sign-in, proved with the platform's
 own certificate, the identity kept as `tid` + `oid` -- and §3.3's Keycloak
 identity provider no longer signs anybody in to the console or the portal.
-It concerns MCP clients only, until phase 4 removes Keycloak (from phase 3
-on, which moves MCP to the platform's own OAuth server, it signs nobody in).
+Until phase 3 it concerned MCP clients only; since phase 3, which moved MCP
+to the platform's own OAuth server, it signs nobody in, and phase 4 removes
+it with Keycloak.
 
 **Which falsifiers have tests.** 1, 2 (by proxy), 4 and 7 are in
 `backend/tests/test_console_auth_realm.py`. 5 and 6 -- the OIDC authority
@@ -32,8 +33,9 @@ that a federated token carries the `org` claim needs a real Entra tenant and a
 real browser. The mapper is asserted as committed; the claim is not observed.
 `deploy/README.md` used to give the operator a devtools one-liner that decoded
 the console's token; since own authentication phase 1 the console holds no
-Keycloak token, so the claim is now carried only by the access tokens MCP
-clients obtain, and the runbook says so ("Sign in with Microsoft").
+Keycloak token, and since own authentication phase 3 no token Keycloak
+issues is accepted anywhere, so no token carries the claim to check, as the
+runbook says ("Sign in with Microsoft").
 
 **Nothing here has rendered in a running Keycloak.** The theme is FreeMarker
 executed by a Java process this suite does not run, so falsifier 2's real form
@@ -104,8 +106,8 @@ enrolment routes (design §2.2). The balance, stated rather than implied:
   outside the hash chain. Every sign-in, factor change and lockout is now an
   event in the platform's own chain (invariant 4).
 
-MCP keeps signing in at Keycloak until own authentication phase 3, and the
-realm is removed in phase 4.
+Since own authentication phase 3 MCP signs in on the platform's own OAuth
+server too; the realm is removed in phase 4.
 
 ---
 

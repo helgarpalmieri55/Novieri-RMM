@@ -208,6 +208,70 @@ def test_the_unnarrowed_scope_guard_is_not_vacuous() -> None:
     ]
 
 
+# Who may open `oauth_session`, the every-client session over the OAuth
+# server's rows (own authentication phase 3, plan 2026-11-06 B3-31). CLAUDE.md
+# 5a: "cada uso está en una lista revisada" -- `ALL_SCOPE_ALLOWLIST` reviews
+# the function that calls `ClientScope.all()`, this list the files that call
+# it. No route file is here: a route calls a core function that is.
+OAUTH_SESSION_USERS: dict[str, str] = {
+    "app/core/auth/oauth/store.py": "defines it",
+    "app/core/auth/oauth/clients.py": (
+        "an app's row: a registration (the purge, one idle app per transaction, which the "
+        "daily retention sweep runs too; the ceiling and the write in one) and a metadata "
+        "document read in a consent; the organization's MCP switch for both"
+    ),
+    "app/core/auth/oauth/grants.py": (
+        "a person's codes and refresh families: one transaction per token request "
+        "(`exchange_code`, `refresh_grant`) and per RFC 7009 revocation (`revoke_presented`). "
+        "Not the MCP door's check that a grant still stands: `family_is_live` takes the "
+        "caller's session, and the door reads the family in its own every-client "
+        "`org_session` (`deps.admit`, in `ALL_SCOPE_ALLOWLIST`)"
+    ),
+    "app/core/auth/oauth/consent.py": (
+        "an approval: the person's code, its audit row and its notice in one transaction"
+    ),
+    "app/core/auth/oauth/connections.py": (
+        "Settings -> AI connections: the apps holding a person's live grants, and revoking one "
+        "(its grants, the revocation row and the audit event in one transaction)"
+    ),
+}
+
+
+def _oauth_session_uses(sources: list[tuple[str, ast.Module]]) -> list[str]:
+    found: list[str] = []
+    for path, tree in sources:
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.Name):
+                names = [node.id]
+            elif isinstance(node, ast.Attribute):
+                names = [node.attr]
+            found.extend(f"{path}:{node.lineno}" for name in names if name == "oauth_session")
+    return found
+
+
+def test_only_the_reviewed_files_open_the_oauth_session() -> None:
+    outside = [
+        use
+        for use in _oauth_session_uses(_app_sources())
+        if use.split(":")[0] not in OAUTH_SESSION_USERS
+    ]
+    assert not outside, (
+        "oauth_session opens every client over a person's grants; add the file to "
+        f"OAUTH_SESSION_USERS with its reason, or call a function that is there: {outside}"
+    )
+
+
+def test_the_oauth_session_guard_is_not_vacuous() -> None:
+    # The scan reads the package (its definition is a `def`, not a use) and
+    # flags the shape it exists to forbid.
+    assert "app/core/auth/oauth/store.py" in {path for path, _ in _app_sources()}
+    bad = ast.parse("from app.core.auth.oauth.store import oauth_session\n")
+    assert _oauth_session_uses([("app/api/v1/x.py", bad)]) == ["app/api/v1/x.py:1"]
+
+
 def test_every_table_is_classified() -> None:
     live = {t.name for t in Base.metadata.sorted_tables}
     assert live - set(CATALOG) == set(), "unclassified tables (spec §5 test 1)"
@@ -593,6 +657,10 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
         "a WebAuthn credential id: at least 16 random bytes the authenticator chose, and "
         "W3C WebAuthn §7.1 refuses one already registered to anyone"
     ),
+    # Own authentication phase 3 (migration 0247): the SHA-256 of a random
+    # 256-bit value the AI app holds, found by it before anybody's scope exists.
+    ("oauth_codes", "code_hash"): "the SHA-256 of a random 256-bit authorization code",
+    ("oauth_refresh_tokens", "token_hash"): "the SHA-256 of a random 256-bit refresh token",
 }
 
 #: Unique keys on scoped tables that are deliberately organisation-wide.
@@ -601,10 +669,11 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
 #: existing, fails `test_the_org_wide_keys_have_not_rotted`.
 ORG_WIDE_KEYS: dict[str, str] = {
     "users_org_id_external_subject_key": (
-        "an identity, not a name: one subject of the identity provider is one person in "
-        "the organisation, and `deps.admit` finds the user by it. Per client, one login "
-        "could hold a row in each client. Written only under scope all (first-login "
-        "provisioning, `POST /users`), and the value is an opaque id the IdP issues"
+        "an identity, not a name: one subject of the identity provider was one person in "
+        "the organisation. No door reads it since own authentication phase 3 (the MCP token "
+        "names the person by id); the Keycloak event ingest still does until phase 4 removes "
+        "both. Per client, one login could hold a row in each client. Written only under "
+        "scope all (`POST /users`, a contact's placeholder), and the value is an opaque id"
     ),
     "uq_inbound_message_org_message_id": (
         "the poller's idempotency key: an RFC 5322 Message-ID names one email, fetched "

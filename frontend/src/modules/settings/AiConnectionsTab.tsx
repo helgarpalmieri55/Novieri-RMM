@@ -1,7 +1,7 @@
 // AI connections — the organization's MCP switch (`mcp_enabled` over
 // `PATCH /orgs/current`, `orgs.manage`), the address an AI app connects to,
 // a short guide, and the apps that used it here
-// (`GET /mcp/connections`, `POST /mcp/connections/{client_id}/revoke`, both
+// (`GET /mcp/connections`, `POST /mcp/connections/{app_id}/revoke`, both
 // `mcp.use`; a revoke for everyone also needs `orgs.manage`). MCP server
 // design §8.
 //
@@ -31,15 +31,12 @@
 // editor on the Organization tab (`SWITCHES_WITH_OWN_TAB` in ./types.ts): a
 // generic toggle there would be the same write without the question.
 //
-// A REVOKE IS IN FORCE WHEN IT RETURNS, AND THE SCREEN SAYS WHAT IS NOT. The
-// server records the revocation first (every token the app already holds is
-// refused from its next call) and then withdraws each person's consent at the
-// identity provider, best effort. `keycloak_failures` counts the people for
-// whom that second half failed: for them the app's refresh token could still
-// obtain a NEW token, so the outcome says the app "may still reconnect without
-// asking" and asks for another try — never "access ends soon", which would be
-// a promise the platform cannot keep. The result is held as data on the
-// mutation and worded at render, so a language switch re-words it.
+// A REVOKE IS IN FORCE WHEN IT RETURNS. The server records the revocation
+// and ends every sign-in the app holds for whom it was revoked, in one
+// transaction (own-auth plan 2026-11-06, D12): there is no second half that
+// can fail, so the screen never says "may still reconnect". The app is
+// named by its registration's id; one that has none any more holds no
+// access and offers no revoke.
 //
 // NO VENDOR IS THE ONLY OPTION. The guide names Claude as an example of an AI
 // app, and the steps are what any MCP client with custom connectors asks for.
@@ -100,7 +97,7 @@ export function AiConnectionsTab({
   const revoke = useRevokeMcpConnection();
   const guideId = useId();
   /** The app a "Revoke for everyone" is waiting to be confirmed for. */
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<McpAppOut | null>(null);
   /** Turning the switch ON, waiting to be confirmed. */
   const [enabling, setEnabling] = useState(false);
 
@@ -111,8 +108,8 @@ export function AiConnectionsTab({
   const connectionsForbidden = isForbidden(connections.error);
   const readOnly = t("settings.aiConnections.readOnly", { code: MCP_USE });
 
-  function revokeFor(clientId: string, scope: "me" | "everyone") {
-    revoke.mutate({ clientId, scope });
+  function revokeFor(app: McpAppOut, scope: "me" | "everyone") {
+    if (app.id !== null) revoke.mutate({ appId: app.id, label: app.host ?? app.client_id, scope });
   }
 
   return (
@@ -174,9 +171,9 @@ export function AiConnectionsTab({
       <RevokeOutcome
         pending={revoke.isPending}
         error={revoke.error}
-        clientId={revoke.variables?.clientId}
+        label={revoke.variables?.label}
         scope={revoke.variables?.scope}
-        failures={revoke.data?.keycloak_failures}
+        done={revoke.data !== undefined}
       />
 
       {canUse && connections.data ? (
@@ -209,8 +206,8 @@ export function AiConnectionsTab({
                     timezone={me.data?.timezone}
                     canRevokeForEveryone={canManageOrg}
                     busy={revoke.isPending}
-                    onRevokeForMe={() => revokeFor(app.client_id, "me")}
-                    onRevokeForEveryone={() => setConfirming(app.client_id)}
+                    onRevokeForMe={() => revokeFor(app, "me")}
+                    onRevokeForEveryone={() => setConfirming(app)}
                   />
                 ))}
               </tbody>
@@ -235,7 +232,7 @@ export function AiConnectionsTab({
       <ConfirmDialog
         open={confirming != null}
         title={t("settings.aiConnections.confirm.title")}
-        subject={confirming ?? ""}
+        subject={confirming ? (confirming.host ?? confirming.client_id) : ""}
         body={t("settings.aiConnections.confirm.body")}
         confirmLabel={t("settings.aiConnections.confirm.action")}
         destructive
@@ -269,6 +266,8 @@ function AppRow({
   onRevokeForEveryone: () => void;
 }) {
   const t = useT();
+  // The host is what the app cannot fake (B3-10); without a registration, its client id.
+  const label = app.host ?? app.client_id;
   // "For everyone" covers "for you", so only the wider one is said.
   const state = app.revoked_for_everyone
     ? t("settings.aiConnections.apps.revokedForEveryone")
@@ -278,40 +277,50 @@ function AppRow({
   return (
     <tr>
       <Td lead={<Icon name="sparkles" size={18} />}>
-        {/* The client id is what the app registered: recorded, not translated. */}
-        <div className="cell-title">{app.client_id}</div>
+        {/* The host and the client id are recorded, not translated; the name is the app's own claim. */}
+        <div className="cell-title">{label}</div>
+        {app.name !== null ? (
+          <div className="cell-sub">{t("settings.aiConnections.apps.calledItself", { name: app.name })}</div>
+        ) : null}
+        {app.kind === "registered" ? (
+          <div className="cell-sub">{t("settings.aiConnections.apps.selfRegistered")}</div>
+        ) : null}
+        {app.host !== null ? <div className="cell-sub mono">{app.client_id}</div> : null}
         {state ? <div className="cell-sub">{state}</div> : null}
+        {app.id === null ? <div className="cell-sub">{t("settings.aiConnections.apps.unregistered")}</div> : null}
       </Td>
       <Td>
         <span className="count">{app.people}</span>
       </Td>
       <Td>{formatDateTime(app.last_used_at, timezone)}</Td>
       <Td>
-        {/* A revoke is offered again after one: it is how a revoke whose
-            sign-in half failed for some people is retried. */}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={t("settings.aiConnections.apps.revokeMeAria", { app: app.client_id })}
-            disabled={busy}
-            onClick={onRevokeForMe}
-          >
-            {t("settings.aiConnections.apps.revokeMe")}
-          </Button>
-          {canRevokeForEveryone ? (
+        {/* A revoke is offered again after one: an app that reconnected since
+            is revoked again the same way. */}
+        {app.id !== null ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
-              className="danger"
-              aria-label={t("settings.aiConnections.apps.revokeEveryoneAria", { app: app.client_id })}
+              aria-label={t("settings.aiConnections.apps.revokeMeAria", { app: label })}
               disabled={busy}
-              onClick={onRevokeForEveryone}
+              onClick={onRevokeForMe}
             >
-              {t("settings.aiConnections.apps.revokeEveryone")}
+              {t("settings.aiConnections.apps.revokeMe")}
             </Button>
-          ) : null}
-        </div>
+            {canRevokeForEveryone ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="danger"
+                aria-label={t("settings.aiConnections.apps.revokeEveryoneAria", { app: label })}
+                disabled={busy}
+                onClick={onRevokeForEveryone}
+              >
+                {t("settings.aiConnections.apps.revokeEveryone")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </Td>
     </tr>
   );
@@ -326,18 +335,18 @@ function AppRow({
 function RevokeOutcome({
   pending,
   error,
-  clientId,
+  label,
   scope,
-  failures,
+  done,
 }: {
   pending: boolean;
   error: unknown;
-  clientId: string | undefined;
+  label: string | undefined;
   scope: "me" | "everyone" | undefined;
-  failures: number | undefined;
+  done: boolean;
 }) {
   const t = useT();
-  if (pending || clientId === undefined || scope === undefined) return null;
+  if (pending || label === undefined || scope === undefined) return null;
   if (error != null) {
     return (
       <p role="alert" className="notice red" style={{ margin: "16px 0" }}>
@@ -346,28 +355,14 @@ function RevokeOutcome({
       </p>
     );
   }
-  if (failures === undefined) return null;
-  if (failures > 0) {
-    return (
-      <p role="alert" className="notice gold" style={{ margin: "16px 0" }}>
-        <Icon name={KIND_ICON.warn} size={16} />
-        <span>
-          {/* "For you" when it was your own revoke: a count of one person
-              would be a stranger's way of saying it. */}
-          {scope === "me"
-            ? t("settings.aiConnections.partialMe", { app: clientId })
-            : t("settings.aiConnections.partial", { app: clientId, count: failures })}
-        </span>
-      </p>
-    );
-  }
+  if (!done) return null;
   return (
     <p role="status" className="notice" style={{ margin: "16px 0" }}>
       <Icon name={KIND_ICON.ok} size={16} />
       <span>
         {scope === "everyone"
-          ? t("settings.aiConnections.revoked.everyone", { app: clientId })
-          : t("settings.aiConnections.revoked.me", { app: clientId })}
+          ? t("settings.aiConnections.revoked.everyone", { app: label })
+          : t("settings.aiConnections.revoked.me", { app: label })}
       </span>
     </p>
   );

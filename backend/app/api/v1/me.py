@@ -163,8 +163,8 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
     reporting the identity provider's value. `email` reads from the row too,
     and since own authentication phase 1 the row IS the source: the console
     session carries no claim, and the address is the one the person signs in
-    with (`app/core/auth/lookup.py`). (On the MCP channel `deps.admit` still
-    refreshes it from the Keycloak token's claim until phase 3.)
+    with (`app/core/auth/lookup.py`). (Since phase 3 the MCP door reads it from
+    the row too: the platform's token carries no address.)
 
     Under EVERY client, not `ctx.clients`: the profile is the person's, and a
     person with no grant has the empty scope, which sees no staff row
