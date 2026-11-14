@@ -12,13 +12,22 @@ SECURITY DEFINER". No admin engine anywhere in this package
 (`tests/test_oauth_schema.py`). A slug that names no organization is None,
 and the routes answer 503.
 
-EVERY CLIENT, AND ONLY HERE. A technician's grant rows are global rows (O
-under `users`, client NULL) that only an every-client scope may write
-(migration 0231), and they are read by a hash before anybody's scope exists.
-`oauth_session` is the one function that opens that scope over them
-(`ALL_SCOPE_ALLOWLIST`), and the files that call it are listed
+EVERY CLIENT, AND ONLY IN REVIEWED PLACES. A technician's grant rows are
+global rows (O under `users`, client NULL) that only an every-client scope
+may write (migration 0231), and they are read by a hash before anybody's
+scope exists. `oauth_session` opens that scope over them for the OAuth
+server itself (`ALL_SCOPE_ALLOWLIST`), and the files that call it are listed
 (`tests/test_client_catalog.py::OAUTH_SESSION_USERS`); a route file never
-does.
+does. It is not the only every-client session that reaches them, and each
+of the others is an entry of that list too: the door reads the grant an
+access token names (`deps.admit`, read only); the retention sweep deletes
+the dead ones (`retention.sweep_org`, THE RETENTION SWEEP below, whose
+second session writes only the apps' audit row); and the account acts that
+end a person's grants run in theirs -- signing out everywhere and the use
+of a link (`flows._identity_session`), a password change in My security
+(`account.own_session`). An administrator's acts on a technician
+(`user_admin.service`) reach them under the every-client scope their routes
+require (`require_permission_on_every_client`), which the door computed.
 
 THE LOCK ORDER IS THE CALLER'S, AND THE PERSON'S ROW COMES FIRST (own
 authentication phase 2's rule, `guards.lock_user_row`; operator decision D2

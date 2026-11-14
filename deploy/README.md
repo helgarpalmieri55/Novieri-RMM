@@ -35,7 +35,8 @@ removes it. The sections of this
 runbook that describe the console's sign-in through Keycloak -- the
 enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
 predate that change; the runbook is rewritten with the deployment project
-(design §9). Four things phase 1 changed, and two phase 2 changed, that every deployment needs:
+(design §9). Four things phase 1 changed, two phase 2 changed, and one phase
+3 changed, that every deployment needs:
 
 - **`ITS_PUBLIC_CONSOLE_URL` is required for any console sign-in**, and it must
   be exactly the `https://host[:port]` origin the browser's address bar shows
@@ -73,6 +74,19 @@ predate that change; the runbook is rewritten with the deployment project
 - **Sign in with Microsoft is configured in the console**, not in `.env`:
   see [Sign in with Microsoft](#sign-in-with-microsoft-own-authentication-phase-2).
   The `ENTRA_*` lines of `.env.example` are Keycloak's and are not read by it.
+- **Phase 3 moves MCP onto the platform's own OAuth server**
+  ([AI connections (MCP)](#ai-connections-mcp)). A `.env` that already holds
+  `ITS_MCP_REGISTRATION=open` -- step 2 of the connection steps while
+  Keycloak was MCP's authorization server -- now also opens the platform's
+  own anonymous registration (`POST /oauth/register`, advertised as
+  `registration_endpoint`) whenever MCP is on. Claude and Claude Code no
+  longer need it, because the platform reads their client metadata
+  documents: delete the line unless another app needs it (step 7 of
+  "Turning it on"), with `sed -i '/^ITS_MCP_REGISTRATION=/d' .env`, and
+  deploy. And every connector made through Keycloak stops working (401):
+  each person removes the connector, adds it again and approves on the
+  console's consent page, with their second factor confirmed in the last
+  ten minutes.
 
 ---
 
@@ -2123,7 +2137,7 @@ not a narrower grant:
 | Mitigation | What it actually buys |
 |---|---|
 | A separate client from `it-suite-events` | the hourly event sweep keeps its `view-events`-only worst case — an information leak — instead of inheriting this one |
-| The client `kc_client.py` calls exactly six operations, and since own authentication phase 3 nothing calls the client | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute, remove one AI app's consent for a user. The platform now runs the user lifecycle itself, and revoking an AI app stopped involving Keycloak in phase 3, so nothing in `backend/app` imports that client any more; it goes with Keycloak in phase 4. **The credential stays broader than the code, and keycloak-init still issues it**; a bug or an injected call is not bounded by this row |
+| The client `kc_client.py` calls exactly six operations, and since own authentication phase 3 nothing calls the client | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute, remove one AI app's consent for a user. The platform now runs the user lifecycle itself, and revoking an AI app stopped involving Keycloak in phase 3, so nothing in `backend/app` calls that client any more (`realm_config.py` imports its types, and has no caller itself); it goes with Keycloak in phase 4. **The credential stays broader than the code, and keycloak-init still issues it**; a bug or an injected call is not bounded by this row |
 | Every route is RBAC-gated server-side | `users.manage` / `users.read`, checked in the API, never in the frontend |
 | Every action is written to the hash-chained audit log | in the same transaction as the change, so an unlogged lifecycle action is a failed one |
 | **Impersonation is never called** | impersonation is *also* inside `manage-users`. ITMS has no code path that calls it, and adding one would be a new decision, not a patch |
@@ -2382,8 +2396,11 @@ until it goes unused for 30 days, when the daily sweep removes it.
    The answer is JSON whose `issuer` is your console address and which carries
    `"client_id_metadata_document_supported": true`. It carries
    `registration_endpoint` only when you opted in to registration (step 7)
-   and MCP is on. A 503 with `temporarily_unavailable` means
-   `ITS_PUBLIC_CONSOLE_URL` is not an https address without a path (step 1).
+   and MCP is on. Anything other than this JSON means step 1's address is
+   wrong: with a path after the host the request reaches the console's page
+   (HTML, with a 200), with `http://` nothing answers at all, and a 503 with
+   `temporarily_unavailable` is the `api` container saying that
+   `ITS_PUBLIC_CONSOLE_URL` is not an https address without a path.
 4. **Settings → AI connections:** an org-admin turns on **Allow AI apps to
    connect over MCP**. The tab shows the connection address.
 5. **Settings → Roles:** grant `mcp.use` to the roles that may connect.
@@ -2397,10 +2414,12 @@ until it goes unused for 30 days, when the daily sweep removes it.
    that only answers on the person's own computer, it says so. **Approving
    needs the person's second factor confirmed in the last ten minutes**, on a
    remembered browser too, and the person then receives a mail, "You
-   connected <host>" (operator decision 2026-11-06). Approving lets the app
-   act as the person. Then, in the app's settings for that connector, set
-   each tool to *Always allow* or *Needs approval*; tools that change
-   something are safest on *Needs approval*.
+   connected <host>" (operator decision 2026-11-06), when account mail is
+   configured in Settings → Email; without it the approval still succeeds
+   and nothing is mailed. Approving lets the app act as the person. Then, in
+   the app's settings for that connector, set each tool to *Always allow* or
+   *Needs approval*; tools that change something are safest on *Needs
+   approval*.
 7. **Only for an app that cannot publish a metadata document:** opt in to
    registration. Read "Residual risks, stated plainly" below first: risks 3,
    7 and 8 exist only while it is set. From the directory holding
@@ -2512,10 +2531,12 @@ by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`)
   revoke the app for everyone.
 - **The whole organization — the emergency stop:** Settings → AI
   connections → turn **Allow AI apps to connect over MCP** off. Every app is
-  refused from its next call, whatever it is. **Turning it back on ends no
-  grant and restores every one that is still live:** the apps connected
-  before work again at once. To have people approve them again, revoke the
-  apps for everyone before turning the switch back on.
+  refused from its next call, whatever it is. While it is off, apps can
+  still refresh their tokens (`/oauth/token` does not read the switch), but
+  every call they make is refused. **Turning it back on ends no grant and
+  restores every one that is still live:** the apps connected before work
+  again at once. To end those grants, so that people approve the apps
+  again, revoke the apps for everyone before turning the switch back on.
 - **New apps that register themselves, deployment-wide:** delete the
   `ITS_MCP_REGISTRATION=` line from `.env` and redeploy. The platform refuses
   every new registration; apps already registered, and apps known by a
@@ -2587,9 +2608,11 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    claim, says what approving hands over — "If you approve, it can act as you
    in ITMS: everything your role allows, including running actions on managed
    computers" — needs the person's second factor confirmed in the last ten
-   minutes, and mails them "You connected <host>" afterwards. Org-admins
-   should approve only apps they connected themselves, and anyone who gets
-   that mail for an app they do not recognise should revoke it.
+   minutes, and mails them "You connected <host>" afterwards when account
+   mail is configured in Settings → Email (without it the approval still
+   succeeds and nothing is mailed). Org-admins should approve only apps they
+   connected themselves, and anyone who gets that mail for an app they do
+   not recognise should revoke it.
 2. **An app known by its client metadata document makes the platform fetch
    that address**, only inside a signed-in person's consent, with MCP on and
    `mcp.use` held. The fetch goes through the platform's outbound guard (only
@@ -2606,9 +2629,10 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    (an IPv6 address is counted by its /64), registration is refused while MCP
    is off, and the platform holds at most 200 live registrations, after which
    it answers 503 until unused ones expire; a registration nobody uses for 30
-   days goes with the daily sweep. Nothing is exposed by it — registering
-   grants nothing without a person's consent. The hosted Claude apps do not
-   register: they use their metadata documents. Their requests come from
+   days goes with the daily sweep, which audits it, unless a new
+   registration purges it first, which does not. Nothing is exposed by it —
+   registering grants nothing without a person's consent. The hosted Claude
+   apps do not register: they use their metadata documents. Their requests come from
    Anthropic's published egress ranges (`160.79.104.0/21` and
    `153.61.208.0/20`), not from your office. Every Claude user shares those
    addresses, and Anthropic does not say how many of them it uses, so one
@@ -2616,11 +2640,12 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    revocation endpoints together allow 600 requests a minute per address (an
    IPv6 address is counted by its /64).
 4. **http redirects are allowed only to the person's own computer**
-   (`127.0.0.1`, `[::1]`, `localhost`, any port), which desktop AI apps use
-   (Claude Code's metadata document among them). Whatever answers on that
-   port of the person's computer receives the authorization code; it is bound
-   to the app's PKCE verifier and cannot be redeemed without it. The consent
-   page says when an app only answers there.
+   (`127.0.0.1`, `[::1]`, `localhost`, any port but 0, which is refused),
+   which desktop AI apps use (Claude Code's metadata document among them).
+   Whatever answers on that port of the person's computer receives the
+   authorization code; it is bound to the app's PKCE verifier and cannot be
+   redeemed without it. The consent page says when an app only answers
+   there.
 5. **Free text can hold a secret under an innocent name.** The scan blocks
    results by field *name*; a password someone typed into a documentation
    record's notes field is text like any other and reaches the app as the
@@ -2657,8 +2682,9 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
     confirmed in the last ten minutes, so outside that window the trick only
     reaches the second-factor prompt; inside it, one click is enough. It is
     bounded, not removed: the page is titled by the app's host, the person
-    is mailed "You connected <host>", and Settings → AI connections revokes
-    the app.
+    is mailed "You connected <host>" when account mail is configured in
+    Settings → Email (without it the approval still succeeds and nothing is
+    mailed), and Settings → AI connections revokes the app.
 11. **A password change does not stop an approval in the session it keeps.**
     The change ends the person's AI grants and every other session of
     theirs, but an AI app approved afterwards in the session the change was

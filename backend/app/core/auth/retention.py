@@ -38,7 +38,9 @@ THE SWEEP IS AUDITED (plan decision 2; invariant 4): deleting evidence is a
 privileged act, as `ipam.retention` and `security_logs.retention` hold. One
 `auth.retention_applied` per organization, only when something went, with a
 count per step: every row a step's own statements delete is in that day's
-row, whatever else fails (`sweep_org`).
+row, whatever else fails (`sweep_org`) -- except the residual `sweep_org`
+names: a purge error other than 55P03 or 40P01, after apps of the batch
+committed.
 
 EVERY STEP CARRIES AN EXPLICIT `org_id` PREDICATE, in addition to RLS (plan
 decision 3; `app/core/ai/retention.py`'s rule): `sweep` takes any session,
