@@ -10,8 +10,10 @@ is a test that goes red when its protection goes:
   the family's newest access token still works;
 - drop the exact-audience check from `access.verify_access_token`, and a token
   of ours for two audiences is admitted;
-- let `/mcp`, `/oauth/token` or the MCP door read the assistant's internal
-  token, and it is admitted.
+- let the MCP door read the assistant's internal token, and it is admitted;
+  let `/oauth/token` take it, and the refusal changes. `/mcp` refuses it in
+  three independent places, so no single change turns that clause red (the
+  task report says which).
 
 And the whole way, as Claude does it -- register (or be known by a client
 metadata document, with no registration opt-in: operator decision C2), consent

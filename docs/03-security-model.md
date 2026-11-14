@@ -203,9 +203,14 @@ the system.
 - **Retention:** sessions are deleted 90 days after they ended or expired;
   remembered devices and one-time links 30 days after (a technician's
   unused invitation never is: it is the pending invitation Users shows);
-  WebAuthn challenges after a day; since phase 3, spent OAuth authorization codes 10 minutes after they expire, ended AI-app grants after a day, and AI apps unused for 30 days
-  (an ended grant's refresh tokens go with it); each daily sweep that
-  deletes anything is audited (`auth.retention_applied`).
+  WebAuthn challenges after a day; since phase 3, OAuth authorization codes
+  10 minutes after they expire, used or not, ended AI-app grants after a day
+  (their refresh tokens with them), and AI apps unused for 30 days; each
+  daily sweep that deletes anything is audited (`auth.retention_applied`).
+  One residual: idle AI apps go before the audited transaction, and if a
+  purge meets a database error it does not give way on, the apps it already
+  removed that day are not recorded (`app/core/auth/retention.py`,
+  `sweep_org`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):

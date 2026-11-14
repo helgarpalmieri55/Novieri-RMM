@@ -2123,7 +2123,7 @@ not a narrower grant:
 | Mitigation | What it actually buys |
 |---|---|
 | A separate client from `it-suite-events` | the hourly event sweep keeps its `view-events`-only worst case — an information leak — instead of inheriting this one |
-| The code calls exactly six operations | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute (`PATCH /me`, Spanish-language work), remove one AI app's consent for a user (no caller since own authentication phase 3, when revoking an app stopped involving Keycloak; it goes with Keycloak in phase 4). **The credential stays broader than the code**; a bug or an injected call is not bounded by this row |
+| The code calls none of its operations since own authentication phase 3 | `kc_client.py` once called six: create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute, remove one AI app's consent for a user. The platform now runs the user lifecycle itself, and revoking an AI app stopped involving Keycloak in phase 3, so nothing in `backend/app` imports that client any more; it goes with Keycloak in phase 4. **The credential stays broader than the code, and keycloak-init still issues it**; a bug or an injected call is not bounded by this row |
 | Every route is RBAC-gated server-side | `users.manage` / `users.read`, checked in the API, never in the frontend |
 | Every action is written to the hash-chained audit log | in the same transaction as the change, so an unlogged lifecycle action is a failed one |
 | **Impersonation is never called** | impersonation is *also* inside `manage-users`. ITMS has no code path that calls it, and adding one would be a new decision, not a patch |
@@ -2502,9 +2502,14 @@ by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`)
 - **One person:** take `mcp.use` away from their role. Their next call is
   refused. Disabling or deleting the person, resetting their factors (by an
   administrator, or with a recovery link), a password change (their own, or
-  through a reset mail) and "Sign out everywhere" end all their AI grants
-  too, and the codes an app has not exchanged yet; the act's own audit event
-  says how many grants ended (`ai_grants_revoked`).
+  through a reset mail) and the person's own sign-out of every session
+  (`POST /api/v1/auth/logout-everywhere`; the console has no button for it)
+  end all their AI grants too, and the codes an app has not exchanged yet;
+  the act's own audit event says how many grants ended (`ai_grants_revoked`).
+  **An administrator's "Sign out everywhere" (Settings → Users) is not one
+  of them:** it ends the person's console sessions only, and their AI grants
+  stay. To stop those too, take `mcp.use` away, disable the person, or
+  revoke the app for everyone.
 - **The whole organization — the emergency stop:** Settings → AI
   connections → turn **Allow AI apps to connect over MCP** off. Every app is
   refused from its next call, whatever it is. **Turning it back on ends no
@@ -2519,8 +2524,10 @@ by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`)
 - **The whole deployment — the deployment-wide stop:** empty
   `ITS_PUBLIC_CONSOLE_URL` and redeploy. `/mcp` answers 503 and the platform
   has no OAuth issuer. This also turns off everything else that uses the
-  address — the console's own sign-in, Email intake's Microsoft sign-in, the
-  install link — so it is a last resort, not a switch.
+  address — the console's own sign-in and passkeys, the links in the
+  platform's account mail, push install, the Group Policy MSI, Email
+  intake's Microsoft sign-in, the install link (`.env.example` lists them
+  under `ITS_PUBLIC_CONSOLE_URL`) — so it is a last resort, not a switch.
 
 ### What is never reachable over MCP
 
@@ -2620,8 +2627,9 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    person could read it.
 6. **A stolen access token works for at most ten minutes, or until its grant
    ends.** It names its grant, which the API reads on every call: revoking the
-   app, the person's account acts above, or the app's refresh token being used
-   twice (a sign it was copied) end it at once.
+   app, the person's account acts above (not an administrator's "Sign out
+   everywhere", which ends console sessions only), or the app's refresh token
+   being used twice (a sign it was copied) end it at once.
 7. **Until phase 4, Keycloak's own anonymous registration opens with the same
    setting.** keycloak-init still converges it (above). Its tokens are refused
    at `/mcp` and everywhere else, so it leads nowhere; but its own exposure
