@@ -162,11 +162,17 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       person's unspent codes end by their expiry, then their live families
       -- each table's rows LOCKED IN ID ORDER first (`grants.
       _lock_in_id_order`), then ended by id -- and only then the act's
-      audit, which counts them (`ai_grants_revoked`). Before the chain, never after it: an act that
-      held the chain while waiting on a family a refresh holds FOR UPDATE
-      would meet that refresh's reuse or `person_inactive` branch waiting
-      on the chain (40P01). A code exchange of the person's meanwhile waits
-      on the row and then finds its code expired
+      audit, which counts them (`ai_grants_revoked`). Before the chain,
+      never after it, because of the writers that end a family WITHOUT the
+      person's row and then take the chain: an app's RFC 7009 request
+      (`grants.revoke_presented`: `revoke_family`, then the chain) and a
+      revocation in Settings (`connections.revoke_app_access`: the app's
+      codes and families locked in id order, then the chain). An act that
+      held the chain while waiting on a family one of them had locked would
+      close a cycle with it (40P01). Not a refresh or an exchange: each
+      takes the person's row first, so while the act holds that row neither
+      holds a family of the person's. A code exchange of the person's
+      meanwhile waits on the row and then finds its code expired
       (`tests/test_mcp_grant_lifecycle.py`);
     - every use of their links (`flows._consumed`) and the mailing of a
       reset link (`flows.send_reset_link`);

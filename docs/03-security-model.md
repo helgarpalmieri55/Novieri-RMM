@@ -207,10 +207,14 @@ the system.
   10 minutes after they expire, used or not, ended AI-app grants after a day
   (their refresh tokens with them), and AI apps unused for 30 days; each
   daily sweep that deletes anything is audited (`auth.retention_applied`).
-  One residual: idle AI apps go before the audited transaction, and if a
-  purge meets a database error it does not give way on, the apps it already
-  removed that day are not recorded (`app/core/auth/retention.py`,
-  `sweep_org`).
+  An idle AI app can also go before the sweep reaches it, and that removal
+  is not audited: while registration is open, each registration first
+  purges idle apps (B3-22); and a consent that reads an idle app's metadata
+  document again removes the idle row, its grants with it, before storing
+  the new copy. One residual: idle AI apps go before the audited
+  transaction, and if a purge meets a database error it does not give way
+  on, the apps it already removed that day are not recorded
+  (`app/core/auth/retention.py`, `sweep_org`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):

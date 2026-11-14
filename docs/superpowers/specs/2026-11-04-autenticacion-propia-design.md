@@ -239,6 +239,8 @@ recuperación avisa al titular [S1 §4.2.3].
 
 > **Enmienda 2026-11-06 (decisión del operador C1; plan de la fase 3, Task 8).** También al aprobar una aplicación
 > de IA: «Has conectado <host de la app>», con el host que encabeza la pantalla de consentimiento y cómo revocarla.
+> Como todo aviso, solo cuando el correo de cuentas está configurado (Ajustes → Correo): sin él la aprobación se
+> completa igual y no se envía nada (*precisado el 2026-11-14, revisión final de la fase 3*).
 
 ### 2.8 Restablecer la contraseña por correo
 

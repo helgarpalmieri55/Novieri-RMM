@@ -8,8 +8,8 @@ from `users`, never sent; the AI app is `oauth_client_id`. Only
 `OAuthClient.client_id` is an OAuth client id.
 
 NOTHING HERE HOLDS A SECRET IN CLEAR: `code_hash` and `token_hash` are the
-SHA-256 of a random 256-bit value (`app.core.auth.oauth.grants.hash_secret`,
-which arrives with plan Task 7); the access token is never stored.
+SHA-256 of a random 256-bit value (`app.core.auth.oauth.grants.hash_secret`);
+the access token is never stored.
 """
 
 from datetime import datetime

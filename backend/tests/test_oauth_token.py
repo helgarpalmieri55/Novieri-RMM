@@ -614,6 +614,19 @@ def test_a_resource_is_named_by_scheme_and_host_in_any_case_and_the_rest_exactly
     assert not grants.names_resource("https://[::1", RESOURCE)
 
 
+def test_a_console_url_typed_in_capitals_is_canonicalised_on_both_sides() -> None:
+    """Final review, C2. The server's own resource is `ITS_PUBLIC_CONSOLE_URL`
+    as typed: only the presented side was canonicalised, so with capitals in
+    the console's address the resource did not name itself, and every
+    request that named it was `invalid_target`."""
+    typed = "https://RMM.Example.com/mcp"
+    assert grants.names_resource(typed, typed)
+    assert grants.names_resource("https://rmm.example.com/mcp", typed)
+    assert grants.names_resource("HTTPS://RMM.EXAMPLE.COM/mcp", typed)
+    assert not grants.names_resource("https://rmm.example.com/MCP", typed)
+    assert not grants.names_resource("https://rmm.example.com:443/mcp", typed)
+
+
 # --------------------------------------------------------------------------- #
 # The coordinator's integration notes: a code an account act ended (D2, part
 # c), and no signature without an issuer (Task 2's review).
