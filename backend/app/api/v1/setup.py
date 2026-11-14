@@ -181,12 +181,18 @@ def _refuse_without_the_code(presented: str) -> None:
 def _org_slug(settings: Settings, organization_name: str) -> str:
     """The slug the first organization gets, and it is not cosmetic.
 
-    `app/core/security.py` resolves a token's organization claim to a slug, and
-    falls back to `default_org_slug` when the claim is absent -- which is every
-    token on a single-org installation. An organization created under any other
-    slug is one its own administrator cannot sign in to: `auth_context` answers
-    "unknown organization" and the setup screen's promise breaks at the first
-    redirect. So when this deployment declares a slug, that IS the slug.
+    A sign-in names no organization: the platform's own sign-in (since own
+    authentication phase 1) signs a person in to the deployment's, the one
+    `default_org_slug` names (`app.core.auth.flows.login` and
+    `flows.deployment_org`), and its own OAuth server (since phase 3) approves
+    AI apps and redeems their codes in that organization only
+    (`app.core.auth.oauth.store.deployment_org`); the MCP token then carries
+    the organization's id, never a slug. An organization created under any
+    other slug is one its own administrator cannot sign in to: the sign-in
+    looks for them in the declared slug's organization and answers "the email
+    address or the password is not right", and the setup screen's promise
+    breaks at the first sign-in. So when this deployment declares a slug, that
+    IS the slug.
     """
     declared = settings.default_org_slug
     if declared:

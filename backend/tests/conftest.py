@@ -326,8 +326,9 @@ async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
     from tests.fake_idp import ISSUER, JWKS_URL, FakeIdp, jwks_client
     from tests.session_support import CONSOLE
 
-    # `idp` and `jwks_client(idp)` stay: MCP still signs in at Keycloak until
-    # own authentication phase 3 (coordinator D12).
+    # `idp` and `jwks_client(idp)` stay until phase 4: the tests of
+    # `security.validate_token`, and those that prove a Keycloak token is
+    # refused everywhere, still mint one.
     idp = FakeIdp()
     settings = Settings(
         database_url=pg_cluster.app_url,

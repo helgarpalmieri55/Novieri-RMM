@@ -29,7 +29,9 @@ appears. Nothing else in the first-boot section is a guess.
 **Since own authentication phase 1 (2026-11) the console signs in on the
 platform's own screens** -- password and a second factor, a session cookie --
 and not at Keycloak (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
-Keycloak still signs MCP clients in until phase 3. The sections of this
+Since own authentication phase 3 AI apps connect over MCP through the
+platform's own OAuth server too; Keycloak signs nobody in, and phase 4
+removes it. The sections of this
 runbook that describe the console's sign-in through Keycloak -- the
 enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
 predate that change; the runbook is rewritten with the deployment project
@@ -1247,7 +1249,8 @@ docker compose exec keycloak /opt/keycloak/bin/kcadm.sh --help
 
 > **Not the console's sign-in any more.** Since own authentication phase 1 the
 > console signs in on the platform's own screens. What follows is Keycloak's
-> login page, which only MCP clients meet until own authentication phase 3.
+> login page, which nobody meets since own authentication phase 3 (AI apps
+> approve on the console's own consent page); it goes in phase 4.
 
 > **Every "Admin console →" step in this section runs inside the SSH tunnel
 > above, not on the public hostname.** The console is not routed on `:443`;
@@ -1481,9 +1484,10 @@ to the default org — so sign-in *works*, and every Microsoft account silently
 lands in one tenant. Verify the **claim**, not the login. The console page
 used to hold a Keycloak token that could be decoded in the browser's devtools;
 since own authentication phase 1 it holds none (its session is an `HttpOnly`
-cookie naming a server-side session), so the claim is now only in the access
-tokens MCP clients obtain, and the devtools one-liner that read it from the
-console's session storage is gone with that token.
+cookie naming a server-side session), and since own authentication phase 3 no
+token Keycloak issues is accepted anywhere, so no token carries the claim to
+check; the devtools one-liner that read it from the console's session storage
+is gone with that token.
 
 **Trust Email off is deliberate.** With it on, a Microsoft identity that merely
 claims an existing user's email address is linked to that account
@@ -1495,8 +1499,8 @@ account's roles.
 ## Sign in with Microsoft (own authentication, phase 2)
 
 **This replaces "3. Sign in with Microsoft — by hand, for now" above for the
-console and the portal.** That section now concerns MCP clients only, until
-phase 4 removes Keycloak (from phase 3 on, it signs nobody in).
+console and the portal.** Since own authentication phase 3 that section
+concerns nobody: Keycloak signs nobody in, and phase 4 removes it.
 
 In Microsoft Entra ID, register **one** application for this installation:
 
@@ -2119,7 +2123,7 @@ not a narrower grant:
 | Mitigation | What it actually buys |
 |---|---|
 | A separate client from `it-suite-events` | the hourly event sweep keeps its `view-events`-only worst case — an information leak — instead of inheriting this one |
-| The code calls exactly six operations | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute (`PATCH /me`, Spanish-language work), remove one AI app's consent for a user (revoking an app under Settings → AI connections; needs nothing beyond `manage-users`). **The credential stays broader than the code**; a bug or an injected call is not bounded by this row |
+| The client `kc_client.py` calls exactly six operations, and since own authentication phase 3 nothing calls the client | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute, remove one AI app's consent for a user. The platform now runs the user lifecycle itself, and revoking an AI app stopped involving Keycloak in phase 3, so nothing in `backend/app` imports that client any more; it goes with Keycloak in phase 4. **The credential stays broader than the code, and keycloak-init still issues it**; a bug or an injected call is not bounded by this row |
 | Every route is RBAC-gated server-side | `users.manage` / `users.read`, checked in the API, never in the frontend |
 | Every action is written to the hash-chained audit log | in the same transaction as the change, so an unlogged lifecycle action is a failed one |
 | **Impersonation is never called** | impersonation is *also* inside `manage-users`. ITMS has no code path that calls it, and adding one would be a new decision, not a patch |
@@ -2314,36 +2318,48 @@ lock out the entire deployment; unrestricted is the recoverable direction.
 
 An AI app — Claude, or any client that speaks the Model Context Protocol —
 can use ITMS **as the person who connected it**: it sees what that person
-sees and can do what their role allows, every call is in the audit log, and
-the app's own settings decide which tools need the person's approval. The
-server is `/mcp` on the `api` container; there is no new service. Design:
-`docs/superpowers/specs/2026-10-09-mcp-server-design.md`.
+sees and can do what their role allows, every call is in the audit log
+(`mcp.tool_called`), and the app's own settings decide which tools need the
+person's approval. Approving an app is audited too (`mcp.app_authorized`); a
+call over MCP is not a sign-in, so the person's last sign-in stays the last
+time they signed in to the console. The server is `/mcp` on the `api`
+container, and the platform is its own OAuth 2.1 authorization server; there
+is no new service. Design: `docs/superpowers/specs/2026-10-09-mcp-server-design.md`,
+and for the OAuth server `docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` §5.
 
-**It is off by default, four times over.** No AI app connects until all
-four hold:
+**It is off by default, three times over.** No AI app connects until all
+three hold:
 
-1. the deployment has a public address (`ITS_PUBLIC_CONSOLE_URL`) — without
-   it `/mcp` answers 503;
-2. the operator has opted in to AI apps registering themselves
-   (`ITS_MCP_REGISTRATION=open` in `.env`) — without it the identity
-   provider refuses every app's registration, so no app can get as far as a
-   sign-in page, whatever else is set;
-3. an org-admin has turned on **Settings → AI connections → Allow AI apps to
+1. the deployment has a public https address **with no path**
+   (`ITS_PUBLIC_CONSOLE_URL`) — without one, `/mcp` answers 503; with a path
+   after the host (`https://example.com/itms`), too, because an OAuth issuer is
+   an https address with no path, so the platform has none and says so;
+2. an org-admin has turned on **Settings → AI connections → Allow AI apps to
    connect over MCP** for the organization;
-4. the person holds the `mcp.use` permission.
+3. the person holds the `mcp.use` permission.
 
-The third and fourth are checked on every call, not only at connection time.
-The first two are deployment settings read when keycloak-init runs. Closing
-registration again stops NEW apps registering; an app that registered while
-it was open keeps its registration, and is stopped by the third and fourth
-or by revoking it (below).
+The second and third are checked on every call, not only at connection time,
+and the consent page checks them first: while either is missing, it reads no
+app's metadata document and writes nothing.
+
+**How an app introduces itself.** Claude and Claude Code publish a *client
+metadata document* at an https address of their own; the platform reads it
+when a signed-in person opens the consent page, and that needs no further
+setting (operator decision 2026-11-06). An app that can only *register
+itself* (OAuth dynamic client registration) needs the operator's opt-in,
+`ITS_MCP_REGISTRATION=open`. Without it the platform refuses every
+registration and does not advertise the endpoint; with it, registration is
+still refused while MCP is off for the organization, and the platform holds
+at most 200 live registrations. Closing registration again stops new apps
+registering; an app that registered while it was open keeps its registration
+until it goes unused for 30 days, when the daily sweep removes it.
 
 ### Turning it on
 
 1. **`ITS_PUBLIC_CONSOLE_URL` must be set in `.env`** to the https address
    people open the console at, with no path (for this deployment,
-   `https://itms.toeshee.com`). It may already be: Email intake and the
-   install link use the same setting. Check with:
+   `https://itms.toeshee.com`). It may already be: the console's sign-in,
+   Email intake and the install link use the same setting. Check with:
 
    ```sh
    grep '^ITS_PUBLIC_CONSOLE_URL=' .env
@@ -2352,138 +2368,166 @@ or by revoking it (below).
    If that prints nothing or an empty value, edit the line in `.env` by hand
    so it reads `ITS_PUBLIC_CONSOLE_URL=` followed by your address. Keep a
    single line: a second `ITS_PUBLIC_CONSOLE_URL=` further down silently wins.
-   The MCP address is this value plus `/mcp`, and it must match byte for byte
-   what the identity provider writes into tokens, so do not add a trailing
-   path.
-2. **Opt in to AI-app registration.** Read "Residual risks, stated plainly"
-   below first: they are the price of this line, and most of them exist only
-   while it is set. From the directory holding `docker-compose.yml` and
-   `.env`, this removes any earlier `ITS_MCP_REGISTRATION` line and adds the
-   one that opens registration:
+   The MCP address is this value plus `/mcp`, and the platform's tokens are
+   issued for exactly that address, so do not add a trailing path.
+2. **Deploy** as in "Upgrading an existing deployment". The `api` container
+   reads the setting when it starts.
+3. **Check it.** The platform's OAuth metadata names the console as its
+   issuer:
+
+   ```sh
+   curl -s "$(sed -n 's/^ITS_PUBLIC_CONSOLE_URL=//p' .env)/.well-known/oauth-authorization-server"
+   ```
+
+   The answer is JSON whose `issuer` is your console address and which carries
+   `"client_id_metadata_document_supported": true`. It carries
+   `registration_endpoint` only when you opted in to registration (step 7)
+   and MCP is on. A 503 with `temporarily_unavailable` means
+   `ITS_PUBLIC_CONSOLE_URL` is not an https address without a path (step 1).
+4. **Settings → AI connections:** an org-admin turns on **Allow AI apps to
+   connect over MCP**. The tab shows the connection address.
+5. **Settings → Roles:** grant `mcp.use` to the roles that may connect.
+   Org-admins hold `mcp.use` by default; nobody else does until you grant it.
+6. **Connect an AI app.** In the app (in Claude: add a custom connector),
+   give it the connection address. The app opens the console's consent page;
+   the person signs in to the console first if they are not (password and
+   second factor, as always). The page is titled by the host the app cannot
+   disguise — its metadata document's, or the one its answer goes back to —
+   and shows the name the app gave itself as the app's own claim; for an app
+   that only answers on the person's own computer, it says so. **Approving
+   needs the person's second factor confirmed in the last ten minutes**, on a
+   remembered browser too, and the person then receives a mail, "You
+   connected <host>" (operator decision 2026-11-06). Approving lets the app
+   act as the person. Then, in the app's settings for that connector, set
+   each tool to *Always allow* or *Needs approval*; tools that change
+   something are safest on *Needs approval*.
+7. **Only for an app that cannot publish a metadata document:** opt in to
+   registration. Read "Residual risks, stated plainly" below first: risks 3,
+   7 and 8 exist only while it is set. From the directory holding
+   `docker-compose.yml` and `.env`, this removes any earlier
+   `ITS_MCP_REGISTRATION` line and adds the one that opens registration:
 
    ```sh
    sed -i '/^ITS_MCP_REGISTRATION=/d' .env && echo 'ITS_MCP_REGISTRATION=open' >> .env
    ```
 
    Only the exact word `open` opens it; any other value, or no line at all,
-   keeps it closed.
-3. **Deploy** as in "Upgrading an existing deployment", then run the identity
-   init job on its own so its output is in front of you:
+   keeps it closed. Deploy again for the `api` container to read it.
 
-   ```sh
-   docker compose up keycloak-init
-   ```
+The consent page, like every console page, is never shown inside another
+site's frame: nginx answers every console request with
+`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
+(`deploy/nginx.conf`, held by `backend/tests/test_deploy_frame_headers.py`), so
+a page elsewhere cannot overlay it and trick a click on **Approve**.
 
-4. **Check it converged.** keycloak-init sets up everything MCP needs in the
-   realm on every run, and opens app registration only when the address is
-   set and you opted in:
+### What keycloak-init still converges (until phase 4)
 
-   ```sh
-   docker compose logs --tail=20 keycloak-init | grep 'mcp converged'
-   ```
-
-   The first run after opting in lists what it changed, ending with
-   `'registration:removed:trusted-hosts'`. Every run after that prints
-   `identity init: mcp converged=nothing`. If you instead see
-   `anonymous client registration stays closed (Trusted Hosts kept) until …`,
-   the rest of that line names the setting the job did not see —
-   `ITS_PUBLIC_CONSOLE_URL is set` (step 1), `ITS_MCP_REGISTRATION=open`
-   (step 2), or both: check that step and that you ran the job from
-   `deploy/`.
-5. **Settings → AI connections:** an org-admin turns on **Allow AI apps to
-   connect over MCP**. The tab shows the connection address.
-6. **Settings → Roles:** grant `mcp.use` to the roles that may connect.
-   Org-admins hold `mcp.use` by default; nobody else does until you grant it.
-7. **Connect an AI app.** In the app (in Claude: add a custom connector),
-   give it the connection address. The app registers itself, opens the ITMS
-   sign-in page, the person signs in as usual (MFA included) and approves the
-   consent screen, which names the app. Then, in the app's settings for that
-   connector, set each tool to *Always allow* or *Needs approval*; tools that
-   change something are safest on *Needs approval*.
-
-### What keycloak-init converges
-
-On every run, in this order, so that a run that dies part-way leaves
-registration closed:
+Since own authentication phase 3 none of this is in MCP's path: `/mcp`
+accepts only the platform's own access tokens, and refuses every token
+Keycloak issues, whatever its audience. keycloak-init keeps converging it on
+every run until phase 4 removes Keycloak, **and while
+`ITS_MCP_REGISTRATION=open` it still opens Keycloak's own anonymous
+registration** (residual risk 7 below). Nothing is deployed before phase 4
+removes Keycloak (operator decision 2026-10-31), so no host runs in this
+state. In this order, so that a run that dies part-way leaves registration
+closed:
 
 1. reserved client ids, disabled and unusable: `it-suite` (the console's own
-   token audience) and the MCP address itself, so no app can register as
-   either. If `ITS_OIDC_AUDIENCE` names a client the platform or Keycloak
-   needs (`it-suite-web`, the two service clients, `account`, `admin-cli`,
-   `realm-management` and the other built-ins), the job refuses before it
-   changes anything, says so, and exits 5;
-2. the `mcp` client scope with its consent-screen line, then its mappers — the MCP audience
-   (`<ITS_PUBLIC_CONSOLE_URL>/mcp`), the `org` claim and `sub` — then the
-   scope offered to apps as an optional scope;
-3. the client profiles and policies for every app that registers itself, or
-   later updates itself: PKCE S256 required, no implicit flow, no password
-   grant, redirect URIs without wildcards;
+   token audience) and the MCP address itself. If `ITS_OIDC_AUDIENCE` names a
+   client the platform or Keycloak needs (`it-suite-web`, the two service
+   clients, `account`, `admin-cli`, `realm-management` and the other
+   built-ins), the job refuses before it changes anything, says so, and exits
+   5;
+2. the `mcp` client scope with its consent-screen line, then its mappers — the
+   MCP audience (`<ITS_PUBLIC_CONSOLE_URL>/mcp`), the `org` claim and `sub` —
+   then the scope offered to apps as an optional scope;
+3. the client profiles and policies for every app that registers itself in
+   Keycloak, or later updates itself: PKCE S256 required, no implicit flow,
+   no password grant, redirect URIs without wildcards;
 4. the anonymous registration policies: consent required, scopes limited to
    `mcp`, `openid` and `profile`, no protocol mappers of the app's own, full
-   scope off, at most 200 clients in the realm. The realm's *default* client
-   scopes are still allowed (`allow-default-scopes`), so an app that asks for
-   no scope of its own also gets the realm defaults such as `profile` and
-   `email` — the person's name and email address in its token;
-5. **last**, Trusted Hosts is removed, which is what opens anonymous
-   registration — and only when `ITS_PUBLIC_CONSOLE_URL` is set **and**
-   `ITS_MCP_REGISTRATION=open`. Otherwise Trusted Hosts stays (and is put back
-   first if missing), registration stays closed, and the job's log names the
-   missing setting. Steps 1–4 happen either way, so opening registration later
-   is the flag and a redeploy.
+   scope off, at most 200 clients in the realm;
+5. **last**, Trusted Hosts is removed, which is what opens Keycloak's
+   anonymous registration — and only when `ITS_PUBLIC_CONSOLE_URL` is set
+   **and** `ITS_MCP_REGISTRATION=open`. Otherwise Trusted Hosts stays (and is
+   put back first if missing), and the job's log names the missing setting.
+
+`docker compose logs --tail=20 keycloak-init | grep 'mcp converged'` still
+prints `identity init: mcp converged=nothing` on a converged realm.
 
 ### What Traefik routes
 
 | Path | Goes to |
 |---|---|
 | `/mcp` | `api` — the MCP endpoint |
-| `/.well-known/oauth-protected-resource`, `…/mcp` | `api` — tells an app which sign-in to use |
-| `/.well-known/oauth-authorization-server…`, `/.well-known/openid-configuration…` | `api`, which answers 404 on purpose: apps look there first and move on after a 404, but give up on the console's 200 page |
-| `/realms/<realm>/clients-registrations/openid-connect` and `…/openid-connect/<client-id>` | the identity provider — the **only** registration path it serves publicly |
-| any other `clients-registrations` path, in any letter case, and any identity-provider path with `;`, `\`, `..` or an encoded `;` `\` `.` `/` NUL | refused with 403 at Traefik, before the identity provider sees it |
-| `/realms/<realm>/.well-known/…` and the sign-in pages | the identity provider, unchanged |
+| `/.well-known/oauth-protected-resource`, `…/mcp` | `api` — tells an app that the platform is its authorization server |
+| `/.well-known/oauth-authorization-server` | `api` — the platform's OAuth metadata (RFC 8414) |
+| `/.well-known/jwks.json` | `api` — the public halves of the platform's signing keys (own authentication phase 1); AI apps do not need it, the platform verifies its own tokens |
+| `/oauth/token`, `/oauth/register`, `/oauth/revoke`, each by exact path | `api` — the platform's OAuth server |
+| `/oauth/authorize` | the console — the consent page, behind the console's own sign-in |
+| `/.well-known/openid-configuration`, and either document with a path after it | `api`, which answers 404 on purpose: apps look there first and move on after a 404, but give up on the console's 200 page |
+| `/realms/<realm>/clients-registrations/openid-connect` and `…/openid-connect/<client-id>` | Keycloak, until phase 4 — its registration path, which no longer leads to MCP |
+| any other `clients-registrations` path, in any letter case, and any identity-provider path with `;`, `\`, `..` or an encoded `;` `\` `.` `/` NUL | refused with 403 at Traefik, before Keycloak sees it (until phase 4) |
+| `/realms/<realm>/.well-known/…` and Keycloak's pages | Keycloak, unchanged until phase 4 |
 
-Realm names must be lowercase (`[a-z0-9_-]`) for registration to be routed;
-the default `it-suite` is. The identity provider's admin console is still not
-on :443.
-
-The `deploy` CI job proves the identity half of this live, through the real
-Traefik and Keycloak containers (`deploy/keycloak/ci_mcp_flow.py`): the 403s
-above, registration closed until the address is set — and, with the address
-alone, still closed until `ITS_MCP_REGISTRATION=open` — an app's registration
-and PKCE sign-in, a token whose audience is the MCP address and never
-`it-suite`, the console's own token with `azp` `it-suite-web` and `typ`
-`Bearer`, and `mcp converged=nothing` on a second run.
+The `deploy` CI job still proves Keycloak's half of this live
+(`deploy/keycloak/ci_mcp_flow.py`, through the real Traefik and Keycloak
+containers): the 403s above, Keycloak's registration closed until both
+settings are set, its PKCE sign-in and its audience. It does not yet run the
+platform's own OAuth server against the deployed containers: phase 4 rewrites
+it for that, when Keycloak goes (design §8). The platform's server is proved
+by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`).
 
 ### Revoking
 
-- **One app:** Settings → AI connections → **Revoke for me**, or, for an
+- **One app:** Settings → AI connections lists every app that called a tool
+  here in the last 90 days **and every app that holds a live grant** — yours,
+  or anyone's if you hold `orgs.manage` — so one approved a moment ago is
+  there before it has done anything. **Revoke for me**, or, for an
   org-admin, **Revoke for everyone**, which needs both `mcp.use` and
-  `orgs.manage` (an org-admin holds both). Every token the app already holds is
-  refused from its next call, and its permission to sign in again is
-  withdrawn in the identity provider. If the console says that second part
-  could not be done for someone, revoke again: until it is, the app could
-  reconnect for that person without asking. Revoking never deletes the app's
-  registration, which is shared by every organization on the deployment, and
-  never affects another organization.
-- **Revoking is not a block-list.** It ends the sign-ins the app holds now;
-  it does not stop the app coming back. A person can approve the same app
-  again, and any app can register again under a new client id with any name
-  it likes. To keep AI apps out, use one of the stops below.
+  `orgs.manage`, and a view of every client (an org-admin has all three).
+  The app's grants end — yours, or everyone's in this organization — in the
+  same transaction as the record of the revocation, and so do the codes it
+  was given and has not exchanged yet: every token the app holds stops at
+  its next call, and its refresh tokens mint nothing. No identity provider is
+  involved, so there is no second half that can fail. It never affects
+  another organization. An app listed without a **Revoke** button last acted
+  here before it registered with the platform, or its registration expired:
+  it holds no grant here.
+- **Revoking is not a block-list.** It ends the grants the app holds now; it
+  does not stop the app coming back. A person can approve the same app again,
+  and an app can publish another metadata document, or (with the opt-in)
+  register again, under any name it likes. To keep AI apps out, use one of
+  the stops below.
 - **One person:** take `mcp.use` away from their role. Their next call is
-  refused.
+  refused. Disabling or deleting the person, resetting their factors (by an
+  administrator, or with a recovery link), a password change (their own, or
+  through a reset mail) and the person's own sign-out of every session
+  (`POST /api/v1/auth/logout-everywhere`; the console has no button for it)
+  end all their AI grants too, and the codes an app has not exchanged yet;
+  the act's own audit event says how many grants ended (`ai_grants_revoked`).
+  **An administrator's "Sign out everywhere" (Settings → Users) is not one
+  of them:** it ends the person's console sessions only, and their AI grants
+  stay. To stop those too, take `mcp.use` away, disable the person, or
+  revoke the app for everyone.
 - **The whole organization — the emergency stop:** Settings → AI
   connections → turn **Allow AI apps to connect over MCP** off. Every app is
-  refused from its next call, whatever it registered as.
-- **New apps, deployment-wide:** delete the `ITS_MCP_REGISTRATION=` line
-  from `.env` and redeploy. The identity provider refuses every new
-  registration again; apps already registered are unaffected, so pair it
-  with one of the stops above or below.
+  refused from its next call, whatever it is. **Turning it back on ends no
+  grant and restores every one that is still live:** the apps connected
+  before work again at once. To have people approve them again, revoke the
+  apps for everyone before turning the switch back on.
+- **New apps that register themselves, deployment-wide:** delete the
+  `ITS_MCP_REGISTRATION=` line from `.env` and redeploy. The platform refuses
+  every new registration; apps already registered, and apps known by a
+  metadata document, are unaffected, so pair it with one of the stops above
+  or below.
 - **The whole deployment — the deployment-wide stop:** empty
-  `ITS_PUBLIC_CONSOLE_URL` and redeploy. `/mcp`
-  answers 503 and the next keycloak-init run closes registration again. This
-  also turns off everything else that uses the address — Email intake's
-  Microsoft sign-in, and the public address the identity provider writes into
-  invitation and password-reset mail — so it is a last resort, not a switch.
+  `ITS_PUBLIC_CONSOLE_URL` and redeploy. `/mcp` answers 503 and the platform
+  has no OAuth issuer. This also turns off everything else that uses the
+  address — the console's own sign-in and passkeys, the links in the
+  platform's account mail, push install, the Group Policy MSI, Email
+  intake's Microsoft sign-in, the install link (`.env.example` lists them
+  under `ITS_PUBLIC_CONSOLE_URL`) — so it is a last resort, not a switch.
 
 ### What is never reachable over MCP
 
@@ -2498,7 +2542,10 @@ channel**, so a later change to the tool list cannot expose them by accident
 - the agent's install command and deployment token (both mint an enrollment
   token);
 - the backup recovery-key challenge and its proof;
-- the first-run setup claim.
+- the first-run setup claim;
+- approving an AI app on the console's consent page, whose one-time code
+  becomes the person's MCP tokens: an app can never approve itself or
+  another.
 
 **Not tools:** files and streams — the install-link MSI, every CSV and XLSX
 export, recordings, document contents, attachments (download and upload) —
@@ -2526,45 +2573,97 @@ and one hit blocks the whole result rather than redacting it.
 
 ### Residual risks, stated plainly
 
-**Risks 1, 2, 3, 6 and 7 come from self-registration, and exist only while
-it is open** (`ITS_MCP_REGISTRATION=open`). Closing it — delete that line
-from `.env` and redeploy — ends them for new apps; apps that registered while
-it was open keep their registrations until an administrator deletes them in
-the identity provider.
+**Risks 3, 7 and 8 exist only while self-registration is open**
+(`ITS_MCP_REGISTRATION=open`); closing it ends them for new apps. **Risks 1,
+2, 4, 10 and 11 exist whenever MCP is on**, because an app known by its
+client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
 
-1. **http redirects are allowed to any host**, not only to the app's own
-   machine. Keycloak 26.2's redirect enforcer has one switch for http, so
-   allowing `http://127.0.0.1:…/callback` (which desktop AI apps use) allows
-   `http://` to every host. An intercepted authorization code is bound to the
-   app's PKCE verifier and cannot be redeemed without it.
-2. **A registering app can make the identity provider fetch URLs it names**
-   (`sector_identifier_uri`, `jwks_uri`, `request_uris`): blind requests from
-   the identity provider's network, whose success or failure the app can
-   observe. Keycloak 26.2 has no registration policy that refuses them. The
-   follow-up is to route the identity provider's outbound requests through
-   its proxy mappings so only the hosts it really needs are reachable.
-3. **Device-code, CIBA and token-exchange grants are not restricted at
-   registration.** Keycloak 26.2 offers no registration-time control for them.
-4. **Realm names must be lowercase** for app registration to be routed (see
-   the table above).
+1. **Consent phishing.** Anyone can publish a client metadata document — or,
+   with the opt-in, register an app — under any name, and send a person a
+   link to the consent page; that page is the only check between the link
+   and the person's full authority. It is titled by the host the app cannot
+   disguise (its document's, or the one its answer goes back to; ASCII only,
+   so no look-alike letters), shows the app's chosen name only as its own
+   claim, says what approving hands over — "If you approve, it can act as you
+   in ITMS: everything your role allows, including running actions on managed
+   computers" — needs the person's second factor confirmed in the last ten
+   minutes, and mails them "You connected <host>" afterwards. Org-admins
+   should approve only apps they connected themselves, and anyone who gets
+   that mail for an app they do not recognise should revoke it.
+2. **An app known by its client metadata document makes the platform fetch
+   that address**, only inside a signed-in person's consent, with MCP on and
+   `mcp.use` held. The fetch goes through the platform's outbound guard (only
+   public addresses — no private, loopback, link-local or other special-use
+   ones (RFC 6890) — port 443 only, no redirects), is cut at 5 KiB and 5
+   seconds, and its answer is cached as its own cache headers say, bounded to
+   between 5 minutes and 24 hours. A document that is refused is never
+   stored; one that cannot be read just now keeps the copy already stored.
+   A signed-in person can still make the `api` container send one bounded
+   request to a public address of their choosing each time it needs the
+   document. Refusals are logged at most once a minute.
+3. **Registrations can be made by strangers** (only with the opt-in).
+   Registering needs no account. One network may register 20 apps an hour
+   (an IPv6 address is counted by its /64), registration is refused while MCP
+   is off, and the platform holds at most 200 live registrations, after which
+   it answers 503 until unused ones expire; a registration nobody uses for 30
+   days goes with the daily sweep. Nothing is exposed by it — registering
+   grants nothing without a person's consent. The hosted Claude apps do not
+   register: they use their metadata documents. Their requests come from
+   Anthropic's published egress ranges (`160.79.104.0/21` and
+   `153.61.208.0/20`), not from your office. Every Claude user shares those
+   addresses, and Anthropic does not say how many of them it uses, so one
+   address can carry many people's requests; that is why the token and
+   revocation endpoints together allow 600 requests a minute per address (an
+   IPv6 address is counted by its /64).
+4. **http redirects are allowed only to the person's own computer**
+   (`127.0.0.1`, `[::1]`, `localhost`, any port), which desktop AI apps use
+   (Claude Code's metadata document among them). Whatever answers on that
+   port of the person's computer receives the authorization code; it is bound
+   to the app's PKCE verifier and cannot be redeemed without it. The consent
+   page says when an app only answers there.
 5. **Free text can hold a secret under an innocent name.** The scan blocks
    results by field *name*; a password someone typed into a documentation
    record's notes field is text like any other and reaches the app as the
    person could read it.
-6. **Consent phishing.** Anyone can register an app with any display name
-   and send a sign-in link; the consent screen is the only check between
-   that link and the person's full authority. Org-admins should approve only
-   apps they connected themselves. The consent screen says what approving
-   hands over — "Act as you in ITMS: everything your role allows, including
-   running actions on managed computers" (in Spanish for a Spanish sign-in
-   page) — but it names the app by whatever name the app registered.
-7. **The client cap can be filled by strangers.** Max Clients is 200 for the
-   whole realm, the platform's own clients included, and anonymous
-   registration needs no account: anyone who can reach the registration path
-   can register apps until the cap refuses everybody, legitimate apps
-   included. Nothing is exposed by it; it is a denial of service on
-   connecting new apps. Closing registration stops it; the filler apps are
-   removed in the identity provider's admin console.
+6. **A stolen access token works for at most ten minutes, or until its grant
+   ends.** It names its grant, which the API reads on every call: revoking the
+   app, the person's account acts above (not an administrator's "Sign out
+   everywhere", which ends console sessions only), or the app's refresh token
+   being used twice (a sign it was copied) end it at once.
+7. **Until phase 4, Keycloak's own anonymous registration opens with the same
+   setting.** keycloak-init still converges it (above). Its tokens are refused
+   at `/mcp` and everywhere else, so it leads nowhere; but its own exposure
+   stays until Keycloak goes: a registering app can make Keycloak fetch URLs it
+   names (`sector_identifier_uri`, `jwks_uri`, `request_uris`) from
+   Keycloak's network, can fill its 200-client cap, and **the clients it
+   registers never expire**: nothing sweeps them until phase 4 removes the
+   realm.
+8. **Realm names must be lowercase** for Keycloak's registration to be routed
+   (see the table above), until phase 4.
+9. **A refresh token used twice ends the app's grant, with no grace.** That is
+   what a copied token looks like (design §5.3). It is also what an honest
+   race looks like: a refresh whose answer the app never read (Claude stops
+   waiting after 30 seconds), or two refreshes with the same token at once.
+   Claude refreshes on two triggers, ahead of time (up to five minutes before
+   the token expires) and when a call is refused with 401, so two can meet.
+   Either way the app's next call is refused, and the person removes the
+   connector and adds it again.
+10. **One click can approve, within ten minutes of a second factor.** The
+    consent page refuses to be framed (`frame-ancestors 'none'`,
+    `X-Frame-Options: DENY`), but a page on another site can open it as a
+    window of its own under the second click of a double click, which then
+    lands on **Approve**. OWASP calls this DoubleClickjacking, and framing
+    rules do not stop it. Approving needs the person's second factor
+    confirmed in the last ten minutes, so outside that window the trick only
+    reaches the second-factor prompt; inside it, one click is enough. It is
+    bounded, not removed: the page is titled by the app's host, the person
+    is mailed "You connected <host>", and Settings → AI connections revokes
+    the app.
+11. **A password change does not stop an approval in the session it keeps.**
+    The change ends the person's AI grants and every other session of
+    theirs, but an AI app approved afterwards in the session the change was
+    made in — even on a consent page opened before it — still receives its
+    code: it is the same person, in their own session.
 
 Separately from those, and by design: the platform cannot tell whether the
 person or the AI app approved a call — approval happens in the app. A

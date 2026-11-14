@@ -626,8 +626,8 @@ async def test_an_invite_makes_the_local_row_and_no_identity_anywhere_else(
     users_env: Any,
 ) -> None:
     """RULE 3 and D5: the row exists, carries a subject no provider issued,
-    and nothing was asked of Keycloak -- which is also why this person cannot
-    reach MCP until phase 3."""
+    and nothing was asked of Keycloak (since phase 3 that is no obstacle to
+    MCP: `tests/test_oauth_falsifiers.py`)."""
     org = await users_env.create_org("invite")
     _sub, headers, _id = await _admin(users_env, org)
 

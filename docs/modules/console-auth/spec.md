@@ -104,8 +104,8 @@ enrolment routes (design §2.2). The balance, stated rather than implied:
   outside the hash chain. Every sign-in, factor change and lockout is now an
   event in the platform's own chain (invariant 4).
 
-MCP keeps signing in at Keycloak until own authentication phase 3, and the
-realm is removed in phase 4.
+Since own authentication phase 3 MCP signs in on the platform's own OAuth
+server too; the realm is removed in phase 4.
 
 ---
 

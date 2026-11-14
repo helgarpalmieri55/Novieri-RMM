@@ -158,8 +158,10 @@ the system.
   not meet AAL2** on that device -- the operator accepted this knowingly
   (design §0, S2b). Not built: SAML and on-premises Active Directory
   federation (out of scope).
-  MCP clients still authenticate through Keycloak; phase 3 replaces that, and
-  phase 4 removes Keycloak.
+  MCP clients authenticate on the platform's own OAuth 2.1 server since phase
+  3: PKCE S256, consent in the console with a recently confirmed second
+  factor, a ten-minute ES256 access token for exactly the MCP resource, and a
+  refresh token that rotates and whose reuse ends the grant.
 - **Clients' contacts (own authentication phase 2):** a contact is invited
   from their client's Contacts tab by someone with `clients.manage` on that
   client, with a single-use link that lives 72 hours, and on accepting holds
@@ -201,8 +203,14 @@ the system.
 - **Retention:** sessions are deleted 90 days after they ended or expired;
   remembered devices and one-time links 30 days after (a technician's
   unused invitation never is: it is the pending invitation Users shows);
-  WebAuthn challenges after a day; each daily sweep that deletes anything
-  is audited (`auth.retention_applied`).
+  WebAuthn challenges after a day; since phase 3, OAuth authorization codes
+  10 minutes after they expire, used or not, ended AI-app grants after a day
+  (their refresh tokens with them), and AI apps unused for 30 days; each
+  daily sweep that deletes anything is audited (`auth.retention_applied`).
+  One residual: idle AI apps go before the audited transaction, and if a
+  purge meets a database error it does not give way on, the apps it already
+  removed that day are not recorded (`app/core/auth/retention.py`,
+  `sweep_org`).
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):

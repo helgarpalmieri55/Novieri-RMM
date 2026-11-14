@@ -58,6 +58,27 @@ This is independent of the Spanish design written the same day
 
 ## 3. OAuth, and only OAuth
 
+> **Amended 2026-11-06 (autenticación propia, phase 3; plan
+> `docs/superpowers/plans/2026-11-06-autenticacion-propia-fase3.md`).** The
+> authorization server is the platform itself, not the Keycloak realm
+> (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` §5).
+> The protected-resource metadata names the console's address in
+> `authorization_servers`; an app is known by its client metadata document
+> whenever MCP is on, or registers at the platform's `POST /oauth/register`
+> only with `ITS_MCP_REGISTRATION=open` (operator decision 2026-11-06); the
+> person signs in to the console and approves on its consent page
+> (`/oauth/authorize`), with their second factor confirmed in the last ten
+> minutes; the access token is the platform's ES256 `at+jwt`, for exactly the
+> MCP resource, ten minutes, naming its grant, which `/mcp` reads on every
+> call. §3.1 steps 2-4, §3.2 and §3.3 below describe the Keycloak arrangement
+> this replaced, kept as the record until phase 4 removes Keycloak. In §3.4,
+> revoking now ends the app's grants, and the codes it has not exchanged yet,
+> in the platform's own tables, in one transaction with the `mcp_revocation`
+> row and its audit event; nothing is removed in Keycloak, and the list also
+> shows apps holding a live grant that called no tool yet. §8's "app name
+> (from its registration)" is now the host the app cannot fake, with its own
+> name beneath as its claim.
+
 ### 3.1 The flow (MCP authorization spec, current revision)
 
 1. An unauthenticated request to `/mcp` gets **401** with
