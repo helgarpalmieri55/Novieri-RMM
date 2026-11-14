@@ -157,19 +157,28 @@ def new_secret() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _canonical_resource(value: str) -> str | None:
+    """`value` with its scheme and host lower-cased and the rest exactly as
+    written (RFC 3986 §6.2.2.1); None when it is no URL."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
+    )
+
+
 def names_resource(value: str, resource: str) -> bool:
     """`value` is `resource`, its scheme and host in any case and the rest
     exactly (MCP: "implementations SHOULD accept uppercase scheme and host
     components for robustness and interoperability"; RFC 3986 §6.2.2.1; plan
-    B3-05)."""
-    try:
-        parts = urlsplit(value)
-    except ValueError:
-        return False
-    canonical = urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
-    )
-    return canonical == resource
+    B3-05). BOTH SIDES are canonical before they are compared (final review,
+    C2): `resource` is `ITS_PUBLIC_CONSOLE_URL` as typed, and with capitals in
+    it a resource did not name itself, so every request naming it was
+    `invalid_target`. The string the server emits is unchanged."""
+    mine = _canonical_resource(resource)
+    return mine is not None and _canonical_resource(value) == mine
 
 
 def _now() -> datetime:

@@ -21,17 +21,19 @@
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
+import jwt
 import pytest
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth.oauth import cimd, consent
+from app.core.auth.oauth import access, cimd, consent
 from app.core.auth.oauth.store import oauth_session
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
@@ -257,6 +259,67 @@ async def test_a_bad_client_or_redirect_is_shown_and_never_redirected(
         assert body["detail"]
     assert await _codes(env) == []
     assert await _authorized(env) == []
+
+
+async def _apps(env: Env) -> set[tuple[str, datetime]]:
+    async with oauth_session(env.org_id, env.api.app_engine) as session:
+        rows = (await session.execute(select(OAuthClient))).scalars()
+        return {(row.client_id, row.last_used_at) for row in rows}
+
+
+async def _audit_count(env: Env) -> int:
+    async with AsyncSession(env.api.admin_engine) as session:
+        found = await session.execute(select(AuditEvent.id).where(AuditEvent.org_id == env.org_id))
+        return len(found.all())
+
+
+@pytest.mark.parametrize(
+    "client_id",
+    [
+        "itms_abc\x00def",
+        "itms_abc\x7fdef",
+        "itms_abcédef",
+        "itms_" + "a" * 251,
+        "https://claude.example/" + "a" * 233 + ".json",
+    ],
+    ids=["nul", "del", "non-ascii", "over-long", "over-long-document"],
+)
+async def test_a_client_id_outside_vschar_or_too_long_is_not_registered_here(
+    env: Env, client_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Final review, C1. The consent read the query's `client_id` unchecked,
+    and PostgreSQL refuses a NUL in text: `itms_abc%00def` was a 500 and an
+    ERROR line on both routes, for any signed-in person. A `client_id`
+    outside RFC 6749 A.1's VSCHAR (`%x20-7E`), or longer than
+    `MAX_CLIENT_ID` -- no app here has one -- is refused as the unknown app
+    is, before any query reads it: shown, never redirected, and nothing
+    written (no code, no audit, no app stored or used)."""
+    caplog.set_level(logging.ERROR)
+    await _registered(env)
+    apps, events = await _apps(env), await _audit_count(env)
+    _, challenge = pkce_pair()
+    query = authorize_query(client_id, challenge=challenge)
+    for route in ("details", "decision"):
+        resp = await env.api.client.post(
+            f"/api/v1/oauth/authorize/{route}",
+            json={"query": query, **({"approve": True} if route == "decision" else {})},
+            headers=await env.api.headers(env.org_id, env.sub),
+        )
+        assert resp.status_code == 200, (route, resp.text)
+        assert resp.json() == {
+            "outcome": "refused",
+            "error": "invalid_client",
+            "detail": (
+                "this AI app is not registered here, or its registration expired. Connect it "
+                "again from the app."
+            ),
+        }, route
+    assert await _codes(env) == []
+    assert await _authorized(env) == []
+    assert await _audit_count(env) == events
+    assert await _apps(env) == apps
+    assert env.api.mail.sent == []
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
 async def test_an_unreadable_metadata_document_is_shown(env: Env, monkeypatch) -> None:
@@ -566,6 +629,50 @@ async def test_approving_issues_a_code_the_token_endpoint_accepts(env: Env) -> N
     assert event.meta["app"] == app.client_id
     assert event.meta["redirect_host"] == "claude.ai"
     assert code_of(body["redirect_to"]) not in str(event.meta)
+
+
+@pytest.mark.parametrize("named", ["as-typed", "lower-case"])
+async def test_a_console_url_typed_in_capitals_connects_end_to_end(env: Env, named: str) -> None:
+    """Final review, C2. With `ITS_PUBLIC_CONSOLE_URL` typed in capitals, the
+    MCP resource is that string (the server emits it unchanged), and a
+    request naming it -- as the protected-resource metadata spells it, or
+    lower-cased -- is for it: approved, exchanged and refreshed, never
+    `invalid_target`."""
+    typed = "https://ITMS.Example.com"
+    env.api.settings.public_console_url = typed
+    resource = typed + "/mcp"
+    prm = await env.api.client.get("/.well-known/oauth-protected-resource")
+    assert prm.json()["resource"] == resource
+    presented = resource if named == "as-typed" else resource.lower()
+    app = await _registered(env)
+    verifier, challenge = pkce_pair()
+    query = authorize_query(app.client_id, challenge=challenge, resource=presented)
+    body = (await decide(env.api, env.org_id, env.sub, query)).json()
+    assert body["outcome"] == "redirect", body
+    assert _params(body["redirect_to"])["iss"] == [typed]
+    exchanged = await token_request(
+        env.api,
+        grant_type="authorization_code",
+        code=code_of(body["redirect_to"]),
+        client_id=app.client_id,
+        code_verifier=verifier,
+        resource=presented,
+    )
+    assert exchanged.status_code == 200, exchanged.text
+    refreshed = await token_request(
+        env.api,
+        grant_type="refresh_token",
+        refresh_token=exchanged.json()["refresh_token"],
+        client_id=app.client_id,
+        resource=presented,
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    grant = await access.verify_access_token(
+        refreshed.json()["access_token"], settings=env.api.settings
+    )
+    assert grant is not None and grant.client_id == app.client_id
+    claims = jwt.decode(refreshed.json()["access_token"], options={"verify_signature": False})
+    assert (claims["iss"], claims["aud"]) == (typed, resource)
 
 
 async def test_approving_needs_the_second_factor_confirmed_in_the_last_ten_minutes(

@@ -17,18 +17,24 @@ and the decision both -- in RFC 6749 §4.1.2.1's two halves:
   9207 §2: "including error responses"), only on the person's click (plan
   B3-15).
 
-WHAT IS CHECKED: `client_id` and `redirect_uri` once each; the redirect one
-the app registered (`redirects.matches`: exact, but for a loopback port), or
-none when it registered exactly one (OAuth 2.1-17 §4.1.1: "OPTIONAL if only
-one redirect URI is registered for this client. REQUIRED if multiple redirect
-URIs are registered for this client"; plan B3-23); then no other parameter
-twice (§3.1: "MUST NOT be included more than once"), `resource` excepted (RFC
-8707 §2 lets it repeat); `response_type=code`; `code_challenge` of 43
-base64url characters WITH `code_challenge_method=S256` said out loud (RFC 7636
-§4.3: a missing method "defaults to "plain""; §4.4.1: `invalid_request`);
-every `resource` the MCP resource, its scheme and host in any case
-(`grants.names_resource`), and none meaning it (RFC 8707 §2.1: "MAY process
-the request ... by using a predefined default resource value"; plan B3-05).
+WHAT IS CHECKED: `client_id` and `redirect_uri` once each; `client_id` in
+RFC 6749 A.1's VSCHAR (`policy.vschar`, which the token endpoint holds it to
+as well) and no longer than `MAX_CLIENT_ID`, the longest any app here has (a
+registration's is 37 characters, and `cimd.is_document_client_id` refuses a
+longer document), or it is the unknown app before any query reads it
+(PostgreSQL refuses a NUL in text: a 500 until the final review's C1); the
+redirect one the app registered (`redirects.matches`: exact, but for a
+loopback port), or none when it registered exactly one (OAuth 2.1-17 §4.1.1:
+"OPTIONAL if only one redirect URI is registered for this client. REQUIRED
+if multiple redirect URIs are registered for this client"; plan B3-23); then
+no other parameter twice (§3.1: "MUST NOT be included more than once"),
+`resource` excepted (RFC 8707 §2 lets it repeat); `response_type=code`;
+`code_challenge` of 43 base64url characters WITH `code_challenge_method=S256`
+said out loud (RFC 7636 §4.3: a missing method "defaults to "plain"";
+§4.4.1: `invalid_request`); every `resource` the MCP resource, its scheme
+and host in any case (`grants.names_resource`), and none meaning it (RFC
+8707 §2.1: "MAY process the request ... by using a predefined default
+resource value"; plan B3-05).
 `scope` is ignored beyond `mcp` (plan D7): the token's scope is `mcp`
 whatever was asked.
 
@@ -63,6 +69,7 @@ from app.core.auth.oauth.errors import (
 )
 from app.core.auth.oauth.grants import names_resource
 from app.core.auth.oauth.pkce import valid_challenge
+from app.core.auth.oauth.policy import MAX_CLIENT_ID, vschar
 from app.core.auth.oauth.redirects import host_of, matches, with_params
 from app.core.i18n import tr
 from app.core.mcp_channel import mcp_resource
@@ -159,6 +166,8 @@ async def validate(
         raise NotRedirectable(
             tr("this connection request names no AI app"), error="invalid_request"
         )
+    if not vschar(client_id) or len(client_id) > MAX_CLIENT_ID:
+        raise NotRedirectable(not_registered(), error="invalid_client")
     try:
         client = await resolve_client(
             app, org_id=org_id, client_id=client_id, now=now, fetch=fetch, record_use=record_use

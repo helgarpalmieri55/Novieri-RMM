@@ -59,7 +59,15 @@ from app.modules.user_admin.kc_client import (
     set_locale_attribute,
 )
 from tests.mcp_support import mcp_app, mcp_client, mcp_token, running_mcp
-from tests.oauth_support import authorize_query, code_of, connect, decide, pkce_pair, token_request
+from tests.oauth_support import (
+    authorize_query,
+    code_of,
+    connect,
+    decide,
+    pkce_pair,
+    seed_client,
+    token_request,
+)
 from tests.race_helpers import normalised, pause_at, until_blocked_by
 
 BASE = "https://itms.example.com"
@@ -384,6 +392,33 @@ async def test_an_app_approved_and_not_yet_used_is_listed_and_can_be_revoked(env
     assert resp.json() == {"revoked": True, "grants_revoked": 1}
     assert await _live(env, org_id, me) == 0
     assert (await _connections(env, org_id, me)).json()["apps"] == []
+
+
+async def test_a_document_app_is_listed_by_the_host_the_consent_named(env: Any) -> None:
+    """Final review, C3. Settings titles a metadata-document app by its
+    document's host through `redirects.host_of`, the one host rule (B3-10),
+    as the consent screen does: an IPv6 literal compressed in both, never
+    `urlsplit`'s uncompressed spelling in one of them."""
+    org_id, slug = await _org(env)
+    me = await env.api.create_user(org_id, "org-admin")
+    env.api.settings.default_org_slug = slug
+    document = "https://[2001:db8:0:0:0:0:0:1]/oauth/client.json"
+    await seed_client(
+        env.api, org_id, client_id=document, kind="metadata_document", name="Claude Code"
+    )
+    _, challenge = pkce_pair()
+    asked = await env.api.client.post(
+        "/api/v1/oauth/authorize/details",
+        json={"query": authorize_query(document, challenge=challenge)},
+        headers=await env.api.headers(org_id, me),
+    )
+    assert asked.status_code == 200, asked.text
+    named = asked.json()["client"]["client_host"]
+    assert named == "2001:db8::1"
+    await connect(env.api, org_id, me, client_id=document)
+
+    (app,) = (await _connections(env, org_id, me)).json()["apps"]
+    assert (app["client_id"], app["kind"], app["host"]) == (document, "metadata_document", named)
 
 
 async def test_the_list_says_when_the_switch_is_off_and_there_is_no_address(env: Any) -> None:

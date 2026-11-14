@@ -70,6 +70,18 @@ MAX_REQUEST_BYTES = 16 * 1024
 
 _LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _HEX_NUMBER = re.compile(r"0x[0-9a-f]*", re.IGNORECASE)
+_VSCHAR = re.compile(r"[\x20-\x7e]+")
+
+
+def vschar(value: str) -> bool:
+    """RFC 6749 Appendix A's VSCHAR, `%x20-7E`, one character or more: the
+    set of `client_id` (A.1), `code` (A.11) and `refresh_token` (A.17). Held
+    to it before a query reads the value, because PostgreSQL refuses a NUL
+    in text (a 500): by the token and revocation endpoints for every value
+    they read but the verifier (`app.api.oauth_tokens`, THE CHARACTER SETS),
+    and by the consent for the request's `client_id` (`authorize.validate`;
+    final review, C1)."""
+    return _VSCHAR.fullmatch(value) is not None
 
 
 def valid_host(host: str) -> bool:

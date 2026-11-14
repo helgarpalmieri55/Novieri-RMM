@@ -50,7 +50,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -97,7 +96,8 @@ class HeldApp:
 def _registration(row: Any) -> Registration:
     app_id, client_id, name, kind, redirect_uris = row
     if kind == "metadata_document":
-        host = urlsplit(client_id).hostname or client_id
+        # The one host rule (B3-10): the host the consent screen named.
+        host = host_of(client_id)
     else:
         host = ", ".join(sorted({host_of(uri) for uri in redirect_uris} - {""}))
     return Registration(app_id, client_id, name, kind, host)

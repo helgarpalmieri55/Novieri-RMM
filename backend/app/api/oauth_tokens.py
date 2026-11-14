@@ -23,11 +23,12 @@ set before anything uses it, and one outside it is `invalid_request`
 (`MALFORMED`):
 - `code_verifier`: RFC 7636 §4.1, `43*128unreserved` (`pkce.valid_verifier`);
 - every other one -- `grant_type`, `client_id`, `code`, `redirect_uri`,
-  `resource`, `refresh_token`, `scope`, `token` -- VSCHAR, `%x20-7E`: RFC 6749
-  Appendix A's set for `client_id` (A.1), `code` (A.11) and `refresh_token`
-  (A.17), and a superset of what A.4, A.6, A.10 and RFC 8707 allow for
-  `scope`, `redirect_uri`, `grant_type` and `resource`, whose own checks
-  follow.
+  `resource`, `refresh_token`, `scope`, `token` -- VSCHAR, `%x20-7E`
+  (`policy.vschar`, which the consent holds its `client_id` to as well): RFC
+  6749 Appendix A's set for `client_id` (A.1), `code` (A.11) and
+  `refresh_token` (A.17), and a superset of what A.4, A.6, A.10 and RFC 8707
+  allow for `scope`, `redirect_uri`, `grant_type` and `resource`, whose own
+  checks follow.
 A parameter neither route reads -- `token_type_hint`, an unknown one -- is
 held to nothing: "The authorization server MUST ignore unrecognized request
 parameters" (RFC 6749 §3.2), and RFC 7009 §2.2 ignores the hint.
@@ -48,7 +49,6 @@ Outside `/api/v1`: no MCP tool reaches it, no cookie is read, and the CSRF rule
 that carries no ambient credential.
 """
 
-import re
 from collections.abc import Callable
 from urllib.parse import parse_qsl
 from uuid import UUID
@@ -84,6 +84,7 @@ from app.core.auth.oauth.policy import (
     TOKEN_REQUESTS_PER_MINUTE,
     issuer,
     network_of,
+    vschar,
 )
 from app.core.auth.oauth.store import deployment_org
 from app.core.client_address import client_address
@@ -96,7 +97,6 @@ router = APIRouter()
 Form = dict[str, list[str]]
 Charset = Callable[[str], bool]
 _GRANTS = frozenset({"authorization_code", "refresh_token"})
-_VSCHAR = re.compile(r"[\x20-\x7e]+")
 #: The limit's window, in seconds, and what `Retry-After` says (B3-24).
 _WINDOW_S = 60
 
@@ -148,13 +148,7 @@ async def _form(request: Request) -> Form:
     return form
 
 
-def _vschar(value: str) -> bool:
-    """RFC 6749 Appendix A's VSCHAR, `%x20-7E`, the set of every value these
-    routes read but the verifier (THE CHARACTER SETS, above)."""
-    return _VSCHAR.fullmatch(value) is not None
-
-
-def _optional(form: Form, name: str, *, charset: Charset = _vschar) -> str | None:
+def _optional(form: Form, name: str, *, charset: Charset = vschar) -> str | None:
     """The one value of `name`, in `charset`; None when absent. Every value
     these routes read passes here (or `_check_resource`), so none outside its
     set reaches a query or a comparison."""
@@ -168,7 +162,7 @@ def _optional(form: Form, name: str, *, charset: Charset = _vschar) -> str | Non
     return values[0]
 
 
-def _one(form: Form, name: str, *, charset: Charset = _vschar) -> str:
+def _one(form: Form, name: str, *, charset: Charset = vschar) -> str:
     value = _optional(form, name, charset=charset)
     if value is None:
         raise OAuthError(MISSING)
@@ -179,7 +173,7 @@ def _check_resource(form: Form, request: Request) -> None:
     resource = mcp_resource(request.app.state.settings)
     assert resource is not None  # `_ready` refused without it
     values = form.get("resource", [])
-    if not all(_vschar(value) for value in values):
+    if not all(vschar(value) for value in values):
         raise OAuthError(MALFORMED)
     if not all(grants.names_resource(value, resource) for value in values):
         raise OAuthError(BAD_TARGET)
