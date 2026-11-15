@@ -14,7 +14,7 @@ The system is composed of three deployable roles. This separation is what makes
                         │  Agent Gateway  ◀───┘   │                       │
                         │  (mTLS WebSocket)       ├─▶ Job Engine          │
                         │        ▲                │   (signs jobs)        │
-                        │        │                ├─▶ Auth (Keycloak)     │
+                        │        │                ├─▶ Auth (own + OAuth)  │
                         │        │                ├─▶ Audit (hash-chain)  │
                         │        │                └─▶ PostgreSQL + Redis  │
                         │        │                    Object storage (S3) │
@@ -53,8 +53,12 @@ Internally decomposed as:
 - **Job Engine** — enqueues, **signs**, dispatches, and tracks jobs; owns the
   job lifecycle and retries. Backed by Celery + Redis for server-side async and
   scheduling.
-- **Auth** — Keycloak as identity broker (OIDC/SAML, AD/Entra federation, MFA,
-  user/role storage).
+- **Auth** — the platform's own sign-in: a password and a second factor (TOTP
+  or a passkey), Microsoft as an option, and a session cookie; and its own
+  OAuth 2.1 server for AI apps over MCP
+  (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
+  Keycloak, the identity broker of the first design, was removed in own
+  authentication phase 4 (2026-11-15).
 - **Audit** — append-only, hash-chained event log.
 - **Data** — PostgreSQL 16 (relational + tenant isolation via RLS), Redis (queue,
   cache, live pub/sub), S3-compatible object storage (agent binaries, packages,
@@ -166,7 +170,7 @@ Docker Compose stack on one adequately-sized host:
 
 ```
 [ Traefik/nginx TLS ] → [ web ] [ api ] [ agent-gateway ]
-                         [ keycloak ] [ postgres ] [ redis ]
+                         [ openbao ] [ postgres ] [ redis ]
                          [ minio (S3) ]
                          [ internal CA (Vault PKI / step-ca) ]
 Agents across the LAN + optional site server(s) per location.
@@ -223,10 +227,11 @@ behind the proxy, and MinIO in distributed mode. Site servers per branch.
 
 Control plane on Kubernetes (Helm chart in `deploy/helm/`): API and agent-gateway
 as independently scaled deployments, managed PostgreSQL, managed Redis, S3 for
-object storage, Keycloak (or a managed OIDC IdP). Customer LANs run site servers
-for imaging/caching; endpoints anywhere dial the cloud gateway. Multi-tenancy
-carries multiple customer organizations in one control plane, or one control
-plane per large customer.
+object storage; sign-in and the OAuth server are the platform's own (a managed
+OIDC IdP was the plan until own authentication phase 4, 2026-11-15). Customer
+LANs run site servers for imaging/caching; endpoints anywhere dial the cloud
+gateway. Multi-tenancy carries multiple customer organizations in one control
+plane, or one control plane per large customer.
 
 The migration from on-prem to cloud is a deployment and configuration change, not
 an application rewrite — because the data model is already tenant-aware, agents

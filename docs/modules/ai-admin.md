@@ -103,7 +103,7 @@ endpoint agent's footprint or attack surface.
 - **AI Automation substrate** (hard dependency for act mode): orchestration
   service, approved-action registry, autonomy dial, AI audit.
 - **Every module's API** as the read tool surface.
-- **RBAC / Keycloak** — sessions bound to the admin's real permissions.
+- **RBAC and the platform's own sign-in** — sessions bound to the admin's real permissions.
 - **Reporting & Analytics** — read mode is conversational reporting; share the
   query layer rather than duplicating it.
 - **Endpoint Health & Alerting** — alerts are a primary investigation entry

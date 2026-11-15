@@ -16,7 +16,13 @@ own certificate, the identity kept as `tid` + `oid` -- and §3.3's Keycloak
 identity provider no longer signs anybody in to the console or the portal.
 Until phase 3 it concerned MCP clients only; since phase 3, which moved MCP
 to the platform's own OAuth server, it signs nobody in, and phase 4 removes
-it with Keycloak.
+it with Keycloak. Removed on 2026-11-15 (own authentication phase 4), and
+with it the realm, the theme, §4's event forwarding and the tests that read
+them (`backend/tests/test_console_auth_realm.py` and the `keycloak_events`
+tests): falsifiers 1-4 and 7-11 below describe a component that no longer
+exists and have no test (5 and 6, on the console's own path, still have
+theirs), and every present tense about the realm below is the record of
+2026-08.
 
 **Which falsifiers have tests.** 1, 2 (by proxy), 4 and 7 are in
 `backend/tests/test_console_auth_realm.py`. 5 and 6 -- the OIDC authority
@@ -107,7 +113,8 @@ enrolment routes (design §2.2). The balance, stated rather than implied:
   event in the platform's own chain (invariant 4).
 
 Since own authentication phase 3 MCP signs in on the platform's own OAuth
-server too; the realm is removed in phase 4.
+server too; the realm is removed in phase 4. Removed on 2026-11-15 (own
+authentication phase 4).
 
 ---
 

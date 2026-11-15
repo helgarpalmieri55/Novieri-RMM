@@ -537,7 +537,13 @@ Cada fase con su plan, su PR y su revisión:
 3. **Servidor OAuth para MCP y token interno del asistente:** §5.
 4. **Retiro de Keycloak:** servicios, base de datos, `deploy/keycloak/`, rutas de Traefik, respaldo y restauración,
    preflight, secretos `keycloak-*`, claves `.env` `KEYCLOAK_*`, `ITS_OIDC_*`, `ENTRA_*`; la prueba de despliegue de la
-   CI y `ci_mcp_flow.py`, reescrita contra el servidor propio.
+   CI y `ci_mcp_flow.py`, reescrita contra el servidor propio. *Plan:
+   `docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md` (2026-11-15). La base `keycloak`, los secretos
+   `keycloak-*` y las claves `.env` del proveedor de identidad de antes los retira el operador en un paso del runbook,
+   cuando decide cerrar la vuelta atrás (decisiones del operador K1 y K2 de ese plan, 2026-11-15). Nada del
+   repositorio los crea en una instalación nueva ni los lee para funcionar: de las copias de seguridad solo la previa
+   a la actualización guarda la base, `restore.sh` la devuelve cuando una copia la trae, y `deploy.sh` nombra las
+   claves que encuentra en `.env` sin tocarlas.*
 
 La 1 primero; la 2 y la 3 pueden ir en paralelo después; la 4 al final. Sin usuarios que migrar, la consola pasa
 directamente a la sesión propia.
@@ -557,6 +563,14 @@ directamente a la sesión propia.
   la clave privada de Entra (fase 2, D33) son credenciales de la bóveda de la plataforma, que OpenBao envuelve: ninguna
   ruta nueva para ellas. *(Corregido el 2026-11-06.)*
 - El despliegue lo absorbe el proyecto 4.
+
+*Fase 4 (2026-11-15): los documentos que describen el producto de hoy (`docs/01-architecture.md`,
+`02-tech-stack.md`, `04-data-model.md`, `06-roadmap.md`, `08-observability.md`, `product.md`,
+`docs/modules/ai-admin.md`, `DESIGN.md`, `HANDOFF.md`) nombran a Keycloak solo como historia, con la fase en que dejó
+de ser verdad, y `backend/tests/test_docs_without_keycloak.py` lo fija; `deploy/README.md`, `deploy/GO-LIVE.md` y
+`docs/07-backup-restore.md` tienen su propia guarda (`backend/tests/test_runbook_without_keycloak.py`). Las
+especificaciones y los planes fechados se quedan como registro, con una nota fechada donde aún decían «hasta la fase
+4» o describían a Keycloak como su presente.*
 
 ## 10. Falsificadores
 

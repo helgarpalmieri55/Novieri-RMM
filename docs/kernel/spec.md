@@ -1,6 +1,15 @@
 # Phase 0 — Platform Kernel Specification
 
 Status: **approved** (decisions confirmed by product owner, 2026-07-17)
+
+> **2026-11-15 (own authentication phase 4).** The passages on operator
+> authentication through Keycloak -- the scope list, the out-of-scope list,
+> the authentication section, the console's login and the compose services --
+> describe Phase 0 as it was built. The platform signs people in itself since
+> own authentication phase 1, and Keycloak, its realm import and
+> `deploy/keycloak/` were removed in phase 4
+> (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
+
 Sources: `docs/00-vision.md` … `docs/06-roadmap.md`. This spec turns the Phase 0
 scoping brief in `docs/06-roadmap.md` into an implementable design. Where this
 spec and the core docs overlap, the core docs are authoritative; this spec adds
@@ -362,5 +371,9 @@ full stack is exercised at deployment).
 end-to-end demo (`scripts/demo_e2e.py`) that — against a locally running API +
 gateway with the dev CA and local signer — enrolls a fake agent, dispatches a
 signed `hello` job from the API, and shows the verified result and intact
-audit chain. The roadmap's three-OS exit criterion additionally requires the
-skeleton agent under `agent/` (next cycle, still unbuilt).
+audit chain. *(2026-11-15: that script was retired in own authentication
+phase 4; it signed in with a bearer, which `/api/v1` has not read since
+phase 1. The same loop is
+`backend/tests/test_e2e_kernel.py::test_kernel_end_to_end`, which the CI
+`backend` job runs.)* The roadmap's three-OS exit criterion additionally
+requires the skeleton agent under `agent/` (next cycle, still unbuilt).

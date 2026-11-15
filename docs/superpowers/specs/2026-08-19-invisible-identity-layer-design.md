@@ -1,7 +1,7 @@
 # The invisible identity layer — Design
 
 **Date:** 2026-08-19
-**Status:** approved direction (operator chose "A now, revisit B later"); **superseded on 2026-11-04**: the operator chose B (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`)
+**Status:** approved direction (operator chose "A now, revisit B later"); **superseded on 2026-11-04**: the operator chose B (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`); Keycloak removed from the stack on 2026-11-15 (own authentication phase 4)
 **Amends:** `docs/modules/console-auth/spec.md` (§3.4's launcher-removal logic now extends to every identity surface), `docs/00-vision.md` commercial-readiness list
 
 ## 0. The decision, and the test it must pass
