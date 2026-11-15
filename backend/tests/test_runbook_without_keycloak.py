@@ -21,7 +21,7 @@ README = REPO / "deploy" / "README.md"
 GO_LIVE = REPO / "deploy" / "GO-LIVE.md"
 BACKUP_DOC = REPO / "docs" / "07-backup-restore.md"
 SCRIPTS = REPO / "deploy" / "scripts"
-RESTORE_SH = SCRIPTS / "restore.sh"
+DEPLOY_SH = SCRIPTS / "deploy.sh"
 
 # The names case-blind; the `.env` keys as keys, so the audit action
 # `auth.entra_credential_used` (Microsoft sign-in, phase 2) is not one.
@@ -36,6 +36,10 @@ GONE_HEADINGS = (
     "## The provisioning client",
     "### What keycloak-init still converges",
 )
+#: "phase 4" dates a line as history. "until phase 4" is the same two words in
+#: the future tense, written while Keycloak was still here, and dates nothing
+#: (fix round 1).
+DATED = re.compile(r"(?<!until )(?<!until own authentication )phase 4")
 
 
 def _sections(text: str) -> list[tuple[str, str]]:
@@ -55,8 +59,8 @@ def _sections(text: str) -> list[tuple[str, str]]:
 def _dated(lines: list[str], index: int) -> bool:
     """History says when it stopped being true: "phase 4" on the line, on one
     of the three before it (a command under its comment) or on the next one
-    (a sentence wrapped across the two)."""
-    return any("phase 4" in line for line in lines[max(0, index - 3) : index + 2])
+    (a sentence wrapped across the two). Not "until phase 4" (`DATED`)."""
+    return any(DATED.search(line) for line in lines[max(0, index - 3) : index + 2])
 
 
 def _offenders(path: Path, allowed: tuple[str, ...] = ()) -> list[str]:
@@ -84,6 +88,10 @@ def test_the_guard_finds_a_stray_name() -> None:
     assert _dated(lines, 3)
     assert _dated(["integrated with Keycloak until own", "authentication phase 4."], 0)
     assert not _dated(["# phase 4", "a", "b", "c", "pg_restore -d keycloak", "d"], 4)
+    # The future tense is not history (fix round 1).
+    assert not _dated(["Keycloak answers /realms until phase 4."], 0)
+    assert not _dated(["Keycloak, until own authentication phase 4 removes it"], 0)
+    assert _dated(["removed in own authentication phase 4 (2026-11-15)"], 0)
 
 
 def test_the_runbook_names_the_old_provider_only_where_it_retires_it() -> None:
@@ -181,6 +189,11 @@ def test_every_in_page_link_lands_on_a_heading() -> None:
                 seen[base] = count + 1
                 anchors.add(base if count == 0 else f"{base}-{count}")
         links = set(re.findall(r"\]\(#([^)]+)\)", text))
+        # Non-vacuity (fix round 1): the README is where whole sections went,
+        # and a link pattern that stopped matching would pass every file.
+        # GO-LIVE.md has no in-page link today; one added later must land.
+        if path == README:
+            assert links, "no in-page link found in the README: the check is vacuous"
         assert links - anchors == set(), (path.name, sorted(links - anchors))
 
 
@@ -202,3 +215,106 @@ def test_a_removal_by_hand_finds_the_containers_by_their_compose_labels() -> Non
         assert re.search(r"label=com\.docker\.compose\.project=\$\{?project\b", block), block
         assert "label=com.docker.compose.service=$service" in block, block
         assert not re.search(r"compose ps[^\n]*\n?[^\n]*docker rm", block), block
+
+
+def _expand(pattern: str) -> set[str]:
+    """Every string an alternation of literals matches: `A(B|C)D` gives
+    `{"ABD", "ACD"}`. Anything else -- a class, a quantifier -- is refused, so
+    a pattern that stops being a finite list of names fails here."""
+
+    def alternatives(i: int) -> tuple[set[str], int]:
+        options: list[set[str]] = []
+        current = {""}
+        while i < len(pattern) and pattern[i] != ")":
+            char = pattern[i]
+            if char == "|":
+                options.append(current)
+                current, i = {""}, i + 1
+            elif char == "(":
+                inner, i = alternatives(i + 1)
+                assert pattern[i : i + 1] == ")", pattern
+                current, i = {a + b for a in current for b in inner}, i + 1
+            else:
+                assert re.fullmatch(r"[A-Z0-9_]", char), f"not a literal name: {char!r}"
+                current, i = {a + char for a in current}, i + 1
+        options.append(current)
+        return set().union(*options), i
+
+    names, end = alternatives(0)
+    assert end == len(pattern), pattern
+    return names
+
+
+def _shell_array(name: str) -> set[str]:
+    match = re.search(rf"^{name}=\((.*?)\)", DEPLOY_SH.read_text(), re.DOTALL | re.MULTILINE)
+    assert match, name
+    return set(match.group(1).split())
+
+
+def test_the_retiring_step_deletes_exactly_the_keys_deploy_sh_names() -> None:
+    """Parts 4 and 5 delete `.env` keys by name, and `deploy.sh` names the same
+    keys on every run (`OBSOLETE_ENV_KEYS`, of which `ROLLBACK_ENV_KEYS` are
+    the four a rollback needs). Pinned both ways, so neither list can grow or
+    shrink without the other: a key deploy.sh names and the step leaves keeps
+    being named for ever, and a key the step deletes that deploy.sh does not
+    name is a line of `.env` deleted that nobody said was obsolete (fix round
+    1)."""
+    body = _section(RETIRING)
+    seds = [_expand(m) for m in re.findall(r"sed -i -E '/\^\((.+?)\)=/d' \.env", body)]
+    greps = [_expand(m) for m in re.findall(r"grep -cE '\^\((.+?)\)=' \.env", body)]
+    assert len(seds) == 2 and len(greps) == 2, (len(seds), len(greps))
+    obsolete, rollback = _shell_array("OBSOLETE_ENV_KEYS"), _shell_array("ROLLBACK_ENV_KEYS")
+    assert len(rollback) == 4 and rollback < obsolete, (sorted(rollback), sorted(obsolete))
+    assert seds[0] == rollback, sorted(seds[0] ^ rollback)
+    assert seds[1] == obsolete - rollback, sorted(seds[1] ^ (obsolete - rollback))
+    assert greps[0] == rollback, sorted(greps[0] ^ rollback)
+    assert greps[1] == obsolete, sorted(greps[1] ^ obsolete)
+    assert "ITS_DEFAULT_ORG_SLUG" not in seds[0] | seds[1]
+    # The expander itself, so the pin cannot pass by reading nothing.
+    assert _expand("A(B|C)D|E") == {"ABD", "ACD", "E"}
+
+
+def _logical_commands(block: str) -> list[str]:
+    """A shell block's commands as bash reads them: a line ending in `\\`
+    goes on into the next, and comment and blank lines are not commands."""
+    commands: list[str] = []
+    pending = ""
+    for raw in block.splitlines():
+        line = raw.strip()
+        if not pending and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        commands.append(pending + line)
+        pending = ""
+    if pending:
+        commands.append(pending)
+    return commands
+
+
+PROMPT = re.compile(r"(?:^|&&|;|\|\|)\s*read -r")
+
+
+def test_a_prompt_is_the_last_command_of_its_block() -> None:
+    """A `read` that asks for a token reads the terminal, and when a terminal
+    pastes a block without bracketed paste, the terminal holds the rest of
+    the block: the line after the `read` becomes the token, and is written to
+    `.env` or handed to the agent (fix round 1). So the command a prompt is in
+    ends its block, and what uses the value is in that same command."""
+    found = []
+    for path in (README, GO_LIVE, BACKUP_DOC):
+        for block in re.findall(r"```sh\n(.*?)```", path.read_text(), re.DOTALL):
+            commands = _logical_commands(block)
+            for index, command in enumerate(commands):
+                if PROMPT.search(command) and index != len(commands) - 1:
+                    found.append(f"{path.name}: {command[:80]}")
+    assert found == [], found
+    # Non-vacuity: the prompts exist, and a prompt followed by a command is
+    # seen as two commands.
+    prompts = re.findall(r"(?m)^\s*(?:stty -echo; )?read -r", README.read_text())
+    assert len(prompts) >= 7, len(prompts)
+    assert _logical_commands("read -rsp 'x: ' T && \\\n  use \"$T\"\n# c\nnext\n") == [
+        "read -rsp 'x: ' T &&  use \"$T\"",
+        "next",
+    ]

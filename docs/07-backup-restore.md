@@ -62,9 +62,10 @@ Run from `deploy/`. `$BK` is a directory on a **different** host or volume.
 BK=/srv/backup/$(date -u +%Y%m%dT%H%M%SZ) && mkdir -p "$BK"
 
 docker compose exec -T postgres pg_dump -U its_admin -d itsuite  -Fc > "$BK/itsuite.dump"
-# Only for the way back past own authentication phase 4, while the keycloak
-# database exists (deploy.sh's pre-upgrade backup does this itself):
-docker compose exec -T postgres pg_dump -U its_admin -d keycloak -Fc > "$BK/keycloak.dump"
+# Only while the keycloak database exists, as backup.sh decides, for the way
+# back past own authentication phase 4 (deploy.sh's pre-upgrade backup does this):
+has_kc="$(docker compose exec -T postgres psql -X -A -t -U its_admin -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = 'keycloak'" | tr -d '[:space:]')"
+[ "$has_kc" = 1 ] && docker compose exec -T postgres pg_dump -U its_admin -d keycloak -Fc > "$BK/keycloak.dump"
 docker compose exec -T postgres pg_dumpall -U its_admin --globals-only > "$BK/globals.sql"
 ```
 
@@ -115,8 +116,12 @@ of `openbao-data` without them restores nothing.
 
 ### 2.4 Encrypt and ship
 
+`read` asks for your `age` public key (the `age1…` line `age-keygen`
+printed); `gpg -e` works the same way if that is what you use:
+
 ```sh
-tar czf - -C "$BK" . | age -r <recipient> > "$BK.tar.gz.age"   # or gpg -e
+read -rp 'age recipient (age1...): ' AGE_RECIPIENT && \
+  tar czf - -C "$BK" . | age -r "${AGE_RECIPIENT:?no recipient}" > "$BK.tar.gz.age"
 ```
 
 ---
@@ -164,8 +169,10 @@ docker compose up -d --wait postgres
 docker compose exec -T postgres pg_restore -U its_admin -d itsuite  --clean --if-exists < "$BK/itsuite.dump"
 # Only when the backup carries keycloak.dump (taken before own authentication
 # phase 4, or by deploy.sh before an upgrade on a host that still keeps it):
-docker compose exec -T postgres createdb -U its_admin keycloak
-docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if-exists < "$BK/keycloak.dump"
+[ -s "$BK/keycloak.dump" ] && {
+  docker compose exec -T postgres createdb -U its_admin keycloak \
+    && docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if-exists < "$BK/keycloak.dump"
+}
 
 # 4. RE-APPLY THE APP-ROLE PRIVILEGE NARROWING. This is not optional — see below.
 docker compose run --rm postgres-grants
@@ -248,7 +255,8 @@ production requires — that link is an **HMAC-SHA256 keyed by
 the one that proves the HMAC key restored correctly:
 
 ```sh
-curl -sS -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/audit/verify
+# from deploy/: the console address is ITS_PUBLIC_CONSOLE_URL in .env
+curl -sS -H "Authorization: Bearer $TOKEN" "$(sed -n 's/^ITS_PUBLIC_CONSOLE_URL=//p' .env | tail -1)/api/v1/audit/verify"
 # {"ok": true, "count": 12345, "broken_at": null}
 ```
 

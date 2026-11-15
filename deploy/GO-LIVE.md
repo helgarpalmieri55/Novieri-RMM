@@ -349,9 +349,14 @@ that; a restored database with no `openbao-data` cannot sign a job or decrypt
 a credential. Use it in place of §3's steps 3-4, or on its own for a rollback
 on a live host where the key material was never lost:
 
+Run it from `deploy/`. `BACKUP` is the newest backup directory under
+`~/backups`; set it to another to restore that one. Then run one of the two
+lines after it, not both:
+
 ```sh
-./scripts/restore.sh ~/backups/<dir>          # into an EMPTY itsuite
-ITS_RESTORE_FORCE=1 ./scripts/restore.sh ~/backups/<dir>   # REPLACES a populated one
+BACKUP="$(ls -1dt ~/backups/*/ | head -1)"; echo "BACKUP=$BACKUP"
+./scripts/restore.sh "$BACKUP"                        # into an EMPTY itsuite
+ITS_RESTORE_FORCE=1 ./scripts/restore.sh "$BACKUP"    # REPLACES a populated one
 ```
 
 The second form drops the existing `itsuite` database first. `restore.sh`

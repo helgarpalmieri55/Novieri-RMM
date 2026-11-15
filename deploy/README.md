@@ -457,11 +457,17 @@ shipped and mounted into the container:
 docker compose exec openbao sh
 ```
 
-then, inside that shell:
+then, inside that shell, this line on its own -- it waits for you to paste
+the root token and press Enter, and a `read` given more pasted lines would
+take the next one as the token:
 
 ```sh
 stty -echo; read -r BAO_TOKEN; stty echo; echo; export BAO_TOKEN   # paste the root token, Enter
+```
 
+and then:
+
+```sh
 bao policy write its-app /bao/its-app.hcl
 bao policy write gateway-issuer /bao/gateway-issuer.hcl
 bao auth tune -max-lease-ttl=87600h token/
@@ -499,9 +505,27 @@ sudo tee /etc/it-suite/gateway-issuer.token >/dev/null   # paste, Ctrl-D
 
 #### 3.5 Put both tokens in `.env`
 
+Run these three one block at a time: each of the first two asks for one
+token, without echoing it, and waits for your paste -- the `its-app` token
+from 3.4, then the root token from 3.2. `read` and `printf` are shell
+builtins, so neither token becomes an argument of any process, and each
+deletes the key's earlier value first, because a second line further down
+silently wins:
+
+```sh
+read -rsp 'its-app token (3.4): ' T && echo && [ -n "$T" ] && sed -i '/^ITS_OPENBAO_TOKEN=/d' .env && printf 'ITS_OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
 ```
-ITS_OPENBAO_TOKEN=<the its-app token from 3.4>
-OPENBAO_TOKEN=<the root token from 3.2>
+
+```sh
+read -rsp 'root token (3.2): ' T && echo && [ -n "$T" ] && sed -i '/^OPENBAO_TOKEN=/d' .env && printf 'OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
+```
+
+```sh
+grep -c '^ITS_OPENBAO_TOKEN=\|^OPENBAO_TOKEN=' .env
+```
+
+```
+2
 ```
 
 They are **two different values** and must stay that way. `ITS_OPENBAO_TOKEN`
@@ -588,7 +612,7 @@ migrate-1 exited with code 0
 Alembic is quiet on success. Check the version directly:
 
 ```sh
-docker compose exec -e PGPASSWORD=<POSTGRES_ADMIN_PASSWORD> postgres \
+docker compose exec -T postgres \
   psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
 ```
 
@@ -753,6 +777,7 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 ```
 SERVICE           STATUS
 api               Up 15 seconds
+backup-replicator Up 15 seconds
 gateway           Up 22 seconds
 migrate           Exited (0) 23 seconds ago
 minio             Up 26 seconds (healthy)
@@ -767,6 +792,8 @@ worker            Up 15 seconds
 ```
 
 The three `Exited (0)` services are the one-shot jobs; that is success.
+(`backup-replicator` came after the run recorded here, and its line is
+added by hand: it has no healthcheck, so it reads `Up` like `worker`.)
 
 **Verify Traefik actually picked up your certificate.** The fallback to a
 self-signed certificate is silent:
@@ -941,8 +968,9 @@ curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 ```sh
 cd /opt/it-suite/agent && go build -o /usr/local/bin/its-agent ./cmd/agent
 
+read -rsp 'Enrollment token from 11b: ' ITS_AGENT_ENROLL_TOKEN && echo && \
 ITS_AGENT_ENROLL_URL=https://itms.toeshee.com \
-ITS_AGENT_ENROLL_TOKEN=<the token value> \
+ITS_AGENT_ENROLL_TOKEN="${ITS_AGENT_ENROLL_TOKEN:?nothing was pasted}" \
 ITS_AGENT_DATA_DIR=/var/lib/its-agent \
   /usr/local/bin/its-agent
 ```
@@ -980,11 +1008,17 @@ from before the fix described in defect 11.
 #### 11d — Round-trip a signed job
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"device_id":"<device id>","type":"hello","params":{}}' \
-  https://itms.toeshee.com/api/v1/jobs
-# ... then poll it
-curl -H "Authorization: Bearer $TOKEN" https://itms.toeshee.com/api/v1/jobs/<job id>
+read -rp 'Device id (the devices list in 11c): ' DEVICE_ID && \
+JOB_ID="$(curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"device_id\":\"${DEVICE_ID:?no device id}\",\"type\":\"hello\",\"params\":{}}" \
+  https://itms.toeshee.com/api/v1/jobs | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')" && \
+echo "JOB_ID=$JOB_ID"
+```
+
+Then poll it:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" "https://itms.toeshee.com/api/v1/jobs/${JOB_ID:?no job id}"
 ```
 
 ```json
@@ -1444,11 +1478,16 @@ you.
 ### 1. Run the preflight FIRST — this is a step, not a suggestion
 
 It asks the database who is currently on the wrong side of the rule, which is
-the only way to learn the cost before paying it. Run it from the repo root:
+the only way to learn the cost before paying it. Run it from `deploy/`, in a
+one-off `api` container: that container already holds the admin URL
+(`ITS_DATABASE_ADMIN_URL` in `.env`) and reaches Postgres, which publishes
+no port on the host. The script is mounted from the checkout; the domain is
+the one you mean to set:
 
 ```sh
-ITS_DATABASE_ADMIN_URL="postgresql+asyncpg://its_admin:<POSTGRES_ADMIN_PASSWORD>@localhost:5432/itsuite" \
-  backend/.venv/bin/python scripts/preflight_email_domain.py toeshee.com
+docker compose run --rm --no-deps --label traefik.enable=false \
+  -v "$PWD/../scripts/preflight_email_domain.py:/srv/app/preflight_email_domain.py:ro" \
+  --entrypoint python api preflight_email_domain.py toeshee.com
 ```
 
 | Exit code | Meaning |
@@ -2292,10 +2331,14 @@ Two steps on the endpoint, not one, and that is the whole shape of the managed
 path: the package installs, your own secret mechanism enrols.
 
 ```powershell
-# staged on \\<dfs-or-sysvol>\its-agent\ , run by a computer startup script (SYSTEM)
+# Staged on your DFS share or SYSVOL folder, run by a computer startup
+# script as SYSTEM.
+# 1. Install the service, and do not start it:
 .\install.ps1 -Binary .\its-agent-windows-amd64.exe -NoStart
-
-$env:ITS_AGENT_ENROLL_TOKEN = <read from a location only machine accounts can read>
+# 2. Your own secret mechanism sets $env:ITS_AGENT_ENROLL_TOKEN here, from a
+#    location only machine accounts can read. Which one is yours to choose;
+#    this runbook names none.
+# 3. Enrol:
 .\its-agent-enroll.ps1 -Url https://itms.toeshee.com
 ```
 
@@ -2529,7 +2572,7 @@ done | xargs -r docker rm -f
 
 # 7. Verify.
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
-docker compose exec -e PGPASSWORD=<pw> postgres \
+docker compose exec -T postgres \
   psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
 curl -o /dev/null -w '%{http_code}\n' https://itms.toeshee.com/api/v1/devices   # 401
 #    And that the running worker really holds the new beat schedule -- this
@@ -2678,12 +2721,18 @@ One ordered path. Read it before you need it.
 cd /opt/it-suite/deploy
 
 # 1. Decide what you are going back to, and whether the schema moved.
+#    BACKUP is the backup the bad deploy took before it changed anything:
+#    the newest pre-upgrade-* directory, the one deploy.sh named at its
+#    end. Going back further, set BACKUP to that older directory instead,
+#    and past own authentication phase 4 with the line in "Back past own
+#    authentication phase 4" below.
+BACKUP="$(ls -1d ~/backups/pre-upgrade-* | tail -1)"; echo "BACKUP=$BACKUP"
 grep IT_SUITE_VERSION .env                        # the version running now
-cat ~/backups/pre-upgrade-<timestamp>/image_version   # the version to go BACK to
+cat "$BACKUP/image_version"                       # the version to go BACK to
 docker images --format '{{.Repository}}:{{.Tag}}' | grep itsuite/backend
 docker compose exec -T postgres \
   psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
-cat ~/backups/pre-upgrade-<timestamp>/alembic_version   # what the backup holds
+cat "$BACKUP/alembic_version"                     # what the backup holds
 #
 #    THE TWO CASES ARE DIFFERENT ROLLBACKS. If those two revisions MATCH, the
 #    bad deploy did not move the schema: do steps 2 and 5 only, skip 3 and 4,
@@ -2703,7 +2752,7 @@ docker compose stop api gateway worker web
 #    restore.sh refuses a non-empty target by default; in a rollback the
 #    target is ALWAYS non-empty, so that guard is for a mistyped restore, not
 #    for this. Read what it costs, below, before running it.
-ITS_RESTORE_FORCE=1 ./scripts/restore.sh ~/backups/pre-upgrade-<timestamp>
+ITS_RESTORE_FORCE=1 ./scripts/restore.sh "$BACKUP"
 
 # 4. ONLY IF the schema moved: confirm the database is back where the old
 #    images expect it.
@@ -2711,11 +2760,16 @@ docker compose exec -T postgres \
   psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
 
 # 5. Point at the previous version and start. NO rebuild, no git checkout.
-#    Edit the line rather than appending: a `sed -i` on a .env that predates
+#    PREV is the image tag the backup recorded (its image_version), and only
+#    a bare tag is taken: a backup from before versioned images recorded
+#    none, and then the edit below refuses rather than write it. Edit the
+#    line rather than appending: a `sed -i` on a .env that predates
 #    IT_SUITE_VERSION silently matches nothing and leaves you on :dev.
+PREV="$(sed -n 's/^IT_SUITE_VERSION=//p' "$BACKUP/image_version" | tail -1)"
+case "$PREV" in ''|*[!A-Za-z0-9._-]*) echo "no image tag recorded in $BACKUP"; PREV="" ;; *) echo "PREV=$PREV" ;; esac
 grep -q '^IT_SUITE_VERSION=' .env \
-  && sed -i 's/^IT_SUITE_VERSION=.*/IT_SUITE_VERSION=<previous-sha>/' .env \
-  || echo 'IT_SUITE_VERSION=<previous-sha>' >> .env
+  && sed -i "s/^IT_SUITE_VERSION=.*/IT_SUITE_VERSION=${PREV:?no previous version}/" .env \
+  || echo "IT_SUITE_VERSION=${PREV:?no previous version}" >> .env
 grep IT_SUITE_VERSION .env                        # confirm exactly one line
 docker compose up -d
 
@@ -2767,7 +2821,18 @@ the cost of not being a real rollback. If the release changed compose or
 
 **Back past own authentication phase 4 (2026-11-15), the backup in step 3 is
 the one taken before that upgrade: the newest `~/backups/pre-upgrade-*` whose
-`alembic_version` is below `0248`** (`cat ~/backups/pre-upgrade-*/alembic_version`).
+`alembic_version` is below `0248`.** In step 1, set `BACKUP` with the second
+line here instead, which picks it by the rule `deploy.sh` uses (its
+`way_back_backup`); the first lists every backup with its revision, and
+the last line prints `none` when this host holds no backup from before
+0248:
+
+```sh
+grep -H . ~/backups/pre-upgrade-*/alembic_version
+BACKUP=""; for d in ~/backups/pre-upgrade-*/; do [ -r "$d/alembic_version" ] || continue; r="$(tr -d '[:space:]' < "$d/alembic_version")"; case "$r" in [0-9][0-9][0-9][0-9]) [ "$((10#$r))" -lt 248 ] && BACKUP="${d%/}" ;; esac; done
+echo "BACKUP=${BACKUP:-none}"
+```
+
 A backup taken after it cannot cross its migration backwards, and holding
 a dump of the old identity provider's database does not make one the right
 one: every pre-upgrade backup taken while that database exists holds one. If
@@ -2829,15 +2894,20 @@ Every part can be run again, and a second run removes nothing more. In
 
 1. **A final copy of the database, if you want one.** It goes to
    `~/backups/keycloak-final.dump`, beside the pre-upgrade backups and apart
-   from the nightly ones, readable by you alone. The second line writes it
-   only when there is no copy yet (an empty file left by a failed run
-   counts as none), so running this part again after part 2 cannot
-   replace a good copy with an empty one:
+   from the nightly ones, readable by you alone. A copy counts as good only
+   if `pg_restore` reads it to the end (`-f /dev/null` reads every table's
+   data; `-l` reads only the list at the front, which a dump cut off
+   part-way still has). The second command dumps only when there is no
+   good copy yet, into `keycloak-final.dump.part`, and renames it only once
+   `pg_dump` has finished, so running this part again after part 2 cannot
+   replace a good copy with a broken one:
 
    ```sh
    mkdir -p ~/backups
-   test -s ~/backups/keycloak-final.dump || (umask 077 && docker compose exec -T postgres pg_dump -Fc -U its_admin keycloak > ~/backups/keycloak-final.dump)
-   test -s ~/backups/keycloak-final.dump && echo "dump ok"
+   docker compose exec -T postgres pg_restore -f /dev/null >/dev/null 2>&1 < ~/backups/keycloak-final.dump \
+     || (umask 077 && docker compose exec -T postgres pg_dump -Fc -U its_admin keycloak > ~/backups/keycloak-final.dump.part \
+         && mv ~/backups/keycloak-final.dump.part ~/backups/keycloak-final.dump)
+   docker compose exec -T postgres pg_restore -f /dev/null < ~/backups/keycloak-final.dump && echo "dump ok"
    ```
 
    It prints `dump ok`. The copy holds password hashes and the realm's
@@ -2905,7 +2975,17 @@ Every part can be run again, and a second run removes nothing more. In
    restoring the backup from before the upgrade (`itsuite`; and `keycloak`
    only if that backup holds `keycloak.dump`, which the one a stopped
    upgrade took does not -- the final copy of part 1 does) and putting back
-   by hand the four keys, the three secret files and the image.
+   by hand the four keys, the three secret files and the image. The final
+   copy goes back in, after `restore.sh` and before the old release starts,
+   with:
+
+   ```sh
+   docker compose exec -T postgres createdb -U its_admin keycloak
+   docker compose exec -T postgres pg_restore -U its_admin -d keycloak < ~/backups/keycloak-final.dump
+   ```
+
+   `createdb` refuses if a `keycloak` database is already there: then the
+   backup `restore.sh` used held one, and that is the one to keep.
 7. **If a client secret was ever created in Entra for the old identity
    provider's Microsoft sign-in** (`ENTRA_CLIENT_SECRET`), revoke it there:
    in the Microsoft Entra admin center, **App registrations** → that
@@ -3838,12 +3918,17 @@ its own cycle.
   cannot know one — and nothing else on an upgrade path ever gives it one, so
   even with `ITS_DATABASE_PORTAL_URL` set correctly the role cannot
   authenticate and every portal request still fails. After running
-  `docker compose up migrate` on an existing deployment, connect as
-  `its_admin` (or any superuser) and run:
-  ```sql
-  ALTER ROLE portal_user LOGIN PASSWORD '<the value of PORTAL_DB_PASSWORD in .env>';
+  `docker compose up migrate` on an existing deployment, run this from
+  `deploy/`. psql reads the password from the postgres container's own
+  environment (`\getenv`; compose gives it `.env`'s `PORTAL_DB_PASSWORD`),
+  so it is never an argument of any process:
+  ```sh
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U its_admin -d itsuite <<'SQL'
+  \getenv pw PORTAL_DB_PASSWORD
+  ALTER ROLE portal_user LOGIN PASSWORD :'pw';
+  SQL
   ```
-  Use the exact same password already set in `.env`'s `PORTAL_DB_PASSWORD` —
+  It must be the exact same password as `.env`'s `PORTAL_DB_PASSWORD` —
   `ITS_DATABASE_PORTAL_URL` is built from that value, so a mismatch here
   fails authentication with no further clue than "password authentication
   failed for user portal_user". This step is idempotent and safe to re-run
@@ -3917,17 +4002,30 @@ different deployment, which is how this platform is delivered anyway.
 Configuration is **server environment only**, matching the
 secrets-by-file-path convention `ITS_AUDIT_HMAC_KEY_PATH` already uses:
 
-```
-ITS_AI_PROVIDERS=local              # ONE provider key; two is an error
-ITS_AI_LOCAL_KIND=openai_compatible # "openai_compatible" | "anthropic"
-ITS_AI_LOCAL_BASE_URL=http://vllm.internal:8000/v1
-ITS_AI_LOCAL_MODEL=<model name>
-ITS_AI_LOCAL_API_KEY_PATH=/var/lib/its/secrets/ai-provider.key   # optional
+From `deploy/`, this asks for the two values only you know, the model
+server's address and the model's name, deletes any earlier line of the
+five settings, and writes four of them to `deploy/.env` (the `api` service
+reads it via `env_file`; `.env.example` carries the same block commented
+out). The fifth, the key's path, is written with the key below, so it is
+set exactly when the model server takes one:
+
+```sh
+# ITS_AI_PROVIDERS names ONE provider key; two is an error.
+# ITS_AI_LOCAL_KIND is "openai_compatible" or "anthropic".
+read -rp 'Model server address (for example http://vllm.internal:8000/v1): ' AI_URL \
+  && read -rp 'Model name, as that server names it: ' AI_MODEL \
+  && [ -n "$AI_URL" ] && [ -n "$AI_MODEL" ] \
+  && sed -i -E '/^ITS_AI_(PROVIDERS|LOCAL_KIND|LOCAL_BASE_URL|LOCAL_MODEL|LOCAL_API_KEY_PATH)=/d' .env \
+  && printf '%s\n' 'ITS_AI_PROVIDERS=local' 'ITS_AI_LOCAL_KIND=openai_compatible' \
+       "ITS_AI_LOCAL_BASE_URL=$AI_URL" "ITS_AI_LOCAL_MODEL=$AI_MODEL" >> .env
 ```
 
-Put them in `deploy/.env` (the `api` service reads it via `env_file`), where
-`.env.example` now carries the same block commented out. **Restart the `api`
-service after editing them** — the environment is read once, at startup.
+```sh
+grep '^ITS_AI_' .env
+```
+
+**Restart the `api` service after editing them** — the environment is read
+once, at startup.
 
 **The key path must be on the `its-secrets` volume**, which the `api` service
 mounts at `/var/lib/its/secrets` — the same convention `ITS_AUDIT_HMAC_KEY_PATH`
@@ -3935,13 +4033,26 @@ already uses. This is not cosmetic. Nothing in the stack mounts `/run/secrets`,
 so a path there is a `FileNotFoundError` at the first hosted-provider call; and
 `its-secrets` is the volume `docs/07-backup-restore.md` §2.2 tars, so a key
 written anywhere else is key material outside your backup set. Create it the way
-you created the audit key:
+you created the audit key. The prompt waits for your paste:
 
 ```sh
-docker compose run --rm --no-deps --entrypoint sh api -c \
-  'printf %s "<the provider api key>" > /var/lib/its/secrets/ai-provider.key && \
-   chmod 600 /var/lib/its/secrets/ai-provider.key'
+read -rsp 'Provider API key: ' K && echo && \
+printf '%s' "${K:?nothing was pasted}" | docker compose run --rm --no-deps -T --label traefik.enable=false \
+  --entrypoint sh api -c 'umask 077 && cat > /var/lib/its/secrets/ai-provider.key && \
+   chmod 600 /var/lib/its/secrets/ai-provider.key'; unset K
 ```
+
+Then point the setting at it (the `grep` keeps a second run from adding
+the line twice):
+
+```sh
+grep -qx 'ITS_AI_LOCAL_API_KEY_PATH=/var/lib/its/secrets/ai-provider.key' .env \
+  || echo 'ITS_AI_LOCAL_API_KEY_PATH=/var/lib/its/secrets/ai-provider.key' >> .env
+```
+
+The `read` does not echo the key, and `printf` is a shell builtin, so the
+key reaches the container on its standard input and is never an argument
+of any process. Restart the `api` service for the new setting.
 
 The file is read **at point of use and never cached on the config object**, so a
 rotated key takes effect on the next call rather than at the next restart, and a
