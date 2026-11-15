@@ -5,8 +5,9 @@ WHY THIS EXISTS AS A SEPARATE SCRIPT FROM `verify_backup_run.py`
 ================================================================
 
 *2026-11-15: `verify_backup_run.py` was retired in own authentication phase 4;
-it signed in with a bearer, which `/api/v1` has not read since phase 1. What
-CI now holds of what it measured is `HANDOFF.md` §5. This docstring is the
+it signed in with an identity provider's bearer token, which `/api/v1` has
+not accepted since phase 1. What CI now holds of what it measured is
+`HANDOFF.md` §5. This docstring is the
 record of why the two were split, and names it as it was.*
 
 `scripts/verify_backup_run.py` measures `backup.run` and `backup.restore`

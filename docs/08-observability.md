@@ -209,7 +209,9 @@ Stated here so nobody has to discover them during an incident.
 - **A live-host upgrade and a live-host rollback have not been exercised.**
   A backup that holds `keycloak.dump` (one from before own authentication
   phase 4, or the one `deploy.sh` takes before an upgrade) is restored by the
-  drill, which checks it holds tables; nothing reads it after.
+  drill when the drill is pointed at it, and the drill checks it holds tables;
+  nothing reads it after. Unpointed, the drill restores the latest nightly,
+  which has held no `keycloak.dump` since phase 4.
 - **The agent idle budget** (low-tens-of-MB resident, ~0% CPU) is measured for
   the capabilities that carry a benchmark, and remains a design target for those
   that do not. A capability's own spec says which it is; `CLAUDE.md` requires

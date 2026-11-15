@@ -88,10 +88,10 @@ deletes the moment it has exchanged it for a certificate.
 
 `scripts/demo_e2e_agent.py` used to boot the API and the mTLS gateway on real
 ports, enroll the real Go binary and dispatch server-signed jobs to it. It was
-retired on 2026-11-15 (own authentication phase 4): it signed in with a
-bearer, which `/api/v1` has not read since own authentication phase 1, so it
-had not been able to finish since then, and no CI job ran it. Its halves are now held
-in CI on every push:
+retired on 2026-11-15 (own authentication phase 4): it signed in with an
+identity provider's bearer token, which `/api/v1` has not accepted since own
+authentication phase 1, so it had not been able to finish since then, and no
+CI job ran it. Its halves are now held in CI on every push:
 
 - **The Python signer and the Go verifier agree.**
   `backend/tests/test_canonical_corpus.py` (the `backend` job) keeps

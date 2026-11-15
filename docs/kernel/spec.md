@@ -372,8 +372,8 @@ end-to-end demo (`scripts/demo_e2e.py`) that — against a locally running API +
 gateway with the dev CA and local signer — enrolls a fake agent, dispatches a
 signed `hello` job from the API, and shows the verified result and intact
 audit chain. *(2026-11-15: that script was retired in own authentication
-phase 4; it signed in with a bearer, which `/api/v1` has not read since
-phase 1. The same loop is
+phase 4; it signed in with an identity provider's bearer token, which
+`/api/v1` has not accepted since phase 1. The same loop is
 `backend/tests/test_e2e_kernel.py::test_kernel_end_to_end`, which the CI
 `backend` job runs.)* The roadmap's three-OS exit criterion additionally
 requires the skeleton agent under `agent/` (next cycle, still unbuilt).
