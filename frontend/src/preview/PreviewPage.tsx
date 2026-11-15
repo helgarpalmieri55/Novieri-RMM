@@ -1,8 +1,8 @@
 /**
  * A DEV-ONLY harness for looking at the design in a browser.
  *
- * WHY THIS EXISTS. Every screen in this console is behind Keycloak, so until a
- * full stack is running nobody can see the ported design — and "the CSS is
+ * WHY THIS EXISTS. Every screen in this console is behind the sign-in, so until
+ * a full stack is running nobody can see the ported design — and "the CSS is
  * byte-identical to the reference" and "it looks right" are different claims.
  * Building forty more pages on top of a stylesheet no human or screenshot has
  * ever rendered is how a systemic mistake reaches every screen at once.

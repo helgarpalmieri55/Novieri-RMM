@@ -29,9 +29,7 @@ export type ReasonCode =
 // English rather than being dropped. These unions are only the names catalogued
 // under `enums.<Type>` (`enums.coverage.test.ts` checks every value has a label
 // in both languages). A dotted probe name (`backup.nightly`) is keyed with `_`
-// because `.` separates catalogue paths. `keycloak_events` is deliberately
-// absent: its English label would name the identity vendor, which no catalogue
-// string may do.
+// because `.` separates catalogue paths.
 export type PlatformProbe =
   | "postgres_app"
   | "postgres_admin"
@@ -42,7 +40,6 @@ export type PlatformProbe =
   | "objectstore"
   | "object_store"
   | "identity"
-  | "jwks"
   | "signing"
   | "ca"
   | "backup_nightly"
