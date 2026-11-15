@@ -231,7 +231,7 @@ async def portal_engine(pg_cluster: PgCluster) -> AsyncIterator[AsyncEngine]:
 
 
 # ---------------------------------------------------------------------------
-# API app environment: real DB + fake IdP + local CA/signer, in-process ASGI.
+# API app environment: real DB + local CA/signer + `ForeignIssuer`, in-process ASGI.
 # ---------------------------------------------------------------------------
 
 from uuid import UUID, uuid4  # noqa: E402

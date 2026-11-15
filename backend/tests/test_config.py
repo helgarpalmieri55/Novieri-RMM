@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+from pydantic_settings import SettingsConfigDict
 
 from app.core.config import Settings, get_settings, override_settings
 
@@ -68,13 +70,26 @@ def test_a_keycloak_era_env_is_read_and_ignored(monkeypatch) -> None:
 def test_a_keycloak_era_dotenv_file_is_read_and_ignored(monkeypatch, tmp_path) -> None:
     """The same keys from a dotenv file, which is where `extra` matters: with
     `extra="forbid"` this construction raises, and `extra="ignore"` is what
-    keeps an upgraded `.env` read this way from stopping the process."""
+    keeps an upgraded `.env` read this way from stopping the process.
+
+    The falsifier is the second half: the same file, read by a `Settings`
+    whose only difference is `extra="forbid"`, raises, and raises only for
+    the extra keys -- so the file does carry keys no field reads, and it is
+    `extra="ignore"` that lets the first construction through."""
     _required(monkeypatch)
     dotenv = tmp_path / "keycloak-era.env"
     dotenv.write_text("".join(f"{key}={value}\n" for key, value in KEYCLOAK_ERA_ENV.items()))
     s = Settings(_env_file=dotenv)
     assert s.default_org_slug is None
     assert not hasattr(s, "oidc_issuer")
+
+    class ForbiddingSettings(Settings):
+        model_config = SettingsConfigDict(extra="forbid")
+
+    assert ForbiddingSettings.model_config["env_prefix"] == "ITS_"  # inherited
+    with pytest.raises(ValidationError) as refused:
+        ForbiddingSettings(_env_file=dotenv)
+    assert {error["type"] for error in refused.value.errors()} == {"extra_forbidden"}
 
 
 def test_override_settings_swaps_cached_instance(monkeypatch) -> None:

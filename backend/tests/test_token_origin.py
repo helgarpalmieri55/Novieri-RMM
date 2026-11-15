@@ -87,7 +87,7 @@ def _id_token(
 
 
 # --------------------------------------------------------------------------- #
-# The two origin rules, as units
+# No bearer is a console credential, whoever obtained it
 # --------------------------------------------------------------------------- #
 
 
@@ -95,8 +95,9 @@ def _id_token(
 async def test_no_client_s_token_is_a_console_credential(api_env, azp: str) -> None:
     """Was: the console-token origin rule admitted only `oidc_console_client_id`
     (two tests: the default client, and the client the setting names). Now no
-    access token is a console credential, whoever obtained it and whatever the
-    setting names."""
+    access token is a console credential, whoever obtained it: the console's
+    old client (`it-suite-web`) or any other. (The setting went with Keycloak
+    in own authentication phase 4.)"""
     _, slug, sub = await _person(api_env)
     token = api_env.foreign.token(sub, slug, azp=azp, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
@@ -116,7 +117,7 @@ async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The sweep: no door validates a token without an origin rule
+# The sweeps: no code can validate a Keycloak token; every MCP door reads its grant
 # --------------------------------------------------------------------------- #
 
 APP = Path(__file__).resolve().parents[1] / "app"
