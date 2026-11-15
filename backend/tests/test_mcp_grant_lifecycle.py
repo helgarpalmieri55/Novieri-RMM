@@ -1,13 +1,17 @@
 """An act on the account ends the person's AI connections (autenticación
-propia design §2.4, §5.3, §7; plan 2026-11-06, Task 10).
+propia design §2.4, §5.3, §7; plan 2026-11-06, Task 10; phase 4 plan,
+Task 1).
 
-The acts that forget a person's remembered browsers end their grants too, with
-the act as the reason and the count in the act's own audit event: being
-disabled or deleted, a factor reset (by an administrator or by the recovery
-link), a password change (their own, or by the mail link) and "sign out
-everywhere" -- the person's own, and since operator decision E1 (2026-11-15;
-phase 4 plan, Task 1) an administrator's too, which still forgets no
-browser.
+Eight acts end a person's grants, each with its reason on the grant and the
+count in its own audit event (`ai_grants_revoked`): being disabled or
+deleted, a factor reset (by an administrator or by the recovery link), a
+password change (their own, or by the mail link) and "sign out everywhere"
+(the person's own, or an administrator's). All but one also forget the
+person's remembered browsers. The exception is an administrator's "sign out
+everywhere" (operator decision E1, 2026-11-15; phase 4 plan, Task 1): it
+forgets no browser, and its grants end with the reason the person's own
+sign-out gives, `signed_out_everywhere`; the audit event tells the two apart
+(`by: administrator`, the administrator as actor).
 
 And, from the coordinator's integration notes (operator decision D2, part c,
 2026-11-12): each of those acts also ends the person's UNSPENT authorization
@@ -587,6 +591,16 @@ async def test_an_exchange_waiting_on_an_administrators_sign_out_opens_no_grant(
             )
         ).all()
     assert live == []
+    # Not `mcp.code_reused`: the act ended the code, it did not spend it.
+    async with AsyncSession(env.admin_engine) as session:
+        reused = (
+            await session.execute(
+                select(AuditEvent.id).where(
+                    AuditEvent.org_id == org, AuditEvent.action == "mcp.code_reused"
+                )
+            )
+        ).all()
+    assert reused == []
 
 
 # --------------------------------------------------------------------------- #
