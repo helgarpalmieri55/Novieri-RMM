@@ -107,8 +107,6 @@ def test_factory_fails_closed_in_production(tmp_path: Path) -> None:
     base = dict(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=str(tmp_path),
     )
     prod = Settings(
@@ -125,8 +123,6 @@ def test_factory_selects_backend(tmp_path: Path) -> None:
     base = dict(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=str(tmp_path),
     )
     local = Settings(**base, signing_backend="local", signing_key_path=tmp_path / "k.key")

@@ -115,8 +115,6 @@ def registered_app() -> Any:
         Settings(
             database_url="postgresql+asyncpg://unused/unused",
             database_admin_url="postgresql+asyncpg://unused/unused",
-            oidc_issuer="https://issuer.test",
-            oidc_jwks_url="https://jwks.test",
             ca_dir=Path("/tmp/its-ai-boundaries-ca"),
         )
     )

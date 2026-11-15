@@ -826,7 +826,7 @@ async def test_a_subprotocol_token_no_longer_opens_the_socket(api_env, live_api)
     """Own authentication phase 1: the console's old way in is no way in."""
     org_id = await api_env.create_org("ws-bearer")
     sub = await api_env.create_user(org_id, "read-only")
-    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
     with pytest.raises(
         (websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)
     ):

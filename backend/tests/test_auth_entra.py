@@ -86,8 +86,6 @@ def _settings(url: str | None) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir="/tmp/ca",
         public_console_url=url,
     )

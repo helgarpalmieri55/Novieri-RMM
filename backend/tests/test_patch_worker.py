@@ -230,8 +230,6 @@ async def test_scan_sweep_all_orgs_delegates_per_org(
         settings = Settings(
             database_url=pg_cluster.app_url,
             database_admin_url=pg_cluster.admin_url,
-            oidc_issuer="https://kc.example/realms/it-suite",
-            oidc_jwks_url="https://kc.example/realms/it-suite/certs",
             ca_dir=tmp_path / "ca",
             signing_key_path=tmp_path / "job-signing.key",
             redis_url=REDIS_URL,
@@ -285,8 +283,6 @@ async def test_apply_sweep_visits_all_orgs_and_sums_dispatch_apply_counts(
         settings = Settings(
             database_url=pg_cluster.app_url,
             database_admin_url=pg_cluster.admin_url,
-            oidc_issuer="https://kc.example/realms/it-suite",
-            oidc_jwks_url="https://kc.example/realms/it-suite/certs",
             ca_dir=tmp_path / "ca",
             signing_key_path=tmp_path / "job-signing.key",
             redis_url=REDIS_URL,
@@ -338,8 +334,6 @@ def test_create_celery_registers_patch_job_types(pg_cluster, tmp_path: Path) -> 
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url=REDIS_URL,

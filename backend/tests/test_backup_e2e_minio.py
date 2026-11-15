@@ -129,7 +129,7 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
     settings = Settings(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i", oidc_jwks_url="https://i/certs", ca_dir=tmp_path,
+        ca_dir=tmp_path,
         s3_endpoint=LOCAL, s3_access_key=ACCESS, s3_secret_key=SECRET,
         s3_bucket="itms-e2e-local", signing_key_path=tmp_path / "sign.key",
         vault_root_key_path=tmp_path / "vault.key",

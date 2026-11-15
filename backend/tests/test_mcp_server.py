@@ -216,8 +216,8 @@ async def test_a_keycloak_token_is_401_whatever_its_audience(mcp_env) -> None:
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
     for token in (
-        mcp_env.idp.token(sub, slug, email=f"{sub}@test.local", extra={"client_id": "claude"}),
-        mcp_env.idp.token(
+        mcp_env.foreign.token(sub, slug, email=f"{sub}@test.local", extra={"client_id": "claude"}),
+        mcp_env.foreign.token(
             sub,
             slug,
             aud=MCP_AUD,
@@ -285,21 +285,20 @@ async def test_a_token_that_names_no_app_is_401(mcp_env) -> None:
 
 async def test_a_token_without_an_org_claim_is_401(mcp_env) -> None:
     """The organization is the token's `org`, which the platform signed. Without
-    it the token does not verify, whatever `ITS_DEFAULT_ORG_SLUG` and the
-    multi-tenant switch say."""
+    it the token does not verify, whatever `ITS_DEFAULT_ORG_SLUG` says. (Until
+    own authentication phase 4 this also ran with the multi-tenant switch on
+    and off; the switch was Keycloak's, and went with it.)"""
     org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
     mcp_env.settings.default_org_slug = slug
     claims = mcp_claims(await mcp_token(mcp_env, slug, sub))
     del claims["org"]
-    for multi_tenant in (False, True):
-        mcp_env.settings.multi_tenant = multi_tenant
-        async with mcp_client(mcp_env) as client:
-            resp = await client.post(
-                "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
-            )
-        assert resp.status_code == 401
-        assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+    async with mcp_client(mcp_env) as client:
+        resp = await client.post(
+            "/mcp", json=INITIALIZE, headers=_bearer(await signed_mcp_token(claims))
+        )
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
 
 
 # --------------------------------------------------------------------------- #

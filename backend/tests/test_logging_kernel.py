@@ -588,7 +588,7 @@ def test_a_collision_slot_does_not_overwrite_a_real_key_of_the_same_name() -> No
 # --- Fix wave 4: the key-shape gate was exactly the alphabet of a JWT --------
 
 # base64url segments joined by `.`, 85 characters -- this platform's own
-# bearer-token shape (`app/core/security.py`). Module-level so every test
+# bearer-token shape (`app/core/auth/oauth/access.py`). Module-level so every test
 # below that needs "a JWT" uses the identical, measured-length string.
 _JWT = (
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9."

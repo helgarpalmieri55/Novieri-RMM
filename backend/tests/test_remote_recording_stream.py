@@ -25,8 +25,6 @@ def store(tmp_path):
     settings = Settings(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=tmp_path,
         s3_access_key="test",
         s3_secret_key="test",

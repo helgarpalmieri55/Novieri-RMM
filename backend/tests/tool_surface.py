@@ -166,8 +166,6 @@ def build_router_only_app() -> FastAPI:
             database_url=unreachable,
             database_admin_url=unreachable,
             database_portal_url=unreachable,
-            oidc_issuer="https://idp.invalid",
-            oidc_jwks_url="https://idp.invalid/jwks",
             ca_dir=tmp / "ca",
             signing_key_path=tmp / "job-signing.key",
             redis_url="redis://127.0.0.1:6379/9",

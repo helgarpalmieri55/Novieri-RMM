@@ -156,16 +156,6 @@ CATALOG: dict[str, str] = {
         "la ventana de este despliegue no se puede leer ({window}); créalo de nuevo con una "
         "válida"
     ),
-    "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
-    "token has no kid header": "el token no tiene encabezado kid",
-    "this token is not an access token": "este token no es un token de acceso",
-    "token missing required {oidc_org_claim} claim in multi-tenant mode": (
-        "al token le falta el claim obligatorio {oidc_org_claim} en el modo multiorganización"
-    ),
-    "token missing {oidc_org_claim} claim and no default org configured": (
-        "al token le falta el claim {oidc_org_claim} y no hay una organización predeterminada "
-        "configurada"
-    ),
     "object suffix must be a non-empty relative path": (
         "el sufijo del objeto debe ser una ruta relativa no vacía"
     ),
@@ -5213,12 +5203,6 @@ CATALOG: dict[str, str] = {
     ),
     "the MCP channel marker is malformed": "la marca del canal MCP está mal formada",
     "this access token was refused": "se rechazó este token de acceso",
-    "this token was issued to the console and is not accepted over MCP": (
-        "este token se emitió para la consola y no se acepta por MCP"
-    ),
-    "MCP access must be granted by a person signing in": (
-        "el acceso por MCP debe concederlo una persona al iniciar sesión"
-    ),
     # MCP server (app/mcp/server.py)
     "MCP is turned off for this organization. An org-admin turns it on in "
     "Settings → AI connections.": (
