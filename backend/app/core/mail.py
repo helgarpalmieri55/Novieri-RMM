@@ -287,8 +287,22 @@ def recipient_permitted(
     address: str, sender: str, caller_email: str, org_domain: str | None
 ) -> bool:
     """The sending address, the caller's own mailbox (a `+tag` is fine), or an
-    address in the organization's console sign-in domain. Why the list is this
-    short: `realm_config.py`'s module docstring, "THE TEST SEND"."""
+    address in the organization's console sign-in domain.
+
+    WHY THE LIST IS THIS SHORT (moved from `user_admin/realm_config.py`, which
+    went with Keycloak in own authentication phase 4):
+
+    - A mail-sending primitive that took ANY address would send from the
+      organization's own domain, through its own relay, to anyone. The content
+      is the platform's fixed test text, so the worst case is small, but it is
+      a primitive this platform does not need to hold.
+    - "The caller's DOMAIN" was the first version, and review showed why not:
+      a caller signed in as `admin@gmail.com` would have opened all of
+      gmail.com. The caller's own address is proof of one mailbox, not of a
+      domain. The console sign-in domain is the only domain here that already
+      means "this organization's people": it decides who may sign in at all.
+    - The sending address's DOMAIN is not on the list for the same reason: it
+      is one form field away from any value."""
     wanted = split_address(address)
     if wanted is None:
         return False

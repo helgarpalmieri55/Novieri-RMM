@@ -9,7 +9,7 @@ these probes read them, and the ordinary sampler and
 
 READS FILES, NO NETWORK, NO SECRETS. The files hold result words and times
 only. A missing file means "not set up", reported `ok` with
-`configured: false` (the `keycloak_events` precedent): visible, not alarming.
+`configured: false`: visible, not alarming.
 """
 
 import asyncio

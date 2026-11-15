@@ -671,9 +671,10 @@ ORG_WIDE_KEYS: dict[str, str] = {
     "users_org_id_external_subject_key": (
         "an identity, not a name: one subject of the identity provider was one person in "
         "the organisation. No door reads it since own authentication phase 3 (the MCP token "
-        "names the person by id); the Keycloak event ingest still does until phase 4 removes "
-        "both. Per client, one login could hold a row in each client. Written only under "
-        "scope all (`POST /users`, a contact's placeholder), and the value is an opaque id"
+        "names the person by id), and nothing at all since phase 4 removed the Keycloak event "
+        "ingest; it stays a surrogate key (phase 4 plan, P4-09). Per client, one login could "
+        "hold a row in each client. Written only under scope all (`POST /users`, a contact's "
+        "placeholder), and the value is an opaque id"
     ),
     "uq_inbound_message_org_message_id": (
         "the poller's idempotency key: an RFC 5322 Message-ID names one email, fetched "

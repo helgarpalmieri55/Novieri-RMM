@@ -12,8 +12,9 @@ fixture over conftest's `app_engine`. It is deliberately `app_engine`, not
 (Task 7's migration 0055), and `admin_engine` is `BYPASSRLS` -- writing
 through it would pass even if the app-role policy were wrong.
 
-`sample_health_once` also runs `WORKER_SAMPLED_PROBES` -- seven of the eight
-probes, all but `jwks` (see `app.api.probes`) -- against real `Settings`
+`sample_health_once` also runs `WORKER_SAMPLED_PROBES` -- every probe since
+own authentication phase 4 removed `jwks`, the one only the API process could
+measure (see `app.api.probes`) -- against real `Settings`
 (Postgres, Redis, a local CA/signer/vault rooted under `tmp_path`), so this
 file overrides the process-wide settings singleton the same way
 `test_worker_audit_chain.py` and `test_worker_beat_expiry.py` do.
@@ -22,15 +23,13 @@ file overrides the process-wide settings singleton the same way
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.api.probes import WORKER_SAMPLED_PROBES
+from app.api.probes import _ALL_PROBES, WORKER_SAMPLED_PROBES
 from app.core.config import Settings, override_settings
-from app.core.health.probes import probe_jwks
 from app.models import PlatformHealthSample
 from app.worker import RETENTION_HOURS, prune_health_samples, sample_health_once
 
@@ -76,47 +75,14 @@ async def _insert(session: AsyncSession, *, sampled_at: datetime) -> None:
 
 
 async def test_one_row_per_probe_is_written(db_session: AsyncSession) -> None:
+    """Every probe, one row each, and exactly the registry's set -- so a probe
+    silently swapped in for another still fails this. Ten since own
+    authentication phase 4 removed `jwks` (never sampled: a worker holds no
+    key cache of an identity provider) and `keycloak_events`."""
     written = await sample_health_once(db_session)
-    # One short of the registry's size: the sampler runs
-    # `WORKER_SAMPLED_PROBES`, every probe but `jwks` -- see
-    # `test_the_sampler_writes_no_jwks_row` below for why. Re-measured when
-    # `keycloak_events` was added, and again for the three backup probes.
-    assert written == 11, "one row per worker-sampled probe (every probe minus jwks)"
-
-
-async def test_the_sampler_writes_no_jwks_row(db_session: AsyncSession) -> None:
-    """The worker constructs no `JwksCache`, so sampling `jwks` from this
-    process would not describe the IdP -- it would fabricate a `down` for an
-    attribute that was never wired up here. Assert the exact set written,
-    not just its size, so a probe silently swapped in for another still
-    fails this."""
-    await sample_health_once(db_session)
+    assert written == 10, "one row per probe"
     names = set((await db_session.execute(select(PlatformHealthSample.probe))).scalars().all())
-    assert names == WORKER_SAMPLED_PROBES
-    assert "jwks" not in names
-
-
-async def test_jwks_is_excluded_because_a_worker_reading_would_be_a_false_down() -> None:
-    """Pins the COST of the exclusion above, not just the fact of it.
-
-    `probe_jwks` reads `state.jwks._keys` unconditionally (see
-    `app.core.health.probes.probe_jwks`) -- there is no `getattr` fallback
-    for a missing `jwks` itself, only for `_keys` on top of it. A
-    worker-shaped state, exactly like the one `sample_health_once` builds,
-    has no `jwks` attribute at all, so calling the probe on it is not a
-    graceful DEGRADED -- it is an `AttributeError`. Left uncaught, the
-    registry's own catch-all (`ProbeRegistry._run_one`) turns any such
-    exception into `Status.DOWN` / `ReasonCode.UNREACHABLE`, which is exactly
-    the fabricated, permanent `jwks / down / unreachable` row this whole fix
-    exists to stop writing every 60 seconds. If a future edit drops `jwks`
-    from `WORKER_SAMPLED_PROBES`, or has `sample_health_once` fall back to
-    calling `probe_jwks` directly instead of going through the registry, this
-    test shows exactly what that costs instead of raising a mysterious
-    `AttributeError` in production.
-    """
-    worker_shaped_state = SimpleNamespace()  # no `jwks` attribute, by design
-    with pytest.raises(AttributeError):
-        await probe_jwks(worker_shaped_state)
+    assert names == WORKER_SAMPLED_PROBES == set(_ALL_PROBES)
 
 
 async def test_the_sweep_deletes_beyond_the_window_and_keeps_the_rest(

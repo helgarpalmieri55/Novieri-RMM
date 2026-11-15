@@ -41,7 +41,7 @@ def O(parent: str | None = None, fk: str | None = None) -> Entry:  # noqa: E743
 CATALOG: dict[str, Entry] = {
     # identity and platform
     "organizations": G, "roles": G, "permissions": G, "role_permissions": G,
-    "user_roles": G, "users": O(), "audit_events": G, "keycloak_event_ingest": G,
+    "user_roles": G, "users": O(), "audit_events": G,
     "agent_releases": G, "dashboard_layouts": G, "mcp_revocation": G,
     "platform_error_group": G, "platform_error_event": G, "platform_health_sample": G,
     "platform_probe_notice": G, "org_vault_keys": G, "domain_events": O(),

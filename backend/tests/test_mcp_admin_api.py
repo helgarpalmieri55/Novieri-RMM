@@ -19,8 +19,11 @@ What is pinned here:
 - one organization's revocation never reaches another's users;
 - `PATCH /orgs/current` audits `mcp.settings_changed` when the switch moves.
 
-Keycloak is still `httpx.MockTransport`: for `kc_client.revoke_consent`'s own
-tests, which stay until phase 4, and to prove that revoking sends it nothing.
+Every request that is not in-process sends to
+`test_user_admin_api.OutboundRecorder` (`install_outbound`), to prove that
+revoking sends nothing anywhere. Until own authentication phase 4 it was a
+fake Keycloak that took only the clients built without a transport, and also
+served `kc_client.revoke_consent`'s own tests; they went with that client.
 """
 
 import asyncio
@@ -48,16 +51,6 @@ from app.mcp import exclusions
 from app.models import AuditEvent, Organization, Permission, Role, RolePermission, User, UserRole
 from app.models.mcp import McpRevocation
 from app.models.oauth import OAuthRefreshFamily
-from app.modules.user_admin import kc_client
-from app.modules.user_admin.kc_client import (
-    KeycloakAdminConfig,
-    KeycloakAdminError,
-    delete_user,
-    execute_actions_email,
-    revoke_consent,
-    set_enabled,
-    set_locale_attribute,
-)
 from tests.mcp_support import mcp_app, mcp_client, mcp_token, running_mcp
 from tests.oauth_support import (
     authorize_query,
@@ -69,17 +62,9 @@ from tests.oauth_support import (
     token_request,
 )
 from tests.race_helpers import normalised, pause_at, until_blocked_by
+from tests.test_user_admin_api import install_outbound
 
 BASE = "https://itms.example.com"
-_REAL_CLIENT = httpx.AsyncClient
-
-CONFIG = KeycloakAdminConfig(
-    base_url="https://keycloak.test",
-    realm="it-suite",
-    client_id="it-suite-provisioning",
-    client_secret="not-a-real-secret",
-)
-TOKEN = "tok-never-log-me"
 
 MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
@@ -102,66 +87,10 @@ ROUTES = (
 )
 
 
-# --------------------------------------------------------------------------- #
-# Fake Keycloak: the token endpoint and the consents endpoint, nothing else
-# --------------------------------------------------------------------------- #
-
-
-class FakeKeycloak:
-    def __init__(self) -> None:
-        #: (Keycloak user id, client id) of every consent DELETE, in order.
-        self.deleted: list[tuple[str, str]] = []
-        self.raw_paths: list[str] = []
-        #: Every request that reached the transport, token exchanges included.
-        self.requests: list[httpx.Request] = []
-        self.token_requests = 0
-        #: How many `httpx.AsyncClient`s were built for Keycloak.
-        self.clients = 0
-        self.delete_status = 204
-        self.raise_connect = False
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if self.raise_connect:
-            raise httpx.ConnectError("boom", request=request)
-        path = request.url.path
-        if path.endswith("/protocol/openid-connect/token"):
-            self.token_requests += 1
-            return httpx.Response(200, json={"access_token": TOKEN})
-        assert request.headers["Authorization"] == f"Bearer {TOKEN}"
-        prefix = "/admin/realms/it-suite/users/"
-        assert request.method == "DELETE", f"unexpected call {request.method} {path}"
-        assert path.startswith(prefix), f"unexpected path {path}"
-        user_id, consents, client_id = path.removeprefix(prefix).split("/")
-        assert consents == "consents"
-        self.raw_paths.append(request.url.raw_path.decode())
-        self.deleted.append((user_id, client_id))
-        return httpx.Response(self.delete_status)
-
-
-def _install(monkeypatch: pytest.MonkeyPatch, kc: FakeKeycloak) -> None:
-    """Every client built WITHOUT a transport is Keycloak's -- that is how
-    `kc_client` builds one. A client that names its own transport (the MCP
-    server's in-process call, the tests' ASGI client) keeps it."""
-
-    def factory(*args: Any, **kw: Any) -> httpx.AsyncClient:
-        if "transport" in kw:
-            return _REAL_CLIENT(*args, **kw)
-        kc.clients += 1
-        return _REAL_CLIENT(*args, transport=httpx.MockTransport(kc.handler), **kw)
-
-    monkeypatch.setattr(httpx, "AsyncClient", factory)
-
-
 @pytest.fixture()
 async def env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     api_env.settings.public_console_url = BASE
-    kc = FakeKeycloak()
-    _install(monkeypatch, kc)
-    monkeypatch.setattr(
-        KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: CONFIG)
-    )
-    return SimpleNamespace(api=api_env, kc=kc)
+    return SimpleNamespace(api=api_env, outbound=install_outbound(monkeypatch))
 
 
 # --------------------------------------------------------------------------- #
@@ -462,7 +391,7 @@ async def test_revoke_for_me_cuts_off_my_old_token_and_not_my_colleagues(env: An
         assert row.client_id == "claude"
         assert row.revoked_by == await _user_id(env, me)
         # No identity provider is asked anything.
-        assert env.kc.requests == []
+        assert env.outbound.seen == []
         (event,) = await _events(env, org_id, "mcp.app_revoked")
         assert event.actor_id == await _user_id(env, me)
         assert event.meta == {"client_id": "claude", "scope": "me", "grants_revoked": 1}
@@ -550,7 +479,7 @@ async def test_revoke_for_everyone_without_orgs_manage_is_403_and_writes_nothing
     assert resp.json()["detail"] == "requires orgs.manage"
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
     assert await _live(env, org_id, tech) == 1
     # Non-vacuity: the same person may revoke for themselves.
     assert (await _revoke(env, org_id, tech, "me")).status_code == 200
@@ -597,7 +526,7 @@ async def test_revoke_for_everyone_cuts_off_the_whole_org_and_no_other(env: Any)
         assert row.user_id is None
         assert row.revoked_by == await _user_id(env, admin)
         assert await _rows(env, other_id) == []
-        assert env.kc.requests == []
+        assert env.outbound.seen == []
         (event,) = await _events(env, org_id, "mcp.app_revoked")
         assert event.meta == {"client_id": "claude", "scope": "everyone", "grants_revoked": 2}
         # Before the `_old_token`s below: each opens a grant of its own.
@@ -630,13 +559,12 @@ async def test_a_revocation_shows_as_revoked_for_everyone(env: Any) -> None:
 async def test_revoking_calls_no_identity_provider(env: Any) -> None:
     org_id, slug = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
-    env.kc.raise_connect = True
 
     resp = await _revoke(env, org_id, me, "me")
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"revoked": True, "grants_revoked": 0}
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
     (row,) = await _rows(env, org_id)
     assert row.user_id == await _user_id(env, me)
     async with running_mcp(env.api):
@@ -685,12 +613,10 @@ async def test_a_revocation_is_written_whole_or_not_at_all(
     assert await _live(env, org_id, me) == 1
 
 
-async def test_revoking_needs_no_provisioning_client(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: None)
-    )
+async def test_revoking_needs_no_provisioning_client(env: Any) -> None:
+    """There is none since own authentication phase 4 (until then this test
+    made the provisioning client's settings read as absent first): a grant in
+    use ends, and nothing is sent anywhere."""
     org_id, slug = await _org(env)
     me = await env.api.create_user(org_id, "org-admin")
     async with running_mcp(env.api):
@@ -699,7 +625,7 @@ async def test_revoking_needs_no_provisioning_client(
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"revoked": True, "grants_revoked": 1}
     assert len(await _rows(env, org_id)) == 1
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 async def test_revoking_for_a_large_organization_ends_every_grant_in_the_request(
@@ -731,7 +657,7 @@ async def test_revoking_for_a_large_organization_ends_every_grant_in_the_request
     assert time.monotonic() - started < 5
     assert resp.json() == {"revoked": True, "grants_revoked": 40}
     assert all(f.revoked_at is not None for f in await _families(env, org_id))
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 async def test_a_grant_past_its_idle_limit_is_neither_ended_nor_counted(env: Any) -> None:
@@ -841,7 +767,7 @@ async def test_a_dot_segment_is_no_app_id_and_reaches_nothing(env: Any, dots: st
     assert resp.status_code == 422, resp.text
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 async def test_a_bare_dot_reaches_nothing(env: Any) -> None:
@@ -852,7 +778,7 @@ async def test_a_bare_dot_reaches_nothing(env: Any) -> None:
     resp = await _revoke(env, org_id, admin, "everyone", app=".")
     assert resp.status_code in (404, 405, 422), resp.text
     assert await _rows(env, org_id) == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 @pytest.mark.parametrize(
@@ -881,7 +807,7 @@ async def test_the_platforms_own_clients_cannot_even_be_named(
     assert resp.status_code == 422, resp.text
     assert await _rows(env, org_id) == []
     assert await _events(env, org_id, "mcp.app_revoked") == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 async def test_an_unknown_app_is_404_in_the_persons_language(env: Any) -> None:
@@ -920,7 +846,7 @@ async def test_a_malformed_app_id_is_422_and_writes_nothing(env: Any, bad: str) 
     resp = await _revoke(env, org_id, me, "me", app=bad)
     assert resp.status_code == 422, resp.text
     assert await _rows(env, org_id) == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 async def test_an_app_id_cannot_add_a_path_segment(env: Any) -> None:
@@ -931,7 +857,7 @@ async def test_an_app_id_cannot_add_a_path_segment(env: Any) -> None:
     resp = await _revoke(env, org_id, me, "me", app="a%2F..%2Fb")
     assert resp.status_code in (404, 422), resp.text
     assert await _rows(env, org_id) == []
-    assert env.kc.requests == []
+    assert env.outbound.seen == []
 
 
 @pytest.mark.parametrize("body", [{"scope": "all"}, {}, {"scope": "me", "user_id": "x"}])
@@ -953,83 +879,6 @@ async def test_revoking_needs_mcp_use(env: Any) -> None:
     resp = await _revoke(env, org_id, tech, "me")
     assert resp.status_code == 403
     assert await _rows(env, org_id) == []
-
-
-# --------------------------------------------------------------------------- #
-# The Keycloak call itself
-# --------------------------------------------------------------------------- #
-
-
-async def test_revoke_consent_deletes_the_consent_and_quotes_the_client_id(
-    env: Any,
-) -> None:
-    await revoke_consent(CONFIG, user_id="u-1", client_id="a:b.c")
-    assert env.kc.raw_paths == ["/admin/realms/it-suite/users/u-1/consents/a%3Ab.c"]
-
-
-async def test_revoke_consent_treats_404_as_done(env: Any) -> None:
-    env.kc.delete_status = 404
-    await revoke_consent(CONFIG, user_id="u-1", client_id="claude")
-    assert env.kc.deleted == [("u-1", "claude")]
-
-
-async def test_revoke_consent_raises_on_any_other_refusal(env: Any) -> None:
-    env.kc.delete_status = 500
-    with pytest.raises(httpx.HTTPStatusError):
-        await revoke_consent(CONFIG, user_id="u-1", client_id="claude")
-
-
-@pytest.mark.parametrize(
-    ("user_id", "client_id"),
-    [
-        ("u-1", ".."),
-        ("u-1", "."),
-        ("u-1", ""),
-        ("u-1", "a/b"),
-        ("u-1", "a\\b"),
-        ("..", "claude"),
-        (".", "claude"),
-        ("", "claude"),
-        ("a/b", "claude"),
-        ("a\\b", "claude"),
-    ],
-)
-async def test_revoke_consent_refuses_an_id_that_is_not_one_segment_before_sending(
-    env: Any, user_id: str, client_id: str
-) -> None:
-    with pytest.raises(KeycloakAdminError):
-        await revoke_consent(CONFIG, user_id=user_id, client_id=client_id)
-    # Not even the token exchange: nothing reached the transport.
-    assert env.kc.requests == []
-
-
-@pytest.mark.parametrize("bad", ["..", ".", "", "a/b", "a\\b"])
-async def test_every_user_operation_refuses_a_user_id_that_is_not_one_segment(
-    env: Any, bad: str
-) -> None:
-    for call in (
-        delete_user(CONFIG, user_id=bad),
-        set_enabled(CONFIG, user_id=bad, enabled=False),
-        execute_actions_email(CONFIG, user_id=bad, actions=["UPDATE_PASSWORD"]),
-        set_locale_attribute(CONFIG, user_id=bad, locale="es"),
-    ):
-        with pytest.raises(KeycloakAdminError):
-            await call
-    assert env.kc.requests == []
-
-
-async def test_the_sent_path_must_end_with_exactly_the_quoted_segments(
-    env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The second layer, on its own: with the segment guard switched off, a
-    `..` is resolved away by URL normalisation, and the check on the URL httpx
-    would actually send refuses it without sending."""
-    monkeypatch.setattr(kc_client, "_path_segment", lambda value: value)
-    with pytest.raises(KeycloakAdminError):
-        await revoke_consent(CONFIG, user_id="u-1", client_id="..")
-    with pytest.raises(KeycloakAdminError):
-        await delete_user(CONFIG, user_id="u-1/..")
-    assert env.kc.requests == []
 
 
 # --------------------------------------------------------------------------- #

@@ -3753,7 +3753,6 @@ CATALOG: dict[str, str] = {
     "its settings are wrong or unreadable": "su configuración es incorrecta o ilegible",
     "Application database": "Base de datos de la aplicación",
     "Certificate authority": "Autoridad de certificación",
-    "Sign-in event forwarding": "Reenvío de eventos de inicio de sesión",
     # --- portal ---
     "not a portal user": "tu cuenta no tiene acceso al portal",
     "article {article_id} not found": "no se encontró el artículo {article_id}",
@@ -3958,7 +3957,6 @@ CATALOG: dict[str, str] = {
     "Database administration connection": "Administración de la base de datos",
     "Object storage": "Almacenamiento de objetos",
     "Secret vault": "Bóveda",
-    "Sign-in key cache": "Claves de inicio de sesión (JWKS)",
     "Job signing key": "Firma de tareas",
     "Nightly platform backup": "Copia de seguridad nocturna",
     "Off-host backup copy": "Copia de seguridad externa",
@@ -4847,17 +4845,8 @@ CATALOG: dict[str, str] = {
         "crear un enlace de invitación. Es un ajuste del servidor, no algo que esta pantalla pueda "
         "arreglar."
     ),
-    "the identity provider did not return this platform's service account, so a test message "
-    "has no sender to go out as": (
-        "el proveedor de identidad no devolvió la cuenta de servicio de esta plataforma, así "
-        "que un mensaje de prueba no tiene remitente con el que salir"
-    ),
     "no email settings are saved yet, so there is nothing to test": (
         "todavía no hay una configuración de correo guardada, así que no hay nada que probar"
-    ),
-    "no sending address is saved, so there is nowhere to send a test message": (
-        "no hay ninguna dirección de envío guardada, así que no hay adónde enviar un mensaje "
-        "de prueba"
     ),
     "{address} is not an email address": "{address} no es una dirección de correo electrónico",
     "a test can only go to the sending address, to your own address (a +tag is fine), or any "
@@ -4868,12 +4857,6 @@ CATALOG: dict[str, str] = {
     "a test can only go to the sending address, to your own address (a +tag is fine)": (
         "una prueba solo puede ir a la dirección de envío o a tu propia dirección (se admite "
         "una etiqueta +)"
-    ),
-    "{address} is the address of a sign-in account, and the identity provider will not send a "
-    "test to it. Add a tag before the @ to reach the same inbox, for example {example}": (
-        "{address} es la dirección de una cuenta de inicio de sesión, y el proveedor de "
-        "identidad no le enviará una prueba. Añade una etiqueta antes de la @ para llegar a la "
-        "misma bandeja de entrada, por ejemplo {example}"
     ),
     "user admin, you cannot ... your own account: disable": "deshabilitar",
     "user admin, you cannot ... your own account: delete": "eliminar",
