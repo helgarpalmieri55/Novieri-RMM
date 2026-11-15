@@ -9,9 +9,9 @@ import (
 	"github.com/toeshee/it-suite/agent/internal/config"
 )
 
-// The env var names are fixed by scripts/demo_e2e_agent.py:191-198, which
-// launches the real binary with exactly these three. Renaming one breaks the
-// end-to-end demo, not just this test.
+// The env var names are an interface (config's package comment says who
+// writes them). Renaming one breaks every service definition already
+// written, not just this test.
 const (
 	envURL   = "ITS_AGENT_ENROLL_URL"
 	envToken = "ITS_AGENT_ENROLL_TOKEN"

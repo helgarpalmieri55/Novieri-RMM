@@ -44,8 +44,10 @@ argv, in a unit file, or inside the package. See that README's first section.
 
 ## Configuration
 
-Three environment variables, whose names are fixed by
-`scripts/demo_e2e_agent.py`, plus one file:
+Three environment variables, plus one file. The names are an interface: the
+service definitions every installer writes carry the URL and the data
+directory (`packaging/`, `internal/install`, `internal/update`), so renaming one
+breaks every agent already installed.
 
 | Variable | Meaning |
 |---|---|

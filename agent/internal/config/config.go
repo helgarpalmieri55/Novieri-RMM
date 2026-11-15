@@ -1,10 +1,13 @@
 // Package config resolves the agent's process configuration from the
 // environment and defines the data-directory layout.
 //
-// The three environment variables are fixed by scripts/demo_e2e_agent.py,
-// which launches the real binary with exactly ITS_AGENT_ENROLL_URL,
-// ITS_AGENT_ENROLL_TOKEN and ITS_AGENT_DATA_DIR. They are an interface, not an
-// implementation detail.
+// The three environment variables, ITS_AGENT_ENROLL_URL, ITS_AGENT_ENROLL_TOKEN
+// and ITS_AGENT_DATA_DIR, are an interface, not an implementation detail. The
+// service definitions every installer writes carry the URL and the data
+// directory (agent/packaging/, internal/install, internal/update), and the
+// token variable is how a person running the binary by hand enrolls it
+// (docs/modules/agent/README.md, "Run and enroll"). Renaming one breaks every
+// service definition already written.
 //
 // There is one non-environment input, and it is the credential: the enrollment
 // token may instead arrive as a 0600 file at EnrollTokenPath(), which is how
@@ -28,7 +31,8 @@ import (
 	"strings"
 )
 
-// Environment variable names. Fixed by scripts/demo_e2e_agent.py:191-198.
+// Environment variable names: an interface (the package comment says who
+// writes them).
 const (
 	EnvEnrollURL   = "ITS_AGENT_ENROLL_URL"
 	EnvEnrollToken = "ITS_AGENT_ENROLL_TOKEN"

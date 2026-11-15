@@ -1,6 +1,6 @@
 """Phase 0 exit test (in-repo scope): the full kernel loop in one flow.
 
-Org → admin (fake IdP) → enrollment token → CSR → enroll → mTLS connect →
+Org → admin (a console session) → enrollment token → CSR → enroll → mTLS connect →
 LIVE dispatch via the operator API (API → Redis → gateway subscriber → agent)
 → agent-side verification exactly per docs/05-agent-spec.md → result → API
 shows succeeded → audit chain verifies.

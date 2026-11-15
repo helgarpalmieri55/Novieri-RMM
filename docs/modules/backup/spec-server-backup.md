@@ -933,8 +933,11 @@ over a fake gateway that signs jobs and mints real SigV4 POST and GET grants:
   compared by per-table row count and checksum; L7 falsifiers B5–B8 and B10;
 - L8 full stack: `docker compose` up, `scripts/verify_backup_run.py` write and
   restore legs (the restore leg runs for the first time), then replication to
-  `offsite`; L9 `itms-recover` restores from `offsite` alone, with `local`
-  stopped and the database dropped, and the bytes compare.
+  `offsite` *(2026-11-15: that script, which could not complete since own
+  authentication phase 1, was retired in phase 4; `HANDOFF.md` §5 says what
+  CI holds of its legs and what it does not)*; L9 `itms-recover` restores from
+  `offsite` alone, with `local` stopped and the database dropped, and the
+  bytes compare.
 
 **`backup-e2e-windows`** (`windows-latest`, elevated). `minio.exe` started in the
 background (service containers are Linux-only); SQL Server 2022 Express

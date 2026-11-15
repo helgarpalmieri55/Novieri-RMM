@@ -78,8 +78,8 @@ func TestASignedInventoryCollectJobProducesTheDocumentAtTheTopLevel(t *testing.T
 }
 
 func TestASignedHelloJobEchoesItsMessage(t *testing.T) {
-	// scripts/demo_e2e_agent.py asserts exactly this:
-	//     final["result"].get("greeting") == "hello from the control plane"
+	// The answer echoes the signed message (hello.go); the control plane
+	// sends this job as its post-update probe.
 	h := newHarness(t)
 	h.dispatch(t, "hello", `{"message":"hello from the control plane"}`,
 		"9c3f0a11-0000-4000-8000-000000000002")

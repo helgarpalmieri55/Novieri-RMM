@@ -74,12 +74,13 @@ enforced rather than hoped for:
 | `GET /livez` | The process is running. Nothing else. |
 | `GET /readyz` | The **hard** probes pass. 503 with the failing names otherwise. |
 
-**Eight probes**, of which two are hard (`postgres.app`, `redis`) — failing
+**Ten probes**, of which two are hard (`postgres.app`, `redis`) — failing
 either means the API cannot serve, so `/readyz` fails and traffic should move
-away. The other six (`postgres.admin`, `objectstore`, `vault`, `jwks`,
-`signing`, `ca`) are reported but do not fail readiness: an object store that is
+away. The other eight (`postgres.admin`, `objectstore`, `vault`, `signing`,
+`ca`, and the host backup's `backup.nightly`, `backup.offsite` and
+`backup.drill`) are reported but do not fail readiness: an object store that is
 down breaks backups, not logins, and taking the whole API out of rotation for it
-would turn a partial outage into a total one.
+would turn a partial outage into a total one. `app/api/probes.py` is the list.
 
 **`GET /api/v1/platform/status`** is the operator-facing view: probe results,
 per-replica heartbeats, and the module registry (routes and job types per
@@ -90,9 +91,9 @@ replica says nothing about a dead sibling behind the same proxy, so each API and
 worker process writes its own heartbeat keyed by container hostname. A replica
 goes **degraded** after 3 missed intervals and **down** after 10.
 
-The `jwks` probe is deliberately excluded from the worker's sampled set: a
-worker cannot reach the IdP on the API's path, and sampling it there would
-report a false DOWN.
+The worker samples every probe. It did not sample `jwks`, which read a key
+cache only the API process held; that probe and `keycloak_events` went with the
+identity provider in own authentication phase 4.
 
 **Probe alerts go through `notification`** (added 2026-09-23,
 `app/core/health/notify.py`). Every 60 s the worker reads the samples; a probe
@@ -149,12 +150,15 @@ is there; the notification path is a decision that has not been made.
 ## 4. Backup, restore, and rollback
 
 `docs/07-backup-restore.md` is authoritative for disaster recovery — including
-the parts no script covers (the internal CA, the audit-chain HMAC key, the
-Keycloak realm). Two scripts automate the database half:
+the parts no script covers (the internal CA, the audit-chain HMAC key). Two
+scripts automate the database half:
 
-- `deploy/scripts/backup.sh` — globals, both databases, and the values a
-  restore checks itself against (`alembic_version`, RLS policy count, image
-  version). Artefacts are `600`, and it fails rather than writing an empty one.
+- `deploy/scripts/backup.sh` — globals, the application database (and, only in
+  the backup `deploy.sh` takes before an upgrade, the old identity provider's
+  while a host upgraded across own authentication phase 4 still has it), and
+  the values a restore checks itself against (`alembic_version`, RLS policy
+  count, image version). Artefacts are `600`, and it fails rather than writing
+  an empty one.
 - `deploy/scripts/restore.sh` — refuses a non-empty target unless
   `ITS_RESTORE_FORCE=1`, creates only *absent* roles (applying a
   `pg_dumpall --roles-only` file wholesale would clobber live passwords), and
@@ -184,7 +188,7 @@ image's migrations against the new schema.
 | `frontend` | vitest, `tsc` strict, the production build |
 | `agent` | The Go suite — a control-plane change that breaks the agent goes red here rather than in the field |
 | `migrations` | `upgrade head → downgrade base → upgrade head`, with a schema diff and a leftover-objects check that counts **enum types as well as tables** |
-| `deploy` | The backup/restore round trip between two purpose-built clusters, run exactly as documented, plus a re-run with the narrowing neutralised so the check cannot pass vacuously |
+| `deploy` | The backup/restore round trip between two purpose-built clusters, run exactly as documented, plus a re-run with the narrowing neutralised so the check cannot pass vacuously; since own authentication phase 4, also that the pre-upgrade backup keeps the old identity provider's database and a forced restore brings it back, and the platform's own OAuth server and MCP door, live through Traefik on a real OpenBao (`deploy/ci/mcp_flow.py`) |
 
 ---
 
@@ -203,9 +207,11 @@ Stated here so nobody has to discover them during an incident.
   unverified.** The CI check proves tag interpolation only, and says so in its
   own comment.
 - **A live-host upgrade and a live-host rollback have not been exercised.**
-  The Keycloak realm restore is now checked by the monthly drill (Keycloak
-  boots on the restored database and serves the realm); a sign-in against a
-  restored realm has not been.
+  A backup that holds `keycloak.dump` (one from before own authentication
+  phase 4, or the one `deploy.sh` takes before an upgrade) is restored by the
+  drill when the drill is pointed at it, and the drill checks it holds tables;
+  nothing reads it after. Unpointed, the drill restores the latest nightly,
+  which has held no `keycloak.dump` since phase 4.
 - **The agent idle budget** (low-tens-of-MB resident, ~0% CPU) is measured for
   the capabilities that carry a benchmark, and remains a design target for those
   that do not. A capability's own spec says which it is; `CLAUDE.md` requires

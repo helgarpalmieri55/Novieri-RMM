@@ -244,10 +244,12 @@ Five sizes, and one named exception.
 
 Tailwind's `text-xs..2xl` resolve to Small / Body / Body / H2 / H1 / KPI, so a
 module written with utilities lands on the ramp by construction. The earlier
-sign-in and article ramps are not part of v3: the sign-in page lives in the
-Keycloak theme, outside this bundle, and rendered documentation must be
-expressed with these rungs (an H1 at 22, an H2 at 15, prose at Body, code at
-Small) or the harmony gate reports the stray.
+sign-in and article ramps are not part of v3: the sign-in pages were
+Keycloak's theme, outside this bundle, until own authentication phase 1
+(phase 3 for AI apps over MCP; Keycloak itself went in phase 4); they are the
+console's own now, and rendered documentation must be expressed with these
+rungs (an H1 at 22, an H2 at 15, prose at Body, code at Small) or the harmony
+gate reports the stray.
 
 ### Named Rules
 
