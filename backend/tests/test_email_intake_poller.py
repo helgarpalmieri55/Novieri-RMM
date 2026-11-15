@@ -939,8 +939,6 @@ def test_create_celery_registers_the_email_intake_poll(pg_cluster, tmp_path: Pat
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url="redis://localhost:6379/9",

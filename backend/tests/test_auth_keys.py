@@ -344,8 +344,6 @@ def _settings(tmp_path: Path, **overrides: Any) -> Settings:
     base: dict[str, Any] = dict(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=str(tmp_path),
     )
     return Settings(**(base | overrides))

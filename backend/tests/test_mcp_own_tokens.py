@@ -163,7 +163,7 @@ async def test_a_keycloak_token_is_refused_whatever_its_audience(mcp_env) -> Non
     them: the signature is not the platform's."""
     _, slug, sub = await _admin(mcp_env)
     for token in (
-        mcp_env.idp.token(
+        mcp_env.foreign.token(
             sub,
             slug,
             aud=MCP_AUD,
@@ -171,7 +171,7 @@ async def test_a_keycloak_token_is_refused_whatever_its_audience(mcp_env) -> Non
             email=f"{sub}@test.local",
             extra={"client_id": "claude"},
         ),
-        mcp_env.idp.token(sub, slug, email=f"{sub}@test.local", extra={"client_id": "claude"}),
+        mcp_env.foreign.token(sub, slug, email=f"{sub}@test.local", extra={"client_id": "claude"}),
     ):
         resp = await _initialize(mcp_env, token)
         resp_es = await _initialize(mcp_env, token, **{"Accept-Language": "es"})

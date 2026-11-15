@@ -235,8 +235,6 @@ def test_factory_guard(tmp_path: Path) -> None:
     base = dict(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=str(tmp_path),
     )
     local = Settings(**base, vault_backend="local", vault_root_key_path=tmp_path / "r.key")

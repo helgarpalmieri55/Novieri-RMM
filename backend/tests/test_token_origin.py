@@ -11,9 +11,11 @@ tokens that name no person at all.
 
 So, pinned here:
 
-- `validate_token` admits only access tokens: `typ` exactly "Bearer", as
-  Keycloak issues every access token. ID, refresh, offline and logout tokens,
-  and a token with no `typ`, are refused on every door;
+- until own authentication phase 4, `security.validate_token` admitted only
+  access tokens (`typ` exactly "Bearer", as Keycloak issued every access
+  token). The validator went with Keycloak; the tokens below are refused at
+  every door now because nothing on the platform can verify them at all,
+  and each is still sent (`tests/foreign_tokens.py`);
 - no non-MCP door reads a bearer at all: the console signs in by cookie since
   own authentication phase 1 (Task 13);
 - `/mcp` refuses every token the platform's own OAuth server did not issue --
@@ -39,18 +41,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope
-from app.core.config import Settings
-from app.core.security import (
-    JwksCache,
-    TokenClaims,
-    TokenValidationError,
-    require_person_mcp_token,
-    validate_token,
-)
 from app.models import User
 from app.models.auth import AuthSession
 from app.modules.remote.tunnel import TunnelAuthError
-from tests.fake_idp import CONSOLE_CLIENT_ID, ISSUER, JWKS_URL, FakeIdp, jwks_client
+from tests.foreign_tokens import ForeignIssuer
 from tests.mcp_support import MCP_AUD, mcp_client, mcp_token, running_mcp
 from tests.session_support import (
     CONSOLE,
@@ -61,11 +55,6 @@ from tests.session_support import (
     ws_cookie,
 )
 
-NOT_ACCESS_EN = "this token is not an access token"
-NOT_ACCESS_ES = "este token no es un token de acceso"
-CONSOLE_OVER_MCP_EN = "this token was issued to the console and is not accepted over MCP"
-NOT_A_PERSON_EN = "MCP access must be granted by a person signing in"
-NOT_A_PERSON_ES = "el acceso por MCP debe concederlo una persona al iniciar sesión"
 NO_APP_EN = "this token does not name the AI app it was issued to"
 NO_APP_ES = "este token no indica la aplicación de IA para la que se emitió"
 REFUSED_EN = "this access token was refused"
@@ -89,90 +78,17 @@ INITIALIZE = {
 }
 
 
-def _settings(**overrides: Any) -> Settings:
-    return Settings(
-        database_url="postgresql+asyncpg://x:x@localhost/x",
-        database_admin_url="postgresql+asyncpg://x:x@localhost/x",
-        oidc_issuer=ISSUER,
-        oidc_jwks_url=JWKS_URL,
-        ca_dir="/tmp/ca",
-        **overrides,
-    )
-
-
-def _id_token(idp: FakeIdp, sub: str, slug: str | None = "toeshee", **kw: Any) -> str:
-    """What Keycloak issues as the ID token of a client registered as
+def _id_token(
+    issuer: ForeignIssuer, sub: str, slug: str | None = "toeshee", **kw: Any
+) -> str:
+    """What Keycloak issued as the ID token of a client registered as
     `it-suite`: `typ` "ID", `aud` and `azp` both that client id."""
-    return idp.token(sub, slug, aud="it-suite", azp="it-suite", typ="ID", **kw)
-
-
-# --------------------------------------------------------------------------- #
-# The settings default
-# --------------------------------------------------------------------------- #
-
-
-def test_the_console_client_id_defaults_to_the_spa_client() -> None:
-    assert _settings().oidc_console_client_id == "it-suite-web"
-    assert CONSOLE_CLIENT_ID == "it-suite-web"
-
-
-def test_the_console_client_id_is_read_from_the_environment(monkeypatch) -> None:
-    monkeypatch.setenv("ITS_OIDC_CONSOLE_CLIENT_ID", "other-spa")
-    assert _settings().oidc_console_client_id == "other-spa"
-
-
-# --------------------------------------------------------------------------- #
-# validate_token: access tokens only
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.parametrize("typ", ["ID", "Refresh", "Offline", "Logout", "bearer", "BEARER", ""])
-async def test_a_token_that_is_not_an_access_token_is_refused(typ: str) -> None:
-    idp = FakeIdp()
-    cache = JwksCache(JWKS_URL, client=jwks_client(idp))
-    with pytest.raises(TokenValidationError) as exc:
-        await validate_token(idp.token("s", typ=typ), settings=_settings(), jwks=cache)
-    assert str(exc.value) == NOT_ACCESS_EN
-
-
-async def test_a_token_with_no_typ_is_refused() -> None:
-    idp = FakeIdp()
-    cache = JwksCache(JWKS_URL, client=jwks_client(idp))
-    with pytest.raises(TokenValidationError) as exc:
-        await validate_token(idp.token("s", typ=None), settings=_settings(), jwks=cache)
-    assert str(exc.value) == NOT_ACCESS_EN
-
-
-async def test_an_id_token_carrying_the_console_audience_is_refused() -> None:
-    idp = FakeIdp()
-    cache = JwksCache(JWKS_URL, client=jwks_client(idp))
-    with pytest.raises(TokenValidationError):
-        await validate_token(_id_token(idp, "s"), settings=_settings(), jwks=cache)
-
-
-async def test_a_bearer_token_is_admitted_and_carries_its_origin() -> None:
-    idp = FakeIdp()
-    cache = JwksCache(JWKS_URL, client=jwks_client(idp))
-    claims = await validate_token(
-        idp.token("s", extra={"preferred_username": "alice", "client_id": "x"}),
-        settings=_settings(),
-        jwks=cache,
-    )
-    assert claims.azp == "it-suite-web"
-    assert claims.preferred_username == "alice"
-    assert claims.client_id_claim is True
-    plain = await validate_token(idp.token("s"), settings=_settings(), jwks=cache)
-    assert plain.preferred_username == ""
-    assert plain.client_id_claim is False
+    return issuer.token(sub, slug, aud="it-suite", azp="it-suite", typ="ID", **kw)
 
 
 # --------------------------------------------------------------------------- #
 # The two origin rules, as units
 # --------------------------------------------------------------------------- #
-
-
-def _claims(**kw: Any) -> TokenClaims:
-    return TokenClaims(sub="s", email="", name="", org_slug="o", **kw)
 
 
 @pytest.mark.parametrize("azp", ["it-suite-web", "other-spa"])
@@ -181,30 +97,11 @@ async def test_no_client_s_token_is_a_console_credential(api_env, azp: str) -> N
     (two tests: the default client, and the client the setting names). Now no
     access token is a console credential, whoever obtained it and whatever the
     setting names."""
-    api_env.settings.oidc_console_client_id = azp
     _, slug, sub = await _person(api_env)
-    token = api_env.idp.token(sub, slug, azp=azp, email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, slug, azp=azp, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
     assert refusal_code(resp) == "auth_required"
-
-
-def test_require_person_mcp_token() -> None:
-    settings = _settings()
-    require_person_mcp_token(
-        _claims(azp="claude", preferred_username="alice", sid="s-1"), settings
-    )
-    with pytest.raises(TokenValidationError) as exc:
-        require_person_mcp_token(_claims(azp="it-suite-web"), settings)
-    assert str(exc.value) == CONSOLE_OVER_MCP_EN
-    for claims in (
-        _claims(azp="claude", preferred_username="service-account-claude"),
-        _claims(azp="claude", client_id_claim=True),
-        _claims(azp="claude", preferred_username="alice"),  # no `sid`: no sign-in
-    ):
-        with pytest.raises(TokenValidationError) as exc:
-            require_person_mcp_token(claims, settings)
-        assert str(exc.value) == NOT_A_PERSON_EN
 
 
 async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
@@ -218,33 +115,59 @@ async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
     assert refusal_code(resp) == "auth_required"
 
 
-async def test_the_legacy_client_id_claim_marks_a_service_account() -> None:
-    """Keycloak before 25 hardcoded the service-account mapper as `clientId`."""
-    idp = FakeIdp()
-    cache = JwksCache(JWKS_URL, client=jwks_client(idp))
-    claims = await validate_token(
-        idp.token("s", extra={"clientId": "x"}), settings=_settings(), jwks=cache
-    )
-    assert claims.client_id_claim is True
-    assert claims.is_service_account is True
-    with pytest.raises(TokenValidationError) as exc:
-        require_person_mcp_token(
-            await validate_token(
-                idp.token("s", azp="claude", extra={"clientId": "claude"}),
-                settings=_settings(),
-                jwks=cache,
-            ),
-            _settings(),
-        )
-    assert str(exc.value) == NOT_A_PERSON_EN
-
-
 # --------------------------------------------------------------------------- #
 # The sweep: no door validates a token without an origin rule
 # --------------------------------------------------------------------------- #
 
 APP = Path(__file__).resolve().parents[1] / "app"
-ORIGIN_RULES = frozenset({"require_person_mcp_token"})
+
+#: The Keycloak validator's names (`app/core/security.py`, removed in phase 4).
+VALIDATOR_NAMES = frozenset(
+    {"validate_token", "JwksCache", "TokenClaims", "require_person_mcp_token"}
+)
+
+
+def _validator_uses(source: str) -> list[int]:
+    """Lines of `source` whose CODE names the validator: an import of
+    `app.core.security`, or one of its names. Comments and docstrings are not
+    code, and the history they tell is allowed."""
+    found: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module == "app.core.security":
+            found.append(node.lineno)
+        elif isinstance(node, ast.Import) and any(
+            alias.name == "app.core.security" for alias in node.names
+        ):
+            found.append(node.lineno)
+        elif isinstance(node, ast.Name) and node.id in VALIDATOR_NAMES:
+            found.append(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr in VALIDATOR_NAMES:
+            found.append(node.lineno)
+    return found
+
+
+def test_the_validator_sweep_catches_a_use() -> None:
+    """Non-vacuity: an import and a call are found; a comment is not."""
+    bad = "from app.core.security import validate_token\nvalidate_token(t)\n"
+    assert _validator_uses(bad) == [1, 2]
+    assert _validator_uses("# validate_token( was Keycloak's\nx = 1\n") == []
+
+
+def test_no_door_can_validate_a_keycloak_token_any_more() -> None:
+    """Was `test_every_validate_token_call_in_app_is_followed_by_an_origin_rule`
+    (and its non-vacuity twin), which held every `security.validate_token`
+    site to an origin rule and, since phase 3, counted none. Own
+    authentication phase 4 removed the validator, its JWKS cache and its
+    origin rules; what the sweep protected -- that no door admits a token the
+    platform's own servers did not issue -- is now that nothing in `app/`
+    could: the module is gone and no code names it."""
+    assert not (APP / "core" / "security.py").exists()
+    left = [
+        f"{path.relative_to(APP.parent)}:{line}"
+        for path in sorted(APP.rglob("*.py"))
+        for line in _validator_uses(path.read_text())
+    ]
+    assert left == [], left
 
 
 def _called(node: ast.AST) -> str | None:
@@ -257,9 +180,7 @@ def _called(node: ast.AST) -> str | None:
     return None
 
 
-def _unruled_validations(
-    source: str, call: str = "validate_token", rules: frozenset[str] = ORIGIN_RULES
-) -> list[int]:
+def _unruled_validations(source: str, call: str, rules: frozenset[str]) -> list[int]:
     """Lines of `call(` sites whose enclosing function calls none of `rules`
     after them."""
     tree = ast.parse(source)
@@ -273,39 +194,6 @@ def _unruled_validations(
             if _called(site) == call and not any(r >= site.lineno for r in ruled):
                 found.append(site.lineno)
     return found
-
-
-def test_the_sweep_catches_a_validation_with_no_origin_rule() -> None:
-    """Non-vacuity: the detector flags the shape it exists to forbid, and
-    passes the shape every door has."""
-    bad = "async def door(t):\n    claims = await validate_token(t)\n    return claims\n"
-    good = (
-        "async def door(t, s):\n    claims = await validate_token(t)\n"
-        "    require_person_mcp_token(claims, s)\n"
-    )
-    assert _unruled_validations(bad) == [2]
-    assert _unruled_validations(good) == []
-
-
-def test_every_validate_token_call_in_app_is_followed_by_an_origin_rule() -> None:
-    offenders: list[str] = []
-    sites = 0
-    for path in sorted(APP.rglob("*.py")):
-        if path == APP / "core" / "security.py":
-            continue  # the definition, and the helpers themselves
-        source = path.read_text()
-        if "validate_token(" not in source:
-            continue
-        sites += source.count("validate_token(")
-        rel = path.relative_to(APP.parent)
-        offenders += [f"{rel}:{line}" for line in _unruled_validations(source)]
-    # None since own authentication phase 3 (plan 2026-11-06, Task 9): the MCP
-    # door verifies the platform's own token. A new one is a decision.
-    assert sites == 0, f"{sites}: a door validates a Keycloak token again; that is a decision"
-    assert offenders == [], (
-        "validate_token( with no require_person_mcp_token( "
-        f"after it in the same function: {offenders}"
-    )
 
 
 #: Every caller of `verify_access_token(` in `app/`, outside its definition.
@@ -364,7 +252,7 @@ async def test_a_console_token_no_longer_reaches_api_me(api_env) -> None:
     """Own authentication phase 1: the console signs in by cookie, and the
     token it used to send is no credential at /api/v1."""
     org_id, slug, sub = await _person(api_env)
-    token = api_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, slug, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
     assert refusal_code(resp) == "auth_required"
@@ -377,7 +265,7 @@ async def test_an_id_token_is_refused_on_api_me(api_env) -> None:
     door refuses before reading any bearer (`auth_required`), where it used to
     refuse the token as no access token."""
     _, slug, sub = await _person(api_env)
-    token = _id_token(api_env.idp, sub, slug, email=f"{sub}@test.local")
+    token = _id_token(api_env.foreign, sub, slug, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
     assert refusal_code(resp) == "auth_required"
@@ -393,7 +281,7 @@ async def test_an_access_token_another_client_obtained_is_refused_on_api(
     api_env, azp: str | None
 ) -> None:
     _, slug, sub = await _person(api_env)
-    token = api_env.idp.token(sub, slug, azp=azp, email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, slug, azp=azp, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
     assert refusal_code(resp) == "auth_required"
@@ -409,8 +297,8 @@ async def test_a_refused_origin_provisions_nobody(api_env) -> None:
     slug = await api_env.org_slug(org_id)
     stranger = f"stranger-{uuid4()}"
     for token in (
-        _id_token(api_env.idp, stranger, slug),
-        api_env.idp.token(stranger, slug, azp="attacker"),
+        _id_token(api_env.foreign, stranger, slug),
+        api_env.foreign.token(stranger, slug, azp="attacker"),
     ):
         resp = await api_env.client.get(
             "/api/v1/me", headers={"Authorization": f"Bearer {token}"}
@@ -484,10 +372,10 @@ async def test_the_ui_websocket_admits_no_token_at_all(api_env, live_api) -> Non
     that one included -- and the person's session cookie is the control."""
     org_id, slug, sub = await _person(api_env, "read-only")
     for token in (
-        api_env.idp.token(sub, slug),
-        _id_token(api_env.idp, sub, slug),
-        api_env.idp.token(sub, slug, azp="attacker"),
-        api_env.idp.token(sub, slug, typ=None),
+        api_env.foreign.token(sub, slug),
+        _id_token(api_env.foreign, sub, slug),
+        api_env.foreign.token(sub, slug, azp="attacker"),
+        api_env.foreign.token(sub, slug, typ=None),
     ):
         assert await _ws_admits(live_api, token=token) is False
     signed = await sign_in(api_env, org_id, sub)
@@ -506,7 +394,7 @@ async def test_the_ui_websocket_refuses_a_token_carrying_the_mcp_audience(
         await _ws_admits(live_api, cookie=signed.token, origin="https://itms.example.com")
         is True
     )
-    both = api_env.idp.token(sub, slug, extra={"aud": ["it-suite", MCP_AUD]})
+    both = api_env.foreign.token(sub, slug, extra={"aud": ["it-suite", MCP_AUD]})
     assert await _ws_admits(live_api, token=both) is False
 
 
@@ -590,8 +478,10 @@ async def test_a_persons_mcp_token_is_admitted(mcp_env) -> None:
         {"azp": "claude", "extra": {"client_id": "claude"}},
         {"azp": "it-suite-web", "extra": {"client_id": "it-suite-web"}},
         {"azp": "claude", "typ": "ID", "extra": {"client_id": "claude"}},
-        # Proven live (deploy/keycloak/ci_mcp_flow.py): a person's token always
-        # carries `sid`, a `client_credentials` token never does.
+        # Proven live against Keycloak 26.2 by the CI script of the time
+        # (`deploy/keycloak/ci_mcp_flow.py`, removed in own authentication
+        # phase 4): a person's token always carried `sid`, a
+        # `client_credentials` token never did.
         {"azp": "claude", "sid": None, "extra": {"client_id": "claude"}},
     ],
     ids=["service-account-username", "client-id-claim", "console-azp", "id-token", "no-sid"],
@@ -602,7 +492,7 @@ async def test_a_token_no_person_signed_in_for_is_refused_at_mcp(
     org_id, slug = await _mcp_org(mcp_env)
     # A sub with no `users` row: nothing may be provisioned for it.
     sub = f"svc-{uuid4()}"
-    token = mcp_env.idp.token(sub, slug, aud=MCP_AUD, email=f"{sub}@test.local", **kw)
+    token = mcp_env.foreign.token(sub, slug, aud=MCP_AUD, email=f"{sub}@test.local", **kw)
     async with running_mcp(mcp_env), mcp_client(mcp_env) as client:
         resp = await client.post("/mcp", json=INITIALIZE, headers=_bearer(token))
         resp_es = await client.post(
@@ -639,7 +529,7 @@ async def test_the_remote_tunnel_refuses_an_ended_session(api_env) -> None:
 
 async def test_the_api_refuses_a_console_token_carrying_the_mcp_audience(mcp_env) -> None:
     _, slug, sub = await _person(mcp_env)
-    both = mcp_env.idp.token(
+    both = mcp_env.foreign.token(
         sub, slug, email=f"{sub}@test.local", extra={"aud": ["it-suite", MCP_AUD]}
     )
     resp = await mcp_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {both}"})
@@ -650,7 +540,7 @@ async def test_the_api_refuses_a_console_token_carrying_the_mcp_audience(mcp_env
 async def test_a_legacy_client_id_claim_is_refused_at_mcp(mcp_env) -> None:
     org_id, slug = await _mcp_org(mcp_env)
     sub = f"svc-{uuid4()}"
-    token = mcp_env.idp.token(
+    token = mcp_env.foreign.token(
         sub, slug, aud=MCP_AUD, azp="claude", email=f"{sub}@test.local",
         extra={"clientId": "claude"},
     )

@@ -53,8 +53,6 @@ def test_get_ticket_adapter_null_backend_returns_null_adapter() -> None:
     settings = Settings(
         database_url="postgresql+asyncpg://app_user:app@localhost/x",
         database_admin_url="postgresql+asyncpg://admin:a@localhost/x",
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir="/tmp/ca",
         change_ticket_backend="null",
     )
@@ -66,8 +64,6 @@ def test_get_ticket_adapter_unknown_backend_raises() -> None:
     settings = Settings(
         database_url="postgresql+asyncpg://app_user:app@localhost/x",
         database_admin_url="postgresql+asyncpg://admin:a@localhost/x",
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir="/tmp/ca",
         change_ticket_backend="odoo",
     )

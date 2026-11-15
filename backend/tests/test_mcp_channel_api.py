@@ -183,7 +183,7 @@ async def test_a_console_token_is_refused_on_a_marked_request(mcp_env) -> None:
     `tests/test_auth_falsifiers.py::test_the_mcp_channel_takes_no_cookie`
     holds on the channel."""
     _, slug, sub = await _org_admin(mcp_env)
-    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    token = mcp_env.foreign.token(sub, slug, email=f"{sub}@test.local")
     async with marked_client(mcp_env) as client:
         resp = await client.get("/api/v1/me", headers=_bearer(token))
     assert resp.status_code == 401

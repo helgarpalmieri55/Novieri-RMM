@@ -83,7 +83,8 @@ async def test_the_session_wins_over_a_bearer_token(api_env: Any) -> None:
     alice = await api_env.create_user(org_id, "read-only")
     bob = await api_env.create_user(org_id, "read-only")
     signed = await sign_in(api_env, org_id, alice)
-    bob_token = api_env.idp.token(bob, await api_env.org_slug(org_id), email=f"{bob}@test.local")
+    slug = await api_env.org_slug(org_id)
+    bob_token = api_env.foreign.token(bob, slug, email=f"{bob}@test.local")
     response = await _me(api_env, {**signed.headers, "Authorization": f"Bearer {bob_token}"})
     assert response.json()["user_id"] == str(signed.user_id)
 
@@ -317,7 +318,7 @@ async def test_a_console_bearer_is_no_way_into_the_vault(api_env: Any) -> None:
     headers = await api_env.headers(org_id, sub)
     credential_id = await _credential(api_env, headers)
     slug = await api_env.org_slug(org_id)
-    token = api_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, slug, email=f"{sub}@test.local")
     refused = await _checkout(
         api_env, credential_id, {"Authorization": f"Bearer {token}", **console_headers()}
     )

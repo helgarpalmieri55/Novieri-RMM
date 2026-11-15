@@ -23,8 +23,6 @@ def _api_settings(tmp_path: Path) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://app_user:app@127.0.0.1:5432/postgres",
         database_admin_url="postgresql+asyncpg://its_admin:its_admin_test@127.0.0.1:5432/postgres",
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url="redis://localhost:6379/9",

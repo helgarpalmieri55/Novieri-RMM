@@ -29,31 +29,15 @@ class Settings(BaseSettings):
     database_portal_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
-    oidc_issuer: str
-    oidc_audience: str = "it-suite"
-    oidc_jwks_url: str
-    oidc_org_claim: str = "org"
-    # The OIDC client the console's SPA signed in with at Keycloak until own
-    # authentication phase 1. Read only by
-    # `app.core.security.require_person_mcp_token`, which refused at `/mcp` a
-    # Keycloak token whose `azp` is this client, so a grant consented to for
-    # the console was never an MCP one. UNUSED SINCE PHASE 3: `/mcp` accepts
-    # only the platform's own access tokens, and nothing in `backend/app`
-    # calls `require_person_mcp_token`, `security.validate_token` or
-    # `deps.jwks`; this setting, `multi_tenant` below and those functions go
-    # with Keycloak in phase 4. No non-MCP door reads a bearer at all since
-    # phase 1's Task 13 -- the console signs in with the platform's own
-    # session. Optional: nothing under deploy/ overrides the default, so no
-    # `.env` change is needed.
-    oidc_console_client_id: str = "it-suite-web"
     # The organization this deployment signs people in to (`flows.login`, the
-    # OAuth server's `store.deployment_org`); until phase 3 also the fallback
-    # `security.validate_token` gave a Keycloak token with no org claim.
+    # OAuth server's `store.deployment_org`, the setup claim's slug and the
+    # recovery command). One organization per deployment. The Keycloak-era
+    # `ITS_OIDC_*` and `ITS_MULTI_TENANT` settings went with Keycloak in own
+    # authentication phase 4; a `.env` that still sets them starts as before:
+    # the containers get them as environment variables, which are read only
+    # for a field that exists, and a dotenv file's extra keys are dropped by
+    # `extra="ignore"` (`tests/test_config.py`, both ways).
     default_org_slug: str | None = None
-    # When true (multi-tenant deployments), `security.validate_token` rejects a
-    # Keycloak token missing the org claim rather than falling back to
-    # default_org_slug. Unused since phase 3, with that function (above).
-    multi_tenant: bool = False
 
     signing_backend: Literal["local", "openbao"] = "local"
     signing_key_path: Path | None = None

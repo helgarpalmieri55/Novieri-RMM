@@ -153,7 +153,6 @@ async def setup_env(
 ) -> Any:
     from app.core.config import Settings
     from app.main import create_app
-    from tests.fake_idp import ISSUER, JWKS_URL, FakeIdp, jwks_client
 
     dbname = f"its_claim_{_secrets.token_hex(4)}"
     _psql(f'CREATE DATABASE "{dbname}" TEMPLATE "{unclaimed_template}" OWNER its_admin')
@@ -169,8 +168,6 @@ async def setup_env(
         database_url=_rebase(pg_cluster.app_url, dbname),
         database_admin_url=_rebase(pg_cluster.admin_url, dbname),
         database_portal_url=_rebase(pg_cluster.portal_url, dbname),
-        oidc_issuer=ISSUER,
-        oidc_jwks_url=JWKS_URL,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         default_org_slug="toeshee",
@@ -178,7 +175,7 @@ async def setup_env(
         # database, as `tests/conftest.py::api_env` uses, never the default.
         redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
     )
-    app = create_app(settings, jwks_http_client=jwks_client(FakeIdp()))
+    app = create_app(settings)
     _include_setup_router(app)
 
     # THE APP'S OWN TWO ENGINES, REPLACED WITH UNPOOLED ONES. `create_app`
@@ -377,8 +374,9 @@ async def test_the_first_administrator_is_an_org_admin(setup_env: Any) -> None:
 async def test_the_organization_takes_the_slug_this_deployment_signs_in_with(
     setup_env: Any,
 ) -> None:
-    """`ITS_DEFAULT_ORG_SLUG` is what `app/core/security.py` resolves a token to
-    when the org claim is absent, which is every token on a single-org install.
+    """`ITS_DEFAULT_ORG_SLUG` is the organization `POST /auth/login` signs
+    people in to (until own authentication phase 4 also what a Keycloak token
+    with no org claim resolved to), which is everyone on a single-org install.
     An organization created under any other slug is one the first administrator
     cannot sign in to: `auth_context` answers "unknown organization" and the
     setup screen's whole promise -- claim it, then use it -- breaks at the

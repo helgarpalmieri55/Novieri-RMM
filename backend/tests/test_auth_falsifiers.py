@@ -685,7 +685,7 @@ async def test_the_console_bearer_opens_no_console_door(api_env: Any) -> None:
     credential at /api/v1 any more; the same person by cookie is the control."""
     org_id = await api_env.create_org("door")
     sub = await api_env.create_user(org_id, "org-admin")
-    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
 
     by_bearer = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     by_cookie = await api_env.client.get("/api/v1/me", headers=await api_env.headers(org_id, sub))

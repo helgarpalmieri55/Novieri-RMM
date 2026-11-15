@@ -57,7 +57,6 @@ async def test_an_app_holds_postgres_backends_until_it_is_disposed(
     per test, across the whole suite."""
     from app.core.config import Settings
     from app.main import create_app
-    from tests.fake_idp import ISSUER, JWKS_URL
 
     before = await _backends(admin_engine, pg_cluster.dbname)
 
@@ -67,8 +66,6 @@ async def test_an_app_holds_postgres_backends_until_it_is_disposed(
                 database_url=pg_cluster.app_url,
                 database_admin_url=pg_cluster.admin_url,
                 database_portal_url=pg_cluster.portal_url,
-                oidc_issuer=ISSUER,
-                oidc_jwks_url=JWKS_URL,
                 ca_dir=tmp_path / f"ca-{i}",
                 signing_key_path=tmp_path / f"job-signing-{i}.key",
             )
