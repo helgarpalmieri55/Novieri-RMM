@@ -18,10 +18,10 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 > **Verification status.** The PostgreSQL dump/restore path, the Docker-volume
 > tar path, the post-restore privilege re-application, and the audit chain
 > check in this document were executed end to end against this stack. The
-> OpenBao and Keycloak sections were **not** executed (no initialized OpenBao
-> was available); they are written from the configuration in
-> `deploy/openbao/` and are marked where that matters. Treat unmarked commands
-> as tested and marked ones as needing a rehearsal before you rely on them.
+> OpenBao section was **not** executed (no initialized OpenBao was
+> available); it is written from the configuration in `deploy/openbao/` and
+> is marked where that matters. Treat unmarked commands as tested and marked
+> ones as needing a rehearsal before you rely on them.
 
 ---
 
@@ -30,13 +30,13 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 | # | State | Where it lives | Lose it and… |
 |---|---|---|---|
 | 1 | Application database (`itsuite`) | `postgres-data` volume | everything: devices, tickets, jobs, audit log, vault *ciphertext* |
-| 2 | Keycloak database (`keycloak`) | same volume, same cluster | all operator identities, clients, MFA enrollments |
+| 2 | The old identity provider's database (`keycloak`), only on a host upgraded from before own authentication phase 4 | same volume, same cluster | the realm that release used; only the backup `deploy.sh` takes before an upgrade holds it, and nothing reads it after phase 4 (`deploy/README.md`, "Retiring the old identity provider's data") |
 | 3 | Object storage | `minio-data` volume | backup repositories, deploy artifacts, OS images, attachments |
 | 4 | **OpenBao storage** | `openbao-data` volume | the internal CA, the job-signing key, **every vault DEK** — see §5 |
 | 5 | **OpenBao unseal keys + root token** | *operator-held, outside the stack* | the volume in #4 becomes undecryptable ballast |
 | 6 | **Audit HMAC key** (and anything else on that volume — today, an optional AI provider API key) | `its-secrets` volume | the restored audit chain can never be verified — see §4; a lost provider key must be reissued by its vendor |
 | 7 | CA material on disk | `its-ca` volume | the gateway's client-CA trust anchor (and, with `ITS_CA_BACKEND=local`, the CA private key itself) |
-| 8 | `deploy/.env` | the host, gitignored | DB passwords, OpenBao token, MinIO credentials, OIDC config |
+| 8 | `deploy/.env` | the host, gitignored | DB passwords, OpenBao token, MinIO credentials, the console address |
 | 9 | Gateway server cert | `its-gateway-tls` volume | re-issuable from the CA with `deploy/scripts/issue-gateway-cert.py`; not critical if #4/#7 survive |
 | 10 | Operator TLS cert for `:443` | `deploy/certs/` on the host, **gitignored** | not in the compose volume set at all — it is a bind mount, so a volume-only backup misses it. Re-issuable from your public CA |
 
@@ -56,13 +56,16 @@ design).
 
 Run from `deploy/`. `$BK` is a directory on a **different** host or volume.
 
-### 2.1 PostgreSQL (both databases)
+### 2.1 PostgreSQL
 
 ```sh
 BK=/srv/backup/$(date -u +%Y%m%dT%H%M%SZ) && mkdir -p "$BK"
 
 docker compose exec -T postgres pg_dump -U its_admin -d itsuite  -Fc > "$BK/itsuite.dump"
-docker compose exec -T postgres pg_dump -U its_admin -d keycloak -Fc > "$BK/keycloak.dump"
+# Only while the keycloak database exists, as backup.sh decides, for the way
+# back past own authentication phase 4 (deploy.sh's pre-upgrade backup does this):
+has_kc="$(docker compose exec -T postgres psql -X -A -t -U its_admin -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = 'keycloak'" | tr -d '[:space:]')"
+[ "$has_kc" = 1 ] && docker compose exec -T postgres pg_dump -U its_admin -d keycloak -Fc > "$BK/keycloak.dump"
 docker compose exec -T postgres pg_dumpall -U its_admin --globals-only > "$BK/globals.sql"
 ```
 
@@ -113,8 +116,12 @@ of `openbao-data` without them restores nothing.
 
 ### 2.4 Encrypt and ship
 
+`read` asks for your `age` public key (the `age1…` line `age-keygen`
+printed); `gpg -e` works the same way if that is what you use:
+
 ```sh
-tar czf - -C "$BK" . | age -r <recipient> > "$BK.tar.gz.age"   # or gpg -e
+read -rp 'age recipient (age1...): ' AGE_RECIPIENT && \
+  tar czf - -C "$BK" . | age -r "${AGE_RECIPIENT:?no recipient}" > "$BK.tar.gz.age"
 ```
 
 ---
@@ -153,13 +160,19 @@ for v in openbao-data its-ca its-secrets its-gateway-tls minio-data; do
 done
 
 # 2. Fresh Postgres. The entrypoint runs init-app-user.sh, which creates
-#    app_user/portal_user with the .env passwords, creates the keycloak
-#    database, and installs the ALTER DEFAULT PRIVILEGES baseline.
+#    app_user/portal_user with the .env passwords and installs the ALTER
+#    DEFAULT PRIVILEGES baseline. (Since own authentication phase 4 it no
+#    longer creates a keycloak database.)
 docker compose up -d --wait postgres
 
-# 3. Restore both databases as its_admin.
+# 3. Restore the databases as its_admin.
 docker compose exec -T postgres pg_restore -U its_admin -d itsuite  --clean --if-exists < "$BK/itsuite.dump"
-docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if-exists < "$BK/keycloak.dump"
+# Only when the backup carries keycloak.dump (taken before own authentication
+# phase 4, or by deploy.sh before an upgrade on a host that still keeps it):
+[ -s "$BK/keycloak.dump" ] && {
+  docker compose exec -T postgres createdb -U its_admin keycloak \
+    && docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if-exists < "$BK/keycloak.dump"
+}
 
 # 4. RE-APPLY THE APP-ROLE PRIVILEGE NARROWING. This is not optional — see below.
 docker compose run --rm postgres-grants
@@ -242,7 +255,8 @@ production requires — that link is an **HMAC-SHA256 keyed by
 the one that proves the HMAC key restored correctly:
 
 ```sh
-curl -sS -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/audit/verify
+# from deploy/: the console address is ITS_PUBLIC_CONSOLE_URL in .env
+curl -sS -H "Authorization: Bearer $TOKEN" "$(sed -n 's/^ITS_PUBLIC_CONSOLE_URL=//p' .env | tail -1)/api/v1/audit/verify"
 # {"ok": true, "count": 12345, "broken_at": null}
 ```
 
@@ -384,9 +398,10 @@ drill is recorded as SOC 2 evidence.
 (timer `its-restore-drill.timer`, `deploy/README.md` "Platform backups")
 restores the latest nightly backup into the throwaway project
 `itms-restore-drill` on the same host and runs steps 2, 4 (the role and
-narrowing parts) and 6 (the SQL pre-flight) below, plus a Keycloak boot on
-the restored `keycloak` database — the realm check this document could not
-run before. Steps 1, 3, 5, 7 and 8 need the key material and a full stack;
+narrowing parts) and 6 (the SQL pre-flight) below, plus, for a backup that
+holds `keycloak.dump` (taken before own authentication phase 4, or by
+`deploy.sh` before an upgrade), a check that the restored `keycloak`
+database holds tables. Steps 1, 3, 5, 7 and 8 need the key material and a full stack;
 they remain a manual rehearsal on a scratch host.
 
 1. **Stack comes up.** `docker compose ps` — every service `Up`, `postgres`
