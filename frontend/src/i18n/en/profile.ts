@@ -134,6 +134,10 @@ export const profile = {
       unknownBrowser: "Unknown browser",
       end: "Sign out",
       endAria: "Sign out the session from {where}",
+      everywhere: "Sign out everywhere",
+      everywhereNote:
+        "Signs out every session above, this one too, forgets your remembered devices and disconnects the AI apps you connected.",
+      everywhereNoteContact: "Signs out every session above, this one too, and forgets your remembered devices.",
     },
     confirm: {
       passkey: {
@@ -166,6 +170,13 @@ export const profile = {
         title: "Sign out a session",
         body: "That browser is signed out at its next request.",
         action: "Sign out",
+      },
+      everywhere: {
+        title: "Sign out everywhere",
+        body: "Every session ends, this one too, and you sign in again here. Remembered devices ask for your second factor again, and every AI app you connected loses its access until you approve it again.",
+        bodyContact: "Every session ends, this one too, and you sign in again here. Remembered devices ask for your second factor again.",
+        subject: "All your sessions, this one included",
+        action: "Sign out everywhere",
       },
     },
   },

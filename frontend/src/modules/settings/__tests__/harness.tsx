@@ -559,6 +559,7 @@ export const calls = {
   regenerateRecoveryCodes: vi.fn(),
   revokeTrustedDevice: vi.fn(),
   endMySession: vi.fn(),
+  logoutEverywhere: vi.fn(),
   stepUpTotp: vi.fn(),
   stepUpPasskeyOptions: vi.fn(),
   stepUpPasskey: vi.fn(),
@@ -666,6 +667,7 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   calls.regenerateRecoveryCodes.mockResolvedValue({ recovery_codes: [...RECOVERY_CODES_FIXTURE] });
   calls.revokeTrustedDevice.mockResolvedValue(undefined);
   calls.endMySession.mockResolvedValue(undefined);
+  calls.logoutEverywhere.mockResolvedValue(undefined);
   calls.stepUpTotp.mockResolvedValue(undefined);
   calls.stepUpPasskeyOptions.mockResolvedValue(REQUEST_OPTIONS_FIXTURE);
   calls.stepUpPasskey.mockResolvedValue(undefined);
