@@ -337,6 +337,18 @@ tiempo.
   [S27, S30]. `iss`, `aud`, `kid` y algoritmo fijados [S38].
 - **Refresco:** opaco, guardado como hash, **rota en cada uso**; reutilizar uno ya usado revoca toda la familia;
   caduca a los 30 días sin uso [S16, S30, S33]. Un refresh inválido responde `invalid_grant` [S33].
+- *Enmienda del 2026-11-15 (decisión del operador E2; plan de la fase 4, Task 3).* Un refresh token ya usado de una
+  concesión viva se guarda 30 días desde su uso, y después lo borra el barrido diario (`oauth_used_refresh_tokens`).
+  Presentarlo una vez borrado es un `invalid_grant` simple, como un token que el servidor no conoce: ya no revoca la
+  familia. RFC 9700 §4.14.2 basa la detección en que el servidor guarda la relación del token invalidado; E2 le pone
+  un límite, que va desde el primer uso del token (su `used_at`), lo hiciera quien lo hiciera, hasta el primer
+  barrido diario pasados 30 días. Lo que cuesta, en los dos sentidos. Si alguien copió el token y refrescó antes que
+  la app, y la app vuelve con su copia pasado ese límite, la app recibe `invalid_grant` y la concesión copiada sigue
+  hasta que se revoca o pasa 30 días sin uso. Si la app refrescó primero y quien copió el token lo presenta pasado
+  ese límite, antes de E2 eso terminaba la concesión y escribía `mcp.refresh_reused`, la señal de la brecha de
+  RFC 9700 §4.14.2; ahora es un `invalid_grant` que nada distingue de un token desconocido: el ladrón no gana nada,
+  pero la fuga queda sin registrar. Lo dice el riesgo residual del runbook «A used refresh token is remembered for
+  30 days».
 - Revocar un cliente de IA en Ajustes corta su acceso en la siguiente llamada (1c(d)).
 - *Enmienda del 2026-11-15 (decisión del operador E1; plan de la fase 4, Task 1).* «Cerrar sesión en todas partes»,
   el de la persona y el de un administrador (`DELETE /api/v1/users/{id}/sessions`), termina también sus concesiones

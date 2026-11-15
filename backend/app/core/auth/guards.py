@@ -219,12 +219,16 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       long dead that a writer above may still lock -- a refresh or an
       exchange presenting an old secret, a revocation's UPDATE reaching a
       grant that lapsed unrevoked -- so they WAIT ON NO ROW. Each statement
-      locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
-      inside it, leaves first: `oauth_codes` expired more than ten minutes
-      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
-      ended more than a day ago that no code still names; then those grants
-      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
-      still names, so their cascade reaches no row they did not lock. A row
+      locks what it deletes FOR UPDATE SKIP LOCKED, the ended (for a used
+      token, the rotated) condition inside it, leaves first: `oauth_codes`
+      expired more than ten minutes ago; then (`oauth_refresh_tokens`) the
+      refresh tokens of the grants ended more than a day ago that no code
+      still names; then (`oauth_used_refresh_tokens`, operator decision E2,
+      2026-11-15) the refresh tokens a live grant rotated past more than 30
+      days ago, whose grant is read, never locked, and stays; then those
+      ended grants (`oauth_grants`, `oauth_refresh_families`) that no token
+      and no code still names, so their cascade reaches no row they did not
+      lock. A row
       another transaction holds is left to the next day's sweep. They hold no
       person's row and no app row, and the chain comes last: a writer above
       may wait on them and then find the row gone, never the other way round

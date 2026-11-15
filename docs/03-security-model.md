@@ -161,7 +161,8 @@ the system.
   MCP clients authenticate on the platform's own OAuth 2.1 server since phase
   3: PKCE S256, consent in the console with a recently confirmed second
   factor, a ten-minute ES256 access token for exactly the MCP resource, and a
-  refresh token that rotates and whose reuse ends the grant.
+  refresh token that rotates and whose reuse, within 30 days of its use, ends
+  the grant (operator decision E2, 2026-11-15).
 - **Clients' contacts (own authentication phase 2):** a contact is invited
   from their client's Contacts tab by someone with `clients.manage` on that
   client, with a single-use link that lives 72 hours, and on accepting holds
@@ -205,7 +206,10 @@ the system.
   unused invitation never is: it is the pending invitation Users shows);
   WebAuthn challenges after a day; since phase 3, OAuth authorization codes
   10 minutes after they expire, used or not, ended AI-app grants after a day
-  (their refresh tokens with them), and AI apps unused for 30 days; each
+  (their refresh tokens with them), and AI apps unused for 30 days; since
+  2026-11-15 (operator decision E2), the refresh tokens a live grant rotated
+  past, 30 days after their use -- presenting one after that is a plain
+  `invalid_grant`, not a reuse that ends the grant; each
   daily sweep that deletes anything is audited (`auth.retention_applied`).
   An idle AI app can also go before the sweep reaches it, and that removal
   is not audited: while registration is open, each registration first

@@ -2596,7 +2596,7 @@ and one hit blocks the whole result rather than redacting it.
 **Risks 3, 7 and 8 exist only while self-registration is open**
 (`ITS_MCP_REGISTRATION=open`); closing it ends them for new apps. **Risks 1,
 2, 4, 10 and 11 exist whenever MCP is on**, because an app known by its
-client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
+client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
 
 1. **Consent phishing.** Anyone can publish a client metadata document — or,
    with the opt-in, register an app — under any name, and send a person a
@@ -2689,6 +2689,24 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
     theirs, but an AI app approved afterwards in the session the change was
     made in — even on a consent page opened before it — still receives its
     code: it is the same person, in their own session.
+12. **A used refresh token is remembered for 30 days** (operator decision
+    E2, 2026-11-15): from its first use, whoever made it, until the first
+    daily sweep more than 30 days later. Until then, presenting it again
+    ends the app's grant (risk 9). Once that sweep has deleted it,
+    presenting it is a plain `invalid_grant`, and the grant lives on. That
+    costs something either way round. If someone else refreshed with a
+    copied token first, the theft is caught only if the real app presents
+    its own copy before that sweep — the window runs from the thief's
+    refresh, not from the theft; an app that comes back later is simply
+    asked to connect again, while the copy goes on working until its grant
+    is revoked or sits unused for 30 days. If the real app refreshed first,
+    a thief who presents the stale copy before that sweep ends the grant and
+    leaves `mcp.refresh_reused` in the audit log, the sign that the token
+    leaked; after it, the copy is refused like any unknown token: the thief
+    gains nothing, but nothing in the audit log says the token leaked.
+    Settings → AI connections lists every app holding a live grant. If an app asks you to connect again when you
+    did not expect it, use **Revoke for me** on it there before reconnecting:
+    that ends every grant of yours to that app, the copy included.
 
 Separately from those, and by design: the platform cannot tell whether the
 person or the AI app approved a call — approval happens in the app. A
