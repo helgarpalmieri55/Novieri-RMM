@@ -1,5 +1,7 @@
 #!/bin/bash
-# First-boot init: RLS-constrained application role + Keycloak database.
+# First-boot init: the RLS-constrained application role, and portal_user's
+# password. (Until own authentication phase 4 it also created the identity
+# provider's database; a fresh install has none.)
 # The admin role (its_admin) carries BYPASSRLS deliberately — it is the
 # migration/bootstrap role; all request traffic uses app_user.
 #
@@ -64,5 +66,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- override that design and blow a hole through the RLS-scoped portal —
     -- a requester would gain access to every table in the schema, not just
     -- their own tickets.
-    CREATE DATABASE keycloak OWNER its_admin;
 EOSQL

@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Take a complete, restorable backup of the platform's databases.
 #
-# Three artefacts, not two. `deploy/README.md` and `GO-LIVE.md` previously
-# prescribed only the two `-Fc` dumps:
+# Two artefacts, and a third in one case. `deploy/README.md` and `GO-LIVE.md`
+# once prescribed only the `-Fc` dumps, and no ROLE definitions:
 #
 #   itsuite.dump    the application database
-#   keycloak.dump   the realm, users and federation config -- losing this
-#                   locks every operator out even with an intact itsuite
 #   globals.sql     the cluster's ROLE definitions
+#   keycloak.dump   ONLY in the backup deploy.sh takes before an upgrade
+#                   (ITS_BACKUP_OLD_IDENTITY_DB=1), and only while a
+#                   `keycloak` database exists: own authentication phase 4
+#                   removed Keycloak, and a host upgraded from before keeps
+#                   that database until the operator retires it. A nightly
+#                   or off-site backup never holds it; a fresh install has
+#                   none.
 #
 # WHAT globals.sql IS AND IS NOT FOR. A `pg_dump` of a single database emits
 # ZERO CREATE ROLE statements while depending on three cluster-level roles it
@@ -36,6 +41,9 @@
 # stack publishes no Postgres port. Override that for testing or for a host
 # where the tools are local:
 #   ITS_PG_EXEC="" PGHOST=127.0.0.1 PGUSER=its_admin ./backup.sh /tmp/bk
+#
+# ITS_BACKUP_OLD_IDENTITY_DB=1 also dumps the old identity provider's
+# database while it exists. Only deploy.sh sets it, for its pre-upgrade backup.
 #
 # OBJECT STORAGE (MinIO) is NOT in this backup unless asked for. One bucket
 # holds everything; fleet backup data lives under `<org>/backup/<repo>/`.
@@ -68,6 +76,12 @@ case "$ITS_BACKUP_OBJECTS" in
     none|all|no-fleet-backups) ;;
     *) echo "ERROR: ITS_BACKUP_OBJECTS must be none, all or no-fleet-backups" >&2; exit 1 ;;
 esac
+# 1 only from deploy.sh's pre-upgrade backup (the keycloak.dump note above).
+: "${ITS_BACKUP_OLD_IDENTITY_DB:=0}"
+case "$ITS_BACKUP_OLD_IDENTITY_DB" in
+    0|1) ;;
+    *) echo "ERROR: ITS_BACKUP_OLD_IDENTITY_DB must be 0 or 1" >&2; exit 1 ;;
+esac
 
 # Resolve before any `cd`: the caller's path is relative to where they stand.
 OUT_DIR="${1:-./backups/$(date -u +%Y-%m-%dT%H%M%SZ)}"
@@ -89,8 +103,32 @@ run pg_dumpall --roles-only -U "$ITS_PG_SUPERUSER" > "$OUT_DIR/globals.sql"
 echo "--> itsuite"
 run pg_dump -Fc -U "$ITS_PG_ADMIN_USER" itsuite > "$OUT_DIR/itsuite.dump"
 
-echo "--> keycloak"
-run pg_dump -Fc -U "$ITS_PG_ADMIN_USER" keycloak > "$OUT_DIR/keycloak.dump"
+# THE OLD IDENTITY PROVIDER'S DATABASE (operator decision K1, 2026-11-15). A
+# host upgraded from before own authentication phase 4 keeps `keycloak` until
+# the operator retires it (deploy/README.md "Retiring the old identity
+# provider's data"). It holds Keycloak's password hashes and the realm keys
+# that signed its tokens, so it goes ONLY into the backup deploy.sh takes
+# before an upgrade (the one before the phase-4 upgrade, with its schema below
+# 0248, is the way back to a release from before it), and never into a
+# nightly or off-site one. The note below is the reminder that
+# it is still there. A -tAc scalar into a string compare, not
+# `psql | grep -q`: under pipefail a grep that exits early SIGPIPEs psql
+# (restore.sh's prepare_db says the same).
+has_keycloak=$(run psql -X -A -t -U "$ITS_PG_ADMIN_USER" -d itsuite \
+    -c "SELECT count(*) FROM pg_database WHERE datname = 'keycloak'")
+with_keycloak=0
+if [ "${has_keycloak//[[:space:]]/}" = "1" ]; then
+    if [ "$ITS_BACKUP_OLD_IDENTITY_DB" = 1 ]; then
+        echo "--> keycloak (the old identity provider's database: the way back past phase 4)"
+        run pg_dump -Fc -U "$ITS_PG_ADMIN_USER" keycloak > "$OUT_DIR/keycloak.dump"
+        with_keycloak=1
+    else
+        echo "    NOTE: the old identity provider's database ('keycloak') is still on this"
+        echo "    cluster. This backup leaves it out; only deploy.sh's pre-upgrade backup"
+        echo "    keeps it. deploy/README.md \"Retiring the old identity provider's data\""
+        echo "    removes it once you no longer need the way back."
+    fi
+fi
 
 # The schema revision this backup holds, in plain text beside the dumps.
 # WITHOUT THIS THE ROLLBACK DECISION IS UNANSWERABLE: the runbook's first
@@ -127,7 +165,9 @@ fi
 # can still leave a 0-byte file behind, and a backup that is silently empty
 # is worse than no backup: it is a backup you will trust at 3am.
 fail=0
-for f in globals.sql itsuite.dump keycloak.dump alembic_version policy_count image_version; do
+artefacts="globals.sql itsuite.dump alembic_version policy_count image_version"
+[ "$with_keycloak" = 1 ] && artefacts="$artefacts keycloak.dump"
+for f in $artefacts; do
     if [ ! -s "$OUT_DIR/$f" ]; then
         echo "ERROR: $OUT_DIR/$f is missing or empty" >&2
         fail=1

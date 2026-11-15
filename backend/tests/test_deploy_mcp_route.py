@@ -18,15 +18,15 @@ tries a path-inserted form first --
 `/.well-known/openid-configuration[/realms/it-suite]` -- moves on after a 4xx;
 given a 200 it parses the body, and an HTML page fails that parse and ends
 the sign-in. Routed to the api, they answer FastAPI's JSON 404
-(`test_mcp_discovery_fallbacks.py` holds the answers). Keycloak keeps its own
-documents under `/realms/<realm>/` until phase 4 removes it.
+(`test_mcp_discovery_fallbacks.py` holds the answers). Since own
+authentication phase 4 nothing serves `/realms/<realm>/`: the paths Keycloak
+answered fall to the console (`test_public_surface.py`).
 
 Also: no console route begins with `/mcp` or `/.well-known` or names an
 OAuth machine endpoint, and the api is given longer to stop than a running
 write tool call.
 
-The router model (priority, then first match) is the one
-`test_deploy_keycloak_registration_edge.py` already holds to the compose file.
+The router model (priority, then first match) is `tests/traefik_routes.py`.
 """
 
 import re
@@ -36,7 +36,7 @@ import yaml
 
 from app.mcp.invoke import TOOL_TIMEOUT_S
 from app.mcp.server import _SHUTDOWN_GRACE_S
-from tests.test_deploy_keycloak_registration_edge import _winner
+from tests.traefik_routes import winner as _winner
 
 REPO = Path(__file__).resolve().parents[2]
 COMPOSE = REPO / "deploy" / "docker-compose.yml"
@@ -83,16 +83,19 @@ def test_the_mcp_paths_reach_the_api_and_not_the_spa() -> None:
         assert _winner(path) == "api", (path, _winner(path))
 
 
-def test_the_realm_keeps_its_own_discovery_documents() -> None:
-    """The realm's documents live under `/realms/<realm>/.well-known/`, which
-    begins `/realms` -- no new prefix can take them."""
+def test_the_former_realm_paths_reach_no_identity_provider() -> None:
+    """Was `test_the_realm_keeps_its_own_discovery_documents`: until own
+    authentication phase 4 these were Keycloak's (`kc`,
+    `kc-registration-oidc`). Now no router names them, and none of the MCP
+    prefixes above takes them either: the console's catch-all does, and an
+    MCP client reading one gets a page, not a second authorization server."""
     for path in (
         "/realms/it-suite/.well-known/openid-configuration",
         "/realms/it-suite/.well-known/oauth-authorization-server",
         "/realms/it-suite/protocol/openid-connect/auth",
         "/realms/it-suite/clients-registrations/openid-connect",
     ):
-        assert _winner(path) in {"kc", "kc-registration-oidc"}, (path, _winner(path))
+        assert _winner(path) == "web", (path, _winner(path))
 
 
 def test_the_console_keeps_its_pages() -> None:

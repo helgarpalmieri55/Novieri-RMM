@@ -10,7 +10,7 @@ import jwt
 
 from app.core.auth import keys
 from app.core.auth.keys import OpenBaoAuthKeys
-from tests.test_deploy_keycloak_registration_edge import _winner
+from tests.traefik_routes import winner as _winner
 
 
 async def test_the_set_is_public_and_verifies_what_the_platform_signs(api_env: Any) -> None:

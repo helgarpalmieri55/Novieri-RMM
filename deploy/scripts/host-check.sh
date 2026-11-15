@@ -117,7 +117,7 @@ else
 fi
 
 say "5. Resources"
-# ITMS brings up postgres, redis, minio, keycloak, openbao, traefik, the
+# ITMS brings up postgres, redis, minio, openbao, traefik, the console, the
 # api, a worker and the gateway -- on top of whatever is already here.
 free -h 2>/dev/null | head -2
 echo "--- disk ---"
@@ -168,9 +168,9 @@ done
 have firewall-cmd || have ufw || echo "neither firewalld nor ufw present; check nftables/iptables directly"
 
 say "8. Time"
-# The agent gateway is mTLS and the console is OIDC. Both fail in confusing
-# ways on a host whose clock is wrong -- certificate validity and token
-# expiry are absolute times.
+# The agent gateway is mTLS, and the console's one-time codes and the tokens
+# it issues AI apps are time-based. Both fail in confusing ways on a host whose
+# clock is wrong -- certificate validity and token expiry are absolute times.
 timedatectl 2>/dev/null | head -6 || date -u
 
 echo

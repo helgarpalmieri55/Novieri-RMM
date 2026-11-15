@@ -205,3 +205,22 @@ def test_the_factor_costs_the_operator_sizes_by_are_the_measured_ones() -> None:
     _block, flat = _sign_in_limits_block()
     assert "Setting up the first factor at first sign-in is 3." in flat, flat
     assert "setting up the app costs 4 or 5" in flat, flat
+
+
+# --- operator decision (2026-10-15): AI-app registration opens only on an opt-in
+#
+# Moved, unchanged, from `tests/test_keycloak_init_job.py` in own
+# authentication phase 4 (plan 2026-11-15, Task 6, fix round 1): that file went
+# with `init-clients.py`, but `ITS_MCP_REGISTRATION` is now the platform's own
+# dynamic client registration switch, and the example must still leave it
+# off, commented out, with the pointer to the runbook section that explains it.
+
+
+def test_the_env_example_documents_the_opt_in_and_leaves_it_off() -> None:
+    lines = ENV_EXAMPLE.read_text().splitlines()
+    assert "# ITS_MCP_REGISTRATION=open" in lines
+    assert not [x for x in lines if x.startswith("ITS_MCP_REGISTRATION=")], (
+        "the example must not opt anybody in"
+    )
+    text = ENV_EXAMPLE.read_text()
+    assert "AI connections (MCP)" in text
