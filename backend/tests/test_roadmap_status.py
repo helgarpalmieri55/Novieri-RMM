@@ -99,15 +99,6 @@ PHASE_18_ALSO = {"ai_portal"}
 # invariant 2a governs, and 2a is a clause about a path to UNENROLLED machines
 # -- there is no numbered phase for that, because every numbered phase assumes
 # an endpoint the control plane can already reach.
-#
-# `keycloak_events` (added 2026-08-18) is unphased for a different and narrower
-# reason: it is NOT A BUSINESS MODULE. It adds no routes, no job types and no
-# frontend folder -- it is a worker sweep implementing one clause of
-# `docs/modules/console-auth/spec.md` §4, which is sign-in and deployment work
-# rather than a numbered phase. It lives under `app/modules/` because that is
-# where a self-contained package with its own migration belongs, not because it
-# is a module in the roadmap's sense. A roadmap row for it would claim a
-# deliverable that does not exist.
 EXPECTED_UNPHASED = frozenset(
     {
         "agent_distribution",
@@ -115,7 +106,6 @@ EXPECTED_UNPHASED = frozenset(
         # Self-update (spec-self-update.md): keeping enrolled agents current,
         # the third agent-distribution path. Phase 0 work like the two above.
         "agent_update",
-        "keycloak_events",
         "email_intake",
         "notification",
         # Answers review 2026-09-23 finding 5; not a numbered roadmap phase.

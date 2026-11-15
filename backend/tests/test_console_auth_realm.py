@@ -14,7 +14,6 @@ console -- and must, because realm import runs only against an empty database.
 `deploy/README.md`'s "Branding and extending sign-in" is the other half.
 """
 
-import ast
 import json
 import re
 from pathlib import Path
@@ -1267,63 +1266,6 @@ def test_the_provisioning_secret_is_a_path_and_never_inlined() -> None:
     assert "ITS_KEYCLOAK_ADMIN_CLIENT_ID=it-suite-provisioning" in env
 
 
-def test_the_env_example_ships_a_secret_path_something_actually_writes() -> None:
-    """`.env.example` AND `from_settings` MUST AGREE, and what makes them agree
-    CHANGED UNDER THIS TEST.
-
-    The original assertion was the exact inverse: ship the path COMMENTED OUT.
-    That was right at the time. `from_settings` returns `None` — the documented
-    "not configured, routes answer 503" branch — only when the URL *or* the
-    path is falsy; the URL is shared with the event sweep, so on any deployment
-    forwarding events it is already set, and a populated path with no file
-    behind it raised `FileNotFoundError` on every lifecycle request instead.
-    Commenting it out was the only way to reach the branch the file promised.
-
-    THE FACT THAT CHANGED: `deploy/docker-compose.yml`'s `keycloak-init` job now
-    creates the provisioning client and writes that secret on every
-    `docker compose up`. So the path shipped populated is a path something
-    actually writes — and shipped COMMENTED it is now a first-boot failure, the
-    only boot where it matters: `POST /api/v1/setup/claim` answers 503 and the
-    buyer's very first action fails.
-
-    The invariant this test has always defended is unchanged — the file must not
-    promise a state the code cannot reach — so the assertion inverted while the
-    reason stayed put. It is pinned to the INIT JOB rather than to a literal, so
-    if that job stops writing the secret, this fails instead of the operator's
-    install.
-    """
-    env = ENV_EXAMPLE.read_text()
-    active = re.search(r"^ITS_KEYCLOAK_ADMIN_SECRET_PATH=(\S+)", env, re.MULTILINE)
-    assert active is not None, (
-        "ship this ACTIVE: `keycloak-init` writes the secret on every start, and "
-        "commented out it makes a fresh install refuse its own setup screen"
-    )
-    # Composed from the job's OWN constants rather than matched as a literal:
-    # `init-clients.py` builds the path as `secrets_dir / secret_filename`, so
-    # the full string never appears in its source and a substring check would
-    # fail against a job that writes exactly the right file.
-    init_job = (REPO / "deploy/keycloak/init-clients.py").read_text()
-    directory = re.search(r'DEFAULT_SECRETS_DIR = Path\("([^"]+)"\)', init_job)
-    filename = re.search(r'secret_filename="(keycloak-admin[^"]*)"', init_job)
-    assert directory and filename, (
-        "`init-clients.py` no longer declares DEFAULT_SECRETS_DIR and the "
-        "provisioning client's secret_filename in the shape this reads; "
-        "re-derive the binding rather than deleting it"
-    )
-    written = f"{directory.group(1).rstrip('/')}/{filename.group(1)}"
-    assert active.group(1) == written, (
-        f"`.env.example` points at {active.group(1)} and `init-clients.py` "
-        f"writes {written} — the path and its writer must name the same file, "
-        "or first boot fails on a secret nothing created"
-    )
-    source = KC_CLIENT.read_text()
-    assert "if not url or not secret_path:" in source, (
-        "the reasoning above is about this exact condition; if it changed, "
-        "re-derive what .env.example should ship"
-    )
-    assert "FileNotFoundError" in source
-
-
 def _env_block(start: str, end: str) -> str:
     """One block of `.env.example`, between two of its comment headers.
 
@@ -1369,58 +1311,6 @@ def test_the_env_example_says_what_a_configured_but_missing_secret_does() -> Non
         "and why the 'not configured' branch is unreachable once the URL is "
         "set -- the URL is shared with the event sweep"
     )
-
-
-KC_CLIENT = REPO / "backend/app/modules/user_admin/kc_client.py"
-DESIGN = REPO / "docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md"
-
-#: Small enough that spelling them out beats a dependency.
-_SPELLED = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
-
-
-def test_every_document_that_counts_the_admin_operations_counts_the_same() -> None:
-    """A NUMBER REPEATED IN THREE PLACES DRIFTS IN TWO OF THEM.
-
-    "The credential is broader than the code" is the whole mitigation argument
-    for `manage-users` (design §2.1, §6). Its force comes from the code half
-    being small and *known*, so a document claiming five operations against a
-    client that performs four is not a rounding error -- it is the mitigation
-    describing something other than what shipped, and the direction of the
-    error is the one that overstates the blast radius nobody re-derives.
-
-    DERIVED FROM THE SOURCE, not from a second hardcoded number: the count is
-    the module-level public coroutines in `kc_client.py`, so adding a fifth
-    operation goes red on every document that still says four.
-    """
-    module = ast.parse(KC_CLIENT.read_text())
-    operations = sorted(
-        node.name
-        for node in module.body
-        if isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_")
-    )
-    spelled = _SPELLED[len(operations)]
-    assert operations == [
-        "create_user",
-        "delete_user",
-        "execute_actions_email",
-        # Added 2026-10-14: the MCP server's revoke removes one AI app's
-        # consent for one person (MCP server design §3.4).
-        "revoke_consent",
-        "set_enabled",
-        # Added 2026-10-14: `PATCH /me` mirrors the caller's own language.
-        "set_locale_attribute",
-    ], operations
-
-    def flat(path: Path) -> str:
-        return re.sub(r"\s+", " ", path.read_text())
-
-    assert f"performs exactly {spelled} operations" in flat(KC_CLIENT)
-    assert f"calls exactly {spelled}" in flat(DESIGN), (
-        "design §2.1's mitigation list must count what the client actually does"
-    )
-    assert f"calls exactly {spelled} operations" in flat(README)
-    for name in operations:
-        assert name != "impersonate", "invariant: impersonation is never called"
 
 
 # --- The email-domain allowlist (spec §3.3) -------------------------------- #
@@ -1924,10 +1814,6 @@ def test_no_client_carries_a_field_keycloak_will_reject() -> None:
 # in without ever setting a credential.
 # --------------------------------------------------------------------------- #
 
-#: The module that started Keycloak's account actions from the console. Own-auth
-#: Task 10 deleted it with `oidc-client-ts`; it stays named so the re-pointed
-#: tests below can say it is gone.
-FRONTEND_AUTH = REPO / "frontend/src/lib/auth.ts"
 FRONTEND_SRC = REPO / "frontend/src"
 
 
@@ -1940,89 +1826,6 @@ def _console_sources() -> list[Path]:
         and ".test." not in path.name
         and "__tests__" not in path.parts
     ]
-
-
-def _actions_the_console_starts() -> set[str]:
-    """The `kc_action` values the browser sends.
-
-    RE-POINTED (own-auth Task 10, plan decision D24). This read the closed
-    union `ACCOUNT_ACTIONS` in `lib/auth.ts`, which started each credential
-    step at Keycloak. The console changes credentials on its own pages now and
-    that file is gone, so the set is read from EVERY console source: a
-    `kc_action` anywhere is a step started at Keycloak again, and it lands in
-    the realm checks below like the three that were there.
-    """
-    found: set[str] = set()
-    for path in _console_sources():
-        found.update(re.findall(r"kc_action\W{1,6}([A-Za-z_-]+)", path.read_text()))
-    return found
-
-
-def _actions_the_backend_mails() -> set[str]:
-    """The actions `kc_client` asks Keycloak to mail a link for.
-
-    Read from the source rather than restated, so a fourth action added to
-    either side lands in the realm or goes red here.
-    """
-    module = ast.parse(KC_CLIENT.read_text())
-    literals: dict[str, str] = {}
-    groups: dict[str, set[str]] = {}
-    for node in module.body:
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
-            name, value = node.targets[0].id, node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            name, value = node.target.id, node.value
-        else:
-            continue
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            literals[name] = value.value
-        elif isinstance(value, ast.Tuple):
-            members = set()
-            for element in value.elts:
-                if isinstance(element, ast.Constant) and isinstance(element.value, str):
-                    members.add(element.value)
-                elif isinstance(element, ast.Name) and element.id in literals:
-                    # e.g. ENROLMENT_ACTIONS reuses PASSKEY_REQUIRED_ACTION.
-                    members.add(literals[element.id])
-            groups[name] = members
-    mailed = groups.get("ENROLMENT_ACTIONS", set()) | groups.get("PASSWORD_RESET_ACTIONS", set())
-    assert mailed, f"{KC_CLIENT} no longer names the actions it mails"
-    return mailed
-
-
-def _enabled_actions(realm: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {a["alias"]: a for a in realm.get("requiredActions", []) if a.get("enabled") is True}
-
-
-def test_the_action_sets_are_read_from_both_sides_and_are_not_empty() -> None:
-    """Non-vacuity, first: the two extractors above are regex and `ast` over
-    files that move. An empty set makes the guard below assert nothing over
-    nothing, twice.
-
-    RE-POINTED (own-auth Task 10, D24): the console's set is EMPTY on purpose
-    now -- it starts no Keycloak step -- so its non-vacuity is that the scan
-    read the real console, and that `lib/auth.ts` is gone rather than moved.
-    The backend's set is unchanged: `kc_client` still mails Keycloak's actions
-    until the invitation of own-auth Task 8 replaces it."""
-    console, mailed = _actions_the_console_starts(), _actions_the_backend_mails()
-    assert "UPDATE_PASSWORD" in mailed, sorted(mailed)
-    assert len(_console_sources()) > 300, len(_console_sources())
-    assert not FRONTEND_AUTH.exists(), f"{FRONTEND_AUTH} is back"
-    assert console == set(), sorted(console)
-
-
-def test_every_credential_step_itms_asks_for_exists_in_the_realm() -> None:
-    """THE SILENT ONE. Every path in this platform that changes a credential
-    names an action and asks Keycloak to run it; an action the realm never
-    registered does not fail, it does nothing."""
-    registered = _enabled_actions(REALM)
-    for action in sorted(_actions_the_console_starts() | _actions_the_backend_mails()):
-        assert action in registered, (
-            f"{action} is asked for by ITMS and is not an enabled required "
-            f"action in the realm. Declared: {sorted(registered)}. A kc_action "
-            f"for it returns the user to ITMS with kc_action_status=error and "
-            f"no visible failure."
-        )
 
 
 #: Keycloak 26's own default set (`DefaultRequiredActions.Action`), minus the

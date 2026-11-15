@@ -303,9 +303,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/modules/health/sweep.py::_for_each_org": "worker: health sweeps, one org_session per org",
     "app/modules/ipam/reconcile.py::reconcile_sweep_all_orgs": "worker: IPAM daily reconcile",
     "app/modules/ipam/retention.py::sweep_all_orgs": "worker: IPAM retention sweep",
-    "app/modules/keycloak_events/sweep.py::_forward": (
-        "worker: forwards Keycloak events into the audit chain"
-    ),
     **_reviewed(
         "app/modules/remote/recording.py",
         "worker: session-recording retention sweep",

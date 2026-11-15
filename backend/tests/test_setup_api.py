@@ -30,8 +30,8 @@ EVERY ASSERTION ABOUT WHAT THE DATABASE HOLDS READS THROUGH THE ADMIN
 read through a tenant session would be answered by RLS -- returning "no users"
 for a populated platform, which is the exact bug these tests exist to catch.
 
-NO IDENTITY PROVIDER IS CALLED. The fake from `test_user_admin_api` stays on
-`httpx` so that a call would be seen; `kc.seen == []` holds it.
+NO IDENTITY PROVIDER IS CALLED. `test_user_admin_api.install_outbound` stays
+on `httpx` so that a call would be seen; `outbound.seen == []` holds it.
 """
 
 import os
@@ -54,7 +54,7 @@ from app.models import AuditEvent, Organization, Role, User, UserRole
 from app.models.auth import AuthPassword
 from tests.auth_support import CONSOLE, browser
 from tests.conftest import PgCluster, _psql, _run_migrations
-from tests.test_user_admin_api import _REAL_CLIENT, FakeKeycloak
+from tests.test_user_admin_api import _REAL_CLIENT, OutboundRecorder, install_outbound
 
 REPO = Path(__file__).resolve().parents[2]
 ENV_EXAMPLE = REPO / "deploy" / ".env.example"
@@ -103,14 +103,14 @@ class SetupEnv:
         client: httpx.AsyncClient,
         settings: Any,
         admin_engine: AsyncEngine,
-        kc: FakeKeycloak,
+        outbound: OutboundRecorder,
         code_path: Path,
     ) -> None:
         self.app = app
         self.client = client
         self.settings = settings
         self.admin_engine = admin_engine
-        self.kc = kc
+        self.outbound = outbound
         self.code_path = code_path
 
     @property
@@ -195,12 +195,7 @@ async def setup_env(
         _rebase(pg_cluster.admin_url, dbname), poolclass=NullPool
     )
 
-    kc = FakeKeycloak()
-
-    def factory(**kw: Any) -> httpx.AsyncClient:
-        return _REAL_CLIENT(transport=httpx.MockTransport(kc.handler), **kw)
-
-    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    outbound = install_outbound(monkeypatch)
 
     # NullPool, and it is not an optimisation -- it is what stops this file
     # from failing the WHOLE SUITE intermittently.
@@ -223,7 +218,7 @@ async def setup_env(
     async with _REAL_CLIENT(
         transport=httpx.ASGITransport(app=app), base_url="http://api.test"
     ) as client:
-        yield SetupEnv(app, client, settings, admin_engine, kc, code_path)
+        yield SetupEnv(app, client, settings, admin_engine, outbound, code_path)
 
     await admin_engine.dispose()
     await app.state.app_engine.dispose()
@@ -336,7 +331,7 @@ async def test_the_right_code_on_an_empty_platform_claims_it(setup_env: Any) -> 
     # No identity provider was asked for anything (P2 phase 1): the row's
     # subject is the platform's own placeholder, and the password is stored.
     assert users[0].external_subject.startswith("itms-local:")
-    assert setup_env.kc.seen == []
+    assert setup_env.outbound.seen == []
     async with AsyncSession(setup_env.admin_engine) as session:
         assert await session.get(AuthPassword, users[0].id) is not None
 
@@ -443,7 +438,7 @@ async def test_a_wrong_code_is_refused_and_leaves_nothing_behind(setup_env: Any)
     assert response.status_code == 403
     assert await setup_env.orgs() == []
     assert await setup_env.users() == []
-    assert setup_env.kc.seen == [], "a refused claim reached the identity provider"
+    assert setup_env.outbound.seen == [], "a refused claim reached the identity provider"
 
 
 async def test_an_empty_code_is_refused(setup_env: Any) -> None:
@@ -510,16 +505,17 @@ async def test_a_deleted_user_does_not_reopen_the_setup_screen(setup_env: Any) -
 
 
 async def test_the_claim_needs_no_identity_provider_settings(setup_env: Any) -> None:
-    """P2 phase 1: there is no provisioning credential to wait for. With no
-    `ITS_KEYCLOAK_ADMIN_*` at all the claim makes the owner."""
-    assert setup_env.app.state.settings.keycloak_admin_url is None
+    """P2 phase 1: there is no provisioning credential to wait for, and since
+    own authentication phase 4 no such setting at all: the claim makes the
+    owner."""
+    assert not hasattr(setup_env.app.state.settings, "keycloak_admin_url")
 
     response = await setup_env.client.post(
         "/api/v1/setup/claim", json=_body(code=setup_env.code)
     )
 
     assert response.status_code == 201, response.text
-    assert setup_env.kc.seen == []
+    assert setup_env.outbound.seen == []
 
 
 @pytest.mark.parametrize(

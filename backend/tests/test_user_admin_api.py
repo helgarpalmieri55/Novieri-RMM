@@ -13,10 +13,10 @@ The rules this surface keeps, and the test that would notice each breaking:
    `users.id`, audit `actor_id` among them (§0.6), so the row is marked
    `deleted` and RETAINED. `test_a_deleted_users_audit_history_is_still_resolvable`
    is the assertion that matters.
-3. **No identity provider is called** (design §1.3, D5). A fake Keycloak stays
-   installed on `httpx` so that any call would be SEEN: every `kc.seen == []`
-   below holds the rule. An invited technician's `external_subject` is
-   `itms-local:<uuid>`.
+3. **No identity provider is called** (design §1.3, D5). Every httpx request
+   that is not in-process goes to an `OutboundRecorder` (`install_outbound`),
+   so that any call would be SEEN: every `outbound.seen == []` below holds the
+   rule. An invited technician's `external_subject` is `itms-local:<uuid>`.
 4. **The domain rule is enforced here too.** A console that refuses an address
    at sign-in but invites it is not enforcing anything.
 5. **The invitation link is shown once, and only when no mail carried it.**
@@ -55,76 +55,78 @@ from app.core.router_inspect import flatten
 from app.models import AuditEvent, Client, Role, User, UserRole
 from app.modules.user_admin import service as user_admin_service
 from app.modules.user_admin.api import router as users_router
-from app.modules.user_admin.kc_client import KeycloakAdminConfig
 from tests.auth_support import CONSOLE, capture_mail, console_ready, signed_in
 from tests.session_support import console_headers
 
-#: Captured at import, before any fixture swaps the name -- see
-#: `tests/test_keycloak_event_client.py` for why a factory that resolved
-#: `httpx.AsyncClient` by name would recurse into itself.
+#: Captured at import, before any fixture swaps the name: a factory that
+#: resolved `httpx.AsyncClient` by name would recurse into itself.
 _REAL_CLIENT = httpx.AsyncClient
 
-CONFIG = KeycloakAdminConfig(
-    base_url="https://keycloak.test",
-    realm="it-suite",
-    client_id="it-suite-provisioning",
-    client_secret="not-a-real-secret",
-)
 
+class OutboundRecorder:
+    """Every request that would have left the test process through httpx
+    (`install_outbound` says which), kept so that a call to anything outside
+    the platform would be SEEN.
 
-class FakeKeycloak:
-    """A Keycloak that records what it was asked and answers what the test says.
-
-    Each response status is a separate knob because each of them is a DIFFERENT
-    real failure with a different correct handling: a taken email (409 on
-    create) must leave no ITMS row, a realm with no SMTP (500 on the mail) must
-    leave the user created and say so, and a revoked credential (403 on the
-    enable) must roll the ITMS status back.
+    Rule 3 above, and the same rule in `test_setup_api.py`, `test_me_locale.py`
+    and `test_mcp_admin_api.py`: `.seen == []` holds it. Until own
+    authentication phase 4 this was a fake Keycloak that answered its admin
+    API. Nothing is answered now: a 599, which no real server sends, so a
+    caller that broke the rule would fail visibly as well as be seen.
     """
 
     def __init__(self) -> None:
         self.seen: list[httpx.Request] = []
-        self.create_status = 201
-        self.mail_status = 204
-        self.update_status = 204
-        self.delete_status = 204
-        self.issued: list[str] = []
-        #: Force the id the next create returns. The only reason a test needs
-        #: this is to collide with a row that already exists, which is how the
-        #: "ITMS half fails" ordering is exercised.
-        self.next_id: str | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path.endswith("/protocol/openid-connect/token"):
-            return httpx.Response(200, json={"access_token": "tok-123"})
         self.seen.append(request)
-        if path.endswith("/execute-actions-email"):
-            return httpx.Response(self.mail_status)
-        if request.method == "POST" and path.endswith("/users"):
-            new_id = self.next_id or str(uuid4())
-            self.next_id = None
-            self.issued.append(new_id)
-            return httpx.Response(
-                self.create_status,
-                headers={"Location": f"{CONFIG.base_url}/admin/realms/it-suite/users/{new_id}"},
-            )
-        if request.method == "PUT":
-            return httpx.Response(self.update_status)
-        if request.method == "DELETE":
-            return httpx.Response(self.delete_status)
-        raise AssertionError(f"unexpected call: {request.method} {path}")
+        return httpx.Response(599)
 
-    # -- readers the tests assert on ---------------------------------------- #
 
-    def calls(self, method: str, suffix: str = "") -> list[httpx.Request]:
-        return [
-            r for r in self.seen if r.method == method and r.url.path.endswith(suffix)
-        ]
+def install_outbound(monkeypatch: pytest.MonkeyPatch) -> OutboundRecorder:
+    """From now until the test ends, every `httpx.AsyncClient` sends to a new
+    `OutboundRecorder` -- one built with no transport, and one built with a
+    network transport of its own (`app/core/egress.py` pins its addresses
+    that way). Only an in-process transport keeps itself: an ASGI client (the
+    tests', the assistant's, the MCP server's own call) or a mock.
 
-    @property
-    def mails(self) -> list[httpx.Request]:
-        return self.calls("PUT", "/execute-actions-email")
+    FAIL CLOSED, NOT ONLY FOR THE CLIENTS THIS FACTORY BUILDS. A mount routes
+    a request around `transport`, so a mount that is not in-process goes to
+    the recorder too; and httpx's own network transports, sync and async,
+    answer to the recorder for as long as it is installed, so a client built
+    before it (the app's long-lived ones, built at startup), a proxy (which
+    httpx mounts as one of those transports) or a sync client is seen rather
+    than sent. The `test_the_recorder_sees_*` tests below hold each way out."""
+    recorder = OutboundRecorder()
+    in_process = (httpx.ASGITransport, httpx.MockTransport)
+
+    def to_recorder() -> httpx.MockTransport:
+        return httpx.MockTransport(recorder.handler)
+
+    def factory(*args: Any, **kw: Any) -> httpx.AsyncClient:
+        if not isinstance(kw.get("transport"), in_process):
+            kw["transport"] = to_recorder()
+        if kw.get("mounts"):
+            # `None` is httpx's "this pattern uses `transport`", kept as it is.
+            kw["mounts"] = {
+                pattern: mounted if mounted is None or isinstance(mounted, in_process)
+                else to_recorder()
+                for pattern, mounted in kw["mounts"].items()
+            }
+        return _REAL_CLIENT(*args, **kw)
+
+    async def network_async(
+        self: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        return recorder.handler(request)
+
+    def network_sync(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        return recorder.handler(request)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", network_async)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", network_sync)
+    return recorder
 
 
 @pytest.fixture()
@@ -133,18 +135,147 @@ def users_env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     if "/api/v1/users" not in paths:
         api_env.app.include_router(users_router, prefix="/api/v1")
 
-    # Rule 3: nothing on this surface calls an identity provider. The fake
-    # stays on `httpx` so a call would be SEEN, and `kc.seen == []` holds it.
-    kc = FakeKeycloak()
-
-    def factory(**kw: Any) -> httpx.AsyncClient:
-        return _REAL_CLIENT(transport=httpx.MockTransport(kc.handler), **kw)
-
-    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    # Rule 3: nothing on this surface calls an identity provider, or anything
+    # else outside the platform. The recorder stays on `httpx` so a call would
+    # be SEEN, and `outbound.seen == []` holds it.
+    api_env.outbound = install_outbound(monkeypatch)
     console_ready(api_env, monkeypatch)
-    api_env.kc = kc
     api_env.mail = capture_mail(monkeypatch)
     return api_env
+
+
+# --------------------------------------------------------------------------- #
+# The recorder itself: `outbound.seen == []` means nothing left only if every
+# way out is seen. Each case below is a way a request could leave a test
+# process through httpx, and the request must reach the recorder and get its
+# 599 rather than a socket (own authentication phase 4, Task 5). `.invalid`
+# never resolves (RFC 6761 §6.4), so a recorder that let one through fails
+# with a connect error rather than reaching anyone.
+# --------------------------------------------------------------------------- #
+
+_AWAY = "https://idp.invalid/admin/realms/x/users"
+
+
+async def _no_transport() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=5)
+
+
+async def _the_ai_providers_client() -> httpx.AsyncClient:
+    # `app/core/ai/providers/_http.py` passes its seam's `None` by name.
+    from app.core.ai.providers import _http
+
+    return httpx.AsyncClient(transport=_http._transport(), timeout=5)
+
+
+async def _the_egress_client() -> httpx.AsyncClient:
+    # `app/core/egress.py` builds a network transport of its own per address.
+    from app.core import egress
+
+    return httpx.AsyncClient(transport=egress._build_transport("192.0.2.1"), timeout=5)
+
+
+class _ItsOwnWayOut(httpx.AsyncBaseTransport):
+    """A transport that is neither httpx's network one nor in-process: the
+    factory has to replace it, because no backstop below httpx would see what
+    it does."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"left the process: {request.url}")
+
+
+async def _a_transport_that_is_not_httpxs() -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=_ItsOwnWayOut(), timeout=5)
+
+
+async def _a_mount_around_an_in_process_transport() -> httpx.AsyncClient:
+    # A mount wins over `transport` for the URLs it matches (httpx
+    # `_transport_for_url`), so keeping an in-process transport must not keep
+    # a mount beside it that is not one.
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+        mounts={"https://": _ItsOwnWayOut()},
+        timeout=5,
+    )
+
+
+async def _a_proxy() -> httpx.AsyncClient:
+    # `proxy=` becomes an `all://` mount of a network transport.
+    return httpx.AsyncClient(proxy="http://proxy.invalid:3128", timeout=5)
+
+
+_WAYS_OUT = {
+    "no transport": _no_transport,
+    "transport=None (the AI provider's client)": _the_ai_providers_client,
+    "a network transport of its own (the egress client)": _the_egress_client,
+    "a transport of its own that is not httpx's": _a_transport_that_is_not_httpxs,
+    "a mount beside an in-process transport": _a_mount_around_an_in_process_transport,
+    "a proxy": _a_proxy,
+}
+
+
+@pytest.mark.parametrize("build", list(_WAYS_OUT.values()), ids=list(_WAYS_OUT))
+async def test_the_recorder_sees_every_client_that_could_leave(
+    build: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outbound = install_outbound(monkeypatch)
+
+    async with await build() as client:
+        response = await client.get(_AWAY)
+
+    assert response.status_code == 599
+    assert [str(request.url) for request in outbound.seen] == [_AWAY]
+
+
+async def test_the_recorder_sees_a_client_built_before_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long-lived client the app built at startup, before any fixture
+    installed the recorder (`app/core/vault.py`, `app/core/auth/keys.py` and
+    `app/core/ca.py` build theirs that way): the network transport itself
+    answers to the recorder, so it is seen too."""
+    early = _REAL_CLIENT(timeout=5)
+    outbound = install_outbound(monkeypatch)
+
+    async with early:
+        response = await early.get(_AWAY)
+
+    assert response.status_code == 599
+    assert [str(request.url) for request in outbound.seen] == [_AWAY]
+
+
+def test_the_recorder_sees_a_synchronous_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    outbound = install_outbound(monkeypatch)
+
+    with httpx.Client(timeout=5) as client:
+        response = client.get(_AWAY)
+
+    assert response.status_code == 599
+    assert [str(request.url) for request in outbound.seen] == [_AWAY]
+
+
+async def test_an_in_process_client_keeps_its_own_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The non-vacuity half: an ASGI client (the tests' own, the assistant's,
+    the MCP server's call to itself) and a mock answer as themselves, and
+    nothing is recorded -- so a recorder that swallowed every client could not
+    pass the cases above by breaking the app's own calls."""
+    outbound = install_outbound(monkeypatch)
+    app = FastAPI()
+
+    @app.get("/here")
+    async def here() -> dict[str, str]:
+        return {"from": "asgi"}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://api.test"
+    ) as asgi:
+        assert (await asgi.get("/here")).json() == {"from": "asgi"}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(204))
+    ) as mock:
+        assert (await mock.get(_AWAY)).status_code == 204
+    assert outbound.seen == []
 
 
 async def _invite(
@@ -402,7 +533,7 @@ async def test_writes_require_users_manage(users_env: Any) -> None:
     ]
     assert [r.status_code for r in refused] == [403] * 10
     # And nothing reached an identity provider.
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
     # Non-vacuity: the victim really was reachable -- nothing about the target
     # itself refused these, only the missing permission.
     row = await _user_row(users_env.admin_engine, victim_id)
@@ -476,7 +607,7 @@ async def test_another_orgs_user_cannot_be_acted_on(users_env: Any) -> None:
     assert perms.status_code == 404, perms.text
     row = await _user_row(users_env.admin_engine, stranger_id)
     assert row is not None and row.status == "active"
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_no_lifecycle_route_reaches_another_orgs_user(users_env: Any) -> None:
@@ -526,7 +657,7 @@ async def test_no_lifecycle_route_reaches_another_orgs_user(users_env: Any) -> N
     assert {name: r.status_code for name, r in attempts.items()} == {
         name: 404 for name in attempts
     }, {name: r.text for name, r in attempts.items()}
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
     # And org B's row is exactly as it was.
     row = await _user_row(users_env.admin_engine, stranger_id)
     assert row is not None and row.status == "active"
@@ -640,7 +771,7 @@ async def test_an_invite_makes_the_local_row_and_no_identity_anywhere_else(
     assert (row.email, row.display_name, row.status, row.org_id) == (
         "ada@toeshee.com", "Ada Lovelace", "active", org,
     )
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_an_invite_grants_the_requested_roles_per_client_and_audits(
@@ -790,7 +921,7 @@ async def test_an_invite_refuses_super_admin(users_env: Any) -> None:
 
     assert response.status_code == 403, response.text
     assert await _user_by_email(users_env.admin_engine, "root@toeshee.com") is None
-    assert users_env.kc.seen == [] and users_env.mail.sent == []
+    assert users_env.outbound.seen == [] and users_env.mail.sent == []
 
 
 async def test_an_invite_refuses_another_orgs_role(users_env: Any) -> None:
@@ -812,10 +943,11 @@ async def test_an_invite_refuses_another_orgs_role(users_env: Any) -> None:
 
 
 async def test_the_lifecycle_needs_no_identity_provider_configuration(users_env: Any) -> None:
-    """Rule 3, from the deployment's side: with no `ITS_KEYCLOAK_ADMIN_*` at all
-    (the test settings set none) every lifecycle write works, where it used to
+    """Rule 3, from the deployment's side: no identity-provider setting exists
+    (the `ITS_KEYCLOAK_ADMIN_*` settings went with Keycloak in own
+    authentication phase 4) and every lifecycle write works, where it used to
     be a 503."""
-    assert users_env.settings.keycloak_admin_url is None
+    assert not hasattr(users_env.settings, "keycloak_admin_url")
     org = await users_env.create_org("no-kc")
     _sub, headers, _admin_id = await _admin(users_env, org)
     await users_env.create_user(org, "org-admin")
@@ -831,7 +963,7 @@ async def test_the_lifecycle_needs_no_identity_provider_configuration(users_env:
     ]
 
     assert [r.status_code for r in responses] == [201, 200, 200, 204, 204]
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_authorization_runs_before_anything_else(users_env: Any) -> None:
@@ -1072,7 +1204,7 @@ async def test_super_admin_cannot_be_revoked_disabled_or_deleted(users_env: Any)
     ]
     row = await _user_row(users_env.admin_engine, operator_id)
     assert row is not None and row.status == "active"
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_the_super_admin_rail_refuses_that_role_and_not_every_user(
@@ -1154,7 +1286,7 @@ async def test_a_caller_cannot_disable_or_delete_themselves(users_env: Any) -> N
     assert delete.status_code == 403, delete.text
     row = await _user_row(users_env.admin_engine, actor_id)
     assert row is not None and row.status == "active"
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_the_last_org_admin_cannot_be_disabled_deleted_or_stripped(
@@ -1196,7 +1328,7 @@ async def test_the_last_org_admin_cannot_be_disabled_deleted_or_stripped(
     assert [a.role_id for a in await _assignments(users_env.admin_engine, actor_id)] == [
         org_admin_role
     ]
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_an_org_admin_on_one_client_does_not_keep_the_org_administrable(
@@ -1312,7 +1444,7 @@ async def test_disable_writes_the_status_and_ends_the_persons_sessions(
     assert (await users_env.client.get("/api/v1/me", headers=member.headers())).status_code == 401
     events = [e for e in await _audit(users_env.admin_engine, org) if e.action == "user.disabled"]
     assert len(events) == 1 and events[0].actor_id == actor_id
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_enable_restores_the_status(users_env: Any) -> None:
@@ -1327,7 +1459,7 @@ async def test_enable_restores_the_status(users_env: Any) -> None:
     assert response.status_code == 200, response.text
     row = await _user_row(users_env.admin_engine, tech_id)
     assert row is not None and row.status == "active"
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
 
 
 async def test_a_failure_inside_disable_rolls_the_status_back(
@@ -1374,7 +1506,7 @@ async def test_an_administrator_no_longer_resets_a_password_by_mail(users_env: A
     assert response.status_code == 404
     events = await _audit(users_env.admin_engine, org)
     assert [e for e in events if e.action == "user.password_reset_requested"] == []
-    assert users_env.kc.seen == [] and users_env.mail.sent == []
+    assert users_env.outbound.seen == [] and users_env.mail.sent == []
 
 
 async def test_a_resend_whose_mail_fails_shows_the_new_link(users_env: Any) -> None:
@@ -1437,7 +1569,7 @@ async def test_delete_retains_the_itms_row(
     response = await users_env.client.delete(f"/api/v1/users/{tech_id}", headers=headers)
 
     assert response.status_code == 204, response.text
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
     row = await _user_row(users_env.admin_engine, tech_id)
     assert row is not None, "the ITMS row must be RETAINED"
     assert row.status == "deleted"
@@ -1653,7 +1785,7 @@ async def test_a_contact_is_not_a_user_this_surface_administers(users_env: Any) 
         response = await users_env.client.request(method, path, json=body, headers=headers)
         answers.append((method, path, response.status_code))
     assert [a for a in answers if a[2] != 404] == []
-    assert users_env.kc.seen == []
+    assert users_env.outbound.seen == []
     row = await _user_row(users_env.admin_engine, contact.id)
     assert row is not None and (row.kind, row.status) == ("contact", "active")
     assert [a.id for a in await _assignments(users_env.admin_engine, contact.id)] == [grant.id]

@@ -241,12 +241,6 @@ const DYNAMIC: Dynamic[] = [
     ],
   },
   {
-    file: "modules/keycloak_events/mapping.py",
-    how: "map_event(): _DIRECT table and the passkey branch",
-    needles: ["_DIRECT"],
-    codes: ["auth.identity_linked", "auth.identity_unlinked", "auth.passkey_registered", "auth.passkey_removed"],
-  },
-  {
     file: "modules/patch/reboot.py",
     how: 'f"patch.reboot_{state}" over the states _close() is called with, plus the _audit literals',
     needles: ['f"patch.reboot_{state}"'],
@@ -499,7 +493,6 @@ const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "modules/ipam/importer.py": 1,
   "modules/ipam/registry.py": 1,
   "modules/ipam/subnets.py": 1,
-  "modules/keycloak_events/sweep.py": 3,
   "modules/patch/reboot.py": 1,
   "modules/people/checklists.py": 1,
   "modules/people/service.py": 1,

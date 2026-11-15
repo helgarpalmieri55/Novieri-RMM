@@ -23,8 +23,6 @@ from app.core.health.backup_status import (
 )
 from app.core.health.probes import (
     probe_ca,
-    probe_jwks,
-    probe_keycloak_events,
     probe_objectstore,
     probe_postgres_admin,
     probe_postgres_app,
@@ -52,14 +50,8 @@ _ALL_PROBES: dict[str, Probe] = {
     "postgres.admin": probe_postgres_admin,
     "objectstore": probe_objectstore,
     "vault": probe_vault,
-    "jwks": probe_jwks,
     "signing": probe_signing,
     "ca": probe_ca,
-    # SOFT, and `ok` when unconfigured. Forwarding Keycloak's credential events
-    # is optional; a deployment that has not enabled it is not unhealthy. What
-    # this probe exists to prevent is the OTHER silence -- configured, not
-    # running, and nobody told.
-    "keycloak_events": probe_keycloak_events,
     # SOFT, and `ok` when the host has no backup timer. Read from files the
     # host scripts write (app/core/health/backup_status.py).
     "backup.nightly": probe_backup,
@@ -67,16 +59,11 @@ _ALL_PROBES: dict[str, Probe] = {
     "backup.drill": probe_restore_drill,
 }
 
-# The probes a Celery worker can meaningfully SAMPLE into history -- every
-# probe except `jwks`. Only the API process ever constructs a `JwksCache`
-# (`app/main.py`'s startup); a worker's state has no `jwks` attribute at all,
-# so running `probe_jwks` there would not be measuring the IdP being down --
-# it would be measuring an attribute this process never had a reason to hold,
-# and `probe_jwks`'s unconditional `state.jwks._keys` read turns that absence
-# into an `AttributeError`, which the registry's catch-all reports as
-# `Status.DOWN` / `ReasonCode.UNREACHABLE`. See `app.worker.sample_health_once`
-# and `test_jwks_is_excluded_because_a_worker_reading_would_be_a_false_down`.
-WORKER_SAMPLED_PROBES = frozenset(_ALL_PROBES) - {"jwks"}
+# The probes a Celery worker can meaningfully SAMPLE into history: every one
+# since own authentication phase 4 removed `jwks`, which read a cache only the
+# API process held (`app.worker.sample_health_once` says why that mattered).
+# Derived from `_ALL_PROBES`, never typed out, so the two cannot drift.
+WORKER_SAMPLED_PROBES = frozenset(_ALL_PROBES)
 
 # WHAT THE STATUS PAGE PRINTS -- a SECOND string, deliberately, and never the
 # key.
@@ -88,8 +75,9 @@ WORKER_SAMPLED_PROBES = frozenset(_ALL_PROBES) - {"jwks"}
 # orphans every stored sample, so none of them changes.
 #
 # But `/api/v1/platform/status` sends the name straight to
-# `PlatformStatusPage`, which prints it in a table -- so `keycloak_events` put
-# the identity vendor's name on an operator's screen, from a Python dict key.
+# `PlatformStatusPage`, which prints it in a table -- so a probe once keyed
+# `keycloak_events` (removed in own authentication phase 4) put the identity
+# vendor's name on an operator's screen, from a Python dict key.
 # A buyer does not know what Keycloak is and must never need to
 # (`docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §1.3,
 # and the buyer test in §0). No scan of user-visible string LITERALS could ever
@@ -105,10 +93,8 @@ PROBE_LABELS: dict[str, str] = {
     "postgres.admin": N_("Database administration connection"),
     "objectstore": N_("Object storage"),
     "vault": N_("Secret vault"),
-    "jwks": N_("Sign-in key cache"),
     "signing": N_("Job signing key"),
     "ca": N_("Certificate authority"),
-    "keycloak_events": N_("Sign-in event forwarding"),
     "backup.nightly": N_("Nightly platform backup"),
     "backup.offsite": N_("Off-host backup copy"),
     "backup.drill": N_("Restore drill"),
