@@ -23,9 +23,12 @@ TWO PHASES, because the registration switch is read when the api starts.
                   be approved, exchange the code with PKCE S256, call
                   `/mcp`, refresh, and see a reused refresh token, a reused
                   code, an RFC 7009 revocation and "sign out everywhere" each
-                  end a grant at the next call. A token signed by anybody
+                  end a grant at the next call -- every grant shown working
+                  at `/mcp` before it is shown ended, and an ended grant's
+                  refresh token refused too. A token signed by anybody
                   else -- a tampered one, and one shaped like Keycloak's --
-                  is refused at `/mcp`.
+                  is refused at `/mcp`; that one and an MCP access token
+                  `/mcp` has just accepted are refused at the console's door.
 
 WHAT IT NEVER PRINTS. Tokens, codes, passwords, the install code, the TOTP
 secret and recovery codes. Claims are printed by NAME, with values only for
@@ -56,6 +59,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import ssl
 import sys
@@ -79,17 +83,24 @@ PROTOCOL_VERSION = "2026-07-28"
 SESSION_COOKIE = "__Host-itms_session"
 #: Claims whose VALUES are safe to print. Everything else is printed by name.
 SHOWN_CLAIMS = frozenset({"aud", "iss", "scope", "client_id", "typ"})
-#: Paths Keycloak's router (`kc`) answered until phase 4. Nothing routes them
-#: to an identity provider any more: they fall to the console, whose nginx
-#: answers its own page.
+#: Paths Keycloak's router (`kc`) and its registration edge answered until
+#: phase 4. Nothing routes them to an identity provider any more: they fall to
+#: the console, whose nginx answers its own page. The same nine the committed
+#: router model checks (`backend/tests/test_public_surface.py`).
 FORMER_KEYCLOAK_PATHS = (
     "/realms/it-suite/.well-known/openid-configuration",
     "/realms/it-suite/protocol/openid-connect/auth",
+    "/realms/it-suite/protocol/openid-connect/token",
     "/realms/it-suite/clients-registrations/openid-connect",
-    "/resources/x/login/itms/css/itms.css",
+    "/realms/it-suite/clients-registrations/default",
+    "/realms/it-suite/account",
+    "/resources/abc/login/itms/css/itms.css",
     "/js/keycloak.js",
     "/admin/master/console/",
 )
+#: The refusal of a refresh token that is not live, whatever the reason: one
+#: answer, so the endpoint tells a caller nothing (RFC 6749 §5.2).
+DEAD_REFRESH = {"error": "invalid_grant", "error_description": "the refresh token is not valid"}
 #: What each phase has to have proven before it may say "every assertion
 #: held". `Flow.done` marks a section where its last assertion holds; `main`
 #: fails a phase that came back with any of these unmarked.
@@ -111,6 +122,7 @@ PHASES: dict[str, tuple[str, ...]] = {
         "a tampered token refused at /mcp",
         "a Keycloak-shaped token refused at /mcp",
         "a Keycloak-shaped token refused at the console",
+        "an MCP access token refused at the console",
         "refresh",
         "refresh reuse ends the grant",
         "code reuse ends the grant",
@@ -174,13 +186,6 @@ def jwt_parts(token: str) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(header, dict) or not isinstance(claims, dict):
         raise Failed("the token's header or payload is not a JSON object")
     return header, claims
-
-
-def audiences(claims: Mapping[str, Any]) -> list[str]:
-    aud = claims.get("aud")
-    if aud is None:
-        return []
-    return [aud] if isinstance(aud, str) else [str(a) for a in aud]
 
 
 def exact_audience(claims: Mapping[str, Any], resource: str) -> bool:
@@ -468,10 +473,31 @@ class Flow:
     def refused_at_the_console(self, token: str, what: str) -> None:
         """The console's API door, with no cookie: it reads a session cookie
         only, and since own authentication phase 4 nothing on the platform can
-        validate a Keycloak token at all."""
+        validate a Keycloak token at all. Refused with `auth_required`, the
+        refusal the console answers with its sign-in page: the door asked for a
+        session, whatever the bearer was (1c(a): an MCP token opens `/mcp`
+        and nothing else)."""
         answer = self.http.request("GET", "/api/v1/me", bearer=token, cookies=False)
         check(answer.status == 401, f"/api/v1/me answered {answer.status} to {what}, not 401")
-        ok(f"/api/v1/me refuses {what}: 401")
+        body = answer.json()
+        check(
+            isinstance(body, dict) and body.get("code") == "auth_required",
+            f"/api/v1/me's 401 to {what} is not auth_required",
+        )
+        ok(f"/api/v1/me refuses {what}: 401 auth_required")
+
+    def refused_refresh(self, grant: Grant, what: str) -> None:
+        """The token endpoint refuses `grant`'s refresh token as not live."""
+        answer = self.token(
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": grant.refresh,
+                "client_id": grant.client_id,
+            }
+        )
+        check(answer.status == 400, f"{what} answered {answer.status}, not 400")
+        check(answer.json() == DEAD_REFRESH, f"{what} is not refused as invalid_grant")
+        ok(f"the token endpoint refuses {what}: 400 invalid_grant")
 
     def discovery(self, *, registration: bool) -> dict[str, Any]:
         answer = self.mcp(None)
@@ -735,10 +761,41 @@ class Flow:
         return Grant(client_id, str(body["access_token"]), str(body["refresh_token"]))
 
     def reaches_mcp(self, grant: Grant, what: str) -> None:
+        """`initialize` answered as JSON-RPC (the api's MCP server answers
+        JSON, `json_response=True`): the reply to this request's id, carrying
+        initialize's result -- read, not found as a word in the body.
+
+        The revision is the one asked for or an earlier one the server
+        supports (MCP: "Otherwise, the server MUST respond with another
+        protocol version it supports"). The api answers `2025-11-25` to
+        `2026-07-28`: its SDK negotiates `initialize` among its handshake
+        revisions, and 2026-07-28 has no `initialize` of its own."""
         answer = self.mcp(grant.access)
         check(answer.status == 200, f"/mcp answered {answer.status} to {what}")
-        check(b"protocolVersion" in answer.body, f"/mcp's answer to {what} is not initialize's")
-        ok(f"/mcp answers {what}")
+        check(answer.media() == "application/json", f"/mcp's answer to {what} is not JSON")
+        reply = answer.json()
+        check(
+            isinstance(reply, dict) and reply.get("jsonrpc") == "2.0" and reply.get("id") == 1,
+            f"/mcp's answer to {what} is not the JSON-RPC reply to its request",
+        )
+        result = reply.get("result")
+        check(isinstance(result, dict), f"/mcp's answer to {what} carries no result")
+        revision = result.get("protocolVersion")
+        check(
+            isinstance(revision, str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", revision) is not None
+            and revision <= PROTOCOL_VERSION,
+            f"/mcp's answer to {what} names no revision up to {PROTOCOL_VERSION}",
+        )
+        server = result.get("serverInfo")
+        check(
+            isinstance(result.get("capabilities"), dict)
+            and isinstance(server, dict)
+            and isinstance(server.get("name"), str)
+            and server["name"] != "",
+            f"/mcp's answer to {what} is not initialize's result",
+        )
+        ok(f"/mcp answers {what}: initialize, revision {revision}")
         self.done("/mcp")
 
     def open(self, setup_code: str, wait_s: float) -> None:
@@ -756,6 +813,9 @@ class Flow:
         self.done("a Keycloak-shaped token refused at /mcp")
         self.refused_at_the_console(keycloak_shaped, "a token shaped like Keycloak's")
         self.done("a Keycloak-shaped token refused at the console")
+        # The one `/mcp` has just accepted opens nothing else (1c(a)).
+        self.refused_at_the_console(first.access, "an access token /mcp has just accepted")
+        self.done("an MCP access token refused at the console")
         rotated = self.issued(
             self.token(
                 {
@@ -770,21 +830,18 @@ class Flow:
         check(rotated.refresh != first.refresh, "the refresh token did not rotate")
         self.reaches_mcp(rotated, "the refreshed access token")
         self.done("refresh")
-        reused = self.token(
-            {"grant_type": "refresh_token", "refresh_token": first.refresh, "client_id": client_id}
-        )
-        check(reused.status == 400, f"a reused refresh token answered {reused.status}")
-        check(
-            reused.json()
-            == {"error": "invalid_grant", "error_description": "the refresh token is not valid"},
-            "a reused refresh token is not invalid_grant",
-        )
+        self.refused_refresh(first, "a refresh token presented a second time")
         self.refused_at_mcp(rotated.access, "the access token of a grant whose refresh was reused")
+        # The whole family, not only the token presented twice (design §10,
+        # falsifier 6): the one the rotation issued is dead too.
+        self.refused_refresh(rotated, "the refresh token that replaced the reused one")
         self.done("refresh reuse ends the grant")
 
-        # A code presented twice ends the grant it opened.
+        # A code presented twice ends the grant it opened. Shown working first:
+        # a token that never worked is refused with nothing having ended it.
         code, verifier = self.approve(client_id)
         second = self.exchange(client_id, code, verifier)
+        self.reaches_mcp(second, "a second grant's access token")
         again = self.token(
             {
                 "grant_type": "authorization_code",
@@ -806,9 +863,12 @@ class Flow:
         self.refused_at_mcp(second.access, "the access token of a grant whose code was reused")
         self.done("code reuse ends the grant")
 
-        # RFC 7009, by the app itself.
+        # RFC 7009, by the app itself. Its 200 proves nothing on its own --
+        # §2.2 answers 200 for a token that was never valid too -- so the
+        # grant is shown working before and refused after, both halves.
         code, verifier = self.approve(client_id)
         third = self.exchange(client_id, code, verifier)
+        self.reaches_mcp(third, "a third grant's access token")
         revoked = self.http.request(
             "POST",
             "/oauth/revoke",
@@ -817,6 +877,7 @@ class Flow:
         )
         check(revoked.status == 200, f"the RFC 7009 revocation answered {revoked.status}")
         self.refused_at_mcp(third.access, "the access token of a grant the app revoked")
+        self.refused_refresh(third, "the refresh token the app revoked")
         self.done("revocation ends the grant")
 
         # The person signs out everywhere: their AI grants end with their sessions.

@@ -18,6 +18,7 @@ import sys
 from email.message import Message
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 import yaml
@@ -39,18 +40,18 @@ def _load() -> ModuleType:
 flow = _load()
 
 
-def _part(data: dict) -> str:
+def _part(data: dict[str, Any]) -> str:
     return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
 
 
-def _jwt(claims: dict, header: dict | None = None) -> str:
+def _jwt(claims: dict[str, Any], header: dict[str, Any] | None = None) -> str:
     return f"{_part(header or {'alg': 'ES256', 'typ': 'at+jwt'})}.{_part(claims)}.c2ln"
 
 
 def test_it_imports_nothing_outside_the_standard_library() -> None:
     """CI runs it with the runner's bare `python3`: no venv, no pip."""
     tree = ast.parse(SCRIPT.read_text())
-    names = set()
+    names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name.split(".")[0] for alias in node.names)
@@ -86,8 +87,8 @@ def test_the_audience_must_be_exactly_the_resource_as_a_string() -> None:
     assert flow.exact_audience({"aud": resource}, resource)
     for wrong in ([resource], [resource, "it-suite"], "it-suite", None, "https://other/mcp"):
         assert not flow.exact_audience({"aud": wrong}, resource), wrong
-    assert flow.audiences({"aud": ["x", "y"]}) == ["x", "y"]
-    assert flow.audiences({}) == []
+    # `audiences()` went in fix round 1 (review minor 8): nothing called it.
+    assert not hasattr(flow, "audiences")
 
 
 def test_totp_matches_rfc_6238s_own_vectors() -> None:
@@ -234,6 +235,36 @@ def test_the_former_keycloak_paths_are_all_checked() -> None:
         assert any(path.startswith(prefix) for path in paths), prefix
 
 
+#: The paths the committed router model sends nowhere near an identity
+#: provider (Task 6's `tests/test_public_surface.py::FORMER_IDENTITY_PATHS`,
+#: whose docstring says CI sends "the same paths" through the real Traefik).
+ROUTER_MODEL_PATHS = (
+    "/realms/it-suite/.well-known/openid-configuration",
+    "/realms/it-suite/protocol/openid-connect/auth",
+    "/realms/it-suite/protocol/openid-connect/token",
+    "/realms/it-suite/clients-registrations/openid-connect",
+    "/realms/it-suite/clients-registrations/default",
+    "/realms/it-suite/account",
+    "/resources/abc/login/itms/css/itms.css",
+    "/js/keycloak.js",
+    "/admin/master/console/",
+)
+
+
+def test_the_live_check_sends_the_paths_the_router_model_checks() -> None:
+    """The same nine, in the same order, as the router model's. Where that
+    test file defines its tuple, it is read from it, so the two cannot drift
+    apart after Tasks 6 and 7 meet."""
+    assert flow.FORMER_KEYCLOAK_PATHS == ROUTER_MODEL_PATHS
+    surface = REPO / "backend/tests/test_public_surface.py"
+    for node in ast.walk(ast.parse(surface.read_text())):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "FORMER_IDENTITY_PATHS"
+            for target in node.targets
+        ):
+            assert ast.literal_eval(node.value) == flow.FORMER_KEYCLOAK_PATHS
+
+
 def _deploy_step(name: str) -> str:
     """The `run` of the deploy job's step whose name starts with NAME, read
     as YAML and without its comment lines: a commented-out command is not one
@@ -295,14 +326,63 @@ def test_ci_restores_the_old_identity_providers_database_from_a_pre_upgrade_back
     `keycloak` database out, the pre-upgrade one keeps it, and a forced
     restore of that one brings it back."""
     run = _deploy_step("the old identity provider's database")
-    nightly = run.index("./scripts/backup.sh /tmp/ci-nightly")
-    assert "test ! -e /tmp/ci-nightly/keycloak.dump" in run
-    pre = run.index("ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh /tmp/ci-pre-upgrade")
-    restore = run.index("ITS_RESTORE_FORCE=1 ./scripts/restore.sh /tmp/ci-pre-upgrade")
+    nightly = run.index('./scripts/backup.sh "$nightly"')
+    assert 'test ! -e "$nightly/keycloak.dump"' in run
+    pre = run.index('ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh "$pre_upgrade"')
+    restore = run.index('ITS_RESTORE_FORCE=1 ./scripts/restore.sh "$pre_upgrade"')
     assert nightly < pre < restore
-    assert "test -s /tmp/ci-pre-upgrade/keycloak.dump" in run
+    assert 'test -s "$pre_upgrade/keycloak.dump"' in run
     assert run.index("DROP DATABASE keycloak WITH (FORCE)") < restore
     assert "realm_probe" in run[restore:]
+
+
+def test_the_k1_backups_are_this_runs_own_and_go_with_the_step() -> None:
+    """Fix round 1 (review minors 2 and 3). A fixed `/tmp/ci-nightly` on a
+    reused runner could hold last run's `keycloak.dump` and answer for a
+    backup that never wrote one; each directory comes from `mktemp -d` under
+    the runner's temp, and the trap removes them however the step ends. And
+    the restore is proven by a row this run wrote, not by a table's name."""
+    run = _deploy_step("the old identity provider's database")
+    assert "/tmp/" not in run
+    for name in ("nightly", "pre_upgrade"):
+        assert f'{name}="$(mktemp -d "$RUNNER_TEMP/' in run, name
+    assert """trap 'rm -rf "$nightly" "$pre_upgrade" "$restore_log"' EXIT""" in run
+    assert run.index("trap ") < run.index("./scripts/backup.sh")
+    restore = run.index('ITS_RESTORE_FORCE=1 ./scripts/restore.sh "$pre_upgrade"')
+    wrote = run.index("INSERT INTO realm_probe VALUES ('$marker')")
+    assert wrote < run.index('./scripts/backup.sh "$nightly"')
+    assert "SELECT x FROM realm_probe" in run[restore:]
+    assert '= "$marker" ]' in run[restore:]
+
+
+def test_the_deploy_job_keeps_the_name_branch_protection_may_require() -> None:
+    """Fix round 1 (review minor 12): a required status check is matched by
+    the job's name, and a renamed job leaves the PR waiting on the old one."""
+    job = yaml.safe_load(CI.read_text())["jobs"]["deploy"]
+    assert job["name"] == "deploy (compose first boot · app_user privileges)"
+
+
+def test_openbao_is_waited_for_until_it_answers_not_initialised() -> None:
+    """Fix round 1 (review minor 4): `bao status` exits 2 for any sealed
+    vault, initialised or not; `operator init -status` exits 2 only for one
+    that is not initialised, which is the fact `operator init` needs."""
+    run = _deploy_step(OAUTH_STEP)
+    waited = run.index("docker compose exec -T openbao bao operator init -status")
+    assert waited < run.index("bao operator init -key-shares=1")
+    assert "bao status" not in run
+
+
+def test_a_failed_phase_leaves_the_stacks_logs() -> None:
+    """Fix round 1 (review minor 5). The masks are in place before the first
+    call that can print them (the install code is the last secret read)."""
+    run = _deploy_step(OAUTH_STEP)
+    logs = "|| { docker compose logs api web traefik; exit 1; }"
+    for phase in ("closed", "open"):
+        line = next(x.strip() for x in run.splitlines() if f"flow --phase {phase}" in x)
+        assert line.endswith(logs), line
+    assert run.index('echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"') < run.index(
+        "flow --phase open"
+    )
 
 
 def test_the_files_that_hold_a_secret_are_the_runners_alone() -> None:
@@ -331,7 +411,8 @@ def test_each_phase_promises_what_the_deploy_job_is_there_to_prove() -> None:
     open phase: the AI app's whole path -- dynamic registration, a sign-in
     and consent with a fresh factor, the code exchange with PKCE S256, `/mcp`,
     the refresh and its reuse ending the grant -- and a token shaped like
-    Keycloak's refused at `/mcp` and at the console."""
+    Keycloak's refused at `/mcp` and at the console, and one `/mcp` has just
+    accepted refused at the console too (1c(a), fix round 1)."""
     assert flow.PHASES["closed"] == (
         "discovery",
         "registration refused",
@@ -348,6 +429,7 @@ def test_each_phase_promises_what_the_deploy_job_is_there_to_prove() -> None:
         "a tampered token refused at /mcp",
         "a Keycloak-shaped token refused at /mcp",
         "a Keycloak-shaped token refused at the console",
+        "an MCP access token refused at the console",
         "refresh",
         "refresh reuse ends the grant",
         "code reuse ends the grant",
@@ -436,3 +518,174 @@ def test_the_open_phase_will_not_start_without_the_install_code(
     assert "--phase open needs --setup-code-file" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         flow.main(["--base", "https://localhost"])
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1. A grant is shown working before it is shown ended (review
+# IMPORTANT-1), an ended grant's refresh token is dead too (design §10,
+# falsifier 6), and what the flow accepts as an answer is read, not grepped.
+# --------------------------------------------------------------------------- #
+
+
+def _calls_in_open() -> list[tuple[int, str, str]]:
+    """`(line, method, first argument as source)` of every `self.<method>(...)`
+    call in `Flow.open`, in source order."""
+    tree = ast.parse(SCRIPT.read_text())
+    flow_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Flow")
+    method = next(n for n in flow_class.body if isinstance(n, ast.FunctionDef) and n.name == "open")
+    calls = [
+        (node.lineno, node.func.attr, ast.unparse(node.args[0]))
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and node.args
+    ]
+    return sorted(calls)
+
+
+def _lines(calls: list[tuple[int, str, str]], method: str, arg: str) -> list[int]:
+    return [line for line, name, first in calls if name == method and first == arg]
+
+
+#: Each section that ends a grant, and the grant (`Flow.open`'s name) it ends.
+ENDED = {
+    "refresh reuse ends the grant": "rotated",
+    "code reuse ends the grant": "second",
+    "revocation ends the grant": "third",
+    "signing out everywhere ends the grant": "fourth",
+}
+
+
+def test_the_grants_the_open_phase_ends_are_these_four() -> None:
+    refused = {
+        first.removesuffix(".access")
+        for _line, name, first in _calls_in_open()
+        if name == "refused_at_mcp" and first.endswith(".access")
+    }
+    assert refused == set(ENDED.values())
+
+
+@pytest.mark.parametrize("section", list(ENDED))
+def test_a_grant_is_shown_working_before_it_is_shown_ended(section: str) -> None:
+    """A refusal at `/mcp` proves a grant ended only if the same token was
+    accepted there first: a token that never worked is refused with nothing
+    having ended it, and an RFC 7009 revocation answers 200 for a token that
+    was never valid (§2.2). A control placed after the act that ends the
+    grant would fail live, not pass, so the order checked here is enough."""
+    grant, calls = ENDED[section], _calls_in_open()
+    accepted = _lines(calls, "reaches_mcp", grant)
+    refused = _lines(calls, "refused_at_mcp", f"{grant}.access")
+    marked = _lines(calls, "done", repr(section))
+    assert accepted and refused and marked, (accepted, refused, marked)
+    assert accepted[0] < refused[0] < marked[0]
+
+
+#: The sections after which an ended grant's refresh token is presented.
+FAMILY = {"refresh reuse ends the grant": "rotated", "revocation ends the grant": "third"}
+
+
+@pytest.mark.parametrize("section", list(FAMILY))
+def test_an_ended_grants_refresh_token_is_dead_too(section: str) -> None:
+    """Design §10 falsifier 6, "revoca su familia": after a reuse, the
+    refresh token the rotation issued is refused; after a revocation, the
+    token the app revoked."""
+    grant, calls = FAMILY[section], _calls_in_open()
+    refused = _lines(calls, "refused_at_mcp", f"{grant}.access")
+    dead = _lines(calls, "refused_refresh", grant)
+    marked = _lines(calls, "done", repr(section))
+    assert refused and dead and marked, (refused, dead, marked)
+    assert refused[0] < dead[0] < marked[0]
+
+
+def _response(status: int, body: object, media: str = "application/json") -> Any:
+    headers = Message()
+    headers["Content-Type"] = media
+    return flow.Response("/x", status, headers, json.dumps(body).encode())
+
+
+class _Answers:
+    """Stands in for `Client`: every request gets the next answer."""
+
+    def __init__(self, *answers: Any) -> None:
+        self.base = "https://localhost"
+        self.cookies = flow.Cookies()
+        self.answers = list(answers)
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        return self.answers.pop(0)
+
+
+GRANT = flow.Grant("itms_x", "not-an-access-token", "not-a-refresh-token")
+INITIALIZED: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "protocolVersion": flow.PROTOCOL_VERSION,
+        "capabilities": {},
+        "serverInfo": {"name": "itms", "version": "1"},
+    },
+}
+
+
+def test_mcp_is_reached_only_by_initializes_own_reply() -> None:
+    """Review minor 10: the JSON-RPC reply to this request, with initialize's
+    result -- not any body that happens to contain the word `protocolVersion`.
+
+    The revision is the one asked for or an earlier one the server supports
+    (MCP: "Otherwise, the server MUST respond with another protocol version it
+    supports"). Live, the api answers `2025-11-25` to `2026-07-28`: the SDK
+    (mcp 2.3.0) negotiates `initialize` among its handshake revisions, whose
+    latest is 2025-11-25, and 2026-07-28 has no `initialize` of its own."""
+    for revision in (flow.PROTOCOL_VERSION, "2025-11-25"):
+        answer = {**INITIALIZED, "result": {**INITIALIZED["result"], "protocolVersion": revision}}
+        reached = flow.Flow(_Answers(_response(200, answer)))
+        reached.reaches_mcp(GRANT, "a token")
+        assert "/mcp" in reached.reached
+    result = INITIALIZED["result"]
+    for wrong in (
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "bad protocolVersion"}},
+        {"jsonrpc": "2.0", "id": 2, "result": result},
+        {"jsonrpc": "1.0", "id": 1, "result": result},
+        {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05"}},
+        {"jsonrpc": "2.0", "id": 1, "result": {**result, "protocolVersion": "2099-01-01"}},
+        {"jsonrpc": "2.0", "id": 1, "result": {**result, "protocolVersion": "latest"}},
+        {"jsonrpc": "2.0", "id": 1, "result": {**result, "serverInfo": {}}},
+        {"jsonrpc": "2.0", "id": 1, "result": {**result, "capabilities": None}},
+        [INITIALIZED],
+    ):
+        with pytest.raises(flow.Failed):
+            flow.Flow(_Answers(_response(200, wrong))).reaches_mcp(GRANT, "a token")
+    with pytest.raises(flow.Failed):
+        streamed = _response(200, INITIALIZED, "text/event-stream")
+        flow.Flow(_Answers(streamed)).reaches_mcp(GRANT, "a token")
+    with pytest.raises(flow.Failed):
+        flow.Flow(_Answers(_response(401, INITIALIZED))).reaches_mcp(GRANT, "a token")
+
+
+def test_the_console_refuses_with_its_own_sign_in_refusal() -> None:
+    """Review minor 1: the console door's 401 is `auth_required`, the one the
+    console sends to the sign-in page -- not any 401."""
+    flow.Flow(
+        _Answers(_response(401, {"detail": "d", "code": "auth_required"}))
+    ).refused_at_the_console("a-token", "a token")
+    for status, body in (
+        (401, {"detail": "d"}),
+        (401, {"detail": "d", "code": "csrf"}),
+        (200, {"email": "owner@ci.invalid"}),
+    ):
+        with pytest.raises(flow.Failed):
+            flow.Flow(_Answers(_response(status, body))).refused_at_the_console("t", "a token")
+
+
+def test_a_dead_refresh_token_is_refused_as_invalid_grant() -> None:
+    dead = {"error": "invalid_grant", "error_description": "the refresh token is not valid"}
+    flow.Flow(_Answers(_response(400, dead))).refused_refresh(GRANT, "a dead refresh token")
+    for status, body in (
+        (200, {"access_token": "x", "refresh_token": "y"}),
+        (400, {"error": "invalid_request", "error_description": "x"}),
+        (401, dead),
+    ):
+        with pytest.raises(flow.Failed):
+            flow.Flow(_Answers(_response(status, body))).refused_refresh(GRANT, "a token")
