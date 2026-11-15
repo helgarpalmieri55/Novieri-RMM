@@ -27,6 +27,12 @@ WHAT GOES, AND AFTER HOW LONG:
 - an AI app's grant (`oauth_refresh_families`) `OAUTH_GRANT_RETENTION` (1 day)
   after it was revoked or lapsed, its refresh tokens first, counted apart;
   its reason is also in the audit event of the act that ended it;
+- a refresh token a LIVE grant rotated past, `OAUTH_USED_TOKEN_RETENTION` (30
+  days) after it was used (operator decision E2, 2026-11-15; own
+  authentication phase 4, Task 3). Until then, presented again, it ends its
+  grant (design §5.3: "reutilizar uno ya usado revoca toda la familia");
+  after it, it is a token the server does not know, a plain `invalid_grant`,
+  and the grant lives on (design §5.3, amended 2026-11-15);
 - an AI app unused for `CLIENT_IDLE` (30 days), with its grants and codes (ON
   DELETE CASCADE).
 
@@ -61,15 +67,18 @@ THE OAUTH STEPS (own authentication phase 3, plan 2026-11-06, Task 13; the
 lock map in `guards.lock_user_row`). The codes, the refresh tokens and the
 grants go in the sweep's transaction, the apps before it and outside it:
 
-- `oauth_codes`, `oauth_refresh_tokens` and `oauth_grants` hold no person's
-  row and no app row, and WAIT ON NO ROW: each statement locks what it
-  deletes FOR UPDATE SKIP LOCKED, with the ended condition inside it, and
+- `oauth_codes`, `oauth_refresh_tokens`, `oauth_used_refresh_tokens` and
+  `oauth_grants` hold no person's row and no app row, and WAIT ON NO ROW:
+  each statement locks what it deletes FOR UPDATE SKIP LOCKED, with the
+  ended (for a used token, the rotated) condition inside it, and
   leaves a row another transaction holds to the next day's sweep. Its
   `org_id` predicate is where it chooses and locks those rows, so on a
   session RLS does not filter it does not even lock another organization's.
-  They go leaves first -- the codes; the ended grants' refresh tokens; then
-  the ended grants no token or code still names -- so no cascade of theirs
-  reaches a row they did not lock. Why not plain DELETEs: a revocation's one
+  They go leaves first -- the codes; the ended grants' refresh tokens; the
+  refresh tokens live grants rotated past more than 30 days ago (since
+  operator decision E2, 2026-11-15), whose grants stay; then the ended grants
+  no token or code still names -- so no cascade of theirs reaches a row they
+  did not lock. Why not plain DELETEs: a revocation's one
   UPDATE (`revoked_at IS NULL`) also matches a grant that lapsed unrevoked,
   in no order of the sweep's, and a refresh locks a token and then its
   family, the other way round from a family's cascading DELETE; an
@@ -143,6 +152,11 @@ CHALLENGE_RETENTION = timedelta(days=1)
 #: it ended (plan 2026-11-06, Task 13; B3-25).
 OAUTH_CODE_RETENTION = timedelta(minutes=10)
 OAUTH_GRANT_RETENTION = timedelta(days=1)
+#: How long a LIVE grant keeps a refresh token it rotated past, counted from
+#: the rotation (operator decision E2, 2026-11-15; own authentication phase
+#: 4, Task 3): within it a second presentation is a reuse and ends the grant,
+#: after it the token is gone and the presentation a plain `invalid_grant`.
+OAUTH_USED_TOKEN_RETENTION = timedelta(days=30)
 #: The beat interval (`app/worker.py`).
 SWEEP_INTERVAL_S = 86400.0
 #: The audit action of a sweep that deleted something (plan decision 2).
@@ -298,6 +312,37 @@ async def _oauth_refresh_tokens(session: AsyncSession, org_id: UUID, now: dateti
     )
 
 
+async def _oauth_used_refresh_tokens(session: AsyncSession, org_id: UUID, now: datetime) -> int:
+    """The refresh tokens a LIVE grant rotated past more than
+    `OAUTH_USED_TOKEN_RETENTION` ago (operator decision E2, 2026-11-15); how
+    many. Live: neither revoked nor past its idle limit, by the sweep's
+    clock -- an ended grant's tokens are `_oauth_refresh_tokens`', the step
+    before, a day after it ended, and a grant that ended since its token was
+    used is that step's too. Each locked FOR UPDATE SKIP LOCKED (THE OAUTH
+    STEPS): one a refresh holds -- a reuse being presented -- is left to the
+    next sweep, and the grant row is read, never locked. A token is a leaf
+    and its grant stays, so the DELETE cascades nowhere."""
+    family = aliased(OAuthRefreshFamily)
+    token = aliased(OAuthRefreshToken)
+    rotated_long_ago = (
+        select(token.id)
+        .join(family, family.id == token.family_id)
+        .where(
+            token.org_id == org_id,
+            token.used_at < now - OAUTH_USED_TOKEN_RETENTION,
+            family.revoked_at.is_(None),
+            family.expires_at > now,
+        )
+        .with_for_update(of=token, skip_locked=True)
+    )
+    return await _deleted(
+        session,
+        delete(OAuthRefreshToken)
+        .where(OAuthRefreshToken.id.in_(rotated_long_ago))
+        .returning(OAuthRefreshToken.id),
+    )
+
+
 async def _oauth_grants(session: AsyncSession, org_id: UUID, now: datetime) -> int:
     """Grants revoked or lapsed more than `OAUTH_GRANT_RETENTION` ago, once
     their tokens have gone (`_oauth_refresh_tokens`, the step before); how
@@ -351,6 +396,10 @@ STEPS: tuple[tuple[str, Step], ...] = (
     # `APART_STEPS`'.
     ("oauth_codes", _oauth_codes),
     ("oauth_refresh_tokens", _oauth_refresh_tokens),
+    # Operator decision E2 (2026-11-15; phase 4 plan, Task 3): the refresh
+    # tokens live grants rotated past more than 30 days ago. Leaves too, and
+    # their grants stay, so before or after the grants step is all one.
+    ("oauth_used_refresh_tokens", _oauth_used_refresh_tokens),
     ("oauth_grants", _oauth_grants),
 )
 

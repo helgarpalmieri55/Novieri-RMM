@@ -2597,7 +2597,7 @@ and one hit blocks the whole result rather than redacting it.
 **Risks 3, 7 and 8 exist only while self-registration is open**
 (`ITS_MCP_REGISTRATION=open`); closing it ends them for new apps. **Risks 1,
 2, 4, 10 and 11 exist whenever MCP is on**, because an app known by its
-client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
+client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
 
 1. **Consent phishing.** Anyone can publish a client metadata document — or,
    with the opt-in, register an app — under any name, and send a person a
@@ -2690,6 +2690,17 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
     theirs, but an AI app approved afterwards in the session the change was
     made in — even on a consent page opened before it — still receives its
     code: it is the same person, in their own session.
+12. **A used refresh token is remembered for 30 days** (operator decision
+    E2, 2026-11-15). Within them, presenting it again ends the app's grant
+    (risk 9). After them the platform has forgotten it: presenting it is a
+    plain `invalid_grant`, and the grant lives on. So a token copied and used
+    by someone else first is caught only if the real app tries its own copy
+    within 30 days of the theft; an app that comes back later is simply asked
+    to connect again, while the copy goes on working until its grant is
+    revoked or sits unused for 30 days. Settings → AI connections lists every
+    app holding a live grant. If an app asks you to connect again when you
+    did not expect it, use **Revoke for me** on it there before reconnecting:
+    that ends every grant of yours to that app, the copy included.
 
 Separately from those, and by design: the platform cannot tell whether the
 person or the AI app approved a call — approval happens in the app. A
