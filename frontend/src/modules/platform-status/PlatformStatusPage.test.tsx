@@ -35,11 +35,11 @@ const STATUS: PlatformStatus = {
       reason: "sealed",
       detail: null,
     },
-    // `ok` AND NOT FORWARDING. The status is deliberately unalarming -- an
-    // operator who has not enabled Keycloak event forwarding has not broken
-    // anything -- so the entire distinction lives in `detail`.
+    // `ok` AND NOT BACKING UP. The status is deliberately unalarming -- a
+    // host with no backup timer has not broken anything -- so the entire
+    // distinction lives in `detail`.
     {
-      name: "keycloak_events",
+      name: "backup.nightly",
       status: "ok",
       duration_ms: 1,
       reason: null,
@@ -192,13 +192,15 @@ describe("PlatformStatusPage", () => {
     expect(screen.queryByText("ok")).not.toBeInTheDocument();
   });
   it("renders a probe's detail, because for one probe that is the whole answer", async () => {
-    // THE FAILURE THIS GUARDS is a page that reads `keycloak_events / ok / —`
-    // on a deployment where Keycloak credential events are not reaching the
-    // audit chain at all. The probe answers `ok` on purpose; `configured:
-    // false` is the part that says forwarding is off, and a page that drops
-    // `detail` turns a deliberately-visible gap back into a silent one.
+    // THE FAILURE THIS GUARDS is a page that reads `backup.nightly / ok / —`
+    // on a host where nothing is being backed up at all. The probe answers
+    // `ok` on purpose; `configured: false` is the part that says the backup
+    // is not set up, and a page that drops `detail` turns a
+    // deliberately-visible gap back into a silent one. (Until own
+    // authentication phase 4 this row was the identity provider's event
+    // forwarding, which answered the same way.)
     renderWithProviders(<PlatformStatusPage />);
-    const row = (await screen.findByText("keycloak_events")).closest("tr");
+    const row = (await screen.findByText("backup.nightly")).closest("tr");
     expect(row).not.toBeNull();
     // The DETAIL is still the whole answer; it is now said in the reader's
     // alphabet ("Configured: no"), and the raw payload fragment is asserted
