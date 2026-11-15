@@ -31,7 +31,7 @@ not simply `0.0.0.0`:
   because "is the port busy" is the wrong question.
 
 Whatever address you choose must be the one your DNS name resolves to and the
-one your `:443` certificate covers. `ITS_OIDC_ISSUER`, `ITS_GATEWAY_URL`,
+one your `:443` certificate covers. `ITS_PUBLIC_CONSOLE_URL`, `ITS_GATEWAY_URL`,
 `ITS_GATEWAY_RELAY_URL` and `ITS_S3_PUBLIC_ENDPOINT` all embed that hostname,
 and **agents resolve the name** — a name pointing at the other address reaches
 the other platform, with a valid certificate, and nothing looks broken.
@@ -299,8 +299,8 @@ round.
 ## 4. The clock
 
 `timedatectl` must report `System clock synchronized: yes` **before** first
-boot, not after. Certificate validity windows and OIDC token expiry are
-absolute times: a host that is minutes off issues agent certificates that fail
+boot, not after. Certificate validity windows, one-time sign-in codes and
+token expiry are absolute times: a host that is minutes off issues agent certificates that fail
 validation elsewhere, and rejects tokens that are perfectly valid. "NTP service:
 active" is not the same as synchronized — active means the daemon is running,
 which it will happily do having never reached a source.

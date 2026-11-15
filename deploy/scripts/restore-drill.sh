@@ -5,14 +5,22 @@
 #   ./scripts/restore-drill.sh                 # the latest nightly backup
 #   ./scripts/restore-drill.sh BACKUP_DIR      # a specific one
 #   ./scripts/restore-drill.sh --keep          # leave the drill running to inspect
-#   ./scripts/restore-drill.sh --skip-keycloak # databases only (less memory)
+#   ./scripts/restore-drill.sh --skip-keycloak # accepted, and does nothing since
+#                                              # own authentication phase 4
 #
-# WHAT IT PROVES: both dumps restore; restore.sh's own end-state checks pass
+# WHAT IT PROVES: the dumps restore; restore.sh's own end-state checks pass
 # (RLS policy count equals the backup's, app_user narrowed); the schema is at
 # the backup's alembic revision; app_user cannot bypass RLS; the audit chain's
-# linkage is intact (docs/07 §4 pre-flight); Keycloak boots on the restored
-# database and serves the realm. WHAT IT DOES NOT: key material (OpenBao, the
-# CA, the audit HMAC key) and the API are not in this backup and not started.
+# linkage is intact (docs/07 §4 pre-flight); and a `keycloak.dump`, when the
+# backup has one (taken before own authentication phase 4, or by deploy.sh
+# before an upgrade), restores into a database that holds tables. WHAT IT
+# DOES NOT: key material (OpenBao, the CA, the audit HMAC key) and the API
+# are not in this backup and not started. Nor does it prove the way back to
+# a release from before own authentication phase 4: nothing here starts the
+# old identity provider (this release has no image of it), and the nightly
+# backups it drills hold no `keycloak.dump` since then. That way back is
+# only the backup taken before that upgrade, whose schema is below 0248
+# (deploy/README.md "Rolling back a deployment").
 #
 # ISOLATION: the project name is fixed below and compared with the live one;
 # COMPOSE_* variables are unset; the drill file publishes no ports, mounts no
@@ -26,14 +34,15 @@ DRILL_FILE="$DEPLOY_DIR/drill/docker-compose.drill.yml"
 CONF="${ITS_BACKUP_CONF:-/etc/it-suite/backup.conf}"
 STATE_DIR="${ITS_BACKUP_STATE_DIR:-/var/lib/it-suite/backup}"
 STATUS_DIR="${ITS_BACKUP_STATUS_DIR:-/var/lib/it-suite/backup-status}"
-KC_WAIT_S="${ITS_DRILL_KEYCLOAK_WAIT_S:-240}"
-KEEP=0; SKIP_KC=0; BACKUP_DIR=""
+KEEP=0; BACKUP_DIR=""
 
 for arg in "$@"; do
     case "$arg" in
         --keep) KEEP=1 ;;
-        --skip-keycloak) SKIP_KC=1 ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        # Kept so a timer or a cron line that passes it does not fail; there
+        # is nothing left to skip (own authentication phase 4).
+        --skip-keycloak) echo "--skip-keycloak: nothing to skip since own authentication phase 4" ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         -*) echo "unknown argument: $arg" >&2; exit 2 ;;
         *) BACKUP_DIR="$arg" ;;
     esac
@@ -101,7 +110,7 @@ if [ -z "$BACKUP_DIR" ]; then
     BACKUP_DIR="$root/latest"
 fi
 BACKUP_DIR="$(cd "$BACKUP_DIR" 2>/dev/null && pwd -P)" || { echo "no backup at ${BACKUP_DIR}" >&2; exit 1; }
-for f in itsuite.dump keycloak.dump globals.sql alembic_version policy_count; do
+for f in itsuite.dump globals.sql alembic_version policy_count; do
     [ -s "$BACKUP_DIR/$f" ] || { echo "backup $BACKUP_DIR has no $f" >&2; exit 1; }
 done
 
@@ -159,24 +168,11 @@ for t in organizations devices users audit_events; do
     note "rows  $t: $n"
 done
 
-if [ "$SKIP_KC" = 0 ]; then
-    say "Starting Keycloak on the restored database"
-    realm="$(grep -E '^ITS_KEYCLOAK_REALM=' "$DEPLOY_DIR/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-    realm="${realm:-it-suite}"
-    dc up -d keycloak </dev/null
-    status=""; waited=0
-    while [ "$waited" -lt "$KC_WAIT_S" ]; do
-        # bash's /dev/tcp inside the container: the image has no curl.
-        # shellcheck disable=SC2016  # expanded inside the container
-        status="$(dc exec -T -e "R=$realm" keycloak bash -c \
-            'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /realms/$R/.well-known/openid-configuration HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && head -1 <&3' \
-            </dev/null 2>/dev/null | tr -d '\r' || true)"
-        case "$status" in *" 200"*) break ;; esac
-        sleep 5; waited=$((waited + 5))
-    done
-    case "$status" in
-        *" 200"*) check "Keycloak serves realm '$realm' from the restored database" ok ;;
-        *) check "Keycloak serves realm '$realm' from the restored database" "${status:-no answer} after ${waited}s" ;;
+if [ -s "$BACKUP_DIR/keycloak.dump" ]; then
+    kc_tables="$(psql_drill -d keycloak -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null | tr -d '[:space:]' || true)"
+    case "$kc_tables" in
+        ''|0) check "the restored keycloak database holds tables" "${kc_tables:-query failed}" ;;
+        *) check "the restored keycloak database holds tables" ok ;;
     esac
 fi
 

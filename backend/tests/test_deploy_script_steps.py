@@ -26,81 +26,315 @@ def _script() -> str:
 _SH_COMMENT = re.compile(r"^\s*#.*$", re.MULTILINE)
 
 
-def _keycloak_branch() -> str:
-    """The body of `if [ "$NEED_KEYCLOAK" = 1 ]; then ... fi`, comments removed."""
-    # Either shape the branch has worn: a block, or the `&& { ... }`
-    # one-liner it used to be. Matching only one would make this test fail on
-    # formatting and report it as a missing step, which is a worse lie than
-    # the bug it guards.
-    body = re.search(
-        r'if \[ "\$NEED_KEYCLOAK" = 1 \]; then(.*?)\nfi'
-        # `\{\s`, not `\{`: a bash command group needs whitespace after its
-        # brace, and without it this also matched `${paths:+...}` -- a
-        # parameter expansion on an unrelated line -- and took that for the
-        # provisioning step.
-        r'|\[ "\$NEED_KEYCLOAK" = 1 \][^\n]*&&[^\n]*\{\s(.*?)\}',
-        _script(),
-        re.DOTALL,
+def test_no_step_starts_an_identity_provider() -> None:
+    """Own authentication phase 4. deploy.sh restarted `keycloak` on a realm
+    or theme change and ran `keycloak-init` on every deploy; both services
+    left the compose file, and a step naming either would stop the deploy
+    with `no such service` -- after the migration had already run. No compose
+    command and no one-shot names either now: the two names are left only
+    where the script finds and removes the old containers (below). (Replaces
+    `test_a_theme_change_is_detected_at_all`,
+    `test_a_realm_or_theme_change_restarts_keycloak_not_only_keycloak_init`
+    and `test_keycloak_init_runs_on_every_deploy_not_only_on_a_realm_change`,
+    which pinned those steps.)"""
+    steps = _SH_COMMENT.sub("", _script())
+    assert not re.search(r"NEED_KEYCLOAK|KC_IMAGE_CHANGED", steps)
+    commands = [
+        line.strip()
+        for line in steps.splitlines()
+        if '"${COMPOSE[@]}"' in line or "run_oneshot " in line
+    ]
+    assert [c for c in commands if "keycloak" in c.lower()] == [], commands
+
+
+def test_no_up_removes_orphans() -> None:
+    """The coordinator's decision (2026-11-15): `up --remove-orphans` would
+    also remove any container the operator added to this project. The old
+    identity provider's two containers go by name instead (below)."""
+    assert "--remove-orphans" not in _SH_COMMENT.sub("", _script())
+
+
+def test_obsolete_env_keys_are_named_and_never_edited() -> None:
+    """The keys an upgraded `.env` still holds are named once, and the file is
+    left byte for byte as it was (the script never edits `.env` beyond
+    IT_SUITE_VERSION). `.env.example` ships none of them."""
+    listed = re.search(r"OBSOLETE_ENV_KEYS=\((.*?)\)", _script(), re.DOTALL)
+    assert listed is not None
+    keys = listed.group(1).split()
+    assert len(keys) == 17 and len(set(keys)) == 17, keys
+    example = (REPO / "deploy/.env.example").read_text()
+    shipped = [k for k in keys if re.search(rf"^#?\s*{k}=", example, re.MULTILINE)]
+    assert shipped == [], shipped
+    script = f"""
+set -euo pipefail
+cd "$(mktemp -d)"
+printf '%s\\n' 'ITS_OIDC_ISSUER=https://x/realms/it-suite' 'KEYCLOAK_ADMIN_PASSWORD=p' \\
+    'ITS_DEFAULT_ORG_SLUG=toeshee' > .env
+cp .env before
+note() {{ printf '%s\\n' "$*"; }}
+OBSOLETE_ENV_KEYS=({" ".join(keys)})
+{_fn("obsolete_env_keys")}
+obsolete_env_keys
+cmp -s .env before && echo UNCHANGED
+"""
+    run = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
+    assert "2 key(s)" in run.stdout, run.stdout
+    assert "KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_ISSUER" in run.stdout, run.stdout
+    assert "ITS_DEFAULT_ORG_SLUG" not in run.stdout.split("\n", 1)[1], run.stdout
+    assert "UNCHANGED" in run.stdout, run.stdout
+    # Not "harmless; remove them": the release before needs four of them
+    # (operator decision K1, 2026-11-15).
+    assert "Do NOT remove them yet" in run.stdout, run.stdout
+    assert "Retiring the old identity provider's data" in run.stdout, run.stdout
+    assert "Harmless" not in _script()
+
+
+def _containers(listing: str) -> str:
+    """deploy.sh's two container functions, with `docker compose ps -a`
+    answering LISTING (one `name service` per line) and every other docker
+    call written to ./calls."""
+    return f"""
+set -euo pipefail
+cd "$(mktemp -d)"
+say()  {{ printf '%s\\n' "$*"; }}
+note() {{ printf '%s\\n' "$*"; }}
+warn() {{ printf 'WARNING %s\\n' "$*"; }}
+docker() {{
+  case "$1 $2" in
+    "compose ps") printf '%b' {listing!r} ;;
+    *) echo "docker $*" >> calls ;;
+  esac
+}}
+COMPOSE=(docker compose)
+{_fn("old_identity_containers")}
+{_fn("remove_old_identity_containers")}
+"""
+
+
+def test_the_old_identity_providers_containers_go_by_name_and_nothing_else() -> None:
+    """Compose leaves a container whose service left the file RUNNING, and
+    Traefik routes to it by the labels on the container: Keycloak, its
+    anonymous client registration included, would go on answering on :443.
+    Exactly `keycloak` and `keycloak-init`, by service name -- not the
+    operator's own `guacd`, not a `keycloak-proxy` of theirs (the
+    coordinator's decision, 2026-11-15)."""
+    listing = (
+        "it-suite-api-1 api\n"
+        "it-suite-keycloak-1 keycloak\n"
+        "it-suite-keycloak-init-1 keycloak-init\n"
+        "it-suite-guacd-1 guacd\n"
+        "it-suite-keycloak-proxy-1 keycloak-proxy\n"
     )
-    assert body is not None, (
-        "deploy.sh no longer reacts to NEED_KEYCLOAK at all -- if the step "
-        "was renamed, this test needs to follow it rather than be deleted"
-    )
-    return _SH_COMMENT.sub("", body.group(1) or body.group(2))
+    run = _run_bash(_containers(listing) + "remove_old_identity_containers\ncat calls\n")
+    assert run.returncode == 0, run.stdout + run.stderr
+    calls = [line for line in run.stdout.splitlines() if line.startswith("docker ")]
+    assert calls == [
+        "docker stop it-suite-keycloak-1",
+        "docker rm it-suite-keycloak-1",
+        "docker stop it-suite-keycloak-init-1",
+        "docker rm it-suite-keycloak-init-1",
+    ], run.stdout
 
 
+def test_removing_them_twice_is_a_no_op() -> None:
+    script = _containers("it-suite-api-1 api\n")
+    run = _run_bash(script + "remove_old_identity_containers\ntest ! -e calls && echo NO_CALLS\n")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "none left" in run.stdout and "NO_CALLS" in run.stdout, run.stdout
 
-def test_a_theme_change_is_detected_at_all() -> None:
-    assert re.search(r"touched '\^deploy/\(keycloak\|realm\)'", _script()), (
-        "nothing under deploy/keycloak/ sets NEED_KEYCLOAK, so a login theme "
-        "or realm change deploys as a no-op"
-    )
 
-
-def test_a_realm_or_theme_change_restarts_keycloak_not_only_keycloak_init() -> None:
-    """Provisioning clients is not the same as reloading a theme.
-
-    THIS IS A REGRESSION TEST FOR A REAL MISS. `deploy/keycloak/` is a
-    read-only bind mount and Keycloak caches the login theme and the realm in
-    memory, so a changed template reaches nobody until the container restarts.
-    The branch used to run `keycloak-init` alone -- which creates service
-    clients over the admin API and touches neither -- so a theme change was
-    detected, announced, "provisioned", and still not serving.
-
-    The fix to `login-config-totp.ftl` on 2026-09-22 (the QR path posted no
-    totpSecret, so every scan ended in an uncaught NPE) would have been
-    deployed by this script and left every user still unable to enrol 2FA.
-    """
-    branch = _keycloak_branch()
-
-    assert "restart keycloak" in branch, (
-        "a realm or theme change runs keycloak-init but never restarts "
-        "keycloak, so the bind-mounted theme stays cached and the change does "
-        "not reach anyone"
-    )
+def test_they_go_after_the_new_app_tier_is_up() -> None:
+    """Until then, a deploy that stops leaves the release before able to run."""
     text = _SH_COMMENT.sub("", _script())
-    restart = text.index('"${COMPOSE[@]}" restart keycloak')
-    init_step = text.index("run_oneshot keycloak-init")
-    assert restart < init_step, "keycloak must restart BEFORE keycloak-init runs against it"
+    up = text.index('\n"${COMPOSE[@]}" up -d\n')
+    removal = text.index("\nremove_old_identity_containers\n")
+    assert up < removal < text.index('say "Verifying"')
 
 
-def test_keycloak_init_runs_on_every_deploy_not_only_on_a_realm_change() -> None:
-    """`--import-realm` skips an existing realm, so keycloak-init is the only
-    path by which the repo's realm allowlist reaches a live host. Gating it on
-    a deploy/keycloak diff left hand-made drift (an open account console) in
-    place for every release that did not touch the realm file."""
-    assert "keycloak-init" not in _keycloak_branch(), (
-        "keycloak-init is back inside the NEED_KEYCLOAK branch"
+def _already(listing: str, home: str = "") -> str:
+    """`stop_if_already_deployed` after a pull that brought nothing, with
+    HOME (where `backups/pre-upgrade-*` live) a directory of its own."""
+    return _containers(listing) + f"""
+HOME={home!r}; [ -n "$HOME" ] || HOME="$PWD"
+git() {{ echo 2f20afbe00000000000000000000000000000000; }}
+BASELINE={BASE!r}; AFTER=2f20afbe00000000000000000000000000000000
+SHORT_AFTER=2f20afbe; REPO_ROOT=/opt/it-suite; RUNNING_TAG=2f20afbe
+{_fn("way_back_backup")}
+{_fn("stop_if_already_deployed")}
+ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""
+stop_if_already_deployed
+echo "CONTINUED baseline=[$BASELINE] running=[$RUNNING_TAG]"
+echo "back=[$ROLLBACK_BACKUP_DIR] base=[$ROLLBACK_BASE]"
+"""
+
+
+def _backups(home: Path) -> dict[str, Path]:
+    """What a host holds after the deploy.sh of the release before phase 4
+    stopped part-way: an older pre-upgrade backup, the one it took (0247,
+    images 53b02f81), and one taken past 0248 by an earlier finishing try."""
+    made = {}
+    for name, rev, tag in (
+        ("pre-upgrade-2026-11-01T0900Z", "0246", "1a2b3c4d"),
+        ("pre-upgrade-2026-11-20T1000Z", "0247", "53b02f81"),
+        ("pre-upgrade-2026-11-20T1015Z", "0248", "2f20afbe"),
+    ):
+        made[rev] = home / "backups" / name
+        made[rev].mkdir(parents=True)
+        (made[rev] / "alembic_version").write_text(f"{rev}\n")
+        (made[rev] / "image_version").write_text(f"IT_SUITE_VERSION={tag}\n")
+    return made
+
+
+def test_a_half_done_upgrade_is_finished_not_called_already_deployed() -> None:
+    """The deploy.sh of a release before own authentication phase 4, run as
+    usual, pulls this release, records its tag and migrates, then stops at
+    `restart keycloak`. Re-run, this script read the new tag as running and
+    answered "Already deployed" with exit 0, the app tier still on the old
+    images. While either old container is there it runs a full deploy."""
+    for old in ("it-suite-keycloak-1 keycloak\n", "it-suite-keycloak-init-1 keycloak-init\n"):
+        run = _run_bash(_already("it-suite-api-1 api\n" + old))
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "Already deployed" not in run.stdout, run.stdout
+        assert "CONTINUED baseline=[]" in run.stdout and "full deploy" in run.stdout, run.stdout
+    done = _run_bash(_already("it-suite-api-1 api\n"))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Already deployed" in done.stdout and "CONTINUED" not in done.stdout, done.stdout
+
+
+def test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248(
+    tmp_path: Path,
+) -> None:
+    """Not this run's backup, which is past 0248, and not the newest one that
+    holds `keycloak.dump`: the newest `pre-upgrade-*` whose schema is below
+    0248, with the images its `image_version` names. The closing rollback
+    help prints that backup, that tag and that commit."""
+    made = _backups(tmp_path)
+    finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
+    script = _already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)) + f"""
+{_fn("rollback_help")}
+BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
+rollback_help
+"""
+    run = _run_bash(script)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert f"back=[{made['0247']}]" in run.stdout, run.stdout
+    assert "running=[53b02f81]" in run.stdout and "base=[53b02f81]" in run.stdout, run.stdout
+    help_ = run.stdout[run.stdout.index("If you need to go back") :]
+    assert f"ITS_RESTORE_FORCE=1 ./scripts/restore.sh {made['0247']}\n" in help_, help_
+    assert "IT_SUITE_VERSION=53b02f81" in help_ and "checkout 53b02f81 -- deploy" in help_, help_
+    assert "There is no image to swap back to" not in help_, help_
+    restore = [line for line in help_.splitlines() if "restore.sh" in line]
+    assert str(finishing) not in "\n".join(restore), help_
+
+
+def test_without_a_backup_from_before_0248_it_says_so(tmp_path: Path) -> None:
+    (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z").mkdir(parents=True)
+    (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z" / "alembic_version").write_text("0248\n")
+    run = _run_bash(_already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "back=[] base=[]" in run.stdout and "from before migration 0248" in run.stdout
+
+
+def _verify(left: str) -> str:
+    return f"""
+set -euo pipefail
+cd "$(mktemp -d)"
+note() {{ printf '%s\\n' "$*"; }}
+warn() {{ printf 'WARNING %s\\n' "$*"; }}
+docker() {{
+  echo "docker $*" >> calls
+  case "$*" in
+    "compose config") printf 'name: it-suite\\nservices:\\n  api: {{}}\\n' ;;
+    *"service=keycloak") printf '%b' {left!r} ;;
+  esac
+}}
+COMPOSE=(docker compose)
+{_fn("old_identity_containers_left")}
+{_fn("verify_old_identity_gone")}
+"""
+
+
+def test_the_verify_step_fails_while_a_container_of_it_is_left() -> None:
+    """By the containers' own compose labels, not by `compose ps`: if that
+    did not list a container whose service left the file, the removal would
+    say "none left" and Traefik would go on routing to Keycloak."""
+    check = "verify_old_identity_gone && echo PASSED || echo FAILED\n"
+    left = _run_bash(_verify("3f1c9a\n") + check + "cat calls\n")
+    assert "FAILED" in left.stdout and "docker rm -f 3f1c9a" in left.stdout, left.stdout
+    assert "label=com.docker.compose.project=it-suite" in left.stdout, left.stdout
+    gone = _run_bash(_verify("") + check)
+    assert "PASSED" in gone.stdout and "no container of the old identity provider" in gone.stdout
+    text = _SH_COMMENT.sub("", _script())
+    assert text.index('say "Verifying"') < text.index("\nverify_old_identity_gone || FAIL=1\n")
+
+
+def test_the_check_runs_before_the_diff_is_taken() -> None:
+    text = _SH_COMMENT.sub("", _script())
+    call = text.index("\nstop_if_already_deployed\n")
+    assert text.index("\nold_identity_containers() {") < call < text.index('CHANGED="$(git')
+
+
+OBSOLETE = re.compile(
+    r"KEYCLOAK_ADMIN_(USER|PASSWORD)|ITS_OIDC_[A-Z_]+|ITS_MULTI_TENANT"
+    r"|ENTRA_(TENANT_ID|CLIENT_ID|CLIENT_SECRET)|ITS_KEYCLOAK_[A-Z_]+"
+)
+
+
+def test_no_other_deploy_file_names_an_obsolete_key() -> None:
+    """A script that still READS one is the failure: `preflight.sh` read
+    `ITS_OIDC_ISSUER`, which a fresh `.env` no longer has, and refused every
+    new install. deploy.sh names them on purpose (its list and the rollback
+    check). The runbook is Task 9's guard's (`deploy/README.md`,
+    `deploy/GO-LIVE.md`), and `deploy/keycloak/` holds only Task 7's
+    `ci_mcp_flow.py`, which that task removes."""
+    exempt = {DEPLOY_SH, REPO / "deploy/README.md", REPO / "deploy/GO-LIVE.md"}
+    found = [
+        f"{path.relative_to(REPO)}:{number}"
+        for path in sorted((REPO / "deploy").rglob("*"))
+        if path.is_file()
+        and path not in exempt
+        and "keycloak" not in path.relative_to(REPO).parts
+        for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1)
+        if OBSOLETE.search(line)
+    ]
+    assert found == [], found
+
+
+def test_the_preflight_checks_the_certificate_against_the_console_address(tmp_path: Path) -> None:
+    """Its host comes from `ITS_PUBLIC_CONSOLE_URL` (until own authentication
+    phase 4, `ITS_OIDC_ISSUER`, which a fresh `.env` no longer has), and a
+    blank value gives no host -- not the whole line, which `sed` without
+    `-n ...p` printed."""
+    text = (REPO / "deploy/scripts/preflight.sh").read_text()
+    found = re.search(
+        r"^  host=\"\$\(grep -E '\^ITS_PUBLIC_CONSOLE_URL=' \.env.*?\|\| true\)\"$",
+        text,
+        re.MULTILINE | re.DOTALL,
     )
-    lines = [ln.strip() for ln in _SH_COMMENT.sub("", _script()).splitlines()]
-    assert "run_oneshot keycloak-init" in lines, "keycloak-init is not run unconditionally"
+    assert found is not None, "preflight.sh does not take the host from ITS_PUBLIC_CONSOLE_URL"
+    for value, host in (
+        ("https://itms.example.test", "itms.example.test"),
+        ("https://itms.example.test:8443/", "itms.example.test"),
+        ("", ""),
+        ("https://your-host", "your-host"),
+    ):
+        env = f"ITS_DEFAULT_ORG_SLUG=toeshee\nITS_PUBLIC_CONSOLE_URL={value}\n"
+        (tmp_path / ".env").write_text(env)
+        run = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + found.group(0) + '\nprintf "[%s]" "$host"'],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            check=True,
+        )
+        assert run.stdout == f"[{host}]", (value, run.stdout)
 
 
 def test_every_one_shot_checks_its_exit_code() -> None:
     """`docker compose up <one-shot>` does not reliably fail on a non-zero
     exit, so a failed migration or realm convergence read as success."""
     text = _SH_COMMENT.sub("", _script())
-    for svc in ("migrate", "postgres-grants", "openbao-init", "keycloak-init"):
+    for svc in ("migrate", "postgres-grants", "openbao-init"):
         assert f"run_oneshot {svc}" in text, svc
         assert f'"${{COMPOSE[@]}}" up {svc}\n' not in text, f"{svc} bypasses run_oneshot"
 
@@ -141,12 +375,17 @@ def _harness(
     web: bool = True,
     baseline: str = BASE,
     migrate: int = 0,
-    keycloak: int = 0,
     compose: int = 0,
-    kc_image: int = 0,
+    old_compose: str = "",
+    env: str = "",
 ) -> str:
+    # OLD_COMPOSE is what `git show <base>:deploy/docker-compose.yml` prints;
+    # ENV is the .env the rollback is printed against.
     return f"""
 set -euo pipefail
+cd "$(mktemp -d)"
+printf '%b' {env!r} > .env
+git() {{ case "$*" in *" show "*) printf '%b' {old_compose!r} ;; *) return 1 ;; esac; }}
 say()  {{ LAST_STEP="$*"; printf '%s\\n' "$*"; }}
 note() {{ printf '%s\\n' "$*"; }}
 warn() {{ printf 'WARNING %s\\n' "$*"; }}
@@ -160,8 +399,7 @@ docker() {{
 LAST_STEP=starting
 RUNNING_TAG={running_tag!r}; SHORT_AFTER=2f20afbe
 BACKUP_DIR={BACKUP!r}; BASELINE={baseline!r}; REPO_ROOT=/opt/it-suite
-NEED_MIGRATE={migrate}; NEED_KEYCLOAK={keycloak}; NEED_COMPOSE={compose}
-KC_IMAGE_CHANGED={kc_image}
+NEED_MIGRATE={migrate}; NEED_COMPOSE={compose}
 {_fn("rollback_help")}
 """
 
@@ -210,29 +448,46 @@ def test_a_migration_adds_the_restore_between_stopping_and_starting() -> None:
     out = _rollback(migrate=1)
     restore = _step(out, f"ITS_RESTORE_FORCE=1 ./scripts/restore.sh {BACKUP}")
     assert _step(out, "docker compose stop") < restore < _step(out, "docker compose up -d"), out
-    assert "audit" in out and "DROPS BOTH DATABASES" in out, out
+    assert "audit" in out and "DROPS THE DATABASES IN THE BACKUP" in out, out
 
 
-def test_a_compose_or_theme_change_is_undone_from_git_not_by_restoring_the_database() -> None:
-    """Restoring Postgres undoes neither -- the running compose file and the
-    bind-mounted theme come from the checkout -- and costs every write and
-    audited action since the backup."""
-    cases = (
-        (dict(compose=1), "deploy/docker-compose.yml"),
-        (dict(keycloak=1), "deploy/keycloak"),
+def test_a_compose_change_checks_the_whole_deploy_directory_out() -> None:
+    """Restoring Postgres undoes no compose change -- the running compose file
+    and what it bind-mounts come from the checkout -- and costs every write
+    and audited action since the backup. And the compose file alone is not
+    enough: an earlier release's compose bind-mounts files of that release
+    (the old identity provider's realm and theme, until own authentication
+    phase 4) which the new checkout no longer has. So `deploy`, whole. (Was
+    `test_a_compose_or_theme_change_is_undone_from_git_not_by_restoring_the_database`
+    and, with it, `test_a_keycloak_image_change_does_need_the_restore`.)"""
+    out = _rollback(compose=1)
+    assert f"checkout {BASE[:12]} -- deploy\n" in out, out
+    assert "restore.sh" not in out, f"a compose change sent to a database restore:\n{out}"
+    assert "restart" not in out, out
+
+
+def test_a_rollback_past_phase_4_names_the_env_keys_it_needs() -> None:
+    """The release before own authentication phase 4 needs four keys this one
+    does not read: its compose file does not parse without the two
+    KEYCLOAK_ADMIN_*, and its api, gateway, worker and migrate do not start
+    without the two ITS_OIDC_*. If .env lost any, the rollback says so
+    before the step that would fail."""
+    old = "      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?set in .env}\n"
+    out = _rollback(
+        migrate=1,
+        compose=1,
+        old_compose=old,
+        env="KEYCLOAK_ADMIN_USER=admin\nITS_OIDC_ISSUER=https://x/realms/it-suite\n",
     )
-    for kw, path in cases:
-        out = _rollback(**kw)
-        assert f"checkout {BASE[:12]} -- " in out and path in out, f"{kw}:\n{out}"
-        assert "restore.sh" not in out, f"{kw} sent to a database restore:\n{out}"
-    assert "docker compose restart keycloak" in _rollback(keycloak=1)
-
-
-def test_a_keycloak_image_change_does_need_the_restore() -> None:
-    """The one compose change git cannot undo: Keycloak migrates its schema
-    one way on start, so the old image cannot read the database."""
-    out = _rollback(compose=1, kc_image=1)
-    assert "restore.sh" in out and "deploy/docker-compose.yml" in out, out
+    warning = _step(out, "no longer has")
+    assert "KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_JWKS_URL" in out.splitlines()[warning], out
+    edit = _step(out, "IT_SUITE_VERSION=53b02f81")
+    assert warning < edit < _step(out, "docker compose up -d"), out
+    four = ("KEYCLOAK_ADMIN_USER", "KEYCLOAK_ADMIN_PASSWORD", "ITS_OIDC_ISSUER")
+    four += ("ITS_OIDC_JWKS_URL",)
+    kept = "".join(f"{key}=x\n" for key in four)
+    assert "no longer has" not in _rollback(migrate=1, compose=1, old_compose=old, env=kept)
+    assert "no longer has" not in _rollback(migrate=1, compose=1, old_compose="services: {}\n")
 
 
 def test_a_run_that_dies_part_way_still_prints_how_to_go_back() -> None:
