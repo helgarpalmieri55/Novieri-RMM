@@ -155,10 +155,13 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       phase 2 (items 1-2);
     - THE ACTS THAT END A PERSON'S AI GRANTS (own authentication phase 3,
       Task 10; operator decision D2, part c): a disable, a deletion, a
-      factor reset (`user_admin.service`), a password change (`account`,
-      or a mailed link in `flows.reset_password`), signing out everywhere
-      and the recovery link (`flows`). Each holds the row above first, then
-      forgets the devices, then `oauth.grants.revoke_all_for_user`: the
+      factor reset and, since operator decision E1 (2026-11-15), an
+      administrator's sign-out everywhere (`user_admin.service`), a password
+      change (`account`, or a mailed link in `flows.reset_password`), the
+      person's own sign-out everywhere and the recovery link (`flows`).
+      Each holds the row above first, then (all but an administrator's
+      sign-out everywhere, which leaves them as they are) forgets the
+      devices, then `oauth.grants.revoke_all_for_user`: the
       person's unspent codes end by their expiry, then their live families
       -- each table's rows LOCKED IN ID ORDER first (`grants.
       _lock_in_id_order`), then ended by id -- and only then the act's

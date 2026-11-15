@@ -2521,14 +2521,13 @@ by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`)
 - **One person:** take `mcp.use` away from their role. Their next call is
   refused. Disabling or deleting the person, resetting their factors (by an
   administrator, or with a recovery link), a password change (their own, or
-  through a reset mail) and the person's own sign-out of every session
-  (`POST /api/v1/auth/logout-everywhere`; the console has no button for it)
+  through a reset mail), the person's own **Sign out everywhere** (their
+  security page, `POST /api/v1/auth/logout-everywhere`) and, since
+  2026-11-15, an administrator's **Sign out everywhere** (Settings → Users)
   end all their AI grants too, and the codes an app has not exchanged yet;
-  the act's own audit event says how many grants ended (`ai_grants_revoked`).
-  **An administrator's "Sign out everywhere" (Settings → Users) is not one
-  of them:** it ends the person's console sessions only, and their AI grants
-  stay. To stop those too, take `mcp.use` away, disable the person, or
-  revoke the app for everyone.
+  the act's own audit event says how many grants ended
+  (`ai_grants_revoked`). An administrator's sign-out still leaves the
+  person's remembered browsers as they are.
 - **The whole organization — the emergency stop:** Settings → AI
   connections → turn **Allow AI apps to connect over MCP** off. Every app is
   refused from its next call, whatever it is. While it is off, apps can
@@ -2652,9 +2651,9 @@ client metadata document needs no opt-in. Risks 5, 6 and 9 hold always.
    person could read it.
 6. **A stolen access token works for at most ten minutes, or until its grant
    ends.** It names its grant, which the API reads on every call: revoking the
-   app, the person's account acts above (not an administrator's "Sign out
-   everywhere", which ends console sessions only), or the app's refresh token
-   being used twice (a sign it was copied) end it at once.
+   app, the person's account acts above (an administrator's "Sign out
+   everywhere" among them), or the app's refresh token being used twice (a
+   sign it was copied) end it at once.
 7. **Until phase 4, Keycloak's own anonymous registration opens with the same
    setting.** keycloak-init still converges it (above). Its tokens are refused
    at `/mcp` and everywhere else, so it leads nowhere; but its own exposure

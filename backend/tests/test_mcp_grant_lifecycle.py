@@ -5,8 +5,9 @@ The acts that forget a person's remembered browsers end their grants too, with
 the act as the reason and the count in the act's own audit event: being
 disabled or deleted, a factor reset (by an administrator or by the recovery
 link), a password change (their own, or by the mail link) and "sign out
-everywhere". An administrator ending the person's sessions forgets no browser,
-and ends no grant (B3-07).
+everywhere" -- the person's own, and since operator decision E1 (2026-11-15;
+phase 4 plan, Task 1) an administrator's too, which still forgets no
+browser.
 
 And, from the coordinator's integration notes (operator decision D2, part c,
 2026-11-12): each of those acts also ends the person's UNSPENT authorization
@@ -32,6 +33,7 @@ from app.core.auth.oauth.store import oauth_session
 from app.core.mcp_channel import mcp_resource
 from app.models import AuditEvent, Organization
 from app.models.oauth import OAuthCode, OAuthRefreshFamily
+from app.modules.user_admin import service as user_admin_service
 from tests.auth_support import browser, capture_mail, console_ready, link_token, signed_in
 from tests.mcp_support import mcp_app
 from tests.oauth_support import (
@@ -310,9 +312,14 @@ async def test_the_recovery_link_ends_the_ai_connections(lifecycle_env: Any) -> 
     assert await _ended(env, pending)
 
 
-async def test_an_administrator_ending_sessions_leaves_the_ai_connections(
+async def test_an_administrators_sign_out_everywhere_ends_the_ai_connections(
     lifecycle_env: Any,
 ) -> None:
+    """Operator decision E1 (2026-11-15; phase 4 plan, Task 1). This test was
+    `test_an_administrator_ending_sessions_leaves_the_ai_connections`, which
+    pinned the opposite (phase 3 plan, Task 10, decision 3; B3-07): inverted
+    on purpose, not weakened. The grant ends with the person's own act's
+    reason, the unspent code by its expiry, and the act counts the grant."""
     env = lifecycle_env
     org = await env.create_org("grant-sessions")
     admin = await signed_in(env, org, "org-admin")
@@ -325,8 +332,32 @@ async def test_an_administrator_ending_sessions_leaves_the_ai_connections(
     )
 
     assert resp.status_code == 204, resp.text
-    assert await _reason(env, family) is None
-    assert not await _ended(env, pending)
+    assert await _reason(env, family) == "signed_out_everywhere"
+    assert await _counted(env, org, "auth.sessions_ended") == 1
+    assert await _ended(env, pending)
+
+
+async def test_an_administrators_sign_out_everywhere_leaves_their_own_grants(
+    lifecycle_env: Any,
+) -> None:
+    """Only the person named in the path loses their grants: the
+    administrator who acted keeps theirs, and so does a colleague."""
+    env = lifecycle_env
+    org = await env.create_org("grant-sessions-own")
+    admin = await signed_in(env, org, "org-admin")
+    member = await signed_in(env, org, "technician")
+    colleague = await signed_in(env, org, "technician")
+    mine = await _connected(env, org, admin.user_id)
+    theirs = await _connected(env, org, colleague.user_id)
+    await _connected(env, org, member.user_id)
+
+    resp = await env.client.delete(
+        f"/api/v1/users/{member.user_id}/sessions", headers=admin.headers()
+    )
+
+    assert resp.status_code == 204, resp.text
+    assert await _reason(env, mine) is None
+    assert await _reason(env, theirs) is None
 
 
 async def test_an_act_leaves_spent_and_expired_codes_as_they_were(lifecycle_env: Any) -> None:
@@ -486,6 +517,76 @@ async def test_an_exchange_waiting_on_signing_out_everywhere_opens_no_grant(
             )
         ).all()
     assert reused == []
+
+
+async def test_an_exchange_waiting_on_an_administrators_sign_out_opens_no_grant(
+    lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operator decision E1, the race the previous test's twin closes for the
+    person's own act. A technician approved "claude" a moment ago; its code
+    is not exchanged yet. An administrator signs them out everywhere, and the
+    act is held where it ends their sessions -- the technician's `users` row
+    held (`user_admin.service._target(lock=True)`). The app exchanges the
+    code meanwhile and waits on that row; the act ends the unspent code and
+    the grants and commits; the exchange then reads the code expired: a
+    plain `invalid_grant`, and no live grant is left."""
+    env = lifecycle_env
+    org = await env.create_org("grant-admin-race")
+    admin = await signed_in(env, org, "org-admin")
+    member = await signed_in(env, org, "technician")
+    verifier, challenge = pkce_pair()
+    code, code_id = await _issue(env, org, member.user_id, challenge)
+    paused, go, seen = pause_at(monkeypatch, user_admin_service, "end_all_for_user")
+    signing_out = asyncio.create_task(
+        env.client.delete(f"/api/v1/users/{member.user_id}/sessions", headers=admin.headers())
+    )
+    await asyncio.wait_for(paused.wait(), 30)
+    exchanging = asyncio.create_task(
+        token_request(
+            env,
+            grant_type="authorization_code",
+            code=code,
+            client_id="claude",
+            code_verifier=verifier,
+        )
+    )
+    watching = asyncio.create_task(until_blocked_by(env.app_engine, seen["pid"]))
+    try:
+        await asyncio.wait({watching, exchanging}, timeout=30, return_when=asyncio.FIRST_COMPLETED)
+        seen_waiting = watching.done() and watching.exception() is None
+        waiting = watching.result() if seen_waiting else []
+        held = seen_waiting and not exchanging.done()
+    finally:
+        if not watching.done():
+            watching.cancel()
+        go.set()
+    signed_out, exchanged = await asyncio.wait_for(
+        asyncio.gather(signing_out, exchanging, return_exceptions=True), timeout=60
+    )
+
+    assert not isinstance(signed_out, BaseException), signed_out
+    assert signed_out.status_code == 204, signed_out.text
+    assert not isinstance(exchanged, BaseException), exchanged
+    assert held, exchanged.text
+    assert waiting and all(
+        "FROM USERS " in normalised(q) and "FOR NO KEY UPDATE" in normalised(q) for q in waiting
+    ), waiting
+    assert exchanged.status_code == 400, exchanged.text
+    assert exchanged.json() == {
+        "error": "invalid_grant",
+        "error_description": "the authorization code is not valid",
+    }
+    assert await _ended(env, code_id)
+    async with oauth_session(org, env.app_engine) as session:
+        live = (
+            await session.execute(
+                select(OAuthRefreshFamily.id).where(
+                    OAuthRefreshFamily.user_id == member.user_id,
+                    OAuthRefreshFamily.revoked_at.is_(None),
+                )
+            )
+        ).all()
+    assert live == []
 
 
 # --------------------------------------------------------------------------- #

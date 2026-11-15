@@ -643,7 +643,11 @@ async def test_an_administrator_ends_a_persons_sessions(lifecycle_env: Any) -> N
     assert (await env.client.get("/api/v1/me", headers=admin.headers())).status_code == 200
     events = await _audit(env, org, "auth.sessions_ended")
     assert [(e.actor_id, e.target_id, e.meta) for e in events] == [
-        (admin.user_id, str(member.user_id), {"by": "administrator", "scope": "everywhere"})
+        (
+            admin.user_id,
+            str(member.user_id),
+            {"by": "administrator", "scope": "everywhere", "ai_grants_revoked": 0},
+        )
     ]
 
 

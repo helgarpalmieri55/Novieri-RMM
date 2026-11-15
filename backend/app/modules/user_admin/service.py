@@ -41,6 +41,15 @@ person's AI grants, and the codes an AI app has not exchanged yet
 (`oauth.grants.revoke_all_for_user`, imported as `ai_grants`: `delete_user`
 and `cancel_invite` have locals named `grants`), counted in the act's audit
 event as `ai_grants_revoked`.
+
+AN ADMINISTRATOR'S SIGN-OUT EVERYWHERE (`end_sessions`) ends the sessions and,
+since operator decision E1 (2026-11-15; own authentication phase 4), the AI
+grants and the unspent codes too, in the same order and counted the same way;
+it forgets no device. The grants end with the reason the person's own
+sign-out gives (`signed_out_everywhere`, the button's own name); the audit
+event tells the two acts apart: `auth.sessions_ended` with `by:
+administrator` and the administrator as actor here, `by: self` and the
+person as actor in `flows.logout_everywhere`.
 """
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -1173,20 +1182,34 @@ async def reset_factors(
 async def end_sessions(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, user_id: UUID
 ) -> None:
-    """Every console session of the person ends; their remembered devices stay
-    (a reset or a disable forgets those). A deleted account is refused
+    """Every console session of the person ends, and so do their AI grants
+    and the codes an AI app has not exchanged yet; their remembered devices
+    stay (a reset or a disable forgets those). A deleted account is refused
     (`_require_live`, final review C-M5): deleting ended its sessions, and a
     record of ending them again would be about nobody. No `super-admin` rail
     (operator decision 2, 2026-11-05).
+
+    THE AI GRANTS END TOO (operator decision E1, 2026-11-15; own
+    authentication phase 4, Task 1), reversing phase 3's Task 10, decision 3:
+    an administrator who signs a person out everywhere is stopping that
+    person, and an AI app acting as them is the person too (CLAUDE.md 1c).
+    `ai_grants.revoke_all_for_user` with the reason the person's own "sign
+    out everywhere" gives (`signed_out_everywhere`: `REVOKE_REASONS` is a
+    closed list in migration 0247; the audit event tells the two acts apart
+    by `by` and the actor), after the sessions and before the chain, counted
+    in the event as `ai_grants_revoked`, as every act that ends grants does.
 
     THE ROW FIRST (`_target(lock=True)`, own authentication phase 2, Task 9b
     fix round 1): a Microsoft link's return checks its session is live under
     the person's row and then links, so ending the sessions waits for a link
     in flight and is waited for by one that arrives -- a link never lands in
-    a session ended before it committed."""
+    a session ended before it committed. An AI app's code exchange takes the
+    same row first (`grants._exchange`), so one in flight waits for this act
+    and then finds its code ended (`tests/test_mcp_grant_lifecycle.py`)."""
     user = await _target(session, org_id, user_id, lock=True)
     _require_live(user)
     await end_all_for_user(session, user.id, "ended_by_admin")
+    ai_ended = await ai_grants.revoke_all_for_user(session, user.id, "signed_out_everywhere")
     await audit_service.record(
         session,
         org_id=org_id,
@@ -1195,7 +1218,7 @@ async def end_sessions(
         action="auth.sessions_ended",
         target_type="user",
         target_id=str(user.id),
-        metadata={"by": "administrator", "scope": "everywhere"},
+        metadata={"by": "administrator", "scope": "everywhere", "ai_grants_revoked": ai_ended},
     )
 
 

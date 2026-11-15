@@ -11326,6 +11326,16 @@ devices stay»), y tampoco termina sus concesiones. Una línea junto a cada `rev
 ai_grants`): `user_admin/service.py` tiene variables locales `grants` en `delete_user` (`:1150`) y `cancel_invite`, que
 taparían al módulo, y mypy lo vería (A3-54); el mismo alias en los tres archivos.
 
+*Enmienda del 2026-11-15 (decisión del operador E1; plan de la fase 4,
+`docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md`, Task 1).* La frase «Que un administrador cierre
+las sesiones de alguien no los olvida (`user_admin.service.end_sessions`, «their remembered devices stay»), y tampoco
+termina sus concesiones» deja de valer en su segunda mitad: `end_sessions` termina las concesiones de la persona con
+el motivo `signed_out_everywhere`, después de sus sesiones y antes de la cadena, y su evento lleva
+`ai_grants_revoked`. Sigue sin olvidar sus equipos recordados. Son ocho actos, no siete.
+El motivo es el del propio botón de la persona (`REVOKE_REASONS` es una lista cerrada en 0247); quien lea la cadena
+distingue los dos actos por el evento: `auth.sessions_ended` con `by: administrator` y el administrador como actor
+en `end_sessions`, `by: self` y la persona como actor en `flows.logout_everywhere`.
+
 **Decisión de la tarea (4): el acto deja constancia de cuántas concesiones terminó** (B3-30). El diseño §7 audita las
 «revocaciones de clientes de IA», y el motivo en la fila de la familia se barre al día (Task 13). Cada uno de los siete
 actos ya escribe su evento (`user.disabled`, `user.deleted`, `user.factors_reset`, `auth.password_changed`,

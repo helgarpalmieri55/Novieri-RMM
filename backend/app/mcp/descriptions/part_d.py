@@ -544,7 +544,9 @@ PART_D: dict[str, str] = {
         "and whether it is org-wide or limited to one device group."
     ),
     "DELETE /api/v1/users/{user_id}/sessions": (
-        "Ends every console session of a user at once; their remembered browsers stay. Audited."
+        "Ends every console session of a user at once and disconnects the AI apps they "
+        "connected (this connection too, if the user is you); their remembered browsers stay. "
+        "Audited."
     ),
     # --- vendors ---
     "GET /api/v1/vendors": (
