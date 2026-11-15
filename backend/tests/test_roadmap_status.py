@@ -178,10 +178,14 @@ def test_no_module_ships_without_a_roadmap_phase() -> None:
     a reason.
     """
     phased = {pkg for _n, _name, pkg, _fe in PHASES} | PHASE_18_ALSO
+    # A shipped module is a package. A directory without `__init__.py` is
+    # what a removed module leaves in a working copy that ran its tests
+    # before the removal -- `__pycache__` alone, which git does not track
+    # (own authentication phase 4 removed `keycloak_events` that way).
     shipped = {
         d.name
         for d in (REPO / "backend/app/modules").iterdir()
-        if d.is_dir() and not d.name.startswith("__")
+        if d.is_dir() and not d.name.startswith("__") and (d / "__init__.py").is_file()
     }
     unphased = shipped - phased
     assert unphased == EXPECTED_UNPHASED, (
