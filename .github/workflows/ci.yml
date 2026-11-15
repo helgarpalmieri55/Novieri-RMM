@@ -363,7 +363,10 @@ jobs:
     # (backend/tests/conftest.py::_run_migrations), so the backend job above
     # stays green no matter how broken the deployment scripts are -- exactly
     # how a fresh boot came to abort on an unset APP_DB_PASSWORD unnoticed.
-    name: deploy (compose first boot · app_user privileges)
+    # Since own authentication phase 4 (plan 2026-11-15, Task 7) its last step
+    # also runs steps 3, 5, 7 and 8 -- OpenBao, the audit key, the edge, the
+    # claim -- and the platform's own OAuth server and MCP door through them.
+    name: deploy (compose first boot · app_user privileges · own OAuth server, live)
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -521,6 +524,31 @@ jobs:
           echo "FORCE RLS tables after restore: $(cat /tmp/forced)"
           [ "$(cat /tmp/forced)" -gt 0 ] || { echo "::error::no FORCE RLS after restore"; exit 1; }
 
+      - name: the old identity provider's database -- kept by the pre-upgrade backup only, and restored
+        # OPERATOR DECISION K1 (2026-11-15), live. A host upgraded from before
+        # own authentication phase 4 keeps its `keycloak` database until the
+        # operator retires it: the nightly backup leaves it out, the one
+        # deploy.sh takes before an upgrade (ITS_BACKUP_OLD_IDENTITY_DB=1)
+        # keeps it, because it is the way back, and restore.sh brings it back.
+        # A fresh install has no such database, so this step makes one.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          psql_admin() { docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U its_admin "$@"; }
+          psql_admin -d postgres -c "CREATE DATABASE keycloak OWNER its_admin"
+          psql_admin -d keycloak -c "CREATE TABLE realm_probe (x int)"
+          ./scripts/backup.sh /tmp/ci-nightly
+          test ! -e /tmp/ci-nightly/keycloak.dump
+          ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh /tmp/ci-pre-upgrade
+          test -s /tmp/ci-pre-upgrade/keycloak.dump
+          # The operator retired it; then went back.
+          psql_admin -d postgres -c "DROP DATABASE keycloak WITH (FORCE)"
+          ITS_RESTORE_FORCE=1 ./scripts/restore.sh /tmp/ci-pre-upgrade | tee /tmp/kc-restore.log
+          grep -q "keep it if you are rolling back" /tmp/kc-restore.log
+          probe="$(psql_admin -A -t -d keycloak -c "SELECT count(*) FROM information_schema.tables WHERE table_name = 'realm_probe'")"
+          [ "$(tr -d '[:space:]' <<<"$probe")" = 1 ] || { echo "::error::the restored keycloak database lost its table"; exit 1; }
+          psql_admin -d postgres -c "DROP DATABASE keycloak WITH (FORCE)"
+
       - name: IT_SUITE_VERSION selects the image reference (interpolation only)
         # WHAT THIS DOES AND DOES NOT PROVE -- stated precisely, because an
         # earlier version of this step was named "rollback retags, it does not
@@ -565,177 +593,134 @@ jobs:
           fi
           echo "IT_SUITE_VERSION selects the image reference for all five services"
 
-      - name: keycloak 26.2 — the realm still parses, and takes the token fields
-        # The only check in the tree that the running identity provider stores
-        # what `realm_config.py` sends for a Microsoft sign-in (mail-oauth
-        # design §6.1 item 10). The fields were read about in release notes.
+      - name: the platform's own OAuth server and MCP door, live, through Traefik
+        # THE HALF NO UNIT TEST CAN REACH (own authentication phase 4, plan
+        # 2026-11-15, Task 7). The backend suite proves what the OAuth server
+        # DECIDES, and test_deploy_mcp_route.py what the Traefik rules SAY.
+        # This proves what the shipped images DO with them: the real `api` on
+        # the stack's real OpenBao -- the token key and the pepper never leave
+        # it, and this is the first run of deploy/README.md step 3.6 that is
+        # not a reader's -- with `web` and `traefik`, reached on :443 with a
+        # certificate the script verifies (no -k anywhere).
+        # deploy/ci/mcp_flow.py lists every assertion; it prints claim NAMES,
+        # never a token, a code, a password or the install code.
+        #
+        # OPENBAO WITH ONE SHARE, because CI has nobody to hand five to. Its
+        # unseal key, root token and the its-app token live in this step's
+        # shell and the throwaway .env (0600 before the first is written to
+        # it), are masked in the log, and reach `bao` on stdin, never in an
+        # argv a process listing on a shared runner would show. The install
+        # code is masked as soon as it is read. The two files that held a
+        # secret are removed however the step ends (the trap); `teardown`
+        # takes the vault itself with `down -v`. On a self-hosted runner the
+        # throwaway .env stays in the checkout until the next job's checkout
+        # cleans it. Production keeps five shares and never runs on root.
+        #
+        # TWO PHASES: the opt-in (ITS_MCP_REGISTRATION) is read when the api
+        # starts, so the closed phase runs first and the api is recreated
+        # with it before the open one.
         working-directory: deploy
         run: |
           set -euo pipefail
-          docker compose up -d keycloak
-          kc() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
-          ok=
-          for _ in $(seq 1 60); do
-            if docker compose exec -T keycloak sh -c \
-                '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 \
-                   --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
-                   --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"' >/dev/null 2>&1; then
-              ok=1; break
-            fi
-            sleep 5
-          done
-          [ -n "$ok" ] || { docker compose logs keycloak; echo "::error::keycloak never answered"; exit 1; }
-          # The login theme survived: a silent fallback to the vendor theme logs nothing.
-          # Captured first: `grep -q` closing the pipe early makes
-          # `docker compose exec` exit 255 under pipefail.
-          kc get realms/it-suite --fields loginTheme > /tmp/theme.json
-          grep -q '"itms"' /tmp/theme.json
-          kc update realms/it-suite \
-            -s 'smtpServer.host=smtp.office365.com' \
-            -s 'smtpServer.port=587' \
-            -s 'smtpServer.from=ci@example.invalid' \
-            -s 'smtpServer.starttls=true' \
-            -s 'smtpServer.auth=true' \
-            -s 'smtpServer.user=ci@example.invalid' \
-            -s 'smtpServer.authType=token' \
-            -s 'smtpServer.authTokenUrl=https://login.microsoftonline.com/t/oauth2/v2.0/token' \
-            -s 'smtpServer.authTokenScope=https://outlook.office365.com/.default' \
-            -s 'smtpServer.authTokenClientId=ci-client' \
-            -s 'smtpServer.authTokenClientSecret=ci-secret'
-          # `--fields smtpServer` returns `{}` for this nested map in 26.2, so
-          # read the whole realm and take the block out of it.
-          kc get realms/it-suite > /tmp/realm.json
-          python3 -c "import json; print(json.dumps(json.load(open('/tmp/realm.json'))['smtpServer'], indent=1))" > /tmp/smtp.json
-          cat /tmp/smtp.json
-          grep -q '"authType" *: *"token"' /tmp/smtp.json
-          grep -q '"authTokenClientId" *: *"ci-client"' /tmp/smtp.json
-          # set_smtp's carry-over rests on the secret being MASKED on read. If
-          # this fails it is a finding: record what came back, do not delete it.
-          if grep -q 'ci-secret' /tmp/smtp.json; then
-            echo "::error::the realm returned the client secret unmasked"; exit 1
-          fi
-          grep -q '"authTokenClientSecret" *: *"\*' /tmp/smtp.json
+          umask 077
+          init_json="$RUNNER_TEMP/bao-init.json"
+          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code"' EXIT
 
-      - name: MCP — live registration, PKCE and audience, through Traefik
-        # THE HALF NO UNIT TEST CAN REACH. test_keycloak_init_job.py proves what
-        # keycloak-init DECIDES against a fake realm, and
-        # test_deploy_keycloak_registration_edge.py proves what the Traefik
-        # rules SAY. This proves what Keycloak 26.2 and Traefik 3.6 DO with
-        # them: an AI app registers anonymously, signs a person in with code +
-        # PKCE S256 for `scope=openid mcp`, and gets a token whose audience is
-        # the MCP resource and never the console's `it-suite`. The full list
-        # of assertions is deploy/keycloak/ci_mcp_flow.py's own docstring and
-        # sections; it prints claim NAMES, never a token or a secret.
-        #
-        # THROUGH TRAEFIK, NOT KEYCLOAK'S PORT. Which registration paths reach
-        # Keycloak at all (`default`, `install`, `;`, `%3B`, `..`, `%2F`, case)
-        # is decided by the edge, so the check has to go through the edge:
-        # the real compose `traefik` service, its docker-label routers, and a
-        # certificate the script verifies (no -k anywhere). Only the admin
-        # calls that set up the test person go to Keycloak's own address on
-        # the compose network, which Traefik never routes by design.
-        #
-        # THE COMPOSE keycloak-init SERVICE, not `python3 init-clients.py`: the
-        # `migrate` step above already built the backend image it runs on, and
-        # its env wiring (ITS_PUBLIC_CONSOLE_URL, ITS_MCP_REGISTRATION,
-        # ITS_OIDC_AUDIENCE), mounts and
-        # secrets volume are part of what ships. `--no-deps` on every run:
-        # ITS_PUBLIC_CONSOLE_URL is exported below for keycloak-init, and
-        # without it compose would see `keycloak`'s KC_HOSTNAME change and
-        # recreate the container mid-step.
-        #
-        # AFTER THE STEP ABOVE, NOT BEFORE: that one signs kcadm in with the
-        # bootstrap password, and keycloak-init rotates it away on every run.
-        # The current one is read off the secrets volume when it is needed.
-        working-directory: deploy
-        run: |
-          set -euo pipefail
+          # 1. Nothing of the old identity provider is defined, at all.
+          defined="$(docker compose config --services) $(docker compose config --images)"
+          if grep -qi keycloak <<<"$defined"; then
+            echo "::error::the compose stack still defines an identity provider service or image"; exit 1
+          fi
+
+          # 2. OpenBao: initialise, unseal, the its-app policy and its token
+          #    (deploy/README.md 3.1-3.4), then provision (3.6).
+          docker compose up -d openbao
+          rc=1
+          for _ in $(seq 1 30); do
+            rc=0; docker compose exec -T openbao bao status >/dev/null 2>&1 || rc=$?
+            [ "$rc" = 2 ] && break    # answering, sealed, not yet initialised
+            sleep 2
+          done
+          [ "$rc" = 2 ] || { docker compose logs openbao; echo "::error::openbao never answered"; exit 1; }
+          docker compose exec -T openbao \
+            bao operator init -key-shares=1 -key-threshold=1 -format=json > "$init_json"
+          unseal=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unseal_keys_b64"][0])' "$init_json")
+          root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root_token"])' "$init_json")
+          rm -f "$init_json"
+          echo "::add-mask::$unseal"
+          echo "::add-mask::$root"
+          # `key=-` reads the value from stdin, as it is: no trailing newline.
+          printf '%s' "$unseal" | docker compose exec -T openbao bao write sys/unseal key=- >/dev/null
+          app_token=$(docker compose exec -T openbao sh -c 'read -r BAO_TOKEN && export BAO_TOKEN &&
+            bao policy write its-app /bao/its-app.hcl >/dev/null &&
+            bao token create -orphan -policy=its-app -ttl=24h -field=token' <<<"$root")
+          echo "::add-mask::$app_token"
+          # The vault's tokens go into .env: 0600 first, as deploy/README.md
+          # step 1 makes it (`sed -i` keeps the mode it finds).
+          chmod 600 .env
+          sed -i -e '/^ITS_OPENBAO_TOKEN=/d' -e '/^OPENBAO_TOKEN=/d' \
+            -e '/^ITS_PUBLIC_CONSOLE_URL=/d' -e '/^ITS_MCP_REGISTRATION=/d' .env
+          {
+            echo "ITS_OPENBAO_TOKEN=$app_token"
+            echo "OPENBAO_TOKEN=$root"
+            echo "ITS_PUBLIC_CONSOLE_URL=https://localhost"
+          } >> .env
+          docker compose run --rm openbao-init
+
+          # 3. The audit HMAC key (step 5) and a certificate for :443 (step 7).
+          docker compose run --rm --no-deps --entrypoint sh api -c \
+            'head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
             -keyout certs/privkey.pem -out certs/fullchain.pem 2>/dev/null
-          docker compose up -d --no-deps traefik
-          up=
-          for _ in $(seq 1 30); do
-            if curl -sf --cacert certs/fullchain.pem -o /dev/null \
-                https://localhost/realms/it-suite/.well-known/openid-configuration; then
-              up=1; break
-            fi
-            sleep 2
-          done
-          [ -n "$up" ] || { docker compose logs traefik; echo "::error::Traefik never routed to Keycloak"; exit 1; }
 
-          init() { docker compose run --rm -T --no-deps keycloak-init; }
-          flow() {
-            python3 keycloak/ci_mcp_flow.py --base https://localhost \
-              --cafile certs/fullchain.pem --realm it-suite "$@"
+          # 4. The api, the console and the edge. Both behind Traefik, which
+          #    routes only a healthy container: the api's metadata, and the
+          #    console's page for `/`. `--noproxy '*'`: the runner's proxy, if
+          #    it has one, is not the way to localhost (the flow sets no proxy
+          #    either).
+          get() { curl -sf --noproxy '*' --cacert certs/fullchain.pem "$@"; }
+          wait_for_api() {
+            local page
+            for _ in $(seq 1 60); do
+              if get -o /dev/null https://localhost/.well-known/oauth-authorization-server; then
+                page="$(get -o /dev/null -w '%{content_type}' https://localhost/ || true)"
+                case "$page" in text/html*) return 0 ;; esac
+              fi
+              sleep 3
+            done
+            docker compose logs api web traefik
+            echo "::error::the api and the console never both answered through Traefik"
+            return 1
           }
+          docker compose up -d --build api web traefik
+          wait_for_api
+          flow() { python3 ci/mcp_flow.py --base https://localhost --cafile certs/fullchain.pem "$@"; }
 
-          # 1. Neither ITS_PUBLIC_CONSOLE_URL nor the opt-in: closed, and the
-          #    job names both missing settings.
-          unset ITS_PUBLIC_CONSOLE_URL ITS_MCP_REGISTRATION
-          init | tee /tmp/kc-init-closed.log
-          grep -q "anonymous client registration stays closed" /tmp/kc-init-closed.log
-          grep -q "until ITS_PUBLIC_CONSOLE_URL is set and ITS_MCP_REGISTRATION=open" \
-            /tmp/kc-init-closed.log
-          flow --expect-registration-closed
+          # 5. Unclaimed, registration closed.
+          flow --phase closed
 
-          # 2. The URL alone (operator decision, 2026-10-15): the audience and
-          #    everything else converge, and registration STAYS CLOSED until
-          #    the operator opts in. Proven against Keycloak, not just logged.
-          export ITS_PUBLIC_CONSOLE_URL=https://itms.example.test
-          init | tee /tmp/kc-init-url-only.log
-          grep -q "'mapper:mcp-audience'" /tmp/kc-init-url-only.log
-          grep -q "stays closed (Trusted Hosts kept) until ITS_MCP_REGISTRATION=open" \
-            /tmp/kc-init-url-only.log
-          if grep -q "registration:removed" /tmp/kc-init-url-only.log; then
-            echo "::error::registration opened without ITS_MCP_REGISTRATION=open"; exit 1
+          # 6. The opt-in, read at start: recreate the api with it.
+          echo "ITS_MCP_REGISTRATION=open" >> .env
+          docker compose up -d --no-deps --force-recreate api
+          wait_for_api
+
+          # 7. Claimed with the install code the api writes on the first
+          #    status request (deploy/README.md step 8), then the whole AI
+          #    app's path.
+          get -o /dev/null https://localhost/api/v1/setup/status
+          docker compose exec -T api cat /var/lib/its/secrets/setup-code > "$RUNNER_TEMP/setup-code"
+          # The api logs this code once, when it creates it: masked before
+          # anything could print it, read by the shell itself (`$(<file)`).
+          echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"
+          flow --phase open --setup-code-file "$RUNNER_TEMP/setup-code"
+
+          # 8. And nothing of the old identity provider ever ran in this
+          #    project (not the host's: a shared runner may run anything).
+          running="$(docker compose ps -a --format '{{.Image}} {{.Name}}')"
+          if grep -qi keycloak <<<"$running"; then
+            echo "::error::a container of the old identity provider ran in this job"; exit 1
           fi
-          flow --expect-registration-closed
-
-          # 3. The URL and the opt-in: only now does registration open.
-          export ITS_MCP_REGISTRATION=open
-          init | tee /tmp/kc-init-open.log
-          grep -q "'registration:removed:trusted-hosts'" /tmp/kc-init-open.log
-          if grep -q "registration stays closed" /tmp/kc-init-open.log; then
-            echo "::error::keycloak-init still reports registration closed"; exit 1
-          fi
-
-          # 4. The sign-in path, as an AI app sees it. Keycloak's address on
-          #    the stack's OWN network, named by compose rather than guessed, so
-          #    a container on a second network cannot yield two addresses.
-          net=$(docker compose config --format json \
-                  | python3 -c "import json,sys; print(json.load(sys.stdin)['networks']['default']['name'])")
-          kc_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" \
-                    "$(docker compose ps -q keycloak)")
-          [ -n "$kc_ip" ] || { echo "::error::keycloak has no address on $net"; exit 1; }
-          secrets_dir=$(mktemp -d)
-          trap 'rm -rf "$secrets_dir"' EXIT
-          read_secret() {
-            ( umask 077
-              docker compose run --rm -T --no-deps --entrypoint cat keycloak-init \
-                "/var/lib/its/secrets/$1" > "$secrets_dir/$1" )
-          }
-          read_secret keycloak-bootstrap-admin.secret
-          read_secret keycloak-admin.secret
-          flow --resource "$ITS_PUBLIC_CONSOLE_URL/mcp" \
-            --admin-base "http://$kc_ip:8080" \
-            --admin-user "$(sed -n 's/^KEYCLOAK_ADMIN_USER=//p' .env)" \
-            --admin-password-file "$secrets_dir/keycloak-bootstrap-admin.secret" \
-            --provisioning-secret-file "$secrets_dir/keycloak-admin.secret"
-          rm -rf "$secrets_dir"
-
-          # 5. A converged realm takes ZERO writes. Every convergence line must
-          #    say `nothing`, the passkey flow included; the bootstrap rotation
-          #    is the one write by design.
-          init | tee /tmp/kc-init-again.log
-          for line in "created=nothing" "granted=nothing" "realm keys converged=nothing" \
-              "required actions registered=nothing updated=nothing" \
-              "clients corrected=nothing" "passkey flow=already-bound writes=nothing" \
-              "mcp converged=nothing"; do
-            grep -qF "identity init: $line" /tmp/kc-init-again.log \
-              || { echo "::error::second keycloak-init run was not a no-op: expected '$line'"; exit 1; }
-          done
-          echo "keycloak-init on a converged realm: mcp converged=nothing, zero writes"
 
       - name: teardown
         if: always()
