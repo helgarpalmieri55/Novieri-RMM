@@ -11,13 +11,14 @@ Work top to bottom. Each item names the exact file or variable.
 
 ## 1. Secrets in `deploy/.env`
 
-`cp .env.example .env` leaves **seven** values that must be replaced, and
-**all seven are literally `change-me`** — verified against `.env.example`
-2026-08-16, which had said "five" here. The distinction that matters is not
-which ones say `change-me`; it is *when* you can replace them: five are
-generated before you start anything, and the two OpenBao tokens do not exist
-until first boot has run (§3.2, §3.4), so they stay `change-me` for a few
-minutes by necessity.
+`cp .env.example .env` leaves **six** values that must be replaced, and
+**all six are literally `change-me`** — verified against `.env.example`
+2026-08-16, which had said "five" here, and seven until own authentication
+phase 4 (2026-11-15) took the identity provider's admin password out. The
+distinction that matters is not which ones say `change-me`; it is *when* you
+can replace them: four are generated before you start anything, and the two
+OpenBao tokens do not exist until first boot has run (§3.2, §3.4), so they
+stay `change-me` for a few minutes by necessity.
 
 `./scripts/preflight.sh` checks all of this for you and refuses on anything
 left at a default. Run it before `docker compose up`, not after.
@@ -27,7 +28,6 @@ left at a default. Run it before `docker compose up`, not after.
 | `POSTGRES_ADMIN_PASSWORD` | `openssl rand -base64 24` | `its_admin` — BYPASSRLS, the migration/bootstrap role |
 | `APP_DB_PASSWORD` | `openssl rand -base64 24` | `app_user` — the RLS-constrained role every request runs as |
 | `PORTAL_DB_PASSWORD` | `openssl rand -base64 24` | `portal_user` — the row-scoped end-user portal role |
-| `KEYCLOAK_ADMIN_PASSWORD` | `openssl rand -base64 24` | the identity provider's bootstrap admin. **Used once, then rotated away by the init job** — see §2 |
 | `MINIO_ROOT_PASSWORD` | `openssl rand -base64 24` | also used as `ITS_S3_SECRET_KEY`, which signs every presigned URL the fleet is handed — see §3 |
 | `ITS_OPENBAO_TOKEN` | first boot step 3.4 | the **least-privilege `its-app`** token, never the root token |
 | `OPENBAO_TOKEN` | first boot step 3.2 | the **provisioning/root** token; blank it out again after first boot |
@@ -56,155 +56,29 @@ short-lived provisioning container and can be emptied once `openbao-init` has
 run. Leaving the root token in `.env` permanently gives every application
 process the ability to delete the job-signing key.
 
-## 2. Identity
+## 2. The first administrator
 
-Three instructions that used to be yours are now the stack's, and it is worth
-knowing that before you go looking for them: rotating the bootstrap admin,
-restricting the admin console, and creating the first administrator.
+There is no identity provider to secure any more (own authentication phase 4,
+2026-11-15): the platform holds the accounts itself. What used to be this
+section -- the bootstrap admin of a separate identity service, its admin
+console, its realm -- is gone with it.
 
-**The bootstrap admin retires itself.** `KEYCLOAK_ADMIN_USER` /
-`KEYCLOAK_ADMIN_PASSWORD` still create a permanent `master`-realm account on
-first boot — but the `keycloak-init` job now uses it once, to create the two
-service clients the platform needs, and then **rotates its password to a random
-value written only to the `its-secrets` volume**, mode 600, at
-`/var/lib/its/secrets/keycloak-bootstrap-admin.secret`.
-
-This supersedes the instruction that used to sit here asking you to create a
-named admin and then delete the bootstrap account. Nothing needs deleting: the
-account exists, no human knows its password, and no step in this runbook or in
-`deploy/README.md` uses it. That is stronger than a request to please remove it,
-because a request is only as good as the person reading it at 2am.
-
-Two consequences to plan for rather than discover:
-
-- **`KEYCLOAK_ADMIN_PASSWORD` in `.env` is stale after the first
-  `docker compose up`,** and that is correct, not a fault. It stays in `.env`
-  because the init job falls back to it if the volume's copy is missing or was
-  never applied. Generate it properly anyway (§1) — it is live until the first
-  run finishes.
-- **The bootstrap password now exists in exactly one place.** `its-secrets` is
-  already in the backup set for the audit HMAC key (§6); it is now also the
-  only copy of the vendor's break-glass credential. Lose that volume *and*
-  `.env` together and nobody — including the vendor — can authenticate as the
-  master account again.
-
-**There is no admin portal on `:443`, and nothing in normal operation needs
-one.** `/admin` is not routed (`docker-compose.yml`, the `keycloak` labels);
-Traefik forwards only what sign-in needs. Adding it back is a security
-regression, not a convenience: that console can create any user and reset any
-password in the fleet, behind one password, on the product's own hostname.
-Realm-level work — federating AD/Entra, inspecting a login flow — is
-**vendor-only** and goes over an SSH tunnel to the container, documented in
-`deploy/README.md`, "Break-glass: the identity admin console".
-
-**First boot is a screen, not a runbook.** `deploy/README.md`'s old steps 8–10
-— create the first administrator by piping Python into `docker compose exec`,
-insert the organization row by SQL, grant the role by a second SQL statement —
-are replaced by:
-
-0. **Configure email first if you can.** The setup screen finishes by *emailing*
-   the administrator it just created, so an installation with no working SMTP
-   finishes it with a detour. `deploy/README.md`, "Keycloak SMTP", is
-   ten minutes and removes the whole of "if the invitation could not be sent"
-   below. Skipping it is survivable, not free.
-
-1. Open `https://<your host>/`. On an unclaimed installation it shows the
-   setup screen — and that first request is what **generates** the install
-   code, so do this before looking for it. Nothing runs earlier.
-
-2. Read the code. The api logs it exactly once, at the moment it is created,
-   and writes it to `/var/lib/its/secrets/setup-code` mode 600:
-
-   ```sh
-   docker compose logs api | grep -i "install code"
-   ```
-
-3. Enter it on that screen, with your name, email and organization name.
-
-That creates the organization, the administrator account and its `org-admin`
-grant in **one transaction**, through the same code paths the Users tab uses,
-and writes all of it to the hash-chained audit log. Either all three exist or
-none do.
-
-**It does not sign you in, and that is deliberate rather than unfinished.**
-ITMS issues no session and holds no password — the account it just created has
-no credential at all yet. What the screen does instead is have the identity
-provider send an **enrolment email**: choose a password, enrol a passkey, then
-sign in the ordinary way. So the last screen of setup says one of two things,
-and on an installation where you skipped step 0 it says the second:
-
-| The screen says | What it means | What you do |
-|---|---|---|
-| "Check that inbox for a link to choose a password, then sign in." | the mail was accepted for delivery | open it, set a password, enrol the passkey, sign in. Note "accepted", not "arrived" — a relay can accept and still drop it |
-| "The invitation email could not be sent…" | nothing is configured to send mail yet | the account, the organization and the grant all exist and are fine; it simply has no way to reach you. Read on |
-
-**If the invitation could not be sent.** This is the expected first outcome on
-an installation with no SMTP, not a failure of the claim — and **re-running
-setup will not help**: the installation is claimed, the screen is gone, and the
-claim route now answers "this installation has already been set up". Recovery is
-vendor-side, through the SSH tunnel in `deploy/README.md`, "Break-glass: the
-identity admin console", and there are two ways:
-
-- **Fix the cause, then re-send** — the one to prefer. Set the realm's SMTP
-  settings (`deploy/README.md`, "Keycloak SMTP"), then in the same
-  console: **Users →** the administrator **→ Credentials → Credential Reset**,
-  actions `Update Password` and `webauthn-register-passwordless`, **Send email**.
-  That is the identical mail the setup screen tried to send.
-- **Get in first, fix it from inside** — if mail is going to take a while. Same
-  console: **Users →** the administrator **→ Credentials → Set password**,
-  **Temporary: On**. Sign in with it, and configure delivery in ITMS itself at
-  **Settings → Email** so that no later account ever needs this tunnel. Sign in
-  promptly: that password is in your clipboard and in nobody's audit log.
-
-Either way, check afterwards that the account really is an administrator —
-**Settings → Users** should list it with the **org-admin** role. If it does not,
-the claim did not complete and nothing above will substitute for it.
-
-**The install code is the only thing between a stranger and this box.** An
-appliance is reachable long before its owner sits down at it, and the setup
-screen has to answer before any user exists, so it cannot be gated by a
-permission. Zero-users alone is not a guard. Claim the installation from a
-browser you trust, promptly, and treat the code as a password until you have.
-
-Still yours to check, and none of it is automated:
-
-- **MFA is a default required action** (`CONFIGURE_TOTP` in the realm import)
-  but only for accounts created after the import. Verify every account has it.
-- **If you enabled `directAccessGrantsEnabled` on the `it-suite-web` client**
-  to script a first-boot verification, **turn it back off.** It is off in the
-  committed realm import, and off on both service clients the init job creates.
-  A client with the password grant enabled turns every leaked password into an
-  API token with no browser and no MFA prompt.
-- **Federate AD/Entra rather than creating local users**, and make sure the
-  identity provider mapper populates the **`org`** attribute — it is declared
-  in the realm's user profile (`components` →
-  `org.keycloak.userprofile.UserProfileProvider`), and Keycloak **silently
-  discards** any attribute not declared there. This is vendor-side work through
-  the tunnel above.
-- **Verify sign-in in a private window before you trust it.** The console has
-  no launcher page of its own: an unauthenticated visitor is redirected
-  straight to the identity provider (`docs/modules/console-auth/spec.md` §3.4).
-  So a broken login theme, browser flow or identity provider leaves **no other
-  way in**, and the failure looks like a redirect you cannot stop rather than
-  an error. Change one of those three at a time, and check the result before
-  changing the next — `deploy/README.md`, "Branding and extending sign-in", is
-  in that order for this reason.
-- **`keycloak-init` must have exited 0.** Nothing gates on it deliberately — a
-  failure there should not stop the product from starting — so it is on you to
-  look:
-
-  ```sh
-  docker compose ps -a keycloak-init      # Exited (0)
-  docker compose logs keycloak-init       # says what it created; never a secret
-  ```
-
-  A non-zero exit means the two service clients may not exist, and the setup
-  screen will tell you it cannot create an account. Re-run it — it is
-  idempotent and re-running is its normal case:
-
-  ```sh
-  docker compose up keycloak-init
-  ```
+- **Claim the installation promptly** (`deploy/README.md` step 8). Until it is
+  claimed, the setup screen answers anybody who has the install code, and the
+  code is in the api's log and at `/var/lib/its/secrets/setup-code`. Once it
+  is claimed, the screen is gone.
+- **Enrol the second factor at the first sign-in, and keep the ten recovery
+  codes** where you keep the OpenBao shares (step 9). The recovery link
+  (`deploy/README.md`, "Recovery link") is the way back for an administrator
+  who loses every factor; it is run on this host, never over HTTP.
+- **Give at least two people `org-admin`**, each with their own account, so
+  that one lost factor never locks the organization out.
+- **`ITS_PUBLIC_CONSOLE_URL`** is the address people open the console at,
+  exactly (`https://host[:port]`). Every sign-in write is refused without it.
+- **On a host upgraded from before phase 4**, the old identity provider's
+  database, three secret files and four `.env` keys are still there, and the
+  way back past phase 4 needs them, until you retire them (`deploy/README.md`,
+  "Retiring the old identity provider's data").
 
 ## 3. TLS
 
@@ -412,12 +286,14 @@ Set `OFFSITE` in `/etc/it-suite/backup.conf` so a copy leaves this host. The
 timers do **not** cover the key material below; those items stay manual and
 go somewhere other than the database backups.
 
-- **`its-secrets` volume — the audit HMAC key, and now more than that.**
+- **`its-secrets` volume — the audit HMAC key, and more than that.**
   Restoring the database without it makes the entire audit chain permanently
-  unverifiable, and there is no way to recompute it. Since the init job (§2) it
-  also holds the **only** copy of the identity provider's bootstrap-admin
-  password and the two service-client secrets. Back it up **off this host,
-  immediately** after first boot.
+  unverifiable, and there is no way to recompute it. It also holds an AI
+  provider's API key if you configured one, and, on a host upgraded from
+  before own authentication phase 4, the old identity provider's three
+  secret files, which the way back past phase 4 needs until you retire them
+  (`deploy/README.md`, "Retiring the old identity provider's data"). Back it
+  up **off this host, immediately** after first boot.
 - **`its-ca` volume — the client CA root** the gateway admits agents against.
 - **The OpenBao unseal shares and root token** (§4). These are not on the host
   and must not be. **With auto-unseal, also the key file**
@@ -429,11 +305,16 @@ go somewhere other than the database backups.
   ```sh
   cd deploy && ./scripts/backup.sh ~/backups/$(date -u +%FT%H%MZ)
   ```
-  That writes **three** artefacts, and the third is the one a hand-rolled
+  That writes the artefacts below, and the last is the one a hand-rolled
   `pg_dump` misses:
   - `itsuite.dump` — the application database.
-  - `keycloak.dump` — your realm, users and federation config. Losing it
-    locks every operator out even with an intact application database.
+  - `keycloak.dump` — only in the backup `deploy.sh` takes before an
+    upgrade, on a host upgraded from before own authentication phase 4 and
+    while the old identity provider's database exists. The nightly backups
+    leave it out. What takes you back to a release from before phase 4 is
+    the backup taken before that upgrade, whose `alembic_version` is below
+    `0248`, with `keycloak.dump` or without it (`deploy/README.md`,
+    "Rolling back a deployment").
   - `globals.sql` — the cluster's **role definitions**, and therefore the
     roles' **SCRAM password hashes**. `docs/07-backup-restore.md` §2.1: *"It
     is a secret. Encrypt it, or skip it entirely."* `backup.sh` writes it
@@ -496,8 +377,10 @@ application role rewrite the RBAC catalogue. This is what
 `docs/07-backup-restore.md` §3 has said all along.
 
 The `itsuite` restore has been exercised end to end between two clusters
-shaped like this one. **The `keycloak` restore has not been verified beyond
-running** — no realm, user or federation check has been done after one.
+shaped like this one. A `keycloak.dump` (a backup from before own
+authentication phase 4) is restored and checked for tables by the monthly
+drill, and CI's `deploy` job restores one from a pre-upgrade backup and
+checks that a row it wrote came back; nothing past that.
 
 ## 7. Deployment hygiene
 
@@ -507,16 +390,13 @@ running** — no realm, user or federation check has been done after one.
 - **`ITS_VAULT_BACKEND=openbao`.** Left unset it silently defaults to `local`
   — a root key on the container's own disk — which is a real downgrade of
   invariant #3, not a convenience.
-- **`ITS_MULTI_TENANT`**: leave `false` for single-org on-prem. Set `true` only
-  once every account reliably carries the `org` claim; in multi-tenant mode a
-  token without it is rejected outright.
-- **Pin every image.** `openbao`, `minio`, `traefik`, `postgres`, `keycloak`
-  and `redis` (Valkey `8.1.10-alpine` since 2026-09-23) are pinned in
+- **Pin every image.** `openbao`, `minio`, `traefik`, `postgres` and `redis`
+  (Valkey `8.1.10-alpine` since 2026-09-23) are pinned in
   `docker-compose.yml`. Keep it that way: an
   unattended `docker compose pull` that moves a secret store across a major
   version is how first-boot step 3 became impossible in the first place.
-- **Firewall.** Publish only `443` and `8443`. Postgres, Redis, MinIO, OpenBao
-  and Keycloak's HTTP port have no published ports and must stay that way.
+- **Firewall.** Publish only `443` and `8443`. Postgres, Redis, MinIO and
+  OpenBao have no published ports and must stay that way.
 - **`ITMS_BIND_IP`** — leave at `0.0.0.0` on a dedicated host. On a host that
   already runs something else on `:443`, set it to the address ITMS answers on;
   leaving it wildcard there does not degrade gracefully, it stops traefik from

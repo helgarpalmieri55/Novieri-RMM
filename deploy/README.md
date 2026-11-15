@@ -1,8 +1,8 @@
 # Deploying it-suite (on-prem, single node)
 
 **Read [`GO-LIVE.md`](GO-LIVE.md) before this faces anything real.** It lists
-every default that must be changed — secrets, TLS, the Keycloak admin account,
-the OpenBao seal, the audit-chain key backup, database backups.
+every default that must be changed — secrets, TLS, the OpenBao seal, the
+audit-chain key backup, database backups.
 
 ## Status of this runbook
 
@@ -26,36 +26,37 @@ same symptoms if you ever diverge from these versions.
 **What is NOT verified** is marked inline as ⚠ **UNVERIFIED** wherever it
 appears. Nothing else in the first-boot section is a guess.
 
-**Since own authentication phase 1 (2026-11) the console signs in on the
-platform's own screens** -- password and a second factor, a session cookie --
-and not at Keycloak (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
-Since own authentication phase 3 AI apps connect over MCP through the
-platform's own OAuth server too; Keycloak signs nobody in, and phase 4
-removes it. The sections of this
-runbook that describe the console's sign-in through Keycloak -- the
-enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
-predate that change; the runbook is rewritten with the deployment project
-(design §9). Four things phase 1 changed, two phase 2 changed, and one phase
-3 changed, that every deployment needs:
+**Since own authentication phase 4 (2026-11-15) there is no Keycloak.** The
+console and the portal sign in on the platform's own screens -- a password
+and a second factor, or Microsoft, and a session cookie -- since phase 1, and
+AI apps connect over MCP through the platform's own OAuth server since phase
+3 (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`). Own
+authentication phase 4 removed the `keycloak` and `keycloak-init` services,
+their image, their routes and every setting they read. Sections written before
+phase 1 still describe token claims where the platform now reads its own
+session; the runbook is rewritten with the deployment project (design §9).
+What the four phases changed that every deployment needs -- and a host
+upgraded from a release before phase 1 crosses all four at once:
 
-- **`ITS_PUBLIC_CONSOLE_URL` is required for any console sign-in**, and it must
-  be exactly the `https://host[:port]` origin the browser's address bar shows
+- **`ITS_PUBLIC_CONSOLE_URL` is required for any sign-in**, and it must be
+  exactly the `https://host[:port]` origin the browser's address bar shows
   (step 1). Unset, or naming another host, port or scheme, every sign-in write
-  is refused as `csrf` and nobody can sign in -- first boot completes, then the
-  sign-in screen refuses. Passkeys, the reset and invitation links and the
-  recovery command are built from it too. The platform, not Keycloak, now
-  sends invitations and password resets, through **Settings → Email**.
+  is refused as `csrf` and nobody can sign in -- first boot completes, then
+  the sign-in screen refuses. Passkeys, the reset and invitation links, the
+  OAuth server and the recovery command are built from it too. The platform
+  sends invitations and password resets itself, through **Settings → Email**.
 - **`ITS_AUTH_KEYS_BACKEND=openbao` must be in `.env`** (step 3, the sign-in
-  keys). A new `.env` copied from `.env.example` has it; an existing one does
-  not, and without it the api will not start.
+  keys). A new `.env` copied from `.env.example` has it; one from before
+  phase 1 does not, and without it the api will not start.
 - **Phase 1 installs on a fresh database.** Design P7: "no hay datos que
-  conservar" -- there are no Keycloak users to migrate. Migration 0245 is safe
-  on a populated database (it only creates tables), but an existing technician
-  has no password row and **no path to one**: forgot-password needs an existing
-  password, an invitation refuses an address that already has an account, and
-  the recovery command keeps the password as it is. First boot (step 8) mints
-  the one `org-admin`, who sets their password on the setup screen; every
-  other technician is invited from **Settings → Users**.
+  conservar" -- no account carries over from the old identity provider.
+  Migration 0245 is safe on a populated database (it only creates tables),
+  but on a host upgraded from before phase 1 an existing technician has no
+  password row and **no path to one**: forgot-password needs an existing
+  password, an invitation refuses an address that already has an account,
+  and the recovery command keeps the password as it is. First boot (step 8)
+  mints the one `org-admin`, who sets their password on the setup screen;
+  every other technician is invited from **Settings → Users**.
 - **A super-admin is never invited** (no organization can grant the role, so
   none can invite or re-invite its holder), and an account without a password
   has no way to get one: forgot-password needs an existing password and a
@@ -73,20 +74,35 @@ predate that change; the runbook is rewritten with the deployment project
   the line.
 - **Sign in with Microsoft is configured in the console**, not in `.env`:
   see [Sign in with Microsoft](#sign-in-with-microsoft-own-authentication-phase-2).
-  The `ENTRA_*` lines of `.env.example` are Keycloak's and are not read by it.
 - **Phase 3 moves MCP onto the platform's own OAuth server**
   ([AI connections (MCP)](#ai-connections-mcp)). A `.env` that already holds
-  `ITS_MCP_REGISTRATION=open` -- step 2 of the connection steps while
-  Keycloak was MCP's authorization server -- now also opens the platform's
-  own anonymous registration (`POST /oauth/register`, advertised as
-  `registration_endpoint`) whenever MCP is on. Claude and Claude Code no
-  longer need it, because the platform reads their client metadata
-  documents: delete the line unless another app needs it (step 7 of
-  "Turning it on"), with `sed -i '/^ITS_MCP_REGISTRATION=/d' .env`, and
-  deploy. And every connector made through Keycloak stops working (401):
-  each person removes the connector, adds it again and approves on the
-  console's consent page, with their second factor confirmed in the last
+  `ITS_MCP_REGISTRATION=open` -- step 2 of the connection steps before phase
+  3 -- now opens the platform's own anonymous registration (`POST
+  /oauth/register`, advertised as `registration_endpoint`) whenever MCP is
+  on. Claude and Claude Code no longer need it, because the platform reads
+  their client metadata documents: delete the line unless another app needs
+  it (step 7 of "Turning it on"), with `sed -i '/^ITS_MCP_REGISTRATION=/d'
+  .env`, and deploy. And every connector made before phase 3 stops working
+  (401): each person removes the connector, adds it again and approves on
+  the console's consent page, with their second factor confirmed in the last
   ten minutes.
+- **The first upgrade past phase 4 starts with `git pull`**, then
+  `./scripts/deploy.sh` ([Upgrading an existing
+  deployment](#upgrading-an-existing-deployment) says why).
+- **An existing `.env` keeps the old identity provider's keys**, which
+  `scripts/deploy.sh` names on every run. Nothing in this release reads them,
+  but the release before phase 4 does not start without four of them, so
+  **keep them** until you close that way back in [Retiring the old identity
+  provider's data](#retiring-the-old-identity-providers-data).
+  `ITS_DEFAULT_ORG_SLUG` is not one of them: keep it.
+- **A host upgraded from before phase 4 still has the old identity
+  provider's database and three secret files.** Nothing in this release uses
+  them. The way back past phase 4 is the backup taken before that upgrade:
+  the newest `~/backups/pre-upgrade-*` whose `alembic_version` is below
+  `0248` ([Rolling back a deployment](#rolling-back-a-deployment)). The
+  nightly and off-site backups leave the database out from phase 4 on. They
+  all stay until you remove them, when you choose: [Retiring the old identity
+  provider's data](#retiring-the-old-identity-providers-data).
 
 ---
 
@@ -146,8 +162,8 @@ fails authentication.
 
 - An `A` record for the host — this runbook uses **`itms.toeshee.com`**
   throughout. Substitute yours everywhere, including in `.env`
-  (`ITS_OIDC_ISSUER`, `ITS_GATEWAY_URL`, `ITS_GATEWAY_RELAY_URL`) and in the
-  gateway certificate (step 6).
+  (`ITS_PUBLIC_CONSOLE_URL`, `ITS_GATEWAY_URL`, `ITS_GATEWAY_RELAY_URL`) and in
+  the gateway certificate (step 6).
 - Inbound **443** and **8443**. Nothing else — every other service is internal
   to the compose network with no published port. Both ports must be reachable
   **from every managed endpoint**, not only from operators: `8443` is the agent
@@ -228,14 +244,13 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Set every `change-me`. Five you generate now; **two you cannot know yet** —
+Set every `change-me`. Four you generate now; **two you cannot know yet** —
 `ITS_OPENBAO_TOKEN` and `OPENBAO_TOKEN` come out of step 3 and are filled in at
 step 3.5. Leave them as `change-me` for now: Compose only requires them to be
 non-empty, so the literal `change-me` gets you through steps 2 and 3.
 
 ```sh
-for v in POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD \
-         KEYCLOAK_ADMIN_PASSWORD MINIO_ROOT_PASSWORD; do
+for v in POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD MINIO_ROOT_PASSWORD; do
   sed -i "s|^$v=change-me$|$v=$(openssl rand -base64 24 | tr -d '=+/')|" .env
 done
 sed -i 's/your-host/itms.toeshee.com/g' .env
@@ -321,10 +336,10 @@ docker compose up -d postgres
 
 First boot runs `postgres/init-app-user.sh`, which creates `app_user` and
 `portal_user` (both NOSUPERUSER, NOBYPASSRLS), grants `its_admin` BYPASSRLS
-(the migration/bootstrap role), creates the `keycloak` database, and installs
-`app_user`'s standing `ALTER DEFAULT PRIVILEGES` so any table a future
-migration adds is usable with no manual step. No table exists yet, so `app_user`
-cannot use anything yet either — **step 4b is not optional**.
+(the migration/bootstrap role), and installs `app_user`'s standing `ALTER
+DEFAULT PRIVILEGES` so any table a future migration adds is usable with no
+manual step. No table exists yet, so `app_user` cannot use anything yet
+either — **step 4b is not optional**.
 
 ```sh
 docker compose logs postgres | grep -E 'CREATE ROLE|ALTER DEFAULT|CREATE DATABASE'
@@ -337,7 +352,6 @@ postgres-1  | CREATE ROLE
 postgres-1  | CREATE ROLE
 postgres-1  | ALTER DEFAULT PRIVILEGES
 postgres-1  | ALTER DEFAULT PRIVILEGES
-postgres-1  | CREATE DATABASE
 Up 15 seconds (healthy)
 ```
 
@@ -529,12 +543,13 @@ the `gateway` role (the gateway's own server certificate). The credential vault
 (`ITS_VAULT_BACKEND=openbao`) reuses the same `transit` mount for its per-org
 keys, created on first use — nothing extra to provision.
 
-⚠ **UNVERIFIED — this paragraph has not been run against a live OpenBao.** No CI
-job runs `openbao-init` or starts the api against OpenBao (the `deploy` job
-starts postgres, keycloak and traefik), and no report has run transit `hmac`
-with an `hmac`-type key, or `sign` with `marshaling_algorithm=jws`, live. The
-code (`backend/app/core/auth/keys.py`) was written and reviewed against
-OpenBao 2.6.1's source; that is read, not run.
+**Run in CI since own authentication phase 4.** The `deploy` job initialises
+OpenBao (one share), loads `its-app`, runs `openbao-init` and starts the api
+against it, then signs a person in and connects an AI app end to end through
+Traefik (`deploy/ci/mcp_flow.py`): transit `hmac` with the `auth-pepper` key
+and `sign` with `auth-signing` run live there. Five shares, the unseal by
+hand and a host reboot have still only been run by the people who wrote
+this section.
 
 Since own authentication phase 1 it also creates two transit keys for sign-in:
 `auth-pepper` (HMAC, the versioned pepper every password verifier is
@@ -739,7 +754,6 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 SERVICE           STATUS
 api               Up 15 seconds
 gateway           Up 22 seconds
-keycloak          Up 26 seconds
 migrate           Exited (0) 23 seconds ago
 minio             Up 26 seconds (healthy)
 openbao           Up About a minute (healthy)
@@ -752,7 +766,7 @@ web               Up 26 seconds
 worker            Up 15 seconds
 ```
 
-The four `Exited (0)` services are the one-shot jobs; that is success.
+The three `Exited (0)` services are the one-shot jobs; that is success.
 
 **Verify Traefik actually picked up your certificate.** The fallback to a
 self-signed certificate is silent:
@@ -807,37 +821,10 @@ piping Python into `docker compose exec`, inserting the organization row by SQL,
 and granting the role by a second SQL statement.** All three now happen in one
 transaction behind one screen, through the same service code the Users tab uses.
 
-First confirm the realm imported and the init job finished:
-
-```sh
-docker compose logs keycloak | grep -i "imported"
-docker compose ps -a keycloak-init      # Exited (0)
-```
-
-```
-keycloak-1  | Realm 'it-suite' imported
-```
-
-**A non-zero `keycloak-init` means the setup screen will refuse**, because the
-credential it creates accounts with does not exist yet. Re-run it — it is
-idempotent — before going further:
-
-```sh
-docker compose up keycloak-init
-```
-
-> **Superseded by own authentication (phase 1).** The setup screen now sets the
-> administrator's password on the screen itself and sends **no mail**; the first
-> sign-in enrols the second factor. Keycloak SMTP is not needed for first boot,
-> and the paragraph below, and step 9's enrolment mail, describe the old flow.
-> Account mail (invitations, resets) is configured afterwards in ITMS at
-> **Settings → Email**.
-
-**Configure email first if you can.** The screen below finishes by *emailing* the
-administrator it creates, and an installation with no working SMTP finishes it
-with a detour through the break-glass tunnel. [Keycloak
-SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all) below is ten
-minutes and removes that entirely.
+The setup screen sets the administrator's password itself and sends **no
+mail**; the first sign-in enrols the second factor (step 9). Account mail
+(invitations, password resets) is configured afterwards in ITMS at
+**Settings → Email**.
 
 Then:
 
@@ -853,7 +840,8 @@ Then:
    docker compose logs api | grep -i "install code"
    ```
 
-3. **Enter it**, with your name, email and organization name.
+3. **Enter it**, with your name, email, organization name and the password you
+   will sign in with (12 characters at least).
 
 That creates the organization, the administrator account and its `org-admin`
 grant **in one transaction** — either all three or none — and writes every part
@@ -861,10 +849,10 @@ of it to the hash-chained audit log.
 
 **The organization's slug is `ITS_DEFAULT_ORG_SLUG` from `.env`** — `toeshee`
 in the shipped example — not something you type, and not derived from the name
-you enter unless that setting is blank. That is deliberate:
-`app/core/security.py` resolves a token with no `org` claim to that slug, which
-is every token on a single-organization installation, and an organization
-created under any other slug is one its own administrator cannot sign in to.
+you enter unless that setting is blank. That is deliberate: the sign-in, the
+OAuth server for AI apps and the recovery command all look people up in that
+one organization, and an organization created under any other slug is one its
+own administrator cannot sign in to.
 
 **The install code is the only thing between a stranger and this box.** An
 appliance answers on the network long before its owner sits down at it, and this
@@ -872,57 +860,20 @@ screen must answer before any user exists, so it cannot be gated by a permission
 Zero users alone is not a guard. Claim it promptly, from a browser you trust, and
 treat the code as a password until you have.
 
-### Step 9 — Finish enrolment and sign in
+### Step 9 — Sign in, and enrol your second factor
 
-**Setup does not sign you in, and that is deliberate rather than unfinished.**
-ITMS issues no session and holds no password; the account step 8 created has no
-credential at all yet. The identity provider mails an **enrolment link** —
-choose a password, enrol a passkey, then sign in normally.
+Setup does not sign you in. Open `https://itms.toeshee.com/sign-in` and sign
+in with the address and the password you gave the setup screen. The first
+sign-in asks for a second factor before anything else -- an authenticator
+app (TOTP) or a passkey -- and then shows ten recovery codes, once. Keep them
+where you keep the OpenBao shares: an administrator who loses every factor
+needs one, or the [recovery
+link](#recovery-link-an-administrator-who-lost-every-second-factor).
 
-So the last screen of setup says one of two things:
-
-| It says | What it means |
-|---|---|
-| "Check that inbox for a link to choose a password, then sign in." | the mail was **accepted for delivery**. Not "arrived" — a relay can accept and still drop it silently |
-| "The invitation email could not be sent…" | nothing is configured to send mail. The organization, the account and the grant all exist and are fine; there is simply no way to reach you |
-
-**If the invitation could not be sent** — the expected outcome if you skipped the
-SMTP step above — **re-running setup will not help.** The installation is
-claimed, the screen is gone, and the claim route now answers "this installation
-has already been set up". Recovery is vendor-side, through the tunnel in
-[Break-glass: the identity admin
-console](#break-glass-the-identity-admin-console-vendor-only):
-
-- **Fix the cause, then re-send** (prefer this). Configure [Keycloak
-  SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all), then in
-  the same console: **Users →** your account **→ Credentials → Credential
-  Reset**, actions `Update Password` and `webauthn-register-passwordless`,
-  **Send email**. That is the identical mail setup tried to send.
-- **Get in first, fix it from inside**, if mail will take a while. Same console:
-  **Users →** your account **→ Credentials → Set password**, **Temporary: On**.
-  Sign in with it, then configure delivery in ITMS itself at **Settings →
-  Email**, so no later account ever needs this tunnel.
-
-Two things about **federated** accounts, which cost an afternoon each if you meet
-them later rather than here:
-
-- **Any attribute not declared in the realm's user profile is silently
-  discarded** by Keycloak 26 — 201 Created, attribute gone. `org` is declared in
-  `keycloak/realm-it-suite.json` under `components` →
-  `org.keycloak.userprofile.UserProfileProvider`. Do not remove it.
-- **`kcadm.sh ... -s 'attributes.org=toeshee'` silently does nothing.** It
-  returns success and stores no attribute. Use the Admin REST API instead.
-
-**`https://itms.toeshee.com/admin/` no longer reaches anything, and that is
-the fix rather than the fault.** The identity provider's admin console can
-create any user and reset any password in the fleet, so it is not routed on the
-product's public hostname; Traefik forwards only what sign-in needs. Federating
-AD/Entra and every other realm-level task is **VENDOR-ONLY** and goes through
-the tunnel in [Break-glass: the identity admin
-console](#break-glass-the-identity-admin-console-vendor-only) below.
-
-⚠ **UNVERIFIED**: no browser session, no login and no AD/Entra federation has
-been exercised against that console — through the tunnel or before it.
+There is no identity admin console behind this product any more. Everything
+an administrator does with accounts -- inviting, disabling, resetting second
+factors, signing someone out everywhere -- is in **Settings → Users**, and
+Microsoft sign-in is in **Settings → Microsoft sign-in**.
 
 ### Step 10 — Confirm you really are an administrator
 
@@ -1123,398 +1074,7 @@ The link is printed on stdout and the same warning on stderr. It needs
 `ITS_PUBLIC_CONSOLE_URL` and `ITS_DEFAULT_ORG_SLUG`; without either it prints
 `refused: ...` and exits 1.
 
-## Break-glass: the identity admin console (VENDOR-ONLY)
-
-**This is not an operator task and it is not part of normal operation.**
-Everything a customer does day to day — adding a person, resetting a password,
-configuring email, branding sign-in — belongs in ITMS itself. Reaching for this
-section to do routine work is a product gap worth filing, not a workaround
-worth repeating.
-
-**The identity admin console is no longer routed on `:443`, deliberately.**
-`deploy/docker-compose.yml` routes only `/realms`, `/resources` and `/js` to
-the identity container: what sign-in needs, and nothing else. `/admin` used to
-be in that list and was removed, because that console can create any user and
-reset any password in the fleet — the whole estate's authority in one page,
-behind one password, on the same hostname the product answers on.
-`backend/tests/test_public_surface.py` pins both halves of the decision, so
-re-adding the prefix fails the suite instead of shipping quietly, and removing
-one of the other three fails it too.
-
-This supersedes GO-LIVE's "restrict `/admin` to an admin network or VPN before
-go-live". There is nothing left on `:443` to restrict.
-
-### Realm drift: what reaches an existing host, and what never does
-
-Keycloak starts with `--import-realm`, which **skips a realm that already
-exists**, so `deploy/keycloak/realm-it-suite.json` is imported once per host.
-Everything after that reaches a running realm only through `keycloak-init`,
-which `./scripts/deploy.sh` runs on **every** deploy. It converges an explicit
-allowlist, writing only what differs, and nothing else
-(`deploy/keycloak/init-clients.py`):
-
-| Owned by the repo (converged every deploy) | Where it is listed |
-|---|---|
-| `loginTheme`, `internationalizationEnabled`, `supportedLocales`, `defaultLocale`, `displayName`, `displayNameHtml`, `editUsername`, `registrationAllowed`, `bruteForceProtected`, every `webAuthnPolicyPasswordless*` key the file sets | `CONVERGED_REALM_KEYS` |
-| `enabled` and `defaultAction` of every required action the file lists, in both directions | `required_actions_to_update` |
-| `account-console.enabled` (off), `account.enabled` (on), `it-suite-web` redirect URIs, `rootUrl`, `directAccessGrantsEnabled`, PKCE and post-logout attributes | `CONVERGED_CLIENTS` |
-| the `browser-passkey` flow, bound only if a password path survives | `converge_passkey_flow` |
-
-**Never written by the job**, whatever the file says: `smtpServer` (Settings →
-Email owns it), the event-log settings, users, identity providers and any key
-not in the table. `RUNTIME_OWNED_REALM_KEYS` names the ones a test keeps off
-the allowlist. To make the repo own a new setting, add it to the file **and**
-to the allowlist; a key in the file alone reaches new installs only.
-
-**Check what a deploy changed:**
-
-```sh
-cd /opt/it-suite/deploy
-docker compose logs keycloak-init | grep 'identity init'
-```
-
-`realm keys converged=nothing`, `updated=nothing` and `clients
-corrected=nothing` mean the host already matched. The first deploy with this
-job closes an account console that is still open and prints
-`clients corrected=['account-console']`.
-
-### The account console is closed at the realm, not at the router
-
-`/admin` could be dropped from the routing rule. The **account console** could
-not: it lives at `/realms/it-suite/account`, under the one prefix sign-in cannot
-do without, so removing it by path would take the login pages and the OIDC
-endpoints with it.
-
-It is therefore closed one level down — `deploy/keycloak/realm-it-suite.json`
-ships the built-in `account-console` client **disabled**. Nothing can enter that
-portal, because the browser's authorization request names a client the realm
-refuses. Everything it used to be needed for — set a password, add or replace an
-MFA device, register a passkey — is a button on the ITMS profile page, which runs
-exactly that one step on the same sign-in pages and returns the user to the page
-they left.
-
-Two consequences worth knowing before you go looking for them:
-
-- The realm also declares the `account` client, deliberately, and leaves it
-  **enabled**. That is not an oversight: the admin API resolves it as the system
-  client for the action-token mail that enrols a user and resets a password. The
-  pair is declared together because declaring only one of them makes the realm
-  **unimportable** — Keycloak creates its own built-in pair when the file has no
-  `account` client, and then collides with the file's `account-console` on a
-  duplicate client id. `backend/tests/test_console_auth_realm.py` pins that,
-  because the failure surfaces as a container that will not start, days later, on
-  an unrelated `docker compose up -d`.
-- End users no longer hold the `account` client's roles, so the account REST API
-  answers them with a refusal as well. Nothing in ITMS calls it.
-
-**Break-glass, if a vendor ever needs that portal:** inside the SSH tunnel,
-Admin console → **Clients → `account-console` → Enabled → Save**. Turn it back
-off afterwards; a customer who finds it has found a second product.
-
-### Reaching it anyway
-
-The identity container publishes **no host port**, so there is no
-`localhost:8080` on the server to forward to. The tunnel forwards to the
-container's own address on the compose network, which the SSH server resolves
-for you.
-
-```sh
-# 1. On the server, in /opt/it-suite/deploy: the container's address on the
-#    compose network.
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-  "$(docker compose ps -q keycloak)"
-```
-
-```
-172.18.0.7
-```
-
-```sh
-# 2. From your workstation: forward a local port to that address. Nothing is
-#    published on the server and nothing is opened to the internet — the
-#    forward lives and dies with this SSH session.
-ssh -N -L 8080:172.18.0.7:8080 you@itms.toeshee.com
-```
-
-Then browse **`http://127.0.0.1:8080/admin/`** while that session stays open and
-sign in with `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` from `.env`.
-`--hostname-strict=false` in the container's command is why the console answers
-on a hostname it was never configured with; without it the console would
-redirect you to the public name and straight back out of the tunnel.
-
-**Close the tunnel when you are finished, because the tunnel is the access
-control** — the only one. That account has no second factor and there is no
-network boundary behind it.
-
-The container's address changes whenever the stack is recreated (any
-`docker compose up -d` after an upgrade), so re-run step 1 each time. A stale
-address presents as a tunnel that connects and then hangs, not as an error.
-
-If you need to run a command rather than click one, skip the tunnel entirely —
-this needs no forwarding at all:
-
-```sh
-docker compose exec keycloak /opt/keycloak/bin/kcadm.sh --help
-```
-
----
-
-## Branding and extending sign-in (VENDOR-ONLY)
-
-> **Not the console's sign-in any more.** Since own authentication phase 1 the
-> console signs in on the platform's own screens. What follows is Keycloak's
-> login page, which nobody meets since own authentication phase 3 (AI apps
-> approve on the console's own consent page); it goes in phase 4.
-
-> **Every "Admin console →" step in this section runs inside the SSH tunnel
-> above, not on the public hostname.** The console is not routed on `:443`;
-> `https://itms.toeshee.com/admin/` answers with the ITMS console's own
-> catch-all, not with an identity provider. Open the tunnel first, then read
-> "Admin console →" as `http://127.0.0.1:8080/admin/`.
-
-**Realm import runs only against an empty database,** and that fact used to
-own this section: everything in `deploy/keycloak/realm-it-suite.json` applied
-at first boot, editing it on a running install changed nothing, and what
-followed here was a list of the same changes re-entered by hand in a second
-admin console.
-
-**Most of that is now the `keycloak-init` job's work** (2026-08-20). It reads
-the same realm file Keycloak imports — bind-mounted read-only — and converges
-an **allowlist** of realm state onto a realm the import will never touch
-again, on every `docker compose up`:
-
-| Converged automatically | Where it comes from |
-|---|---|
-| Registered + enabled required actions | the file's `requiredActions`, honouring each entry's own `enabled` |
-| Login theme | `loginTheme` |
-| WebAuthn passwordless policy | every `webAuthnPolicyPasswordless*` key |
-| Whether a user may change their own username | `editUsername` |
-| `it-suite-web`'s `rootUrl`, `redirectUris`, post-logout URIs | that client's entry |
-
-> **Superseded by own authentication (phase 1)** for Settings → Email: it no
-> longer writes the realm. The relay's password or client secret is stored in
-> ITMS's vault (Settings → Email), ITMS fetches the Microsoft token itself and
-> sends the mail. The allowlist below still keeps a hand-set realm SMTP block.
-
-**An allowlist, not the whole representation, and the reason is worth
-knowing.** `Settings → Email` writes the realm's `smtpServer` through the same
-`manage-realm` grant this job holds. A convergence that carried the file's
-whole realm would revert your mail configuration on every deploy, and the
-symptom — "email stopped working again" — names nothing that leads back to the
-upgrade. `backend/tests/test_keycloak_init_job.py::test_the_smtp_block_is_never_converged`
-is the guard on that list.
-
-**What this fixed, concretely.** On the first live deployment, *Change
-password* and *Add a passkey* in the console's profile page did nothing: the
-page reloaded and returned. The realm file that built that install listed one
-required action, and Keycloak's import does not merge a supplied
-`requiredActions` array with the defaults — if it is present, it *is* the set.
-`kc_action` naming an action the realm has not registered is ignored. Sign-out
-dead-ending on "Invalid redirect uri" was the same fact: the live client still
-carried `redirectUris: ["https://*/auth/callback"]`, and a wildcard is honoured
-only as a trailing `*`.
-
-Two things below are still **by hand**, and neither is an oversight — see each.
-
-### 0. Check the flow after any theme change — and how to get back
-
-**A FreeMarker error in a login template answers 500, and nobody can sign in
-— including you.** On a deployment with one administrator that is a lockout,
-and it is reached by a typo. The templates are written without a Keycloak to
-render them against (`backend/tests/test_console_auth_realm.py` checks that
-every block directive closes and that every `itms-` class has a rule, which
-catches the gross cases and proves nothing about whether a page renders).
-
-So after any deploy that touches `deploy/keycloak/themes/`:
-
-1. **Keep your current session open.** Do the check in a private window, so a
-   broken page cannot take your only authenticated tab with it.
-2. Walk the flow: sign in (password → authenticator code), then from the
-   console's profile page run **Change password** and **Manage MFA device**.
-3. If a page 500s or renders wrong, the theme is a bind-mount and the rollback
-   is two commands:
-
-```sh
-cd /opt/it-suite && git checkout HEAD~1 -- deploy/keycloak/themes/
-cd deploy && docker compose restart keycloak
-```
-
-**`cd deploy` is not optional and its absence broke this rollback in anger.**
-`docker-compose.yml` lives in `deploy/`, so running `docker compose` from the
-repository root answers `no configuration file provided: not found` — which,
-read at speed with a broken login page in the other window, looks like the
-rollback itself failing rather than the shell being in the wrong directory.
-
-That reverts the templates and nothing else — no image rebuild, no migration,
-no restart of the application. `git checkout <last-good-sha> -- deploy/keycloak/themes/`
-if you need to go further back than one commit.
-
-### 1. The ITMS login theme — automatic
-
-Converged from the realm file's `loginTheme`; the theme itself is mounted at
-`./keycloak/themes:/opt/keycloak/themes:ro`. Nothing to do but deploy.
-
-**It styles the whole flow as of 2026-08-20, not just the first page.**
-`parent=base` gives the theme templates and no styling at all, so until that
-date exactly one page was branded — `login.ftl` — and every other page a user
-reaches rendered as bare HTML on a grey background: the authenticator code on
-every sign-in, enrolling a device, changing a password, and the three pages you
-land on when something goes wrong. The operator photographed the code step one
-day after go-live. Seven templates are themed now; the two WebAuthn pages are
-deliberately left on base (they carry live JavaScript that must not be copied
-without a real Keycloak to test against) and a test holds that decision in
-place.
-
-To apply it to a realm that predates the convergence job, run the job:
-
-```sh
-docker compose up keycloak-init
-docker compose restart keycloak
-```
-
-Check it in a private window at `https://itms.toeshee.com/` — the console has
-no launcher of its own, so an unauthenticated visit redirects straight to the
-sign-in page, which is what the login theme actually styles.
-**An unbranded page means the mount is missing** — Keycloak falls back to its
-own theme silently and logs nothing about it.
-
-> This check used to say `/realms/it-suite/account`, the account console. That
-> URL no longer renders a usable page: the `account-console` client is shipped
-> **disabled** in the realm (see the break-glass section above), so the browser's
-> authorization request for it is refused. Checking branding there would now
-> tell you nothing about the theme, and the sign-in page is the honest test
-> anyway — it is the page every user sees.
-
-### 2. Passkeys — policy automatic, sign-in flow by hand
-
-The **policy** and the **enrolment required action** are converged from the
-realm file, so *Add a passkey* on the profile page works after a deploy:
-
-| Field | Value | Converged? |
-|---|---|---|
-| Relying Party Entity Name | `ITMS` | yes |
-| Signature Algorithms | `ES256`, `RS256` | yes |
-| Attestation Conveyance Preference | `none` | yes |
-| Require Discoverable Credential | `Yes` | yes |
-| User Verification Requirement | `required` | yes |
-| `webauthn-register-passwordless` registered and enabled | — | yes |
-
-**Both halves are automatic as of 2026-08-20**, and this section's warning has
-changed rather than gone away. `keycloak-init` copies the stock `browser` flow
-to `browser-passkey`, adds the WebAuthn passwordless authenticator as an
-**ALTERNATIVE** beside the existing legs, and binds it.
-
-**Why an operator should still read this.** Binding a browser flow is the most
-dangerous write this platform makes: a flow that refuses everybody refuses the
-account that would repair it, and the way back is `kcadm.sh` inside the
-container. Four things contain that, and the third is the one that matters:
-
-1. the flow is a **copy** of Keycloak's own, so the password leg is what the
-   vendor shipped rather than a graph reconstructed by us;
-2. passkey is an **alternative beside** the password form, never in front of
-   it, so a WebAuthn execution that cannot run falls through;
-3. the job **refuses to bind** unless it can see a reachable password
-   alternative in the flow it just built — a measurement of the result, not a
-   precaution taken while writing (`password_alternative_survives`, and note
-   that a password form nested inside a DISABLED subflow does not count);
-4. a realm already bound to this flow is left alone, so the daily deploy is not
-   rewriting the mechanism every account depends on.
-
-**Check it in a private window with your session still open**, as with any
-theme change. If sign-in misbehaves, unbind without a shell in the container:
-
-```sh
-docker compose exec -e PGPASSWORD="$(grep '^POSTGRES_ADMIN_PASSWORD=' .env | cut -d= -f2-)" \
-  postgres psql -U its_admin -d keycloak \
-  -c "UPDATE realm SET browser_flow = (SELECT id FROM authentication_flow
-       WHERE alias = 'browser' AND realm_id = (SELECT id FROM realm WHERE name = 'it-suite'))
-      WHERE name = 'it-suite';"
-docker compose restart keycloak
-```
-
-That puts the realm back on the stock browser flow — password and OTP, no
-passkey — which is where it was before this feature existed.
-
----
-
-**The older manual route, kept because it is still how you would inspect what
-the job built:** **Authentication → Flows → browser → Duplicate**
-(call it `browser-passkey`), add a **WebAuthn Passwordless Authenticator**
-execution as an **Alternative** beside the Username/Password form, and only then
-bind it as the realm's Browser flow.
-
-> **Test it with a real authenticator before you bind it.** Binding a broken
-> browser flow locks every account out of the console, including yours, and the
-> only recovery is `kcadm.sh` inside the Keycloak container. This is why the
-> flow is neither in the committed realm JSON nor in the convergence
-> allowlist — a wrong `authenticationFlows` graph does not fail loudly, it
-> fails by locking you out, and a job that re-applied it on every deploy would
-> do so unattended at 3am.
-
-`User verification: required` is deliberate. It makes the passkey two factors on
-its own — the authenticator, plus the PIN or biometric that unlocks it — which
-is why a passkey sign-in does **not** additionally prompt for TOTP. Password
-sign-in still does.
-
-The consequence worth stating: **an account with a passkey and no TOTP is
-protected only as well as that one authenticator.** Lose the phone, lose the
-account, and recovery is an admin resetting credentials. Keep TOTP enrolled as
-well on anything holding `org-admin` or `super-admin`.
-
-### 3. Sign in with Microsoft — by hand, for now
-
-Not converged, because the client secret is the obstacle: it cannot live in
-the realm file (it would be a credential in git), so the identity provider
-cannot be expressed there in full. Converging it means teaching the job to
-read `ENTRA_CLIENT_SECRET` and create the provider and its `org` mapper — a
-cycle of its own, tracked in the UX remediation programme's backlog.
-
-In Entra: register an application, add the redirect URI
-
-```
-https://itms.toeshee.com/realms/it-suite/broker/microsoft/endpoint
-```
-
-and mint a client secret.
-
-Admin console → **Identity providers → OpenID Connect v1.0**:
-
-| Field | Value |
-|---|---|
-| Alias | `microsoft` — **must match**, the redirect URI above contains it |
-| Discovery endpoint | `https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration` |
-| Client ID | the Entra application (client) id |
-| Client authentication | `Client secret sent as post` |
-| Client Secret | yours, from `.env` (`ENTRA_CLIENT_SECRET`) — **type it here, never into the realm JSON** |
-| Trust Email | **Off** |
-| First login flow | `first broker login` |
-
-Then **Mappers → Add mapper → Hardcoded attribute**: attribute `org`, value your
-org slug (the same one as `ITS_DEFAULT_ORG_SLUG` in `.env`).
-
-**The mapper is not optional, and its absence is masked.** With
-`ITS_MULTI_TENANT=false` a federated user carrying no `org` attribute falls back
-to the default org — so sign-in *works*, and every Microsoft account silently
-lands in one tenant. Verify the **claim**, not the login. The console page
-used to hold a Keycloak token that could be decoded in the browser's devtools;
-since own authentication phase 1 it holds none (its session is an `HttpOnly`
-cookie naming a server-side session), and since own authentication phase 3 no
-token Keycloak issues is accepted anywhere, so no token carries the claim to
-check; the devtools one-liner that read it from the console's session storage
-is gone with that token.
-
-**Trust Email off is deliberate.** With it on, a Microsoft identity that merely
-claims an existing user's email address is linked to that account
-automatically — whoever controls that name at the IdP inherits the local
-account's roles.
-
----
-
 ## Sign in with Microsoft (own authentication, phase 2)
-
-**This replaces "3. Sign in with Microsoft — by hand, for now" above for the
-console and the portal.** Since own authentication phase 3 that section
-concerns nobody: Keycloak signs nobody in, and phase 4 removes it.
 
 In Microsoft Entra ID, register **one** application for this installation:
 
@@ -1627,13 +1187,10 @@ What follows the choice:
 - the messages the server writes: errors, refusals and confirmations;
 - notification emails, which go out in the **recipient's** own language. An
   address that is not a user of that organization gets English;
-- the Keycloak sign-in pages and Keycloak's own emails (invitations, password
-  resets). For these, the realm must have languages turned on. `keycloak-init`
-  does this on every deploy (`internationalizationEnabled`, `supportedLocales`,
-  `defaultLocale`; see the table above). Changing language in the console also
-  writes the person's Keycloak `locale` attribute. If that write fails, the
-  console setting is still saved, and the person sees a note saying the sign-in
-  pages were not updated.
+- the sign-in pages and the account emails (invitations, password resets),
+  which the platform serves and sends itself: the emails in the person's own
+  language, the sign-in pages in this browser's last choice or, failing that,
+  the browser's own language.
 
 What stays English, on purpose:
 
@@ -1654,227 +1211,7 @@ everywhere.
 
 ---
 
-## Forwarding Keycloak's credential events
-
-**Optional, and the deployment tells you which way you chose.** A passkey
-registered, a passkey removed, a Microsoft identity linked to an account — each
-is a new way into a privileged account, and each is recorded by Keycloak in a
-log that is not tamper-evident and not the one an auditor reads. Turning this
-on copies those four events into ITMS's hash-chained audit log, hourly.
-
-> **VENDOR-ONLY.** Every "Admin console →" step below runs inside the SSH
-> tunnel in [Break-glass: the identity admin
-> console](#break-glass-the-identity-admin-console-vendor-only). That console is
-> not routed on `:443`.
-
-Leave it off and nothing breaks: the sweep is a no-op and **Platform → Status**
-reports `keycloak_events` as `ok` with `configured: false`. That wording is
-deliberate — you have not broken anything, but the gap is on the page rather
-than nowhere.
-
-**What this does not make true.** Keycloak's own log remains the source. A
-Keycloak compromised *before* a sweep runs can drop an event this will never
-see, and nothing here makes that absence detectable. Forwarding puts the events
-that are emitted into a tamper-evident chain; it does not make the emitter
-trustworthy.
-
-### 1. Turn the event log on — it is OFF by default
-
-Admin console → **Realm settings → Events**.
-
-| Tab | Setting | Value |
-|---|---|---|
-| User events config | Save events | **On** |
-| User events config | Expiration | at least `2 days` (the sweep's own window is 30 days; this is Keycloak's, and it must outlive an outage) |
-| Admin events config | Save events | **On** |
-
-**Without this the feature has nothing to read and sits at "configured, zero
-events" for ever** — a status page that looks healthy and a chain that stays
-empty. Check the **User events** tab shows rows before going further.
-
-### 2. The service-account client — already created for you
-
-`deploy/keycloak/init-clients.py` runs as the `keycloak-init` job on every
-`docker compose up` and creates this client, so there is nothing to click:
-
-| Field | Value |
-|---|---|
-| Client ID | `it-suite-events` — matches `ITS_KEYCLOAK_EVENTS_CLIENT_ID` |
-| Client authentication | **On** (confidential) |
-| Authentication flow | **Service accounts roles** only — standard flow and direct access grants both off |
-| Role | from `realm-management`: **`view-events`**. Nothing else |
-| Secret | `/var/lib/its/secrets/keycloak-events.secret`, mode 600, written by the same job |
-
-**Only `view-events`, and this is the part that matters.** Not `realm-admin`,
-and not the bootstrap `admin` account from `.env` (`KEYCLOAK_ADMIN_USER` /
-`KEYCLOAK_ADMIN_PASSWORD`): that account can reset any password and create any
-user, which is why the init job **rotates its password away** to a value only
-the secrets volume holds ([`GO-LIVE.md`](GO-LIVE.md) §2). A credential that can
-only *read* an event log has a worst case of an information leak; one that can
-administer the realm has a worst case of every account in it. If a future
-version of this feature needs a second role, that is a change to what this
-credential can do and it is a reviewed decision, not a silent upgrade —
-`backend/tests/test_keycloak_init_job.py` fails if the widening that gave
-`it-suite-provisioning` its second role ever reaches this one.
-
-### 3. The secret, and where it lives
-
-The job writes it to `/var/lib/its/secrets/keycloak-events.secret`, mode 600, on
-the same `its-secrets` volume as the audit HMAC key and for the same reason: the
-worker reads it off disk, and an env var holding a credential is readable by
-`docker inspect` and lands in shell history.
-
-It is re-read and re-written on **every** run, not only on creation, so a
-restore that brought back the database but not the secrets volume is repaired by
-`docker compose up keycloak-init` rather than by a trip to the admin console.
-
-### 4. The settings, which ship correct
-
-```
-ITS_KEYCLOAK_ADMIN_URL=http://keycloak:8080
-ITS_KEYCLOAK_REALM=it-suite
-ITS_KEYCLOAK_EVENTS_CLIENT_ID=it-suite-events
-ITS_KEYCLOAK_EVENTS_SECRET_PATH=/var/lib/its/secrets/keycloak-events.secret
-```
-
-All four are the shipped values in `deploy/.env.example`. `http://keycloak:8080`
-is the in-network address — the sweep runs in the worker container and does not
-need to go out through Traefik — and it is **shared with the provisioning
-client**, so blanking it to turn forwarding off also turns user provisioning off
-and breaks the first-boot setup screen. Turn forwarding off at step 1 instead,
-by leaving the realm's event log off.
-
-```sh
-docker compose up -d worker api
-```
-
-### 5. Check it actually ran
-
-**Platform → Status** should show `keycloak_events` as `ok` with
-`configured: true` within an hour. Until the first sweep completes it reads
-`degraded / stale` with `ever_run: false`, which is the honest answer.
-
-Then prove the whole path rather than the configuration: register a passkey on
-a test account (**Branding and extending sign-in → Passkeys** above), wait for
-the next sweep, and look for `auth.passkey_registered` in the audit log.
-
-```sh
-curl -sS -H "Authorization: Bearer $TOKEN" \
-  "https://itms.toeshee.com/api/v1/audit?action=auth.passkey_registered" | jq
-```
-
-**A configured deployment whose secret file is missing reports `down` /
-`misconfigured`, not `configured: false`.** Those are different failures: the
-second is a choice, the first is a deployment whose operator believes
-forwarding is running.
-
-### What is not covered
-
-* **Only four event types are forwarded**: passkey registered, passkey removed,
-  identity linked, identity unlinked. Not logins — `auth.login` is already
-  written by the API when a token is presented, and forwarding every login in
-  the realm would bury the four that matter.
-* **An event whose Keycloak user does not resolve to an ITMS user is counted,
-  not filed.** The realm is shared by every tenant, and filing one tenant's
-  credential change into another's evidence is worse than not forwarding it.
-  These show in the task's `unresolved` count.
-* **Nothing here has been run against a live Keycloak.** The sweep, the
-  mapping and the dedupe are covered by tests; the HTTP conversation with
-  Keycloak's admin API is not.
-
----
-
-## Keycloak SMTP (before phase 1) — required before user management works at all
-
-> **SUPERSEDED BY THE PRODUCT FOR EVERY DAY BUT THE FIRST.** Email is now
-> **Settings → Email** inside ITMS — host, port, TLS mode, from address,
-> credentials and a test send. **Since own authentication (phase 1) the relay's
-> password is stored in ITMS's vault (Settings → Email)**, encrypted, decrypted
-> only to send and never echoed back; ITMS sends the account mail itself, and
-> the realm is not written. That is where an operator configures delivery, and
-> this section no longer describes their work.
->
-> **Superseded by own authentication (phase 1) for first boot too:** the setup
-> screen sends no mail (step 8), so nothing below is needed to claim an
-> installation.
->
-> **Before phase 1:** it still described yours in exactly one situation, first
-> boot. Settings → Email was behind a sign-in, and on a brand-new installation
-> nobody could sign in until the enrolment mail arrived — which needed SMTP.
-> Configuring it here, once, before [Step 8 — Claim the
-> installation](#step-8--claim-the-installation), broke that circle. Since own
-> authentication phase 1 there is no such circle (the note above).
->
-> **VENDOR-ONLY either way.** The "Admin console →" step below runs inside the
-> SSH tunnel in [Break-glass: the identity admin
-> console](#break-glass-the-identity-admin-console-vendor-only); that console
-> is not routed on `:443`.
-
-**Not optional, and the failure it prevents is unrecoverable from the
-console.** ITMS creates a user in Keycloak and then asks Keycloak to email
-that person an action link so they can set a credential and enrol a passkey.
-A created user has **no credential** until they follow that link. If Keycloak
-cannot send mail:
-
-- the account exists, is enabled, and **nobody can ever sign in to it**;
-- there is **no admin API in Keycloak 26 that returns the action link** for an
-  operator to copy out and pass on by hand — the link is generated inside the
-  send and is not exposed anywhere;
-- the only remedy is to configure SMTP and use the console's **Resend
-  invitation** action — or, vendor-side, to set a temporary password by hand in
-  the identity admin console over the SSH tunnel.
-
-**The first user this bites is the first administrator**, created by the setup
-screen in step 8 before anyone can sign in to fix it. So configure this before
-you claim the installation, not after you have created ten accounts nobody can
-reach.
-
-### 1. Fill in the Email tab
-
-Admin console → **Realm settings → Email**.
-
-| Field | Value | Why it matters |
-|---|---|---|
-| From | e.g. `itms@toeshee.com` | Keycloak refuses to send with this empty, and the error surfaces to the operator as a failed invitation, not as a config error |
-| From display name | e.g. `ITMS` | what the recipient sees; an unrecognised sender is a link nobody clicks |
-| Reply to | a monitored mailbox | the invitation is the one mail where "reply to this" is a real support path |
-| Host / Port | your relay | `587` with StartTLS, or `465` with SSL |
-| Enable StartTLS **or** Enable SSL | on | one of the two, not both |
-| Authentication | on, with username and password | the password is typed **here**, in the running realm — see below |
-
-Then use **Test connection** on that same tab, with your own address, and
-**wait for the mail to arrive**. A green "Success" means Keycloak reached the
-relay; it does not mean the relay delivered anything, and a relay that accepts
-and then silently drops mail from an unknown sender is the common case.
-
-### 2. The password does not go in the realm JSON
-
-`deploy/keycloak/realm-it-suite.json` **cannot carry the SMTP password**, and
-must not be edited to. That file is in **git**: a secret committed there is a
-credential in every clone, every fork and every CI cache, rotatable only by
-rewriting history. It is the same argument the
-"3. Sign in with Microsoft — by hand, for now" section above makes about
-`ENTRA_CLIENT_SECRET`, at the second field somebody reaches for.
-
-There is a second reason the file is the wrong place regardless of secrets:
-**realm import runs only against an empty database**, so editing the JSON on a
-running install changes nothing at all. The Email tab is the only thing that
-affects a live realm.
-
-### 3. What this does NOT achieve
-
-- **It does not make invitations reliable.** ITMS reports a send failure in the
-  create-user response rather than swallowing it, and offers a resend — because
-  one transient mail failure would otherwise leave an account nobody can ever
-  sign into. Watch for that in the response; it is not a background job you can
-  ignore.
-- **It does not verify the address.** Keycloak sends to whatever address the
-  operator typed. A typo produces a successful send and an account that stays
-  uncredentialed for ever.
-- **Nothing here has been run against a live Keycloak.** The invitation path is
-  covered by tests against a mock transport, exactly as `keycloak_events` is.
-
-### 4. Signing in to Microsoft 365 instead of with a password
+## Sending account mail through Microsoft 365 (Settings → Email)
 
 Microsoft is retiring password sign-in (basic auth) for SMTP. **Settings →
 Email → Sign-in: Microsoft 365** makes ITMS sign in to `smtp.office365.com`
@@ -1882,7 +1219,6 @@ with an Azure application instead. **Since own authentication (phase 1)** the
 client secret is stored in ITMS's vault (Settings → Email), encrypted and
 decrypted only to send; ITMS fetches the Microsoft token itself
 (client-credentials grant) and sends the mail. The secret is never shown back.
-The realm is not involved.
 
 > ⚠ **UNVERIFIED against a live Microsoft tenant.** The permission, the scope
 > and the Exchange commands below follow Microsoft's documentation
@@ -1891,7 +1227,8 @@ The realm is not involved.
 > and 10 have been run, this is "shipped, not verified".
 
 **Use a separate Azure application for this**, not the one Email Intake uses:
-this secret lives in the realm, and it should not also unlock reading mail.
+this secret sends the platform's mail, and it should not also unlock reading
+mail.
 
 Azure portal (Microsoft Entra admin center):
 
@@ -1951,15 +1288,17 @@ In ITMS:
    Accepted is not delivered: look in the inbox, not at the button.
 10. Invite a test user and confirm the invitation arrives.
 
-If step 9 fails with an identity-provider error, check in this order: admin
+If step 9 fails with a Microsoft sign-in error, check in this order: admin
 consent granted (step 4), the Enterprise application Object ID (step 6), SMTP
 AUTH enabled for the mailbox, and the client secret not expired.
 
 **Going back to a password:** choose **Sign-in: Password**, type the password,
-Save. The Microsoft application details are removed from the realm in the
-same save.
+Save. The Microsoft application details are cleared in the same save, and its
+client secret is deleted from ITMS's vault.
 
-### 5. Notification email channels over Microsoft 365
+---
+
+## Notification email channels over Microsoft 365
 
 Ticket and platform notifications are sent by ITMS itself, per organisation,
 through **Notifications → Channels**. An email channel offers the same
@@ -1969,12 +1308,12 @@ token and signs in to `smtp.office365.com:587` with StartTLS, and every use is
 in the audit log as `notification.credential_used`. Password sign-in stays for
 any other mail server.
 
-The Azure side is steps 1-6 above. The `ITMS outgoing mail` application can be
-reused; to send from another mailbox, run the `Add-MailboxPermission` and
-`Add-RecipientPermission` lines again with that mailbox. The channel's **From
-address** is the mailbox it sends as. Press **Test** on the channel: the test
-message goes to the From address itself. Unverified against a live tenant, as
-above.
+The Azure side is steps 1-6 of the section above. The `ITMS outgoing mail`
+application can be reused; to send from another mailbox, run the
+`Add-MailboxPermission` and `Add-RecipientPermission` lines again with that
+mailbox. The channel's **From address** is the mailbox it sends as. Press
+**Test** on the channel: the test message goes to the From address itself.
+Unverified against a live tenant, as above.
 
 ---
 
@@ -1995,9 +1334,10 @@ the https address people open the console at (for this deployment,
 `https://itms.toeshee.com`). It is the address Microsoft returns the browser
 to. Without it the console says Connect with Microsoft is switched off.
 
-**Use a separate Azure application from the outgoing-mail one** in the
-section above, so that the secret the identity provider holds cannot also read
-mail.
+**Use a separate Azure application from the outgoing-mail one** ([Sending
+account mail through Microsoft
+365](#sending-account-mail-through-microsoft-365-settings--email)), so that
+the secret that sends mail cannot also read it.
 
 Azure portal (Microsoft Entra admin center):
 
@@ -2074,123 +1414,6 @@ while the mailbox is switched on.
 
 ---
 
-## The provisioning client
-
-> **AUTOMATED — there is nothing to do here.** `deploy/keycloak/init-clients.py`
-> runs as the `keycloak-init` job on every `docker compose up`: it creates this
-> client, grants its roles, and writes its secret to
-> `/var/lib/its/secrets/keycloak-admin.secret` mode 600. `deploy/.env.example`
-> ships already pointing at that file. This section now documents **what the job
-> did and what it costs**, which is the half that still needs a reader.
-
-The credential ITMS uses to create, disable, delete and password-reset users in
-Keycloak — and the one the first-boot setup screen uses to create the very first
-administrator. **A different client from `it-suite-events`**, deliberately, and
-this section spends all of its words on what it costs, because nobody has to
-create it any more and the cost is permanent.
-
-### 1. What the job created
-
-| Field | Value |
-|---|---|
-| Client ID | `it-suite-provisioning` — matches `ITS_KEYCLOAK_ADMIN_CLIENT_ID` |
-| Client authentication | **On** (confidential) |
-| Authentication flow | **Service accounts roles** only — standard flow and direct access grants are both off, so a leaked secret is not a password grant |
-| Roles | from `realm-management`: **`manage-users`** and **`manage-realm`**. Nothing else — not `realm-admin`, and never the bootstrap `admin` account from `.env` |
-| Secret | `/var/lib/its/secrets/keycloak-admin.secret`, on the `its-secrets` volume, mode 600 |
-
-> **Superseded by own authentication (phase 1):** Settings → Email no longer
-> writes the realm's SMTP block; the relay secret is stored in ITMS's vault and
-> ITMS sends the mail. Nothing in `app/` uses `manage-realm` for mail now
-> (`user_admin/realm_config.py` is kept, uncalled, until phase 4).
-
-`manage-realm` is the 2026-08-19 widening
-(`docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §4): it
-is what lets **Settings → Email** inside ITMS write the realm's SMTP block, so
-that configuring delivery is no longer a trip to somebody else's console. It
-touches this client only — the event sweep stays `view-events`, and
-`backend/tests/test_keycloak_init_job.py` asserts it.
-
-**To check it, or to repair it:**
-
-```sh
-docker compose ps -a keycloak-init      # Exited (0)
-docker compose up keycloak-init         # idempotent; re-running is its normal case
-```
-
-A secrets volume restored without the database, or the other way round, is
-exactly the case the re-run repairs: the job re-reads and re-writes every client
-secret on every run rather than only on creation.
-
-### 2. What that grant actually is, stated plainly
-
-**`manage-users` has no finer split in Keycloak.** There is no
-"create-users-but-not-reset-passwords" role to assign instead. So:
-
-> **This credential can create any user and reset any password in the realm.
-> Whoever owns ITMS owns every identity in it.**
-
-That is the price of the full user lifecycle in the console, and it is not
-softened by anything below. The mitigations are real but they are mitigations,
-not a narrower grant:
-
-| Mitigation | What it actually buys |
-|---|---|
-| A separate client from `it-suite-events` | the hourly event sweep keeps its `view-events`-only worst case — an information leak — instead of inheriting this one |
-| The client `kc_client.py` calls exactly six operations, and since own authentication phase 3 nothing calls the client | create user, set enabled true/false, send `execute-actions-email`, delete user, set the caller's own `locale` attribute, remove one AI app's consent for a user. The platform now runs the user lifecycle itself, and revoking an AI app stopped involving Keycloak in phase 3, so nothing in `backend/app` calls that client any more (`realm_config.py` imports its types, and has no caller itself); it goes with Keycloak in phase 4. **The credential stays broader than the code, and keycloak-init still issues it**; a bug or an injected call is not bounded by this row |
-| Every route is RBAC-gated server-side | `users.manage` / `users.read`, checked in the API, never in the frontend |
-| Every action is written to the hash-chained audit log | in the same transaction as the change, so an unlogged lifecycle action is a failed one |
-| **Impersonation is never called** | impersonation is *also* inside `manage-users`. ITMS has no code path that calls it, and adding one would be a new decision, not a patch |
-
-If a future version of this feature needs a second Keycloak role, that is a
-change to what this credential can do, and it is your decision rather than a
-silent upgrade.
-
-### 3. The settings, which ship correct
-
-```
-ITS_KEYCLOAK_ADMIN_URL=http://keycloak:8080
-ITS_KEYCLOAK_REALM=it-suite
-ITS_KEYCLOAK_ADMIN_CLIENT_ID=it-suite-provisioning
-ITS_KEYCLOAK_ADMIN_SECRET_PATH=/var/lib/its/secrets/keycloak-admin.secret
-```
-
-All four are the shipped values in `deploy/.env.example`; copy it and they are
-already right. `ITS_KEYCLOAK_ADMIN_URL` is **shared with the event sweep** — the
-realm's in-network address, not a second setting — and `http://keycloak:8080`
-never goes out through Traefik, which is what keeps the admin API off the public
-entrypoint.
-
-**The path ships populated, and it used to ship commented out.** That reversal is
-deliberate: the comment block it replaced told you to create the client by hand
-and *then* uncomment, which described work the init job now does — while the
-commented-out line quietly made a fresh installation refuse its own setup screen
-with "identity provisioning is not configured", on the one occasion that screen
-is ever shown.
-
-**A short window on a cold host is expected.** Nothing gates the `api` service on
-`keycloak-init` finishing (making it a dependency would turn an init failure into
-a product that will not start at all), so for a few seconds the path is set and
-the file is not there yet. In that window the setup screen says the installation
-is still starting up and asks you to try again, and **Platform → Status** reports
-`keycloak_events` as `down / misconfigured`. Both clear themselves. Neither is a
-reason to edit the settings above — check `docker compose ps -a keycloak-init`.
-
-### 5. What this does NOT achieve
-
-- **It does not scope the credential to one tenant.** The Keycloak realm is
-  shared by every ITMS organization. Tenant scoping of *who may press the
-  button* is ITMS's RBAC; the credential itself sees the whole realm.
-- **It does not let ITMS see or set a password.** Reset means asking Keycloak
-  to email an `UPDATE_PASSWORD` action. No password is generated, stored,
-  displayed or returned by ITMS — invariant 3.
-- **Delete removes the Keycloak identity only.** The ITMS row is marked
-  `status='deleted'` and kept, because 89 foreign keys across 21 tables point
-  at `users.id` and a hard delete would shred the audit history that makes the
-  log evidence. The row authorizes nothing from that moment on.
-
----
-
 ## The email-domain allowlist (`ITS_CONSOLE_EMAIL_DOMAIN`)
 
 Refuses any token whose `email` claim is not at your domain. Unset — which is
@@ -2249,12 +1472,11 @@ in once is what clears it** — no hand-written `UPDATE` any more.
 
 | The account | What actually clears it |
 |---|---|
-| should keep access | Fix the address in Keycloak, then have them sign in once. That satisfies the **gate** immediately (it reads the live claim) and updates the **stored row** the preflight reads, so the next run stops listing them. Until they sign in, the preflight keeps reporting the old address — it can only see rows. |
+| should keep access | No screen changes a technician's address (none has since own authentication phase 1): delete the account and invite the correct address (**Settings → Users**), or disable it (next row). |
 | should not keep access | Disable them: console → **Users → Disable**, i.e. `POST /api/v1/users/{id}/disable`. The preflight lists non-active rows but they do **not** set the exit code, and the same gate refuses a disabled user regardless of domain |
 
 Re-run until it exits `0`. If it still exits `1` on an address you have
-already fixed in Keycloak, that is the divergence in §4 below, not a failed
-fix.
+already fixed, that is the divergence in §4 below, not a failed fix.
 
 ### 2. Then set it, and restart
 
@@ -2317,7 +1539,7 @@ lock out the entire deployment; unrestricted is the recoverable direction.
   **stored** `users.email` row. Since migration `0066` (§7.2) that row is
   refreshed from the claim on every admission, so the two converge — but only
   when the user signs in. The window has not closed, it has narrowed to
-  "since their last sign-in": an address changed in Keycloak this morning by
+  "since their last sign-in": an address changed this morning by
   somebody who has not logged in since is still the old one here, in both
   directions. A row that reads clean can belong to someone whose live claim now
   fails, and a row that reads dirty can belong to someone the gate would now
@@ -2396,9 +1618,13 @@ until it goes unused for 30 days, when the daily sweep removes it.
    The answer is JSON whose `issuer` is your console address and which carries
    `"client_id_metadata_document_supported": true`. It carries
    `registration_endpoint` only when you opted in to registration (step 7)
-   and MCP is on. Anything other than this JSON means step 1's address is
-   wrong: with a path after the host the request reaches the console's page
-   (HTML, with a 200), with `http://` nothing answers at all, and a 503 with
+   and MCP is on. Only that JSON is the `api` answering: the console's
+   catch-all router answers any path the `api` does not take with its own
+   HTML page and a 200. That page
+   comes back while the `api` container is still starting -- Traefik leaves
+   out a container whose health check has not passed yet, so wait a minute
+   and run it again -- and it is what a path after the host in step 1 gives
+   for good. With `http://` nothing answers at all, and a 503 with
    `temporarily_unavailable` is the `api` container saying that
    `ITS_PUBLIC_CONSOLE_URL` is not an https address without a path.
 4. **Settings → AI connections:** an org-admin turns on **Allow AI apps to
@@ -2421,8 +1647,8 @@ until it goes unused for 30 days, when the daily sweep removes it.
    *Needs approval*; tools that change something are safest on *Needs
    approval*.
 7. **Only for an app that cannot publish a metadata document:** opt in to
-   registration. Read "Residual risks, stated plainly" below first: risks 3,
-   7 and 8 exist only while it is set. From the directory holding
+   registration. Read "Residual risks, stated plainly" below first: risk 3
+   exists only while it is set. From the directory holding
    `docker-compose.yml` and `.env`, this removes any earlier
    `ITS_MCP_REGISTRATION` line and adds the one that opens registration:
 
@@ -2439,41 +1665,6 @@ site's frame: nginx answers every console request with
 (`deploy/nginx.conf`, held by `backend/tests/test_deploy_frame_headers.py`), so
 a page elsewhere cannot overlay it and trick a click on **Approve**.
 
-### What keycloak-init still converges (until phase 4)
-
-Since own authentication phase 3 none of this is in MCP's path: `/mcp`
-accepts only the platform's own access tokens, and refuses every token
-Keycloak issues, whatever its audience. keycloak-init keeps converging it on
-every run until phase 4 removes Keycloak, **and while
-`ITS_MCP_REGISTRATION=open` it still opens Keycloak's own anonymous
-registration** (residual risk 7 below). Nothing is deployed before phase 4
-removes Keycloak (operator decision 2026-10-31), so no host runs in this
-state. In this order, so that a run that dies part-way leaves registration
-closed:
-
-1. reserved client ids, disabled and unusable: `it-suite` (the console's own
-   token audience) and the MCP address itself. If `ITS_OIDC_AUDIENCE` names a
-   client the platform or Keycloak needs (`it-suite-web`, the two service
-   clients, `account`, `admin-cli`, `realm-management` and the other
-   built-ins), the job refuses before it changes anything, says so, and exits
-   5;
-2. the `mcp` client scope with its consent-screen line, then its mappers — the
-   MCP audience (`<ITS_PUBLIC_CONSOLE_URL>/mcp`), the `org` claim and `sub` —
-   then the scope offered to apps as an optional scope;
-3. the client profiles and policies for every app that registers itself in
-   Keycloak, or later updates itself: PKCE S256 required, no implicit flow,
-   no password grant, redirect URIs without wildcards;
-4. the anonymous registration policies: consent required, scopes limited to
-   `mcp`, `openid` and `profile`, no protocol mappers of the app's own, full
-   scope off, at most 200 clients in the realm;
-5. **last**, Trusted Hosts is removed, which is what opens Keycloak's
-   anonymous registration — and only when `ITS_PUBLIC_CONSOLE_URL` is set
-   **and** `ITS_MCP_REGISTRATION=open`. Otherwise Trusted Hosts stays (and is
-   put back first if missing), and the job's log names the missing setting.
-
-`docker compose logs --tail=20 keycloak-init | grep 'mcp converged'` still
-prints `identity init: mcp converged=nothing` on a converged realm.
-
 ### What Traefik routes
 
 | Path | Goes to |
@@ -2485,17 +1676,16 @@ prints `identity init: mcp converged=nothing` on a converged realm.
 | `/oauth/token`, `/oauth/register`, `/oauth/revoke`, each by exact path | `api` — the platform's OAuth server |
 | `/oauth/authorize` | the console — the consent page, behind the console's own sign-in |
 | `/.well-known/openid-configuration`, and either document with a path after it | `api`, which answers 404 on purpose: apps look there first and move on after a 404, but give up on the console's 200 page |
-| `/realms/<realm>/clients-registrations/openid-connect` and `…/openid-connect/<client-id>` | Keycloak, until phase 4 — its registration path, which no longer leads to MCP |
-| any other `clients-registrations` path, in any letter case, and any identity-provider path with `;`, `\`, `..` or an encoded `;` `\` `.` `/` NUL | refused with 403 at Traefik, before Keycloak sees it (until phase 4) |
-| `/realms/<realm>/.well-known/…` and Keycloak's pages | Keycloak, unchanged until phase 4 |
+| `/realms/…`, `/resources/…`, `/js/…`, `/admin/…` | the console's own page: no router names them since own authentication phase 4, so no identity provider is reachable on `:443` |
 
-The `deploy` CI job still proves Keycloak's half of this live
-(`deploy/keycloak/ci_mcp_flow.py`, through the real Traefik and Keycloak
-containers): the 403s above, Keycloak's registration closed until both
-settings are set, its PKCE sign-in and its audience. It does not yet run the
-platform's own OAuth server against the deployed containers: phase 4 rewrites
-it for that, when Keycloak goes (design §8). The platform's server is proved
-by the backend suite (`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`).
+The `deploy` CI job proves this live, through the real Traefik, `web` and
+`api` containers and the api on a real OpenBao (`deploy/ci/mcp_flow.py`):
+the 401 and its `resource_metadata`, both discovery documents, the 404 where
+an OpenID document would be, registration closed and then open, the consent,
+PKCE, the token's audience, refresh rotation and reuse, RFC 7009, `/mcp`
+itself, and that the old identity provider's paths reach only the console.
+The backend suite proves the server's decisions
+(`backend/tests/test_oauth_*.py`, `test_mcp_own_tokens.py`).
 
 ### Revoking
 
@@ -2593,10 +1783,10 @@ and one hit blocks the whole result rather than redacting it.
 
 ### Residual risks, stated plainly
 
-**Risks 3, 7 and 8 exist only while self-registration is open**
-(`ITS_MCP_REGISTRATION=open`); closing it ends them for new apps. **Risks 1,
-2, 4, 10 and 11 exist whenever MCP is on**, because an app known by its
-client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
+**Risk 3 exists only while self-registration is open**
+(`ITS_MCP_REGISTRATION=open`); closing it ends it for new apps. **Risks 1, 2,
+4, 8 and 9 exist whenever MCP is on**, because an app known by its client
+metadata document needs no opt-in. Risks 5, 6, 7 and 10 hold always.
 
 1. **Consent phishing.** Anyone can publish a client metadata document — or,
    with the opt-in, register an app — under any name, and send a person a
@@ -2654,17 +1844,7 @@ client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
    app, the person's account acts above (an administrator's "Sign out
    everywhere" among them), or the app's refresh token being used twice (a
    sign it was copied) end it at once.
-7. **Until phase 4, Keycloak's own anonymous registration opens with the same
-   setting.** keycloak-init still converges it (above). Its tokens are refused
-   at `/mcp` and everywhere else, so it leads nowhere; but its own exposure
-   stays until Keycloak goes: a registering app can make Keycloak fetch URLs it
-   names (`sector_identifier_uri`, `jwks_uri`, `request_uris`) from
-   Keycloak's network, can fill its 200-client cap, and **the clients it
-   registers never expire**: nothing sweeps them until phase 4 removes the
-   realm.
-8. **Realm names must be lowercase** for Keycloak's registration to be routed
-   (see the table above), until phase 4.
-9. **A refresh token used twice ends the app's grant, with no grace.** That is
+7. **A refresh token used twice ends the app's grant, with no grace.** That is
    what a copied token looks like (design §5.3). It is also what an honest
    race looks like: a refresh whose answer the app never read (Claude stops
    waiting after 30 seconds), or two refreshes with the same token at once.
@@ -2672,27 +1852,27 @@ client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
    the token expires) and when a call is refused with 401, so two can meet.
    Either way the app's next call is refused, and the person removes the
    connector and adds it again.
-10. **One click can approve, within ten minutes of a second factor.** The
-    consent page refuses to be framed (`frame-ancestors 'none'`,
-    `X-Frame-Options: DENY`), but a page on another site can open it as a
-    window of its own under the second click of a double click, which then
-    lands on **Approve**. OWASP calls this DoubleClickjacking, and framing
-    rules do not stop it. Approving needs the person's second factor
-    confirmed in the last ten minutes, so outside that window the trick only
-    reaches the second-factor prompt; inside it, one click is enough. It is
-    bounded, not removed: the page is titled by the app's host, the person
-    is mailed "You connected <host>" when account mail is configured in
-    Settings → Email (without it the approval still succeeds and nothing is
-    mailed), and Settings → AI connections revokes the app.
-11. **A password change does not stop an approval in the session it keeps.**
-    The change ends the person's AI grants and every other session of
-    theirs, but an AI app approved afterwards in the session the change was
-    made in — even on a consent page opened before it — still receives its
-    code: it is the same person, in their own session.
-12. **A used refresh token is remembered for 30 days** (operator decision
+8. **One click can approve, within ten minutes of a second factor.** The
+   consent page refuses to be framed (`frame-ancestors 'none'`,
+   `X-Frame-Options: DENY`), but a page on another site can open it as a
+   window of its own under the second click of a double click, which then
+   lands on **Approve**. OWASP calls this DoubleClickjacking, and framing
+   rules do not stop it. Approving needs the person's second factor
+   confirmed in the last ten minutes, so outside that window the trick only
+   reaches the second-factor prompt; inside it, one click is enough. It is
+   bounded, not removed: the page is titled by the app's host, the person
+   is mailed "You connected <host>" when account mail is configured in
+   Settings → Email (without it the approval still succeeds and nothing is
+   mailed), and Settings → AI connections revokes the app.
+9. **A password change does not stop an approval in the session it keeps.**
+   The change ends the person's AI grants and every other session of
+   theirs, but an AI app approved afterwards in the session the change was
+   made in — even on a consent page opened before it — still receives its
+   code: it is the same person, in their own session.
+10. **A used refresh token is remembered for 30 days** (operator decision
     E2, 2026-11-15): from its first use, whoever made it, until the first
     daily sweep more than 30 days later. Until then, presenting it again
-    ends the app's grant (risk 9). Once that sweep has deleted it,
+    ends the app's grant (risk 7). Once that sweep has deleted it,
     presenting it is a plain `invalid_grant`, and the grant lives on. That
     costs something either way round. If someone else refreshed with a
     copied token first, the theft is caught only if the real app presents
@@ -2704,9 +1884,10 @@ client metadata document needs no opt-in. Risks 5, 6, 9 and 12 hold always.
     leaves `mcp.refresh_reused` in the audit log, the sign that the token
     leaked; after it, the copy is refused like any unknown token: the thief
     gains nothing, but nothing in the audit log says the token leaked.
-    Settings → AI connections lists every app holding a live grant. If an app asks you to connect again when you
-    did not expect it, use **Revoke for me** on it there before reconnecting:
-    that ends every grant of yours to that app, the copy included.
+    Settings → AI connections lists every app holding a live grant. If an
+    app asks you to connect again when you did not expect it, use **Revoke
+    for me** on it there before reconnecting: that ends every grant of
+    yours to that app, the copy included.
 
 Separately from those, and by design: the platform cannot tell whether the
 person or the AI app approved a call — approval happens in the app. A
@@ -3213,6 +2394,21 @@ change actually needs — building `web` alone for a frontend release, running
 `migrate` only when a new revision file appeared, and so on. Run
 `./scripts/deploy.sh --plan` first to see the decision without acting on it.
 
+**The first upgrade past own authentication phase 4 (2026-11-15) starts with
+the pull**, from `deploy/`:
+
+```sh
+git -C .. pull --ff-only && ./scripts/deploy.sh
+```
+
+The release before it runs its own `deploy.sh`, which pulls part-way through
+-- and bash goes on running the text it already opened, which restarts and
+provisions the old identity provider, services this compose file no longer
+has: it stops after the migration, with the app tier still on the old images.
+If that already happened, run `./scripts/deploy.sh` again: it sees the old
+identity provider's containers still there and finishes the upgrade as a full
+deploy, instead of answering "Already deployed".
+
 Two things it does that the manual sequence below cannot:
 
 - **It takes the older of (running image tag, pre-pull HEAD) as its baseline.**
@@ -3234,12 +2430,27 @@ Since 2026-09-23 it also:
   commands, instead of letting `up -d` block; if the deploy itself recreates
   OpenBao and it comes back sealed, an interactive run asks for the shares
   at the prompt and `--yes` stops with the fix;
-- **runs `keycloak-init` on every deploy**, which converges the realm
-  allowlist in [Realm drift](#realm-drift-what-reaches-an-existing-host-and-what-never-does);
-- **fails on any one-shot** (`migrate`, `postgres-grants`, `openbao-init`,
-  `keycloak-init`) that exits non-zero;
+- **fails on any one-shot** (`migrate`, `postgres-grants`, `openbao-init`)
+  that exits non-zero;
 - **reports the nightly backup timer**, or says how to install it
   ([Platform backups](#platform-backups-nightly-off-host-and-a-monthly-drill)).
+
+Since 2026-11-15 (own authentication phase 4) it also:
+
+- **removes the old identity provider's two containers, `keycloak` and
+  `keycloak-init`**, once the new app tier is up: compose leaves a container
+  whose service left the file running, and Traefik would go on routing to
+  it. It finds them by the labels Compose put on them -- this project's
+  `com.docker.compose.project` and those two services'
+  `com.docker.compose.service` -- and nothing else in the project is
+  touched. Its Verify step fails while one is left, and a `docker` that
+  does not answer stops the run;
+- **keeps the old identity provider's database in the backup it takes before
+  an upgrade, and only there** (`ITS_BACKUP_OLD_IDENTITY_DB=1`); the nightly
+  backups leave it out;
+- **names the old identity provider's `.env` keys and says to keep them**
+  until [Retiring the old identity provider's
+  data](#retiring-the-old-identity-providers-data).
 
 The manual sequence stays below, because a script that decides for you is only
 trustworthy if you can see what it decided and do it yourself.
@@ -3255,7 +2466,11 @@ cd /opt/it-suite
 #    rollback retags to; the backup is only needed if the upgrade moves the
 #    schema.
 grep IT_SUITE_VERSION deploy/.env
-cd deploy && ./scripts/backup.sh ~/backups/pre-upgrade-$(date -u +%FT%H%MZ) && cd ..
+#    ITS_BACKUP_OLD_IDENTITY_DB=1: the backup before an upgrade keeps the old
+#    identity provider's database while one exists, as deploy.sh's does (a
+#    backup.sh from before own authentication phase 4 ignores it, and dumped
+#    it anyway).
+cd deploy && ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh ~/backups/pre-upgrade-$(date -u +%FT%H%MZ) && cd ..
 #    That writes globals.sql alongside the dumps, and globals.sql CONTAINS
 #    THE ROLES' SCRAM PASSWORD HASHES. It is mode 600, but the directory is
 #    still a secret-bearing directory: encrypt it before it leaves the host
@@ -3288,14 +2503,6 @@ docker compose up postgres-grants     # idempotent; picks up any new table
 #    openbao/init.sh are deliberately unconditional).
 docker compose up openbao-init
 
-# 5b. Re-run the identity init job. Idempotent, and it is how a corrected
-#     realm setting reaches an existing deployment -- a realm is imported only
-#     when it does not already exist, so the realm file alone changes nothing
-#     on a running install. `up -d` below starts it too; running it here means
-#     a failure is visible on its own rather than buried in a wall of
-#     container output.
-docker compose up keycloak-init
-
 # 6. Restart the application services.
 #    THIS IS ALSO HOW CELERY BEAT PICKS UP A NEW SCHEDULE. Beat is not its own
 #    container -- the `worker` service runs `celery ... worker --beat`, so the
@@ -3305,6 +2512,20 @@ docker compose up keycloak-init
 #    changed IT_SUITE_VERSION. If you ever skip step 3, force it:
 #      docker compose up -d --force-recreate worker
 docker compose up -d
+
+# 6b. The old identity provider's two containers go: compose leaves them
+#     running and Traefik routes to them. Found as deploy.sh finds them, by
+#     the labels Compose put on them (this project, and those two
+#     services), not by `compose ps`; nothing else is touched. The first
+#     line prints this project's name (it-suite unless .env sets
+#     COMPOSE_PROJECT_NAME); the loop prints the id of each container it
+#     removed, and nothing when none is left. Needed only on the upgrade
+#     past own authentication phase 4, and a no-op after it:
+project="$(docker compose config --no-interpolate | awk '/^name: / { print $2; exit }')"; echo "project: $project"
+for service in keycloak keycloak-init; do
+  docker ps -aq --filter "label=com.docker.compose.project=${project:?docker compose config named no project}" \
+    --filter "label=com.docker.compose.service=$service"
+done | xargs -r docker rm -f
 
 # 7. Verify.
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
@@ -3350,9 +2571,14 @@ What remains unverified, precisely:
 - A `git pull`-over-an-older-release upgrade **on a live host**.
 - A rollback **on a live host** — the tag mechanism is CI-verified, the
   operational sequence below is not.
-- Restore of the `keycloak` database specifically. `backup.sh` dumps it and
-  `restore.sh` restores it, but only the `itsuite` restore was asserted
-  against; a realm/user/federation check after restore has not been done.
+- A rollback past own authentication phase 4 on a live host. CI's `deploy`
+  job restores a pre-upgrade backup that holds `keycloak.dump` and checks
+  the database came back; nothing has started the release before phase 4
+  on it since.
+- The removal of the old identity provider's containers on a live host.
+  The label query `deploy.sh` makes, and step 6b above, have been run only
+  against a simulated `docker`, never against containers a release before
+  phase 4 left behind.
 
 Notes that apply to upgrades specifically:
 
@@ -3428,16 +2654,21 @@ job (bucket lifecycle, Object Lock).
 
 **The drill cannot touch the live stack:** fixed project name checked
 against `docker-compose.yml`'s, `COMPOSE_*` unset, no published ports, its
-own volumes, passwords generated per run. It proves both dumps restore, the
+own volumes, passwords generated per run. It proves the dumps restore, the
 RLS policy count and `app_user` narrowing (via `restore.sh`), the schema
-revision, the audit-chain linkage, and that Keycloak serves the realm from
-the restored database. It does **not** cover key material: `openbao-data`,
+revision, the audit-chain linkage, and, for a backup that holds
+`keycloak.dump` (one taken before own authentication phase 4, or by
+`deploy.sh` before an upgrade), that the restored `keycloak` database holds
+tables. It does not prove the way back past phase 4: the nightly backups it
+drills leave that database out, and that way back is only the backup taken
+before the phase-4 upgrade ([Rolling back a
+deployment](#rolling-back-a-deployment)). It does **not** cover key material: `openbao-data`,
 `its-secrets`, `its-ca`, the OpenBao shares or unseal key file, `.env` and
 `certs/` are still backed up by hand, **to a different place than the
 database backups** (`docs/07-backup-restore.md` §1-2).
 
 Run a drill by hand at any time: `sudo ./scripts/restore-drill.sh`
-(`--keep` leaves it up to inspect; `--skip-keycloak` saves memory).
+(`--keep` leaves it up to inspect).
 
 ## Rolling back a deployment
 
@@ -3467,7 +2698,8 @@ cat ~/backups/pre-upgrade-<timestamp>/alembic_version   # what the backup holds
 docker compose stop api gateway worker web
 
 # 3. ONLY IF the schema moved: restore the pre-deploy backup.
-#    ITS_RESTORE_FORCE=1 IS REQUIRED HERE AND IT DROPS BOTH DATABASES.
+#    ITS_RESTORE_FORCE=1 IS REQUIRED HERE AND IT DROPS EVERY DATABASE THE BACKUP
+#    HOLDS: `itsuite`, and the old identity provider's if it is in the backup.
 #    restore.sh refuses a non-empty target by default; in a rollback the
 #    target is ALWAYS non-empty, so that guard is for a mistyped restore, not
 #    for this. Read what it costs, below, before running it.
@@ -3533,12 +2765,168 @@ to watch. The old `git checkout <sha> && rebuild` kept the two together at
 the cost of not being a real rollback. If the release changed compose or
 `.env`, check those out at the old SHA too.
 
+**Back past own authentication phase 4 (2026-11-15), the backup in step 3 is
+the one taken before that upgrade: the newest `~/backups/pre-upgrade-*` whose
+`alembic_version` is below `0248`** (`cat ~/backups/pre-upgrade-*/alembic_version`).
+A backup taken after it cannot cross its migration backwards, and holding
+a dump of the old identity provider's database does not make one the right
+one: every pre-upgrade backup taken while that database exists holds one. If
+that upgrade stopped part-way and a second `deploy.sh` finished it, the right
+one is the first run's: it holds no such dump, and needs none, because the
+database stayed on the cluster and `restore.sh` touches only the databases a
+backup holds; the second run names it, and its images, at its start and in
+its closing rollback help. Both halves of the paragraph above apply, too:
+check out the whole `deploy/` directory at the old release, not only
+`docker-compose.yml` -- that release bind-mounts files this checkout no
+longer has, and `deploy.sh` prints the exact `git checkout` at the end of the
+upgrade -- and `.env` must still hold the four keys that release starts
+with, which [Retiring the old identity provider's
+data](#retiring-the-old-identity-providers-data) lists. Until you take that
+step, they are there.
+
 **Your rollback targets are local images, and `docker system prune` deletes
 them.** With the tag gone, `docker compose up -d` rebuilds from the working
 tree and tags the result with the old SHA — a rollback that silently
 redeploys current source under a name that says otherwise. Keep at least the
 last few `itsuite/backend` and `itsuite/web` tags, and prune by name rather
 than wholesale.
+
+## Retiring the old identity provider's data
+
+**Only on a host that ran a release from before own authentication phase 4
+(2026-11-15).** A fresh install never had any of this.
+
+Phase 4 removed Keycloak from the stack, and `deploy.sh` removed its two
+containers on the upgrade. What a host that ran it still keeps, on purpose:
+
+- the `keycloak` database in the stack's Postgres -- the old realm, with its
+  users' password hashes, its client secrets and the keys that signed its
+  tokens;
+- three files on the `its-secrets` volume: `keycloak-admin.secret`,
+  `keycloak-events.secret` and `keycloak-bootstrap-admin.secret`;
+- four `.env` keys the release before phase 4 needs to start -- its compose
+  file does not parse without `KEYCLOAK_ADMIN_USER` and
+  `KEYCLOAK_ADMIN_PASSWORD`, and its api, gateway, worker and migrate do not
+  start without `ITS_OIDC_ISSUER` and `ITS_OIDC_JWKS_URL` -- and the other
+  keys of the old identity provider, which nothing reads at all;
+- the image `quay.io/keycloak/keycloak:26.2`.
+
+Nothing in this release reads any of them. **The way back past phase 4 is the
+backup taken before that upgrade** -- the newest `~/backups/pre-upgrade-*`
+whose `alembic_version` is below `0248` -- restored as [Rolling back a
+deployment](#rolling-back-a-deployment) says, with the four keys still in
+`.env`, the database and the secret files still here, and `deploy/` checked
+out at the old release. **Do not delete the keys, the secret files or the
+database before the step below.**
+
+**The step, at a time you choose, once you have checked the upgrade. It
+closes the way back past phase 4:** after it, a release from before phase 4
+no longer starts on this host (part 6 says what going back would then take). A
+migration could have done it (Alembic can run a statement outside its
+transaction), but it is irreversible, so it is your act and not `up -d`'s.
+Every part can be run again, and a second run removes nothing more. In
+`deploy/`:
+
+1. **A final copy of the database, if you want one.** It goes to
+   `~/backups/keycloak-final.dump`, beside the pre-upgrade backups and apart
+   from the nightly ones, readable by you alone. The second line writes it
+   only when there is no copy yet (an empty file left by a failed run
+   counts as none), so running this part again after part 2 cannot
+   replace a good copy with an empty one:
+
+   ```sh
+   mkdir -p ~/backups
+   test -s ~/backups/keycloak-final.dump || (umask 077 && docker compose exec -T postgres pg_dump -Fc -U its_admin keycloak > ~/backups/keycloak-final.dump)
+   test -s ~/backups/keycloak-final.dump && echo "dump ok"
+   ```
+
+   It prints `dump ok`. The copy holds password hashes and the realm's
+   signing keys: keep it encrypted, like `globals.sql`, or skip this part.
+2. **The database, and the image.** No container of the old identity
+   provider may still be connected. `deploy.sh` removed them; the first two
+   commands remove any left, found as `deploy.sh` finds them, by the labels
+   Compose put on them (this project, and those two services), not by
+   `compose ps`. The first prints this project's name (`it-suite` unless
+   `.env` sets `COMPOSE_PROJECT_NAME`); the loop prints the id of each
+   container it removed, and nothing when none is left:
+
+   ```sh
+   project="$(docker compose config --no-interpolate | awk '/^name: / { print $2; exit }')"; echo "project: $project"
+   for service in keycloak keycloak-init; do
+     docker ps -aq --filter "label=com.docker.compose.project=${project:?docker compose config named no project}" \
+       --filter "label=com.docker.compose.service=$service"
+   done | xargs -r docker rm -f
+   docker compose exec -T postgres dropdb -U its_admin keycloak
+   docker compose exec -T postgres psql -X -A -t -U its_admin -d postgres \
+     -c "SELECT count(*) FROM pg_database WHERE datname = 'keycloak'"
+   docker image rm quay.io/keycloak/keycloak:26.2
+   ```
+
+   The query prints `0`. On a second run `dropdb` answers that the database
+   does not exist and `docker image rm` that there is no such image; the
+   query still prints `0`.
+3. **The three secret files**, from a one-off `api` container that Traefik
+   is told to ignore (the `api` service mounts the volume, and runs as the
+   user that wrote them):
+
+   ```sh
+   docker compose run --rm --no-deps --label traefik.enable=false --entrypoint rm api -f \
+     /var/lib/its/secrets/keycloak-admin.secret \
+     /var/lib/its/secrets/keycloak-events.secret \
+     /var/lib/its/secrets/keycloak-bootstrap-admin.secret
+   docker compose run --rm --no-deps --label traefik.enable=false --entrypoint ls api /var/lib/its/secrets
+   ```
+
+   The listing shows no `keycloak-` file.
+4. **The four keys a rollback needed:**
+
+   ```sh
+   sed -i -E '/^(KEYCLOAK_ADMIN_USER|KEYCLOAK_ADMIN_PASSWORD|ITS_OIDC_ISSUER|ITS_OIDC_JWKS_URL)=/d' .env
+   grep -cE '^(KEYCLOAK_ADMIN_USER|KEYCLOAK_ADMIN_PASSWORD|ITS_OIDC_ISSUER|ITS_OIDC_JWKS_URL)=' .env
+   ```
+
+   `grep -c` prints `0`.
+5. **The other keys of the old identity provider**, the thirteen
+   `deploy.sh` names besides those four, each by its whole name, so no other
+   line of `.env` can match:
+
+   ```sh
+   sed -i -E '/^(ITS_OIDC_(AUDIENCE|ORG_CLAIM|CONSOLE_CLIENT_ID)|ITS_MULTI_TENANT|ENTRA_(TENANT_ID|CLIENT_ID|CLIENT_SECRET)|ITS_KEYCLOAK_(ADMIN_URL|REALM|EVENTS_CLIENT_ID|EVENTS_SECRET_PATH|ADMIN_CLIENT_ID|ADMIN_SECRET_PATH))=/d' .env
+   grep -cE '^(KEYCLOAK_ADMIN_(USER|PASSWORD)|ITS_OIDC_(ISSUER|JWKS_URL|AUDIENCE|ORG_CLAIM|CONSOLE_CLIENT_ID)|ITS_MULTI_TENANT|ENTRA_(TENANT_ID|CLIENT_ID|CLIENT_SECRET)|ITS_KEYCLOAK_(ADMIN_URL|REALM|EVENTS_CLIENT_ID|EVENTS_SECRET_PATH|ADMIN_CLIENT_ID|ADMIN_SECRET_PATH))=' .env
+   ```
+
+   `grep -c` prints `0`, and the next `./scripts/deploy.sh` names no key.
+   `ITS_DEFAULT_ORG_SLUG` stays. The containers that read `.env` see the
+   change the next time they are recreated; nothing in them read those keys.
+6. **This closed the way back.** From here, a release from before own
+   authentication phase 4 does not start on this host: its compose file and
+   its api refuse without the keys, and its identity provider has neither
+   its database nor its secrets nor its image. Going back would mean
+   restoring the backup from before the upgrade (`itsuite`; and `keycloak`
+   only if that backup holds `keycloak.dump`, which the one a stopped
+   upgrade took does not -- the final copy of part 1 does) and putting back
+   by hand the four keys, the three secret files and the image.
+7. **If a client secret was ever created in Entra for the old identity
+   provider's Microsoft sign-in** (`ENTRA_CLIENT_SECRET`), revoke it there:
+   in the Microsoft Entra admin center, **App registrations** → that
+   application → **Certificates & secrets**. Deleting the line in part 5
+   does not stop the secret working; nothing in this platform reads it any
+   more.
+
+Copies made before the step keep what it removed: every pre-upgrade backup
+taken while the database existed, and the nightly and off-site backups
+taken before the phase-4 upgrade, hold `keycloak.dump`, and a
+hand-made copy of `its-secrets` holds the three files, until they age out
+under your retention -- an off-site bucket with Object Lock or a lifecycle
+rule may not let you delete them sooner. The next `./scripts/backup.sh`
+writes no `keycloak.dump` and prints no note about the database.
+
+⚠ **UNVERIFIED as a whole on a live host.** No host upgraded from before
+phase 4 has run this step. CI's `deploy` job drops a `keycloak` database it
+made and restores it from a pre-upgrade backup; the `.env` lines of parts 4
+and 5 were run against the `.env.example` of the release before phase 4,
+and the container query of part 2 against a simulated `docker`. Nothing
+else here has run.
 
 ## Renewing the gateway certificate
 
@@ -3586,6 +2974,10 @@ sit on the login path, both had been present since the beginning, and neither
 is visible to any server-side test — which is why step 8 carried a
 "no browser session, no login" marker for as long as it did. They are listed because the symptoms are unhelpful and you will meet them
 again if you pin different versions.
+
+Rows 8, 9, 13 and 14 describe the identity provider this platform used until
+own authentication phase 4 (2026-11-15); they are kept as the record of what
+went wrong, and none of them can happen on a release after it.
 
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
