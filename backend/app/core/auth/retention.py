@@ -31,8 +31,9 @@ WHAT GOES, AND AFTER HOW LONG:
   days) after it was used (operator decision E2, 2026-11-15; own
   authentication phase 4, Task 3). Until then, presented again, it ends its
   grant (design §5.3: "reutilizar uno ya usado revoca toda la familia");
-  after it, it is a token the server does not know, a plain `invalid_grant`,
-  and the grant lives on (design §5.3, amended 2026-11-15);
+  once the sweep has taken it, it is a token the server does not know, a
+  plain `invalid_grant`, and the grant lives on (design §5.3, amended
+  2026-11-15);
 - an AI app unused for `CLIENT_IDLE` (30 days), with its grants and codes (ON
   DELETE CASCADE).
 
@@ -154,8 +155,9 @@ OAUTH_CODE_RETENTION = timedelta(minutes=10)
 OAUTH_GRANT_RETENTION = timedelta(days=1)
 #: How long a LIVE grant keeps a refresh token it rotated past, counted from
 #: the rotation (operator decision E2, 2026-11-15; own authentication phase
-#: 4, Task 3): within it a second presentation is a reuse and ends the grant,
-#: after it the token is gone and the presentation a plain `invalid_grant`.
+#: 4, Task 3): within it a second presentation is a reuse and ends the grant;
+#: the first daily sweep after it deletes the token, and a presentation then
+#: is a plain `invalid_grant`.
 OAUTH_USED_TOKEN_RETENTION = timedelta(days=30)
 #: The beat interval (`app/worker.py`).
 SWEEP_INTERVAL_S = 86400.0

@@ -723,6 +723,24 @@ async def test_a_live_grants_used_tokens_go_thirty_days_after_their_use(api_env)
     }
 
 
+async def test_the_thirty_days_are_counted_strictly(api_env) -> None:
+    """The cutoff is strict, by the sweep's clock (`used_at < now -
+    OAUTH_USED_TOKEN_RETENTION`): a token rotated past exactly 30 days ago
+    stays, one rotated past a second before that goes (review of Task 3, fix
+    round 1)."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-edge")
+    family_id, _current = await _open(api_env, org_id, user_id, app)
+    edge, _ = await _rotated(api_env, org_id, user_id, family_id, used=NOW - timedelta(days=30))
+    past, _ = await _rotated(
+        api_env, org_id, user_id, family_id, used=NOW - timedelta(days=30, seconds=1)
+    )
+
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+
+    left = await _ids(api_env, OAuthRefreshToken, org_id)
+    assert edge in left and past not in left
+
+
 async def test_an_ended_grants_used_tokens_are_not_this_steps(api_env) -> None:
     """A grant revoked an hour ago keeps every token until a day after it
     ended, when `oauth_refresh_tokens` takes them all: this step takes a LIVE
@@ -751,7 +769,7 @@ async def test_reusing_a_token_the_sweep_took_is_a_plain_invalid_grant(api_env) 
     this server does not know -- `invalid_grant`, no `mcp.refresh_reused`, and
     the grant, with the token the app holds now, lives on."""
     org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-gone")
-    family_id, _current = await _open(api_env, org_id, user_id, app)
+    family_id, current = await _open(api_env, org_id, user_id, app)
     _, old = await _rotated(api_env, org_id, user_id, family_id, used=LONG_AGO)
     assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
 
@@ -768,6 +786,11 @@ async def test_reusing_a_token_the_sweep_took_is_a_plain_invalid_grant(api_env) 
         family = await session.get(OAuthRefreshFamily, family_id)
     assert family is not None and family.revoked_at is None
     assert await _reused_audits(api_env, org_id) == []
+    # The token the app holds now still refreshes (review of Task 3, fix round 1).
+    fresh = await token_request(
+        api_env, grant_type="refresh_token", refresh_token=current, client_id=app.client_id
+    )
+    assert fresh.status_code == 200, fresh.text
 
 
 async def test_a_used_token_the_sweep_kept_still_ends_its_grant(api_env) -> None:
@@ -791,9 +814,14 @@ async def test_a_used_token_the_sweep_kept_still_ends_its_grant(api_env) -> None
 
 
 async def test_the_used_tokens_step_waits_on_no_token_a_refresh_holds(api_env) -> None:
-    """A reuse being presented locks its token (`grants._refresh`, step 3).
-    The step skips that one, FOR UPDATE SKIP LOCKED, and takes the other; the
-    sweep's transaction runs under a lock timeout and never waits."""
+    """A reuse being presented locks its token AND its grant
+    (`grants._refresh`, step 3: one SELECT ... FOR UPDATE of both, after the
+    person's row and the app). The step skips the held token, FOR UPDATE
+    SKIP LOCKED, and still takes another old token of the same grant: it
+    locks the token only (`of=token`) and reads the grant, so a grant a
+    refresh holds neither hides that token nor makes the step wait. Locking
+    the grant too would skip it (review of Task 3, fix round 1). The sweep's
+    transaction runs under a lock timeout and never waits."""
     org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-held")
     family_id, _current = await _open(api_env, org_id, user_id, app)
     held, held_secret = await _rotated(api_env, org_id, user_id, family_id, used=LONG_AGO)
@@ -802,9 +830,11 @@ async def test_the_used_tokens_step_waits_on_no_token_a_refresh_holds(api_env) -
     )
 
     async with oauth_session(org_id, api_env.app_engine) as refresh:
-        await lock_user_row(refresh, user_id)
-        await refresh.execute(
-            select(OAuthRefreshToken.id)
+        await lock_user_row(refresh, user_id)  # 1. the person
+        assert await clients.hold(refresh, org_id=org_id, app_id=app.id, now=NOW)  # 2. the app
+        await refresh.execute(  # 3. the token and its grant, as `grants._refresh` locks them
+            select(OAuthRefreshToken, OAuthRefreshFamily)
+            .join(OAuthRefreshFamily, OAuthRefreshFamily.id == OAuthRefreshToken.family_id)
             .where(OAuthRefreshToken.token_hash == grants.hash_secret(held_secret))
             .with_for_update()
         )
