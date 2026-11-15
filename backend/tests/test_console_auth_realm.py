@@ -1814,10 +1814,6 @@ def test_no_client_carries_a_field_keycloak_will_reject() -> None:
 # in without ever setting a credential.
 # --------------------------------------------------------------------------- #
 
-#: The module that started Keycloak's account actions from the console. Own-auth
-#: Task 10 deleted it with `oidc-client-ts`; it stays named so the re-pointed
-#: tests below can say it is gone.
-FRONTEND_AUTH = REPO / "frontend/src/lib/auth.ts"
 FRONTEND_SRC = REPO / "frontend/src"
 
 
@@ -1830,26 +1826,6 @@ def _console_sources() -> list[Path]:
         and ".test." not in path.name
         and "__tests__" not in path.parts
     ]
-
-
-def _actions_the_console_starts() -> set[str]:
-    """The `kc_action` values the browser sends.
-
-    RE-POINTED (own-auth Task 10, plan decision D24). This read the closed
-    union `ACCOUNT_ACTIONS` in `lib/auth.ts`, which started each credential
-    step at Keycloak. The console changes credentials on its own pages now and
-    that file is gone, so the set is read from EVERY console source: a
-    `kc_action` anywhere is a step started at Keycloak again, and it lands in
-    the realm checks below like the three that were there.
-    """
-    found: set[str] = set()
-    for path in _console_sources():
-        found.update(re.findall(r"kc_action\W{1,6}([A-Za-z_-]+)", path.read_text()))
-    return found
-
-
-def _enabled_actions(realm: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {a["alias"]: a for a in realm.get("requiredActions", []) if a.get("enabled") is True}
 
 
 #: Keycloak 26's own default set (`DefaultRequiredActions.Action`), minus the

@@ -13,9 +13,9 @@ The rules this surface keeps, and the test that would notice each breaking:
    `users.id`, audit `actor_id` among them (§0.6), so the row is marked
    `deleted` and RETAINED. `test_a_deleted_users_audit_history_is_still_resolvable`
    is the assertion that matters.
-3. **No identity provider is called** (design §1.3, D5). Every request that
-   is not in-process goes to an `OutboundRecorder` (`install_outbound`), so
-   that any call would be SEEN: every `outbound.seen == []` below holds the
+3. **No identity provider is called** (design §1.3, D5). Every httpx request
+   that is not in-process goes to an `OutboundRecorder` (`install_outbound`),
+   so that any call would be SEEN: every `outbound.seen == []` below holds the
    rule. An invited technician's `external_subject` is `itms-local:<uuid>`.
 4. **The domain rule is enforced here too.** A console that refuses an address
    at sign-in but invites it is not enforcing anything.

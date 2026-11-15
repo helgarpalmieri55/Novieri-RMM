@@ -19,7 +19,7 @@ What is pinned here:
 - one organization's revocation never reaches another's users;
 - `PATCH /orgs/current` audits `mcp.settings_changed` when the switch moves.
 
-Every request that is not in-process sends to
+Every httpx request that is not in-process sends to
 `test_user_admin_api.OutboundRecorder` (`install_outbound`), to prove that
 revoking sends nothing anywhere. Until own authentication phase 4 it was a
 fake Keycloak that took only the clients built without a transport, and also
