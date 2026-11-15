@@ -704,13 +704,21 @@ jobs:
           #    it has one, is not the way to localhost (the flow sets no proxy
           #    either).
           get() { curl -sf --noproxy '*' --cacert certs/fullchain.pem "$@"; }
+          # The api's OWN answer, not just a 200: Traefik leaves out a
+          # container whose health check has not passed yet, and meanwhile
+          # the console's catch-all router answers the metadata path with
+          # its HTML page and a 200 (the first phase-4 run waited on exactly
+          # that, and its POST /mcp reached nginx: 405).
           wait_for_api() {
-            local page
+            local meta page
             for _ in $(seq 1 60); do
-              if get -o /dev/null https://localhost/.well-known/oauth-authorization-server; then
-                page="$(get -o /dev/null -w '%{content_type}' https://localhost/ || true)"
-                case "$page" in text/html*) return 0 ;; esac
-              fi
+              meta="$(get -o /dev/null -w '%{content_type}' https://localhost/.well-known/oauth-authorization-server || true)"
+              case "$meta" in
+                application/json*)
+                  page="$(get -o /dev/null -w '%{content_type}' https://localhost/ || true)"
+                  case "$page" in text/html*) return 0 ;; esac
+                  ;;
+              esac
               sleep 3
             done
             docker compose logs api web traefik

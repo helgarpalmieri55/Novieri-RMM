@@ -372,6 +372,25 @@ def test_openbao_is_waited_for_until_it_answers_not_initialised() -> None:
     assert "bao status" not in run
 
 
+def test_the_api_is_waited_for_until_it_answers_itself() -> None:
+    """The deploy job's first run with phase 4 (run 43746102957) failed with
+    "/mcp without a token answered 405": the wait passed while the api was
+    still starting. Traefik leaves out a container whose health check has not
+    passed yet, so the console's catch-all router answered the metadata path
+    with its HTML page and a 200, and the flow's POST /mcp reached nginx. The
+    wait takes only the api's own JSON for that path -- and so does the wait
+    after the api is recreated for the opt-in."""
+    run = _deploy_step(OAUTH_STEP)
+    start = run.index("wait_for_api() {")
+    wait = run[start : run.index("\n}\n", start)]
+    assert "https://localhost/.well-known/oauth-authorization-server" in wait
+    assert "application/json" in wait
+    loop = wait[wait.index("for _ in"):]
+    metadata = loop.index("oauth-authorization-server")
+    assert "application/json" in loop[metadata:], "checked on the metadata answer itself"
+    assert run.count("wait_for_api\n") >= 2, "both waits: the first start and the recreate"
+
+
 def test_a_failed_phase_leaves_the_stacks_logs() -> None:
     """Fix round 1 (review minor 5). The masks are in place before the first
     call that can print them (the install code is the last secret read)."""
