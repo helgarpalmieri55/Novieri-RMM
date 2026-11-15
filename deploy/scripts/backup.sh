@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Take a complete, restorable backup of the platform's databases.
 #
-# Three artefacts, not two. `deploy/README.md` and `GO-LIVE.md` previously
-# prescribed only the two `-Fc` dumps:
+# Two artefacts, and a third in one case. `deploy/README.md` and `GO-LIVE.md`
+# once prescribed only the `-Fc` dumps, and no ROLE definitions:
 #
 #   itsuite.dump    the application database
+#   globals.sql     the cluster's ROLE definitions
 #   keycloak.dump   ONLY in the backup deploy.sh takes before an upgrade
 #                   (ITS_BACKUP_OLD_IDENTITY_DB=1), and only while a
 #                   `keycloak` database exists: own authentication phase 4
@@ -12,7 +13,6 @@
 #                   that database until the operator retires it. A nightly
 #                   or off-site backup never holds it; a fresh install has
 #                   none.
-#   globals.sql     the cluster's ROLE definitions
 #
 # WHAT globals.sql IS AND IS NOT FOR. A `pg_dump` of a single database emits
 # ZERO CREATE ROLE statements while depending on three cluster-level roles it

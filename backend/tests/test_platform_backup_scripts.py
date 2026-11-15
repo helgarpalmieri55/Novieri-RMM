@@ -423,6 +423,99 @@ def test_the_drill_refuses_a_compose_file_naming_the_live_project(tmp_path: Path
     assert json.loads((status / "drill.json").read_text())["result"] == "fail"
 
 
+# --- the drill since own authentication phase 4 (fix round 1) -----------------
+#
+# The real restore-drill.sh, in a copy of deploy/ with a fake `docker` on PATH
+# and a fake restore.sh: the drill's own checks, against answers the test
+# chooses. The fake psql answers a healthy restored database, and for the
+# `keycloak` database the table count in FAKE_KC_TABLES ("fail" exits 1).
+
+_FAKE_DRILL_DOCKER = r"""#!/bin/sh
+echo "$*" >> "$FAKE_LOG"
+case "$*" in
+  *" psql "*"-d keycloak"*)
+    [ "$FAKE_KC_TABLES" = fail ] && exit 1
+    echo "$FAKE_KC_TABLES" ;;
+  *"IS DISTINCT FROM"*) echo 0 ;;
+  *"SELECT version_num"*) echo 0248 ;;
+  *rolbypassrls*) echo f ;;
+  *"SELECT count(*) FROM "*) echo 1 ;;
+esac
+exit 0
+"""
+
+
+def _drill(
+    tmp_path: Path, *args: str, keycloak_dump: bool, kc_tables: str = "0"
+) -> subprocess.CompletedProcess[str]:
+    deploy = tmp_path / "deploy"
+    (deploy / "scripts").mkdir(parents=True)
+    (deploy / "drill").mkdir()
+    shutil.copy(DRILL, deploy / "scripts/restore-drill.sh")
+    shutil.copy(LIVE_COMPOSE, deploy / "docker-compose.yml")
+    shutil.copy(DRILL_COMPOSE, deploy / "drill/docker-compose.drill.yml")
+    restore = deploy / "scripts/restore.sh"
+    restore.write_text('#!/bin/sh\necho "restore.sh $*" >> "$FAKE_LOG"\n')
+    restore.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(_FAKE_DRILL_DOCKER)
+    (bin_dir / "docker").chmod(0o755)
+    backup = tmp_path / "backups/daily/2026-11-20T020000Z"
+    backup.mkdir(parents=True)
+    for name, body in (
+        ("itsuite.dump", "dump"),
+        ("globals.sql", "CREATE ROLE its_admin;"),
+        ("alembic_version", "0248\n"),
+        ("policy_count", "133\n"),
+    ):
+        (backup / name).write_text(body)
+    if keycloak_dump:
+        (backup / "keycloak.dump").write_text("dump")
+    return _bash(
+        " ".join(f'"{a}"' for a in (f"{deploy}/scripts/restore-drill.sh", *args, backup)),
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        FAKE_LOG=str(tmp_path / "docker-calls"),
+        FAKE_KC_TABLES=kc_tables,
+        ITS_BACKUP_STATUS_DIR=str(tmp_path / "status"),
+        ITS_BACKUP_STATE_DIR=str(tmp_path / "state"),
+    )
+
+
+def test_the_drill_needs_no_keycloak_dump(tmp_path: Path) -> None:
+    """The nightly backups it drills hold none since phase 4 (K1): requiring
+    one failed every drill on every fresh install and every upgraded host."""
+    run = _drill(tmp_path, keycloak_dump=False)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "Restore drill PASSED" in run.stdout, run.stdout
+    assert "-d keycloak" not in (tmp_path / "docker-calls").read_text()
+    assert "keycloak database" not in run.stdout, run.stdout
+
+
+def test_skip_keycloak_is_accepted_and_changes_nothing(tmp_path: Path) -> None:
+    """P4-23: a timer or a cron line that still passes it does not fail, and
+    the drill it runs is the drill without it -- the old dump still checked."""
+    run = _drill(tmp_path, "--skip-keycloak", keycloak_dump=True, kc_tables="42")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "--skip-keycloak: nothing to skip" in run.stdout, run.stdout
+    assert "PASS  the restored keycloak database holds tables" in run.stdout, run.stdout
+    assert "Restore drill PASSED" in run.stdout, run.stdout
+
+
+def test_a_keycloak_dump_is_checked_in_the_restored_database(tmp_path: Path) -> None:
+    """A backup that holds one (taken before phase 4, or deploy.sh's
+    pre-upgrade backup) must have restored a database that holds tables; none,
+    or a query that fails, fails the drill."""
+    for tables, verdict in (("42", "PASS"), ("0", "FAIL"), ("fail", "FAIL")):
+        case = tmp_path / tables
+        case.mkdir()
+        run = _drill(case, keycloak_dump=True, kc_tables=tables)
+        line = f"{verdict}  the restored keycloak database holds tables"
+        assert line in run.stdout, (tables, run.stdout)
+        assert (run.returncode == 0) == (verdict == "PASS"), (tables, run.stdout)
+    assert "query failed" in run.stdout, run.stdout
+
+
 # --- results the platform reads (app/core/health/backup_status.py) -------------
 
 

@@ -54,14 +54,36 @@ def test_no_up_removes_orphans() -> None:
     assert "--remove-orphans" not in _SH_COMMENT.sub("", _script())
 
 
+def _array(name: str) -> str:
+    """A top-level `NAME=( ... )` array of deploy.sh, as the script has it."""
+    match = re.search(rf"^{name}=\(.*?\)$", _script(), re.MULTILINE | re.DOTALL)
+    assert match is not None, f"deploy.sh has no {name} -- if renamed, follow it"
+    return match.group(0)
+
+
+#: The four keys the release before own authentication phase 4 does not start
+#: without (operator decision K1, 2026-11-15): its compose file needs the two
+#: KEYCLOAK_ADMIN_*, its api, gateway, worker and migrate the two ITS_OIDC_*.
+ROLLBACK_KEYS = (
+    "KEYCLOAK_ADMIN_USER",
+    "KEYCLOAK_ADMIN_PASSWORD",
+    "ITS_OIDC_ISSUER",
+    "ITS_OIDC_JWKS_URL",
+)
+
+
 def test_obsolete_env_keys_are_named_and_never_edited() -> None:
     """The keys an upgraded `.env` still holds are named once, and the file is
     left byte for byte as it was (the script never edits `.env` beyond
-    IT_SUITE_VERSION). `.env.example` ships none of them."""
+    IT_SUITE_VERSION). `.env.example` ships none of them. And the note says
+    WHICH four a rollback needs (fix round 1: it said "four of them")."""
     listed = re.search(r"OBSOLETE_ENV_KEYS=\((.*?)\)", _script(), re.DOTALL)
     assert listed is not None
     keys = listed.group(1).split()
     assert len(keys) == 17 and len(set(keys)) == 17, keys
+    rollback = re.search(r"^ROLLBACK_ENV_KEYS=\((.*?)\)$", _script(), re.MULTILINE)
+    assert rollback is not None and tuple(rollback.group(1).split()) == ROLLBACK_KEYS
+    assert set(ROLLBACK_KEYS) <= set(keys)
     example = (REPO / "deploy/.env.example").read_text()
     shipped = [k for k in keys if re.search(rf"^#?\s*{k}=", example, re.MULTILINE)]
     assert shipped == [], shipped
@@ -73,6 +95,7 @@ printf '%s\\n' 'ITS_OIDC_ISSUER=https://x/realms/it-suite' 'KEYCLOAK_ADMIN_PASSW
 cp .env before
 note() {{ printf '%s\\n' "$*"; }}
 OBSOLETE_ENV_KEYS=({" ".join(keys)})
+{_array("ROLLBACK_ENV_KEYS")}
 {_fn("obsolete_env_keys")}
 obsolete_env_keys
 cmp -s .env before && echo UNCHANGED
@@ -83,27 +106,58 @@ cmp -s .env before && echo UNCHANGED
     assert "ITS_DEFAULT_ORG_SLUG" not in run.stdout.split("\n", 1)[1], run.stdout
     assert "UNCHANGED" in run.stdout, run.stdout
     # Not "harmless; remove them": the release before needs four of them
-    # (operator decision K1, 2026-11-15).
-    assert "Do NOT remove them yet" in run.stdout, run.stdout
+    # (operator decision K1, 2026-11-15) -- and these four, by name.
+    keep = run.stdout.splitlines()[_step(run.stdout, "Do NOT remove them yet")]
+    assert all(key in keep for key in ROLLBACK_KEYS), keep
     assert "Retiring the old identity provider's data" in run.stdout, run.stdout
     assert "Harmless" not in _script()
 
 
-def _containers(listing: str) -> str:
-    """deploy.sh's two container functions, with `docker compose ps -a`
-    answering LISTING (one `name service` per line) and every other docker
-    call written to ./calls."""
+def _containers(listing: str, *, docker_fails: str = "", compose_ps: str = "") -> str:
+    """deploy.sh's container functions, against a `docker` that answers the
+    way the engine does. `docker ps -a ... --filter label=K=V` lists the
+    containers in LISTING (one `name project service` per line) whose compose
+    labels EQUAL every filter given, as Docker's label filter does; `docker
+    compose config` names the project `it-suite`; `docker compose ps` answers
+    COMPOSE_PS, which is empty unless a test says otherwise (whether Compose
+    lists a container whose service left the file is Compose's choice). Each
+    label query is written to ./queries and every other docker call to
+    ./calls. DOCKER_FAILS names the call that exits 1 instead: `ps` (the
+    engine) or `config` (the compose file)."""
     return f"""
 set -euo pipefail
 cd "$(mktemp -d)"
 say()  {{ printf '%s\\n' "$*"; }}
 note() {{ printf '%s\\n' "$*"; }}
 warn() {{ printf 'WARNING %s\\n' "$*"; }}
+die()  {{ printf 'FAILED %s\\n' "$*" >&2; exit 1; }}
+printf '%b' {listing!r} > listing
 docker() {{
-  case "$1 $2" in
-    "compose ps") printf '%b' {listing!r} ;;
-    *) echo "docker $*" >> calls ;;
-  esac
+  local project="" service="" arg
+  if [ "$1" = compose ]; then
+    case "$*" in
+      *" config"*)
+        [ {docker_fails!r} = config ] && return 1
+        printf 'name: it-suite\\nservices:\\n  api: {{}}\\n' ;;
+      *" ps"*) printf '%b' {compose_ps!r} ;;
+      *) echo "docker $*" >> calls ;;
+    esac
+    return 0
+  fi
+  if [ "$1" = ps ]; then
+    [ {docker_fails!r} = ps ] && return 1
+    echo "docker $*" >> queries
+    for arg in "$@"; do
+      case "$arg" in
+        label=com.docker.compose.project=*) project="${{arg#label=com.docker.compose.project=}}" ;;
+        label=com.docker.compose.service=*) service="${{arg#label=com.docker.compose.service=}}" ;;
+      esac
+    done
+    awk -v p="$project" -v s="$service" \\
+      '(p == "" || $2 == p) && (s == "" || $3 == s) {{ print $1 }}' listing
+    return 0
+  fi
+  echo "docker $*" >> calls
 }}
 COMPOSE=(docker compose)
 {_fn("old_identity_containers")}
@@ -117,15 +171,22 @@ def test_the_old_identity_providers_containers_go_by_name_and_nothing_else() -> 
     anonymous client registration included, would go on answering on :443.
     Exactly `keycloak` and `keycloak-init`, by service name -- not the
     operator's own `guacd`, not a `keycloak-proxy` of theirs (the
-    coordinator's decision, 2026-11-15)."""
+    coordinator's decision, 2026-11-15), and not a `keycloak` of another
+    compose project on the same host. (Fix round 1: the name is the
+    container's `com.docker.compose.service` label in this project, the query
+    the Verify step makes, not a line of `compose ps`.)"""
     listing = (
-        "it-suite-api-1 api\n"
-        "it-suite-keycloak-1 keycloak\n"
-        "it-suite-keycloak-init-1 keycloak-init\n"
-        "it-suite-guacd-1 guacd\n"
-        "it-suite-keycloak-proxy-1 keycloak-proxy\n"
+        "it-suite-api-1 it-suite api\n"
+        "it-suite-keycloak-1 it-suite keycloak\n"
+        "it-suite-keycloak-init-1 it-suite keycloak-init\n"
+        "it-suite-guacd-1 it-suite guacd\n"
+        "it-suite-keycloak-proxy-1 it-suite keycloak-proxy\n"
+        "lab-keycloak-1 lab keycloak\n"
     )
-    run = _run_bash(_containers(listing) + "remove_old_identity_containers\ncat calls\n")
+    compose_ps = "".join(f"{n} {s}\n" for n, _p, s in (ln.split() for ln in listing.splitlines()))
+    run = _run_bash(
+        _containers(listing, compose_ps=compose_ps) + "remove_old_identity_containers\ncat calls\n"
+    )
     assert run.returncode == 0, run.stdout + run.stderr
     calls = [line for line in run.stdout.splitlines() if line.startswith("docker ")]
     assert calls == [
@@ -136,8 +197,56 @@ def test_the_old_identity_providers_containers_go_by_name_and_nothing_else() -> 
     ], run.stdout
 
 
+def test_an_orphan_only_the_labels_find_is_removed() -> None:
+    """Fix round 1. The removal read `docker compose ps -a`, the Verify step
+    the containers' labels; if Compose did not list a container whose service
+    left the file, the removal said "none left" and Verify then failed the
+    deploy on a container nothing had tried to remove. Both read the labels
+    now, through one function."""
+    listing = "it-suite-api-1 it-suite api\nit-suite-keycloak-1 it-suite keycloak\n"
+    run = _run_bash(
+        _containers(listing, compose_ps="it-suite-api-1 api\n")
+        + "remove_old_identity_containers\ncat calls\n"
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "none left" not in run.stdout, run.stdout
+    assert "docker stop it-suite-keycloak-1" in run.stdout, run.stdout
+    assert "docker rm it-suite-keycloak-1" in run.stdout, run.stdout
+    listing_fn = _fn("old_identity_containers")
+    assert "label=com.docker.compose.service=" in listing_fn, listing_fn
+    assert '"${COMPOSE[@]}" ps' not in listing_fn, listing_fn
+    assert "$(old_identity_containers)" in _fn("verify_old_identity_gone")
+    assert "$(old_identity_containers)" in _fn("stop_if_already_deployed")
+
+
+def test_a_docker_that_does_not_answer_stops_the_run() -> None:
+    """Fix round 1. `|| true` turned a failed docker call into "none left",
+    into a passing Verify, and -- before the diff -- into "Already deployed".
+    The removal, the Verify check and the half-done check each stop the run
+    now, with the reason, whether the engine or the compose file failed."""
+    listing = "it-suite-keycloak-1 it-suite keycloak\n"
+    for fails in ("ps", "config"):
+        removal = _run_bash(
+            _containers(listing, docker_fails=fails)
+            + "remove_old_identity_containers\necho REACHED\n"
+        )
+        verify = _run_bash(
+            _verify(listing, docker_fails=fails)
+            + "verify_old_identity_gone && echo PASSED || echo LEFT\necho REACHED\n"
+        )
+        already = _run_bash(_already(listing, docker_fails=fails))
+        for run in (removal, verify, already):
+            assert run.returncode != 0, (fails, run.stdout, run.stderr)
+            assert "REACHED" not in run.stdout and "CONTINUED" not in run.stdout, run.stdout
+            assert "FAILED" in run.stderr, (fails, run.stderr)
+            assert "the old identity provider's containers" in run.stderr, (fails, run.stderr)
+        assert "none left" not in removal.stdout, removal.stdout
+        assert "PASSED" not in verify.stdout and "LEFT" not in verify.stdout, verify.stdout
+        assert "Already deployed" not in already.stdout, already.stdout
+
+
 def test_removing_them_twice_is_a_no_op() -> None:
-    script = _containers("it-suite-api-1 api\n")
+    script = _containers("it-suite-api-1 it-suite api\n")
     run = _run_bash(script + "remove_old_identity_containers\ntest ! -e calls && echo NO_CALLS\n")
     assert run.returncode == 0, run.stdout + run.stderr
     assert "none left" in run.stdout and "NO_CALLS" in run.stdout, run.stdout
@@ -151,19 +260,21 @@ def test_they_go_after_the_new_app_tier_is_up() -> None:
     assert up < removal < text.index('say "Verifying"')
 
 
-def _already(listing: str, home: str = "") -> str:
+def _already(listing: str, home: str = "", docker_fails: str = "") -> str:
     """`stop_if_already_deployed` after a pull that brought nothing, with
     HOME (where `backups/pre-upgrade-*` live) a directory of its own."""
-    return _containers(listing) + f"""
+    return _containers(listing, docker_fails=docker_fails) + f"""
 HOME={home!r}; [ -n "$HOME" ] || HOME="$PWD"
 git() {{ echo 2f20afbe00000000000000000000000000000000; }}
 BASELINE={BASE!r}; AFTER=2f20afbe00000000000000000000000000000000
 SHORT_AFTER=2f20afbe; REPO_ROOT=/opt/it-suite; RUNNING_TAG=2f20afbe
+{_array("ROLLBACK_ENV_KEYS")}
 {_fn("way_back_backup")}
 {_fn("stop_if_already_deployed")}
-ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""
+{_fn("rollback_env_keys_check")}
+ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""; HALF_DONE_UPGRADE=0
 stop_if_already_deployed
-echo "CONTINUED baseline=[$BASELINE] running=[$RUNNING_TAG]"
+echo "CONTINUED baseline=[$BASELINE] running=[$RUNNING_TAG] half_done=[$HALF_DONE_UPGRADE]"
 echo "back=[$ROLLBACK_BACKUP_DIR] base=[$ROLLBACK_BASE]"
 """
 
@@ -190,13 +301,18 @@ def test_a_half_done_upgrade_is_finished_not_called_already_deployed() -> None:
     usual, pulls this release, records its tag and migrates, then stops at
     `restart keycloak`. Re-run, this script read the new tag as running and
     answered "Already deployed" with exit 0, the app tier still on the old
-    images. While either old container is there it runs a full deploy."""
-    for old in ("it-suite-keycloak-1 keycloak\n", "it-suite-keycloak-init-1 keycloak-init\n"):
-        run = _run_bash(_already("it-suite-api-1 api\n" + old))
+    images. While either old container is there it runs a full deploy, and
+    marks the run as finishing a half-done upgrade (fix round 1)."""
+    for old in (
+        "it-suite-keycloak-1 it-suite keycloak\n",
+        "it-suite-keycloak-init-1 it-suite keycloak-init\n",
+    ):
+        run = _run_bash(_already("it-suite-api-1 it-suite api\n" + old))
         assert run.returncode == 0, run.stdout + run.stderr
         assert "Already deployed" not in run.stdout, run.stdout
         assert "CONTINUED baseline=[]" in run.stdout and "full deploy" in run.stdout, run.stdout
-    done = _run_bash(_already("it-suite-api-1 api\n"))
+        assert "half_done=[1]" in run.stdout, run.stdout
+    done = _run_bash(_already("it-suite-api-1 it-suite api\n"))
     assert done.returncode == 0, done.stdout + done.stderr
     assert "Already deployed" in done.stdout and "CONTINUED" not in done.stdout, done.stdout
 
@@ -210,7 +326,7 @@ def test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248(
     help prints that backup, that tag and that commit."""
     made = _backups(tmp_path)
     finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
-    script = _already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)) + f"""
+    script = _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path)) + f"""
 {_fn("rollback_help")}
 BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
 rollback_help
@@ -230,28 +346,38 @@ rollback_help
 def test_without_a_backup_from_before_0248_it_says_so(tmp_path: Path) -> None:
     (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z").mkdir(parents=True)
     (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z" / "alembic_version").write_text("0248\n")
-    run = _run_bash(_already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)))
+    run = _run_bash(_already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path)))
     assert run.returncode == 0, run.stdout + run.stderr
     assert "back=[] base=[]" in run.stdout and "from before migration 0248" in run.stdout
 
 
-def _verify(left: str) -> str:
-    return f"""
-set -euo pipefail
-cd "$(mktemp -d)"
-note() {{ printf '%s\\n' "$*"; }}
-warn() {{ printf 'WARNING %s\\n' "$*"; }}
-docker() {{
-  echo "docker $*" >> calls
-  case "$*" in
-    "compose config") printf 'name: it-suite\\nservices:\\n  api: {{}}\\n' ;;
-    *"service=keycloak") printf '%b' {left!r} ;;
-  esac
-}}
-COMPOSE=(docker compose)
-{_fn("old_identity_containers_left")}
-{_fn("verify_old_identity_gone")}
+def test_without_a_backup_from_before_0248_the_closing_help_names_none(tmp_path: Path) -> None:
+    """Fix round 1. Backups moved, or another $HOME: no `pre-upgrade-*` here
+    is below 0248, and the running tag is the new one. The closing help took
+    its no-images branch and named THIS run's backup, at 0248, as "The
+    backup to restore" -- a way back to nowhere. It now names none, and says
+    that no backup on this host goes back past phase 4."""
+    past = tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z"
+    past.mkdir(parents=True)
+    (past / "alembic_version").write_text("0248\n")
+    finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
+    script = _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path)) + f"""
+{_fn("rollback_help")}
+BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
+rollback_help
 """
+    run = _run_bash(script)
+    assert run.returncode == 0, run.stdout + run.stderr
+    help_ = run.stdout[run.stdout.index("If you need to go back") :]
+    assert "no backup on this host goes back past" in help_.lower(), help_
+    assert str(finishing) not in help_ and str(past) not in help_, help_
+    assert "The backup to restore" not in help_, help_
+    assert "IT_SUITE_VERSION=" not in help_ and "docker compose up -d" not in help_, help_
+
+
+def _verify(listing: str, docker_fails: str = "") -> str:
+    """deploy.sh's Verify check, against the same `docker` as `_containers`."""
+    return _containers(listing, docker_fails=docker_fails) + _fn("verify_old_identity_gone")
 
 
 def test_the_verify_step_fails_while_a_container_of_it_is_left() -> None:
@@ -259,10 +385,12 @@ def test_the_verify_step_fails_while_a_container_of_it_is_left() -> None:
     did not list a container whose service left the file, the removal would
     say "none left" and Traefik would go on routing to Keycloak."""
     check = "verify_old_identity_gone && echo PASSED || echo FAILED\n"
-    left = _run_bash(_verify("3f1c9a\n") + check + "cat calls\n")
-    assert "FAILED" in left.stdout and "docker rm -f 3f1c9a" in left.stdout, left.stdout
+    listing = "it-suite-api-1 it-suite api\nit-suite-keycloak-1 it-suite keycloak\n"
+    left = _run_bash(_verify(listing) + check + "cat queries\n")
+    assert "FAILED" in left.stdout.splitlines(), left.stdout
+    assert "docker rm -f it-suite-keycloak-1" in left.stdout, left.stdout
     assert "label=com.docker.compose.project=it-suite" in left.stdout, left.stdout
-    gone = _run_bash(_verify("") + check)
+    gone = _run_bash(_verify("it-suite-api-1 it-suite api\n") + check)
     assert "PASSED" in gone.stdout and "no container of the old identity provider" in gone.stdout
     text = _SH_COMMENT.sub("", _script())
     assert text.index('say "Verifying"') < text.index("\nverify_old_identity_gone || FAIL=1\n")
@@ -278,6 +406,7 @@ OBSOLETE = re.compile(
     r"KEYCLOAK_ADMIN_(USER|PASSWORD)|ITS_OIDC_[A-Z_]+|ITS_MULTI_TENANT"
     r"|ENTRA_(TENANT_ID|CLIENT_ID|CLIENT_SECRET)|ITS_KEYCLOAK_[A-Z_]+"
 )
+_ROLLBACK_KEY_NAMES = re.compile(r"\b(" + "|".join(ROLLBACK_KEYS) + r")\b")
 
 
 def test_no_other_deploy_file_names_an_obsolete_key() -> None:
@@ -285,19 +414,39 @@ def test_no_other_deploy_file_names_an_obsolete_key() -> None:
     `ITS_OIDC_ISSUER`, which a fresh `.env` no longer has, and refused every
     new install. deploy.sh names them on purpose (its list and the rollback
     check). The runbook is Task 9's guard's (`deploy/README.md`,
-    `deploy/GO-LIVE.md`), and `deploy/keycloak/` holds only Task 7's
-    `ci_mcp_flow.py`, which that task removes."""
-    exempt = {DEPLOY_SH, REPO / "deploy/README.md", REPO / "deploy/GO-LIVE.md"}
-    found = [
-        f"{path.relative_to(REPO)}:{number}"
-        for path in sorted((REPO / "deploy").rglob("*"))
-        if path.is_file()
-        and path not in exempt
-        and "keycloak" not in path.relative_to(REPO).parts
-        for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1)
-        if OBSOLETE.search(line)
-    ]
+    `deploy/GO-LIVE.md`).
+
+    Fix round 1:
+    - The one other file exempt is `deploy/keycloak/ci_mcp_flow.py`, by name:
+      it is Task 7's, which deletes it. The exemption was every path under
+      `deploy/keycloak/`, which would have let anything else there through.
+    - `.env.example` may name the four keys a rollback needs, in a comment
+      line, so whoever compares an upgraded `.env` with it knows which to
+      keep -- never as a key, commented out or not, and none of the other
+      thirteen.
+    - Bytecode (`__pycache__`) and a local `deploy/.env` are not shipped;
+      the second is gitignored and on an upgraded host holds these keys."""
+    exempt = {
+        DEPLOY_SH,
+        REPO / "deploy/README.md",
+        REPO / "deploy/GO-LIVE.md",
+        REPO / "deploy/keycloak/ci_mcp_flow.py",
+        REPO / "deploy/.env",
+    }
+    example = REPO / "deploy/.env.example"
+    found = []
+    for path in sorted((REPO / "deploy").rglob("*")):
+        if not path.is_file() or path in exempt or "__pycache__" in path.parts:
+            continue
+        for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+            prose = line.startswith("#") and not re.match(r"#\s*[A-Z][A-Z0-9_]*=", line)
+            if path == example and prose:
+                line = _ROLLBACK_KEY_NAMES.sub("", line)
+            if OBSOLETE.search(line):
+                found.append(f"{path.relative_to(REPO)}:{number}")
     assert found == [], found
+    comments = " ".join(ln for ln in example.read_text().splitlines() if ln.startswith("#"))
+    assert [key for key in ROLLBACK_KEYS if key not in comments] == [], "name the four"
 
 
 def test_the_preflight_checks_the_certificate_against_the_console_address(tmp_path: Path) -> None:
@@ -400,6 +549,8 @@ LAST_STEP=starting
 RUNNING_TAG={running_tag!r}; SHORT_AFTER=2f20afbe
 BACKUP_DIR={BACKUP!r}; BASELINE={baseline!r}; REPO_ROOT=/opt/it-suite
 NEED_MIGRATE={migrate}; NEED_COMPOSE={compose}
+{_array("ROLLBACK_ENV_KEYS")}
+{_fn("rollback_env_keys_check")}
 {_fn("rollback_help")}
 """
 
@@ -488,6 +639,30 @@ def test_a_rollback_past_phase_4_names_the_env_keys_it_needs() -> None:
     kept = "".join(f"{key}=x\n" for key in four)
     assert "no longer has" not in _rollback(migrate=1, compose=1, old_compose=old, env=kept)
     assert "no longer has" not in _rollback(migrate=1, compose=1, old_compose="services: {}\n")
+
+
+def test_without_the_old_images_the_rollback_still_names_the_missing_keys() -> None:
+    """Fix round 1: the check ran only on the image-swap path. Without the old
+    images the way back is the backup and a rebuild of the old release, which
+    needs the same four keys."""
+    old = "      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?set in .env}\n"
+    out = _rollback(web=False, migrate=1, old_compose=old, env="KEYCLOAK_ADMIN_USER=admin\n")
+    assert "There is no image to swap back to" in out, out
+    warning = out.splitlines()[_step(out, "no longer has")]
+    assert "KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_ISSUER ITS_OIDC_JWKS_URL" in warning, out
+
+
+def test_with_no_known_base_the_rollback_says_which_keys_it_cannot_rule_out() -> None:
+    """Fix round 1: with no commit to read the old compose file from, this run
+    cannot tell whether the release before predates phase 4. It says so, and
+    which of the four .env lacks, rather than saying nothing."""
+    out = _rollback(baseline="", migrate=1, compose=1, env="ITS_OIDC_ISSUER=https://x\n")
+    _step(out, "does not know which release ran before")
+    warning = out.splitlines()[_step(out, "no longer has")]
+    assert "KEYCLOAK_ADMIN_USER KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_JWKS_URL" in warning, out
+    assert "ITS_OIDC_ISSUER" not in warning, out
+    kept = "".join(f"{key}=x\n" for key in ROLLBACK_KEYS)
+    assert "no longer has" not in _rollback(baseline="", migrate=1, compose=1, env=kept)
 
 
 def test_a_run_that_dies_part_way_still_prints_how_to_go_back() -> None:

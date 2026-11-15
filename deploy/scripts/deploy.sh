@@ -196,6 +196,8 @@ OBSOLETE_ENV_KEYS=(
     ITS_KEYCLOAK_EVENTS_CLIENT_ID ITS_KEYCLOAK_EVENTS_SECRET_PATH
     ITS_KEYCLOAK_ADMIN_CLIENT_ID ITS_KEYCLOAK_ADMIN_SECRET_PATH
 )
+# The four of them the release before cannot start without.
+ROLLBACK_ENV_KEYS=(KEYCLOAK_ADMIN_USER KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_ISSUER ITS_OIDC_JWKS_URL)
 obsolete_env_keys() {
     local key found=()
     for key in "${OBSOLETE_ENV_KEYS[@]}"; do
@@ -204,7 +206,7 @@ obsolete_env_keys() {
     if [ ${#found[@]} -gt 0 ]; then
         note ".env holds ${#found[@]} key(s) this release no longer reads:"
         note "  ${found[*]}"
-        note "Do NOT remove them yet: a rollback past own authentication phase 4 needs four of them."
+        note "Do NOT remove them yet: a rollback past own authentication phase 4 needs ${ROLLBACK_ENV_KEYS[*]}."
         note "deploy/README.md \"Retiring the old identity provider's data\" removes them, when you choose."
     fi
     return 0
@@ -219,15 +221,36 @@ obsolete_env_keys
 # These two, BY NAME, and nothing else -- not `up --remove-orphans`, which
 # would also remove any container the operator added to this project.
 # Neither holds data: Keycloak's is in Postgres, and its image declares no
-# volume. The listing is this project's own (`compose ps -a` includes a
-# container whose service the file no longer defines).
+# volume.
+#
+# FOUND BY THE LABELS ON THE CONTAINERS THEMSELVES -- this project's
+# `com.docker.compose.project` and the service's `com.docker.compose.service`,
+# each an exact match -- not by `compose ps`, whose listing of a container
+# whose service left the file is Compose's choice to make. The half-done
+# check, the removal and the Verify step all ask this one query. And a docker
+# that does not answer STOPS THE RUN: read as "none left", an error would let
+# Keycloak go on answering on :443 behind a green deploy. Called in `$(...)`,
+# so `die` ends only that subshell: every caller exits on its status.
 old_identity_containers() {
-    "${COMPOSE[@]}" ps -a --format '{{.Name}} {{.Service}}' 2>/dev/null </dev/null \
-        | awk '$2 == "keycloak" || $2 == "keycloak-init" { print $1 }' || true
+    local cfg project service names
+    if ! cfg="$("${COMPOSE[@]}" config --no-interpolate 2>&1 </dev/null)"; then
+        printf '%s\n' "$cfg" >&2
+        die "docker compose config failed, so this run cannot look for the old identity provider's containers."
+    fi
+    project="$(awk '/^name: / { print $2; exit }' <<<"$cfg")"
+    [ -n "$project" ] \
+        || die "docker compose config named no project, so this run cannot look for the old identity provider's containers."
+    for service in keycloak keycloak-init; do
+        names="$(docker ps -a --format '{{.Names}}' \
+            --filter "label=com.docker.compose.project=$project" \
+            --filter "label=com.docker.compose.service=$service" </dev/null)" \
+            || die "docker ps failed, so this run cannot tell whether the old identity provider's containers are gone. Is the Docker daemon running?"
+        [ -z "$names" ] || printf '%s\n' "$names"
+    done
 }
 remove_old_identity_containers() {
     local name found
-    found="$(old_identity_containers)"
+    found="$(old_identity_containers)" || exit 1
     if [ -z "$found" ]; then
         note "none left"
         return 0
@@ -292,8 +315,10 @@ fi
 # images its `image_version` names. That backup has no `keycloak.dump` (the
 # new backup.sh took it without the flag), and needs none: the old identity
 # provider's database is still on the cluster, and restore.sh touches only the
-# databases a backup holds. rollback_help prints that backup and that tag.
-ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""
+# databases a backup holds. rollback_help prints that backup and that tag --
+# or, when this host holds no such backup, says so and names none
+# (HALF_DONE_UPGRADE): this run's own backup is no way back past phase 4.
+ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""; HALF_DONE_UPGRADE=0
 way_back_backup() {
     local dir rev found=""
     for dir in "$HOME"/backups/pre-upgrade-*/; do
@@ -306,13 +331,15 @@ way_back_backup() {
     printf '%s' "$found"
 }
 stop_if_already_deployed() {
-    local old_tag
+    local old_tag old
     [ -n "$BASELINE" ] || return 0
     [ "$(git -C "$REPO_ROOT" rev-parse "$BASELINE")" = "$AFTER" ] || return 0
-    if [ -n "$(old_identity_containers)" ]; then
+    old="$(old_identity_containers)" || exit 1
+    if [ -n "$old" ]; then
         warn "the old identity provider's containers are still here: an upgrade past own"
         warn "authentication phase 4 stopped part-way. Finishing it as a full deploy."
         BASELINE=""
+        HALF_DONE_UPGRADE=1
         ROLLBACK_BACKUP_DIR="$(way_back_backup)"
         if [ -z "$ROLLBACK_BACKUP_DIR" ]; then
             warn "No backup under $HOME/backups/pre-upgrade-* is from before migration 0248, so"
@@ -447,6 +474,31 @@ ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh "$BACKUP_DIR"
 # first step that changes anything, so a run that dies half-way through a
 # migration still says how to get back. Printed on success too: a problem
 # found an hour later is found with this still in the scrollback.
+#
+# A RELEASE FROM BEFORE OWN AUTHENTICATION PHASE 4 needs ROLLBACK_ENV_KEYS, which
+# this one does not read. Says so if .env lost any: for certain when the commit
+# that ran before is known and its compose file names them, as a condition when
+# it is not known (no commit, or one this checkout does not have). Every path of
+# rollback_help asks, the restore-only one included: rebuilding the old release
+# needs them as much as swapping back to its images does.
+rollback_env_keys_check() {
+    local base="$1" old_compose key missing=()
+    for key in "${ROLLBACK_ENV_KEYS[@]}"; do
+        grep -qE "^${key}=." .env 2>/dev/null || missing+=("$key")
+    done
+    [ ${#missing[@]} -gt 0 ] || return 0
+    if [ -n "$base" ] && old_compose="$(git -C "$REPO_ROOT" show "$base:deploy/docker-compose.yml" 2>/dev/null)"; then
+        grep -q 'KEYCLOAK_ADMIN_USER' <<<"$old_compose" || return 0
+        warn "The release you would go back to predates own authentication phase 4. Its compose file"
+        warn "or its api stops without these .env keys, which .env no longer has: ${missing[*]}"
+    else
+        warn "This run does not know which release ran before, or cannot read it from this checkout, so it"
+        warn "cannot tell whether that release predates own authentication phase 4. If it does, its compose"
+        warn "file or its api stops without these .env keys, which .env no longer has: ${missing[*]}"
+    fi
+    warn "Put them back, with the values they had, before the next step."
+    return 0
+}
 rollback_help() {
     local prev="$RUNNING_TAG" base="${ROLLBACK_BASE:-${BASELINE:-}}" n=1
     # Past an upgrade that stopped part-way, the backup taken before it
@@ -458,6 +510,16 @@ rollback_help() {
         note "An upgrade stopped part-way before this run: the way back is the backup it took first."
         note "This run's own backup ($BACKUP_DIR) is past migration 0248 and cannot go back past it."
     fi
+    if [ "${HALF_DONE_UPGRADE:-0}" = 1 ] && [ -z "${ROLLBACK_BACKUP_DIR:-}" ]; then
+        warn "An upgrade past own authentication phase 4 stopped part-way before this run."
+        warn "NO BACKUP ON THIS HOST GOES BACK PAST IT: none under $HOME/backups/pre-upgrade-* is from"
+        warn "before migration 0248, and the one this run took is past it. So this names none to restore."
+        note "The way back is the backup that stopped run took first, if it is kept elsewhere: the"
+        note "pre-upgrade-* directory whose alembic_version is below 0248, restored with"
+        note "ITS_RESTORE_FORCE=1 and scripts/restore.sh. Without it, the only way is forward."
+        rollback_env_keys_check ""
+        return 0
+    fi
 
     if [ -z "$prev" ] || [ "$prev" = "dev" ] || [ "$prev" = "$SHORT_AFTER" ] \
         || ! docker image inspect "itsuite/backend:$prev" >/dev/null 2>&1 \
@@ -467,6 +529,7 @@ rollback_help() {
         note "There is no image to swap back to. The backup to restore is at:"
         note "  $way_back"
         [ -n "$base" ] && note "and the commit that was running before is ${base:0:12}."
+        rollback_env_keys_check "$base"
         return 0
     fi
 
@@ -490,22 +553,7 @@ rollback_help() {
             warn "Check deploy/ out at the previous release by hand; the images alone do not carry it."
         fi
     fi
-    # A RELEASE FROM BEFORE OWN AUTHENTICATION PHASE 4 needs four .env keys this
-    # one does not read (OBSOLETE_ENV_KEYS above). Say so if .env lost any.
-    local old_compose key missing=()
-    if [ -n "$base" ]; then
-        old_compose="$(git -C "$REPO_ROOT" show "$base:deploy/docker-compose.yml" 2>/dev/null || true)"
-        if grep -q 'KEYCLOAK_ADMIN_USER' <<<"$old_compose"; then
-            for key in KEYCLOAK_ADMIN_USER KEYCLOAK_ADMIN_PASSWORD ITS_OIDC_ISSUER ITS_OIDC_JWKS_URL; do
-                grep -qE "^${key}=." .env 2>/dev/null || missing+=("$key")
-            done
-        fi
-    fi
-    if [ ${#missing[@]} -gt 0 ]; then
-        warn "The release you would go back to predates own authentication phase 4. Its compose file"
-        warn "or its api stops without these .env keys, which .env no longer has: ${missing[*]}"
-        warn "Put them back, with the values they had, before the next step."
-    fi
+    rollback_env_keys_check "$base"
     note "  $n. grep -q '^IT_SUITE_VERSION=' .env && sed -i 's/^IT_SUITE_VERSION=.*/IT_SUITE_VERSION=$prev/' .env || echo 'IT_SUITE_VERSION=$prev' >> .env"; n=$((n + 1))
     note "  $n. docker compose up -d"; n=$((n + 1))
     return 0
@@ -581,28 +629,20 @@ remove_old_identity_containers
 say "Verifying"
 FAIL=0
 
-# THE OLD IDENTITY PROVIDER'S CONTAINERS ARE GONE, checked by the labels on the
-# containers themselves (the project and the service), so this does not rest
-# on `compose ps` listing a container whose service left the file. One left is
-# still routed by Traefik, so it fails the deploy and says how to remove it.
-old_identity_containers_left() {
-    local cfg project service
-    cfg="$("${COMPOSE[@]}" config 2>/dev/null </dev/null || true)"
-    project="$(awk '/^name: / { print $2; exit }' <<<"$cfg")"
-    for service in keycloak keycloak-init; do
-        docker ps -aq --filter "label=com.docker.compose.project=${project:-it-suite}" \
-            --filter "label=com.docker.compose.service=$service" 2>/dev/null </dev/null || true
-    done
-}
+# THE OLD IDENTITY PROVIDER'S CONTAINERS ARE GONE, by the same label query the
+# removal made (old_identity_containers), so this does not rest on `compose ps`
+# listing a container whose service left the file. One left is still routed by
+# Traefik, so it fails the deploy and says how to remove it; a docker that does
+# not answer stops the run there, as it does everywhere else.
 verify_old_identity_gone() {
     local left
-    left="$(old_identity_containers_left | tr '\n' ' ')"
-    if [ -z "${left// /}" ]; then
+    left="$(old_identity_containers)" || exit 1
+    if [ -z "$left" ]; then
         note "no container of the old identity provider is left"
         return 0
     fi
     warn "a container of the old identity provider is still here, and Traefik routes to it:"
-    warn "  docker rm -f ${left% }"
+    warn "  docker rm -f ${left//$'\n'/ }"
     return 1
 }
 verify_old_identity_gone || FAIL=1
