@@ -338,6 +338,11 @@ tiempo.
 - **Refresco:** opaco, guardado como hash, **rota en cada uso**; reutilizar uno ya usado revoca toda la familia;
   caduca a los 30 días sin uso [S16, S30, S33]. Un refresh inválido responde `invalid_grant` [S33].
 - Revocar un cliente de IA en Ajustes corta su acceso en la siguiente llamada (1c(d)).
+- *Enmienda del 2026-11-15 (decisión del operador E1; plan de la fase 4, Task 1).* «Cerrar sesión en todas partes»,
+  el de la persona y el de un administrador (`DELETE /api/v1/users/{id}/sessions`), termina también sus concesiones
+  de IA y los códigos que una app aún no canjeó, en la misma transacción y con el recuento en el evento
+  (`ai_grants_revoked`). El del administrador sigue sin olvidar los equipos recordados. La consola ofrece el botón a
+  la persona en su página de seguridad, y al contacto en la del portal.
 
 ### 5.4 Registro abierto, con límites
 
