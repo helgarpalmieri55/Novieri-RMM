@@ -13,7 +13,7 @@
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import { navigation } from "../../lib/session";
@@ -374,6 +374,9 @@ describe("Your security", () => {
     await user.click(within(dialog).getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(calls.endMySession).toHaveBeenCalledExactlyOnceWith("s-2"));
   });
+
+  // A failed assertion must not leave the `navigation.assign` spy on for the next test.
+  afterEach(() => vi.restoreAllMocks());
 
   it("signs out everywhere after a confirmation that names the AI apps, then leaves for the sign-in page", async () => {
     const assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});

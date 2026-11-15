@@ -9,8 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setActiveLanguage } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { navigation } from "../../lib/session";
 import { MY_SECURITY_FIXTURE, apiClient, calls, installDefaults } from "../settings/__tests__/harness";
@@ -48,6 +49,8 @@ async function panel(title: string): Promise<HTMLElement> {
   return section;
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 beforeEach(() => {
   installDefaults();
   calls.getMySecurity.mockResolvedValue(CONTACT);
@@ -70,7 +73,22 @@ describe("a contact's security", () => {
     await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
     await waitFor(() => expect(assign).toHaveBeenCalledExactlyOnceWith("/portal/sign-in"));
     expect(calls.logoutEverywhere).toHaveBeenCalledOnce();
+    // The binding console rule: no `["me"]` observer where a contact can be.
+    expect(calls.me).not.toHaveBeenCalled();
     assign.mockRestore();
+  });
+
+  it("says nothing of AI apps in Spanish either, in the panel or in the dialog", async () => {
+    setActiveLanguage("es");
+    vi.spyOn(navigation, "assign").mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderPortalSecurity();
+    const box = await panel("Sesiones");
+    const button = within(box).getByRole("button", { name: "Cerrar sesión en todas partes" });
+    expect(box).not.toHaveTextContent(/\bIA\b/);
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Cerrar sesión en todas partes" });
+    expect(dialog).not.toHaveTextContent(/\bIA\b/);
   });
 
   it("reads the time zone from the portal, never from the console", async () => {
