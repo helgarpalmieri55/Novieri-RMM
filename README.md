@@ -55,11 +55,12 @@ cd frontend && npm install
 npm test && npm run build     # vitest + tsc strict + vite build
 ```
 
-End-to-end kernel demo (enroll → mTLS connect → signed job → verified result
-→ audit chain):
+The end-to-end kernel loop (enroll → mTLS connect → signed job → verified
+result → audit chain) is a test in the backend suite, against real PostgreSQL,
+Redis and the mTLS gateway:
 
 ```sh
-backend/.venv/bin/python scripts/demo_e2e.py
+cd backend && .venv/bin/pytest -q tests/test_e2e_kernel.py
 ```
 
 Deployment: see [`deploy/README.md`](deploy/README.md). Disaster recovery:

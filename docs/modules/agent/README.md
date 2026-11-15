@@ -84,21 +84,33 @@ life of the process and your shell keeps it in history. It goes into one
 deletes the moment it has exchanged it for a certificate.
 `agent/packaging/README.md` has the full argument.
 
-## Prove the whole path works
+## What proves the whole path works
 
-```sh
-scripts/build_agent.sh
-backend/.venv/bin/python scripts/demo_e2e_agent.py
-```
+`scripts/demo_e2e_agent.py` used to boot the API and the mTLS gateway on real
+ports, enroll the real Go binary and dispatch server-signed jobs to it. It was
+retired on 2026-11-15 (own authentication phase 4): it signed in with a
+bearer, which `/api/v1` has not read since own authentication phase 1, so it
+had not been able to finish since then, and no CI job ran it. Its halves are now held
+in CI on every push:
 
-Boots the API and the mTLS gateway on real ports, enrolls the real Go binary,
-and dispatches server-signed jobs the agent verifies in Go before executing.
-It is the only thing in the repository that proves the Python signer and the Go
-verifier agree: `pytest` exercises the signer against a Python reader, and
-`go test` exercises the verifier against Go-built fixtures. Neither can catch a
-disagreement between them.
+- **The Python signer and the Go verifier agree.**
+  `backend/tests/test_canonical_corpus.py` (the `backend` job) keeps
+  `agent/internal/canonical/testdata/corpus.jsonl` exactly what
+  `canonical_bytes` produces and checks `signed_jobs.jsonl`, frames the real
+  signer made, against their own recorded bytes;
+  `TestServerSignaturesVerifyOverAgentComputedBytes` (the `agent` job) verifies
+  those signatures over bytes the Go encoder computes.
+- **The wire shapes agree.** `backend/tests/test_wire_schema_export.py` keeps
+  `docs/kernel/wire-protocol/*.schema.json` current with the Pydantic models,
+  and `agent/internal/wire/schema_test.go` with the capabilities'
+  `schema_test.go` files checks the Go side against them.
+- **The kernel loop on the control plane.**
+  `backend/tests/test_e2e_kernel.py::test_kernel_end_to_end`: enrollment, the
+  mTLS gateway on a real port, a live dispatch through the operator API, the
+  agent's checks done by a Python double, the result and the audit chain.
 
-Requires local Postgres 16 and Redis on `localhost:6379`.
+**Not held by anything:** the compiled binary enrolling against this control
+plane and running a job through its gateway.
 
 ---
 

@@ -4,6 +4,11 @@
 WHY THIS EXISTS AS A SEPARATE SCRIPT FROM `verify_backup_run.py`
 ================================================================
 
+*2026-11-15: `verify_backup_run.py` was retired in own authentication phase 4;
+it signed in with a bearer, which `/api/v1` has not read since phase 1. What
+CI now holds of what it measured is `HANDOFF.md` §5. This docstring is the
+record of why the two were split, and names it as it was.*
+
 `scripts/verify_backup_run.py` measures `backup.run` and `backup.restore`
 against the full `deploy/docker-compose.yml` stack. Its restore leg carried
 this, verbatim, from the day it was written:
@@ -125,8 +130,6 @@ def main() -> int:
         database_url=unreachable,
         database_admin_url=unreachable,
         database_portal_url=unreachable,
-        oidc_issuer="https://idp.invalid",
-        oidc_jwks_url="https://idp.invalid/jwks",
         ca_dir=tmp / "ca",
         signing_key_path=tmp / "job-signing.key",
         s3_endpoint=args.endpoint,
