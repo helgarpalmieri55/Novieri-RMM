@@ -135,6 +135,10 @@ export const profile: Shape<typeof en> = {
       unknownBrowser: "Navegador desconocido",
       end: "Cerrar sesión",
       endAria: "Cerrar la sesión desde {where}",
+      everywhere: "Cerrar sesión en todas partes",
+      everywhereNote:
+        "Cierra todas las sesiones de arriba, también esta, olvida tus equipos recordados y desconecta las aplicaciones de IA que conectaste.",
+      everywhereNoteContact: "Cierra todas las sesiones de arriba, también esta, y olvida tus equipos recordados.",
     },
     confirm: {
       passkey: {
@@ -165,6 +169,13 @@ export const profile: Shape<typeof en> = {
         title: "Cerrar una sesión",
         body: "Ese navegador cierra la sesión en su siguiente solicitud.",
         action: "Cerrar sesión",
+      },
+      everywhere: {
+        title: "Cerrar sesión en todas partes",
+        body: "Se cierran todas las sesiones, también esta, y vuelves a iniciar sesión aquí. Los equipos recordados vuelven a pedir tu segundo factor, y cada aplicación de IA que conectaste pierde su acceso hasta que la apruebes de nuevo.",
+        bodyContact: "Se cierran todas las sesiones, también esta, y vuelves a iniciar sesión aquí. Los equipos recordados vuelven a pedir tu segundo factor.",
+        subject: "Todas tus sesiones, también esta",
+        action: "Cerrar sesión en todas partes",
       },
     },
   },

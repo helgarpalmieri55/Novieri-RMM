@@ -319,7 +319,7 @@ export const settings = {
         title: "Sign out everywhere",
         question: "End every session of {email}?",
         action: "Sign out {email}",
-        body: "Every session they have open ends now. Their account stays active, and they can sign in again.",
+        body: "Every session they have open ends now, and every AI app they connected loses its access until they approve it again. Their account stays active, and they can sign in again.",
       },
       cancelInvite: {
         title: "Cancel invitation",

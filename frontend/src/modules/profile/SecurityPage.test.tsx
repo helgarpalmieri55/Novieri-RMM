@@ -16,6 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
+import { navigation } from "../../lib/session";
 import {
   CREATION_OPTIONS_FIXTURE,
   MY_SECURITY_FIXTURE,
@@ -372,6 +373,50 @@ describe("Your security", () => {
     const dialog = await screen.findByRole("dialog", { name: "Sign out a session" });
     await user.click(within(dialog).getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(calls.endMySession).toHaveBeenCalledExactlyOnceWith("s-2"));
+  });
+
+  it("signs out everywhere after a confirmation that names the AI apps, then leaves for the sign-in page", async () => {
+    const assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});
+    assign.mockClear();
+    const user = userEvent.setup();
+    renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Sign out everywhere" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out everywhere" });
+    expect(dialog).toHaveTextContent("every AI app you connected loses its access");
+    await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledExactlyOnceWith("/sign-in"));
+    expect(calls.logoutEverywhere).toHaveBeenCalledOnce();
+    expect(calls.endMySession).not.toHaveBeenCalled();
+    assign.mockRestore();
+  });
+
+  it("leaves for the sign-in page when this session had already ended (a 401)", async () => {
+    const assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});
+    assign.mockClear();
+    calls.logoutEverywhere.mockRejectedValue(new ApiError(401, ""));
+    const user = userEvent.setup();
+    renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Sign out everywhere" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out everywhere" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledExactlyOnceWith("/sign-in"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    assign.mockRestore();
+  });
+
+  it("stays on the page and says why when signing out everywhere fails", async () => {
+    const assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});
+    assign.mockClear();
+    calls.logoutEverywhere.mockRejectedValue(new ApiError(503, ""));
+    const user = userEvent.setup();
+    renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Sign out everywhere" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out everywhere" });
+    await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Sign out everywhere" })).toBeEnabled();
+    assign.mockRestore();
   });
 
   it("changes nothing when the recent confirmation is closed, and says so where the change was asked", async () => {

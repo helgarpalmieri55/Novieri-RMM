@@ -246,6 +246,36 @@ export async function signOut(api: Pick<ApiClient, "logout">, to: string = SIGN_
 }
 
 /**
+ * Sign out everywhere (operator decision E1, 2026-11-15): the server ends
+ * every session of this person -- this one too -- and forgets every browser
+ * they remembered; a technician's AI apps lose their access too. Then the
+ * whole document goes to the sign-in page, as `signOut` does: the session
+ * this tab was using is gone with the rest.
+ *
+ * A 401 COUNTS AS SIGNED OUT, as in `signOut` (coordinator's decision on
+ * P4-03, 2026-11-15): this tab's session had already ended, so there is
+ * nothing of it left here, and the page goes to the sign-in. The server
+ * ended nothing else on that request; a person who still has another
+ * session open signs in again and presses the button there. Every other
+ * failure rejects, and the page stays and says why.
+ *
+ * `to`: the console's sign-in page, or the portal's for a contact.
+ */
+export async function signOutEverywhere(
+  api: Pick<ApiClient, "logoutEverywhere">,
+  to: string = SIGN_IN_PATH,
+): Promise<void> {
+  try {
+    await api.logoutEverywhere();
+  } catch (error: unknown) {
+    if (!(error instanceof ApiError && error.status === 401)) throw error;
+  }
+  forgetStoredClient();
+  sessionSignedOut();
+  navigation.assign(to);
+}
+
+/**
  * Whether a person is signed in right now, as far as this tab knows: `/me`
  * answered and no 401 has been seen since. `LanguageBridge` saves a language
  * to the account only then (plan decision D20): on a sign-in page there is no
