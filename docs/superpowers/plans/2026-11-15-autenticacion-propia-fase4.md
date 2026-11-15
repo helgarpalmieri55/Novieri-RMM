@@ -102,12 +102,12 @@ No son comandos de despliegue: la secuencia completa es del informe del proyecto
 
 1. **Los contenedores.** Al quitar los servicios del archivo, `docker compose up -d` **no** borra los contenedores `keycloak` y `keycloak-init` que ya existen: los deja como huérfanos y avisa (Docker: «`--remove-orphans` Remove containers for services not defined in the Compose file»; con `COMPOSE_REMOVE_ORPHANS` sin poner, «Compose displays a warning about orphaned containers instead» [D1, D2]). **Y Traefik sigue enrutando a uno huérfano**: su proveedor de Docker lee las etiquetas de cada contenedor del motor («By default, Traefik watches for container level labels on a standalone Docker Engine»; con `exposedByDefault=false` solo ignora los que no llevan `traefik.enable=true` [D3]), y el `keycloak` huérfano conserva las suyas —`/realms`, `/resources`, `/js` y el registro anónimo—. Por eso el `deploy.sh` nuevo **quita esos dos contenedores por su nombre** cuando la capa de aplicación nueva ya está arriba, y nada más del proyecto: no `--remove-orphans`, que quitaría también lo que el operador haya añadido (decisión del coordinador C1; Task 6); el runbook da el mismo paso para la secuencia a mano (Task 9). *Que Traefik enrute a un contenedor que compose ya no define se deduce de esas frases; no se ha visto en vivo (Apéndice E, SIN VERIFICAR).*
 2. **Su volumen.** Keycloak no tiene volumen propio en este stack: guarda todo en la base `keycloak` del Postgres compartido («Configure a relational database for Keycloak to store user, client, and realm data» [K1]), y la imagen 26.2.0 no declara ningún `VOLUME` (su `Dockerfile`, comprobado por la revisión previa). El directorio `/opt/keycloak/data` del contenedor solo recibía el realm por `--import-realm` desde un bind mount [K2]. Borrar el contenedor no pierde nada que no esté en la base.
-3. **Su base de datos (decisión del operador K1, 2026-11-15).** La base `keycloak` guarda «hashed user passwords, client credentials and realm keys that are used to sign tokens» [K1]: no sirve de nada al producto desde esta fase y es material sensible. **Desde la actualización, las copias nocturnas y externas no la vuelcan**; la copia que `deploy.sh` toma antes de actualizar sí (`ITS_BACKUP_OLD_IDENTITY_DB=1`), porque es la vuelta atrás pasada la fase 4 (punto 7). Se queda en el clúster hasta el paso «Retiring the old identity provider's data» del runbook, que el operador corre cuando elige (Task 9). Una migración **podría** borrarla —Alembic se conecta a `itsuite` y `autocommit_block()` corre una sentencia fuera de la transacción [P1, A1]—, pero sería un borrado irreversible y desatendido: por eso es un acto del operador y no de `up -d`.
+3. **Su base de datos (decisión del operador K1, 2026-11-15).** La base `keycloak` guarda «hashed user passwords, client credentials and realm keys that are used to sign tokens» [K1]: no sirve de nada al producto desde esta fase y es material sensible. **Desde la actualización, las copias nocturnas y externas no la vuelcan**; la copia que `deploy.sh` toma antes de actualizar sí (`ITS_BACKUP_OLD_IDENTITY_DB=1`), mientras la base exista (la de la actualización que cruza la fase 4 es la vuelta atrás, punto 7). Se queda en el clúster hasta el paso «Retiring the old identity provider's data» del runbook, que el operador corre cuando elige (Task 9). Una migración **podría** borrarla —Alembic se conecta a `itsuite` y `autocommit_block()` corre una sentencia fuera de la transacción [P1, A1]—, pero sería un borrado irreversible y desatendido: por eso es un acto del operador y no de `up -d`.
 4. **Sus secretos (decisión del operador K2).** `keycloak-init` escribió en el volumen `its-secrets` (`/var/lib/its/secrets/`) `keycloak-admin.secret`, `keycloak-events.secret` y `keycloak-bootstrap-admin.secret` (`deploy/keycloak/init-clients.py:106`, `:111`, `:119`). No hay `deploy/secrets/` en el repositorio. Ninguna pieza de esta fase los lee; los leían `keycloak-init` (el de administración y el de la cuenta bootstrap) y el barrido de eventos del worker viejo (el de eventos; `kc_client` no tiene ningún lector desde la fase 3). Se borran en el mismo paso del runbook que la base.
 5. **Lo que el respaldo deja de incluir.** Desde la actualización, `backup.sh` no produce `keycloak.dump` salvo en la copia previa de `deploy.sh`, y mientras la base exista imprime una nota que lo recuerda; `restore-drill.sh` deja de exigirlo (Task 6). **Una copia vieja que contiene `keycloak.dump` se sigue restaurando**: `restore.sh` ya restauraba ese archivo solo si estaba (`deploy/scripts/restore.sh:227-235`), crea la base si falta (`prepare_db`, `:193-197`) y, tras el `pg_restore` y antes de volver a estrechar `app_user`, dice qué es y que se conserve si se está volviendo atrás (Task 6). Lo prueban dos pruebas con un `ITS_PG_EXEC` falso (una copia con el volcado se restaura y la siguiente copia nocturna no lo lleva) y un paso de la CI (Task 7).
 6. **Las claves `.env` que quedan sin lector** (las que el host tiene y `.env.example` ya no trae): `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD`, `ITS_OIDC_ISSUER`, `ITS_OIDC_JWKS_URL`, `ITS_OIDC_AUDIENCE`, `ITS_OIDC_ORG_CLAIM`, `ITS_OIDC_CONSOLE_CLIENT_ID`, `ITS_MULTI_TENANT`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`, `ITS_KEYCLOAK_ADMIN_URL`, `ITS_KEYCLOAK_REALM`, `ITS_KEYCLOAK_EVENTS_CLIENT_ID`, `ITS_KEYCLOAK_EVENTS_SECRET_PATH`, `ITS_KEYCLOAK_ADMIN_CLIENT_ID`, `ITS_KEYCLOAK_ADMIN_SECRET_PATH`. **Esta versión no las lee**: compose ya no las interpola, y los contenedores reciben `.env` como variables de entorno, que pydantic-settings lee solo para un campo que existe (y `extra="ignore"` descarta las de un archivo dotenv); lo fijan `tests/test_config.py` en sus dos formas (Task 4) y el falsificador 11 (Task 11). **Pero cuatro las necesita la versión anterior, y con ella la vuelta atrás**: su compose no se interpreta sin `KEYCLOAK_ADMIN_USER` y `KEYCLOAK_ADMIN_PASSWORD` (`dd062f8`, `deploy/docker-compose.yml:592-593`, `:747`, `:752`), y su API, su gateway, su worker y su `migrate` no arrancan sin `ITS_OIDC_ISSUER` y `ITS_OIDC_JWKS_URL` (`backend/app/core/config.py:32-34`, sin valor por omisión). Así que `deploy.sh` las nombra y **dice que no se borren todavía**; se borran en el paso «Retiring the old identity provider's data» (decisión del operador K1). `ENTRA_CLIENT_SECRET`, si existe, es un secreto vivo de la aplicación de Entra que usaba el broker de Keycloak: ese paso manda revocarlo en Entra. `preflight.sh` era la única pieza del repositorio que aún leía una (`ITS_OIDC_ISSUER`, para comprobar el certificado); pasa a `ITS_PUBLIC_CONSOLE_URL` (P4-38). **`ITS_DEFAULT_ORG_SLUG` no es obsoleta**: vivía en el bloque «Keycloak / OIDC» de `.env.example` y se queda, en su bloque propio (Task 6).
-7. **Migración y vuelta atrás.** El `migrate` aplica 0248 en el siguiente `up -d` (borra `keycloak_event_ingest`). Como el esquema se mueve, **volver atrás es restaurar la copia** (diseño de rollback, D1), no `alembic downgrade`: `deploy.sh` ya lo imprime así cuando hay revisión nueva. **La única copia que sirve es la que `deploy.sh` toma antes de cambiar nada**: sale del `backup.sh` nuevo con `ITS_BACKUP_OLD_IDENTITY_DB=1`, así que trae `keycloak.dump` mientras la base exista, y la restauración forzada devuelve las dos bases; una copia nocturna posterior no cruza 0248 hacia atrás. Volver además necesita el compose, `deploy/keycloak/` y los guiones de antes: el `rollback_help` de `deploy.sh` pasa a imprimir `git checkout <base> -- deploy` entero cuando el compose cambió (Task 6; antes nombraba `deploy/docker-compose.yml` y `deploy/keycloak` sueltos), y avisa si `.env` ya no tiene las cuatro claves del punto 6. Con `IT_SUITE_VERSION` en la etiqueta anterior y `docker compose up -d`, el host vuelve a como estaba. *Si en ese host `build-images.sh` nunca dejó una etiqueta anterior («Recent tags: (none yet)»), no hay imagen a la que volver y el único camino es restaurar la copia y reconstruir la versión vieja; el informe del proyecto 4 lo comprueba (`CLAUDE.md`).* Un detalle del tránsito: entre el `migrate` (que borra `keycloak_event_ingest`) y la recreación del worker, el beat **viejo** puede lanzar su `keycloak_event_sweep` horario contra la tabla ya borrada y dejar una línea de error; no hace nada más (revisión 3, M13).
-8. **La primera actualización a esta versión con `deploy.sh` tiene que empezar con `git pull`.** `deploy.sh` hace su propio `git pull` a mitad de la ejecución, pero bash sigue ejecutando el texto del guion que abrió: comprobado aquí con git 2.43 y bash 5.2 (un guion que hace checkout de otra versión de sí mismo sigue imprimiendo su versión vieja; `scratchpad/p2f4plan/bashswap/probe.sh`; la revisión previa lo repitió con `git pull --ff-only`). El `deploy.sh` de antes de esta fase graba `IT_SUITE_VERSION` nuevo y migra, y después reinicia `keycloak` y corre `keycloak-init`, servicios que el compose nuevo ya no tiene: se para con `no such service` **después** de migrar, con la capa de aplicación en las imágenes viejas. Con `git pull` antes, el `deploy.sh` que corre es el nuevo (lo dicen el runbook, Task 9, y la cabecera de `deploy.sh`, Task 6). **Y si ya pasó**, volver a correr el `deploy.sh` nuevo termina la actualización: mientras quede un contenedor `keycloak` o `keycloak-init` no responde «Already deployed» y hace un despliegue completo (decisión del coordinador C2; Task 6). La copia que tomó aquel `deploy.sh` viejo la hizo el `backup.sh` nuevo sin la opción, sin `keycloak.dump`; la base sigue en el clúster y `restore.sh` solo toca las bases que trae la copia, así que esa copia sigue siendo la vuelta atrás y el `deploy.sh` nuevo lo dice.
+7. **Migración y vuelta atrás.** El `migrate` aplica 0248 en el siguiente `up -d` (borra `keycloak_event_ingest`). Como el esquema se mueve, **volver atrás es restaurar la copia** (diseño de rollback, D1), no `alembic downgrade`: `deploy.sh` ya lo imprime así cuando hay revisión nueva. **La copia que sirve se reconoce por su esquema, no por su `keycloak.dump`: es la copia previa a la actualización que cruzó la fase 4: la `pre-upgrade-*` más nueva cuyo `alembic_version` es menor que `0248`** (lo dicen el runbook, Task 9, y `deploy.sh`, Task 6). Una copia posterior no cruza 0248 hacia atrás, y llevar `keycloak.dump` no la hace la buena: `deploy.sh` vuelca la base en cada copia previa mientras exista, también en las de actualizaciones posteriores, ya a 0248. En el caso normal es la que tomó el `deploy.sh` de la actualización que cruzó la fase 4, con `keycloak.dump`, y la restauración forzada devuelve las dos bases. Volver además necesita el compose, `deploy/keycloak/` y los guiones de antes: el `rollback_help` de `deploy.sh` pasa a imprimir `git checkout <base> -- deploy` entero cuando el compose cambió (Task 6; antes nombraba `deploy/docker-compose.yml` y `deploy/keycloak` sueltos), y avisa si `.env` ya no tiene las cuatro claves del punto 6. Con `IT_SUITE_VERSION` en la etiqueta anterior y `docker compose up -d`, el host vuelve a como estaba. *Si en ese host `build-images.sh` nunca dejó una etiqueta anterior («Recent tags: (none yet)»), no hay imagen a la que volver y el único camino es restaurar la copia y reconstruir la versión vieja; el informe del proyecto 4 lo comprueba (`CLAUDE.md`).* Un detalle del tránsito: entre el `migrate` (que borra `keycloak_event_ingest`) y la recreación del worker, el beat **viejo** puede lanzar su `keycloak_event_sweep` horario contra la tabla ya borrada y dejar una línea de error; no hace nada más (revisión 3, M13).
+8. **La primera actualización a esta versión con `deploy.sh` tiene que empezar con `git pull`.** `deploy.sh` hace su propio `git pull` a mitad de la ejecución, pero bash sigue ejecutando el texto del guion que abrió: comprobado aquí con git 2.43 y bash 5.2 (un guion que hace checkout de otra versión de sí mismo sigue imprimiendo su versión vieja; `scratchpad/p2f4plan/bashswap/probe.sh`; la revisión previa lo repitió con `git pull --ff-only`). El `deploy.sh` de antes de esta fase graba `IT_SUITE_VERSION` nuevo y migra, y después reinicia `keycloak` y corre `keycloak-init`, servicios que el compose nuevo ya no tiene: se para con `no such service` **después** de migrar, con la capa de aplicación en las imágenes viejas. Con `git pull` antes, el `deploy.sh` que corre es el nuevo (lo dicen el runbook, Task 9, y la cabecera de `deploy.sh`, Task 6). **Y si ya pasó**, volver a correr el `deploy.sh` nuevo termina la actualización: mientras quede un contenedor `keycloak` o `keycloak-init` no responde «Already deployed» y hace un despliegue completo (decisión del coordinador C2; Task 6). La copia que tomó aquel `deploy.sh` viejo la hizo el `backup.sh` nuevo sin la opción, sin `keycloak.dump`, a 0247; la base sigue en el clúster y `restore.sh` solo toca las bases que trae la copia, así que esa copia es la vuelta atrás, y la del `deploy.sh` que termina la actualización, ya a 0248, no lo es. Ese `deploy.sh` la busca por su esquema (la `pre-upgrade-*` más nueva por debajo de 0248), lee de su `image_version` la etiqueta vieja, y las dice al empezar y en su ayuda de vuelta atrás del final, con la restauración de esa copia, esa etiqueta y el `git checkout` de esa versión (re-revisión, N2; `test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248`). Y al verificar comprueba, por las etiquetas de compose de los contenedores, que ninguno de los dos queda (re-revisión, m11).
 9. **OpenBao y `.env` nuevos:** ninguno. Ninguna ruta nueva de OpenBao, ninguna clave `.env` nueva. Las imágenes `itsuite/backend` y `itsuite/web` cambian (backend y consola); la imagen `quay.io/keycloak/keycloak:26.2` deja de usarse y el paso del runbook la borra (`docker image rm quay.io/keycloak/keycloak:26.2`), cosa que tampoco borra datos.
 
 ## Apéndice A — Contratos
@@ -119,7 +119,7 @@ No son comandos de despliegue: la secuencia completa es del informe del proyecto
 - `backend/tests/traefik_routes.py` (Task 6): `COMPOSE`, `def compose(path: Path = COMPOSE) -> dict[str, Any]`, `def routers(path: Path = COMPOSE) -> list[tuple[int, str, str]]` (con `functools.cache`), `def matches(rule: str, path: str, method: str) -> bool`, `def winner(path: str, compose_file: Path = COMPOSE) -> str`, `METHODS`. Lo que era `_routers`, `_matches` y `_winner` de `test_deploy_keycloak_registration_edge.py`, que se borra.
 - `backend/tests/test_user_admin_api.py::OutboundRecorder` (Task 5): `seen: list[httpx.Request]`, `handler(request) -> httpx.Response` (responde 599 y anota); `install_outbound(monkeypatch) -> OutboundRecorder` (todo `httpx.AsyncClient` envía al registrador, el construido sin `transport` y el que trae un transporte de red propio, como los de `app/core/egress.py`; solo uno en proceso, `httpx.ASGITransport` o `httpx.MockTransport`, conserva el suyo). `users_env.outbound` reemplaza a `users_env.kc`; `setup_env.outbound`, a `setup_env.kc`; en `test_mcp_admin_api.py` y `test_me_locale.py`, `env.outbound`.
 - `deploy/ci/mcp_flow.py` (Task 7): `python3 ci/mcp_flow.py --base https://localhost --cafile certs/fullchain.pem --phase closed` y `… --phase open --setup-code-file "$RUNNER_TEMP/setup-code"`; sale 0 si todo se cumple, 1 con una línea `FAIL` en la primera aserción que no se cumple (cada paso necesita los anteriores), 2 si no llega. Funciones puras que prueba `backend/tests/test_ci_mcp_flow.py` (y `FORMER_KEYCLOAK_PATHS`, que no puede quedar vacía): `s256`, `pkce_pair`, `jwt_parts`, `audiences`, `exact_audience`, `totp`, `totp_secret`, `challenge_params`, `authorize_query`, `callback_params`, `tampered`, `foreign_token`, `describe_claims`, `Cookies`.
-- `deploy/scripts/backup.sh` (Task 6): `ITS_BACKUP_OLD_IDENTITY_DB` (`0` por omisión o `1`; otro valor se niega antes de volcar). `deploy/scripts/deploy.sh` (Task 6): `OBSOLETE_ENV_KEYS`, `obsolete_env_keys()`, `old_identity_containers()`, `remove_old_identity_containers()`, `stop_if_already_deployed()`.
+- `deploy/scripts/backup.sh` (Task 6): `ITS_BACKUP_OLD_IDENTITY_DB` (`0` por omisión o `1`; otro valor se niega antes de volcar). `deploy/scripts/deploy.sh` (Task 6): `OBSOLETE_ENV_KEYS`, `obsolete_env_keys()`, `old_identity_containers()`, `remove_old_identity_containers()`, `way_back_backup()`, `stop_if_already_deployed()` (con `ROLLBACK_BACKUP_DIR` y `ROLLBACK_BASE`, que lee `rollback_help`), `old_identity_containers_left()`, `verify_old_identity_gone()`.
 - Migración `0248` (Task 5): `upgrade()` borra `keycloak_event_ingest`, su política y su índice; `downgrade()` la recrea como 0064.
 
 
@@ -131,7 +131,7 @@ No son comandos de despliegue: la secuencia completa es del informe del proyecto
 
 - **Desde la actualización a la fase 4, las copias nocturnas y externas (`backup.sh`) no vuelcan `keycloak`**, aunque la base siga existiendo. `backup.sh` lo dice en una nota mientras la base exista: el recordatorio de que sigue ahí (Task 6).
 - **`restore.sh` sigue restaurando un `keycloak.dump` cuando una copia lo trae**, así que una copia de antes de la fase 4 se restaura entera. Lo prueban `test_a_backup_with_the_old_database_restores_it_and_the_next_backup_has_none` y `test_a_backup_without_it_restores_without_touching_it` (Task 6, con un `ITS_PG_EXEC` falso) y, en vivo, el paso nuevo del job `deploy` de la CI (Task 7).
-- **La copia previa a la actualización que toma `deploy.sh` guarda `keycloak`**, porque es la vuelta atrás. **El mecanismo, elegido por este plan:** `backup.sh` lee `ITS_BACKUP_OLD_IDENTITY_DB` (`0` por omisión, `1` o se niega antes de volcar nada); con `1`, y solo si la base existe, vuelca `keycloak` y exige el volcado no vacío. `deploy.sh` es el único que pone `1` (`ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh "$BACKUP_DIR"`), y `scheduled-backup.sh` pone `0` explícitamente, para que una variable heredada no cambie la copia nocturna. Una opción en vez de un paso aparte, porque así la copia previa sigue siendo un solo directorio con un solo conjunto de comprobaciones (artefactos no vacíos, `globals.sql` con los tres roles) y `restore.sh` no cambia. Lo prueban cuatro pruebas de `test_platform_backup_scripts.py` (Task 6) y la CI (Task 7). *Un caso que lo rodea:* si el `deploy.sh` de antes de la fase 4 hace él mismo el `git pull` (punto 8), su copia la toma el `backup.sh` nuevo sin la opción, sin `keycloak.dump`; la base sigue intacta en el clúster y `restore.sh` solo toca las bases que trae la copia, así que la vuelta atrás con esa copia la deja como está. `deploy.sh` lo dice al terminar esa actualización (Task 6).
+- **La copia previa a la actualización que toma `deploy.sh` guarda `keycloak`**, porque la de la actualización que cruza la fase 4 es la vuelta atrás. La copia de la vuelta atrás se reconoce por su esquema, no por su volcado: es la copia previa a la actualización que cruzó la fase 4: la `pre-upgrade-*` más nueva cuyo `alembic_version` es menor que `0248` (`deploy.sh` vuelca la base en cada copia previa mientras exista, también en las posteriores, ya a 0248). **El mecanismo, elegido por este plan:** `backup.sh` lee `ITS_BACKUP_OLD_IDENTITY_DB` (`0` por omisión, `1` o se niega antes de volcar nada); con `1`, y solo si la base existe, vuelca `keycloak` y exige el volcado no vacío. `deploy.sh` es el único que pone `1` (`ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh "$BACKUP_DIR"`), y `scheduled-backup.sh` pone `0` explícitamente, para que una variable heredada no cambie la copia nocturna. Una opción en vez de un paso aparte, porque así la copia previa sigue siendo un solo directorio con un solo conjunto de comprobaciones (artefactos no vacíos, `globals.sql` con los tres roles) y `restore.sh` no cambia. Lo prueban cuatro pruebas de `test_platform_backup_scripts.py` (Task 6) y la CI (Task 7). *Un caso que lo rodea:* si el `deploy.sh` de antes de la fase 4 hace él mismo el `git pull` (punto 8), su copia la toma el `backup.sh` nuevo sin la opción, sin `keycloak.dump`; la base sigue intacta en el clúster y `restore.sh` solo toca las bases que trae la copia, así que la vuelta atrás con esa copia la deja como está. El `deploy.sh` que termina esa actualización busca esa copia por su esquema y la nombra, con la etiqueta vieja de su `image_version`, al empezar y en su ayuda de vuelta atrás del final (Task 6). La secuencia a mano del runbook pasa la opción también en su copia del paso 1 (Task 9).
 - **Un solo paso del runbook, «Retiring the old identity provider's data»**, que el operador corre cuando ha comprobado la actualización, en el momento que elija (sin «una versión después»): (1) una copia final opcional, con los comandos exactos y su destino (`~/backups/keycloak-final.dump`); (2) `dropdb keycloak`; (3) borra los tres archivos `keycloak-*.secret` del volumen `its-secrets`; (4) borra las cuatro claves `.env` que necesita una vuelta atrás (`KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD`, `ITS_OIDC_ISSUER`, `ITS_OIDC_JWKS_URL`) con un comando que las borra, sin marcadores; (5) borra las demás claves obsoletas; (6) dice claramente que **cierra la vuelta atrás** a las imágenes de antes de la fase 4; (7) manda revocar en Entra el `ENTRA_CLIENT_SECRET` viejo, si alguna vez se creó para el broker de Keycloak (Task 9).
 - **Hasta ese paso, el runbook y `deploy.sh` dicen que NO se borren** esas claves, los secretos ni la base: ningún «harmless; remove them by hand» queda (Tasks 6 y 9; revisión 1 I4, revisión 3 I2).
 - **Las premisas de K1, corregidas** donde aparecían: la opción D (una migración) **es posible** con `autocommit_block()` de Alembic (`alembic/runtime/migration.py:274-283`, instalado: «to support the occasional database DDL or system operation that specifically has to be run outside of any kind of transaction block»), pero desaconsejable: un borrado irreversible y desatendido en cada `up -d`; `kc_client` no tiene ningún lector desde la fase 3 (`app/modules/user_admin/__init__.py:7-11`); quien leía los secretos es `keycloak-init` (el de la cuenta bootstrap y el de administración) y el barrido de eventos del worker viejo (`keycloak_events/client.py:49-58`, el de eventos); y lo que de verdad cuesta la opción A de antes es que **los hashes de contraseña y las claves del realm** («hashed user passwords, client credentials and realm keys that are used to sign tokens» [K1]) iban en cada copia nocturna y externa.
@@ -188,7 +188,7 @@ E1 y E2 se decidieron antes (2026-11-15; Global Constraints). Ninguna otra pregu
 | # | Decisión | Dónde |
 |---|---|---|
 | C1 | **Nada de `--remove-orphans`.** `deploy.sh` quita exactamente los contenedores `keycloak` y `keycloak-init`, por su nombre de servicio y de forma idempotente, en la actualización, para que Traefik deje de enrutarles (sus etiquetas viven en el contenedor) y se cierre el registro anónimo de Keycloak. No guardan datos: los de Keycloak están en Postgres y su imagen no declara volumen. Nada más que el operador haya añadido al proyecto se toca. Lo prueban `test_the_old_identity_providers_containers_go_by_name_and_nothing_else`, `test_removing_them_twice_is_a_no_op`, `test_they_go_after_the_new_app_tier_is_up` y `test_no_up_removes_orphans`. | Tasks 6, 9 |
-| C2 | **La primera actualización, y el host a medias.** El apartado «Upgrading» del runbook dice `git pull` primero y después `./scripts/deploy.sh`, con el porqué (bash conserva en memoria el texto viejo del guion). El `deploy.sh` nuevo no responde «Already deployed» con salida 0 mientras exista un contenedor `keycloak` o `keycloak-init`: termina la actualización como un despliegue completo (`stop_if_already_deployed`; `test_a_half_done_upgrade_is_finished_not_called_already_deployed`). | Tasks 6, 9 |
+| C2 | **La primera actualización, y el host a medias.** El apartado «Upgrading» del runbook dice `git pull` primero y después `./scripts/deploy.sh`, con el porqué (bash conserva en memoria el texto viejo del guion). El `deploy.sh` nuevo no responde «Already deployed» con salida 0 mientras exista un contenedor `keycloak` o `keycloak-init`: termina la actualización como un despliegue completo (`stop_if_already_deployed`; `test_a_half_done_upgrade_is_finished_not_called_already_deployed`), y nombra como vuelta atrás la copia que tomó la ejecución parada, la más nueva por debajo de 0248, con la etiqueta de su `image_version` (re-revisión, N2). | Tasks 6, 9 |
 | C3 | **E1, el botón del portal (P4-02):** se queda. | Task 2 |
 | C4 | **E1, un 401 de `logout-everywhere` (P4-03):** cuenta como sesión cerrada y va al inicio de sesión; cualquier otro error se queda con su motivo; probados los dos. | Task 2 |
 | C5 | **E1, el motivo de la concesión (P4-01):** se queda `signed_out_everywhere`; el evento de auditoría distingue los dos actos por acción y actor, y se dice donde se documenta el motivo. | Task 1 |
@@ -216,7 +216,7 @@ E1 y E2 se decidieron antes (2026-11-15; Global Constraints). Ninguna otra pregu
 | `tests/test_deploy_keycloak_registration_edge.py` (8) | los routers `kc`, `kc-registration-oidc`, `kc-registration-closed` | Su modelo de routers se muda a `tests/traefik_routes.py`; que ninguna ruta llega a un proveedor de identidad: `test_public_surface.py`, reescrito (Task 6), y el falsificador 11. |
 | `tests/test_public_surface.py`, 4 de 5: `test_sign_in_is_still_routed`, `test_the_admin_console_is_not_publicly_routed`, `test_the_realm_file_is_where_this_test_thinks_it_is`, `test_the_account_console_is_closed_because_routing_cannot_close_it` | el router `kc`, el realm | Reescrito: ningún router lleva a Keycloak, las rutas que eran suyas caen en la consola, y no queda ni servicio ni imagen ni etiqueta suya (Task 6). |
 | `tests/test_deploy_mcp_route.py::test_the_realm_keeps_its_own_discovery_documents` | el router `kc` | Re-apuntada: `test_the_former_realm_paths_reach_no_identity_provider` (Task 6). |
-| `tests/test_deploy_script_steps.py`, 5 de 21: `test_a_theme_change_is_detected_at_all`, `test_a_realm_or_theme_change_restarts_keycloak_not_only_keycloak_init`, `test_keycloak_init_runs_on_every_deploy_not_only_on_a_realm_change`, `test_a_keycloak_image_change_does_need_the_restore` y `test_a_compose_or_theme_change_is_undone_from_git_not_by_restoring_the_database` | los pasos de Keycloak de `deploy.sh` y su ayuda de vuelta atrás | Nuevas (Task 6): `test_no_step_starts_an_identity_provider`, `test_no_up_removes_orphans`, `test_the_old_identity_providers_containers_go_by_name_and_nothing_else`, `test_removing_them_twice_is_a_no_op`, `test_they_go_after_the_new_app_tier_is_up`, `test_a_half_done_upgrade_is_finished_not_called_already_deployed`, `test_the_check_runs_before_the_diff_is_taken`, `test_obsolete_env_keys_are_named_and_never_edited`, `test_no_other_deploy_file_names_an_obsolete_key`, `test_the_preflight_checks_the_certificate_against_the_console_address`, `test_a_compose_change_checks_the_whole_deploy_directory_out` y `test_a_rollback_past_phase_4_names_the_env_keys_it_needs`. |
+| `tests/test_deploy_script_steps.py`, 5 de 21: `test_a_theme_change_is_detected_at_all`, `test_a_realm_or_theme_change_restarts_keycloak_not_only_keycloak_init`, `test_keycloak_init_runs_on_every_deploy_not_only_on_a_realm_change`, `test_a_keycloak_image_change_does_need_the_restore` y `test_a_compose_or_theme_change_is_undone_from_git_not_by_restoring_the_database` | los pasos de Keycloak de `deploy.sh` y su ayuda de vuelta atrás | Nuevas (Task 6): `test_no_step_starts_an_identity_provider`, `test_no_up_removes_orphans`, `test_the_old_identity_providers_containers_go_by_name_and_nothing_else`, `test_removing_them_twice_is_a_no_op`, `test_they_go_after_the_new_app_tier_is_up`, `test_a_half_done_upgrade_is_finished_not_called_already_deployed`, `test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248`, `test_without_a_backup_from_before_0248_it_says_so`, `test_the_verify_step_fails_while_a_container_of_it_is_left`, `test_the_check_runs_before_the_diff_is_taken`, `test_obsolete_env_keys_are_named_and_never_edited`, `test_no_other_deploy_file_names_an_obsolete_key`, `test_the_preflight_checks_the_certificate_against_the_console_address`, `test_a_compose_change_checks_the_whole_deploy_directory_out` y `test_a_rollback_past_phase_4_names_the_env_keys_it_needs`. |
 | `tests/test_platform_backup_scripts.py::test_the_drill_runs_the_images_the_live_stack_pins` | su línea de `keycloak` | Se queda, sin esa línea, más una aserción de que el simulacro no define `keycloak` (Task 6). El mismo archivo gana siete pruebas de K1, que corren `backup.sh` y `restore.sh` con un `ITS_PG_EXEC` falso (Task 6; revisión 3, I3). |
 | `tests/test_ci_mcp_flow.py` (13) | `deploy/keycloak/ci_mcp_flow.py` | Reescrita para `deploy/ci/mcp_flow.py` (Task 7, 19 pruebas): solo biblioteca estándar, PKCE, audiencia exacta, nada secreto impreso, TOTP contra los vectores de RFC 6238 y RFC 4226, la lista de rutas viejas no vacía, y el job `deploy` de la CI leído como YAML: sus dos fases, ningún secreto del almacén en un argv, y el paso de K1. |
 | `tests/test_mcp_grant_lifecycle.py::test_an_administrator_ending_sessions_leaves_the_ai_connections` | ninguna: **se invierte** por E1 | `test_an_administrators_sign_out_everywhere_ends_the_ai_connections` (Task 1). |
@@ -323,7 +323,7 @@ Cada cita está copiada de la página descargada ese día con `curl` y convertid
 - `printf '%s' "$unseal" | … bao write sys/unseal key=-` y el token raíz por la entrada estándar de un `sh` dentro del contenedor: leídos en el código ([B3]), no ejecutados contra un OpenBao vivo.
 - `bao operator init -format=json` y `bao status` contra un OpenBao 2.6.1 vivo: los nombres de campo salen de su código [B1]; que `bao status` responda 2 a un servidor sin inicializar (el bucle de espera del paso) se deduce de que uno sin inicializar está sellado.
 - Que un mensaje `app.worker.keycloak_event_sweep` que quedara en la cola al actualizar se rechace una vez y nada más (P4-27).
-- Un `./scripts/deploy.sh` real sobre un host con Keycloak (la retirada de sus contenedores, el final de una actualización a medias, el aviso de las claves de la vuelta atrás), y una vuelta atrás de verdad a una versión de antes de la fase 4.
+- Un `./scripts/deploy.sh` real sobre un host con Keycloak (la retirada de sus contenedores, el final de una actualización a medias con la copia y la etiqueta de su vuelta atrás, el aviso de las claves, y la comprobación final por las etiquetas `com.docker.compose.project` y `com.docker.compose.service`, que Compose pone a cada contenedor y aquí solo se simularon), y una vuelta atrás de verdad a una versión de antes de la fase 4.
 - Las páginas de Keycloak citadas ([K1], [K2]) son de su versión 26.6.4; el stack fijaba 26.2. Lo citado (dónde guarda los datos, la importación del realm) no cambia entre ellas, pero no se leyó la página de 26.2.
 
 ---
@@ -336,7 +336,7 @@ Cada cita está copiada de la página descargada ese día con `curl` y convertid
 **Files:**
 - Modify: `backend/app/modules/user_admin/service.py:1173-1199` (`end_sessions`) y el docstring del módulo (`:34-44`)
 - Modify: `backend/app/mcp/descriptions/part_d.py:546-548`
-- Modify: `backend/app/core/auth/guards.py:156-160` (docstring de `lock_user_row`, viñeta «THE ACTS THAT END A PERSON'S AI GRANTS»)
+- Modify: `backend/app/core/auth/guards.py:156-161` (docstring de `lock_user_row`, viñeta «THE ACTS THAT END A PERSON'S AI GRANTS»)
 - Test: `backend/tests/test_mcp_grant_lifecycle.py` (docstring `:1-9`, import `:34`, la prueba de `:313-329`, una prueba nueva delante del bloque «# One clock» )
 - Test: `backend/tests/test_user_lifecycle.py:644-646`
 - Modify: `deploy/README.md` (`### Revoking`, viñeta «One person», `:2521-2531`; riesgo 6, `:2652-2656`)
@@ -597,7 +597,7 @@ administrator` and the administrator as actor here, `by: self` and the
 person as actor in `flows.logout_everywhere`.
 ```
 
-En `backend/app/core/auth/guards.py`, la viñeta (`:156-159`):
+En `backend/app/core/auth/guards.py`, la viñeta (`:156-161`):
 
 ```python
 # antes
@@ -606,6 +606,7 @@ En `backend/app/core/auth/guards.py`, la viñeta (`:156-159`):
       factor reset (`user_admin.service`), a password change (`account`,
       or a mailed link in `flows.reset_password`), signing out everywhere
       and the recovery link (`flows`). Each holds the row above first, then
+      forgets the devices, then `oauth.grants.revoke_all_for_user`: the
 # después
     - THE ACTS THAT END A PERSON'S AI GRANTS (own authentication phase 3,
       Task 10; operator decision D2, part c): a disable, a deletion, a
@@ -615,10 +616,10 @@ En `backend/app/core/auth/guards.py`, la viñeta (`:156-159`):
       person's own sign-out everywhere and the recovery link (`flows`).
       Each holds the row above first, then (all but an administrator's
       sign-out everywhere, which leaves them as they are) forgets the
-      devices, then
+      devices, then `oauth.grants.revoke_all_for_user`: the
 ```
 
-(El resto de la viñeta sigue igual, desde «`oauth.grants.revoke_all_for_user` …»: el orden fila → … → `revoke_all_for_user` → cadena es el mismo en el acto del administrador.)
+(El resto de la viñeta sigue igual, desde «person's unspent codes end by their expiry …»: el orden fila → … → `revoke_all_for_user` → cadena es el mismo en el acto del administrador.)
 
 - [ ] **Step 5: Las pruebas pasan**
 
@@ -1105,7 +1106,7 @@ git commit -m "feat(console): sign out everywhere from your own security page (E
 
 **Files:**
 - Modify: `backend/app/core/auth/retention.py` (docstring `:27-29`, «THE OAUTH STEPS» `:64-72`; constante detrás de `OAUTH_GRANT_RETENTION` `:145`; función nueva delante de `_oauth_grants` `:301`; `STEPS` `:352-354`)
-- Modify: `backend/app/core/auth/guards.py:218-224` (la viñeta de la retención en el mapa de bloqueos)
+- Modify: `backend/app/core/auth/guards.py:219-224` (la viñeta de la retención en el mapa de bloqueos)
 - Modify: `backend/app/core/auth/oauth/store.py:90-98` («THE RETENTION SWEEP TAKES NEITHER ROW…»)
 - Modify: `backend/app/core/client_scope.py:277-285` (el motivo de `retention.py::sweep_org`)
 - Test: `backend/tests/test_oauth_retention.py` (`OAUTH_KEYS`, cuatro aserciones exactas, un import, seis pruebas al final), `backend/tests/test_auth_retention.py:276-286`
@@ -1463,10 +1464,17 @@ Mutaciones (una a una, deshaciendo cada una con `git checkout backend/app/core/a
 
 - [ ] **Step 6: El mapa de bloqueos y la lista de alcance**
 
-`backend/app/core/auth/guards.py:218-224`:
+`backend/app/core/auth/guards.py:219-224`:
 
 ```python
 # antes
+      locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
+      inside it, leaves first: `oauth_codes` expired more than ten minutes
+      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
+      ended more than a day ago that no code still names; then those grants
+      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
+      still names, so their cascade reaches no row they did not lock. A row
+# después
       locks what it deletes FOR UPDATE SKIP LOCKED, the ended (for a used
       token, the rotated) condition inside it, leaves first: `oauth_codes`
       expired more than ten minutes ago; then (`oauth_refresh_tokens`) the
@@ -1477,16 +1485,6 @@ Mutaciones (una a una, deshaciendo cada una con `git checkout backend/app/core/a
       ended grants (`oauth_grants`, `oauth_refresh_families`) that no token
       and no code still names, so their cascade reaches no row they did not
       lock. A row
-# después
-      locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
-      inside it, leaves first: `oauth_codes` expired more than ten minutes
-      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
-      ended more than a day ago that no code still names; then
-      (`oauth_used_refresh_tokens`, operator decision E2, 2026-11-15) the
-      refresh tokens a live grant rotated past more than 30 days ago, whose
-      grant is read, never locked, and stays; then those ended grants
-      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
-      still names, so their cascade reaches no row they did not lock. A row
 ```
 
 `backend/app/core/auth/oauth/store.py:90-98`:
@@ -2268,10 +2266,9 @@ the OIDC `org` claim (`app.api.deps.auth_context` resolves the org BY SLUG,
 before any tenant context exists) -- renaming it through the console would log
 """,
     """`slug` and `status` are READ-ONLY here. The slug is the tenant's identity at
-sign-in: `ITS_DEFAULT_ORG_SLUG` names the organization people sign in to, and
-the platform's own MCP access token carries it as `org` (until own
-authentication phase 4 Keycloak's tokens did too) -- renaming it through the
-console would log
+sign-in: `ITS_DEFAULT_ORG_SLUG` names the organization people sign in to and
+AI apps connect to, by its slug (until own authentication phase 4, also the
+`org` claim of a Keycloak token) -- renaming it through the console would log
 """,
 )
 swap(
@@ -3411,7 +3408,7 @@ git commit -m "refactor: Keycloak's admin clients, event forwarding, probes, set
 
 **Interfaces:**
 - Depende de: la Task 5 (el código que leía `ITS_KEYCLOAK_*` ya no está) y la Task 4.
-- Produce: `tests/traefik_routes.py` (Apéndice A); el nombre de sección `Retiring the old identity provider's data` que `restore.sh`, `backup.sh` y `deploy.sh` citan y la Task 9 crea; `backup.sh` con `ITS_BACKUP_OLD_IDENTITY_DB`; `deploy.sh` con `OBSOLETE_ENV_KEYS`, `obsolete_env_keys()`, `old_identity_containers()`, `remove_old_identity_containers()` y `stop_if_already_deployed()` (Apéndice A).
+- Produce: `tests/traefik_routes.py` (Apéndice A); el nombre de sección `Retiring the old identity provider's data` que `restore.sh`, `backup.sh` y `deploy.sh` citan y la Task 9 crea; `backup.sh` con `ITS_BACKUP_OLD_IDENTITY_DB`; `deploy.sh` con `OBSOLETE_ENV_KEYS`, `obsolete_env_keys()`, `old_identity_containers()`, `remove_old_identity_containers()`, `way_back_backup()`, `stop_if_already_deployed()`, `old_identity_containers_left()` y `verify_old_identity_gone()` (Apéndice A).
 
 **Decisiones de la tarea:** P4-12, P4-13, P4-19, P4-20, P4-23, P4-26, P4-31, P4-37, P4-38; las del operador K1 y K2 (B.1: las copias nocturnas sin `keycloak`, la previa con él, y nada se borra hasta el paso del runbook) y las del coordinador C1, C2 y C7. **Se fusiona junto con la Task 7** (notas de integración).
 
@@ -4123,15 +4120,38 @@ def test_they_go_after_the_new_app_tier_is_up() -> None:
     assert up < removal < text.index('say "Verifying"')
 
 
-def _already(listing: str) -> str:
+def _already(listing: str, home: str = "") -> str:
+    """`stop_if_already_deployed` after a pull that brought nothing, with
+    HOME (where `backups/pre-upgrade-*` live) a directory of its own."""
     return _containers(listing) + f"""
+HOME={home!r}; [ -n "$HOME" ] || HOME="$PWD"
 git() {{ echo 2f20afbe00000000000000000000000000000000; }}
 BASELINE={BASE!r}; AFTER=2f20afbe00000000000000000000000000000000
-SHORT_AFTER=2f20afbe; REPO_ROOT=/opt/it-suite
+SHORT_AFTER=2f20afbe; REPO_ROOT=/opt/it-suite; RUNNING_TAG=2f20afbe
+{_fn("way_back_backup")}
 {_fn("stop_if_already_deployed")}
+ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""
 stop_if_already_deployed
-echo "CONTINUED baseline=[$BASELINE]"
+echo "CONTINUED baseline=[$BASELINE] running=[$RUNNING_TAG]"
+echo "back=[$ROLLBACK_BACKUP_DIR] base=[$ROLLBACK_BASE]"
 """
+
+
+def _backups(home: Path) -> dict[str, Path]:
+    """What a host holds after the deploy.sh of the release before phase 4
+    stopped part-way: an older pre-upgrade backup, the one it took (0247,
+    images 53b02f81), and one taken past 0248 by an earlier finishing try."""
+    made = {}
+    for name, rev, tag in (
+        ("pre-upgrade-2026-11-01T0900Z", "0246", "1a2b3c4d"),
+        ("pre-upgrade-2026-11-20T1000Z", "0247", "53b02f81"),
+        ("pre-upgrade-2026-11-20T1015Z", "0248", "2f20afbe"),
+    ):
+        made[rev] = home / "backups" / name
+        made[rev].mkdir(parents=True)
+        (made[rev] / "alembic_version").write_text(f"{rev}\n")
+        (made[rev] / "image_version").write_text(f"IT_SUITE_VERSION={tag}\n")
+    return made
 
 
 def test_a_half_done_upgrade_is_finished_not_called_already_deployed() -> None:
@@ -4148,6 +4168,73 @@ def test_a_half_done_upgrade_is_finished_not_called_already_deployed() -> None:
     done = _run_bash(_already("it-suite-api-1 api\n"))
     assert done.returncode == 0, done.stdout + done.stderr
     assert "Already deployed" in done.stdout and "CONTINUED" not in done.stdout, done.stdout
+
+
+def test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248(
+    tmp_path: Path,
+) -> None:
+    """Not this run's backup, which is past 0248, and not the newest one that
+    holds `keycloak.dump`: the newest `pre-upgrade-*` whose schema is below
+    0248, with the images its `image_version` names. The closing rollback
+    help prints that backup, that tag and that commit."""
+    made = _backups(tmp_path)
+    finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
+    script = _already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)) + f"""
+{_fn("rollback_help")}
+BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
+rollback_help
+"""
+    run = _run_bash(script)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert f"back=[{made['0247']}]" in run.stdout, run.stdout
+    assert "running=[53b02f81]" in run.stdout and "base=[53b02f81]" in run.stdout, run.stdout
+    help_ = run.stdout[run.stdout.index("If you need to go back") :]
+    assert f"ITS_RESTORE_FORCE=1 ./scripts/restore.sh {made['0247']}\n" in help_, help_
+    assert "IT_SUITE_VERSION=53b02f81" in help_ and "checkout 53b02f81 -- deploy" in help_, help_
+    assert "There is no image to swap back to" not in help_, help_
+    restore = [line for line in help_.splitlines() if "restore.sh" in line]
+    assert str(finishing) not in "\n".join(restore), help_
+
+
+def test_without_a_backup_from_before_0248_it_says_so(tmp_path: Path) -> None:
+    (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z").mkdir(parents=True)
+    (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z" / "alembic_version").write_text("0248\n")
+    run = _run_bash(_already("it-suite-keycloak-1 keycloak\n", home=str(tmp_path)))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "back=[] base=[]" in run.stdout and "from before migration 0248" in run.stdout
+
+
+def _verify(left: str) -> str:
+    return f"""
+set -euo pipefail
+cd "$(mktemp -d)"
+note() {{ printf '%s\\n' "$*"; }}
+warn() {{ printf 'WARNING %s\\n' "$*"; }}
+docker() {{
+  echo "docker $*" >> calls
+  case "$*" in
+    "compose config") printf 'name: it-suite\\nservices:\\n  api: {{}}\\n' ;;
+    *"service=keycloak") printf '%b' {left!r} ;;
+  esac
+}}
+COMPOSE=(docker compose)
+{_fn("old_identity_containers_left")}
+{_fn("verify_old_identity_gone")}
+"""
+
+
+def test_the_verify_step_fails_while_a_container_of_it_is_left() -> None:
+    """By the containers' own compose labels, not by `compose ps`: if that
+    did not list a container whose service left the file, the removal would
+    say "none left" and Traefik would go on routing to Keycloak."""
+    check = "verify_old_identity_gone && echo PASSED || echo FAILED\n"
+    left = _run_bash(_verify("3f1c9a\n") + check + "cat calls\n")
+    assert "FAILED" in left.stdout and "docker rm -f 3f1c9a" in left.stdout, left.stdout
+    assert "label=com.docker.compose.project=it-suite" in left.stdout, left.stdout
+    gone = _run_bash(_verify("") + check)
+    assert "PASSED" in gone.stdout and "no container of the old identity provider" in gone.stdout
+    text = _SH_COMMENT.sub("", _script())
+    assert text.index('say "Verifying"') < text.index("\nverify_old_identity_gone || FAIL=1\n")
 
 
 def test_the_check_runs_before_the_diff_is_taken() -> None:
@@ -4219,10 +4306,10 @@ ds.write_text(text)
 print("ok")
 ```
 
-Expected: `ok`. Lo que hace: las siete pruebas de la sección del runbook «The email-domain allowlist» se copian, sin cambiar, a `tests/test_email_domain_runbook.py` con los ayudantes que usan (P4-26), y `test_console_auth_realm.py` se borra con las otras 96 (Apéndice C); se borran las pruebas de `init-clients.py`, del pin de la imagen y del borde de registro de Keycloak; `test_deploy_mcp_route.py` y `test_auth_jwks.py` leen `tests/traefik_routes.py`, y la prueba de los documentos del realm pasa a decir que esas rutas caen en la consola; el simulacro solo tiene `postgres`; `test_platform_backup_scripts.py` gana siete pruebas de K1, que corren `backup.sh` y `restore.sh` de verdad con un `ITS_PG_EXEC` falso (la copia nocturna deja fuera la base vieja y lo dice; la previa la guarda mientras exista; un volcado vacío falla; la opción se comprueba antes de volcar; solo `deploy.sh` la pide y `scheduled-backup.sh` la niega; una copia con `keycloak.dump` lo restaura en un host que ya no tiene la base, y la copia nocturna siguiente no lo lleva; una copia sin él no toca `keycloak`); y `test_deploy_script_steps.py` cambia sus pruebas de Keycloak por las del Apéndice C: ningún paso arranca un proveedor de identidad, ningún `up` quita huérfanos, los dos contenedores se van por su nombre y nada más (con un `docker` simulado que lista también un `guacd` y un `keycloak-proxy` del operador), dos veces es lo mismo que una, después de la capa nueva, una actualización a medias se termina en vez de responder «Already deployed», las claves obsoletas se nombran sin tocar `.env` y con el aviso de no borrarlas, ningún otro archivo de `deploy/` las nombra, el preflight saca el host de `ITS_PUBLIC_CONSOLE_URL`, la vuelta atrás saca `deploy` entero y avisa si faltan las cuatro claves.
+Expected: `ok`. Lo que hace: las siete pruebas de la sección del runbook «The email-domain allowlist» se copian, sin cambiar, a `tests/test_email_domain_runbook.py` con los ayudantes que usan (P4-26), y `test_console_auth_realm.py` se borra con las otras 96 (Apéndice C); se borran las pruebas de `init-clients.py`, del pin de la imagen y del borde de registro de Keycloak; `test_deploy_mcp_route.py` y `test_auth_jwks.py` leen `tests/traefik_routes.py`, y la prueba de los documentos del realm pasa a decir que esas rutas caen en la consola; el simulacro solo tiene `postgres`; `test_platform_backup_scripts.py` gana siete pruebas de K1, que corren `backup.sh` y `restore.sh` de verdad con un `ITS_PG_EXEC` falso (la copia nocturna deja fuera la base vieja y lo dice; la previa la guarda mientras exista; un volcado vacío falla; la opción se comprueba antes de volcar; solo `deploy.sh` la pide y `scheduled-backup.sh` la niega; una copia con `keycloak.dump` lo restaura en un host que ya no tiene la base, y la copia nocturna siguiente no lo lleva; una copia sin él no toca `keycloak`); y `test_deploy_script_steps.py` cambia sus pruebas de Keycloak por las del Apéndice C: ningún paso arranca un proveedor de identidad, ningún `up` quita huérfanos, los dos contenedores se van por su nombre y nada más (con un `docker` simulado que lista también un `guacd` y un `keycloak-proxy` del operador), dos veces es lo mismo que una, después de la capa nueva, una actualización a medias se termina en vez de responder «Already deployed», y su vuelta atrás es la copia de antes de 0248 con su etiqueta, no la de esta ejecución (y lo dice si no hay ninguna), la verificación falla mientras quede un contenedor de los dos, las claves obsoletas se nombran sin tocar `.env` y con el aviso de no borrarlas, ningún otro archivo de `deploy/` las nombra, el preflight saca el host de `ITS_PUBLIC_CONSOLE_URL`, la vuelta atrás saca `deploy` entero y avisa si faltan las cuatro claves.
 
 Run: `.venv/bin/pytest -q tests/test_public_surface.py tests/test_deploy_script_steps.py tests/test_platform_backup_scripts.py tests/test_deploy_mcp_route.py`
-Expected: 25 FAIL y 48 PASS (en el ensayo de la ronda de correcciones). Fallan las tres de `test_public_surface.py` (el servicio `keycloak`, los routers `kc*`, las rutas antiguas llegan a `kc`), `test_the_former_realm_paths_reach_no_identity_provider`, la del simulacro, las siete de K1 menos `test_an_empty_dump_of_it_fails_the_backup` (que el `backup.sh` de hoy ya cumple: vuelca `keycloak` siempre y exige el volcado no vacío), y en `test_deploy_script_steps.py` las nuevas menos `test_no_up_removes_orphans` (el guion de hoy no quita huérfanos, y la prueba fija que siga sin hacerlo), más las cinco de la vuelta atrás que llegan a leer `NEED_KEYCLOAK` en el `rollback_help` de hoy (su arnés ya no lo define, y la función lo lee con `set -u`).
+Expected: 28 FAIL y 48 PASS (en el ensayo de la segunda ronda de correcciones, sobre las oleadas 1 y 2 de los guiones corregidos). Fallan las tres de `test_public_surface.py` (el servicio `keycloak`, los routers `kc*`, las rutas antiguas llegan a `kc`), `test_the_former_realm_paths_reach_no_identity_provider`, la del simulacro, las siete de K1 menos `test_an_empty_dump_of_it_fails_the_backup` (que el `backup.sh` de hoy ya cumple: vuelca `keycloak` siempre y exige el volcado no vacío), y en `test_deploy_script_steps.py` las nuevas menos `test_no_up_removes_orphans` (el guion de hoy no quita huérfanos, y la prueba fija que siga sin hacerlo), más las cinco de la vuelta atrás que llegan a leer `NEED_KEYCLOAK` en el `rollback_help` de hoy (su arnés ya no lo define, y la función lo lee con `set -u`).
 
 - [ ] **Step 3: El despliegue, con dos guiones**
 
@@ -4350,8 +4437,9 @@ run pg_dump -Fc -U "$ITS_PG_ADMIN_USER" keycloak > "$OUT_DIR/keycloak.dump"
 # the operator retires it (deploy/README.md "Retiring the old identity
 # provider's data"). It holds Keycloak's password hashes and the realm keys
 # that signed its tokens, so it goes ONLY into the backup deploy.sh takes
-# before an upgrade -- the way back to a release from before phase 4 -- and
-# never into a nightly or off-site one. The note below is the reminder that
+# before an upgrade (the one before the phase-4 upgrade, with its schema below
+# 0248, is the way back to a release from before it), and never into a
+# nightly or off-site one. The note below is the reminder that
 # it is still there. A -tAc scalar into a string compare, not
 # `psql | grep -q`: under pipefail a grep that exits early SIGPIPEs psql
 # (restore.sh's prepare_db says the same).
@@ -4484,8 +4572,8 @@ swap(
 # a release from before own authentication phase 4: nothing here starts the
 # old identity provider (this release has no image of it), and the nightly
 # backups it drills hold no `keycloak.dump` since then. That way back is
-# only the pre-upgrade backup deploy.sh took (deploy/README.md "Rolling back
-# a deployment").""",
+# only the backup taken before that upgrade, whose schema is below 0248
+# (deploy/README.md "Rolling back a deployment").""",
 )
 swap(drill, "        -h|--help) sed -n '2,20p' \"$0\"; exit 0 ;;\n",
      "        -h|--help) sed -n '2,28p' \"$0\"; exit 0 ;;\n")
@@ -4621,15 +4709,51 @@ fi
 # app tier still on the old images. Re-run, this script would read the new
 # tag as running and stop here with exit 0. Those two containers are the mark
 # of that half-done upgrade, so it finishes it as a full deploy instead.
+#
+# AND THE WAY BACK IS NOT THIS RUN'S BACKUP. This run backs up a database the
+# stopped run already migrated past 0248, which no release before phase 4 can
+# read. The way back is the backup the stopped run took first: the newest
+# `pre-upgrade-*` whose schema is below 0248 (its `alembic_version`), with the
+# images its `image_version` names. That backup has no `keycloak.dump` (the
+# new backup.sh took it without the flag), and needs none: the old identity
+# provider's database is still on the cluster, and restore.sh touches only the
+# databases a backup holds. rollback_help prints that backup and that tag.
+ROLLBACK_BACKUP_DIR=""; ROLLBACK_BASE=""
+way_back_backup() {
+    local dir rev found=""
+    for dir in "$HOME"/backups/pre-upgrade-*/; do
+        dir="${dir%/}"
+        [ -r "$dir/alembic_version" ] || continue
+        rev="$(tr -d '[:space:]' < "$dir/alembic_version")"
+        case "$rev" in [0-9][0-9][0-9][0-9]) ;; *) continue ;; esac
+        [ "$((10#$rev))" -lt 248 ] && found="$dir"
+    done
+    printf '%s' "$found"
+}
 stop_if_already_deployed() {
+    local old_tag
     [ -n "$BASELINE" ] || return 0
     [ "$(git -C "$REPO_ROOT" rev-parse "$BASELINE")" = "$AFTER" ] || return 0
     if [ -n "$(old_identity_containers)" ]; then
         warn "the old identity provider's containers are still here: an upgrade past own"
         warn "authentication phase 4 stopped part-way. Finishing it as a full deploy."
-        warn "The way back is the pre-upgrade backup the run that stopped took (the newest"
-        warn "$HOME/backups/pre-upgrade-* before this run's), not the one this run takes."
         BASELINE=""
+        ROLLBACK_BACKUP_DIR="$(way_back_backup)"
+        if [ -z "$ROLLBACK_BACKUP_DIR" ]; then
+            warn "No backup under $HOME/backups/pre-upgrade-* is from before migration 0248, so"
+            warn "this run cannot name the way back past phase 4. This run's own backup is not it."
+            return 0
+        fi
+        old_tag="$(sed -n 's/^IT_SUITE_VERSION=//p' "$ROLLBACK_BACKUP_DIR/image_version" 2>/dev/null | tail -1 || true)"
+        case "$old_tag" in *[!A-Za-z0-9._-]*) old_tag="" ;; esac
+        warn "The way back is the backup the stopped run took first, not the one this run takes:"
+        warn "  $ROLLBACK_BACKUP_DIR (schema $(tr -d '[:space:]' < "$ROLLBACK_BACKUP_DIR/alembic_version"), images ${old_tag:-unrecorded})"
+        if [ -n "$old_tag" ]; then
+            RUNNING_TAG="$old_tag"
+            if git -C "$REPO_ROOT" rev-parse --verify --quiet "${old_tag}^{commit}" >/dev/null 2>&1; then
+                ROLLBACK_BASE="$old_tag"
+            fi
+        fi
         return 0
     fi
     say "Already deployed"
@@ -4652,6 +4776,33 @@ cut(
     "# A NEW migration file is the signal",
 )
 swap(ds, "    NEED_KEYCLOAK=1; NEED_OPENBAO=1\n", "    NEED_OPENBAO=1\n")
+swap(
+    ds,
+    """    local prev="$RUNNING_TAG" base="${BASELINE:-}" n=1
+    say "If you need to go back"
+    note "deploy/README.md \\"Rolling back a deployment\\" -- here with this run's values."
+""",
+    """    local prev="$RUNNING_TAG" base="${ROLLBACK_BASE:-${BASELINE:-}}" n=1
+    # Past an upgrade that stopped part-way, the backup taken before it
+    # (stop_if_already_deployed), not this run's, which is past 0248.
+    local way_back="${ROLLBACK_BACKUP_DIR:-$BACKUP_DIR}"
+    say "If you need to go back"
+    note "deploy/README.md \\"Rolling back a deployment\\" -- here with this run's values."
+    if [ -n "${ROLLBACK_BACKUP_DIR:-}" ]; then
+        note "An upgrade stopped part-way before this run: the way back is the backup it took first."
+        note "This run's own backup ($BACKUP_DIR) is past migration 0248 and cannot go back past it."
+    fi
+""",
+)
+swap(
+    ds,
+    """        note "There is no image to swap back to. The backup this run took is at:"
+        note "  $BACKUP_DIR"
+""",
+    """        note "There is no image to swap back to. The backup to restore is at:"
+        note "  $way_back"
+""",
+)
 swap(
     ds,
     """[ "$NEED_KEYCLOAK" = 1 ] && note "RUN    restart keycloak — realm or theme changed" || note "skip   keycloak restart — no realm or theme change"
@@ -4686,7 +4837,7 @@ swap(
     return 0""",
     """    if [ "$NEED_MIGRATE" = 1 ]; then
         warn "This deploy moved the database schema (a migration), so the old images cannot run against it."
-        note "  $n. ITS_RESTORE_FORCE=1 ./scripts/restore.sh $BACKUP_DIR"; n=$((n + 1))
+        note "  $n. ITS_RESTORE_FORCE=1 ./scripts/restore.sh $way_back"; n=$((n + 1))
         warn "     That DROPS THE DATABASES IN THE BACKUP and rewinds the audit log to it: every write and"
         warn "     every audited action since then is gone. Export anything you need first (see the runbook)."
     fi
@@ -4734,9 +4885,9 @@ swap(
 ./scripts/backup.sh "$BACKUP_DIR"
 """,
     """BACKUP_DIR="$HOME/backups/pre-upgrade-$(date -u +%FT%H%MZ)"
-# With the old identity provider's database while one exists: this backup is
-# the way back past own authentication phase 4, and the nightly ones leave it
-# out (backup.sh; operator decision K1, 2026-11-15).
+# With the old identity provider's database while one exists: the backup taken
+# before the phase-4 upgrade is the way back past it, and the nightly ones
+# leave that database out (backup.sh; operator decision K1, 2026-11-15).
 ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh "$BACKUP_DIR"
 """,
 )
@@ -4755,6 +4906,41 @@ fi
 # leaves the release before it able to run.
 say "Removing the old identity provider's containers"
 remove_old_identity_containers
+""",
+)
+swap(
+    ds,
+    """say "Verifying"
+FAIL=0
+""",
+    """say "Verifying"
+FAIL=0
+
+# THE OLD IDENTITY PROVIDER'S CONTAINERS ARE GONE, checked by the labels on the
+# containers themselves (the project and the service), so this does not rest
+# on `compose ps` listing a container whose service left the file. One left is
+# still routed by Traefik, so it fails the deploy and says how to remove it.
+old_identity_containers_left() {
+    local cfg project service
+    cfg="$("${COMPOSE[@]}" config 2>/dev/null </dev/null || true)"
+    project="$(awk '/^name: / { print $2; exit }' <<<"$cfg")"
+    for service in keycloak keycloak-init; do
+        docker ps -aq --filter "label=com.docker.compose.project=${project:-it-suite}" \\
+            --filter "label=com.docker.compose.service=$service" 2>/dev/null </dev/null || true
+    done
+}
+verify_old_identity_gone() {
+    local left
+    left="$(old_identity_containers_left | tr '\\n' ' ')"
+    if [ -z "${left// /}" ]; then
+        note "no container of the old identity provider is left"
+        return 0
+    fi
+    warn "a container of the old identity provider is still here, and Traefik routes to it:"
+    warn "  docker rm -f ${left% }"
+    return 1
+}
+verify_old_identity_gone || FAIL=1
 """,
 )
 
@@ -4918,7 +5104,7 @@ Lo que hacen, por archivo:
 - **`backup.sh`:** `ITS_BACKUP_OLD_IDENTITY_DB` (`0` por omisión; `0` o `1`, comprobado antes de volcar nada); mira si la base `keycloak` existe (un escalar `-tAc`, no `psql | grep -q`, por lo de `pipefail` que `restore.sh` ya explica); con `1` y la base, la vuelca y exige su volcado no vacío; sin `1` y con la base, una nota que la recuerda y nombra el paso del runbook (K1, P4-12). `scheduled-backup.sh` pasa `ITS_BACKUP_OLD_IDENTITY_DB=0`.
 - **`restore.sh`:** sigue restaurando `keycloak.dump` cuando la copia lo trae, y lo dice: que las versiones desde la fase 4 no lo usan, que la anterior sí y se conserve si se está volviendo atrás, y el nombre de la sección del runbook que lo retira (revisión 3, M2). El comentario de `prepare_db` se reescribe entero, hasta «… not for that.» (revisión 3, M1).
 - **`restore-drill.sh` y su compose:** no arranca Keycloak; si la copia trae `keycloak.dump`, comprueba que la base restaurada tiene tablas; `--skip-keycloak` se acepta y avisa de que no hace nada (P4-23); su cabecera dice que no prueba la vuelta atrás a una versión de antes de la fase 4, que es solo con la copia previa de `deploy.sh` (C7), y su `--help` imprime la cabecera entera (`2,28p`).
-- **`deploy.sh`:** la cabecera dice que la primera actualización pasada la fase 4 empieza con el `git pull` y que, si el guion viejo ya se paró, basta volver a correr este (C2; su `--help` imprime ahora la cabecera hasta «Usage», `2,47p`); el aviso de `ITS_PUBLIC_CONSOLE_URL` sin `http://keycloak:8080` (P4-31); `OBSOLETE_ENV_KEYS` y `obsolete_env_keys()`, que nombran las 17 claves sin tocar `.env` y dicen que no se borren todavía (K1); `old_identity_containers()` y `remove_old_identity_containers()`, que quitan por su nombre `keycloak` y `keycloak-init` después del último `up -d` y nada más (C1); `stop_if_already_deployed()`, que no responde «Already deployed» mientras quede alguno de los dos (C2); la copia previa con `ITS_BACKUP_OLD_IDENTITY_DB=1`; fuera `NEED_KEYCLOAK`, `KC_IMAGE_CHANGED`, el reinicio de `keycloak` y `keycloak-init`; la ayuda de vuelta atrás hace `checkout <base> -- deploy` entero, dice «DROPS THE DATABASES IN THE BACKUP» y, si la versión de destino es de antes de la fase 4 (su compose nombra `KEYCLOAK_ADMIN_USER`), avisa de cuáles de las cuatro claves faltan en `.env` (P4-13).
+- **`deploy.sh`:** la cabecera dice que la primera actualización pasada la fase 4 empieza con el `git pull` y que, si el guion viejo ya se paró, basta volver a correr este (C2; su `--help` imprime ahora la cabecera hasta «Usage», `2,47p`); el aviso de `ITS_PUBLIC_CONSOLE_URL` sin `http://keycloak:8080` (P4-31); `OBSOLETE_ENV_KEYS` y `obsolete_env_keys()`, que nombran las 17 claves sin tocar `.env` y dicen que no se borren todavía (K1); `old_identity_containers()` y `remove_old_identity_containers()`, que quitan por su nombre `keycloak` y `keycloak-init` después del último `up -d` y nada más (C1); `stop_if_already_deployed()`, que no responde «Already deployed» mientras quede alguno de los dos (C2) y entonces busca la copia de la vuelta atrás por su esquema (`way_back_backup()`: la `pre-upgrade-*` más nueva por debajo de 0248), lee su etiqueta vieja de `image_version` y se las da a `rollback_help` (`ROLLBACK_BACKUP_DIR`, `ROLLBACK_BASE`), que las imprime en vez de la copia de esta ejecución, ya a 0248 (re-revisión, N2); `verify_old_identity_gone()`, al verificar, que falla el despliegue si queda un contenedor de los dos, buscado por sus etiquetas de compose y no por `compose ps` (re-revisión, m11); la copia previa con `ITS_BACKUP_OLD_IDENTITY_DB=1`; fuera `NEED_KEYCLOAK`, `KC_IMAGE_CHANGED`, el reinicio de `keycloak` y `keycloak-init`; la ayuda de vuelta atrás hace `checkout <base> -- deploy` entero, dice «DROPS THE DATABASES IN THE BACKUP» y, si la versión de destino es de antes de la fase 4 (su compose nombra `KEYCLOAK_ADMIN_USER`), avisa de cuáles de las cuatro claves faltan en `.env` (P4-13).
 - **`preflight.sh`:** el host del certificado sale de `ITS_PUBLIC_CONSOLE_URL`, con `sed -n …p` para que un valor vacío dé un host vacío (P4-38), y su frase de GO-LIVE §2. **`host-check.sh`:** la lista de servicios y la nota del reloj. **`host-network.md`:** `ITS_PUBLIC_CONSOLE_URL` en la lista de claves que llevan el nombre del host, y la frase del reloj.
 - **`.env.example`:** fuera `ITS_MULTI_TENANT`, el bloque «Keycloak / OIDC», `ENTRA_*`, `ITS_KEYCLOAK_*`, la viñeta de `KC_HOSTNAME` y la frase de `keycloak-init` sobre `ITS_MCP_REGISTRATION`; `ITS_DEFAULT_ORG_SLUG=toeshee` se queda en un bloque propio (`test_setup_api.py::test_the_shipped_defaults_name_the_organization_the_console_signs_in_to` lo exige), con un comentario que dice que las claves viejas de un `.env` existente se conservan hasta el paso del runbook; y `:350` nombra `ITS_PUBLIC_CONSOLE_URL`.
 
@@ -4934,8 +5120,8 @@ Expected: `api backup-replicator gateway migrate minio openbao openbao-init post
 
 - [ ] **Step 4: Las pruebas pasan**
 
-Run: `.venv/bin/pytest -q tests/test_email_domain_runbook.py tests/test_public_surface.py tests/test_deploy_mcp_route.py tests/test_auth_jwks.py tests/test_deploy_script_steps.py tests/test_platform_backup_scripts.py tests/test_deploy_env_documentation.py tests/test_deploy_scripts.py tests/test_mcp_discovery_fallbacks.py tests/test_deploy_install_link.py tests/test_deploy_object_storage_route.py tests/test_openbao_seal_script.py tests/test_deploy_runbook_secrets.py tests/test_setup_api.py`
-Expected: PASS (en el ensayo de la ronda de correcciones, sobre las oleadas 1 y 2: 194 en esta rama sola, con el `tests/test_ci_mcp_flow.py` viejo, que lee `deploy/keycloak/ci_mcp_flow.py`, que aquí sigue; 200 con la Task 7). Y `.venv/bin/ruff check tests`: limpio.
+Run: `.venv/bin/pytest -q tests/test_email_domain_runbook.py tests/test_public_surface.py tests/test_deploy_mcp_route.py tests/test_auth_jwks.py tests/test_deploy_script_steps.py tests/test_platform_backup_scripts.py tests/test_deploy_env_documentation.py tests/test_deploy_scripts.py tests/test_mcp_discovery_fallbacks.py tests/test_deploy_install_link.py tests/test_deploy_object_storage_route.py tests/test_openbao_seal_script.py tests/test_deploy_runbook_secrets.py tests/test_setup_api.py tests/test_ci_mcp_flow.py`
+Expected: PASS (en el ensayo de la segunda ronda de correcciones, sobre las oleadas 1 y 2 de los guiones corregidos: 197 en esta rama sola, con el `tests/test_ci_mcp_flow.py` viejo, que lee `deploy/keycloak/ci_mcp_flow.py`, que aquí sigue; 203 con la Task 7). Y `.venv/bin/ruff check tests`: limpio.
 
 - [ ] **Step 5: Commit**
 
@@ -6295,7 +6481,7 @@ Expected: la lista de pasos del job (`None`, `Throwaway .env`, …, `backup.sh -
 - [ ] **Step 5: Las pruebas pasan**
 
 Run: `.venv/bin/pytest -q tests/test_ci_mcp_flow.py && .venv/bin/ruff check tests`
-Expected: 19 PASS, limpio. (Con la Task 6 en el mismo árbol, las pruebas de su Step 4 más estas: 200.)
+Expected: 19 PASS, limpio. (Con la Task 6 en el mismo árbol, el comando de su Step 4: 203.)
 
 - [ ] **Step 6: El guion, en vivo contra la API (sin Traefik)**
 
@@ -6807,6 +6993,7 @@ def test_the_retiring_step_is_the_operators_decision_entire() -> None:
     closes the way back, and sends them to revoke the old Entra secret --
     with commands that need nothing filled in (CLAUDE.md)."""
     body = _section(RETIRING)
+    flat = " ".join(body.split())
     for needed in (
         "dropdb -U its_admin keycloak",
         "keycloak-admin.secret",
@@ -6817,8 +7004,10 @@ def test_the_retiring_step_is_the_operators_decision_entire() -> None:
         "ENTRA_CLIENT_SECRET",
         "Do not delete",
     ):
-        assert needed in body, needed
-    assert "one release later" not in body
+        assert needed in flat, needed
+    # Said before anything is deleted, not only after (re-review, m8).
+    assert flat.index("closes the way back") < flat.index("dropdb")
+    assert "one release later" not in flat
     code = "\n".join(re.findall(r"```sh\n(.*?)```", body, re.DOTALL))
     assert code and not re.search(r"<[a-z][a-z -]*>", code), "a placeholder in a command"
 
@@ -6871,7 +7060,7 @@ def test_every_in_page_link_lands_on_a_heading() -> None:
 ```
 
 Run: `.venv/bin/pytest -q tests/test_runbook_without_keycloak.py`
-Expected: 6 FAIL y 3 PASS (en el ensayo de la ronda de correcciones, sobre un árbol con las Tasks 1, 3, 6 y 7): las líneas que nombran al proveedor viejo (137 del README, 18 de `GO-LIVE.md` y 7 de `docs/07-backup-restore.md`), las secciones de Keycloak siguen, no hay sección «Retiring…» ni el paso único, ni el `git pull` primero en «Upgrading». Pasan la no vacuidad, los enlaces internos (hoy resuelven todos) y `test_the_status_keeps_what_an_old_host_still_needs`, que es una guarda de lo que el runbook ya dice y la Task 9 no debe perder.
+Expected: 6 FAIL y 3 PASS (en el ensayo de la segunda ronda de correcciones, sobre un árbol con las oleadas 1 a 3): las líneas que nombran al proveedor viejo (137 del README, 18 de `GO-LIVE.md` y 7 de `docs/07-backup-restore.md`), las secciones de Keycloak siguen, no hay sección «Retiring…» ni el paso único, ni el `git pull` primero en «Upgrading». Pasan la no vacuidad, los enlaces internos (hoy resuelven todos) y `test_the_status_keeps_what_an_old_host_still_needs`, que es una guarda de lo que el runbook ya dice y la Task 9 no debe perder.
 
 - [ ] **Step 3: `deploy/README.md`, sección por sección**
 
@@ -6953,11 +7142,12 @@ upgraded from a release before phase 1 crosses all four at once:
   `ITS_DEFAULT_ORG_SLUG` is not one of them: keep it.
 - **A host upgraded from before phase 4 still has the old identity
   provider's database and three secret files.** Nothing in this release uses
-  them. The backup `deploy.sh` took before the upgrade holds the database,
-  and it is the way back past phase 4; the nightly and off-site backups leave
-  the database out from phase 4 on. They all stay until you remove them, when
-  you choose: [Retiring the old identity provider's
-  data](#retiring-the-old-identity-providers-data).
+  them. The way back past phase 4 is the backup taken before that upgrade:
+  the newest `~/backups/pre-upgrade-*` whose `alembic_version` is below
+  `0248` ([Rolling back a deployment](#rolling-back-a-deployment)). The
+  nightly and off-site backups leave the database out from phase 4 on. They
+  all stay until you remove them, when you choose: [Retiring the old identity
+  provider's data](#retiring-the-old-identity-providers-data).
 ```
 
 3. **DNS (`:147-149`).** «including in `.env` (`ITS_OIDC_ISSUER`, `ITS_GATEWAY_URL`, `ITS_GATEWAY_RELAY_URL`)» → «including in `.env` (`ITS_PUBLIC_CONSOLE_URL`, `ITS_GATEWAY_URL`, `ITS_GATEWAY_RELAY_URL`)».
@@ -7124,16 +7314,22 @@ docker compose ps -a --format '{{.Name}} {{.Service}}' \
 
 19. **«What remains unverified» (`:3336-3338`).** La viñeta «- Restore of the `keycloak` database specifically. …» se sustituye por «- A rollback past own authentication phase 4 on a live host. CI's `deploy` job restores a pre-upgrade backup that holds `keycloak.dump` and checks the database came back; nothing has started the release before phase 4 on it since.».
 
-20. **El simulacro (`:3412-3423`).** «It proves both dumps restore, the RLS policy count …, the audit-chain linkage, and that Keycloak serves the realm from the restored database.» → «It proves the dumps restore, the RLS policy count …, the audit-chain linkage, and, for a backup that holds `keycloak.dump` (one taken before own authentication phase 4, or by `deploy.sh` before an upgrade), that the restored `keycloak` database holds tables. It does not prove the way back past phase 4: the nightly backups it drills leave that database out, and that way back is only the pre-upgrade backup ([Rolling back a deployment](#rolling-back-a-deployment)).»; y «(`--keep` leaves it up to inspect; `--skip-keycloak` saves memory).» → «(`--keep` leaves it up to inspect).».
+20. **El simulacro (`:3412-3423`).** «It proves both dumps restore, the RLS policy count …, the audit-chain linkage, and that Keycloak serves the realm from the restored database.» → «It proves the dumps restore, the RLS policy count …, the audit-chain linkage, and, for a backup that holds `keycloak.dump` (one taken before own authentication phase 4, or by `deploy.sh` before an upgrade), that the restored `keycloak` database holds tables. It does not prove the way back past phase 4: the nightly backups it drills leave that database out, and that way back is only the backup taken before the phase-4 upgrade ([Rolling back a deployment](#rolling-back-a-deployment)).»; y «(`--keep` leaves it up to inspect; `--skip-keycloak` saves memory).» → «(`--keep` leaves it up to inspect).».
 
 21. **`## Rolling back a deployment`** (revisión 1, M12; K1). Detrás del párrafo «**`IT_SUITE_VERSION` rolls back the images, not the configuration.** … check those out at the old SHA too.»:
 
 ```markdown
 **Back past own authentication phase 4 (2026-11-15), the backup in step 3 is
-the one `deploy.sh` took before that upgrade**: it is the only one that holds
-the old identity provider's database, and a backup taken after the upgrade
-cannot cross its migration backwards. Both halves of the paragraph above
-apply, too: check out the whole `deploy/` directory at the old release, not
+the one taken before that upgrade: the newest `~/backups/pre-upgrade-*` whose
+`alembic_version` is below `0248`** (`cat ~/backups/pre-upgrade-*/alembic_version`).
+A backup taken after it cannot cross its migration backwards, and holding
+a dump of the old identity provider's database does not make one the right
+one: every pre-upgrade backup taken while that database exists holds one. If
+that upgrade stopped part-way and a second `deploy.sh` finished it, the right
+one is the first run's: it holds no such dump, and needs none, because the
+database stayed on the cluster and `restore.sh` touches only the databases a
+backup holds; the second run names it, and its images, at its start and in
+its closing rollback help. Both halves of the paragraph above apply, too: check out the whole `deploy/` directory at the old release, not
 only `docker-compose.yml` -- that release bind-mounts files this checkout no
 longer has, and `deploy.sh` prints the exact `git checkout` at the end of the
 upgrade -- and `.env` must still hold the four keys that release starts
@@ -7166,14 +7362,16 @@ containers on the upgrade. What a host that ran it still keeps, on purpose:
 - the image `quay.io/keycloak/keycloak:26.2`.
 
 Nothing in this release reads any of them. **The way back past phase 4 is the
-backup `deploy.sh` took before the upgrade** (`~/backups/pre-upgrade-…`; the
-nightly and off-site backups leave the database out from phase 4 on),
-restored as [Rolling back a deployment](#rolling-back-a-deployment) says, with
-the four keys still in `.env` and `deploy/` checked out at the old release.
-**Do not delete the keys, the secret files or the database before the step
-below.**
+backup taken before that upgrade** -- the newest `~/backups/pre-upgrade-*`
+whose `alembic_version` is below `0248` -- restored as [Rolling back a
+deployment](#rolling-back-a-deployment) says, with the four keys still in
+`.env`, the database and the secret files still here, and `deploy/` checked
+out at the old release. **Do not delete the keys, the secret files or the
+database before the step below.**
 
-**The step, at a time you choose, once you have checked the upgrade.** A
+**The step, at a time you choose, once you have checked the upgrade. It
+closes the way back past phase 4:** after it, a release from before phase 4
+no longer starts on this host (part 6 says what going back would then take). A
 migration could have done it (Alembic can run a statement outside its
 transaction), but it is irreversible, so it is your act and not `up -d`'s.
 In `deploy/`:
@@ -7233,12 +7431,14 @@ In `deploy/`:
    `grep -c` prints `0`, and the next `./scripts/deploy.sh` names no key.
    `ITS_DEFAULT_ORG_SLUG` stays. The containers that read `.env` see the
    change the next time they are recreated; nothing in them read those keys.
-6. **This closes the way back.** From here, a release from before own
+6. **This closed the way back.** From here, a release from before own
    authentication phase 4 does not start on this host: its compose file and
    its api refuse without the keys, and its identity provider has neither
-   its database nor its secrets. The pre-upgrade backup still restores the
-   databases (`restore.sh` recreates `keycloak` from it, and says so), but
-   the keys and the secret files would have to be put back by hand.
+   its database nor its secrets nor its image. Going back would mean
+   restoring the backup from before the upgrade (`itsuite`; and `keycloak`
+   only if that backup holds `keycloak.dump`, which the one a stopped
+   upgrade took does not -- the final copy of part 1 does) and putting back
+   by hand the four keys, the three secret files and the image.
 7. **If a client secret was ever created in Entra for the old identity
    provider's Microsoft sign-in** (`ENTRA_CLIENT_SECRET`), revoke it there:
    in the Microsoft Entra admin center, **App registrations** → that
@@ -7254,7 +7454,11 @@ rule may not let you delete them sooner. The next `./scripts/backup.sh`
 writes no `keycloak.dump` and prints no note about the database.
 ````
 
-23. **«What was broken, and how you would recognise it».** Debajo del párrafo de introducción, antes de la tabla, una línea: «Rows 8, 9, 13 and 14 describe the identity provider this platform used until own authentication phase 4 (2026-11-15); they are kept as the record of what went wrong, and none of them can happen on a release after it.» La tabla no se toca.
+23. **`## Rolling back a deployment`, el paso 3** (re-revisión, m9). En el comentario, «#    ITS_RESTORE_FORCE=1 IS REQUIRED HERE AND IT DROPS BOTH DATABASES.» → «#    ITS_RESTORE_FORCE=1 IS REQUIRED HERE AND IT DROPS EVERY DATABASE THE BACKUP» y una línea más, «#    HOLDS: `itsuite`, and the old identity provider's if it is in the backup.» (lo que dice `deploy.sh` desde la Task 6).
+
+24. **«Upgrading an existing deployment», la secuencia a mano, el paso 1** (re-revisión, m10). La línea «cd deploy && ./scripts/backup.sh ~/backups/pre-upgrade-$(date -u +%FT%H%MZ) && cd ..» pasa a «cd deploy && ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh ~/backups/pre-upgrade-$(date -u +%FT%H%MZ) && cd ..», con esta línea de comentario delante: «#    ITS_BACKUP_OLD_IDENTITY_DB=1: the backup before an upgrade keeps the old identity provider's database while one exists, as deploy.sh's does (a backup.sh from before own authentication phase 4 ignores it, and dumped it anyway).».
+
+25. **«What was broken, and how you would recognise it».** Debajo del párrafo de introducción, antes de la tabla, una línea: «Rows 8, 9, 13 and 14 describe the identity provider this platform used until own authentication phase 4 (2026-11-15); they are kept as the record of what went wrong, and none of them can happen on a release after it.» La tabla no se toca.
 
 - [ ] **Step 4: `deploy/GO-LIVE.md`**
 
@@ -7287,7 +7491,7 @@ console, its realm -- is gone with it.
   "Retiring the old identity provider's data").
 ```
 
-3. **§6 (`:432-436`).** «That writes **three** artefacts, and the third is the one a hand-rolled `pg_dump` misses:» → «That writes the artefacts below, and the last is the one a hand-rolled `pg_dump` misses:»; y la viñeta «- `keycloak.dump` — your realm, users and federation config. Losing it locks every operator out even with an intact application database.» se sustituye por «- `keycloak.dump` — only in the backup `deploy.sh` takes before an upgrade, on a host upgraded from before own authentication phase 4 and while the old identity provider's database exists; it is what takes you back to that release. The nightly backups leave it out.».
+3. **§6 (`:432-436`).** «That writes **three** artefacts, and the third is the one a hand-rolled `pg_dump` misses:» → «That writes the artefacts below, and the last is the one a hand-rolled `pg_dump` misses:»; y la viñeta «- `keycloak.dump` — your realm, users and federation config. Losing it locks every operator out even with an intact application database.» se sustituye por «- `keycloak.dump` — only in the backup `deploy.sh` takes before an upgrade, on a host upgraded from before own authentication phase 4 and while the old identity provider's database exists. The nightly backups leave it out. What takes you back to a release from before phase 4 is the backup taken before that upgrade, whose `alembic_version` is below `0248`, with `keycloak.dump` or without it (`deploy/README.md`, "Rolling back a deployment").».
 4. **§6 (`:499-500`).** «**The `keycloak` restore has not been verified beyond running** — no realm, user or federation check has been done after one.» → «A `keycloak.dump` (a backup from before own authentication phase 4) is restored and checked for tables by the monthly drill, and nothing past that.».
 5. **§7 (`:513-519`).** La viñeta de `ITS_MULTI_TENANT` se borra; en «**Pin every image.** `openbao`, `minio`, `traefik`, `postgres`, `keycloak` and `redis`» se quita `` `keycloak` ``; y en «**Firewall.** … Postgres, Redis, MinIO, OpenBao and Keycloak's HTTP port have no published ports» → «Postgres, Redis, MinIO and OpenBao have no published ports».
 
@@ -7320,7 +7524,7 @@ docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if
 - [ ] **Step 6: La guarda y las pruebas de los documentos pasan**
 
 Run: `.venv/bin/pytest -q tests/test_runbook_without_keycloak.py tests/test_email_domain_runbook.py tests/test_deploy_runbook_secrets.py tests/test_deploy_env_documentation.py tests/test_deploy_object_storage_route.py tests/test_worker_beat_schedule.py tests/test_storage_public_endpoint.py tests/test_deploy_script_steps.py`
-Expected: PASS (90 en el ensayo de la ronda de correcciones). Si `test_the_runbook_names_the_old_provider_only_where_it_retires_it` lista una línea que este paso no previó, se reescribe la línea (o se fecha con «phase 4» si es historia); la guarda no se afloja.
+Expected: PASS (93 en el ensayo de la segunda ronda de correcciones). Si `test_the_runbook_names_the_old_provider_only_where_it_retires_it` lista una línea que este paso no previó, se reescribe la línea (o se fecha con «phase 4» si es historia); la guarda no se afloja.
 
 - [ ] **Step 7: Commit**
 
@@ -7739,8 +7943,10 @@ def test_falsifier_11_nothing_of_it_is_deployed() -> None:
         for name, service in services.items():
             assert "keycloak" not in name.lower(), (path.name, name)
             assert "keycloak" not in str(service.get("image", "")).lower(), (path.name, name)
-    # No file under it (git keeps no empty directory, but a checkout can).
-    assert sorted((REPO / "deploy").glob("keycloak/**/*")) == []
+    # No file under it (git keeps no empty directory, but a checkout can; and
+    # the bytecode the old test of `ci_mcp_flow.py` left there is not shipped).
+    left = (REPO / "deploy").glob("keycloak/**/*")
+    assert sorted(p for p in left if "__pycache__" not in p.parts) == []
     assert {name for _p, name, _r in routers()} == {"api", "minio", "web"}
 
 
@@ -7763,9 +7969,17 @@ JWT_VERIFIERS = frozenset({"decode", "decode_complete", "PyJWKClient", "PyJWT", 
 
 def _decodes(source: str) -> list[int]:
     """Lines that verify a JWT or fetch keys for one: `jwt.decode(...)` and
-    its kin, a name imported from `jwt` and called (`from jwt import decode`),
-    and any use of PyJWT's JWKS client or of its classes."""
+    its kin, under any name the module is imported as (`import jwt as j`), a
+    name imported from `jwt` (`from jwt import decode`), and any use of
+    PyJWT's JWKS client or of its classes."""
     tree = ast.parse(source)
+    modules = {"jwt"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "jwt" and alias.asname
+    }
     imported = {
         alias.asname or alias.name
         for node in ast.walk(tree)
@@ -7779,7 +7993,7 @@ def _decodes(source: str) -> list[int]:
             base = node.value
             while isinstance(base, ast.Attribute):
                 base = base.value
-            if isinstance(base, ast.Name) and base.id == "jwt":
+            if isinstance(base, ast.Name) and base.id in modules:
                 found.add(node.lineno)
         elif isinstance(node, ast.Name) and node.id in imported:
             if not isinstance(node.ctx, ast.Store):
@@ -7794,6 +8008,8 @@ def test_the_decode_sweep_is_not_vacuous() -> None:
     assert _decodes("from jwt import PyJWKClient as C\n\nC(u).get_signing_key_from_jwt(t)\n") == [3]
     assert _decodes("import jwt\njwt.api_jwt.decode_complete(t, k)\n") == [2]
     assert _decodes("import jwt\njwt.PyJWKClient(u)\n") == [2]
+    assert _decodes("import jwt as _jwt\nx = 1\n_jwt.decode(t, k)\n") == [3]
+    assert _decodes("import jwt as _jwt\n_jwt.PyJWK(j).key\n") == []
     assert _decodes("import jwt\ntoken = jwt.encode(c, k)\n") == []
 
 
@@ -7872,7 +8088,7 @@ Run: `cd backend && PYTHONPATH=$PWD .venv/bin/python -m tests.export_console_glo
 Expected: sin diferencias (ninguna tarea cambia `GLOBAL_WRITES` ni `GLOBAL_READS`).
 
 Run: `grep -rIl -i keycloak --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.claude backend/app frontend/src deploy .github`
-Expected (en el ensayo de la ronda de correcciones, sobre un árbol con las Tasks 4–9: 46 archivos): `.github/workflows/ci.yml`; en `backend/app`, las frases en pasado de la columna «Historia» del Apéndice D y los comentarios que las Tasks 4 y 5 dejaron como historia (`api/deps.py`, `api/probes.py`, `api/v1/me.py`, `api/v1/platform.py`, `api/v1/ws.py`, `core/auth/__init__.py`, `core/auth/loopback.py`, `core/auth/oauth/access.py`, `core/auth/oauth/policy.py`, `core/config.py`, `core/identity/__init__.py`, `core/identity/own_profile.py`, `core/identity/policy.py`, `core/mail.py`, `modules/remote/tunnel.py`, `modules/user_admin/__init__.py`, `modules/user_admin/service.py`, `worker.py`); en `deploy/`, `README.md` y `GO-LIVE.md` (el paso de retirada y las líneas fechadas), `ci/mcp_flow.py` (`FORMER_KEYCLOAK_PATHS`) y `scripts/{backup,restore,restore-drill,deploy}.sh` (las líneas que conservan, restauran o quitan lo viejo, a propósito); en `frontend/src`, `lib/oidcLeftovers.ts` (P4-16, se queda), los comentarios en pasado de `main.tsx`, `lib/ws.ts`, `modules/remote/tunnel.ts`, `shell/AccountMenu.tsx` e `i18n/test-utils.tsx`, y archivos de prueba (`App.auth`, `lib/noVendorNames`, `lib/oidcLeftovers`, `lib/session`, `lib/session.navigation`, `lib/ws`, `modules/audit/auditVocabulary.coverage`, `modules/profile/ProfilePage`, `modules/profile/profile.es`, `modules/settings/__tests__/email`, `modules/settings/__tests__/users`, `modules/setup/__tests__/setup`, `shell/AppShell`, `shell/authSurface`). Ninguno fuera de esa lista (revisión 1, M14).
+Expected (en el ensayo de la segunda ronda de correcciones, sobre un árbol con las oleadas 1 y 2 de los guiones corregidos y las Tasks 6–9: 48 archivos): `.github/workflows/ci.yml`; en `backend/app`, las frases en pasado de la columna «Historia» del Apéndice D y los comentarios que las Tasks 4 y 5 dejaron como historia (`api/deps.py`, `api/probes.py`, `api/v1/me.py`, `api/v1/orgs.py` y `core/identity/email_domain.py` (fechados por la Task 4), `api/v1/platform.py`, `api/v1/ws.py`, `core/auth/__init__.py`, `core/auth/loopback.py`, `core/auth/oauth/access.py`, `core/auth/oauth/policy.py`, `core/config.py`, `core/identity/__init__.py`, `core/identity/own_profile.py`, `core/identity/policy.py`, `core/mail.py`, `modules/remote/tunnel.py`, `modules/user_admin/__init__.py`, `modules/user_admin/service.py`, `worker.py`); en `deploy/`, `README.md` y `GO-LIVE.md` (el paso de retirada y las líneas fechadas), `ci/mcp_flow.py` (`FORMER_KEYCLOAK_PATHS`) y `scripts/{backup,restore,restore-drill,deploy}.sh` (las líneas que conservan, restauran o quitan lo viejo, a propósito); en `frontend/src`, `lib/oidcLeftovers.ts` (P4-16, se queda), los comentarios en pasado de `main.tsx`, `lib/ws.ts`, `modules/remote/tunnel.ts`, `shell/AccountMenu.tsx` e `i18n/test-utils.tsx`, y archivos de prueba (`App.auth`, `lib/noVendorNames`, `lib/oidcLeftovers`, `lib/session`, `lib/session.navigation`, `lib/ws`, `modules/audit/auditVocabulary.coverage`, `modules/profile/ProfilePage`, `modules/profile/profile.es`, `modules/settings/__tests__/email`, `modules/settings/__tests__/users`, `modules/setup/__tests__/setup`, `shell/AppShell`, `shell/authSurface`). Ninguno fuera de esa lista (revisión 1, M14; re-revisión, m5).
 
 - [ ] **Step 5: Commit**
 
@@ -7888,7 +8104,7 @@ El informe de la fase al coordinador (`CLAUDE.md`, «Reporting to the operator»
 1. **El camino hasta `main`.** La rama de la fase 4 se fusiona después de las de las fases 1–3 (0248 sigue a 0247), y todas llegan a `main` cuando el proyecto entero termina: el operador despliega siempre desde `main` (2026-09-11) y decidió el 2026-10-31 que nada se despliega hasta que terminen los cuatro proyectos. Esta fase no se despliega sola.
 2. **Solo el delta: lo que esta fase añade a la secuencia de despliegue del proyecto 4** (decisión del operador R1, 2026-11-15; §«Lo que el despliegue tiene que saber», puntos 1–9). La secuencia completa no va en este informe:
    - `migrate` aplica **0248** en el siguiente `up -d` (borra `keycloak_event_ingest`); volver atrás es restaurar la copia previa a la actualización, la única que guarda la base `keycloak`;
-   - **en un host existente, `git pull --ff-only` antes de `./scripts/deploy.sh`** (punto 8); si el `deploy.sh` viejo ya se paró a medias, se vuelve a correr el nuevo, que termina la actualización;
+   - **en un host existente, `git pull --ff-only` antes de `./scripts/deploy.sh`** (punto 8); si el `deploy.sh` viejo ya se paró a medias, se vuelve a correr el nuevo, que termina la actualización y nombra la copia de la vuelta atrás (la de antes de 0248, no la suya);
    - el `deploy.sh` nuevo quita por su nombre los contenedores `keycloak` y `keycloak-init` cuando la capa de aplicación ya está arriba (a mano, el paso 6b del runbook), y nada más del proyecto;
    - las imágenes `itsuite/backend` y `itsuite/web` cambian; `quay.io/keycloak/keycloak:26.2` deja de usarse;
    - **ninguna clave `.env` nueva ni ninguna ruta nueva de OpenBao**; 17 claves quedan sin lector (punto 6), cuatro de ellas las necesita la vuelta atrás, y `deploy.sh` las nombra y dice que no se borren todavía;
@@ -7918,12 +8134,14 @@ La secuencia completa, copiable y sin marcadores, la da el informe del proyecto 
 - **Task 2**, sobre un árbol nuevo: 1.122 pruebas de vitest en los directorios del Step 7 (la única roja, `api.session.test.ts`, lee `backend/`, que ese árbol no tenía); `tsc` sin salida. El Step 3 da `TypeError: signOutEverywhere is not a function`.
 - **Task 4**, sobre la oleada 1: el Step 2 rojo (5 FAIL, 19 PASS); el guion, `24` / `156` / `0` / `ok`; el `grep` del Step 4, la lista que da; el Step 5, 412; el barrido, 83 archivos, 1.325 pasan y 1 se salta; `mypy` limpio en 556 archivos; `ruff` limpio.
 - **Task 5**, sola sobre la oleada 1 (ya no depende de la 4): el Step 6, 691; `mypy` limpio en 551 archivos; `ruff` limpio; vitest de `src/modules/audit`, 113. **La 4 sobre la 5**: `mypy` y `ruff` limpios, y el Step 6 de la 5 otra vez, 693.
-- **Task 6**, sobre las oleadas 1 y 2, en el orden nuevo: el Step 2 rojo (25 FAIL, 48 PASS); el Step 3 (`ok`, `lines still naming keycloak: []`, los 13 servicios, `0`, ningún `SYNTAX`); `shellcheck` 0.10.0 sin avisos nuevos en los siete guiones [S1]; el Step 4, 194; `ruff` limpio.
-- **Task 7**, sola y sobre la 6: el Step 2 (error al importar), el Step 3 (16 PASS, 3 FAIL), el Step 4 (la lista de pasos, dos `bash -n: 0`, `ok`), el Step 5 (19); con la 6, 200; y el guion en vivo contra uvicorn con TLS (Step 6): 33 líneas `ok` y salida 0 en las dos fases [L1].
-- **Task 8**: el guion (`ok`) y su comentario nuevo de `PreviewPage.tsx`; las 81 pruebas y `tsc` son del ensayo al escribir el plan (el cambio nuevo es un comentario).
-- **Task 9**: los cambios del runbook, de `GO-LIVE.md` y de `docs/07` se aplicaron con un simulador que lee cada bloque de este plan por su primera línea y comprueba que cada ancla aparece una vez (sin atender a los saltos de línea donde el plan lo dice), sobre un árbol con las Tasks 1, 3, 6 y 7: todas las anclas, una vez. La guarda, roja antes (6 FAIL, 3 PASS) y verde después, con las demás pruebas de documentos del Step 6 (90); `grep -n "risk [0-9]"` no nombra ningún número viejo.
+- **Tasks 6, 7, 8, 9 y 11**, en la segunda ronda de correcciones, sobre un árbol con las oleadas 1 y 2 hechas con los guiones corregidos (las Tasks 1 y 3, después la 5 y después la 4: `grep -c oauth_used_refresh_tokens` da 3 y `security.py` no está) y la Task 8 encima, no sobre el árbol de antes de la primera ronda:
+  - **Task 6**, en el orden nuevo: el Step 2 rojo (28 FAIL, 48 PASS); el Step 3 (`ok`, `lines still naming keycloak: []`, los 13 servicios, `0`, ningún `SYNTAX`, `--help` en `2,47p` y `2,28p`); `shellcheck` 0.10.0 sin avisos nuevos en los siete guiones [S1]; el Step 4, 197; `ruff` limpio.
+  - **Task 7**, sobre la 6: el Step 2 (error al importar), el Step 3 (16 PASS, 3 FAIL), el Step 4 (la lista de pasos, dos `bash -n: 0`, `ok`), el Step 5 (19); el comando del Step 4 de la 6 con la 7, 203; y el guion en vivo contra uvicorn con TLS (Step 6), en la primera ronda y otra vez en la re-revisión: 33 líneas `ok` y salida 0 en las dos fases [L1].
+  - **Task 8**: el guion (`ok`) y su comentario nuevo de `PreviewPage.tsx`; las 81 pruebas y `tsc` son del ensayo al escribir el plan (el cambio nuevo es un comentario).
+  - **Task 9**: los cambios del runbook, de `GO-LIVE.md` y de `docs/07` se aplicaron con un simulador que lee cada bloque de este plan por su primera línea y comprueba que cada ancla aparece una vez (sin atender a los saltos de línea donde el plan lo dice): todas las anclas, una vez. La guarda, roja antes (6 FAIL, 3 PASS) y verde después, con las demás pruebas de documentos del Step 6 (93); `grep -n "risk [0-9]"` no nombra ningún número viejo.
+- **Cada bloque «antes / después» del plan**, contra `dd062f8`: cada «antes» aparece una vez en su archivo, y los dos de `guards.py`, aplicados en orden, dejan la viñeta sin frases repetidas.
 - **Task 10**: solo texto; su guarda se escribió y se vio fallar sobre los documentos de hoy al escribir el plan; la línea nueva del modelo de datos lleva «phase 4» en sí misma, que es lo que la guarda pide.
-- **Task 11**: el falsificador 11 nuevo, 8 PASS en el árbol con todas las tareas; y la mutación que la revisión pedía: una ruta con la forma del validador viejo (una clave desconocida o inalcanzable es un 401) la señala la prueba nueva con `('GET', '/api/v1/me/still-trusts-the-realm', 401, 200)`, y la prueba de antes, sin la clave ofrecida, la dejaba pasar.
+- **Task 11**: el falsificador 11, 8 PASS en ese árbol con las Tasks 6–9 encima; y la mutación que la revisión pedía: una ruta con la forma del validador viejo (una clave desconocida o inalcanzable es un 401, con `import jwt as _jwt`) la señalan las dos pruebas que el Step 2 nombra, el recorrido con `('GET', '/api/v1/me/still-trusts-the-realm', 401, 200)` y el barrido de `jwt`, que desde la segunda ronda sigue los alias de `import jwt as …`; la prueba de antes, sin la clave ofrecida, la dejaba pasar. El `grep` del Step 4: 48 archivos, los de la lista.
 
 **Lo que la revisión pidió y aquí se hizo de otra manera, con su porqué.**
 - *Revisión 3, I4* pedía dos condiciones más antes de «Already deployed»: que la etiqueta de la `api` en marcha sea la de HEAD y que `docker compose ps -a` no tenga ningún servicio fuera de `docker compose config --services`. La decisión del coordinador C2 la acota a los dos contenedores de Keycloak, y con razón contra el código: la segunda condición haría completo cada despliegue de un host con un contenedor propio del operador en el proyecto (lo que C1 protege), y el caso que la revisión describe (el `deploy.sh` viejo parado en «Identity provider») siempre deja esos dos contenedores, porque el viejo nunca llega a quitarlos.
