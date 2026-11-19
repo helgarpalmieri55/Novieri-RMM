@@ -182,8 +182,6 @@ async def test_sweep_persists_snapshots_per_org_per_product_under_rls(
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
     )
     with override_settings(settings):

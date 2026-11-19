@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
-import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -20,7 +19,6 @@ from app.core.errors.asyncio_handler import install_asyncio_exception_handler
 from app.core.errors.store import DRAIN_INTERVAL_S, drain_once
 from app.core.health.heartbeat import HEARTBEAT_INTERVAL_S, write_heartbeat
 from app.core.i18n import tr, tr_marked
-from app.core.security import JwksCache
 from app.core.signing import get_signer
 from app.core.vault import get_vault
 from app.jobs.engine import JobEngine
@@ -156,11 +154,7 @@ async def _background_loops(app: FastAPI) -> AsyncIterator[None]:
                 logger.error("background task %s did not stop on shutdown", name)
 
 
-def create_app(
-    settings: Settings | None = None,
-    *,
-    jwks_http_client: httpx.AsyncClient | None = None,
-) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     from app.core.logging import configure_logging
 
     configure_logging()
@@ -204,7 +198,6 @@ def create_app(
         )
     app.state.app_engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     app.state.admin_engine = create_async_engine(settings.database_admin_url, pool_pre_ping=True)
-    app.state.jwks = JwksCache(settings.oidc_jwks_url, client=jwks_http_client)
     app.state.ca = get_ca(settings)
     app.state.signer = get_signer(settings)
     app.state.vault = get_vault(settings)

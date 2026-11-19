@@ -409,8 +409,6 @@ _IP_LIMITED_ARGS = ("path", "body", "setting", "bucket")
 _REQUIRED: dict[str, Any] = {
     "database_url": "postgresql+asyncpg://app_user:app@localhost/x",
     "database_admin_url": "postgresql+asyncpg://admin:a@localhost/x",
-    "oidc_issuer": "https://kc.example/realms/it-suite",
-    "oidc_jwks_url": "https://kc.example/realms/it-suite/certs",
     "ca_dir": Path("/tmp/ca"),
 }
 

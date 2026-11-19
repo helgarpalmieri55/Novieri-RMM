@@ -131,7 +131,7 @@ async def test_a_bearer_request_is_not_a_cookie_request(api_env: Any) -> None:
     `RequireConsoleRequestHeader` and this is a 403 `csrf`: red."""
     org_id = await api_env.create_org("csrf-bearer")
     sub = await api_env.create_user(org_id, "read-only")
-    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    token = api_env.foreign.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
     response = await _patch(api_env, {"Authorization": f"Bearer {token}"})
     assert response.status_code == 401, response.text
     assert response.json()["code"] == "auth_required"

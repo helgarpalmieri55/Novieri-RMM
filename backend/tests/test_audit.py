@@ -237,8 +237,6 @@ def test_load_audit_hmac_key_prod_requires_key(tmp_path: Path) -> None:
     base = dict(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=str(tmp_path),
     )
     with pytest.raises(MissingAuditKeyError):

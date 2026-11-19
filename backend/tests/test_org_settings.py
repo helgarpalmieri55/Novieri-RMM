@@ -547,3 +547,22 @@ async def test_a_patch_for_a_deleted_org_is_404_not_a_crash(api_env: Any) -> Non
     headers = {"Cookie": cookie_header("not-a-session"), **console_headers()}
     response = await api_env.client.get("/api/v1/orgs/current", headers=headers)
     assert response.status_code == 401
+
+
+def test_every_name_kept_out_of_org_settings_is_a_real_setting() -> None:
+    """A name in `NEVER_ORG_SETTINGS` that no `Settings` field carries guards
+    nothing. Own authentication phase 4 removed three (`oidc_issuer`,
+    `oidc_jwks_url`, `oidc_audience`) with Keycloak's settings, and named the
+    sign-in's own anchors in their place: the console's address (the OAuth
+    issuer and the CSRF origin), the sign-in keys, and the organization the
+    deployment signs people in to (plan 2026-11-15, P4-08)."""
+    from app.core.config import Settings
+
+    fields = set(Settings.model_fields)
+    assert NEVER_ORG_SETTINGS <= fields, sorted(NEVER_ORG_SETTINGS - fields)
+    assert {
+        "public_console_url",
+        "auth_keys_backend",
+        "auth_keys_dir",
+        "default_org_slug",
+    } <= NEVER_ORG_SETTINGS

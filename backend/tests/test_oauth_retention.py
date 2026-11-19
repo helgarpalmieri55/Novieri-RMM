@@ -54,7 +54,14 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from app.models.oauth import OAuthClient, OAuthCode, OAuthRefreshFamily, OAuthRefreshToken
-from tests.oauth_support import RESOURCE, oauth_org, pkce_pair, seed_client, seed_code
+from tests.oauth_support import (
+    RESOURCE,
+    oauth_org,
+    pkce_pair,
+    seed_client,
+    seed_code,
+    token_request,
+)
 from tests.race_helpers import NO_WAITING, backend_pid, normalised, until_blocked_by
 from tests.session_support import user_id_of
 
@@ -62,7 +69,13 @@ NOW = datetime.now(UTC)
 #: Lapsed, unrevoked, two days ago: an ended grant the sweep takes.
 LAPSED = {"expires_at": NOW - timedelta(days=2)}
 #: The OAuth counts of `auth.retention_applied`, in the order they run.
-OAUTH_KEYS = ("oauth_codes", "oauth_refresh_tokens", "oauth_grants", "oauth_apps")
+OAUTH_KEYS = (
+    "oauth_codes",
+    "oauth_refresh_tokens",
+    "oauth_used_refresh_tokens",
+    "oauth_grants",
+    "oauth_apps",
+)
 #: A code issued then is spent: the codes step takes it.
 AN_HOUR_AGO = NOW - timedelta(hours=1)
 #: Phase 2's four counts, none of which this file's worlds feed.
@@ -173,6 +186,7 @@ async def test_the_sweep_removes_what_can_no_longer_serve_anyone(api_env) -> Non
     assert {key: event.meta[key] for key in OAUTH_KEYS} == {
         "oauth_codes": 1,
         "oauth_refresh_tokens": 2,
+        "oauth_used_refresh_tokens": 0,
         "oauth_grants": 2,
         "oauth_apps": 1,
     }
@@ -206,19 +220,21 @@ async def test_every_oauth_step_names_its_organization(api_env, bypassrls_sessio
 
     for model, ids in before.items():
         assert await _ids(api_env, model, theirs["org_id"]) == ids, model
-    assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [1, 2, 2]
+    assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [1, 2, 0, 2]
     assert mine["idle"] not in await _ids(api_env, OAuthClient, mine["org_id"])
 
 
 def test_the_oauth_steps_close_the_registries() -> None:
-    """Codes, the ended grants' refresh tokens and the grants close `STEPS`,
-    leaves first, in the sweep's transaction; the idle apps are
+    """Codes, the ended grants' refresh tokens, the refresh tokens live
+    grants rotated past (operator decision E2) and the ended grants close
+    `STEPS`, leaves first, in the sweep's transaction; the idle apps are
     `APART_STEPS`' one step, outside it (coordinator's notes for Task 13: the
     purge's shape)."""
-    assert [name for name, _ in retention.STEPS][-3:] == list(OAUTH_KEYS[:-1])
+    assert [name for name, _ in retention.STEPS][-4:] == list(OAUTH_KEYS[:-1])
     assert [name for name, _ in retention.APART_STEPS] == ["oauth_apps"]
     assert retention.OAUTH_CODE_RETENTION == timedelta(minutes=10)
     assert retention.OAUTH_GRANT_RETENTION == timedelta(days=1)
+    assert retention.OAUTH_USED_TOKEN_RETENTION == timedelta(days=30)
 
 
 # --------------------------------------------------------------------------- #
@@ -381,7 +397,7 @@ async def _exchange_meets_the_sweep(
         )
         async with _sweeping(env, org_id) as sweeping:
             swept = await retention.sweep(sweeping, org_id, now=NOW)
-        assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [0, 0, 0]
+        assert [swept.counts[key] for key in OAUTH_KEYS[:-1]] == [0, 0, 0, 0]
         await exchange.execute(text(NO_WAITING))
         assert await grants.revoke_family(exchange, family_id, "code_reused", NOW)
 
@@ -552,6 +568,7 @@ async def test_a_day_when_only_refresh_tokens_went_is_audited(api_env) -> None:
     assert {key: row[key] for key in OAUTH_KEYS} == {
         "oauth_codes": 0,
         "oauth_refresh_tokens": 1,
+        "oauth_used_refresh_tokens": 0,
         "oauth_grants": 0,
         "oauth_apps": 0,
     }
@@ -636,3 +653,213 @@ async def test_when_the_apps_row_fails_too_the_sweeps_own_error_propagates(
     )
     assert (record.org_id, record.apps, record.error) == (org_id, 1, "ConnectionError")
     assert "unreachable" not in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# A live grant's used refresh tokens (operator decision E2, 2026-11-15; phase
+# 4 plan, Task 3)
+# --------------------------------------------------------------------------- #
+
+#: Past and short of `OAUTH_USED_TOKEN_RETENTION` (30 days).
+LONG_AGO = NOW - timedelta(days=31)
+NOT_YET = NOW - timedelta(days=29)
+
+
+async def _rotated(
+    env: Any, org_id: UUID, user_id: UUID, family_id: UUID, *, used: datetime
+) -> tuple[UUID, str]:
+    """A refresh token of the grant `family_id` that a refresh rotated past at
+    `used`: its id and its value."""
+    secret = grants.new_secret()
+    async with oauth_session(org_id, env.app_engine) as session:
+        row = OAuthRefreshToken(
+            org_id=org_id,
+            user_id=user_id,
+            family_id=family_id,
+            token_hash=grants.hash_secret(secret),
+            created_at=used - timedelta(minutes=10),
+            used_at=used,
+        )
+        session.add(row)
+        await session.flush()
+        token_id: UUID = row.id
+    return token_id, secret
+
+
+async def _reused_audits(env: Any, org_id: UUID) -> list[Any]:
+    async with AsyncSession(env.admin_engine) as session:
+        return list(
+            (
+                await session.execute(
+                    select(AuditEvent.id).where(
+                        AuditEvent.org_id == org_id, AuditEvent.action == "mcp.refresh_reused"
+                    )
+                )
+            ).scalars()
+        )
+
+
+async def test_a_live_grants_used_tokens_go_thirty_days_after_their_use(api_env) -> None:
+    """The one rotated past 31 days ago goes; the one rotated past 29 days
+    ago, the grant's current token and the grant stay; the day's audit row
+    counts it under its own key."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used")
+    family_id, _current = await _open(api_env, org_id, user_id, app)
+    old, _ = await _rotated(api_env, org_id, user_id, family_id, used=LONG_AGO)
+    recent, _ = await _rotated(api_env, org_id, user_id, family_id, used=NOT_YET)
+
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+
+    left = await _ids(api_env, OAuthRefreshToken, org_id)
+    assert old not in left and recent in left and len(left) == 2
+    assert await _ids(api_env, OAuthRefreshFamily, org_id) == {family_id}
+    (row,) = await _retention_rows(api_env, org_id)
+    assert {key: row[key] for key in OAUTH_KEYS} == {
+        "oauth_codes": 0,
+        "oauth_refresh_tokens": 0,
+        "oauth_used_refresh_tokens": 1,
+        "oauth_grants": 0,
+        "oauth_apps": 0,
+    }
+
+
+async def test_the_thirty_days_are_counted_strictly(api_env) -> None:
+    """The cutoff is strict, by the sweep's clock (`used_at < now -
+    OAUTH_USED_TOKEN_RETENTION`): a token rotated past exactly 30 days ago
+    stays, one rotated past a second before that goes (review of Task 3, fix
+    round 1)."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-edge")
+    family_id, _current = await _open(api_env, org_id, user_id, app)
+    edge, _ = await _rotated(api_env, org_id, user_id, family_id, used=NOW - timedelta(days=30))
+    past, _ = await _rotated(
+        api_env, org_id, user_id, family_id, used=NOW - timedelta(days=30, seconds=1)
+    )
+
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+
+    left = await _ids(api_env, OAuthRefreshToken, org_id)
+    assert edge in left and past not in left
+
+
+async def test_an_ended_grants_used_tokens_are_not_this_steps(api_env) -> None:
+    """A grant revoked an hour ago keeps every token until a day after it
+    ended, when `oauth_refresh_tokens` takes them all: this step takes a LIVE
+    grant's only. Lapsed counts as ended too."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-ended")
+    revoked, _ = await _open(
+        api_env,
+        org_id,
+        user_id,
+        app,
+        revoked_at=NOW - timedelta(hours=1),
+        revoked_reason="revoked_in_settings",
+    )
+    lapsed, _ = await _open(api_env, org_id, user_id, app, expires_at=NOW - timedelta(hours=1))
+    of_revoked, _ = await _rotated(api_env, org_id, user_id, revoked, used=LONG_AGO)
+    of_lapsed, _ = await _rotated(api_env, org_id, user_id, lapsed, used=LONG_AGO)
+
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 0
+
+    assert {of_revoked, of_lapsed} <= await _ids(api_env, OAuthRefreshToken, org_id)
+
+
+async def test_reusing_a_token_the_sweep_took_is_a_plain_invalid_grant(api_env) -> None:
+    """The consequence the operator accepted with E2 (design §5.3, amended
+    2026-11-15): once the sweep took a used token, presenting it is a token
+    this server does not know -- `invalid_grant`, no `mcp.refresh_reused`, and
+    the grant, with the token the app holds now, lives on."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-gone")
+    family_id, current = await _open(api_env, org_id, user_id, app)
+    _, old = await _rotated(api_env, org_id, user_id, family_id, used=LONG_AGO)
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 1
+
+    reused = await token_request(
+        api_env, grant_type="refresh_token", refresh_token=old, client_id=app.client_id
+    )
+
+    assert reused.status_code == 400, reused.text
+    assert reused.json() == {
+        "error": "invalid_grant",
+        "error_description": "the refresh token is not valid",
+    }
+    async with AsyncSession(api_env.admin_engine) as session:
+        family = await session.get(OAuthRefreshFamily, family_id)
+    assert family is not None and family.revoked_at is None
+    assert await _reused_audits(api_env, org_id) == []
+    # The token the app holds now still refreshes (review of Task 3, fix round 1).
+    fresh = await token_request(
+        api_env, grant_type="refresh_token", refresh_token=current, client_id=app.client_id
+    )
+    assert fresh.status_code == 200, fresh.text
+
+
+async def test_a_used_token_the_sweep_kept_still_ends_its_grant(api_env) -> None:
+    """The control: rotated past 29 days ago, the sweep keeps it, and
+    presenting it again is still a reuse (design §5.3): the grant ends and
+    `mcp.refresh_reused` says so."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-kept")
+    family_id, _current = await _open(api_env, org_id, user_id, app)
+    _, recent = await _rotated(api_env, org_id, user_id, family_id, used=NOT_YET)
+    assert await retention.sweep_org(org_id, api_env.app_engine, now=NOW) == 0
+
+    reused = await token_request(
+        api_env, grant_type="refresh_token", refresh_token=recent, client_id=app.client_id
+    )
+
+    assert reused.status_code == 400, reused.text
+    async with AsyncSession(api_env.admin_engine) as session:
+        family = await session.get(OAuthRefreshFamily, family_id)
+    assert family is not None and family.revoked_reason == "refresh_reused"
+    assert len(await _reused_audits(api_env, org_id)) == 1
+
+
+async def test_the_used_tokens_step_waits_on_no_token_a_refresh_holds(api_env) -> None:
+    """A reuse being presented locks its token AND its grant
+    (`grants._refresh`, step 3: one SELECT ... FOR UPDATE of both, after the
+    person's row and the app). The step skips the held token, FOR UPDATE
+    SKIP LOCKED, and still takes another old token of the same grant: it
+    locks the token only (`of=token`) and reads the grant, so a grant a
+    refresh holds neither hides that token nor makes the step wait. Locking
+    the grant too would skip it (review of Task 3, fix round 1). The sweep's
+    transaction runs under a lock timeout and never waits."""
+    org_id, _sub, user_id, app = await _person(api_env, "oauth-ret-used-held")
+    family_id, _current = await _open(api_env, org_id, user_id, app)
+    held, held_secret = await _rotated(api_env, org_id, user_id, family_id, used=LONG_AGO)
+    other, _ = await _rotated(
+        api_env, org_id, user_id, family_id, used=LONG_AGO - timedelta(days=1)
+    )
+
+    async with oauth_session(org_id, api_env.app_engine) as refresh:
+        await lock_user_row(refresh, user_id)  # 1. the person
+        assert await clients.hold(refresh, org_id=org_id, app_id=app.id, now=NOW)  # 2. the app
+        await refresh.execute(  # 3. the token and its grant, as `grants._refresh` locks them
+            select(OAuthRefreshToken, OAuthRefreshFamily)
+            .join(OAuthRefreshFamily, OAuthRefreshFamily.id == OAuthRefreshToken.family_id)
+            .where(OAuthRefreshToken.token_hash == grants.hash_secret(held_secret))
+            .with_for_update()
+        )
+        async with _sweeping(api_env, org_id) as sweeping:
+            swept = await retention.sweep(sweeping, org_id, now=NOW)
+        assert swept.counts["oauth_used_refresh_tokens"] == 1
+
+    left = await _ids(api_env, OAuthRefreshToken, org_id)
+    assert held in left and other not in left
+
+
+async def test_the_used_tokens_step_names_its_organization(api_env, bypassrls_session) -> None:
+    """Phase 2's decision 3, for this step: on a session RLS does not filter,
+    its `org_id` predicate is what keeps it off another organization's
+    tokens."""
+    mine_org, _s, mine_user, mine_app = await _person(api_env, "oauth-ret-used-a")
+    theirs_org, _t, theirs_user, theirs_app = await _person(api_env, "oauth-ret-used-b")
+    mine_family, _ = await _open(api_env, mine_org, mine_user, mine_app)
+    theirs_family, _ = await _open(api_env, theirs_org, theirs_user, theirs_app)
+    mine, _ = await _rotated(api_env, mine_org, mine_user, mine_family, used=LONG_AGO)
+    theirs, _ = await _rotated(api_env, theirs_org, theirs_user, theirs_family, used=LONG_AGO)
+
+    swept = await retention.sweep(bypassrls_session, mine_org, now=NOW)
+    await bypassrls_session.commit()
+
+    assert swept.counts["oauth_used_refresh_tokens"] == 1
+    assert mine not in await _ids(api_env, OAuthRefreshToken, mine_org)
+    assert theirs in await _ids(api_env, OAuthRefreshToken, theirs_org)

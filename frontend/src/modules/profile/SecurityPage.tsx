@@ -15,6 +15,7 @@
 //   POST   /me/recovery-codes                                  ten new codes, shown once
 //   DELETE /me/trusted-devices/{id}                            forget a remembered device
 //   DELETE /me/sessions/{id}                                   sign out another session
+//   POST   /auth/logout-everywhere                             sign out everywhere, this session too
 //   POST   /auth/microsoft/start, DELETE /me/microsoft         link or unlink a Microsoft account (own-auth phase 2)
 //
 // A CLIENT'S CONTACT HAS THE SAME PAGE IN THE PORTAL (`PortalSecurityPage`,
@@ -40,6 +41,13 @@
 // A PASSWORD CHANGE KEEPS THIS SESSION (own-auth Task 7): the server ends every
 // OTHER session and forgets every remembered device, and this one stays
 // signed in. So a 204 re-reads the page and says so; it is not a sign-out.
+//
+// "SIGN OUT EVERYWHERE" IS (operator decision E1, 2026-11-15; own-auth phase 4,
+// Task 2). It ends every session of the person, this one included, forgets
+// every remembered device and, for a technician, ends the AI apps they
+// connected; so a 204 leaves for the sign-in page -- the console's, or the
+// portal's for a contact -- and so does a 401, this session having already
+// ended; anything else stays here and says why.
 //
 // NOTHING SECRET IS KEPT (invariant 3). The password boxes are emptied once the
 // server has answered, and the mutation that sent both passwords is reset
@@ -70,7 +78,9 @@ import { describeSubmitError, Form } from "../../components/form";
 import { useStepUp, type StepUpRun } from "../../components/stepUp";
 import { Badge, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { useApi } from "../../lib/ApiContext";
 import { describeWhen, formatDate } from "../../lib/datetime";
+import { PORTAL_SIGN_IN_PATH, SIGN_IN_PATH, signOutEverywhere } from "../../lib/session";
 import { useOrgZone } from "../../lib/zone";
 import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -135,17 +145,20 @@ function Failure({ message }: { message: string }) {
 /** `/profile/security`, in the console's frame. */
 export function SecurityPage() {
   const zone = useOrgZone();
-  return <SecurityBody zone={zone} back="/profile/security" />;
+  return <SecurityBody zone={zone} back="/profile/security" signIn={SIGN_IN_PATH} />;
 }
 
 /** `/portal/security`, in the portal's: the zone of `/portal/me` (decision 3). */
 export function PortalSecurityPage() {
   const me = usePortalMe();
-  return <SecurityBody zone={me.data?.timezone ?? null} back="/portal/security" />;
+  return <SecurityBody zone={me.data?.timezone ?? null} back="/portal/security" signIn={PORTAL_SIGN_IN_PATH} />;
 }
 
-/** `back`: this page's own address, where linking a Microsoft account comes back to. */
-function SecurityBody({ zone, back }: { zone: string | null; back: string }) {
+/**
+ * `back`: this page's own address, where linking a Microsoft account comes
+ * back to. `signIn`: where "Sign out everywhere" leaves for.
+ */
+function SecurityBody({ zone, back, signIn }: { zone: string | null; back: string; signIn: string }) {
   const t = useT();
   const security = useMySecurity();
   const stepUp = useStepUp();
@@ -190,7 +203,7 @@ function SecurityBody({ zone, back }: { zone: string | null; back: string }) {
           <TotpPanel security={data} run={stepUp.run} />
           {!contact || secondFactor ? <RecoveryPanel security={data} run={stepUp.run} /> : null}
           <DevicesPanel security={data} run={stepUp.run} zone={zone} />
-          <SessionsPanel security={data} run={stepUp.run} zone={zone} />
+          <SessionsPanel security={data} run={stepUp.run} zone={zone} signIn={signIn} />
         </>
       ) : null}
       {stepUp.dialog}
@@ -983,10 +996,27 @@ function DevicesPanel({ security, run, zone }: { security: MySecurity; run: Step
   );
 }
 
-function SessionsPanel({ security, run, zone }: { security: MySecurity; run: StepUpRun; zone: string | null }) {
+function SessionsPanel({
+  security,
+  run,
+  zone,
+  signIn,
+}: {
+  security: MySecurity;
+  run: StepUpRun;
+  zone: string | null;
+  signIn: string;
+}) {
   const t = useT();
+  const api = useApi();
   const end = useEndMySessionMutation(run);
   const [ending, setEnding] = useState<MySession | null>(null);
+  // Sign out everywhere: asked, then sent; `leaving` holds the button while the
+  // request is out, and a failure is shown here because the page stays.
+  const [askingEverywhere, setAskingEverywhere] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [everywhereFailed, setEverywhereFailed] = useState<unknown>(null);
+  const contact = security.kind === "contact";
   const browser = (session: MySession): string => session.user_agent || t("profile.securityPage.sessions.unknownBrowser");
   const where = (session: MySession): string => session.ip || browser(session);
 
@@ -1025,6 +1055,40 @@ function SessionsPanel({ security, run, zone }: { security: MySecurity; run: Ste
         ))}
       </ul>
       {end.error ? <Failure message={describeSubmitError(end.error)} /> : null}
+
+      <div style={ROW}>
+        <p className="note" style={ROW_TEXT}>
+          {t(contact ? "profile.securityPage.sessions.everywhereNoteContact" : "profile.securityPage.sessions.everywhereNote")}
+        </p>
+        <Btn
+          small
+          variant="danger"
+          icon="logout"
+          label={t("profile.securityPage.sessions.everywhere")}
+          disabled={leaving}
+          onClick={() => setAskingEverywhere(true)}
+        />
+      </div>
+      {everywhereFailed ? <Failure message={describeSubmitError(everywhereFailed)} /> : null}
+
+      <ConfirmDialog
+        open={askingEverywhere}
+        title={t("profile.securityPage.confirm.everywhere.title")}
+        body={t(contact ? "profile.securityPage.confirm.everywhere.bodyContact" : "profile.securityPage.confirm.everywhere.body")}
+        subject={t("profile.securityPage.confirm.everywhere.subject")}
+        confirmLabel={t("profile.securityPage.confirm.everywhere.action")}
+        destructive
+        onConfirm={() => {
+          setAskingEverywhere(false);
+          setEverywhereFailed(null);
+          setLeaving(true);
+          signOutEverywhere(api, signIn).catch((error: unknown) => {
+            setLeaving(false);
+            setEverywhereFailed(error);
+          });
+        }}
+        onCancel={() => setAskingEverywhere(false)}
+      />
 
       <ConfirmDialog
         open={ending !== null}

@@ -27,8 +27,7 @@ No business module is built until the kernel exists. Deliverables:
 - Repo scaffold (backend, frontend, deploy) per `CLAUDE.md` layout.
 - PostgreSQL with **multi-tenancy + Row-Level Security** and the core data model
   (`docs/04-data-model.md`).
-- **Keycloak** integration: SSO (OIDC/SAML, AD/Entra federation), MFA, and RBAC
-  with baseline roles.
+- **Identity**: SSO, MFA and RBAC with baseline roles -- delivered on Keycloak, which own authentication replaced in phases 1 to 3 and removed in phase 4 (2026-11-15).
 - **Agent enrollment**: internal CA (Vault PKI / step-ca), mTLS, certificate
   lifecycle.
 - **Agent gateway**: outbound-only mTLS WebSocket, connection→device→org binding.
@@ -106,10 +105,11 @@ Ordered by value, risk, and dependency. Rationale per phase noted.
 > **"Has shipped surface" is not "is finished", and the distinction is load
 > bearing.** The test asserts four structural signals. It says nothing about
 > whether a module's features are complete, its docs accurate, or its code
-> ever executed on the platform it targets — `backup.run`, for instance, does
-> not complete end to end (`scripts/verify_backup_run.py`), and no Windows or
-> macOS agent code has ever run. Read a green row as "this exists and is
-> wired in", never as "this works".
+> ever executed on the platform it targets — `backup.run`, for instance, did
+> not complete end to end when this note was measured (by
+> `scripts/verify_backup_run.py`, retired on 2026-11-15), and no Windows or
+> macOS agent code had run. Read a green row as "this exists and is wired
+> in", never as "this works".
 >
 > **Six shipped modules appear in no phase at all**: `email_intake`,
 > `notification`, `portal`, `reporting`, `site_server`, `sla`. Some may belong

@@ -88,8 +88,7 @@ export const DEFAULT_AFTER_SIGN_IN = "/";
  * (own-auth Task 11). Prefixes: `/sign-in/factor` is under `/sign-in`. The
  * emailed and server-made links (`/invite`, `/reset-password`, `/recover`)
  * carry their token in the fragment, never in the path. None begins with a
- * prefix the edge sends elsewhere (`/api`, `/enroll`, `/i/`, `/mcp`,
- * `/.well-known`, `/realms`, `/resources`, `/js`; plan decision D19).
+ * prefix of `EDGE_PREFIXES` below (plan decision D19).
  */
 export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite", "/recover", "/portal/sign-in"];
 
@@ -152,7 +151,20 @@ export function safeNext(raw: unknown): string {
   return raw;
 }
 
-/** Paths the edge serves itself, never the console's router. */
+/**
+ * Prefixes that are no page of the console, refused as a `?next=` target.
+ * The edge sends `/i`, `/api`, `/enroll` and `/mcp` to the api, and of
+ * `/.well-known` only the OAuth and OpenID documents (`deploy/docker-
+ * compose.yml`, the `api` router); the console has no page under any of
+ * them. `/realms`, `/resources` and `/js` were the old identity provider's
+ * before own authentication phase 4 retired it; since then the edge sends
+ * them to the console, which has no page under them (`modules/auth/
+ * __tests__/routes.test.ts`). They stay refused: the screen costs nothing,
+ * and on a host upgraded by hand that still runs the old provider's
+ * container, its Traefik labels can still route them to it
+ * (`deploy/README.md`, "Upgrading an existing deployment", step 6b, which
+ * removes it).
+ */
 const EDGE_PREFIXES: readonly string[] = ["/i", "/api", "/enroll", "/mcp", "/.well-known", "/realms", "/resources", "/js"];
 
 /**
@@ -237,6 +249,36 @@ export function enterConsole(next: unknown): void {
 export async function signOut(api: Pick<ApiClient, "logout">, to: string = SIGN_IN_PATH): Promise<void> {
   try {
     await api.logout();
+  } catch (error: unknown) {
+    if (!(error instanceof ApiError && error.status === 401)) throw error;
+  }
+  forgetStoredClient();
+  sessionSignedOut();
+  navigation.assign(to);
+}
+
+/**
+ * Sign out everywhere (operator decision E1, 2026-11-15): the server ends
+ * every session of this person -- this one too -- and forgets every browser
+ * they remembered; a technician's AI apps lose their access too. Then the
+ * whole document goes to the sign-in page, as `signOut` does: the session
+ * this tab was using is gone with the rest.
+ *
+ * A 401 COUNTS AS SIGNED OUT, as in `signOut` (coordinator's decision on
+ * P4-03, 2026-11-15): this tab's session had already ended, so there is
+ * nothing of it left here, and the page goes to the sign-in. The server
+ * ended nothing else on that request; a person who still has another
+ * session open signs in again and presses the button there. Every other
+ * failure rejects, and the page stays and says why.
+ *
+ * `to`: the console's sign-in page, or the portal's for a contact.
+ */
+export async function signOutEverywhere(
+  api: Pick<ApiClient, "logoutEverywhere">,
+  to: string = SIGN_IN_PATH,
+): Promise<void> {
+  try {
+    await api.logoutEverywhere();
   } catch (error: unknown) {
     if (!(error instanceof ApiError && error.status === 401)) throw error;
   }

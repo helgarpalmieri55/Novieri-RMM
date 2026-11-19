@@ -155,10 +155,13 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       phase 2 (items 1-2);
     - THE ACTS THAT END A PERSON'S AI GRANTS (own authentication phase 3,
       Task 10; operator decision D2, part c): a disable, a deletion, a
-      factor reset (`user_admin.service`), a password change (`account`,
-      or a mailed link in `flows.reset_password`), signing out everywhere
-      and the recovery link (`flows`). Each holds the row above first, then
-      forgets the devices, then `oauth.grants.revoke_all_for_user`: the
+      factor reset and, since operator decision E1 (2026-11-15), an
+      administrator's sign-out everywhere (`user_admin.service`), a password
+      change (`account`, or a mailed link in `flows.reset_password`), the
+      person's own sign-out everywhere and the recovery link (`flows`).
+      Each holds the row above first, then (all but an administrator's
+      sign-out everywhere, which leaves them as they are) forgets the
+      devices, then `oauth.grants.revoke_all_for_user`: the
       person's unspent codes end by their expiry, then their live families
       -- each table's rows LOCKED IN ID ORDER first (`grants.
       _lock_in_id_order`), then ended by id -- and only then the act's
@@ -216,12 +219,16 @@ async def lock_user_row(session: AsyncSession, user_id: UUID) -> User | None:
       long dead that a writer above may still lock -- a refresh or an
       exchange presenting an old secret, a revocation's UPDATE reaching a
       grant that lapsed unrevoked -- so they WAIT ON NO ROW. Each statement
-      locks what it deletes FOR UPDATE SKIP LOCKED, the ended condition
-      inside it, leaves first: `oauth_codes` expired more than ten minutes
-      ago; then (`oauth_refresh_tokens`) the refresh tokens of the grants
-      ended more than a day ago that no code still names; then those grants
-      (`oauth_grants`, `oauth_refresh_families`) that no token and no code
-      still names, so their cascade reaches no row they did not lock. A row
+      locks what it deletes FOR UPDATE SKIP LOCKED, the ended (for a used
+      token, the rotated) condition inside it, leaves first: `oauth_codes`
+      expired more than ten minutes ago; then (`oauth_refresh_tokens`) the
+      refresh tokens of the grants ended more than a day ago that no code
+      still names; then (`oauth_used_refresh_tokens`, operator decision E2,
+      2026-11-15) the refresh tokens a live grant rotated past more than 30
+      days ago, whose grant is read, never locked, and stays; then those
+      ended grants (`oauth_grants`, `oauth_refresh_families`) that no token
+      and no code still names, so their cascade reaches no row they did not
+      lock. A row
       another transaction holds is left to the next day's sweep. They hold no
       person's row and no app row, and the chain comes last: a writer above
       may wait on them and then find the row gone, never the other way round

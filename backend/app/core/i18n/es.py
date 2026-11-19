@@ -156,16 +156,6 @@ CATALOG: dict[str, str] = {
         "la ventana de este despliegue no se puede leer ({window}); créalo de nuevo con una "
         "válida"
     ),
-    "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
-    "token has no kid header": "el token no tiene encabezado kid",
-    "this token is not an access token": "este token no es un token de acceso",
-    "token missing required {oidc_org_claim} claim in multi-tenant mode": (
-        "al token le falta el claim obligatorio {oidc_org_claim} en el modo multiorganización"
-    ),
-    "token missing {oidc_org_claim} claim and no default org configured": (
-        "al token le falta el claim {oidc_org_claim} y no hay una organización predeterminada "
-        "configurada"
-    ),
     "object suffix must be a non-empty relative path": (
         "el sufijo del objeto debe ser una ruta relativa no vacía"
     ),
@@ -3753,7 +3743,6 @@ CATALOG: dict[str, str] = {
     "its settings are wrong or unreadable": "su configuración es incorrecta o ilegible",
     "Application database": "Base de datos de la aplicación",
     "Certificate authority": "Autoridad de certificación",
-    "Sign-in event forwarding": "Reenvío de eventos de inicio de sesión",
     # --- portal ---
     "not a portal user": "tu cuenta no tiene acceso al portal",
     "article {article_id} not found": "no se encontró el artículo {article_id}",
@@ -3958,7 +3947,6 @@ CATALOG: dict[str, str] = {
     "Database administration connection": "Administración de la base de datos",
     "Object storage": "Almacenamiento de objetos",
     "Secret vault": "Bóveda",
-    "Sign-in key cache": "Claves de inicio de sesión (JWKS)",
     "Job signing key": "Firma de tareas",
     "Nightly platform backup": "Copia de seguridad nocturna",
     "Off-host backup copy": "Copia de seguridad externa",
@@ -4847,17 +4835,8 @@ CATALOG: dict[str, str] = {
         "crear un enlace de invitación. Es un ajuste del servidor, no algo que esta pantalla pueda "
         "arreglar."
     ),
-    "the identity provider did not return this platform's service account, so a test message "
-    "has no sender to go out as": (
-        "el proveedor de identidad no devolvió la cuenta de servicio de esta plataforma, así "
-        "que un mensaje de prueba no tiene remitente con el que salir"
-    ),
     "no email settings are saved yet, so there is nothing to test": (
         "todavía no hay una configuración de correo guardada, así que no hay nada que probar"
-    ),
-    "no sending address is saved, so there is nowhere to send a test message": (
-        "no hay ninguna dirección de envío guardada, así que no hay adónde enviar un mensaje "
-        "de prueba"
     ),
     "{address} is not an email address": "{address} no es una dirección de correo electrónico",
     "a test can only go to the sending address, to your own address (a +tag is fine), or any "
@@ -4868,12 +4847,6 @@ CATALOG: dict[str, str] = {
     "a test can only go to the sending address, to your own address (a +tag is fine)": (
         "una prueba solo puede ir a la dirección de envío o a tu propia dirección (se admite "
         "una etiqueta +)"
-    ),
-    "{address} is the address of a sign-in account, and the identity provider will not send a "
-    "test to it. Add a tag before the @ to reach the same inbox, for example {example}": (
-        "{address} es la dirección de una cuenta de inicio de sesión, y el proveedor de "
-        "identidad no le enviará una prueba. Añade una etiqueta antes de la @ para llegar a la "
-        "misma bandeja de entrada, por ejemplo {example}"
     ),
     "user admin, you cannot ... your own account: disable": "deshabilitar",
     "user admin, you cannot ... your own account: delete": "eliminar",
@@ -5230,12 +5203,6 @@ CATALOG: dict[str, str] = {
     ),
     "the MCP channel marker is malformed": "la marca del canal MCP está mal formada",
     "this access token was refused": "se rechazó este token de acceso",
-    "this token was issued to the console and is not accepted over MCP": (
-        "este token se emitió para la consola y no se acepta por MCP"
-    ),
-    "MCP access must be granted by a person signing in": (
-        "el acceso por MCP debe concederlo una persona al iniciar sesión"
-    ),
     # MCP server (app/mcp/server.py)
     "MCP is turned off for this organization. An org-admin turns it on in "
     "Settings → AI connections.": (

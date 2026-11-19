@@ -176,12 +176,15 @@ fi
 # a realistic thing to do at 3am, by accident or because the first attempt
 # looked wrong.
 #
-# BOTH DATABASES GO THROUGH THIS, and they are checked BEFORE either is
-# restored. Guarding only `itsuite` would abort on `keycloak` AFTER `itsuite`
-# had already been replaced -- the half-done state this guard exists to
-# prevent. And note a real rollback ALWAYS has a populated target, so the
-# rollback runbook uses ITS_RESTORE_FORCE=1 by design; the default refusal is
-# for the mistyped restore, not for that.
+# EVERY DATABASE IN THE BACKUP GOES THROUGH THIS, and they are checked BEFORE
+# any is restored. A backup taken before own authentication phase 4, or the
+# one deploy.sh takes before an upgrade on a host that still keeps the old
+# identity provider's database, also carries `keycloak.dump`; guarding only
+# `itsuite` would abort on `keycloak` AFTER `itsuite` had already been
+# replaced -- the half-done state this guard exists to prevent. And note a
+# real rollback ALWAYS has a populated target, so the rollback runbook uses
+# ITS_RESTORE_FORCE=1 by design; the default refusal is for the mistyped
+# restore, not for that.
 prepare_db() {
     local db="$1" present
     # NOT `psql ... | grep -q exists`. Under `set -o pipefail`, `grep -q` can
@@ -232,6 +235,10 @@ echo "==> 3. pg_restore"
 run pg_restore -U "$ITS_PG_ADMIN_USER" -d itsuite < "$BACKUP_DIR/itsuite.dump"
 if [ -s "$BACKUP_DIR/keycloak.dump" ]; then
     run pg_restore -U "$ITS_PG_ADMIN_USER" -d keycloak < "$BACKUP_DIR/keycloak.dump"
+    echo "    keycloak.dump restored: the old identity provider's database. Releases"
+    echo "    from own authentication phase 4 on do not use it; the one before does --"
+    echo "    keep it if you are rolling back. It goes in deploy/README.md"
+    echo "    \"Retiring the old identity provider's data\", once no way back needs it."
 fi
 
 echo "==> 4. re-narrow app_user (grant-app-privileges.sql)"

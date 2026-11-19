@@ -181,12 +181,17 @@ async def test_a_console_token_is_refused_on_a_marked_request(mcp_env) -> None:
     """The token the console's own client obtained. Minted here: since own
     authentication Task 13 `mcp_env.headers` is a session cookie, which
     `tests/test_auth_falsifiers.py::test_the_mcp_channel_takes_no_cookie`
-    holds on the channel."""
+    holds on the channel.
+
+    The detail is asserted, not only the 401: the channel has another 401 --
+    a malformed marker (`deps._mcp_call`) -- and this one must be the
+    verifier's refusal of a token the platform did not issue."""
     _, slug, sub = await _org_admin(mcp_env)
-    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    token = mcp_env.foreign.token(sub, slug, email=f"{sub}@test.local")
     async with marked_client(mcp_env) as client:
         resp = await client.get("/api/v1/me", headers=_bearer(token))
     assert resp.status_code == 401
+    assert resp.json()["detail"] == "this access token was refused"
 
 
 async def test_a_marked_request_without_a_console_url_is_503(api_env, monkeypatch) -> None:

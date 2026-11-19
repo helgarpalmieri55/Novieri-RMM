@@ -1,5 +1,5 @@
 """Spanish server messages for user_admin, provisioning, ai_admin, ai_copilot,
-ai_portal, patch, inventory, reporting, security_logs and keycloak_events.
+ai_portal, patch, inventory, reporting and security_logs.
 
 One representative failing route per module, called twice: with
 `Accept-Language: es` the `detail` is the catalogue's Spanish, and with
@@ -666,7 +666,7 @@ async def test_reporting_a_timeout_says_so_in_the_request_language(
 
 
 # --------------------------------------------------------------------------- #
-# security_logs and keycloak_events: events ingested from outside are stored as
+# security_logs: events ingested from outside are stored as
 # recorded and never translated. Only the console's own refusal is.
 # --------------------------------------------------------------------------- #
 
@@ -694,30 +694,6 @@ async def test_security_logs_a_rejected_batch_is_recorded_in_english_in_any_lang
         with use_locale(lang), pytest.raises(SecurityIngestError) as caught:
             await ingest_events(None, SimpleNamespace(), [event])  # type: ignore[arg-type]
         assert str(caught.value) == "unknown event_type 'coffee_machine'"
-
-
-def test_keycloak_events_nothing_it_forwards_or_reports_is_translated(
-    tmp_path: Any,
-) -> None:
-    """keycloak_events has no route and no person-facing sentence. What it writes
-    to the audit chain is a machine action code, and its configuration errors go to
-    the health probe (a reason code) and the worker log, so both stay as they are in
-    a Spanish request."""
-    from types import SimpleNamespace
-
-    from app.modules.keycloak_events.client import KeycloakEventsConfig
-    from app.modules.keycloak_events.mapping import map_event
-
-    passkey = {"type": "UPDATE_CREDENTIAL", "details": {"credential_type": "webauthn"}}
-    missing = SimpleNamespace(
-        keycloak_admin_url="https://idp.test",
-        keycloak_events_secret_path=str(tmp_path / "absent"),
-    )
-    for lang in ("en", "es"):
-        with use_locale(lang):
-            assert map_event(passkey) == "auth.passkey_registered"
-            with pytest.raises(FileNotFoundError, match="does not exist"):
-                KeycloakEventsConfig.from_settings(missing)
 
 
 async def test_patch_a_closed_restarts_reason_is_said_in_spanish_and_stored_in_english(

@@ -113,15 +113,6 @@ async def probe_vault(state: Any) -> ProbeResult:
     return ProbeResult("vault", Status.DOWN, _ms(started), reason or ReasonCode.UNREACHABLE)
 
 
-async def probe_jwks(state: Any) -> ProbeResult:
-    """READS THE CACHE. NEVER FETCHES. See the test's docstring."""
-    started = time.monotonic()
-    keys = len(getattr(state.jwks, "_keys", {}))
-    if keys == 0:
-        return ProbeResult("jwks", Status.DEGRADED, _ms(started), ReasonCode.EMPTY_CACHE)
-    return ProbeResult("jwks", Status.OK, _ms(started), detail={"keys": keys})
-
-
 async def probe_signing(state: Any) -> ProbeResult:
     """Local key material only -- no network, no signing operation."""
     started = time.monotonic()
@@ -136,63 +127,3 @@ async def probe_ca(state: Any) -> ProbeResult:
         return ProbeResult("ca", Status.DOWN, _ms(started), ReasonCode.MISCONFIGURED)
     return ProbeResult("ca", Status.OK, _ms(started))
 
-
-async def probe_keycloak_events(state: Any) -> ProbeResult:
-    """Is Keycloak's credential-event forwarding configured, and running?
-
-    THE UNCONFIGURED CASE IS `ok`, WITH `configured: false`, AND THAT IS THE
-    WHOLE POINT OF THIS PROBE. An operator who has not set forwarding up has
-    not broken anything, so alarming would train them to ignore it. But an
-    audit feature that silently does nothing is worse than one that does not
-    exist -- somebody reads the chain and believes it is complete -- so the gap
-    has to be VISIBLE somewhere. Visible and alarming are different properties,
-    and this is the one that was needed.
-
-    READS A RECORD, PERFORMS NO NETWORK IO. The sweep runs in the Celery
-    worker; the API process answers this. A probe that called Keycloak here
-    would be measuring the API's path to Keycloak, which is not the path the
-    forwarding uses, and would report `ok` for a worker that has been dead for
-    a week (`app/core/health/heartbeat.py` makes the same argument).
-    """
-    from app.modules.keycloak_events.client import KeycloakEventsConfig
-    from app.modules.keycloak_events.sweep import SWEEP_INTERVAL_S, read_last_sweep
-
-    started = time.monotonic()
-    try:
-        config = KeycloakEventsConfig.from_settings(state.settings)
-    except (OSError, ValueError):
-        # Configured, and the secret file is missing or empty. NOT the same as
-        # unconfigured: this operator believes forwarding is running.
-        return ProbeResult(
-            "keycloak_events", Status.DOWN, _ms(started), ReasonCode.MISCONFIGURED
-        )
-    if config is None:
-        return ProbeResult(
-            "keycloak_events", Status.OK, _ms(started), detail={"configured": False}
-        )
-
-    record = await read_last_sweep(state.redis)
-    if record is None:
-        return ProbeResult(
-            "keycloak_events",
-            Status.DEGRADED,
-            _ms(started),
-            ReasonCode.STALE,
-            detail={"configured": True, "ever_run": False},
-        )
-    age_s = max(0.0, time.time() - float(record.get("ts", 0.0)))
-    # Three intervals, matching `heartbeat._DEGRADED_AFTER`: one missed beat is
-    # a slow worker, three is a stopped one.
-    status = Status.OK if age_s < SWEEP_INTERVAL_S * 3 else Status.DEGRADED
-    return ProbeResult(
-        "keycloak_events",
-        status,
-        _ms(started),
-        None if status is Status.OK else ReasonCode.STALE,
-        detail={
-            "configured": True,
-            "ever_run": True,
-            "age_s": int(age_s),
-            "written": int(record.get("written", 0)),
-        },
-    )

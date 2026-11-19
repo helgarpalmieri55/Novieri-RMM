@@ -99,8 +99,6 @@ def test_portal_engine_fails_loudly_when_its_url_is_unset() -> None:
         database_url="postgresql+asyncpg://u:p@db.internal:5432/x",
         database_admin_url="postgresql+asyncpg://u:p@db.internal:5432/x",
         database_portal_url="",
-        oidc_issuer="https://issuer.example.com",
-        oidc_jwks_url="https://issuer.example.com/jwks",
         ca_dir=Path("/tmp/its-portal-test-ca"),
     )
     previous, db._portal_engine = db._portal_engine, None

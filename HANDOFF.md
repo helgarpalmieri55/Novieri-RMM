@@ -123,9 +123,10 @@ eventually tell an agent "you already have that" about a chunk GC had deleted.
 credential on the endpoint**. See `docs/modules/backup/spec.md` §5.2 and the
 amendments at the head of §6.1.
 
-**The grant was then MEASURED**, by `scripts/verify_backup_run.py`, against
-real MinIO behind real Traefik on `:443` with a real compiled agent binary and
-a real signed job (Linux, manual, not in CI). Against a real object store:
+**The grant was then MEASURED**, by `scripts/verify_backup_run.py` (retired on
+2026-11-15; §5 says what holds it now), against real MinIO behind real Traefik
+on `:443` with a real compiled agent binary and a real signed job (Linux,
+manual, not in CI). Against a real object store:
 **403** for a key outside `{storage_ref}/`, **400** for a body over the signed
 `content-length-range`, **204** for a compliant POST under the same grant. That
 last one is not garnish — without it the two rejections are equally consistent
@@ -398,32 +399,62 @@ Be precise about this in any report. The distinction between *tested* and
 - **No live AI smoke test** — needs a real model provider. A scripted provider
   is not a model.
 - **Deploy unverified:** the Ubuntu Docker install commands, a publicly-trusted
-  certificate on the real hostname, the Keycloak console in a browser, AD/Entra
-  federation, and a release-to-release `git pull` upgrade.
-- **`backup.run` has still never completed end to end, on any platform** — but
-  the reason has changed twice and neither original reason survives. The
-  deadlock is fixed; the snapshot providers exist and are wired. What is
-  missing now is simply that **nobody has run it**: a Linux root not on LVM
+  certificate on the real hostname, Sign in with Microsoft against a live
+  tenant, and a release-to-release `git pull` upgrade.
+- ~~**`backup.run` has still never completed end to end, on any platform**~~
+  **SUPERSEDED 2026-11-15:** on Linux it now completes in CI on every push —
+  the `agent` job's MinIO step runs one through the `auto` snapshot provider
+  (a live read on the runner's ext4) and restores it byte for byte, against a
+  control plane the test fakes in Go (last bullet of this list). The rest of
+  this bullet, as written before that step existed: "— but the reason has
+  changed twice and neither original reason survives. The deadlock is fixed;
+  the snapshot providers exist and are wired. What is missing now is simply
+  that **nobody has run it**: a Linux root not on LVM
   still refuses, the LVM integration test skips everywhere this project has
   run (no root, no LVM tooling — a skip is not a pass), and the Windows/macOS
   providers have never executed at all. VSS in particular ships a header
   listing nine unconfirmed items, one of which (writer status never checked)
-  can return `succeeded` over torn data with no error.
-- **The prefix-scoped READ leg has never run against a real object store.**
-  Built, unit-tested, never measured — no Docker daemon here.
-- **What HAS executed, once, by hand:** the backup POST grant against real
-  MinIO behind real Traefik — 403 outside the prefix, 400 over the size cap,
-  204 compliant (`scripts/verify_backup_run.py`). **On Linux only, and no CI
-  job runs it.** CI's `agent` job (`.github/workflows/ci.yml`) DOES run
-  `agent/`'s unit, schema and idle-budget suites on every push, with a real Go
-  toolchain — that job predates this branch and CLAUDE.md has said so all
-  along. What has no CI is `scripts/verify_backup_run.py` itself: it is the
-  live measurement against real MinIO, and it is manual and Linux-only, so a
-  regression in the thing IT checks (the POST grant against a real object
-  store, not the agent code) returns silently until someone runs it by hand.
-  The `:443` certificate was locally issued and installed into the host trust
-  store, so `backupstore`'s system-trust-roots decision is exercised, not
-  proven against a publicly-issued chain.
+  can return `succeeded` over torn data with no error."
+- ~~**The prefix-scoped READ leg has never run against a real object store.**
+  Built, unit-tested, never measured — no Docker daemon here.~~
+  **SUPERSEDED 2026-11-15:** it runs against real MinIO in CI on every push —
+  `backup-e2e` reads a point back through the server's read exchange, and the
+  `agent` job's MinIO step restores through `backupstore` under presigned
+  GETs (last bullet of this list). Both read with grants that should succeed;
+  the refusals (a grant retargeted at another key, an expired grant) are
+  driven only by hand, by `scripts/verify_backup_read_grants.py`, which no CI
+  job runs.
+- **What HAS executed against a real object store** *(rewritten 2026-11-15,
+  when `scripts/verify_backup_run.py` was retired)*. Once, by hand, on Linux:
+  the backup POST grant against real MinIO behind real Traefik — 403 outside
+  the prefix, 400 over the size cap, 204 compliant — by that script, with the
+  compiled agent and the control plane in-process. The `:443` certificate was
+  locally issued and installed into the host trust store, so `backupstore`'s
+  system-trust-roots decision was exercised, not proven against a
+  publicly-issued chain. No CI job ever ran the script, and it could not have
+  completed since own authentication phase 1: it signed in with an identity
+  provider's bearer token, which `/api/v1` has not accepted since then.
+  **What runs on every push instead**, against real MinIO without Traefik in
+  front:
+  - CI's `backup-e2e` job, `backend/tests/test_backup_e2e_minio.py`: the
+    server dispatches a signed `backup.run`; a Python double of the agent
+    verifies it and writes through the POST grant, which MinIO accepts, and a
+    write beside the repository is refused 403. The point is replicated to a
+    second, object-locked MinIO. It is then read twice, each compared byte for
+    byte: from the primary MinIO through the read exchange's presigned GETs,
+    and from the off-site copy alone by `scripts/itms_recover.py`.
+  - The `agent` job's step "backup end to end against a real MinIO",
+    `TestE2EFormat2BackupRestoreAndVerifyAgainstMinIO`: the real Go capability
+    and `backupstore`, jobs signed with a test key and verified by the real
+    runner, a `backup.run` through the `auto` snapshot provider, a
+    deduplicating second run and a restore compared byte for byte, over TLS,
+    against a control plane the test fakes in Go.
+
+  **Each fakes the half the other runs.** No CI job puts the compiled agent on
+  this control plane's gateway, and none sends a POST over the signed
+  `content-length-range` (the policy document is unit-tested,
+  `backend/tests/test_storage_grants.py`). The first of those two gaps has its
+  own row in §6.
 
 ---
 
@@ -431,17 +462,18 @@ Be precise about this in any report. The distinction between *tested* and
 
 | Item | Note |
 |---|---|
-| ~~**Prefix-scoped READ — the restore side**~~ **BUILT, NEVER MEASURED** | Was "the one storage operation still unsolved; `backup.restore` refuses". The `backup_read_query`/`backup_read_grant` pair is built on both sides and `Get`/`GetRef` spend the grants. **The leg has never run against a real object store in any environment** (no Docker daemon here), so the enforcement half is unproven exactly as the POST grant's was before it was measured. `docs/modules/backup/spec.md` §6.1 item 1 |
-| **Snapshot providers exist and are wired (BK-01), `backup.run` has still never completed** | `main.go` now binds `Options.OpenSnapshot` to `backup.PlatformSnapshot`. Linux takes a real LVM snapshot for a root on an LVM logical volume — the dispatch/refusal logic is unit-tested via an injected command runner, and the one test that takes a real loopback LVM snapshot end to end (`snapshot_lvm_integration_test.go`) **skips** in every environment this project has (no root, no LVM tooling) — a skip is not a pass. A Linux root not on LVM still refuses. Windows (VSS, `snapshot_windows.go`) and macOS (APFS, `snapshot_darwin.go`) providers exist, are compile-checked for their `GOOS` (`go vet` + compile-only `go test -c`), and **have never executed** — VSS in particular ships a header listing nine specific unconfirmed items, one of which (writer status is never checked) can yield a `succeeded` result over torn data with no error at all. Do not read any of this as `backup.run` completing end to end on any platform — it has not been. See `docs/modules/backup/agent-engine.md` §4 and §11, and `docs/modules/backup/spec.md` §6.1 item 4. |
+| ~~**Prefix-scoped READ — the restore side**~~ ~~**BUILT, NEVER MEASURED**~~ **RUNS IN CI, SUPERSEDED 2026-11-15** | Since this row was written, CI reads against real MinIO on every push: `backup-e2e` through the server's read exchange, the `agent` job's MinIO step through `backupstore` (§5, last bullet). Only reads that should succeed; the refusals are driven by hand by `scripts/verify_backup_read_grants.py`, which no CI job runs. The row as written: Was "the one storage operation still unsolved; `backup.restore` refuses". The `backup_read_query`/`backup_read_grant` pair is built on both sides and `Get`/`GetRef` spend the grants. **The leg has never run against a real object store in any environment** (no Docker daemon here), so the enforcement half is unproven exactly as the POST grant's was before it was measured. `docs/modules/backup/spec.md` §6.1 item 1 |
+| **Snapshot providers exist and are wired (BK-01)**, ~~`backup.run` has still never completed~~ **SUPERSEDED 2026-11-15 for Linux** | On Linux, `backup.run` now completes in CI on every push through the `auto` provider's live read, against a control plane the test fakes in Go (§5, last bullet); what follows about LVM, VSS and APFS was written before that step and was not re-checked here. The row as written: `main.go` now binds `Options.OpenSnapshot` to `backup.PlatformSnapshot`. Linux takes a real LVM snapshot for a root on an LVM logical volume — the dispatch/refusal logic is unit-tested via an injected command runner, and the one test that takes a real loopback LVM snapshot end to end (`snapshot_lvm_integration_test.go`) **skips** in every environment this project has (no root, no LVM tooling) — a skip is not a pass. A Linux root not on LVM still refuses. Windows (VSS, `snapshot_windows.go`) and macOS (APFS, `snapshot_darwin.go`) providers exist, are compile-checked for their `GOOS` (`go vet` + compile-only `go test -c`), and **have never executed** — VSS in particular ships a header listing nine specific unconfirmed items, one of which (writer status is never checked) can yield a `succeeded` result over torn data with no error at all. Do not read any of this as `backup.run` completing end to end on any platform — it has not been. See `docs/modules/backup/agent-engine.md` §4 and §11, and `docs/modules/backup/spec.md` §6.1 item 4. |
 | ~~**`GOOS=darwin go vet ./...` fails module-wide, and it is a second, independent CI blocker**~~ **FIXED 2026-08-12** — the one falsifier that reaches into `readInto` moved to `budget_linux_test.go` behind `//go:build linux`, which is the guard its `runtime.GOOS` skip could never be (a skip runs after compilation; compilation was what failed). `go vet ./...` now passes on linux, windows AND darwin. Original diagnosis, kept because its second half still stands: | `internal/capabilities/health/budget_test.go:349`: `h.readInto` is undefined on darwin (`sampler_linux.go`'s `readInto` carries `//go:build linux`; `budget_test.go` has no build tag and calls it unconditionally). Pre-existing — predates this cycle, unrelated to backup — and reproducible today: `cd agent && GOOS=darwin go vet ./...`. **The identical failure also reproduces under `GOOS=windows go vet ./...`**, at the same line, for the same reason. Neither is caught by CI today, but not for the same reason going forward: `.github/workflows/ci.yml` has a `windows service code compiles (vet + test binary)` step (line ~328) that runs `GOOS=windows go vet ./...` — it is currently unreached because `staticcheck` fails first and blocks the job (see "The `agent` CI job stops before its tests", below) — so fixing staticcheck alone would surface THIS failure there next, as a second blocker, not a clean run. There is no equivalent macOS job at all: `ci.yml` only cross-compiles `darwin/amd64`/`darwin/arm64` with `go build` (which does not compile `_test.go` files) and ad-hoc-signs the `darwin/arm64` binary — neither step vets or test-compiles macOS code, so this failure would stay invisible on macOS even after staticcheck and the Windows step are both green. Flagging both halves here so the next person estimating "unblock CI" work counts two dormant breaks, not one, and so a Mac build attempt is not surprised by the pre-existing, unrelated `readInto` failure. **Amended 2026-08-13:** the "there is no equivalent macOS job at all" half is no longer true — `ci.yml`'s `agent` job now has a `macOS code compiles (vet, tests included)` step running `GOOS=darwin go vet ./...`, added by the cycle-4 review, so a darwin-tagged `_test.go` break goes red on push instead of staying invisible. |
 | ~~The dedup exchange deadlocks on the agent's read goroutine~~ **FIXED** | Per-capability `Dispatcher` moved execution off the read goroutine — §2. Verified on Linux, against a fake gateway. The tests run in the `agent` CI job on every push; the `-race` verification is local only, since CI omits `-race` by design |
 | Option 4 relay | Not started, and **no longer the restore mechanism** — prefix-scoped READ is. Survives as the fallback for endpoints that cannot route to object storage at all; `docs/modules/backup/spec.md` §6.1 |
-| No CI for the live scripts | The `agent` CI job is configured to run `agent/`'s unit, schema and budget suites on every push. `scripts/verify_backup_run.py` — the live MinIO measurement — is manual and Linux-only and has no CI job of its own |
+| **The compiled agent on this control plane's gateway** | Nothing proves that the compiled agent enrolls against this control plane and runs a signed job through its gateway. `scripts/demo_e2e_agent.py` was the only thing that tried, by hand; it could not sign in after own authentication phase 1 and was retired in phase 4 (2026-11-15). What CI holds instead, in halves: `docs/modules/agent/README.md`, "What proves the whole path works" |
+| ~~No CI for the live scripts~~ **RETIRED 2026-11-15** | `scripts/verify_backup_run.py`, the manual live MinIO measurement, is gone; CI's `backup-e2e` job and the `agent` job's MinIO step run against real MinIO on every push, and §5 says what neither covers |
 | ~~**The `agent` CI job stops before its tests**~~ **FIXED 2026-08-12** | `staticcheck` ran before `test` and failed on ten pre-existing findings, so Actions skipped test, idle budget, cross-compile and packaging (run 31333534459). All ten are cleared and `staticcheck ./...` reports zero; the `GOOS=windows go vet` step that would have surfaced next as a second blocker is also fixed. Verified locally with the workflow's own commands, including all six cross-compile targets (`ci.yml` iterates windows/amd64, windows/arm64, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 — "five" was miscounted here, in the spec and in the roadmap on the same day). ~~**Not yet observed green in Actions itself** — that is the one claim still owed evidence~~ **OBSERVED GREEN 2026-08-16**, run 31941209091 (PR #45): the `agent` job completed `success` with all sixteen steps green, including test, idle budget, cross-compile, the windows/macOS vet steps, shellcheck and the .deb build-install-purge. The debt is paid |
 | **Alerting on error groups** | The error monitor stores groups and events; nothing pages anyone. Phase 14's notification core exists, so this is wiring plus policy (what fires, to where, with what suppression) — but the policy is a decision, not an implementation detail. `docs/08-observability.md` §3 |
 | **Retag-vs-rebuild guard** | Nothing proves `docker compose up -d` REUSES a tagged image rather than rebuilding it. CI's `deploy` job checks tag interpolation only, and says so in its own comment. Needs a Docker daemon; this container has none |
 | **Suppressed Celery records lose detail** | Known, contained, no decision needed |
-| **Live-host upgrade, rollback, Keycloak realm restore** | The three items `docs/08-observability.md` §6 lists as unverified. Need a host, not code |
+| **Live-host upgrade, rollback, and restoring a backup from before own authentication phase 4** | The three items `docs/08-observability.md` §6 lists as unverified. Need a host, not code |
 | Real AWS S3 (not MinIO) | Path-style addressing is pinned; not tested against AWS. AWS still serves path-style for existing buckets |
 | Real Windows/macOS fixtures | Needs the operator's hardware |
 | `package_identifier` server-side validation | Agent's `validPackageID` is authoritative; duplicating the allowlist would create drift. Operator gets a refusal, not a 422 |

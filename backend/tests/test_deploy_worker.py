@@ -142,8 +142,6 @@ async def test_window_sweep_visits_all_orgs_and_sums_dispatch_deployment_counts(
         settings = Settings(
             database_url=pg_cluster.app_url,
             database_admin_url=pg_cluster.admin_url,
-            oidc_issuer="https://kc.example/realms/it-suite",
-            oidc_jwks_url="https://kc.example/realms/it-suite/certs",
             ca_dir=tmp_path / "ca",
             signing_key_path=tmp_path / "job-signing.key",
             redis_url=REDIS_URL,
@@ -178,8 +176,6 @@ async def test_closed_window_pending_deployment_dispatches_nothing(
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url=REDIS_URL,
@@ -241,8 +237,6 @@ def test_create_celery_registers_deploy_job_types(pg_cluster, tmp_path: Path) ->
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url=REDIS_URL,

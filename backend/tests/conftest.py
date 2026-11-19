@@ -231,7 +231,7 @@ async def portal_engine(pg_cluster: PgCluster) -> AsyncIterator[AsyncEngine]:
 
 
 # ---------------------------------------------------------------------------
-# API app environment: real DB + fake IdP + local CA/signer, in-process ASGI.
+# API app environment: real DB + local CA/signer + `ForeignIssuer`, in-process ASGI.
 # ---------------------------------------------------------------------------
 
 from uuid import UUID, uuid4  # noqa: E402
@@ -241,10 +241,10 @@ from sqlalchemy import select  # noqa: E402
 
 
 class ApiEnv:
-    def __init__(self, app, client, idp, settings, admin_engine, app_engine):
+    def __init__(self, app, client, foreign, settings, admin_engine, app_engine):
         self.app = app
         self.client = client
-        self.idp = idp
+        self.foreign = foreign
         self.settings = settings
         self.admin_engine = admin_engine
         self.app_engine = app_engine
@@ -323,19 +323,17 @@ async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
 
     from app.core.config import Settings
     from app.main import create_app
-    from tests.fake_idp import ISSUER, JWKS_URL, FakeIdp, jwks_client
+    from tests.foreign_tokens import ForeignIssuer
     from tests.session_support import CONSOLE
 
-    # `idp` and `jwks_client(idp)` stay until phase 4: the tests of
-    # `security.validate_token`, and those that prove a Keycloak token is
-    # refused everywhere, still mint one.
-    idp = FakeIdp()
+    # Keycloak-shaped tokens no part of the platform can verify: the tests
+    # that prove such a token is refused at every door mint them from here
+    # (`tests/foreign_tokens.py`, own authentication phase 4).
+    foreign = ForeignIssuer()
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
         database_portal_url=pg_cluster.portal_url,
-        oidc_issuer=ISSUER,
-        oidc_jwks_url=JWKS_URL,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
@@ -368,14 +366,14 @@ async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
         port = "" if parts.port in (None, default) else f":{parts.port}"
         request.headers["Origin"] = f"{parts.scheme.lower()}://{host}{port}"
 
-    app = create_app(settings, jwks_http_client=jwks_client(idp))
+    app = create_app(settings)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://api.test",
             event_hooks={"request": [_browser_origin]},
         ) as client:
-            yield ApiEnv(app, client, idp, settings, admin_engine, app_engine)
+            yield ApiEnv(app, client, foreign, settings, admin_engine, app_engine)
     finally:
         # DISPOSE WHAT `create_app` BUILT, not only what this fixture built.
         # `create_app` constructs its own `app.state.app_engine` and

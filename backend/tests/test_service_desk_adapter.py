@@ -56,8 +56,6 @@ def _settings(**overrides: object) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://app_user:app@localhost/x",
         database_admin_url="postgresql+asyncpg://admin:a@localhost/x",
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir="/tmp/ca",
         **overrides,
     )

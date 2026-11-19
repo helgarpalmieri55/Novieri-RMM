@@ -20,9 +20,10 @@ a silent no-op that reads like success. `tests/test_org_settings.py` pins both
 the absence of an id-taking route and the fact that a supplied id changes
 nothing.
 
-`slug` and `status` are READ-ONLY here. The slug is the tenant's identity in
-the OIDC `org` claim (`app.api.deps.auth_context` resolves the org BY SLUG,
-before any tenant context exists) -- renaming it through the console would log
+`slug` and `status` are READ-ONLY here. The slug is the tenant's identity at
+sign-in: `ITS_DEFAULT_ORG_SLUG` names the organization people sign in to and
+AI apps connect to, by its slug (until own authentication phase 4, also the
+`org` claim of a Keycloak token) -- renaming it through the console would log
 every operator in that org out of a platform they can no longer authenticate
 to, and would do it through a route whose own authorization depends on the
 value being changed. `status` is a platform-operator lifecycle field, not a
@@ -71,14 +72,17 @@ added to the allowlist:
   * TLS/CA material (`ITS_CA_DIR`, `ITS_CA_BACKEND`) -- invariant #2's
   * object-storage keys and endpoints (`ITS_S3_ACCESS_KEY`,
     `ITS_S3_SECRET_KEY`, `ITS_S3_ENDPOINT`, `ITS_S3_PUBLIC_ENDPOINT`)
-  * OIDC issuer/JWKS/audience -- the identity this route's own auth rests on
+  * the sign-in's own anchors (`ITS_PUBLIC_CONSOLE_URL`, which is the OAuth
+    issuer and the origin every console write is checked against;
+    `ITS_AUTH_KEYS_BACKEND`, `ITS_AUTH_KEYS_DIR`; `ITS_DEFAULT_ORG_SLUG`) --
+    the identity this route's own auth rests on
   * the gateway URLs and the RBAC/permission catalogue
 
 These live in the environment or in the vault (invariant #3) precisely so that
 compromising an operator account is not the same as compromising the platform.
 A console field that rewrote any of them would be a privilege-escalation path
 by construction: `orgs.manage` is an ORG-admin grant, and repointing the
-signing key or the OIDC issuer is a FLEET-level action. The org-settings screen
+signing key or the sign-in's issuer is a FLEET-level action. The org-settings screen
 is not the place where a tenant admin gets to redefine what the control plane
 trusts. `NEVER_ORG_SETTINGS` below names them in code, and a test asserts the
 allowlist stays disjoint from that list and free of secret-shaped names, so a
@@ -269,9 +273,10 @@ NEVER_ORG_SETTINGS: frozenset[str] = frozenset(
         "s3_secret_key",
         "s3_endpoint",
         "s3_public_endpoint",
-        "oidc_issuer",
-        "oidc_jwks_url",
-        "oidc_audience",
+        "public_console_url",
+        "auth_keys_backend",
+        "auth_keys_dir",
+        "default_org_slug",
         "gateway_url",
         "gateway_relay_url",
     }

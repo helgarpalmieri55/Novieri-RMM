@@ -1,6 +1,6 @@
 """Phase 0 exit test (in-repo scope): the full kernel loop in one flow.
 
-Org → admin (fake IdP) → enrollment token → CSR → enroll → mTLS connect →
+Org → admin (a console session) → enrollment token → CSR → enroll → mTLS connect →
 LIVE dispatch via the operator API (API → Redis → gateway subscriber → agent)
 → agent-side verification exactly per docs/05-agent-spec.md → result → API
 shows succeeded → audit chain verifies.
@@ -24,7 +24,10 @@ from app.jobs.canonical import canonical_bytes
 from app.jobs.engine import JobEngine
 from tests.test_gateway_mtls import _client_ssl, _enroll_device, _free_port
 
-REDIS_URL = "redis://localhost:6379/9"
+# The suite's Redis, `api_env.settings.redis_url` (`ITS_TEST_REDIS_URL` in
+# `conftest.py`), never a database of this file's own: the fixture empties it
+# (`flushdb()`), and `README.md` sends developers here (final review of own
+# authentication phase 4, C8). It is also the one the api publishes on.
 
 
 class FakeAgentRunner:
@@ -85,7 +88,7 @@ class FakeAgentRunner:
 
 @pytest.fixture()
 async def kernel(api_env, tmp_path: Path):
-    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    redis = aioredis.from_url(api_env.settings.redis_url, decode_responses=True)
     await redis.flushdb()
     ca = LocalCA(api_env.settings.ca_dir)
     key_pem, cert_pem = ca.issue_server_cert(["localhost"])
@@ -169,7 +172,7 @@ async def test_kernel_end_to_end(api_env, kernel, tmp_path: Path) -> None:
             runner.verify_and_run(envelope)
 
         # === Phase 1: an inventory sweep through the same signed-job loop ===
-        ui = aioredis.from_url(REDIS_URL, decode_responses=True)
+        ui = aioredis.from_url(api_env.settings.redis_url, decode_responses=True)
         pubsub = ui.pubsub()
         # Enrolled on the internal client's site (`site_id=org_id`): the
         # device's client, and so its channel, is the org's internal client.

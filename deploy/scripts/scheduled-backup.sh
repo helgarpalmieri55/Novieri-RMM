@@ -220,7 +220,7 @@ main() {
     dest="$BACKUP_ROOT/daily/$ts"
     log "backup -> $dest (objects: $OBJECTS)"
     ITS_BACKUP_OBJECTS="$OBJECTS" ITS_BACKUP_OBJECTS_DIR="$BACKUP_ROOT/objects" \
-        "$DEPLOY_DIR/scripts/backup.sh" "$dest"
+        ITS_BACKUP_OLD_IDENTITY_DB=0 "$DEPLOY_DIR/scripts/backup.sh" "$dest"
     ln -sfn "daily/$ts" "$BACKUP_ROOT/latest"
     printf '%s %s\n' "$(date -u +%FT%TZ)" "$dest" > "$STATE_DIR/last-success"
     BACKUP_DONE=1

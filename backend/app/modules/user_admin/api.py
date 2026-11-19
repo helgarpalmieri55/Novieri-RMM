@@ -637,7 +637,8 @@ async def end_sessions(
     request: Request,
     ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
-    """End every console session of this person now."""
+    """End every console session of this person now, and the access of the AI
+    apps they connected; their remembered browsers stay."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:

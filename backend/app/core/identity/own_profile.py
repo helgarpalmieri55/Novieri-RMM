@@ -103,9 +103,6 @@ class OwnProfile:
     #: every one, a client grant in its own (`user_permission_codes`).
     codes_by_client: dict[UUID, frozenset[str]]
     roles: list[str]
-    #: The row's identity at the sign-in provider: where `PATCH /me` mirrors a
-    #: changed language. Read from the row `user_id` selected, never a request.
-    external_subject: str
 
     def codes_in(self, scope: ClientScope) -> frozenset[str]:
         """The codes held in at least one of `clients` that `scope` allows:
@@ -188,7 +185,6 @@ def _profile(user: User, grants: OwnGrants, clients: tuple[OwnClient, ...]) -> O
             for client in clients
         },
         roles=grants.roles,
-        external_subject=user.external_subject,
     )
 
 

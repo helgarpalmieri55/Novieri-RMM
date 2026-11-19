@@ -629,10 +629,24 @@ async def test_disable_signs_the_person_out_and_forgets_their_devices(lifecycle_
 
 
 async def test_an_administrator_ends_a_persons_sessions(lifecycle_env: Any) -> None:
+    """The sessions end; the person's remembered browser stands (phase 4 plan,
+    Task 1, fix round 1). Operator decision E1 made this act end the AI grants
+    too, and only those: call `devices.revoke_all_for_user` in `end_sessions`
+    and the device is forgotten -- red twice below."""
     env = lifecycle_env
     org = await env.create_org("sessions")
     admin = await signed_in(env, org, "org-admin")
     member = await signed_in(env, org, "technician")
+    member.session = None
+    await login(env, member)
+    done = await env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=member.headers(),
+        json={"code": await fresh_code(env, member), "remember_device": True},
+    )
+    member.session, member.device = cookie(done, SESSION_COOKIE), cookie(done, DEVICE_COOKIE)
+    assert member.device
+    assert await _live_devices(env, member.user_id) == 1
 
     ended = await env.client.delete(
         f"/api/v1/users/{member.user_id}/sessions", headers=admin.headers()
@@ -641,9 +655,16 @@ async def test_an_administrator_ends_a_persons_sessions(lifecycle_env: Any) -> N
     assert ended.status_code == 204
     assert (await env.client.get("/api/v1/me", headers=member.headers())).status_code == 401
     assert (await env.client.get("/api/v1/me", headers=admin.headers())).status_code == 200
+    assert await _live_devices(env, member.user_id) == 1
+    member.session = None
+    assert (await login(env, member)).json() == {"state": "signed_in"}
     events = await _audit(env, org, "auth.sessions_ended")
     assert [(e.actor_id, e.target_id, e.meta) for e in events] == [
-        (admin.user_id, str(member.user_id), {"by": "administrator", "scope": "everywhere"})
+        (
+            admin.user_id,
+            str(member.user_id),
+            {"by": "administrator", "scope": "everywhere", "ai_grants_revoked": 0},
+        )
     ]
 
 

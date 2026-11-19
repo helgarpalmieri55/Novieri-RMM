@@ -88,12 +88,14 @@ the purge's entry in `guards.lock_user_row`'s lock map). A transaction that hold
 takes them in id order and touches none of them.
 
 THE RETENTION SWEEP TAKES NEITHER ROW, AND WAITS ON NO GRANT ROW (Task 13;
-`retention.py`'s THE OAUTH STEPS). Its codes, refresh-token and grants steps
-run in one transaction of their own, under `ClientScope.all()`, and skip
-steps 1, 2, 3 and 5: they take no person's row, no advisory lock of theirs
-and no app row, and write no use. Each statement locks what it deletes FOR
-UPDATE SKIP LOCKED, leaves first -- codes, then the ended grants' refresh
-tokens, then the ended grants no token or code still names -- so it never
+`retention.py`'s THE OAUTH STEPS). Its codes, refresh-token, used-token and
+grants steps run in one transaction of their own, under `ClientScope.all()`,
+and skip steps 1, 2, 3 and 5: they take no person's row, no advisory lock of
+theirs and no app row, and write no use. Each statement locks what it
+deletes FOR UPDATE SKIP LOCKED, leaves first -- codes, then the ended grants'
+refresh tokens, then the refresh tokens live grants rotated past more than
+30 days ago (operator decision E2, 2026-11-15), then the ended grants no
+token or code still names -- so it never
 waits on a code, a token or a family a writer above holds, and no cascade of
 its own reaches one; it takes the chain last.
 A writer above may wait on the sweep for a row it deleted, and then find it

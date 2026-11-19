@@ -177,7 +177,6 @@ it is the part most products overstate.
 **Not yet verified, and labelled as such wherever it is claimed:**
 - A `git pull`-over-an-older-release upgrade on a live host.
 - A rollback on a live host.
-- The Keycloak realm restore beyond "the command runs".
 - That `docker compose up -d` *reuses* a tagged image rather than rebuilding
   it — the CI check proves tag interpolation only, and says so in its own
   comment.
@@ -196,7 +195,8 @@ cannot pass vacuously (`backend/tests/test_ui_ws.py`).
 ## 7. How it is deployed
 
 On-premises today: Docker Compose, everything in your rack — PostgreSQL,
-Redis, MinIO, Keycloak for identity, OpenBao for secrets, Traefik in front.
+Redis, MinIO, OpenBao for secrets and keys, Traefik in front; the platform
+signs people in itself.
 `deploy/GO-LIVE.md` is the checklist of what must be changed from defaults
 before anything real touches it; `deploy/README.md` is the runbook for first
 boot, upgrade and rollback.
@@ -238,20 +238,22 @@ fleet; they read output. It is why "0 breached" must never be able to mean
 ## 9. Brand commitments, and what is deliberately still open
 
 **`ITMS` IS A PLACEHOLDER. The product name has not been chosen.** Confirmed
-by the operator on 2026-08-21. It is currently the visible name in 46 places
-across 18 frontend source files, in three files of the sign-in theme, and in
-`<title>`. Nothing may harden an identity around it — no wordmark built from
-those four letters, no logo whose meaning depends on them, no marketing
-surface that treats it as settled. When the name is chosen it is a rename,
-and the count above is the size of that job.
+by the operator on 2026-08-21, when it was the visible name in 46 places
+across 18 frontend source files, in three files of the sign-in theme (which
+went with Keycloak in own authentication phase 4), and in `<title>`. Nothing
+may harden an identity around it — no wordmark built from those four letters,
+no logo whose meaning depends on them, no marketing surface that treats it as
+settled. When the name is chosen it is a rename, and the count above was the
+size of that job then.
 
 **No user-visible string may name the identity vendor.** Enforced, not
 requested: `frontend/src/lib/noVendorNames.test.ts` scans string literals and
 JSX text and fails the build. The rule is scoped to what a user can see —
-imports, type names and comments are exempt, because the platform does
-integrate with Keycloak and source that pretended otherwise would be lying
-about its own dependency. The reasoning generalises: a buyer should never
-need to learn that there is a second system behind the one they bought.
+imports, type names and comments are exempt, because the platform did
+integrate with Keycloak before own authentication phase 4 removed it, and
+source that pretended otherwise would have been lying about its own history.
+The reasoning generalises: a buyer should never need to learn that there is a
+second system behind the one they bought.
 
 **Voice, as practised in the product's own copy.** Say what happened and what
 follows from it. Name the thing that failed and what was and was not changed.

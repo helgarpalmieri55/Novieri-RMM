@@ -70,8 +70,8 @@ class User(TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(200), default="")
     status: Mapped[str] = mapped_column(String(20), default="active")
     last_login_at: Mapped[datetime | None] = mapped_column(default=None)
-    # Migration 0066. The three fields ITMS owns about a person, as against the
-    # ones Keycloak owns (spec §7.1: password, MFA, passkeys, email). All
+    # Migration 0066. The three fields a person's profile holds, as against
+    # the sign-in's own (password, second factors, passkeys, email). All
     # nullable with no default -- NULL is "not stated", which is not the same
     # fact as a cleared field, and there is no defensible non-null timezone for
     # somebody the platform has never heard from.
@@ -865,33 +865,6 @@ class InstallLink(Base):
     created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
-
-
-class KeycloakEventIngest(Base):
-    """One Keycloak event already forwarded into the audit chain.
-
-    A DEDUPE LEDGER, NOT EVIDENCE. Keycloak's event filters are day-granular,
-    so an hourly sweep re-reads the same day twenty-four times; the audit event
-    is written only when an insert here takes. A duplicate would not corrupt
-    the hash chain, it would pollute it -- an auditor counting passkey
-    registrations would count each one once per sweep.
-
-    `fingerprint` is unique GLOBALLY rather than per-org: one Keycloak event
-    must be forwarded once even though the realm is shared by every tenant, and
-    a per-org constraint would let it land twice if a user's org attribute
-    changed between sweeps.
-    """
-
-    __tablename__ = "keycloak_event_ingest"
-    __table_args__ = (
-        UniqueConstraint("fingerprint", name="uq_keycloak_event_fingerprint"),
-        Index("ix_keycloak_event_age", "ingested_at"),
-    )
-
-    id: Mapped[UUID] = uuid7_pk()
-    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
-    fingerprint: Mapped[str] = mapped_column(String(64))
-    ingested_at: Mapped[datetime] = mapped_column(server_default="now()")
 
 
 class DomainEvent(Base):

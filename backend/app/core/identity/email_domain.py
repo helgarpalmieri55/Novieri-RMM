@@ -34,9 +34,10 @@ def is_allowed_domain(email: str, base: str) -> bool:
 
     Refuses rather than parses anything with other than exactly one ``@``:
     quoted local parts (``"a@b"@example.com``) are legal RFC 5321 and carrying
-    a second parser for them buys nothing here. An absent ``email`` claim
-    arrives as ``""`` (``app/core/security.py``), which has no ``@`` and so
-    fails closed.
+    a second parser for them buys nothing here. An empty address -- once an
+    absent ``email`` claim of a Keycloak token (``app/core/security.py``,
+    removed in own authentication phase 4) -- has no ``@`` and so fails
+    closed.
 
     A trailing root-label dot is normalised away on BOTH sides before
     comparison: ``toeshee.com.`` and ``toeshee.com`` are the same DNS name.

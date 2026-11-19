@@ -94,12 +94,17 @@ async def test_the_log_names_the_actor_instead_of_only_its_uuid(api_env) -> None
 
 
 async def test_a_user_shaped_target_is_named_too(api_env) -> None:
-    """`target_type="user"` is written by eleven call sites — every
-    `user_admin` mutation, the Keycloak event sweep, `PATCH /me` and first-login
-    admission — and in every one `target_id` is `str(user.id)`. That is the one
-    target type in the schema that resolves to a person, so it is the one that
-    is resolved; the rest are hostnames, job ids and codes, which no generic
-    resolver could name without inventing a type-to-table map.
+    """`target_type="user"` is written by thirty call sites in `app/` (counted
+    2026-11-19) — every `user_admin` mutation, a client's contacts and their
+    access, `PATCH /me`, first-login admission, setup's first administrator,
+    and own authentication's events about a person (sign-in, account
+    changes, recovery, a factor disabled, Microsoft, AI-app grants) — and in
+    every one `target_id` is the person's `users.id` as a string. (The count
+    read eleven when this was written, the Keycloak event sweep among them;
+    own authentication phase 4 removed that sweep on 2026-11-15.) That is the
+    one target type in the schema that resolves to a person, so it is the one
+    that is resolved; the rest are hostnames, job ids and codes, which no
+    generic resolver could name without inventing a type-to-table map.
     """
     org_id = await api_env.create_org("auditname")
     _, actor_id = await _named_user(api_env, org_id, "Grace Hopper")

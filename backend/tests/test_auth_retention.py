@@ -281,6 +281,7 @@ async def test_a_sweep_that_deleted_something_is_audited_and_one_that_did_not_is
         "challenges": 1,
         "oauth_codes": 0,
         "oauth_refresh_tokens": 0,
+        "oauth_used_refresh_tokens": 0,
         "oauth_grants": 0,
         "oauth_apps": 0,
     }
@@ -337,8 +338,6 @@ def test_the_sweep_runs_daily(tmp_path: Path) -> None:
     settings = Settings(
         database_url="postgresql+asyncpg://x:x@l/x",
         database_admin_url="postgresql+asyncpg://x:x@l/x",
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
     )

@@ -1,6 +1,15 @@
 # Phase 0 — Platform Kernel Specification
 
 Status: **approved** (decisions confirmed by product owner, 2026-07-17)
+
+> **2026-11-15 (own authentication phase 4).** The passages on operator
+> authentication through Keycloak -- the scope list, the out-of-scope list,
+> the authentication section, the console's login and the compose services --
+> describe Phase 0 as it was built. The platform signs people in itself since
+> own authentication phase 1, and Keycloak, its realm import and
+> `deploy/keycloak/` were removed in own authentication phase 4
+> (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
+
 Sources: `docs/00-vision.md` … `docs/06-roadmap.md`. This spec turns the Phase 0
 scoping brief in `docs/06-roadmap.md` into an implementable design. Where this
 spec and the core docs overlap, the core docs are authoritative; this spec adds
@@ -20,8 +29,9 @@ in Phase 0.
 - Repo scaffold: `backend/`, `frontend/`, `deploy/`, `scripts/` per `CLAUDE.md`.
 - PostgreSQL 16 core data model (`docs/04-data-model.md`) with multi-tenancy
   enforced by Row-Level Security, via Alembic migrations.
-- Operator authentication through Keycloak (OIDC), RBAC with seeded baseline
-  roles, enforced server-side on every privileged endpoint.
+- Operator authentication through Keycloak (OIDC; Keycloak went in own
+  authentication phase 4), RBAC with seeded baseline roles, enforced
+  server-side on every privileged endpoint.
 - Agent enrollment: enrollment tokens, CSR signing by the internal CA, device +
   agent registration, certificate lifecycle metadata.
 - Agent gateway: outbound-only mTLS WebSocket service; client-cert →
@@ -81,7 +91,8 @@ in Phase 0.
   > drafted in site-server spec §4.4 and **has not been accepted**), and the
   > connection relay (opaque TCP forwarding only if ever, never TLS
   > termination).
-- SAML; AD/Entra federation is configured inside Keycloak, not in our code.
+- SAML; AD/Entra federation is configured inside Keycloak, not in our code
+  (Phase 0 as built: Keycloak went in own authentication phase 4).
 
 ## 2. Decisions finalized in this phase
 
@@ -176,14 +187,17 @@ Baseline roles and the Phase 0 permission set are seeded in a data migration.
 ## 6. Authentication & RBAC
 
 - Operators authenticate against **Keycloak** (OIDC authorization code + PKCE
-  in the SPA). The API is a resource server: it validates `Bearer` JWTs
-  against Keycloak's JWKS (cached, kid-rotation aware), checking issuer,
-  audience, expiry, signature.
+  in the SPA; removed in own authentication phase 4). The API is a resource
+  server: it validates `Bearer` JWTs against Keycloak's JWKS (cached,
+  kid-rotation aware), checking issuer, audience, expiry, signature.
 - On first authenticated request, the platform upserts the `users` projection
-  row from token claims (`external_subject` = Keycloak `sub`; org resolved
-  from a configured claim, single-org default on-prem).
+  row from token claims (`external_subject` = Keycloak `sub` in Phase 0;
+  Keycloak gone in own authentication phase 4, and the column an opaque key
+  since own authentication phase 1; org resolved from a configured claim,
+  single-org default on-prem).
 - MFA, AD/Entra federation, and session policies are Keycloak configuration
-  (documented in `deploy/keycloak/`), not application code.
+  (documented in `deploy/keycloak/`, which own authentication phase 4
+  removed), not application code.
 - **RBAC:** permission codes are `module.action` strings (Phase 0 set:
   `devices.read`, `devices.manage`, `jobs.read`, `jobs.dispatch`,
   `enrollment.manage`, `audit.read`, `credentials.read`, `credentials.manage`,
@@ -311,8 +325,8 @@ React 18 + TypeScript strict + Vite + Tailwind + shadcn/ui + TanStack
 Query/Table. `src/modules/` mirrors backend modules; Phase 0 ships `devices/`
 and `jobs/` feature folders plus `lib/` (API client, auth, ws).
 
-- **Login:** OIDC code + PKCE against Keycloak (`oidc-client-ts`); tokens in
-  memory, silent renew.
+- **Login:** OIDC code + PKCE against Keycloak (`oidc-client-ts`; Keycloak
+  went in own authentication phase 4); tokens in memory, silent renew.
 - **Devices:** table (hostname, OS, group, agent status, last seen) with
   live status via the UI WebSocket.
 - **Jobs:** dispatch a `hello` / `inventory.collect` job to a device; job list
@@ -324,10 +338,11 @@ and `jobs/` feature folders plus `lib/` (API client, auth, ws).
 
 `deploy/docker-compose.yml`: traefik (TLS, HTTP routing + TCP passthrough for
 the gateway), `api`, `gateway`, `web`, `postgres:16`, `redis`, `minio`,
-`keycloak` (with realm import in `deploy/keycloak/`), `openbao` (with an init
-script creating the transit `job-signing` key and the PKI mount in
-`deploy/openbao/`), `worker` (Celery). Dockerfiles for backend and frontend.
-Secrets/config via `.env` (never committed).
+`keycloak` (with realm import in `deploy/keycloak/`; both removed in own
+authentication phase 4), `openbao` (with an init script creating the transit
+`job-signing` key and the PKI mount in `deploy/openbao/`), `worker` (Celery).
+Dockerfiles for backend and frontend. Secrets/config via `.env` (never
+committed).
 
 ## 14. Testing & verification
 
@@ -362,5 +377,9 @@ full stack is exercised at deployment).
 end-to-end demo (`scripts/demo_e2e.py`) that — against a locally running API +
 gateway with the dev CA and local signer — enrolls a fake agent, dispatches a
 signed `hello` job from the API, and shows the verified result and intact
-audit chain. The roadmap's three-OS exit criterion additionally requires the
-skeleton agent under `agent/` (next cycle, still unbuilt).
+audit chain. *(2026-11-15: that script was retired in own authentication
+phase 4; it signed in with an identity provider's bearer token, which
+`/api/v1` has not accepted since phase 1. The same loop is
+`backend/tests/test_e2e_kernel.py::test_kernel_end_to_end`, which the CI
+`backend` job runs.)* The roadmap's three-OS exit criterion additionally
+requires the skeleton agent under `agent/` (next cycle, still unbuilt).

@@ -71,7 +71,9 @@ This is independent of the Spanish design written the same day
 > minutes; the access token is the platform's ES256 `at+jwt`, for exactly the
 > MCP resource, ten minutes, naming its grant, which `/mcp` reads on every
 > call. §3.1 steps 2-4, §3.2 and §3.3 below describe the Keycloak arrangement
-> this replaced, kept as the record until phase 4 removes Keycloak. In §3.4,
+> this replaced, kept as the record until phase 4 removes Keycloak. (It did,
+> on 2026-11-15: plan `docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md`.)
+> In §3.4,
 > revoking now ends the app's grants, and the codes it has not exchanged yet,
 > in the platform's own tables, in one transaction with the `mcp_revocation`
 > row and its audit event; nothing is removed in Keycloak, and the list also
