@@ -60,7 +60,14 @@ jobs:
 
   backend:
     name: backend (pytest · mypy · ruff)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # ubuntu-24.04, not ubuntu-latest: this job runs against the runner's own
+    # PostgreSQL, and production runs postgres:16 (deploy/docker-compose.yml).
+    # ubuntu-24.04 ships PostgreSQL 16; ubuntu-latest became 26.04, which ships
+    # 18, and 18 is a different database to test against: a RESTRICT foreign
+    # key raises 23001 rather than 23503, and NOT NULL is a pg_constraint row
+    # (run 44444528744, four tests red). Moving the image is a deliberate
+    # change, made together with the compose image.
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-24.04' }}
     services:
       redis:
         image: valkey/valkey:8.1.10-alpine
@@ -142,7 +149,9 @@ jobs:
     # `upgrade head` with DuplicateObjectError. A downgrade's exit code does not
     # tell you the downgrade worked.
     name: migration round-trip (upgrade · downgrade · upgrade)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # ubuntu-24.04 for PostgreSQL 16, the version production runs: see the
+    # backend job.
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-24.04' }}
     defaults:
       run:
         working-directory: backend
@@ -273,7 +282,9 @@ jobs:
     # scripts/itms_recover.py from the off-site bucket alone -- and compared
     # byte for byte. The Go agent's own E2E is a step of the `agent` job.
     name: backup end to end (dispatch · upload · off-site · restore)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # ubuntu-24.04 for PostgreSQL 16, the version production runs: see the
+    # backend job.
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-24.04' }}
     services:
       redis:
         image: valkey/valkey:8.1.10-alpine
