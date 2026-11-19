@@ -951,7 +951,12 @@ jobs:
     # -- the platform always asks for UV and always requires it -- is pytest's
     # (tests/test_auth_falsifiers.py).
     name: webauthn-uv (Chromium virtual authenticator)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # ubuntu-24.04, not ubuntu-latest: Playwright is pinned below on purpose,
+    # and 1.56.1 cannot install Chromium's dependencies on ubuntu-latest once
+    # that became 26.04 ("Playwright does not support chromium on
+    # ubuntu26.04-x64", run 44444213242). Moving the image is a deliberate
+    # change, like raising the pin.
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
 
