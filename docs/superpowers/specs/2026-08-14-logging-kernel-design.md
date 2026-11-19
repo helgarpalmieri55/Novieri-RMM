@@ -17,10 +17,8 @@ appears on any line**. An operator reading production output today cannot answer
 
 > **That "sixty-one" is the number AS MEASURED WHEN THIS SPEC WAS WRITTEN, and
 > it is deliberately not updated in place.** §2.2 below carries the running
-> count with a dated entry per change; the live figure is the newest of those
-> entries -- **109** on 2026-11-15 (own authentication phase 3, Task 13; phase
-> 4 added and removed none) -- asserted exactly by
-> `tests/test_logging_discipline.py`. Rewriting this paragraph on
+> count with a dated entry per change; the live figure is the newest entry in
+> §2.2, asserted exactly by `tests/test_logging_discipline.py`. Rewriting this paragraph on
 > every change would erase the starting point the whole section is describing —
 > the platform as it stood before the kernel existed. Editing it silently is
 > also how it came to claim 62, then 60, then 61, each wrong. The assertion's

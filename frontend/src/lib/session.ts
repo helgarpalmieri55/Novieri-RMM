@@ -153,8 +153,10 @@ export function safeNext(raw: unknown): string {
 
 /**
  * Prefixes that are no page of the console, refused as a `?next=` target.
- * The edge sends `/i`, `/api`, `/enroll`, `/mcp` and `/.well-known` to the
- * api. `/realms`, `/resources` and `/js` were the old identity provider's
+ * The edge sends `/i`, `/api`, `/enroll` and `/mcp` to the api, and of
+ * `/.well-known` only the OAuth and OpenID documents (`deploy/docker-
+ * compose.yml`, the `api` router); the console has no page under any of
+ * them. `/realms`, `/resources` and `/js` were the old identity provider's
  * before own authentication phase 4 retired it; since then the edge sends
  * them to the console, which has no page under them (`modules/auth/
  * __tests__/routes.test.ts`). They stay refused: the screen costs nothing,

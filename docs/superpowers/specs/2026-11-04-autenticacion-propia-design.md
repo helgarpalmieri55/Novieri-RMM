@@ -590,15 +590,17 @@ Cada uno con una prueba que falla si se quita la protección:
 9. El comando de recuperación no existe por HTTP.
 10. Ninguna pantalla dice «Keycloak» (la guarda que ya existe se mantiene).
     *(Enmienda del 2026-11-15, plan de la fase 4, Task 11.)* Y ningún documento vivo del repositorio lo nombra salvo
-    como historia fechada: «phase 4» en la línea, en una de las tres anteriores o en la siguiente, y no «until phase
-    4», que es el mismo par de palabras en futuro (`backend/tests/test_auth_phase4_falsifiers.py`, que recorre todo
-    el Markdown salvo los registros fechados, los runbooks de su propia guarda y `CLAUDE.md`).
+    como historia fechada: «phase 4» en la línea, en una de las tres anteriores o en la siguiente, leídas como un
+    solo texto, y no «until phase 4», que es el mismo par de palabras en futuro, aunque la frase se parta en dos
+    líneas o empiece con mayúscula; la regla no distingue tiempos, y una frase en pasado dice «before … phase 4»
+    (`backend/tests/test_auth_phase4_falsifiers.py`, que recorre todo el Markdown salvo los registros fechados, los
+    runbooks de su propia guarda y `CLAUDE.md`).
 11. *(Enmienda del 2026-11-15, plan de la fase 4, Task 11.)* Ningún token, imagen ni servicio de Keycloak es
     alcanzable ni aceptado en ninguna parte: cada ruta de `/api/v1` responde igual con un token con la forma del de la
     consola de Keycloak que sin credencial, aunque toda petición saliente reciba la JWKS de la clave que lo firmó;
     `/mcp` lo rechaza; ni compose ni el simulacro definen su servicio ni su imagen; ningún router de Traefik lleva a
-    él; ningún ajuste lo nombra; ninguna fuente de la consola le pide cerrar la sesión ni carga el `lib/auth.ts`
-    borrado; y en `app/` solo se verifican los tokens propios y los de Microsoft
+    él; ningún ajuste lo nombra; ninguna fuente de la consola le pide cerrar la sesión y el `lib/auth.ts`
+    borrado no vuelve; y en `app/` solo se verifican los tokens propios y los de Microsoft
     (`backend/tests/test_auth_phase4_falsifiers.py`, con un control positivo: una puerta que aún confía en el realm
     es señalada; en vivo, el job `deploy` de la CI).
 

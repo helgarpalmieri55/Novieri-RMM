@@ -19,14 +19,15 @@ flag it; offered another key, the same door is invisible to the comparison,
 which is why the key is offered. `/mcp` must refuse the token as an invalid
 token. The console's socket refuses it too, in `tests/test_token_origin.py`.
 
-The key is served by a transport of this file's own (`offer_the_key`), not
-by `test_user_admin_api.install_outbound`, which answers every request with
-a 599 and so would hand a would-be validator nothing to accept.
+The key is served through `tests/outbound_support.route_outbound`, the same
+routing `install_outbound` is built on -- but by this file's own handler
+(`offer_the_key`): the recorder answers every request with a 599, and so
+would hand a would-be validator nothing to accept.
 
 THE DEPLOYMENT HALF READS WHAT SHIPS. No setting (the twelve phase 4
 removed, named one by one, and none like them), no compose service, image
 or router, no `deploy/keycloak/`, no console code that asks an identity
-provider to sign it out or loads the deleted `lib/auth.ts`, and no token
+provider to sign it out, no deleted `lib/auth.ts` come back, and no token
 verification in `app/` but the platform's own three (its access tokens, its
 loopback tokens, Microsoft's ID tokens). The `deploy` CI job asserts the
 same of the running stack (`deploy/ci/mcp_flow.py`, and its two
@@ -42,11 +43,8 @@ runbooks' rule for a dated line (`test_runbook_without_keycloak.DATED`:
 """
 
 import ast
-import io
-import json
 import os
 import re
-import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -61,6 +59,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import Settings
 from tests.auth_support import console_ready
 from tests.foreign_tokens import ISSUER, ForeignIssuer
+from tests.outbound_support import route_outbound
 from tests.test_auth_phase2_falsifiers import _filled, _routes
 from tests.test_config import KEYCLOAK_ERA_ENV
 from tests.test_docs_without_keycloak import LIVING as TASK_10_LIVING
@@ -76,9 +75,6 @@ CERTS = f"{ISSUER}/protocol/openid-connect/certs"
 
 #: The sign-in's and the setup's own routes: a bearer is no part of them.
 EXCEPT_PREFIXES = ("/api/v1/auth/", "/api/v1/setup/")
-_REAL_ASYNC_CLIENT = httpx.AsyncClient
-_REAL_CLIENT = httpx.Client
-_REAL_OPEN = urllib.request.OpenerDirector.open
 
 
 class OfferedKey:
@@ -100,58 +96,12 @@ class OfferedKey:
 
 def offer_the_key(monkeypatch: pytest.MonkeyPatch, issuer: ForeignIssuer) -> OfferedKey:
     """From now until the test ends, every request out of the process gets
-    `issuer`'s JWKS for any URL: through every httpx client but an
-    in-process one, and through every urllib opener.
-
-    The same ways out as `test_user_admin_api.install_outbound`, which this
-    cannot reuse (it answers 599): a client built now has its transport and
-    its mounts replaced, and httpx's own network transports answer for as
-    long as this is installed -- so a client built BEFORE it, as a JWKS
-    cache built at startup was, is handed the key too."""
+    `issuer`'s JWKS for any URL (`route_outbound`, with every way out that
+    `install_outbound` covers: new httpx clients and their mounts, httpx's own
+    network transports -- so a client built BEFORE this, as a JWKS cache built
+    at startup was, is handed the key too -- and urllib, PyJWT's way)."""
     offered = OfferedKey(issuer)
-    in_process = (httpx.ASGITransport, httpx.MockTransport)
-
-    def to_offer() -> httpx.MockTransport:
-        return httpx.MockTransport(offered.handler)
-
-    def routed(kw: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(kw.get("transport"), in_process):
-            kw["transport"] = to_offer()
-        if kw.get("mounts"):
-            # `None` is httpx's "this pattern uses `transport`", kept as it is.
-            kw["mounts"] = {
-                pattern: mounted
-                if mounted is None or isinstance(mounted, in_process)
-                else to_offer()
-                for pattern, mounted in kw["mounts"].items()
-            }
-        return kw
-
-    def async_client(*args: Any, **kw: Any) -> httpx.AsyncClient:
-        return _REAL_ASYNC_CLIENT(*args, **routed(kw))
-
-    def client(*args: Any, **kw: Any) -> httpx.Client:
-        return _REAL_CLIENT(*args, **routed(kw))
-
-    async def network_async(
-        self: httpx.AsyncHTTPTransport, request: httpx.Request
-    ) -> httpx.Response:
-        return offered.handler(request)
-
-    def network_sync(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
-        return offered.handler(request)
-
-    def opener(self: urllib.request.OpenerDirector, fullurl: Any, *a: Any, **kw: Any) -> Any:
-        url = fullurl if isinstance(fullurl, str) else fullurl.full_url
-        if url.startswith(("http://", "https://")):
-            return io.BytesIO(json.dumps(offered.document(url)).encode())
-        return _REAL_OPEN(self, fullurl, *a, **kw)
-
-    monkeypatch.setattr(httpx, "AsyncClient", async_client)
-    monkeypatch.setattr(httpx, "Client", client)
-    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", network_async)
-    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", network_sync)
-    monkeypatch.setattr(urllib.request.OpenerDirector, "open", opener)
+    route_outbound(monkeypatch, offered.handler)
     return offered
 
 
@@ -248,12 +198,14 @@ async def test_the_walk_sees_a_door_that_trusts_the_realm(
         async with httpx.AsyncClient(transport=transport, base_url="http://door") as client:
             stranger = offer_the_key(monkeypatch, ForeignIssuer(kid="a-stranger"))
             assert await _differs(client, walked, bearer) == []
-            assert stranger.seen == [CERTS] * 3
+            # PyJWT (unpinned) may refetch on a kid it does not find: at least
+            # once per way in, and only ever the realm's keys.
+            assert set(stranger.seen) == {CERTS} and len(stranger.seen) >= 3
 
             offered = offer_the_key(monkeypatch, api_env.foreign)
             found = await _differs(client, walked, bearer)
             assert found == [(method, path, 401, 200) for method, path in walked]
-            assert offered.seen == [CERTS] * 3
+            assert set(offered.seen) == {CERTS} and len(offered.seen) >= 3
             for _method, path in walked:
                 answer = await client.get(path, headers=bearer)
                 assert answer.json() == {"sub": "someone"}, path
@@ -377,37 +329,6 @@ def _console_sources() -> list[Path]:
 #: The console's own sign-in module until own authentication Task 10, which
 #: deleted it with `oidc-client-ts`: it started every step at Keycloak.
 DELETED_AUTH_MODULE = CONSOLE_SRC / "lib" / "auth"
-_SPECIFIER = re.compile(
-    r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["'](\.{1,2}/[^"']*)["']"""
-)
-
-
-def _imported(source: str, path: Path) -> set[Path]:
-    """Every module `source` (the file at `path`) imports by a relative
-    specifier, resolved as a path without its extension. The console has no
-    import alias (`tsconfig*.json`, `vite.config.ts`): a relative specifier
-    is the only way to reach `lib/auth`."""
-    found = set()
-    for specifier in _SPECIFIER.findall(source):
-        target = Path(os.path.normpath(path.parent / specifier))
-        if target.suffix in {".ts", ".tsx", ".js"}:
-            target = target.with_suffix("")
-        found.add(target.parent if target.name == "index" else target)
-    return found
-
-
-def test_the_import_resolver_is_not_vacuous() -> None:
-    lib = CONSOLE_SRC / "lib"
-    assert _imported('import { signIn } from "./auth";\n', lib / "ws.ts") == {DELETED_AUTH_MODULE}
-    assert _imported(
-        'const m = await import("../lib/auth.ts");', CONSOLE_SRC / "modules" / "y.ts"
-    ) == {DELETED_AUTH_MODULE}
-    assert _imported('export { a } from "../auth/index";\n', lib / "z" / "w.ts") == {
-        DELETED_AUTH_MODULE
-    }
-    # A comment that names the file, as `lib/session.ts` does, is no import.
-    assert _imported("// It replaces `lib/auth.ts` and `oidc-client-ts`.\n", lib / "s.ts") == set()
-    assert _imported('import { x } from "./authSurface";\n', lib / "s.ts") == {lib / "authSurface"}
 
 
 def test_falsifier_11_the_console_asks_no_identity_provider_anything() -> None:
@@ -416,9 +337,12 @@ def test_falsifier_11_the_console_asks_no_identity_provider_anything() -> None:
     `lib/auth.ts` check of `test_the_action_sets_are_read_from_both_sides_
     and_are_not_empty`), widened to any OpenID route: no console code that
     is not a test builds an OpenID sign-out, reads an end-session endpoint
-    or names a `/realms/` URL, and none loads the deleted `lib/auth.ts`,
-    which is not back either. (`lib/oidcLeftovers.ts` only deletes what the
-    Keycloak-era console left in the browser's storage, P4-16.)
+    or names a `/realms/` URL, and the deleted `lib/auth.ts` is not back.
+    Nothing can load it while it is gone: every source is in `tsc -b`'s
+    `include` (`src`), which refuses an import of a missing module (TS2307),
+    and `npm run build` cannot resolve one either -- both run in CI's
+    `frontend` job. (`lib/oidcLeftovers.ts` only deletes what the Keycloak-era
+    console left in the browser's storage, P4-16.)
 
     `kc_action` and `signoutRedirect` are not repeated here: the console's
     own `lib/session.navigation.test.ts:58` refuses both (with
@@ -436,14 +360,6 @@ def test_falsifier_11_the_console_asks_no_identity_provider_anything() -> None:
     assert not DELETED_AUTH_MODULE.with_suffix(".ts").exists()
     assert not DELETED_AUTH_MODULE.with_suffix(".tsx").exists()
     assert not DELETED_AUTH_MODULE.exists()
-    imports = {path: _imported(text, path) for path, text in texts.items()}
-    # Non-vacuity: the resolver reads the real console, into `lib/` too.
-    assert sum(len(found) for found in imports.values()) > 2000
-    assert any(CONSOLE_SRC / "lib" / "session" in found for found in imports.values())
-    loading = [
-        str(p.relative_to(REPO)) for p, found in imports.items() if DELETED_AUTH_MODULE in found
-    ]
-    assert loading == [], loading
 
 
 #: What PyJWT verifies or fetches keys with, under any of its spellings.
@@ -573,6 +489,15 @@ def test_falsifier_10_the_document_rule_sees_an_undated_name() -> None:
     assert _undated("Keycloak was removed in own\nauthentication phase 4.") == []
     assert _undated("2026-11-15 (phase 4):\n\n\nKeycloak's realm is gone.") == []
     assert _undated("phase 4 retired it.\n\n\n\nKeycloak") != []
+    # The future tense however it is wrapped or capitalised (fix round 1):
+    # the rule reads the window as one text, not line by line.
+    assert _undated("Keycloak signs people in until own\nauthentication phase 4.") != []
+    assert _undated("Keycloak signs people in until\nphase 4.") != []
+    assert _undated("Until phase 4, Keycloak signs people in.") != []
+    assert _undated("# Keycloak answers /realms until own authentication\n# phase 4.") != []
+    # And history, capitalised or wrapped, is still history.
+    assert _undated("Keycloak left the stack in\nPhase 4 (2026-11-15).") == []
+    assert _undated("Keycloak was removed by own authentication\n*phase 4*.") == []
 
 
 def test_falsifier_10_the_walk_reads_the_living_documents_and_skips_only_records() -> None:
@@ -589,9 +514,14 @@ def test_falsifier_10_the_walk_reads_the_living_documents_and_skips_only_records
     # Every exception is a real file, and each kind of record skips one.
     for path in RUNBOOKS + OPERATOR_FILES + HISTORY:
         assert path.is_file(), path
-    assert REPO / "docs" / "kernel" / "spec.md" not in walked
-    assert REPO / "docs" / "modules" / "ai-admin" / "plan.md" not in walked
-    assert REPO / "docs" / "kernel" / "security-review-2026-07-18.md" not in walked
+    skipped = (
+        REPO / "docs" / "kernel" / "spec.md",
+        REPO / "docs" / "modules" / "ai-admin" / "plan.md",
+        REPO / "docs" / "kernel" / "security-review-2026-07-18.md",
+    )
+    for record in skipped:
+        assert record.is_file(), record
+        assert record not in walked, record
 
 
 def test_falsifier_10_no_living_document_names_keycloak_but_as_dated_history() -> None:
