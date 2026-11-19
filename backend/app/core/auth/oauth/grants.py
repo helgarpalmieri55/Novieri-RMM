@@ -24,9 +24,14 @@ about the relationship is retained" [S16]; MCP: "MUST rotate refresh tokens"
 "reutilizar uno ya usado revoca toda la familia"; plan B3-27): a refresh whose
 answer the app never read, or two racing with one token, end it too, and the
 person connects again. So does a person no longer active; the family dies
-after `REFRESH_IDLE` without use. Every refusal is `invalid_grant`
-(Anthropic: "Return RFC 6749-compliant error codes when a refresh token is no
-longer valid: invalid_grant" [S33]).
+after `REFRESH_IDLE` without use. THE RELATIONSHIP IS RETAINED FOR 30 DAYS,
+NOT FOR EVER (design §5.3, amended 2026-11-15; operator decision E2): a used
+token of a live family is deleted by the first daily retention sweep after
+`retention.OAUTH_USED_TOKEN_RETENTION` (30 days) from its use, and presented
+after that it is a token the server does not know -- `seen is None` in
+`_refresh`, a plain `invalid_grant` -- not a reuse, and the family lives on.
+Every refusal is `invalid_grant` (Anthropic: "Return RFC 6749-compliant error
+codes when a refresh token is no longer valid: invalid_grant" [S33]).
 
 WHAT IS AUDITED (§7, "consentimientos y revocaciones de clientes de IA"; plan
 B3-22): every end of a grant the person did not cause -- a reused code, a
@@ -48,8 +53,9 @@ committed, so the write stays (the `flows` pattern, phase 1). The app's
 `last_used_at` is touched after the signature, at most once an hour
 (`clients.touch`; A3-37).
 
-NOTHING IS DELETED HERE: spent codes and ended families go with the daily
-retention sweep (`app/core/auth/retention.py`, Task 13).
+NOTHING IS DELETED HERE: spent codes, ended families, and the used tokens of
+a live family 30 days after their use (operator decision E2, 2026-11-15) go
+with the daily retention sweep (`app/core/auth/retention.py`, Task 13).
 
 LOCKED IN THE ORDER OF A PERSON'S ACCOUNT (own authentication phase 2's
 rule, `guards.lock_user_row`; `store`'s LOCK ORDER; operator decision D2,

@@ -17,11 +17,16 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 
 > **Verification status.** The PostgreSQL dump/restore path, the Docker-volume
 > tar path, the post-restore privilege re-application, and the audit chain
-> check in this document were executed end to end against this stack. The
-> OpenBao section was **not** executed (no initialized OpenBao was
-> available); it is written from the configuration in `deploy/openbao/` and
-> is marked where that matters. Treat unmarked commands as tested and marked
-> ones as needing a rehearsal before you rely on them.
+> check in this document were executed end to end against this stack -- the
+> chain check then as a `curl` with a bearer token. Its replacement in §4 was
+> run on 2026-11-19 as `python -` reading the same text, outside a container,
+> against a migrated database holding HMAC-keyed events (it answered `ok:
+> true`, and `ok: false` with another key), not yet inside a running stack,
+> and is marked. The OpenBao section was **not** executed (no initialized
+> OpenBao was available); it is written from the configuration in
+> `deploy/openbao/` and is marked where that matters. Treat unmarked
+> commands as tested and marked ones as needing a rehearsal before you rely
+> on them.
 
 ---
 
@@ -30,7 +35,7 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 | # | State | Where it lives | Lose it and… |
 |---|---|---|---|
 | 1 | Application database (`itsuite`) | `postgres-data` volume | everything: devices, tickets, jobs, audit log, vault *ciphertext* |
-| 2 | The old identity provider's database (`keycloak`), only on a host upgraded from before own authentication phase 4 | same volume, same cluster | the realm that release used; only the backup `deploy.sh` takes before an upgrade holds it, and nothing reads it after phase 4 (`deploy/README.md`, "Retiring the old identity provider's data") |
+| 2 | The old identity provider's database (`keycloak`), only on a host upgraded from before own authentication phase 4 | same volume, same cluster | the realm that release used; only a backup taken before an upgrade with `ITS_BACKUP_OLD_IDENTITY_DB=1` holds it (`deploy.sh`, and the manual upgrade's step 1, set it), and nothing reads it after phase 4 (`deploy/README.md`, "Retiring the old identity provider's data") |
 | 3 | Object storage | `minio-data` volume | backup repositories, deploy artifacts, OS images, attachments |
 | 4 | **OpenBao storage** | `openbao-data` volume | the internal CA, the job-signing key, **every vault DEK** — see §5 |
 | 5 | **OpenBao unseal keys + root token** | *operator-held, outside the stack* | the volume in #4 becomes undecryptable ballast |
@@ -62,10 +67,6 @@ Run from `deploy/`. `$BK` is a directory on a **different** host or volume.
 BK=/srv/backup/$(date -u +%Y%m%dT%H%M%SZ) && mkdir -p "$BK"
 
 docker compose exec -T postgres pg_dump -U its_admin -d itsuite  -Fc > "$BK/itsuite.dump"
-# Only while the keycloak database exists, as backup.sh decides, for the way
-# back past own authentication phase 4 (deploy.sh's pre-upgrade backup does this):
-has_kc="$(docker compose exec -T postgres psql -X -A -t -U its_admin -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = 'keycloak'" | tr -d '[:space:]')"
-[ "$has_kc" = 1 ] && docker compose exec -T postgres pg_dump -U its_admin -d keycloak -Fc > "$BK/keycloak.dump"
 docker compose exec -T postgres pg_dumpall -U its_admin --globals-only > "$BK/globals.sql"
 ```
 
@@ -81,6 +82,11 @@ Notes that matter:
   `init-app-user.sh` recreates the roles from `.env`.
 - `-Fc` (custom format) is required for the `pg_restore --clean --if-exists`
   used in §3.
+- **The old identity provider's database is left out**, as the nightly and
+  off-site backups leave it out (operator decision K1, 2026-11-15). Only a
+  backup taken before an upgrade with `ITS_BACKUP_OLD_IDENTITY_DB=1` holds
+  it; `deploy.sh`, and the manual upgrade's step 1, set it
+  (`deploy/README.md`).
 
 ### 2.2 Object storage, OpenBao, and the key volumes
 
@@ -168,7 +174,7 @@ docker compose up -d --wait postgres
 # 3. Restore the databases as its_admin.
 docker compose exec -T postgres pg_restore -U its_admin -d itsuite  --clean --if-exists < "$BK/itsuite.dump"
 # Only when the backup carries keycloak.dump (taken before own authentication
-# phase 4, or by deploy.sh before an upgrade on a host that still keeps it):
+# phase 4, 2026-11-15, or before an upgrade with ITS_BACKUP_OLD_IDENTITY_DB=1):
 [ -s "$BK/keycloak.dump" ] && {
   docker compose exec -T postgres createdb -U its_admin keycloak \
     && docker compose exec -T postgres pg_restore -U its_admin -d keycloak --clean --if-exists < "$BK/keycloak.dump"
@@ -251,19 +257,57 @@ production requires — that link is an **HMAC-SHA256 keyed by
 
 ### How an operator confirms the chain after a restore
 
-**Authoritative check** — the keyed verification, per org, via the API. This is
-the one that proves the HMAC key restored correctly:
+**Authoritative check** — the keyed verification, for every organization. This
+is the one that proves the HMAC key restored correctly. From `deploy/`, once
+`api` is up, it runs the platform's own verification
+(`audit_service.verify`, what `GET /api/v1/audit/verify` runs) inside the
+`api` container, with that container's `.env` and HMAC key, and prints one
+line per organization; it needs no sign-in and no token. ⚠ Not yet run inside
+a running stack (the verification status at the top of this document).
 
 ```sh
-# from deploy/: the console address is ITS_PUBLIC_CONSOLE_URL in .env
-curl -sS -H "Authorization: Bearer $TOKEN" "$(sed -n 's/^ITS_PUBLIC_CONSOLE_URL=//p' .env | tail -1)/api/v1/audit/verify"
-# {"ok": true, "count": 12345, "broken_at": null}
+docker compose exec -T api python - <<'EOF'
+import asyncio
+import json
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.core.audit import audit_service, load_audit_hmac_key
+from app.core.config import get_settings
+from app.models import Organization
+
+
+async def main() -> None:
+    settings = get_settings()
+    audit_service.set_hmac_key(load_audit_hmac_key(settings))
+    engine = create_async_engine(settings.database_admin_url)
+    try:
+        async with AsyncSession(engine) as session:
+            orgs = (await session.execute(select(Organization.id, Organization.slug))).all()
+            for org_id, slug in orgs:
+                r = await audit_service.verify(session, org_id)
+                broken = str(r.broken_at) if r.broken_at else None
+                print(slug, json.dumps({"ok": r.ok, "count": r.count, "broken_at": broken}))
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+EOF
 ```
 
-It requires the `audit.read` permission and runs against the caller's org, so
-run it once per organization. `ok: false` with a `broken_at` id names the first
-event that failed. **If `ok` is false immediately after a restore and the row
-count looks right, suspect the HMAC key before you suspect the data.**
+```
+toeshee {"ok": true, "count": 12345, "broken_at": null}
+```
+
+`ok: false` with a `broken_at` id names the first event that failed. **If `ok`
+is false immediately after a restore and the row count looks right, suspect the
+HMAC key before you suspect the data.** The console shows the same check for
+the signed-in person's organization: **Audit log**, then **Verify chain** (it
+needs `audit.read`). A `curl` with `Authorization: Bearer` is not a way to run
+it: the console's API reads a session cookie, not a bearer token, since own
+authentication phase 1.
 
 **Pre-flight check** — a pure-SQL structural check you can run during the
 restore, before the API is up and without any token. It validates the linkage
@@ -430,7 +474,8 @@ they remain a manual rehearsal on a scratch host.
    as `app_user` fails with `query would be affected by row-level security
    policy` — it cannot opt out.)
 6. **The audit chain verifies.** §4 — both the SQL pre-flight and the keyed
-   `/api/v1/audit/verify`.
+   verification (the in-container check, or the console's **Verify chain**;
+   both run what `/api/v1/audit/verify` runs).
 7. **An agent still connects.** The real end-to-end proof that the CA restored:
    an existing enrolled endpoint reconnects over mTLS and a `hello` job
    round-trips, with no re-enrollment.

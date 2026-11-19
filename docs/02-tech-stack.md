@@ -115,7 +115,7 @@ recorded here so module specs reference a single source of truth.
 
 | System | Mechanism |
 |---|---|
-| AD / Entra ID | Sign in with Microsoft (multi-tenant application, the platform's own certificate); no SAML or on-premises AD federation (own authentication phase 2; Keycloak's federation went in phase 4) |
+| AD / Entra ID | Sign in with Microsoft (multi-tenant application, the platform's own certificate); no SAML or on-premises AD federation (own authentication phase 2; Keycloak's federation went in own authentication phase 4) |
 | Odoo Helpdesk | REST/JSON-RPC for change tickets and change/deploy records |
 | Sentinel (vuln mgmt) | API pull of prioritized vulnerable targets to drive patching |
 | Power BI / reporting | Evidence and inventory exports (CSV/API) |

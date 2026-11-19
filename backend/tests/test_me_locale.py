@@ -112,6 +112,19 @@ async def test_get_me_does_not_claim_a_sync_state(env: Any) -> None:
     assert "identity_locale_synced" not in response.json()
 
 
+def test_the_profile_holds_no_identity_to_mirror_to() -> None:
+    """`OwnProfile` carried the row's `external_subject`, commented as "where
+    `PATCH /me` mirrors a changed language". Nothing has mirrored since P2
+    phase 1, and nothing read the field: `MeResponse` never exposed it
+    (final review of own authentication phase 4, A2).
+    FALSIFIER: the field put back on `OwnProfile`."""
+    from dataclasses import fields
+
+    from app.core.identity.own_profile import OwnProfile
+
+    assert "external_subject" not in {field.name for field in fields(OwnProfile)}
+
+
 async def test_a_failed_client_map_read_saves_nothing_and_the_retry_saves(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

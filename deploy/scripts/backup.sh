@@ -6,8 +6,8 @@
 #
 #   itsuite.dump    the application database
 #   globals.sql     the cluster's ROLE definitions
-#   keycloak.dump   ONLY in the backup deploy.sh takes before an upgrade
-#                   (ITS_BACKUP_OLD_IDENTITY_DB=1), and only while a
+#   keycloak.dump   ONLY in a backup taken before an upgrade with
+#                   ITS_BACKUP_OLD_IDENTITY_DB=1, and only while a
 #                   `keycloak` database exists: own authentication phase 4
 #                   removed Keycloak, and a host upgraded from before keeps
 #                   that database until the operator retires it. A nightly
@@ -43,7 +43,8 @@
 #   ITS_PG_EXEC="" PGHOST=127.0.0.1 PGUSER=its_admin ./backup.sh /tmp/bk
 #
 # ITS_BACKUP_OLD_IDENTITY_DB=1 also dumps the old identity provider's
-# database while it exists. Only deploy.sh sets it, for its pre-upgrade backup.
+# database while it exists. deploy.sh, and the manual upgrade's step 1
+# (deploy/README.md), set it, for the backup taken before an upgrade.
 #
 # OBJECT STORAGE (MinIO) is NOT in this backup unless asked for. One bucket
 # holds everything; fleet backup data lives under `<org>/backup/<repo>/`.
@@ -76,7 +77,7 @@ case "$ITS_BACKUP_OBJECTS" in
     none|all|no-fleet-backups) ;;
     *) echo "ERROR: ITS_BACKUP_OBJECTS must be none, all or no-fleet-backups" >&2; exit 1 ;;
 esac
-# 1 only from deploy.sh's pre-upgrade backup (the keycloak.dump note above).
+# 1 only for a backup taken before an upgrade (the keycloak.dump note above).
 : "${ITS_BACKUP_OLD_IDENTITY_DB:=0}"
 case "$ITS_BACKUP_OLD_IDENTITY_DB" in
     0|1) ;;
@@ -107,9 +108,10 @@ run pg_dump -Fc -U "$ITS_PG_ADMIN_USER" itsuite > "$OUT_DIR/itsuite.dump"
 # host upgraded from before own authentication phase 4 keeps `keycloak` until
 # the operator retires it (deploy/README.md "Retiring the old identity
 # provider's data"). It holds Keycloak's password hashes and the realm keys
-# that signed its tokens, so it goes ONLY into the backup deploy.sh takes
-# before an upgrade (the one before the phase-4 upgrade, with its schema below
-# 0248, is the way back to a release from before it), and never into a
+# that signed its tokens, so it goes ONLY into a backup taken before an
+# upgrade, by deploy.sh or by the manual upgrade's step 1 (the one before the
+# phase-4 upgrade, with its schema below 0248, is the way back to a release
+# from before it), and never into a
 # nightly or off-site one. The note below is the reminder that
 # it is still there. A -tAc scalar into a string compare, not
 # `psql | grep -q`: under pipefail a grep that exits early SIGPIPEs psql
@@ -124,7 +126,7 @@ if [ "${has_keycloak//[[:space:]]/}" = "1" ]; then
         with_keycloak=1
     else
         echo "    NOTE: the old identity provider's database ('keycloak') is still on this"
-        echo "    cluster. This backup leaves it out; only deploy.sh's pre-upgrade backup"
+        echo "    cluster. This backup leaves it out; only a backup taken before an upgrade"
         echo "    keeps it. deploy/README.md \"Retiring the old identity provider's data\""
         echo "    removes it once you no longer need the way back."
     fi

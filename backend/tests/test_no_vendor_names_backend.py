@@ -8,8 +8,11 @@ render in the buyer's browser exactly like a JSX string does -- was unguarded.
 
 SCOPED TO WHAT A USER CAN SEE, AND NO WIDER, for the reason the frontend guard
 states about itself: a guard broader than its own claim gets deleted the first
-time it is inconvenient. The platform DOES integrate with Keycloak and source
-that pretended otherwise would be lying about its own dependency. So module
+time it is inconvenient. When this guard was written the platform DID
+integrate with Keycloak, until own authentication phase 4 removed it
+(2026-11-15), and source that pretended otherwise would have lied about its
+own dependency; source that records that history, or names a vendor the
+platform still integrates with, is accurate for the same reason. So module
 names, imports, class names, docstrings, comments, settings keys and log
 messages are all exempt and must stay accurate. What is checked is the text
 that leaves the process in a response body:

@@ -308,10 +308,12 @@ go somewhere other than the database backups.
   That writes the artefacts below, and the last is the one a hand-rolled
   `pg_dump` misses:
   - `itsuite.dump` — the application database.
-  - `keycloak.dump` — only in the backup `deploy.sh` takes before an
-    upgrade, on a host upgraded from before own authentication phase 4 and
-    while the old identity provider's database exists. The nightly backups
-    leave it out. What takes you back to a release from before phase 4 is
+  - `keycloak.dump` — on a host upgraded from before own authentication
+    phase 4, and while the old identity provider's database exists, only in
+    a backup taken before an upgrade with `ITS_BACKUP_OLD_IDENTITY_DB=1`
+    (`deploy.sh`, and the manual upgrade's step 1 in `deploy/README.md`,
+    set it). The nightly backups, and the command above, leave it out. What
+    takes you back to a release from before own authentication phase 4 is
     the backup taken before that upgrade, whose `alembic_version` is below
     `0248`, with `keycloak.dump` or without it (`deploy/README.md`,
     "Rolling back a deployment").
@@ -346,8 +348,14 @@ full-recovery procedure is `docs/07-backup-restore.md` §3** — key-material
 volumes first, then a fresh Postgres, then the databases, then the narrowing,
 then unseal OpenBao. `restore.sh` below covers only the database half of
 that; a restored database with no `openbao-data` cannot sign a job or decrypt
-a credential. Use it in place of §3's steps 3-4, or on its own for a rollback
-on a live host where the key material was never lost:
+a credential. Use it in place of §3's steps 3-4.
+
+**A rollback on a live host is not this block.** It is `deploy/README.md`
+"Rolling back a deployment", which stops the application tier first and
+chooses the backup by its schema: back past own authentication phase 4, the
+newest `~/backups/pre-upgrade-*` whose `alembic_version` is below `0248`.
+The newest directory under `~/backups`, which the line below picks, is the
+wrong one there: every backup taken since that upgrade is past 0248.
 
 Run it from `deploy/`. `BACKUP` is the newest backup directory under
 `~/backups`; set it to another to restore that one. Then run one of the two
@@ -359,8 +367,11 @@ BACKUP="$(ls -1dt ~/backups/*/ | head -1)"; echo "BACKUP=$BACKUP"
 ITS_RESTORE_FORCE=1 ./scripts/restore.sh "$BACKUP"    # REPLACES a populated one
 ```
 
-The second form drops the existing `itsuite` database first. `restore.sh`
-refuses a non-empty target unless you set that, because restoring over a
+The second form first drops every database the backup holds that is not
+empty: `itsuite`, and, on a host upgraded across own authentication phase 4,
+the old identity provider's `keycloak` when the backup carries
+`keycloak.dump`. `restore.sh` refuses a non-empty target unless you set
+that, because restoring over a
 populated database leaves one that is neither the old nor the new — but a
 real rollback always has a populated target, so that is the form the
 rollback runbook uses.
@@ -382,10 +393,13 @@ application role rewrite the RBAC catalogue. This is what
 `docs/07-backup-restore.md` §3 has said all along.
 
 The `itsuite` restore has been exercised end to end between two clusters
-shaped like this one. A `keycloak.dump` (a backup from before own
-authentication phase 4) is restored and checked for tables by the monthly
-drill, and CI's `deploy` job restores one from a pre-upgrade backup and
-checks that a row it wrote came back; nothing past that.
+shaped like this one. A `keycloak.dump` (in a backup from before own
+authentication phase 4, or one taken before an upgrade since) is restored
+and checked for tables by the drill when the drill is pointed at it
+(`./scripts/restore-drill.sh` and that backup's directory; the monthly run
+restores the latest nightly, which holds none), and CI's
+`deploy` job restores one from a pre-upgrade backup and checks that a row it
+wrote came back; nothing past that.
 
 ## 7. Deployment hygiene
 

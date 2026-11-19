@@ -3,12 +3,19 @@ history (own authentication phase 4, plan 2026-11-15, Task 10).
 
 Specs and plans are dated records and may describe what was decided then;
 the runbooks are `test_runbook_without_keycloak.py`'s. A line here may name
-the old identity provider only if it says when that stopped being true:
-"phase 4" on it, on one of the three lines before, or on the next.
+the old identity provider only if it says when that stopped being true, by
+the runbooks' rule (`test_runbook_without_keycloak._dated`): own
+authentication's phase 4 by name, or a date of 2026-11 or later, on it, on
+one of the three lines before, or on the next -- and not in the future
+tense. Until the final review of phase 4 (C4) this file had a rule of its
+own, "phase 4" anywhere in the window, which a future tense and the
+roadmap's own Phase 4 both passed.
 """
 
 import re
 from pathlib import Path
+
+from tests.test_runbook_without_keycloak import _dated
 
 REPO = Path(__file__).resolve().parents[2]
 NAMES = re.compile(r"keycloak", re.IGNORECASE)
@@ -30,14 +37,18 @@ def _undated(text: str, name: str = "doc") -> list[str]:
     return [
         f"{name}:{index + 1}: {line.strip()[:100]}"
         for index, line in enumerate(lines)
-        if NAMES.search(line)
-        and not any("phase 4" in near for near in lines[max(0, index - 3) : index + 2])
+        if NAMES.search(line) and not _dated(lines, index)
     ]
 
 
 def test_the_rule_sees_an_undated_name() -> None:
     assert _undated("Auth -- Keycloak as identity broker.") != []
     assert _undated("Keycloak was removed in own\nauthentication phase 4.") == []
+    # The runbooks' rule, not a looser one of its own (final review, C4).
+    assert _undated("Keycloak signs people in; phase 4 removes it.") != []
+    assert _undated("## Phase 4 — Patch, App-deploy\n\nAuth: Keycloak as identity broker.") != []
+    assert _undated("Keycloak stays until it is removed in own authentication phase 4.") != []
+    assert _undated("Keycloak was removed in own authentication Phase 4.") == []
 
 
 def test_the_living_documents_name_keycloak_only_as_history() -> None:

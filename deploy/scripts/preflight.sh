@@ -2,7 +2,7 @@
 #
 # Pre-flight for a first deploy. Run from `deploy/`, before `docker compose up`.
 #
-# WHY THIS EXISTS. GO-LIVE.md is seven sections of things that must be changed
+# WHY THIS EXISTS. GO-LIVE.md is eight sections of things that must be changed
 # from defaults, and the failure mode of a checklist is a human reading it at
 # the end of a long day and being sure they did step 4. Every check below is
 # something the checklist already requires; this just refuses instead of
@@ -38,7 +38,7 @@ else
 fi
 
 # --- no placeholder secrets ----------------------------------------------
-# All seven ship as `change-me`. The two OpenBao tokens are legitimately still
+# All six ship as `change-me`. The two OpenBao tokens are legitimately still
 # `change-me` until first boot has run, so they are reported separately rather
 # than blocking a first `up`.
 first_boot_only="ITS_OPENBAO_TOKEN OPENBAO_TOKEN"

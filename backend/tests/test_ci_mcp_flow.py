@@ -601,15 +601,29 @@ def test_a_grant_is_shown_working_before_it_is_shown_ended(section: str) -> None
     assert accepted[0] < refused[0] < marked[0]
 
 
-#: The sections after which an ended grant's refresh token is presented.
-FAMILY = {"refresh reuse ends the grant": "rotated", "revocation ends the grant": "third"}
+#: The sections after which an ended grant's refresh token is presented:
+#: every one of `ENDED` (final review of phase 4, B4 -- the docstring said
+#: so of each ended grant while `second` and `fourth` never presented
+#: theirs).
+FAMILY = {
+    "refresh reuse ends the grant": "rotated",
+    "code reuse ends the grant": "second",
+    "revocation ends the grant": "third",
+    "signing out everywhere ends the grant": "fourth",
+}
+
+
+def test_every_ended_grant_has_its_refresh_token_presented() -> None:
+    assert FAMILY == ENDED
 
 
 @pytest.mark.parametrize("section", list(FAMILY))
 def test_an_ended_grants_refresh_token_is_dead_too(section: str) -> None:
     """Design §10 falsifier 6, "revoca su familia": after a reuse, the
-    refresh token the rotation issued is refused; after a revocation, the
-    token the app revoked."""
+    refresh token the rotation issued is refused; after a reused code, the
+    grant it opened; after a revocation, the token the app revoked; and
+    after the person signs out everywhere (operator decision E1), the AI
+    app's -- it cannot mint a new access token either."""
     grant, calls = FAMILY[section], _calls_in_open()
     refused = _lines(calls, "refused_at_mcp", f"{grant}.access")
     dead = _lines(calls, "refused_refresh", grant)

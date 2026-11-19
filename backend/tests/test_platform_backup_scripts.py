@@ -183,8 +183,9 @@ def test_backup_sh_defaults_to_databases_only_and_excludes_fleet_data_by_prefix(
 #
 # Own authentication phase 4 removed Keycloak. A host upgraded from before keeps
 # its `keycloak` database until the operator retires it, and that database holds
-# Keycloak's password hashes and the realm keys that signed its tokens: only the
-# backup deploy.sh takes before an upgrade (the way back) keeps it, and
+# Keycloak's password hashes and the realm keys that signed its tokens: only a
+# backup taken before an upgrade (the way back; deploy.sh, and the manual
+# upgrade's step 1, set ITS_BACKUP_OLD_IDENTITY_DB=1) keeps it, and
 # restore.sh still restores a backup that has it. These run the real scripts
 # against fake client tools that answer from FAKE_DBS.
 
