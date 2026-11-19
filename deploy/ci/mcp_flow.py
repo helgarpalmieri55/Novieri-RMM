@@ -24,8 +24,8 @@ TWO PHASES, because the registration switch is read when the api starts.
                   `/mcp`, refresh, and see a reused refresh token, a reused
                   code, an RFC 7009 revocation and "sign out everywhere" each
                   end a grant at the next call -- every grant shown working
-                  at `/mcp` before it is shown ended, and an ended grant's
-                  refresh token refused too. A token signed by anybody
+                  at `/mcp` before it is shown ended, and each ended
+                  grant's refresh token refused too. A token signed by anybody
                   else -- a tampered one, and one shaped like Keycloak's --
                   is refused at `/mcp`; that one and an MCP access token
                   `/mcp` has just accepted are refused at the console's door.
@@ -861,6 +861,7 @@ class Flow:
             "a reused code is not invalid_grant",
         )
         self.refused_at_mcp(second.access, "the access token of a grant whose code was reused")
+        self.refused_refresh(second, "the refresh token of a grant whose code was reused")
         self.done("code reuse ends the grant")
 
         # RFC 7009, by the app itself. Its 200 proves nothing on its own --
@@ -887,6 +888,8 @@ class Flow:
         out = self.http.request("POST", "/api/v1/auth/logout-everywhere", console=True)
         check(out.status == 204, f"sign out everywhere answered {out.status}")
         self.refused_at_mcp(fourth.access, "the access token of a person who signed out everywhere")
+        # Operator decision E1: the AI app cannot mint a new access token either.
+        self.refused_refresh(fourth, "the refresh token of a person who signed out everywhere")
         self.done("signing out everywhere ends the grant")
 
 

@@ -63,9 +63,9 @@ An operator identity, held by the platform itself since own authentication
 phase 1 (password verifier, second factors and sessions in their own tables).
 
 - `id`, `org_id`, `external_subject` (until own authentication phase 1 the
-  subject Keycloak issued -- Keycloak went in phase 4, and rows from before
-  phase 1 may still hold one; now an opaque surrogate key that no door
-  reads), `email`, `display_name`, `status`, `last_login_at`
+  subject Keycloak issued -- Keycloak went in own authentication phase 4,
+  and rows from before phase 1 may still hold one; now an opaque surrogate
+  key that no door reads), `email`, `display_name`, `status`, `last_login_at`
 - Roles via `UserRole`
 
 ### Role / Permission / RolePermission / UserRole

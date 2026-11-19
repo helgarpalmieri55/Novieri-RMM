@@ -63,7 +63,7 @@ def _array(name: str) -> str:
 
 #: The four keys the release before own authentication phase 4 does not start
 #: without (operator decision K1, 2026-11-15): its compose file needs the two
-#: KEYCLOAK_ADMIN_*, its api, gateway, worker and migrate the two ITS_OIDC_*.
+#: KEYCLOAK_ADMIN_*, its api, gateway and worker the two ITS_OIDC_*.
 ROLLBACK_KEYS = (
     "KEYCLOAK_ADMIN_USER",
     "KEYCLOAK_ADMIN_PASSWORD",
@@ -260,13 +260,17 @@ def test_they_go_after_the_new_app_tier_is_up() -> None:
     assert up < removal < text.index('say "Verifying"')
 
 
-def _already(listing: str, home: str = "", docker_fails: str = "") -> str:
+def _already(
+    listing: str, home: str = "", docker_fails: str = "", baseline: str | None = None
+) -> str:
     """`stop_if_already_deployed` after a pull that brought nothing, with
-    HOME (where `backups/pre-upgrade-*` live) a directory of its own."""
+    HOME (where `backups/pre-upgrade-*` live) a directory of its own.
+    BASELINE is `BASE` unless one is given: `--full` leaves it empty."""
+    known = BASE if baseline is None else baseline
     return _containers(listing, docker_fails=docker_fails) + f"""
 HOME={home!r}; [ -n "$HOME" ] || HOME="$PWD"
 git() {{ echo 2f20afbe00000000000000000000000000000000; }}
-BASELINE={BASE!r}; AFTER=2f20afbe00000000000000000000000000000000
+BASELINE={known!r}; AFTER=2f20afbe00000000000000000000000000000000
 SHORT_AFTER=2f20afbe; REPO_ROOT=/opt/it-suite; RUNNING_TAG=2f20afbe
 {_array("ROLLBACK_ENV_KEYS")}
 {_fn("way_back_backup")}
@@ -343,6 +347,39 @@ rollback_help
     assert str(finishing) not in "\n".join(restore), help_
 
 
+def test_a_full_rerun_of_a_half_done_upgrade_still_names_the_way_back(tmp_path: Path) -> None:
+    """Final review of phase 4, B1. `--full` leaves BASELINE empty, and the
+    check began with `[ -n "$BASELINE" ] || return 0`: a `--full` rerun of a
+    half-done upgrade never looked for the old containers, and its closing
+    help named this run's own backup, past 0248, as "The backup to restore".
+    The check runs whenever the running tag is HEAD, whatever BASELINE is.
+    "Already deployed" stays for a known BASELINE only: with nothing of the
+    old provider left, `--full` still redeploys."""
+    made = _backups(tmp_path)
+    finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
+    old = "it-suite-keycloak-1 it-suite keycloak\n"
+    script = _already(old, home=str(tmp_path), baseline="") + f"""
+{_fn("rollback_help")}
+BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
+rollback_help
+"""
+    run = _run_bash(script)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "half_done=[1]" in run.stdout, run.stdout
+    assert f"back=[{made['0247']}]" in run.stdout, run.stdout
+    help_ = run.stdout[run.stdout.index("If you need to go back") :]
+    assert f"ITS_RESTORE_FORCE=1 ./scripts/restore.sh {made['0247']}\n" in help_, help_
+    assert "The backup to restore" not in help_, help_
+    restore = [line for line in help_.splitlines() if "restore.sh" in line]
+    assert str(finishing) not in "\n".join(restore), help_
+
+    nothing_left = _run_bash(_already("it-suite-api-1 it-suite api\n", baseline=""))
+    assert nothing_left.returncode == 0, nothing_left.stdout + nothing_left.stderr
+    assert "Already deployed" not in nothing_left.stdout, nothing_left.stdout
+    assert "CONTINUED baseline=[] " in nothing_left.stdout, nothing_left.stdout
+    assert "half_done=[0]" in nothing_left.stdout, nothing_left.stdout
+
+
 def test_without_a_backup_from_before_0248_it_says_so(tmp_path: Path) -> None:
     (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z").mkdir(parents=True)
     (tmp_path / "backups" / "pre-upgrade-2026-11-20T1015Z" / "alembic_version").write_text("0248\n")
@@ -402,6 +439,65 @@ def test_the_check_runs_before_the_diff_is_taken() -> None:
     assert text.index("\nold_identity_containers() {") < call < text.index('CHANGED="$(git')
 
 
+def _backup_step() -> str:
+    """deploy.sh's backup step as it ships: from `BACKUP_DIR=` to the
+    `backup.sh` call."""
+    match = re.search(
+        r'^BACKUP_DIR="\$HOME/backups/pre-upgrade-.*?'
+        r'^ITS_BACKUP_OLD_IDENTITY_DB=1 \./scripts/backup\.sh "\$BACKUP_DIR"$',
+        _script(),
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, "deploy.sh's backup step moved -- follow it"
+    return match.group(0)
+
+
+def test_a_rerun_in_the_same_minute_does_not_overwrite_the_backup(tmp_path: Path) -> None:
+    """Final review of phase 4, B2. The backup's name has minute resolution
+    and `backup.sh` writes into a directory that exists (`mkdir -p`), so two
+    runs in one UTC minute shared a directory: the second overwrote the
+    first's backup -- after a half-done upgrade, possibly the only one from
+    before migration 0248. deploy.sh stops instead, writing nothing there;
+    in the next minute the name is new and the backup runs."""
+    first = tmp_path / "backups" / "pre-upgrade-2026-11-20T1000Z"
+    first.mkdir(parents=True)
+    (first / "itsuite.dump").write_text("the first run's\n")
+    (tmp_path / "scripts").mkdir()
+    stub = tmp_path / "scripts" / "backup.sh"
+    stub.write_text('#!/usr/bin/env bash\nmkdir -p "$1"\necho "a rerun\'s" > "$1/itsuite.dump"\n')
+    stub.chmod(0o755)
+
+    def step(minute: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "-c", f"""
+set -euo pipefail
+die() {{ printf 'FAILED %s\\n' "$*" >&2; exit 1; }}
+date() {{ echo {minute}; }}
+HOME={str(tmp_path)!r}
+{_backup_step()}
+echo BACKED_UP
+"""],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            stdin=subprocess.DEVNULL,
+        )
+
+    rerun = step("2026-11-20T1000Z")
+    assert rerun.returncode != 0, rerun.stdout + rerun.stderr
+    assert "BACKED_UP" not in rerun.stdout, rerun.stdout
+    assert "FAILED" in rerun.stderr and "already exists" in rerun.stderr, rerun.stderr
+    assert "Wait a minute" in rerun.stderr, rerun.stderr
+    assert (first / "itsuite.dump").read_text() == "the first run's\n"
+
+    later = step("2026-11-20T1001Z")
+    assert later.returncode == 0, later.stdout + later.stderr
+    assert "BACKED_UP" in later.stdout, later.stdout
+    second = tmp_path / "backups" / "pre-upgrade-2026-11-20T1001Z" / "itsuite.dump"
+    assert second.read_text() == "a rerun's\n"
+    assert (first / "itsuite.dump").read_text() == "the first run's\n"
+
+
 OBSOLETE = re.compile(
     r"KEYCLOAK_ADMIN_(USER|PASSWORD)|ITS_OIDC_[A-Z_]+|ITS_MULTI_TENANT"
     r"|ENTRA_(TENANT_ID|CLIENT_ID|CLIENT_SECRET)|ITS_KEYCLOAK_[A-Z_]+"
@@ -417,9 +513,11 @@ def test_no_other_deploy_file_names_an_obsolete_key() -> None:
     `deploy/GO-LIVE.md`).
 
     Fix round 1:
-    - The one other file exempt is `deploy/keycloak/ci_mcp_flow.py`, by name:
-      it is Task 7's, which deletes it. The exemption was every path under
-      `deploy/keycloak/`, which would have let anything else there through.
+    - No file is exempt but those this docstring names. (Until Task 7
+      deleted it, `deploy/keycloak/ci_mcp_flow.py` was too, by name; before
+      fix round 1 the exemption was every path under `deploy/keycloak/`. The
+      final review of phase 4, B5, removed the name the deletion left
+      behind.)
     - `.env.example` may name the four keys a rollback needs, in a comment
       line, so whoever compares an upgraded `.env` with it knows which to
       keep -- never as a key, commented out or not, and none of the other
@@ -430,7 +528,6 @@ def test_no_other_deploy_file_names_an_obsolete_key() -> None:
         DEPLOY_SH,
         REPO / "deploy/README.md",
         REPO / "deploy/GO-LIVE.md",
-        REPO / "deploy/keycloak/ci_mcp_flow.py",
         REPO / "deploy/.env",
     }
     example = REPO / "deploy/.env.example"
@@ -620,7 +717,7 @@ def test_a_compose_change_checks_the_whole_deploy_directory_out() -> None:
 def test_a_rollback_past_phase_4_names_the_env_keys_it_needs() -> None:
     """The release before own authentication phase 4 needs four keys this one
     does not read: its compose file does not parse without the two
-    KEYCLOAK_ADMIN_*, and its api, gateway, worker and migrate do not start
+    KEYCLOAK_ADMIN_*, and its api, gateway and worker do not start
     without the two ITS_OIDC_*. If .env lost any, the rollback says so
     before the step that would fail."""
     old = "      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?set in .env}\n"

@@ -56,8 +56,11 @@ enforced rather than hoped for:
 
 1. **Message templates must be static.** An AST sweep over `app/` rejects
    f-strings, `.format()`, concatenation, and `str(exc)` inside a log call, and
-   pins the exact number of call sites (**70**) so the discipline cannot drift
-   unnoticed. Log the exception with `exc_info=True`; never as an argument.
+   pins the exact number of call sites so the discipline cannot drift
+   unnoticed: the live figure is the newest entry in §2.2 of
+   `docs/superpowers/specs/2026-08-14-logging-kernel-design.md`, asserted
+   exactly by `backend/tests/test_logging_discipline.py`. Log the exception
+   with `exc_info=True`; never as an argument.
 2. **A secret must be kept out of the request line, not redacted out of the
    log.** This is why the console's WebSocket token moved from `?token=` to the
    WebSocket subprotocol header: uvicorn writes the URL verbatim and no logging
@@ -154,11 +157,12 @@ the parts no script covers (the internal CA, the audit-chain HMAC key). Two
 scripts automate the database half:
 
 - `deploy/scripts/backup.sh` — globals, the application database (and, only in
-  the backup `deploy.sh` takes before an upgrade, the old identity provider's
-  while a host upgraded across own authentication phase 4 still has it), and
-  the values a restore checks itself against (`alembic_version`, RLS policy
-  count, image version). Artefacts are `600`, and it fails rather than writing
-  an empty one.
+  a backup taken before an upgrade with `ITS_BACKUP_OLD_IDENTITY_DB=1`, which
+  `deploy.sh`, and the manual upgrade's step 1, set, the old identity
+  provider's while a host upgraded across own authentication phase 4 still
+  has it), and the values a restore checks itself against
+  (`alembic_version`, RLS policy count, image version). Artefacts are `600`,
+  and it fails rather than writing an empty one.
 - `deploy/scripts/restore.sh` — refuses a non-empty target unless
   `ITS_RESTORE_FORCE=1`, creates only *absent* roles (applying a
   `pg_dumpall --roles-only` file wholesale would clobber live passwords), and
@@ -208,10 +212,11 @@ Stated here so nobody has to discover them during an incident.
   own comment.
 - **A live-host upgrade and a live-host rollback have not been exercised.**
   A backup that holds `keycloak.dump` (one from before own authentication
-  phase 4, or the one `deploy.sh` takes before an upgrade) is restored by the
-  drill when the drill is pointed at it, and the drill checks it holds tables;
-  nothing reads it after. Unpointed, the drill restores the latest nightly,
-  which has held no `keycloak.dump` since phase 4.
+  phase 4, or one taken before an upgrade with
+  `ITS_BACKUP_OLD_IDENTITY_DB=1`) is restored by the drill when the drill is
+  pointed at it, and the drill checks it holds tables; nothing reads it
+  after. Unpointed, the drill restores the latest nightly, which has held
+  no `keycloak.dump` since own authentication phase 4.
 - **The agent idle budget** (low-tens-of-MB resident, ~0% CPU) is measured for
   the capabilities that carry a benchmark, and remains a design target for those
   that do not. A capability's own spec says which it is; `CLAUDE.md` requires

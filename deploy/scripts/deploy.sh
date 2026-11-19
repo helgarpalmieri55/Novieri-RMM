@@ -182,7 +182,7 @@ fi
 # and its containers ignore them: pydantic-settings reads an environment
 # variable only for a field it declares. BUT THE RELEASE BEFORE NEEDS FOUR:
 # its compose file does not parse without KEYCLOAK_ADMIN_USER and
-# KEYCLOAK_ADMIN_PASSWORD, and its api, gateway, worker and migrate do not
+# KEYCLOAK_ADMIN_PASSWORD, and its api, gateway and worker do not
 # start without ITS_OIDC_ISSUER and ITS_OIDC_JWKS_URL. So they stay until the
 # operator closes the way back, in deploy/README.md "Retiring the old
 # identity provider's data" (operator decision K1, 2026-11-15). Named here,
@@ -330,10 +330,17 @@ way_back_backup() {
     done
     printf '%s' "$found"
 }
+#
+# WHENEVER THE RUNNING TAG IS HEAD, WHATEVER BASELINE IS. `--full` leaves
+# BASELINE empty, and a check that needed one let a `--full` rerun of a
+# half-done upgrade name its own post-0248 backup as the way back. "Already
+# deployed" still needs a known BASELINE: `--full` always redeploys.
 stop_if_already_deployed() {
-    local old_tag old
-    [ -n "$BASELINE" ] || return 0
-    [ "$(git -C "$REPO_ROOT" rev-parse "$BASELINE")" = "$AFTER" ] || return 0
+    local old_tag old running
+    [ -n "$RUNNING_TAG" ] || return 0
+    running="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${RUNNING_TAG}^{commit}" 2>/dev/null)" \
+        || return 0
+    [ "$running" = "$AFTER" ] || return 0
     old="$(old_identity_containers)" || exit 1
     if [ -n "$old" ]; then
         warn "the old identity provider's containers are still here: an upgrade past own"
@@ -358,6 +365,8 @@ stop_if_already_deployed() {
         fi
         return 0
     fi
+    [ -n "$BASELINE" ] || return 0
+    [ "$(git -C "$REPO_ROOT" rev-parse "$BASELINE")" = "$AFTER" ] || return 0
     say "Already deployed"
     note "the running image was built from HEAD ($SHORT_AFTER) and nothing was pulled."
     note "Nothing to do. Use --full to redeploy anyway."
@@ -453,6 +462,15 @@ say "Backing up"
 # Kept in a variable because it is the rollback of last resort, and the end of
 # this script has to be able to say where it is.
 BACKUP_DIR="$HOME/backups/pre-upgrade-$(date -u +%FT%H%MZ)"
+# NEVER INTO A BACKUP THAT IS ALREADY THERE. The name has minute resolution and
+# backup.sh writes into a directory that exists: a rerun within the same UTC
+# minute overwrote the first run's backup -- after an upgrade past own
+# authentication phase 4 stopped part-way, possibly the only one from before
+# migration 0248. Nothing has changed yet but the pull, so stopping costs a
+# minute.
+if [ -e "$BACKUP_DIR" ]; then
+    die "$BACKUP_DIR already exists: a deploy backed up into it less than a minute ago, and it may be the only backup from before this upgrade. Nothing was written to it. Wait a minute, then re-run ./scripts/deploy.sh"
+fi
 # With the old identity provider's database while one exists: the backup taken
 # before the phase-4 upgrade is the way back past it, and the nightly ones
 # leave that database out (backup.sh; operator decision K1, 2026-11-15).

@@ -26,10 +26,12 @@ would hand a would-be validator nothing to accept.
 
 THE DEPLOYMENT HALF READS WHAT SHIPS. No setting (the twelve phase 4
 removed, named one by one, and none like them), no compose service, image
-or router, no `deploy/keycloak/`, no console code that asks an identity
-provider to sign it out, no deleted `lib/auth.ts` come back, and no token
-verification in `app/` but the platform's own three (its access tokens, its
-loopback tokens, Microsoft's ID tokens). The `deploy` CI job asserts the
+or router, no `deploy/keycloak/`, no beat entry or worker task of it (the
+removed `keycloak-event-sweep` by name), no realm's address in any string
+literal of `app/`, no console code that asks an identity provider to sign it
+out, no deleted `lib/auth.ts` come back, and no token verification in `app/`
+but the platform's own three (its access tokens, its loopback tokens,
+Microsoft's ID tokens). The `deploy` CI job asserts the
 same of the running stack (`deploy/ci/mcp_flow.py`, and its two
 `grep -qi keycloak` checks).
 
@@ -37,9 +39,11 @@ Falsifier 10 -- no screen says "Keycloak" -- is the two guards that already
 hold it: `frontend/src/lib/noVendorNames.test.ts` and
 `backend/tests/test_no_vendor_names_backend.py`. Its documents' half is
 here: `test_docs_without_keycloak.py` (Task 10) checks a list of nine, and
-this file walks every living Markdown document in the repository, with the
-runbooks' rule for a dated line (`test_runbook_without_keycloak.DATED`:
-"phase 4" dates it, "until phase 4" does not).
+this file walks every living Markdown document in the repository, the
+kernel's spec included, with the runbooks' rule for a dated line
+(`test_runbook_without_keycloak._dated`: own authentication's phase 4 by
+name, or a date of 2026-11 or later, dates it; a bare "phase 4", "until ...
+phase 4" and "phase 4 removes" do not -- final review of phase 4, C4).
 """
 
 import ast
@@ -56,7 +60,7 @@ import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.core.config import Settings
+from app.core.config import Settings, override_settings
 from tests.auth_support import console_ready
 from tests.foreign_tokens import ISSUER, ForeignIssuer
 from tests.outbound_support import route_outbound
@@ -314,6 +318,110 @@ def test_falsifier_11_nothing_of_it_is_deployed() -> None:
     assert {name for _p, name, _r in routers()} == {"api", "minio", "web"}
 
 
+#: The worker's half of the old provider until phase 4 of own authentication
+#: (Task 5, 2026-11-15): the beat entry and the task that forwarded its
+#: credential events into the audit chain (`app.modules.keycloak_events`).
+REMOVED_WORKER_NAMES = frozenset(
+    {"keycloak-event-sweep", "keycloak_event_sweep", "app.worker.keycloak_event_sweep"}
+)
+KEYCLOAK_NAMED = re.compile(r"keycloak", re.IGNORECASE)
+WORKER = APP / "worker.py"
+
+
+def _registered_task_names(source: str) -> set[str]:
+    """Every `name=` of a `@<app>.task(...)` decorator. The worker registers
+    its tasks on the `celery_app` it builds at import, and only when settings
+    load -- in a test process they do not, and `celery_app` is None -- so the
+    registrations are read where they are written."""
+    names = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "task"
+            ):
+                for keyword in decorator.keywords:
+                    if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                        names.add(str(keyword.value.value))
+    return names
+
+
+def test_falsifier_11_the_worker_schedules_and_registers_nothing_of_it(tmp_path: Path) -> None:
+    """The beat schedule `create_celery()` builds, its entries' tasks, and
+    every task the worker registers: none is the removed sweep, and none
+    names the old provider, whatever the case. Non-vacuous: the schedule is
+    not empty, the registrations are read, and every scheduled task is one
+    of them -- so the two lists are the worker's, not an empty reading."""
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
+        database_admin_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
+        ca_dir=tmp_path / "ca",
+        signing_key_path=tmp_path / "job-signing.key",
+        redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
+    )
+    from app import worker
+
+    with override_settings(settings):
+        schedule = worker.create_celery().conf.beat_schedule
+    registered = _registered_task_names(WORKER.read_text())
+    scheduled = {str(entry["task"]) for entry in schedule.values()}
+    assert len(schedule) > 40, len(schedule)
+    assert len(registered) > 40, len(registered)
+    assert scheduled <= registered, sorted(scheduled - registered)
+
+    names = set(schedule) | scheduled | registered
+    assert names & REMOVED_WORKER_NAMES == set()
+    assert sorted(name for name in names if KEYCLOAK_NAMED.search(name)) == []
+
+
+#: A realm's address: where the console, the gateway and the worker reached
+#: the old provider (its token and admin endpoints, the compose host).
+REALM_ADDRESS = re.compile(r"/realms/|openid-connect|keycloak:8080", re.IGNORECASE)
+
+
+def _realm_literals(source: str) -> list[int]:
+    """Lines of every string literal -- an f-string's pieces and a docstring
+    included -- that holds a realm's address."""
+    return sorted(
+        {
+            node.lineno
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and REALM_ADDRESS.search(node.value)
+        }
+    )
+
+
+def test_the_realm_literal_sweep_is_not_vacuous() -> None:
+    url = 'u = f"{base}/realms/{realm}/protocol/openid-connect/token"\n'
+    assert _realm_literals(url) == [1]
+    assert _realm_literals('x = 1\nhost = "http://keycloak:8080"\n') == [2]
+    assert _realm_literals('"""Talks to /admin/realms/x."""\n') == [1]
+    assert _realm_literals("# /realms/ in a comment\nx = 1\n") == []
+    assert _realm_literals('path = "/.well-known/oauth-authorization-server"\n') == []
+
+
+def test_falsifier_11_no_code_holds_a_realm_address() -> None:
+    """No string literal in `backend/app` is a realm's address. The sweep
+    reads every module, and would see what the old clients built:
+    `kc_client.py`, `realm_config.py` and `keycloak_events/client.py` held
+    eight such lines at `dd062f8`."""
+    modules = sorted(APP.rglob("*.py"))
+    assert len(modules) > 300, len(modules)
+    assert WORKER in modules and APP / "core" / "auth" / "oauth" / "grants.py" in modules
+    found = {
+        f"{path.relative_to(APP)}:{line}"
+        for path in modules
+        for line in _realm_literals(path.read_text())
+    }
+    assert sorted(found) == []
+
+
 def _console_sources() -> list[Path]:
     """Every source file of the console that is not a test, the set the
     deleted `test_console_auth_realm.py` read."""
@@ -448,9 +556,16 @@ OPERATOR_FILES = (REPO / "CLAUDE.md",)
 #: A design direction dated on its first line ("Direction for the settings
 #: rework, 2026-09-11"), history in the phase 4 plan's Appendix D.
 HISTORY = (REPO / "docs" / "design" / "settings-language.md",)
+#: Named like a record and walked all the same (final review of phase 4, C4):
+#: the platform kernel's spec, which every module registers into and which
+#: `CLAUDE.md` holds authoritative with the rest of `docs/`. `RECORD_NAME`
+#: skipped it by name, as it skips every module's `spec.md`.
+AUTHORITATIVE = (REPO / "docs" / "kernel" / "spec.md",)
 
 
 def _is_record(path: Path) -> bool:
+    if path in AUTHORITATIVE:
+        return False
     return (
         any(path.is_relative_to(directory) for directory in RECORD_DIRS)
         or (path.parent != REPO / "docs" and RECORD_NAME.search(path.name) is not None)
@@ -471,9 +586,10 @@ def _living_documents() -> list[Path]:
 
 def _undated(text: str, name: str = "doc") -> list[str]:
     """Task 10's rule -- a line may name the old identity provider only if
-    "phase 4" is on it, on one of the three lines before or on the next --
-    with the runbooks' reading of "phase 4" (`_dated`): "until phase 4" is
-    the same words in the future tense, and dates nothing."""
+    it is dated on it, on one of the three lines before or on the next --
+    with the runbooks' reading of a date (`_dated`): own authentication's
+    phase 4 by name, or a date of 2026-11 or later, and not in the future
+    tense."""
     lines = text.splitlines()
     return [
         f"{name}:{index + 1}: {line.strip()[:100]}"
@@ -498,6 +614,11 @@ def test_falsifier_10_the_document_rule_sees_an_undated_name() -> None:
     # And history, capitalised or wrapped, is still history.
     assert _undated("Keycloak left the stack in\nPhase 4 (2026-11-15).") == []
     assert _undated("Keycloak was removed by own authentication\n*phase 4*.") == []
+    # The final review's probes (C4): the present tense of a plan, the
+    # roadmap's own Phase 4, and an "until" however far before.
+    assert _undated("The console signs people in through Keycloak; phase 4 removes it.") != []
+    assert _undated("## Phase 4 — Patch, App-deploy\n\nAuth: Keycloak as identity broker.") != []
+    assert _undated("Keycloak signs people in until it is removed in phase 4.") != []
 
 
 def test_falsifier_10_the_walk_reads_the_living_documents_and_skips_only_records() -> None:
@@ -509,13 +630,14 @@ def test_falsifier_10_the_walk_reads_the_living_documents_and_skips_only_records
         REPO / "docs" / "03-security-model.md",
         REPO / "docs" / "05-agent-spec.md",
         REPO / "deploy" / "host-network.md",
+        *AUTHORITATIVE,
     }
     assert named | set(TASK_10_LIVING) <= walked, sorted(named | set(TASK_10_LIVING) - walked)
     # Every exception is a real file, and each kind of record skips one.
-    for path in RUNBOOKS + OPERATOR_FILES + HISTORY:
+    for path in RUNBOOKS + OPERATOR_FILES + HISTORY + AUTHORITATIVE:
         assert path.is_file(), path
     skipped = (
-        REPO / "docs" / "kernel" / "spec.md",
+        REPO / "docs" / "modules" / "mdm" / "spec.md",
         REPO / "docs" / "modules" / "ai-admin" / "plan.md",
         REPO / "docs" / "kernel" / "security-review-2026-07-18.md",
     )

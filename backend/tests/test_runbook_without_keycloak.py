@@ -7,7 +7,8 @@ that retires its data on a host upgraded from before
 (`## Retiring the old identity provider's data`, which `restore.sh`,
 `backup.sh` and `deploy.sh` point at; operator decisions K1 and K2,
 2026-11-15), the dated table of what was broken on the first boots, and any
-line that says it is history by naming phase 4.
+line that says it is history by naming own authentication's phase 4, or a
+date of 2026-11 or later, in the past tense (`_dated`).
 
 And because whole sections went, every in-page link must still land on a
 heading: a deleted section is otherwise a link that scrolls nowhere.
@@ -36,22 +37,64 @@ GONE_HEADINGS = (
     "## The provisioning client",
     "### What keycloak-init still converges",
 )
-#: "phase 4" dates a line as history. "until phase 4" is the same two words in
-#: the future tense, written while Keycloak was still here, and dates nothing
-#: (fix round 1). It is matched against `_window`'s text, never a single line
-#: (Task 11, fix round 1): so "until own" at the end of one line and
-#: "authentication phase 4" at the start of the next are the future tense too.
-#: The rule cannot hear tense: a past sentence that says "until ... phase 4"
-#: is refused as well, and says "before ... phase 4 removed it" instead.
-DATED = re.compile(r"(?<!until )(?<!until own authentication )\bphase 4\b")
+#: What dates a line as history: own authentication's phase 4 BY NAME -- "own
+#: authentication phase 4", "phase 4 of own authentication", "autenticación
+#: propia, fase 4", "fase 4 de la autenticación propia" -- or a date of
+#: November 2026 or later. A bare "phase 4" is not one: the roadmap has a
+#: Phase 4 of its own (Patch, App-deploy), and it dated a Keycloak line beside
+#: it (final review of phase 4, C4). Matched against `_sentences`' text, never
+#: a single line (Task 11, fix round 1): a phrase wrapped across two lines or
+#: two `# ` comment lines reads as the words it is.
+DATED = re.compile(
+    r"\bown authentication(?: s)? phase 4\b"
+    r"|\bphase 4 of own authentication\b"
+    r"|\bautenticación propia fase 4\b"
+    r"|\bfase 4 de (?:la )?autenticación propia\b"
+    r"|\b(?:2026 1[12]|20(?:2[7-9]|[3-9][0-9]) (?:0[1-9]|1[0-2]))(?: [0-3][0-9])?\b"
+)
+#: The same words in the future tense date nothing: they were written while
+#: Keycloak was still here (fix round 1; final review, C4). An "until" before
+#: them in their sentence, however far ("until it is removed in ... phase 4"),
+#: unless another phase is named between the two ("until own authentication
+#: phase 1 ... went in own authentication phase 4": that "until" is phase
+#: 1's) -- so a past sentence that says "until ... phase 4" is refused as
+#: well, and says "before ... phase 4 removed it" instead -- and "phase 4
+#: will", "phase 4 removes".
+UNTIL = re.compile(r"\b(?:until|till|hasta)\b")
+OTHER_PHASE = re.compile(r"\b(?:phase|fase) (?!4\b)[0-9]+\b")
+FUTURE = re.compile(
+    r"(?: [0-9]{4} [0-9]{2} [0-9]{2})? (?:will|shall|is going to|removes|retires|drops"
+    r"|deletes|quita|quitará|retira|retirará)\b"
+)
+#: Where a sentence ends: `.`, `;`, `!` or `?` before a space or the end, so
+#: `deploy.sh` and `3.6` end nothing.
+SENTENCE_END = re.compile(r"[.;!?](?=\s|$)")
 
 
-def _window(lines: list[str]) -> str:
-    """Lines read as one text, the way `DATED` reads them: joined, lower-cased,
-    and every run of spaces, punctuation and markup made one space -- so
-    "Until phase 4", a sentence wrapped across two lines or two `# ` comment
-    lines, and "*phase 4*" all read as the words they are."""
-    return re.sub(r"\W+", " ", " ".join(lines)).lower()
+def _sentences(lines: list[str]) -> list[str]:
+    """Lines read as text, the way `DATED` reads them: joined, cut into
+    sentences, lower-cased, and every run of spaces, punctuation and markup
+    made one space -- so "Until phase 4", a sentence wrapped across two lines
+    or two `# ` comment lines, and "*phase 4*" all read as the words they
+    are, and an "until" in one sentence does not reach the next."""
+    return [
+        re.sub(r"\W+", " ", sentence).lower() for sentence in SENTENCE_END.split(" ".join(lines))
+    ]
+
+
+def _until(before: str) -> bool:
+    """`before` ends in an "until" that is still open: no other phase named
+    after it."""
+    untils = list(UNTIL.finditer(before))
+    return bool(untils) and OTHER_PHASE.search(before, untils[-1].end()) is None
+
+
+def _history(sentence: str) -> bool:
+    """A dating phrase in `sentence` that is not in the future tense."""
+    return any(
+        not _until(sentence[: found.start()]) and FUTURE.match(sentence, found.end()) is None
+        for found in DATED.finditer(sentence)
+    )
 
 
 def _sections(text: str) -> list[tuple[str, str]]:
@@ -69,11 +112,12 @@ def _sections(text: str) -> list[tuple[str, str]]:
 
 
 def _dated(lines: list[str], index: int) -> bool:
-    """History says when it stopped being true: "phase 4" on the line, on one
-    of the three before it (a command under its comment) or on the next one
-    (a sentence wrapped across the two). Not "until phase 4" (`DATED`), on
+    """History says when it stopped being true: own authentication's phase 4,
+    or a date of 2026-11 or later (`DATED`), on the line, on one of the three
+    before it (a command under its comment) or on the next one (a sentence
+    wrapped across the two). Not in the future tense (`UNTIL`, `FUTURE`), on
     one line or across two."""
-    return DATED.search(_window(lines[max(0, index - 3) : index + 2])) is not None
+    return any(map(_history, _sentences(lines[max(0, index - 3) : index + 2])))
 
 
 def _offenders(path: Path, allowed: tuple[str, ...] = ()) -> list[str]:
@@ -112,6 +156,38 @@ def test_the_guard_finds_a_stray_name() -> None:
     assert not _dated(["Until phase 4, Keycloak signs people in."], 0)
     assert not _dated(["# Keycloak answers until own authentication", "# phase 4."], 0)
     assert _dated(["Keycloak left the stack in", "Phase 4 (2026-11-15)."], 0)
+
+
+def test_only_own_authentications_phase_4_or_a_date_dates_a_line() -> None:
+    """Final review of phase 4, C4: the rule could not hear tense, and any
+    "phase 4" dated a line. The reviewer's probes, each passed as history:"""
+    # The present tense of a plan.
+    assert not _dated(["The console signs people in through Keycloak; phase 4 removes it."], 0)
+    assert not _dated(["Keycloak signs people in; own authentication phase 4 removes it."], 0)
+    assert not _dated(["Own authentication phase 4 will remove Keycloak."], 0)
+    # The roadmap's own Phase 4 (Patch, App-deploy) beside a Keycloak line.
+    roadmap = ["## Phase 4 — Patch, App-deploy", "", "Auth: Keycloak as identity broker."]
+    assert not _dated(roadmap, 2)
+    # "until", however far before.
+    assert not _dated(["Keycloak signs people in until it is removed in phase 4."], 0)
+    assert not _dated(["Keycloak stays until it is removed in own authentication phase 4."], 0)
+    assert not _dated(["Keycloak stays until 2026-11-15."], 0)
+    # A date from before November 2026 is not one of phase 4.
+    assert not _dated(["Keycloak's realm was imported on 2026-10-30."], 0)
+    # What does date it: own authentication's phase 4 by name, past tense,
+    # in either language and either order, or a date of 2026-11 or later.
+    assert _dated(["Keycloak was removed in phase 4 of own authentication."], 0)
+    assert _dated(["Keycloak se retiró en autenticación propia, fase 4."], 0)
+    assert _dated(["Keycloak se retiró en la fase 4 de la autenticación propia."], 0)
+    assert _dated(["Keycloak left the stack (2026-11-15)."], 0)
+    assert _dated(["Keycloak left the stack in own authentication's phase 4."], 0)
+    # And the sentence is the unit: an "until" in the sentence before does
+    # not reach it, nor one that another phase closed.
+    retire = ["Keep them until you retire them.", "Own authentication phase 4", "removed Keycloak."]
+    assert _dated(retire, 1)
+    phase_1 = "until own authentication phase 1 the subject Keycloak issued -- Keycloak went"
+    assert _dated([phase_1, "in own authentication phase 4, and rows from before"], 0)
+    assert not _dated(["Keycloak stays until own authentication phase 4 (2026-11-15)."], 0)
 
 
 def test_the_runbook_names_the_old_provider_only_where_it_retires_it() -> None:

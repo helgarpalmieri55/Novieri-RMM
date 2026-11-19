@@ -570,7 +570,8 @@ directamente a la sesión propia.
 de ser verdad, y `backend/tests/test_docs_without_keycloak.py` lo fija; `deploy/README.md`, `deploy/GO-LIVE.md` y
 `docs/07-backup-restore.md` tienen su propia guarda (`backend/tests/test_runbook_without_keycloak.py`). Las
 especificaciones y los planes fechados se quedan como registro, con una nota fechada donde aún decían «hasta la fase
-4» o describían a Keycloak como su presente.*
+4» o describían a Keycloak como su presente, en los que nombra para ello el Apéndice D del plan de la fase 4
+(`docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md`); los demás quedan como historia sin editar.*
 
 ## 10. Falsificadores
 

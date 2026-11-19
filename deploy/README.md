@@ -14,6 +14,13 @@ dispatch → mTLS delivery → verified execution on the endpoint → result →
 hash-chained audit entry, with `GET /api/v1/audit/verify` reporting
 `{"ok":true}`.
 
+**Not yet run live are the commands own authentication phase 4 (2026-11-15)
+rewrote or added**: step 3.5's two token writes, step 8's password field,
+step 9's sign-in and steps 11c and 11d of First boot, and step 1's
+`ITS_BACKUP_OLD_IDENTITY_DB=1` and step 6b of [Upgrading an existing
+deployment](#upgrading-an-existing-deployment) -- no first boot or upgrade
+on a live host has run them since they changed.
+
 The previous version of this runbook had never been run. Executing it found
 eleven defects that made it impossible to follow as written — OpenBao could not
 start, could not be initialised, and could not issue the certificates the
@@ -2489,8 +2496,8 @@ Since 2026-11-15 (own authentication phase 4) it also:
   touched. Its Verify step fails while one is left, and a `docker` that
   does not answer stops the run;
 - **keeps the old identity provider's database in the backup it takes before
-  an upgrade, and only there** (`ITS_BACKUP_OLD_IDENTITY_DB=1`); the nightly
-  backups leave it out;
+  an upgrade** (`ITS_BACKUP_OLD_IDENTITY_DB=1`, which step 1 of the manual
+  sequence below sets too); the nightly backups leave it out;
 - **names the old identity provider's `.env` keys and says to keep them**
   until [Retiring the old identity provider's
   data](#retiring-the-old-identity-providers-data).
@@ -2584,9 +2591,12 @@ docker compose exec worker python -c \
 
 ⚠ **PARTLY UNVERIFIED as a sequence.** Every individual command here was run
 during this first boot, and steps 3–7 were run repeatedly against a live
-stack as fixes landed. A true `git pull`-over-an-older-release upgrade has
-still not been performed on a live host, because this is the first
-deployment there is.
+stack as fixes landed -- except what own authentication phase 4
+(2026-11-15) rewrote or added, which no live host has run: step 1's
+`ITS_BACKUP_OLD_IDENTITY_DB=1` and step 6b here, and First boot's step 3.5
+token writes, step 8 password field, step 9 sign-in and steps 11c and 11d.
+A true `git pull`-over-an-older-release upgrade has still not been
+performed on a live host, because this is the first deployment there is.
 
 What *is* now verified, and by what:
 
@@ -2871,7 +2881,7 @@ containers on the upgrade. What a host that ran it still keeps, on purpose:
   `keycloak-events.secret` and `keycloak-bootstrap-admin.secret`;
 - four `.env` keys the release before phase 4 needs to start -- its compose
   file does not parse without `KEYCLOAK_ADMIN_USER` and
-  `KEYCLOAK_ADMIN_PASSWORD`, and its api, gateway, worker and migrate do not
+  `KEYCLOAK_ADMIN_PASSWORD`, and its api, gateway and worker do not
   start without `ITS_OIDC_ISSUER` and `ITS_OIDC_JWKS_URL` -- and the other
   keys of the old identity provider, which nothing reads at all;
 - the image `quay.io/keycloak/keycloak:26.2`.
