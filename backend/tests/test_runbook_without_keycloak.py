@@ -38,8 +38,20 @@ GONE_HEADINGS = (
 )
 #: "phase 4" dates a line as history. "until phase 4" is the same two words in
 #: the future tense, written while Keycloak was still here, and dates nothing
-#: (fix round 1).
-DATED = re.compile(r"(?<!until )(?<!until own authentication )phase 4")
+#: (fix round 1). It is matched against `_window`'s text, never a single line
+#: (Task 11, fix round 1): so "until own" at the end of one line and
+#: "authentication phase 4" at the start of the next are the future tense too.
+#: The rule cannot hear tense: a past sentence that says "until ... phase 4"
+#: is refused as well, and says "before ... phase 4 removed it" instead.
+DATED = re.compile(r"(?<!until )(?<!until own authentication )\bphase 4\b")
+
+
+def _window(lines: list[str]) -> str:
+    """Lines read as one text, the way `DATED` reads them: joined, lower-cased,
+    and every run of spaces, punctuation and markup made one space -- so
+    "Until phase 4", a sentence wrapped across two lines or two `# ` comment
+    lines, and "*phase 4*" all read as the words they are."""
+    return re.sub(r"\W+", " ", " ".join(lines)).lower()
 
 
 def _sections(text: str) -> list[tuple[str, str]]:
@@ -59,8 +71,9 @@ def _sections(text: str) -> list[tuple[str, str]]:
 def _dated(lines: list[str], index: int) -> bool:
     """History says when it stopped being true: "phase 4" on the line, on one
     of the three before it (a command under its comment) or on the next one
-    (a sentence wrapped across the two). Not "until phase 4" (`DATED`)."""
-    return any(DATED.search(line) for line in lines[max(0, index - 3) : index + 2])
+    (a sentence wrapped across the two). Not "until phase 4" (`DATED`), on
+    one line or across two."""
+    return DATED.search(_window(lines[max(0, index - 3) : index + 2])) is not None
 
 
 def _offenders(path: Path, allowed: tuple[str, ...] = ()) -> list[str]:
@@ -86,12 +99,19 @@ def test_the_guard_finds_a_stray_name() -> None:
     assert [h for h, _ in sections] == ["", "## A", "## B"]
     lines = ["# Only before own authentication", "# phase 4:", "x", "pg_restore -d keycloak"]
     assert _dated(lines, 3)
-    assert _dated(["integrated with Keycloak until own", "authentication phase 4."], 0)
+    assert _dated(["integrated with Keycloak before own", "authentication phase 4 removed it."], 0)
     assert not _dated(["# phase 4", "a", "b", "c", "pg_restore -d keycloak", "d"], 4)
     # The future tense is not history (fix round 1).
     assert not _dated(["Keycloak answers /realms until phase 4."], 0)
     assert not _dated(["Keycloak, until own authentication phase 4 removes it"], 0)
     assert _dated(["removed in own authentication phase 4 (2026-11-15)"], 0)
+    # Nor wrapped, capitalised or split across comment lines (Task 11 fix
+    # round 1); and "until" is refused in the past tense too.
+    assert not _dated(["integrated with Keycloak until own", "authentication phase 4."], 0)
+    assert not _dated(["Keycloak signs people in until", "phase 4."], 0)
+    assert not _dated(["Until phase 4, Keycloak signs people in."], 0)
+    assert not _dated(["# Keycloak answers until own authentication", "# phase 4."], 0)
+    assert _dated(["Keycloak left the stack in", "Phase 4 (2026-11-15)."], 0)
 
 
 def test_the_runbook_names_the_old_provider_only_where_it_retires_it() -> None:

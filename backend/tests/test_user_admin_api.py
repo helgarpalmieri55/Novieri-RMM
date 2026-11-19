@@ -13,8 +13,8 @@ The rules this surface keeps, and the test that would notice each breaking:
    `users.id`, audit `actor_id` among them (§0.6), so the row is marked
    `deleted` and RETAINED. `test_a_deleted_users_audit_history_is_still_resolvable`
    is the assertion that matters.
-3. **No identity provider is called** (design §1.3, D5). Every httpx request
-   that is not in-process goes to an `OutboundRecorder` (`install_outbound`),
+3. **No identity provider is called** (design §1.3, D5). Every httpx or urllib
+   request that is not in-process goes to an `OutboundRecorder` (`install_outbound`),
    so that any call would be SEEN: every `outbound.seen == []` below holds the
    rule. An invited technician's `external_subject` is `itms-local:<uuid>`.
 4. **The domain rule is enforced here too.** A console that refuses an address
@@ -38,6 +38,8 @@ per-test app only if it is not already there, so these tests pass both before
 and after `app/main.py` wires it, and never register it twice.
 """
 
+import urllib.error
+import urllib.request
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -56,77 +58,19 @@ from app.models import AuditEvent, Client, Role, User, UserRole
 from app.modules.user_admin import service as user_admin_service
 from app.modules.user_admin.api import router as users_router
 from tests.auth_support import CONSOLE, capture_mail, console_ready, signed_in
+
+# `OutboundRecorder` and `install_outbound` live in `tests/outbound_support.py`
+# since Task 11's fix round 1, built on the `route_outbound` falsifier 11
+# shares. Re-exported: `test_setup_api.py`, `test_me_locale.py` and
+# `test_mcp_admin_api.py` import them from here.
+from tests.outbound_support import OutboundRecorder as OutboundRecorder
+from tests.outbound_support import install_outbound as install_outbound
 from tests.session_support import console_headers
 
 #: Captured at import, before any fixture swaps the name: a factory that
 #: resolved `httpx.AsyncClient` by name would recurse into itself.
+#: `test_setup_api.py` builds a client that really leaves with it.
 _REAL_CLIENT = httpx.AsyncClient
-
-
-class OutboundRecorder:
-    """Every request that would have left the test process through httpx
-    (`install_outbound` says which), kept so that a call to anything outside
-    the platform would be SEEN.
-
-    Rule 3 above, and the same rule in `test_setup_api.py`, `test_me_locale.py`
-    and `test_mcp_admin_api.py`: `.seen == []` holds it. Until own
-    authentication phase 4 this was a fake Keycloak that answered its admin
-    API. Nothing is answered now: a 599, which no real server sends, so a
-    caller that broke the rule would fail visibly as well as be seen.
-    """
-
-    def __init__(self) -> None:
-        self.seen: list[httpx.Request] = []
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.seen.append(request)
-        return httpx.Response(599)
-
-
-def install_outbound(monkeypatch: pytest.MonkeyPatch) -> OutboundRecorder:
-    """From now until the test ends, every `httpx.AsyncClient` sends to a new
-    `OutboundRecorder` -- one built with no transport, and one built with a
-    network transport of its own (`app/core/egress.py` pins its addresses
-    that way). Only an in-process transport keeps itself: an ASGI client (the
-    tests', the assistant's, the MCP server's own call) or a mock.
-
-    FAIL CLOSED, NOT ONLY FOR THE CLIENTS THIS FACTORY BUILDS. A mount routes
-    a request around `transport`, so a mount that is not in-process goes to
-    the recorder too; and httpx's own network transports, sync and async,
-    answer to the recorder for as long as it is installed, so a client built
-    before it (the app's long-lived ones, built at startup), a proxy (which
-    httpx mounts as one of those transports) or a sync client is seen rather
-    than sent. The `test_the_recorder_sees_*` tests below hold each way out."""
-    recorder = OutboundRecorder()
-    in_process = (httpx.ASGITransport, httpx.MockTransport)
-
-    def to_recorder() -> httpx.MockTransport:
-        return httpx.MockTransport(recorder.handler)
-
-    def factory(*args: Any, **kw: Any) -> httpx.AsyncClient:
-        if not isinstance(kw.get("transport"), in_process):
-            kw["transport"] = to_recorder()
-        if kw.get("mounts"):
-            # `None` is httpx's "this pattern uses `transport`", kept as it is.
-            kw["mounts"] = {
-                pattern: mounted if mounted is None or isinstance(mounted, in_process)
-                else to_recorder()
-                for pattern, mounted in kw["mounts"].items()
-            }
-        return _REAL_CLIENT(*args, **kw)
-
-    async def network_async(
-        self: httpx.AsyncHTTPTransport, request: httpx.Request
-    ) -> httpx.Response:
-        return recorder.handler(request)
-
-    def network_sync(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
-        return recorder.handler(request)
-
-    monkeypatch.setattr(httpx, "AsyncClient", factory)
-    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", network_async)
-    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", network_sync)
-    return recorder
 
 
 @pytest.fixture()
@@ -147,7 +91,7 @@ def users_env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 # --------------------------------------------------------------------------- #
 # The recorder itself: `outbound.seen == []` means nothing left only if every
 # way out is seen. Each case below is a way a request could leave a test
-# process through httpx, and the request must reach the recorder and get its
+# process through httpx or urllib, and the request must reach the recorder and get its
 # 599 rather than a socket (own authentication phase 4, Task 5). `.invalid`
 # never resolves (RFC 6761 §6.4), so a recorder that let one through fails
 # with a connect error rather than reaching anyone.
@@ -250,6 +194,19 @@ def test_the_recorder_sees_a_synchronous_client(monkeypatch: pytest.MonkeyPatch)
         response = client.get(_AWAY)
 
     assert response.status_code == 599
+    assert [str(request.url) for request in outbound.seen] == [_AWAY]
+
+
+def test_the_recorder_sees_a_urllib_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """urllib, the way PyJWT's JWKS client (`PyJWKClient`) fetches keys: seen,
+    and its 599 raised as the `HTTPError` urllib raises for any status of 400
+    or more (Task 11, fix round 1)."""
+    outbound = install_outbound(monkeypatch)
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(_AWAY, timeout=5)
+
+    assert refused.value.code == 599
     assert [str(request.url) for request in outbound.seen] == [_AWAY]
 
 

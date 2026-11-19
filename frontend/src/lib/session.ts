@@ -88,8 +88,7 @@ export const DEFAULT_AFTER_SIGN_IN = "/";
  * (own-auth Task 11). Prefixes: `/sign-in/factor` is under `/sign-in`. The
  * emailed and server-made links (`/invite`, `/reset-password`, `/recover`)
  * carry their token in the fragment, never in the path. None begins with a
- * prefix the edge sends elsewhere (`/api`, `/enroll`, `/i/`, `/mcp`,
- * `/.well-known`, `/realms`, `/resources`, `/js`; plan decision D19).
+ * prefix of `EDGE_PREFIXES` below (plan decision D19).
  */
 export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite", "/recover", "/portal/sign-in"];
 
@@ -152,7 +151,20 @@ export function safeNext(raw: unknown): string {
   return raw;
 }
 
-/** Paths the edge serves itself, never the console's router. */
+/**
+ * Prefixes that are no page of the console, refused as a `?next=` target.
+ * The edge sends `/i`, `/api`, `/enroll` and `/mcp` to the api, and of
+ * `/.well-known` only the OAuth and OpenID documents (`deploy/docker-
+ * compose.yml`, the `api` router); the console has no page under any of
+ * them. `/realms`, `/resources` and `/js` were the old identity provider's
+ * before own authentication phase 4 retired it; since then the edge sends
+ * them to the console, which has no page under them (`modules/auth/
+ * __tests__/routes.test.ts`). They stay refused: the screen costs nothing,
+ * and on a host upgraded by hand that still runs the old provider's
+ * container, its Traefik labels can still route them to it
+ * (`deploy/README.md`, "Upgrading an existing deployment", step 6b, which
+ * removes it).
+ */
 const EDGE_PREFIXES: readonly string[] = ["/i", "/api", "/enroll", "/mcp", "/.well-known", "/realms", "/resources", "/js"];
 
 /**

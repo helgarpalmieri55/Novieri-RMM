@@ -250,9 +250,9 @@ size of that job then.
 requested: `frontend/src/lib/noVendorNames.test.ts` scans string literals and
 JSX text and fails the build. The rule is scoped to what a user can see —
 imports, type names and comments are exempt, because the platform did
-integrate with Keycloak until own authentication phase 4, and source that
-pretended otherwise would have been lying about its own history. The
-reasoning generalises: a buyer should never need to learn that there is a
+integrate with Keycloak before own authentication phase 4 removed it, and
+source that pretended otherwise would have been lying about its own history.
+The reasoning generalises: a buyer should never need to learn that there is a
 second system behind the one they bought.
 
 **Voice, as practised in the product's own copy.** Say what happened and what
