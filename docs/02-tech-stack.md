@@ -65,7 +65,7 @@ Detail in `docs/modules/remote-control.md`.
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Identity | **The platform's own sign-in and OAuth 2.1 server** | Password + TOTP or passkey, Microsoft sign-in, sessions, and the OAuth server AI apps connect through (own authentication design 2026-11-04). Keycloak filled this row until own authentication phase 4 (2026-11-15). |
+| Identity | **The platform's own sign-in and OAuth 2.1 server** | Password + TOTP or passkey, Microsoft sign-in, sessions, and the OAuth server AI apps connect through (own authentication design 2026-11-04). Keycloak filled this row before own authentication phase 4 removed it (2026-11-15). |
 | Secrets / credential vault | **HashiCorp Vault** (transit + KV) | Consistent with Sentinel; envelope encryption for stored admin credentials; decrypt-at-use only |
 | Agent PKI / internal CA | **Vault PKI** or **step-ca** | Issues and rotates agent client certificates for mTLS enrollment |
 
