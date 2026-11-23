@@ -1,0 +1,365 @@
+{
+  "direction": "A",
+  "name": "Cordillera",
+  "note": "Light theme only. One accent; info shares its hue. Ratios are WCAG 2.x, computed by build.js.",
+  "color": {
+    "rail": {
+      "background": "#101b30",
+      "hover": "#1b2945",
+      "text": "#a9b6cc",
+      "textDim": "#8592ab",
+      "activeBackground": "#1b2945",
+      "activeText": "#ffffff",
+      "activeMark": "#8fa6ff",
+      "brand": "#ffffff"
+    },
+    "page": {
+      "background": "#f3f5f8",
+      "surface": "#ffffff",
+      "surfaceHover": "#f7f9fc",
+      "border": "#e1e6ee",
+      "borderControl": "#7b8599",
+      "text": "#111a2b",
+      "textSecondary": "#536077"
+    },
+    "accent": {
+      "base": "#2747c9",
+      "hover": "#203cac",
+      "pressed": "#1a3190",
+      "wash": "#e9edfc",
+      "ink": "#ffffff",
+      "focusRing": "#2747c9"
+    },
+    "severity": {
+      "ok": {
+        "ink": "#17703f",
+        "wash": "#e5f4ea"
+      },
+      "info": {
+        "ink": "#2747c9",
+        "wash": "#e9edfc"
+      },
+      "warning": {
+        "ink": "#8d5a00",
+        "wash": "#fcf1dc"
+      },
+      "critical": {
+        "ink": "#b8172c",
+        "wash": "#fcebed"
+      },
+      "unknown": {
+        "ink": "#586274",
+        "wash": "#edf0f4"
+      }
+    },
+    "brand": {
+      "symbolOnLight": "#2747c9",
+      "wordmarkOnLight": "#111a2b",
+      "descriptorOnLight": "#536077",
+      "faviconTile": "#2747c9",
+      "faviconInk": "#ffffff"
+    }
+  },
+  "type": {
+    "family": "Inter (self-hosted, as today)",
+    "h1": "22px/600",
+    "h2": "15px/600",
+    "body": "13.5px/400",
+    "small": "12px",
+    "caption": "10.5px uppercase 0.1em",
+    "kpi": "26px/600"
+  },
+  "radius": {
+    "control": "6px",
+    "panel": "10px",
+    "chip": "6px",
+    "badge": "4px",
+    "avatar": "50%"
+  },
+  "shadow": {
+    "resting": "0 1px 2px rgba(16,27,48,.05), 0 6px 20px rgba(16,27,48,.06)",
+    "overlay": "0 1px 2px rgba(16,27,48,.05), 0 6px 20px rgba(16,27,48,.06)"
+  },
+  "contrast": [
+    {
+      "use": "Texto del riel (ítems, 13,5 px)",
+      "fg": "railText #a9b6cc",
+      "bg": "rail #101b30",
+      "ratio": 8.39,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Texto del riel sobre hover",
+      "fg": "railText #a9b6cc",
+      "bg": "railLifted #1b2945",
+      "ratio": 7.07,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Ítem activo: texto",
+      "fg": "railActiveText #ffffff",
+      "bg": "railLifted #1b2945",
+      "ratio": 14.49,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Ítem activo: icono y marca",
+      "fg": "railMark #8fa6ff",
+      "bg": "railLifted #1b2945",
+      "ratio": 6.25,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Contadores (12 px)",
+      "fg": "railDim #8592ab",
+      "bg": "rail #101b30",
+      "ratio": 5.48,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Contadores sobre hover",
+      "fg": "railDim #8592ab",
+      "bg": "railLifted #1b2945",
+      "ratio": 4.62,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Contador de alertas (blanco sobre crítico)",
+      "fg": "blanco #ffffff",
+      "bg": "crit #b8172c",
+      "ratio": 6.57,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Logotipo sobre el riel (logo, sin mínimo)",
+      "fg": "railBrand #ffffff",
+      "bg": "rail #101b30",
+      "ratio": 17.19,
+      "minimum": null,
+      "pass": null
+    },
+    {
+      "use": "Avatar: iniciales blancas sobre el riel",
+      "fg": "blanco #ffffff",
+      "bg": "rail #101b30",
+      "ratio": 17.19,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Símbolo: trazo sobre su placa (favicon)",
+      "fg": "favInk #ffffff",
+      "bg": "favTile #2747c9",
+      "ratio": 7.42,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Texto principal sobre superficie",
+      "fg": "text #111a2b",
+      "bg": "surface #ffffff",
+      "ratio": 17.41,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Texto principal sobre fondo de página",
+      "fg": "text #111a2b",
+      "bg": "page #f3f5f8",
+      "ratio": 15.94,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Texto secundario sobre superficie",
+      "fg": "text2 #536077",
+      "bg": "surface #ffffff",
+      "ratio": 6.35,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Texto secundario sobre fondo de página",
+      "fg": "text2 #536077",
+      "bg": "page #f3f5f8",
+      "ratio": 5.81,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Texto secundario sobre fila en hover",
+      "fg": "text2 #536077",
+      "bg": "surfaceHover #f7f9fc",
+      "ratio": 6.02,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Borde de control (campo, botón, chip)",
+      "fg": "borderControl #7b8599",
+      "bg": "surface #ffffff",
+      "ratio": 3.71,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Borde de control sobre fondo de página",
+      "fg": "borderControl #7b8599",
+      "bg": "page #f3f5f8",
+      "ratio": 3.4,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Línea divisoria (decorativa, sin mínimo)",
+      "fg": "border #e1e6ee",
+      "bg": "surface #ffffff",
+      "ratio": 1.25,
+      "minimum": null,
+      "pass": null
+    },
+    {
+      "use": "Enlace sobre superficie",
+      "fg": "accent #2747c9",
+      "bg": "surface #ffffff",
+      "ratio": 7.42,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Enlace sobre fondo de página",
+      "fg": "accent #2747c9",
+      "bg": "page #f3f5f8",
+      "ratio": 6.79,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Botón primario: texto",
+      "fg": "accentInk #ffffff",
+      "bg": "accent #2747c9",
+      "ratio": 7.42,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Botón primario en hover: texto",
+      "fg": "accentInk #ffffff",
+      "bg": "accentHover #203cac",
+      "ratio": 9.12,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Botón primario presionado: texto",
+      "fg": "accentInk #ffffff",
+      "bg": "accentPressed #1a3190",
+      "ratio": 11.13,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Anillo de foco sobre superficie",
+      "fg": "accent #2747c9",
+      "bg": "surface #ffffff",
+      "ratio": 7.42,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Anillo de foco sobre fondo de página",
+      "fg": "accent #2747c9",
+      "bg": "page #f3f5f8",
+      "ratio": 6.79,
+      "minimum": 3,
+      "pass": true
+    },
+    {
+      "use": "Chip seleccionado: texto sobre lavado",
+      "fg": "accent #2747c9",
+      "bg": "accentWash #e9edfc",
+      "ratio": 6.35,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Correcto: tinta sobre lavado",
+      "fg": "ok #17703f",
+      "bg": "okWash #e5f4ea",
+      "ratio": 5.39,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Información: tinta sobre lavado",
+      "fg": "info #2747c9",
+      "bg": "infoWash #e9edfc",
+      "ratio": 6.35,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Advertencia: tinta sobre lavado",
+      "fg": "warn #8d5a00",
+      "bg": "warnWash #fcf1dc",
+      "ratio": 5.22,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Crítico: tinta sobre lavado",
+      "fg": "crit #b8172c",
+      "bg": "critWash #fcebed",
+      "ratio": 5.71,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Desconocido: tinta sobre lavado",
+      "fg": "unk #586274",
+      "bg": "unkWash #edf0f4",
+      "ratio": 5.38,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Correcto: tinta sobre superficie",
+      "fg": "ok #17703f",
+      "bg": "surface #ffffff",
+      "ratio": 6.13,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Advertencia: tinta sobre superficie",
+      "fg": "warn #8d5a00",
+      "bg": "surface #ffffff",
+      "ratio": 5.84,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Crítico: tinta sobre superficie",
+      "fg": "crit #b8172c",
+      "bg": "surface #ffffff",
+      "ratio": 6.57,
+      "minimum": 4.5,
+      "pass": true
+    },
+    {
+      "use": "Desconocido: tinta sobre superficie",
+      "fg": "unk #586274",
+      "bg": "surface #ffffff",
+      "ratio": 6.15,
+      "minimum": 4.5,
+      "pass": true
+    }
+  ]
+}

@@ -137,9 +137,31 @@ versión de uno de estos patrones.
 
 ### 3.1 La marca
 
-La dirección elegida por el operador se transcribe a `DESIGN.md` y a
-`frontend/src/index.css`. Sus valores exactos (tokens, ratios de contraste,
-logotipo y símbolo en SVG) están en `docs/design/marca/`, que este proyecto añade.
+**El operador eligió la dirección A, «Cordillera»** (2026-11-23), entre tres
+propuestas. Las tres están en `docs/design/marca/propuestas-2026-11-23.html`.
+
+- **Barra lateral:** azul noche `#101b30`.
+- **Acento:** cobalto `#2747c9`. Sirve para la acción principal, los enlaces, el
+  anillo de foco y la severidad «info», como hoy.
+- **Página:** fondo `#f3f5f8` y superficie blanca.
+- **Severidades:**
+  - ok `#17703f`
+  - advertencia `#8d5a00`
+  - crítico `#b8172c`
+  - desconocido `#586274`
+- **Logotipo y símbolo:** «NOVIERI» en mayúsculas y una N en zigzag que se lee
+  como dos picos. Hay favicon de 16 y 32 px.
+- **Radios:** 6 px en controles y chips, 10 px en paneles y 4 px en las
+  etiquetas de estado. Los chips y las etiquetas dejan de ser píldoras. Se
+  conserva la única sombra de hoy.
+- **Tipografía:** Inter autoalojada y la escala 22/15/13.5/12/10.5/26, sin
+  cambios.
+
+Los valores exactos, con la tabla de contraste calculada (35 pares, todos AA),
+están en `docs/design/marca/novieri-tokens.json`. El logotipo, el símbolo, el
+favicon y el conjunto «Novieri RMM» están en
+`docs/design/marca/novieri-*.svg`. Se transcriben a `DESIGN.md` y a
+`frontend/src/index.css`.
 
 ### 3.2 Lo que se conserva de `DESIGN.md`
 
