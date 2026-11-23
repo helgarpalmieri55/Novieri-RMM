@@ -27,7 +27,7 @@ const STATUS: PlatformStatus = {
   probes: [
     { name: "database", status: "ok", duration_ms: 4, reason: null, detail: null },
     { name: "vault", status: "down", duration_ms: 812, reason: "sealed", detail: { sealed: true } },
-    { name: "jwks", status: "ok", duration_ms: 2, reason: null, detail: { keys: 2 } },
+    { name: "ca", status: "ok", duration_ms: 2, reason: null, detail: null },
     {
       name: "backup.nightly",
       status: "degraded",
@@ -105,7 +105,6 @@ describe("the platform status page in Spanish", () => {
     expect(within(dependencies).getByText("Sellada")).toBeInTheDocument();
     expect(within(dependencies).getByText("Desactualizada")).toBeInTheDocument();
     expect(within(dependencies).getByText("Bóveda sellada: sí")).toBeInTheDocument();
-    expect(within(dependencies).getByText("Claves: 2")).toBeInTheDocument();
     expect(
       within(dependencies).getByText("Configurado: sí · Horas desde el último éxito: 30 · Se ha ejecutado alguna vez: no"),
     ).toBeInTheDocument();

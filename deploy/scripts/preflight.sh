@@ -2,7 +2,7 @@
 #
 # Pre-flight for a first deploy. Run from `deploy/`, before `docker compose up`.
 #
-# WHY THIS EXISTS. GO-LIVE.md is seven sections of things that must be changed
+# WHY THIS EXISTS. GO-LIVE.md is eight sections of things that must be changed
 # from defaults, and the failure mode of a checklist is a human reading it at
 # the end of a long day and being sure they did step 4. Every check below is
 # something the checklist already requires; this just refuses instead of
@@ -38,7 +38,7 @@ else
 fi
 
 # --- no placeholder secrets ----------------------------------------------
-# All seven ship as `change-me`. The two OpenBao tokens are legitimately still
+# All six ship as `change-me`. The two OpenBao tokens are legitimately still
 # `change-me` until first boot has run, so they are reported separately rather
 # than blocking a first `up`.
 first_boot_only="ITS_OPENBAO_TOKEN OPENBAO_TOKEN"
@@ -146,13 +146,16 @@ if [ "$tls_present" -eq 1 ]; then
   #    its output, not its status. So this greps the text. Testing the exit
   #    code would make the check pass for every certificate ever presented,
   #    which is worse than having no check at all: it would read as verified.
-  host="$(grep -E '^ITS_OIDC_ISSUER=' .env \
-          | sed -E 's|^[^=]+=https?://([^/:]+).*|\1|' || true)"
+  #    The console's own address since own authentication phase 4 (until
+  #    then the old identity provider's issuer, on the same host). `sed -n
+  #    ...p` so a blank value yields nothing rather than the whole line.
+  host="$(grep -E '^ITS_PUBLIC_CONSOLE_URL=' .env | tail -1 \
+          | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
   if [ -z "$host" ] || [ "$host" = "your-host" ]; then
-    refuse "ITS_OIDC_ISSUER does not name a real host, so the certificate cannot be checked against it and no OIDC login will work. Set it to your operator hostname (README step 1)."
+    refuse "ITS_PUBLIC_CONSOLE_URL does not name a real host, so the certificate cannot be checked against it and nobody can sign in. Set it to the address people open the console at (README step 1)."
   elif ! openssl x509 -in certs/fullchain.pem -noout -checkhost "$host" 2>/dev/null \
         | grep -q 'does match'; then
-    refuse "certs/fullchain.pem does not cover '$host' (the host in ITS_OIDC_ISSUER). Traefik will serve it anyway and every browser and every agent will reject it."
+    refuse "certs/fullchain.pem does not cover '$host' (the host in ITS_PUBLIC_CONSOLE_URL). Traefik will serve it anyway and every browser and every agent will reject it."
   else
     ok "certs/fullchain.pem covers $host"
   fi
@@ -180,7 +183,7 @@ fi
 echo
 if [ "$fail" -eq 0 ]; then
   echo "No known-bad state found. This does not mean the deployment is correct --"
-  echo "work through GO-LIVE.md §2 (Keycloak), §4 (OpenBao seal), §5 (gateway cert)"
+  echo "work through GO-LIVE.md §2 (the first administrator), §4 (OpenBao seal), §5 (gateway cert)"
   echo "and §6 (back these up) before anything real touches it."
 else
   echo "Refused. Fix the items above and run again."

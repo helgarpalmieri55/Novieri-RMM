@@ -355,9 +355,11 @@ func mustBuild() *Registry {
 	// HANDOFF.md §5): a Linux root not on an LVM logical volume still refuses;
 	// the one real-LVM test skips everywhere this project has run; the VSS
 	// and APFS providers have never executed, and VSS never checks writer
-	// status, so it can report success over torn application data; and the
-	// restore leg of `scripts/verify_backup_run.py` has never run against a
-	// real object store. The plan that closes this is
+	// status, so it can report success over torn application data; and no CI
+	// job runs this binary's backup against this control plane's gateway (the
+	// `agent` job's MinIO end to end fakes the control plane,
+	// backend/tests/test_backup_e2e_minio.py fakes the agent). The plan that
+	// closes this is
 	// docs/modules/backup/spec-server-backup.md.
 	must(r.Register(deploy.JobTypeScript, deploy.Process.Run))
 	must(r.Register(deploy.JobTypeDeploy, deploy.Process.Deploy))

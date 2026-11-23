@@ -99,15 +99,6 @@ PHASE_18_ALSO = {"ai_portal"}
 # invariant 2a governs, and 2a is a clause about a path to UNENROLLED machines
 # -- there is no numbered phase for that, because every numbered phase assumes
 # an endpoint the control plane can already reach.
-#
-# `keycloak_events` (added 2026-08-18) is unphased for a different and narrower
-# reason: it is NOT A BUSINESS MODULE. It adds no routes, no job types and no
-# frontend folder -- it is a worker sweep implementing one clause of
-# `docs/modules/console-auth/spec.md` §4, which is sign-in and deployment work
-# rather than a numbered phase. It lives under `app/modules/` because that is
-# where a self-contained package with its own migration belongs, not because it
-# is a module in the roadmap's sense. A roadmap row for it would claim a
-# deliverable that does not exist.
 EXPECTED_UNPHASED = frozenset(
     {
         "agent_distribution",
@@ -115,7 +106,6 @@ EXPECTED_UNPHASED = frozenset(
         # Self-update (spec-self-update.md): keeping enrolled agents current,
         # the third agent-distribution path. Phase 0 work like the two above.
         "agent_update",
-        "keycloak_events",
         "email_intake",
         "notification",
         # Answers review 2026-09-23 finding 5; not a numbered roadmap phase.
@@ -188,10 +178,14 @@ def test_no_module_ships_without_a_roadmap_phase() -> None:
     a reason.
     """
     phased = {pkg for _n, _name, pkg, _fe in PHASES} | PHASE_18_ALSO
+    # A shipped module is a package. A directory without `__init__.py` is
+    # what a removed module leaves in a working copy that ran its tests
+    # before the removal -- `__pycache__` alone, which git does not track
+    # (own authentication phase 4 removed `keycloak_events` that way).
     shipped = {
         d.name
         for d in (REPO / "backend/app/modules").iterdir()
-        if d.is_dir() and not d.name.startswith("__")
+        if d.is_dir() and not d.name.startswith("__") and (d / "__init__.py").is_file()
     }
     unphased = shipped - phased
     assert unphased == EXPECTED_UNPHASED, (

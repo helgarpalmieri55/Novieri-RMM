@@ -29,31 +29,15 @@ class Settings(BaseSettings):
     database_portal_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
-    oidc_issuer: str
-    oidc_audience: str = "it-suite"
-    oidc_jwks_url: str
-    oidc_org_claim: str = "org"
-    # The OIDC client the console's SPA signed in with at Keycloak until own
-    # authentication phase 1. Read only by
-    # `app.core.security.require_person_mcp_token`, which refused at `/mcp` a
-    # Keycloak token whose `azp` is this client, so a grant consented to for
-    # the console was never an MCP one. UNUSED SINCE PHASE 3: `/mcp` accepts
-    # only the platform's own access tokens, and nothing in `backend/app`
-    # calls `require_person_mcp_token`, `security.validate_token` or
-    # `deps.jwks`; this setting, `multi_tenant` below and those functions go
-    # with Keycloak in phase 4. No non-MCP door reads a bearer at all since
-    # phase 1's Task 13 -- the console signs in with the platform's own
-    # session. Optional: nothing under deploy/ overrides the default, so no
-    # `.env` change is needed.
-    oidc_console_client_id: str = "it-suite-web"
     # The organization this deployment signs people in to (`flows.login`, the
-    # OAuth server's `store.deployment_org`); until phase 3 also the fallback
-    # `security.validate_token` gave a Keycloak token with no org claim.
+    # OAuth server's `store.deployment_org`, the setup claim's slug and the
+    # recovery command). One organization per deployment. The Keycloak-era
+    # `ITS_OIDC_*` and `ITS_MULTI_TENANT` settings went with Keycloak in own
+    # authentication phase 4; a `.env` that still sets them starts as before:
+    # the containers get them as environment variables, which are read only
+    # for a field that exists, and a dotenv file's extra keys are dropped by
+    # `extra="ignore"` (`tests/test_config.py`, both ways).
     default_org_slug: str | None = None
-    # When true (multi-tenant deployments), `security.validate_token` rejects a
-    # Keycloak token missing the org claim rather than falling back to
-    # default_org_slug. Unused since phase 3, with that function (above).
-    multi_tenant: bool = False
 
     signing_backend: Literal["local", "openbao"] = "local"
     signing_key_path: Path | None = None
@@ -78,39 +62,6 @@ class Settings(BaseSettings):
     # Where the host's backup scripts leave their results, mounted read-only
     # (deploy/docker-compose.yml). Absent means "not set up", not a failure.
     backup_status_dir: Path = Path("/var/lib/its/backup-status")
-
-    # KEYCLOAK EVENT FORWARDING (docs/modules/console-auth/spec.md §7.1).
-    #
-    # Passkey registration, credential removal and identity-provider linking
-    # live only in Keycloak's own event log, which is not tamper-evident and is
-    # not in the hash chain. These four settings let a worker sweep copy them
-    # into it.
-    #
-    # ABSENT BY DEFAULT, AND THAT IS A SUPPORTED STATE: an operator who has not
-    # set this up has not broken anything. The sweep no-ops and the
-    # `keycloak_events` probe reports `configured: false`, so the gap is
-    # VISIBLE -- an audit feature that silently does nothing is worse than one
-    # that does not exist, because somebody reads the chain and believes it is
-    # complete.
-    #
-    # THE CREDENTIAL IS `view-events` ONLY, on a dedicated service-account
-    # client. Not the bootstrap admin: that account can reset any password and
-    # create any user, and GO-LIVE tells the operator to delete it. The secret
-    # is a FILE PATH, following `audit_hmac_key_path` -- a secret in an
-    # environment variable is readable from `/proc` and lands in every
-    # `docker inspect`.
-    keycloak_admin_url: str | None = None
-    keycloak_realm: str = "it-suite"
-    keycloak_events_client_id: str = "it-suite-events"
-    keycloak_events_secret_path: Path | None = None
-
-    # Provisioning: a SEPARATE service-account client from `it-suite-events`,
-    # holding `manage-users`. Separate because the two credentials have wildly
-    # different worst cases -- one reads an event log, the other can create any
-    # user and reset any password in the realm -- and a single client holding
-    # both means the smaller job carries the bigger blast radius forever.
-    keycloak_admin_client_id: str = "it-suite-provisioning"
-    keycloak_admin_secret_path: Path | None = None
 
     # The console email-domain allowlist. An address is admitted iff its domain
     # equals this or ends with "." + this.
@@ -164,8 +115,7 @@ class Settings(BaseSettings):
     # opens RFC 7591 registration, and only while MCP is on. A client metadata
     # document needs no opt-in (operator decision C2, 2026-11-06). Read since
     # own authentication phase 3 by the platform's own authorization server
-    # (`app/core/auth/oauth/policy.py::registration_open`); keycloak-init reads
-    # the same `.env` line until phase 4 retires it.
+    # (`app/core/auth/oauth/policy.py::registration_open`).
     mcp_registration: str = ""
     # The PUBLIC half of the offline release-signing key, base64 Ed25519: the
     # `release-signing-key.pub` asset of an agent release (release-agent.yml).

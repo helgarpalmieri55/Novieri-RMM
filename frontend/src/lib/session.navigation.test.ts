@@ -28,7 +28,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
-import { enterConsole, goToSignIn, navigation, signOut } from "./session";
+import { enterConsole, goToSignIn, navigation, signOut, signOutEverywhere } from "./session";
 
 let assign: ReturnType<typeof vi.spyOn>;
 let replace: ReturnType<typeof vi.spyOn>;
@@ -114,6 +114,36 @@ describe("signOut", () => {
     await expect(signOut({ logout: vi.fn().mockRejectedValue(new ApiError(503, "")) })).rejects.toBeInstanceOf(
       ApiError,
     );
+    expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+describe("signOutEverywhere (operator decision E1, 2026-11-15)", () => {
+  it("asks the server to end every session, then leaves for the page it is given", async () => {
+    const logoutEverywhere = vi.fn().mockResolvedValue(undefined);
+    await signOutEverywhere({ logoutEverywhere });
+    expect(logoutEverywhere).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+    await signOutEverywhere({ logoutEverywhere }, "/portal/sign-in");
+    expect(assign).toHaveBeenLastCalledWith("/portal/sign-in");
+  });
+
+  it("counts a 401 as signed out: this session had already ended, so it leaves for the sign-in page", async () => {
+    await signOutEverywhere({ logoutEverywhere: vi.fn().mockRejectedValue(new ApiError(401, "")) }, "/portal/sign-in");
+    expect(assign).toHaveBeenCalledExactlyOnceWith("/portal/sign-in");
+  });
+
+  it("rejects, and stays, on any other refusal", async () => {
+    await expect(
+      signOutEverywhere({ logoutEverywhere: vi.fn().mockRejectedValue(new ApiError(503, "")) }),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("stays, and rejects, when the server never heard", async () => {
+    await expect(
+      signOutEverywhere({ logoutEverywhere: vi.fn().mockRejectedValue(new TypeError("Failed to fetch")) }),
+    ).rejects.toThrow("Failed to fetch");
     expect(assign).not.toHaveBeenCalled();
   });
 });

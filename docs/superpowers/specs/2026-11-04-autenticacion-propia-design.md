@@ -337,7 +337,24 @@ tiempo.
   [S27, S30]. `iss`, `aud`, `kid` y algoritmo fijados [S38].
 - **Refresco:** opaco, guardado como hash, **rota en cada uso**; reutilizar uno ya usado revoca toda la familia;
   caduca a los 30 días sin uso [S16, S30, S33]. Un refresh inválido responde `invalid_grant` [S33].
+- *Enmienda del 2026-11-15 (decisión del operador E2; plan de la fase 4, Task 3).* Un refresh token ya usado de una
+  concesión viva se guarda 30 días desde su uso, y después lo borra el barrido diario (`oauth_used_refresh_tokens`).
+  Presentarlo una vez borrado es un `invalid_grant` simple, como un token que el servidor no conoce: ya no revoca la
+  familia. RFC 9700 §4.14.2 basa la detección en que el servidor guarda la relación del token invalidado; E2 le pone
+  un límite, que va desde el primer uso del token (su `used_at`), lo hiciera quien lo hiciera, hasta el primer
+  barrido diario pasados 30 días. Lo que cuesta, en los dos sentidos. Si alguien copió el token y refrescó antes que
+  la app, y la app vuelve con su copia pasado ese límite, la app recibe `invalid_grant` y la concesión copiada sigue
+  hasta que se revoca o pasa 30 días sin uso. Si la app refrescó primero y quien copió el token lo presenta pasado
+  ese límite, antes de E2 eso terminaba la concesión y escribía `mcp.refresh_reused`, la señal de la brecha de
+  RFC 9700 §4.14.2; ahora es un `invalid_grant` que nada distingue de un token desconocido: el ladrón no gana nada,
+  pero la fuga queda sin registrar. Lo dice el riesgo residual del runbook «A used refresh token is remembered for
+  30 days».
 - Revocar un cliente de IA en Ajustes corta su acceso en la siguiente llamada (1c(d)).
+- *Enmienda del 2026-11-15 (decisión del operador E1; plan de la fase 4, Task 1).* «Cerrar sesión en todas partes»,
+  el de la persona y el de un administrador (`DELETE /api/v1/users/{id}/sessions`), termina también sus concesiones
+  de IA y los códigos que una app aún no canjeó, en la misma transacción y con el recuento en el evento
+  (`ai_grants_revoked`). El del administrador sigue sin olvidar los equipos recordados. La consola ofrece el botón a
+  la persona en su página de seguridad, y al contacto en la del portal.
 
 ### 5.4 Registro abierto, con límites
 
@@ -520,7 +537,13 @@ Cada fase con su plan, su PR y su revisión:
 3. **Servidor OAuth para MCP y token interno del asistente:** §5.
 4. **Retiro de Keycloak:** servicios, base de datos, `deploy/keycloak/`, rutas de Traefik, respaldo y restauración,
    preflight, secretos `keycloak-*`, claves `.env` `KEYCLOAK_*`, `ITS_OIDC_*`, `ENTRA_*`; la prueba de despliegue de la
-   CI y `ci_mcp_flow.py`, reescrita contra el servidor propio.
+   CI y `ci_mcp_flow.py`, reescrita contra el servidor propio. *Plan:
+   `docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md` (2026-11-15). La base `keycloak`, los secretos
+   `keycloak-*` y las claves `.env` del proveedor de identidad de antes los retira el operador en un paso del runbook,
+   cuando decide cerrar la vuelta atrás (decisiones del operador K1 y K2 de ese plan, 2026-11-15). Nada del
+   repositorio los crea en una instalación nueva ni los lee para funcionar: de las copias de seguridad solo la previa
+   a la actualización guarda la base, `restore.sh` la devuelve cuando una copia la trae, y `deploy.sh` nombra las
+   claves que encuentra en `.env` sin tocarlas.*
 
 La 1 primero; la 2 y la 3 pueden ir en paralelo después; la 4 al final. Sin usuarios que migrar, la consola pasa
 directamente a la sesión propia.
@@ -541,6 +564,15 @@ directamente a la sesión propia.
   ruta nueva para ellas. *(Corregido el 2026-11-06.)*
 - El despliegue lo absorbe el proyecto 4.
 
+*Fase 4 (2026-11-15): los documentos que describen el producto de hoy (`docs/01-architecture.md`,
+`02-tech-stack.md`, `04-data-model.md`, `06-roadmap.md`, `08-observability.md`, `product.md`,
+`docs/modules/ai-admin.md`, `DESIGN.md`, `HANDOFF.md`) nombran a Keycloak solo como historia, con la fase en que dejó
+de ser verdad, y `backend/tests/test_docs_without_keycloak.py` lo fija; `deploy/README.md`, `deploy/GO-LIVE.md` y
+`docs/07-backup-restore.md` tienen su propia guarda (`backend/tests/test_runbook_without_keycloak.py`). Las
+especificaciones y los planes fechados se quedan como registro, con una nota fechada donde aún decían «hasta la fase
+4» o describían a Keycloak como su presente, en los que nombra para ello el Apéndice D del plan de la fase 4
+(`docs/superpowers/plans/2026-11-15-autenticacion-propia-fase4.md`); los demás quedan como historia sin editar.*
+
 ## 10. Falsificadores
 
 Cada uno con una prueba que falla si se quita la protección:
@@ -558,6 +590,20 @@ Cada uno con una prueba que falla si se quita la protección:
 8. Microsoft con `tid`/`oid` desconocido se rechaza; nunca se crea cuenta ni se enlaza por correo.
 9. El comando de recuperación no existe por HTTP.
 10. Ninguna pantalla dice «Keycloak» (la guarda que ya existe se mantiene).
+    *(Enmienda del 2026-11-15, plan de la fase 4, Task 11.)* Y ningún documento vivo del repositorio lo nombra salvo
+    como historia fechada: «phase 4» en la línea, en una de las tres anteriores o en la siguiente, leídas como un
+    solo texto, y no «until phase 4», que es el mismo par de palabras en futuro, aunque la frase se parta en dos
+    líneas o empiece con mayúscula; la regla no distingue tiempos, y una frase en pasado dice «before … phase 4»
+    (`backend/tests/test_auth_phase4_falsifiers.py`, que recorre todo el Markdown salvo los registros fechados, los
+    runbooks de su propia guarda y `CLAUDE.md`).
+11. *(Enmienda del 2026-11-15, plan de la fase 4, Task 11.)* Ningún token, imagen ni servicio de Keycloak es
+    alcanzable ni aceptado en ninguna parte: cada ruta de `/api/v1` responde igual con un token con la forma del de la
+    consola de Keycloak que sin credencial, aunque toda petición saliente reciba la JWKS de la clave que lo firmó;
+    `/mcp` lo rechaza; ni compose ni el simulacro definen su servicio ni su imagen; ningún router de Traefik lleva a
+    él; ningún ajuste lo nombra; ninguna fuente de la consola le pide cerrar la sesión y el `lib/auth.ts`
+    borrado no vuelve; y en `app/` solo se verifican los tokens propios y los de Microsoft
+    (`backend/tests/test_auth_phase4_falsifiers.py`, con un control positivo: una puerta que aún confía en el realm
+    es señalada; en vivo, el job `deploy` de la CI).
 
 ## 11. Fuera de alcance
 

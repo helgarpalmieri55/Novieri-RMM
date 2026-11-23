@@ -8,8 +8,11 @@ render in the buyer's browser exactly like a JSX string does -- was unguarded.
 
 SCOPED TO WHAT A USER CAN SEE, AND NO WIDER, for the reason the frontend guard
 states about itself: a guard broader than its own claim gets deleted the first
-time it is inconvenient. The platform DOES integrate with Keycloak and source
-that pretended otherwise would be lying about its own dependency. So module
+time it is inconvenient. When this guard was written the platform DID
+integrate with Keycloak, until own authentication phase 4 removed it
+(2026-11-15), and source that pretended otherwise would have lied about its
+own dependency; source that records that history, or names a vendor the
+platform still integrates with, is accurate for the same reason. So module
 names, imports, class names, docstrings, comments, settings keys and log
 messages are all exempt and must stay accurate. What is checked is the text
 that leaves the process in a response body:
@@ -147,7 +150,8 @@ def user_visible_strings(source: str) -> list[tuple[int, str]]:
             # ANNOTATED ASSIGNMENTS ONLY. A Pydantic field is always annotated,
             # and an unannotated one in a class body is the other thing that
             # lives there: `__tablename__ = "keycloak_event_ingest"` in
-            # `app/models/core.py`, which is a POSTGRES TABLE NAME. Collecting
+            # `app/models/core.py` until own authentication phase 4, a
+            # POSTGRES TABLE NAME. Collecting
             # it made the first run of this guard report an offender that no
             # user can see and that must never be renamed -- exactly the false
             # positive the frontend guard's docstring warns gets a guard
@@ -293,12 +297,13 @@ def test_no_response_string_names_the_identity_vendor() -> None:
 def test_every_probe_has_a_display_label_and_none_names_the_vendor() -> None:
     """The case no scan of string literals could ever have caught.
 
-    `PlatformStatusPage` prints the probe name the status API sends, and the
-    probe was called `keycloak_events` -- a dict KEY, in the position of a
-    heading, on an operator's screen. The key stays (history rows in
-    `platform_health_sample.probe` carry it, `/readyz` reports it, and
-    `test_platform_health_sampler.py` pins the sampled set); the label is the
-    separate, user-facing string, and this is what keeps it clean.
+    `PlatformStatusPage` prints the probe name the status API sends, and a
+    probe was called `keycloak_events` (until own authentication phase 4) -- a
+    dict KEY, in the position of a heading, on an operator's screen. Keys stay
+    as they are (history rows in `platform_health_sample.probe` carry them,
+    `/readyz` reports them, and `test_platform_health_sampler.py` pins the
+    sampled set); the label is the separate, user-facing string, and this is
+    what keeps it clean.
     """
     from app.api.probes import _ALL_PROBES, PROBE_LABELS, probe_label
 

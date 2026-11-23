@@ -88,12 +88,6 @@ from app.modules.ipam import reconcile as ipam_reconcile_module
 from app.modules.ipam import retention as ipam_retention_module
 from app.modules.ipam import sweep as ipam_sweep_module
 from app.modules.ipam.errors import IpamError
-
-# Imported as a module for the same reason as `health` and `ipam`: the beat
-# entry below reads `keycloak_sweep_module.SWEEP_INTERVAL_S` rather than a
-# literal 3600.0, so the schedule and the staleness threshold the
-# `keycloak_events` probe measures against cannot drift apart.
-from app.modules.keycloak_events import sweep as keycloak_sweep_module
 from app.modules.licenses.reporting import compliance_summary, reported_clients
 from app.modules.notification.delivery import attempt_delivery
 from app.modules.notification.routing import resolve_recipients
@@ -2487,50 +2481,6 @@ async def ipam_retention_all_orgs() -> int:
         await admin_engine.dispose()
 
 
-async def keycloak_event_sweep_once() -> dict[str, int]:
-    """Forward Keycloak's credential events into the audit chain
-    (`docs/modules/console-auth/spec.md` §7.1).
-
-    NOT a `*_all_orgs` shell, and that is the shape of the feature rather than
-    an omission: Keycloak's realm is shared by every tenant, so one fetch
-    covers the whole deployment and the ORG is resolved per event from the
-    Keycloak subject. A per-org loop here would fetch the same events once per
-    tenant and still have to resolve each one.
-
-    THE COUNTS ARE RECORDED, NOT ONLY RETURNED. Celery's result backend is not
-    where an operator looks, so the run is written to Redis for the
-    `keycloak_events` probe -- which is the only thing that can tell
-    "configured and quiet" from "configured and not running".
-    """
-    from app.modules.keycloak_events.sweep import sweep_once, write_last_sweep
-
-    settings = get_settings()
-    app_engine = create_async_engine(settings.database_url)
-    admin_engine = create_async_engine(settings.database_admin_url)
-    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        counts = await sweep_once(
-            engine=app_engine,
-            admin_engine=admin_engine,
-            settings=settings,
-            now=datetime.now(UTC),
-        )
-        # AFTER the sweep, deliberately. A record written up front would mark
-        # the sweep fresh even when the fetch raised, which is the probe
-        # reporting health on the strength of the beat having fired.
-        await write_last_sweep(redis, counts, now=time.time())
-        return {
-            "fetched": counts.fetched,
-            "written": counts.written,
-            "unresolved": counts.unresolved,
-            "skipped": counts.skipped,
-        }
-    finally:
-        await app_engine.dispose()
-        await admin_engine.dispose()
-        await redis.aclose()
-
-
 def register_worker_job_types() -> None:
     """Register every module's job types into the kernel registry, once, when
     the worker process's Celery app is built.
@@ -2708,25 +2658,12 @@ async def sample_health_once(session: AsyncSession) -> int:
     unwrap, job signing) -- local, no network, so building them again here
     costs nothing production is not already paying.
 
-    ONLY `WORKER_SAMPLED_PROBES` ARE SAMPLED -- every probe but `jwks`. This
-    process never verifies a token and constructs no `JwksCache`, so `state`
-    below deliberately has no `jwks` attribute at all.
-
-    CORRECTION: an earlier version of this docstring argued that running
-    `probe_jwks` anyway and letting it read that absence as `down`/
-    `unreachable` was "the honest answer, not a bug to work around". That was
-    wrong -- it conflated two different facts ("the IdP is unreachable" and
-    "this process does not use the IdP") into a single status. The status
-    page computes per-probe uptime from exactly these rows, so writing
-    `jwks / down / unreachable` every 60 seconds would show JWKS at a
-    permanent 0% uptime next to the API's own live probe reporting `ok` on
-    the same page -- an operator reading that during an incident would chase
-    the IdP for nothing. The real fix is scope, not a fabricated reading:
-    sample only the probes this process can meaningfully measure
-    (`app.api.probes.WORKER_SAMPLED_PROBES`) and write nothing for the rest.
-    Absence of a row is honest; a manufactured `down` is not. `probe_jwks`
-    itself is unchanged -- in the API process, where a `JwksCache` genuinely
-    exists, an absent or empty cache must still read as it does today.
+    EVERY PROBE IS SAMPLED (`WORKER_SAMPLED_PROBES`). Until own authentication
+    phase 4 one was not: `jwks` read the API process's cache of Keycloak's
+    keys, which a worker never had, and sampling it here would have written a
+    fabricated `down` every 60 seconds. The probe went with Keycloak; the name
+    `WORKER_SAMPLED_PROBES` stays so that a probe only the API can measure
+    has somewhere to be left out again.
     """
     from app.api.probes import WORKER_SAMPLED_PROBES, build_registry
     from app.core.ca import get_ca
@@ -3396,16 +3333,6 @@ def create_celery() -> Celery:
             "task": "app.worker.ipam_reconcile_sweep",
             "schedule": ipam_reconcile_module.RECONCILE_INTERVAL_SECONDS,
         },
-        # console-auth §7.1. Hourly, matching the module's own constant rather
-        # than a literal: this is the LAG the sweep costs versus a push
-        # listener, and it is stated in the spec as the price of not shipping a
-        # Java plugin into a Keycloak image this project pins and does not
-        # build. A faster beat would buy nothing -- Keycloak's own event
-        # filters are day-granular.
-        "keycloak-event-sweep": {
-            "task": "app.worker.keycloak_event_sweep",
-            "schedule": keycloak_sweep_module.SWEEP_INTERVAL_S,
-        },
         # §4.2's retention pass. Daily: retention is a clock, and it is the ONLY
         # thing that bounds `ipam_observation` -- the upsert keeps that table
         # out of the monitoring business, but nothing kept it out of the
@@ -3505,10 +3432,6 @@ try:  # pragma: no cover - the worker process needs settings; tests may not
     @celery_app.task(name="app.worker.ipam_reconcile_sweep")  # type: ignore[misc, untyped-decorator, unused-ignore]
     def ipam_reconcile_sweep() -> dict[str, int]:
         return {"detected": asyncio.run(ipam_reconcile_sweep_all_orgs(datetime.now(UTC)))}
-
-    @celery_app.task(name="app.worker.keycloak_event_sweep")  # type: ignore[misc, untyped-decorator, unused-ignore]
-    def keycloak_event_sweep() -> dict[str, int]:
-        return asyncio.run(keycloak_event_sweep_once())
 
     @celery_app.task(name="app.worker.ipam_retention")  # type: ignore[misc, untyped-decorator, unused-ignore]
     def ipam_retention() -> dict[str, int]:

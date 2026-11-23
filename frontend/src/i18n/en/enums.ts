@@ -144,9 +144,7 @@ export const enums = {
    * it adds later is not here and reads as its derived English, which is the
    * `humaniseEnum` fallback. A dotted probe name (`backup.nightly`) is keyed
    * with `_` because a `.` is the catalogue's path separator; the derivation is
-   * the same either way. `keycloak_events` is left out on purpose: its English
-   * would name the identity vendor, which the no-vendor-names guard forbids in
-   * any catalogue string.
+   * the same either way.
    */
   ReasonCode: {
     unreachable: "Unreachable",
@@ -168,7 +166,6 @@ export const enums = {
     objectstore: "Objectstore",
     object_store: "Object store",
     identity: "Identity",
-    jwks: "Jwks",
     signing: "Signing",
     ca: "Ca",
     backup_nightly: "Backup nightly",

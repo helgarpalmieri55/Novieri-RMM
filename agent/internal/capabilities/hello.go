@@ -9,10 +9,12 @@ import (
 
 // `hello` -- the kernel's liveness job.
 //
-// It is registered in app/jobs/registry.py as a Phase 0 kernel job type and
-// scripts/demo_e2e_agent.py dispatches it before anything else, asserting
+// It is registered in app/jobs/registry.py as a Phase 0 kernel job type, and
+// it is the probe app/modules/agent_update/reconcile.py sends after a
+// self-update. Its answer echoes the signed message, as
+// TestASignedHelloJobEchoesItsMessage asserts:
 //
-//	final["result"].get("greeting") == "hello from the control plane"
+//	result["greeting"] == params["message"]
 //
 // The plan's Task 7 listed "the hello job succeeds end-to-end" in its
 // definition of done, but Task 7 shipped with an EMPTY registry in main.go, so

@@ -8,7 +8,6 @@ import asyncio
 from pathlib import Path
 
 from app.core.health.probes import (
-    probe_jwks,
     probe_objectstore,
     probe_postgres_app,
     probe_redis,
@@ -207,46 +206,6 @@ async def test_redis_probe_pings() -> None:
 # --- Task 3: the soft probes ---------------------------------------------------
 
 
-async def test_the_jwks_probe_performs_no_network_io() -> None:
-    """`JwksCache` is hardened against unauthenticated refetch-amplification:
-    single-flight lock, minimum refetch interval, failed refetch never clears
-    the key set. A probe that FETCHED would hand an attacker that exact vector
-    through `/api/v1/platform/status` -- so the probe reads the cache and never
-    touches the network.
-
-    IF THIS TEST EVER FAILS, the probe has started fetching and the
-    amplification guard has been defeated by the health surface."""
-
-    class _Cache:
-        def __init__(self) -> None:
-            self._keys = {"kid-1": object()}
-            self._last_refetch = 0.0
-            self.fetches = 0
-
-        async def _refetch(self) -> None:
-            self.fetches += 1
-
-    cache = _Cache()
-    result = await probe_jwks(_FakeState(jwks=cache))
-    assert cache.fetches == 0, "the JWKS probe performed network I/O"
-    assert result.status is Status.OK
-    assert result.detail is not None
-    assert result.detail["keys"] == 1
-
-
-async def test_an_empty_jwks_cache_is_degraded_not_down() -> None:
-    """An empty cache is indistinguishable from 'no token has been validated
-    yet', which is the normal state of a freshly started process."""
-
-    class _Empty:
-        _keys: dict[str, object] = {}
-        _last_refetch = 0.0
-
-    result = await probe_jwks(_FakeState(jwks=_Empty()))
-    assert result.status is Status.DEGRADED
-    assert result.reason is ReasonCode.EMPTY_CACHE
-
-
 async def test_a_sealed_vault_is_down_with_a_sealed_reason_not_an_error() -> None:
     """A sealed vault is a normal operational state with a specific remedy.
     Reporting it as UNREACHABLE would lose that."""
@@ -278,106 +237,6 @@ async def test_the_objectstore_is_constructed_at_most_once() -> None:
     for _ in range(3):
         await probe_objectstore(state, factory=_Store)
     assert constructed == 1
-
-
-# --------------------------------------------------------------------------- #
-# keycloak_events: the probe whose whole job is making a silence visible
-# --------------------------------------------------------------------------- #
-
-
-class _FakeRedis:
-    def __init__(self, value: str | None = None) -> None:
-        self.value = value
-
-    async def get(self, _key: str) -> str | None:
-        return self.value
-
-
-def _kc_settings(tmp_path: object, *, configured: bool) -> object:
-    from types import SimpleNamespace
-
-    if not configured:
-        return SimpleNamespace(keycloak_admin_url=None, keycloak_events_secret_path=None)
-    secret = tmp_path / "kc.secret"  # type: ignore[operator]
-    secret.write_text("not-a-real-secret")
-    return SimpleNamespace(
-        keycloak_admin_url="https://keycloak.test",
-        keycloak_realm="it-suite",
-        keycloak_events_client_id="it-suite-events",
-        keycloak_events_secret_path=str(secret),
-    )
-
-
-async def test_an_unconfigured_deployment_is_ok_and_says_so(tmp_path: object) -> None:
-    """THE POINT OF THIS PROBE. An operator who has not enabled forwarding has
-    not broken anything, so alarming would train them to ignore it -- but the
-    gap still has to be VISIBLE, because somebody will otherwise read the audit
-    chain and believe it is complete. `ok` with `configured: false` is the
-    distinction: visible, not alarming."""
-    from app.core.health.probes import probe_keycloak_events
-
-    result = await probe_keycloak_events(
-        _FakeState(settings=_kc_settings(tmp_path, configured=False), redis=_FakeRedis())
-    )
-    assert result.status is Status.OK
-    assert result.detail == {"configured": False}
-
-
-async def test_a_configured_deployment_that_has_never_swept_is_degraded(
-    tmp_path: object,
-) -> None:
-    """Configured and never run is the state an operator most needs told: they
-    believe forwarding is happening. It is DEGRADED rather than DOWN because
-    nothing is broken for anyone using the platform -- only the evidence trail
-    is thinner than they think."""
-    from app.core.health.probes import probe_keycloak_events
-
-    result = await probe_keycloak_events(
-        _FakeState(settings=_kc_settings(tmp_path, configured=True), redis=_FakeRedis(None))
-    )
-    assert result.status is Status.DEGRADED
-    assert result.reason is ReasonCode.STALE
-    assert result.detail == {"configured": True, "ever_run": False}
-
-
-async def test_a_recent_sweep_is_ok_and_a_stale_one_is_degraded(tmp_path: object) -> None:
-    """The failure this catches is a STOPPED WORKER, which no amount of
-    Keycloak-side configuration reveals: the settings are right, the credential
-    works, and nothing has run for a week."""
-    import json
-    import time
-
-    from app.core.health.probes import probe_keycloak_events
-    from app.modules.keycloak_events.sweep import SWEEP_INTERVAL_S
-
-    settings = _kc_settings(tmp_path, configured=True)
-
-    fresh = json.dumps({"ts": time.time(), "written": 2})
-    result = await probe_keycloak_events(_FakeState(settings=settings, redis=_FakeRedis(fresh)))
-    assert result.status is Status.OK
-    assert result.reason is None
-    assert result.detail is not None and result.detail["written"] == 2
-
-    old = json.dumps({"ts": time.time() - SWEEP_INTERVAL_S * 4, "written": 0})
-    result = await probe_keycloak_events(_FakeState(settings=settings, redis=_FakeRedis(old)))
-    assert result.status is Status.DEGRADED
-    assert result.reason is ReasonCode.STALE
-
-
-async def test_a_configured_secret_that_has_gone_missing_is_down_not_unconfigured(
-    tmp_path: object,
-) -> None:
-    """THE TWO SILENCES ARE NOT THE SAME. Degrading "configured, and the secret
-    file is gone" into "not configured" would hide precisely the deployment
-    whose operator believes forwarding is running."""
-    from app.core.health.probes import probe_keycloak_events
-
-    settings = _kc_settings(tmp_path, configured=True)
-    (tmp_path / "kc.secret").unlink()  # type: ignore[operator]
-
-    result = await probe_keycloak_events(_FakeState(settings=settings, redis=_FakeRedis()))
-    assert result.status is Status.DOWN
-    assert result.reason is ReasonCode.MISCONFIGURED
 
 
 # --------------------------------------------------------------------------- #
@@ -430,13 +289,14 @@ def _status_app(results: list[ProbeResult]):
 async def test_the_status_route_prints_a_label_and_carries_the_key_separately() -> None:
     """THE WORD REACHED THE SCREEN FROM A PYTHON IDENTIFIER.
 
-    `PlatformStatusPage` renders the probe name the API sends, and one probe is
-    registered as `keycloak_events` -- so a buyer read the identity vendor's
-    name in a table heading position, from a dict key that no scan of user-
-    visible string literals could have caught.
+    `PlatformStatusPage` renders the probe name the API sends, and one probe was
+    registered as `keycloak_events` (until own authentication phase 4 removed
+    it) -- so a buyer read the identity vendor's name in a table heading
+    position, from a dict key that no scan of user-visible string literals
+    could have caught.
 
-    The key is NOT renamed: `platform_health_sample.probe` rows carry it,
-    `/readyz`'s `failing` list reports it, and
+    Keys are NOT renamed: `platform_health_sample.probe` rows carry them,
+    `/readyz`'s `failing` list reports them, and
     `test_platform_health_sampler.py` pins the sampled set -- renaming would
     orphan every stored sample. So the route sends both: `key`, the stable
     identifier, and `name`, the human one the page prints.
@@ -452,7 +312,8 @@ async def test_the_status_route_prints_a_label_and_carries_the_key_separately() 
 
     by_key = {p["key"]: p for p in body["probes"]}
     assert set(by_key) == set(_ALL_PROBES), "the identifier every stored sample is keyed by"
-    assert by_key["keycloak_events"]["name"] == probe_label("keycloak_events")
+    assert by_key["backup.nightly"]["name"] == probe_label("backup.nightly")
+    assert by_key["backup.nightly"]["name"] != "backup.nightly"
 
     printed = " | ".join(p["name"] for p in body["probes"])
     assert not re.search(r"keycloak", printed, re.IGNORECASE), printed

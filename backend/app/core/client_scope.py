@@ -277,9 +277,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/core/auth/retention.py::sweep_org": (
         "worker: own authentication's retention (final review A-M6, operator decision C7; "
         "phase 3 plan 2026-11-06, Task 13) -- one organization's old sessions, forgotten "
-        "devices, spent links and old challenges, and its AI apps' spent codes and ended "
-        "grants with their refresh tokens, whose technician rows only an every-client scope "
-        "may delete (its idle AI apps go by clients.purge_idle, under oauth_session, and "
+        "devices, spent links and old challenges, and its AI apps' spent codes, ended grants "
+        "with their refresh tokens and the refresh tokens live grants rotated past 30 days "
+        "ago (operator decision E2, 2026-11-15), whose technician rows only an every-client "
+        "scope may delete (its idle AI apps go by clients.purge_idle, under oauth_session, and "
         "when the sweep then fails a second transaction writes their audit row alone); every "
         "step carries its own org_id predicate, and the sweep is audited"
     ),
@@ -302,9 +303,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/modules/health/sweep.py::_for_each_org": "worker: health sweeps, one org_session per org",
     "app/modules/ipam/reconcile.py::reconcile_sweep_all_orgs": "worker: IPAM daily reconcile",
     "app/modules/ipam/retention.py::sweep_all_orgs": "worker: IPAM retention sweep",
-    "app/modules/keycloak_events/sweep.py::_forward": (
-        "worker: forwards Keycloak events into the audit chain"
-    ),
     **_reviewed(
         "app/modules/remote/recording.py",
         "worker: session-recording retention sweep",

@@ -57,7 +57,6 @@ async def test_an_app_holds_postgres_backends_until_it_is_disposed(
     per test, across the whole suite."""
     from app.core.config import Settings
     from app.main import create_app
-    from tests.fake_idp import ISSUER, JWKS_URL
 
     before = await _backends(admin_engine, pg_cluster.dbname)
 
@@ -67,8 +66,6 @@ async def test_an_app_holds_postgres_backends_until_it_is_disposed(
                 database_url=pg_cluster.app_url,
                 database_admin_url=pg_cluster.admin_url,
                 database_portal_url=pg_cluster.portal_url,
-                oidc_issuer=ISSUER,
-                oidc_jwks_url=JWKS_URL,
                 ca_dir=tmp_path / f"ca-{i}",
                 signing_key_path=tmp_path / f"job-signing-{i}.key",
             )
@@ -115,3 +112,20 @@ def test_the_api_env_fixture_disposes_the_engines_create_app_built() -> None:
     assert "dispose()" in teardown
     for owned in ("app.state.app_engine", "app.state.admin_engine"):
         assert owned in teardown, f"{owned} is not released when api_env unwinds"
+
+
+E2E_KERNEL = Path(__file__).resolve().parent / "test_e2e_kernel.py"
+
+
+def test_the_kernel_loop_flushes_only_the_suites_redis_db() -> None:
+    """Redis is shared too. `README.md` tells a developer to run
+    `tests/test_e2e_kernel.py`, and its fixture calls `flushdb()`: on a
+    hard-coded `redis://localhost:6379/9`, that emptied whatever else used DB
+    9, whatever `ITS_TEST_REDIS_URL` said (final review of own authentication
+    phase 4, C8). It takes the suite's Redis now -- `api_env.settings.
+    redis_url`, which `conftest.py` reads from `ITS_TEST_REDIS_URL` -- the
+    one the api it drives publishes on. Read from the source, like the test
+    above: a flush cannot be watched without running it."""
+    source = E2E_KERNEL.read_text()
+    assert "redis://" not in source, "test_e2e_kernel.py names a Redis database of its own"
+    assert "flushdb()" in source and "api_env.settings.redis_url" in source

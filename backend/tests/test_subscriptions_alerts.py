@@ -209,8 +209,6 @@ async def test_the_sweep_shell_uses_the_configured_window(
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         subscription_alert_window_days=14,

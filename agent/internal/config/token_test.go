@@ -21,7 +21,7 @@ import (
 // What is left is a 0600 file in the data directory, which the agent reads at
 // first boot and DELETES once the token has bought a certificate. These tests
 // pin that path, its permission floor, and its precedence against the env var
-// that scripts/demo_e2e_agent.py uses.
+// a person running the binary by hand sets.
 
 func writeToken(t *testing.T, dir, token string, mode os.FileMode) string {
 	t.Helper()
@@ -86,7 +86,7 @@ func TestTheEnvironmentWinsOverTheTokenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.EnrollToken != "tok.from.env" {
-		t.Fatalf("EnrollToken = %q; the env var is what demo_e2e_agent.py sets and must win", c.EnrollToken)
+		t.Fatalf("EnrollToken = %q; the env var must win over the file", c.EnrollToken)
 	}
 }
 

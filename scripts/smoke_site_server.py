@@ -438,8 +438,6 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
     settings = Settings(
         database_url=app_url,
         database_admin_url=admin_url,
-        oidc_issuer="https://i",
-        oidc_jwks_url="https://i/certs",
         ca_dir=Path("/tmp/smoke-site-ca"),
         s3_access_key="test",
         s3_secret_key="test",

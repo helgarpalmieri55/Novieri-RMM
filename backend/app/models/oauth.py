@@ -110,7 +110,10 @@ class OAuthClient(Base):
 
 class OAuthRefreshFamily(Base):
     """One person's grant to one AI app: its refresh tokens rotate inside it,
-    and reusing one ends it (design §5.3)."""
+    and reusing one ends it (design §5.3) -- for 30 days after its use. Then
+    the retention sweep deletes a live grant's used token
+    (`retention.OAUTH_USED_TOKEN_RETENTION`; design §5.3, amended 2026-11-15,
+    operator decision E2), and presenting it is a plain `invalid_grant`."""
 
     __tablename__ = "oauth_refresh_families"
     __table_args__ = (

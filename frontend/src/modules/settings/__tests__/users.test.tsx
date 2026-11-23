@@ -502,6 +502,19 @@ describe("Settings — Users tab", () => {
     await waitFor(() => expect(mock()).toHaveBeenCalled());
   });
 
+  it("says that signing someone out everywhere ends the AI apps they connected too", async () => {
+    // Operator decision E1 (2026-11-15; own-auth phase 4, Task 1): the
+    // server ends their AI grants with their sessions, so the confirmation
+    // says so before the administrator acts.
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, DANA_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Sign out operator@example.com everywhere" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("every AI app they connected loses its access");
+  });
+
   it("revoking a role confirms, and names both the role and the person", async () => {
     const user = await openUsers();
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));

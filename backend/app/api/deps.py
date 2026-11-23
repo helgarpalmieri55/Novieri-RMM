@@ -49,7 +49,6 @@ from app.core.mcp_channel import (
     mcp_resource,
 )
 from app.core.rbac import clients_holding
-from app.core.security import JwksCache
 from app.core.tenancy import org_session
 from app.models import User
 
@@ -124,11 +123,6 @@ def app_engine(request: Request) -> AsyncEngine:
 def admin_engine(request: Request) -> AsyncEngine:
     engine: AsyncEngine = request.app.state.admin_engine
     return engine
-
-
-def jwks(request: Request) -> JwksCache:
-    cache: JwksCache = request.app.state.jwks
-    return cache
 
 
 def _mcp_call(request: Request) -> McpCall | None:

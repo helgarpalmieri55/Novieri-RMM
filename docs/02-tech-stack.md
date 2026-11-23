@@ -65,7 +65,7 @@ Detail in `docs/modules/remote-control.md`.
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Identity broker | **Keycloak** | OIDC/SAML, AD/Entra federation, MFA, user/role storage out of the box — avoids building SSO/MFA/federation; clean commercialization story. (Apache-2.0) |
+| Identity | **The platform's own sign-in and OAuth 2.1 server** | Password + TOTP or passkey, Microsoft sign-in, sessions, and the OAuth server AI apps connect through (own authentication design 2026-11-04). Keycloak filled this row before own authentication phase 4 removed it (2026-11-15). |
 | Secrets / credential vault | **HashiCorp Vault** (transit + KV) | Consistent with Sentinel; envelope encryption for stored admin credentials; decrypt-at-use only |
 | Agent PKI / internal CA | **Vault PKI** or **step-ca** | Issues and rotates agent client certificates for mTLS enrollment |
 
@@ -115,7 +115,7 @@ recorded here so module specs reference a single source of truth.
 
 | System | Mechanism |
 |---|---|
-| AD / Entra ID | SSO via Keycloak federation (OIDC/SAML), MFA |
+| AD / Entra ID | Sign in with Microsoft (multi-tenant application, the platform's own certificate); no SAML or on-premises AD federation (own authentication phase 2; Keycloak's federation went in own authentication phase 4) |
 | Odoo Helpdesk | REST/JSON-RPC for change tickets and change/deploy records |
 | Sentinel (vuln mgmt) | API pull of prioritized vulnerable targets to drive patching |
 | Power BI / reporting | Evidence and inventory exports (CSV/API) |

@@ -234,8 +234,6 @@ async def test_signed_job_to_frames_to_end_through_the_browser_route(stack) -> N
             Settings(
                 database_url="postgresql+asyncpg://x:x@l/x",
                 database_admin_url="postgresql+asyncpg://x:x@l/x",
-                oidc_issuer="https://i",
-                oidc_jwks_url="https://i/certs",
                 ca_dir=stack.tmp_path,
                 s3_access_key="test",
                 s3_secret_key="test",

@@ -29,10 +29,11 @@ present and of its type. Any failure is None, and the door answers one 401.
 AN UNKNOWN `kid` IS NOT A FREE READ OF OPENBAO (plan D14). `/mcp` is public:
 a token with an invented `kid` would force `keys.jwks(refresh=True)` per
 request. The keys are read again at most once per `REFRESH_EVERY_S` per
-process -- `JwksCache`'s defence for Keycloak's keys (`app/core/security.py`)
--- so a token signed just after a rotation is still admitted at once, unless
-a stranger's token with an invented `kid` armed the interval first: then for
-up to `REFRESH_EVERY_S` seconds. Acceptable, and said so (plan D14).
+process -- the defence Keycloak's key cache had (`JwksCache`, removed in own
+authentication phase 4) -- so a token signed just after a rotation is still
+admitted at once, unless a stranger's token with an invented `kid` armed the
+interval first: then for up to `REFRESH_EVERY_S` seconds. Acceptable, and
+said so (plan D14).
 
 NOT A CLAIM OF RFC 9068 CONFORMANCE (plan B3-06). The token follows RFC
 9068's `typ` and claims; RFC 9068 §2.1 also says "MUST include RS256" of

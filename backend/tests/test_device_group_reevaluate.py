@@ -477,8 +477,6 @@ async def test_the_worker_task_reconciles_health_only_when_something_moved(
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url="redis://localhost:6379/9",
@@ -521,8 +519,6 @@ def test_the_beat_entry_exists_at_the_specified_cadence(pg_cluster, tmp_path) ->
     settings = Settings(
         database_url=pg_cluster.app_url,
         database_admin_url=pg_cluster.admin_url,
-        oidc_issuer="https://kc.example/realms/it-suite",
-        oidc_jwks_url="https://kc.example/realms/it-suite/certs",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
     )

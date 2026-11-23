@@ -308,7 +308,7 @@ export const settings: Shape<typeof en> = {
         title: "Cerrar todas sus sesiones",
         question: "¿Cerrar todas las sesiones de {email}?",
         action: "Cerrar las sesiones de {email}",
-        body: "Todas las sesiones que tiene abiertas terminan ahora. Su cuenta sigue activa y puede volver a iniciar sesión.",
+        body: "Todas las sesiones que tiene abiertas terminan ahora, y cada aplicación de IA que conectó pierde su acceso hasta que la apruebe de nuevo. Su cuenta sigue activa y puede volver a iniciar sesión.",
       },
       cancelInvite: {
         title: "Cancelar invitación",

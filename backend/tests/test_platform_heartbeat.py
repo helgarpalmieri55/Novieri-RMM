@@ -130,8 +130,6 @@ def _api_settings(tmp_path):
     return Settings(
         database_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
         database_admin_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
-        oidc_issuer="https://issuer.test",
-        oidc_jwks_url="https://issuer.test/jwks",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
         redis_url="redis://localhost:6379/9",

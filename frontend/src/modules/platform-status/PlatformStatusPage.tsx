@@ -38,15 +38,15 @@ import {
 //      the shortfall is rendered as its own visible fact (bold, a distinct
 //      colour, AND different text -- "1 / 2 healthy" vs "2 / 2") rather than
 //      leaning on the status badge alone to carry it.
-//   3. Drop a probe's `detail`. Added 2026-08-18 with the `keycloak_events`
-//      probe, and it is not cosmetic: that probe answers `ok` with
-//      `configured: false` for a deployment where Keycloak credential events
-//      are NOT being forwarded into the audit chain. A row reading
-//      `keycloak_events / ok / —` would tell an operator forwarding works. The
-//      status alone is deliberately unalarming -- nothing is broken -- so the
-//      whole distinction lives in `detail`, and a page that discards it turns
-//      a visible gap back into a silent one. `jwks` (`keys: n`) was invisible
-//      for the same reason until now.
+//   3. Drop a probe's `detail`. Added 2026-08-18 with a probe that answered
+//      `ok` with `configured: false` for a feature nobody had set up (the
+//      forwarding of the old identity provider's events, removed in own
+//      authentication phase 4), and the backup probes do the same today: a
+//      host with no backup timer reads `backup.nightly / ok`, and only
+//      `configured: false` says nothing is being backed up. The status alone
+//      is deliberately unalarming -- nothing is broken -- so the whole
+//      distinction lives in `detail`, and a page that discards it turns a
+//      visible gap back into a silent one.
 //
 // ---------------------------------------------------------------------------
 // UX REMEDIATION CYCLE 12 — THREE FINDINGS, ONE THEME: the page knew the
@@ -147,9 +147,6 @@ const PROBE_GLYPH: Record<string, string> = {
   object_store: "archive",
   objectstore: "archive",
   identity: "id-badge-2",
-  keycloak: "id-badge-2",
-  keycloak_events: "history",
-  jwks: "key",
   "backup.nightly": "archive",
   "backup.offsite": "archive",
   "backup.drill": "archive",
@@ -552,10 +549,9 @@ function ProbeRow({ probe }: { probe: Probe }) {
           edge, so the row reads as a failure before the pill does. */}
       <Td lead={<Icon name={glyphFor(PROBE_GLYPH, probeKey(probe))} size={18} />} gutter={kind}>
         {/* THE SAME SHAPE AS THE REASON AND MODULE CELLS: the words first,
-            the key under them. `object_store` and `keycloak_events` sat in
-            snake case in a column of ordinary nouns, and the key is still on
-            the row because it is what the health endpoint and the logs call
-            this probe. */}
+            the key under them. `object_store` sat in snake case in a column
+            of ordinary nouns, and the key is still on the row because it is
+            what the health endpoint and the logs call this probe. */}
         <div className="cell-title">{probeTitle(probe)}</div>
         <div className="cell-sub mono">{probeKey(probe)}</div>
       </Td>

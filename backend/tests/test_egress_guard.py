@@ -39,8 +39,6 @@ def _settings(**overrides: Any) -> Settings:
     base: dict[str, Any] = dict(
         database_url="postgresql+asyncpg://u:p@db.internal:5432/x",
         database_admin_url="postgresql+asyncpg://u:p@db.internal:5432/x",
-        oidc_issuer="https://issuer.example.com",
-        oidc_jwks_url="https://issuer.example.com/jwks",
         ca_dir=Path("/tmp/its-egress-test-ca"),
     )
     base.update(overrides)

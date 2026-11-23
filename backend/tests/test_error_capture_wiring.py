@@ -88,7 +88,8 @@ async def test_a_request_that_fails_authentication_captures_nothing_bound(
     api_env,  # noqa: ANN001
 ) -> None:
     """A request with no/garbage credentials never reaches `auth_context`'s
-    binding line at all -- `validate_token` raises first, which FastAPI's
+    binding line at all -- the door refuses first (`validate_token`, until own
+    authentication phase 4), which FastAPI's
     own `HTTPException` handling turns into an ordinary 401 response, never
     an unhandled exception this middleware's `except` clause sees. Nothing
     is captured, and nothing leaks into whatever runs next."""

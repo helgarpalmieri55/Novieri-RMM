@@ -9,6 +9,12 @@
 > Spec §2 BK-02 said "the chunking/snapshot engine is agent-side and **not
 > built**". This is the document that stops being true of.
 > Date: 2026-08-06.
+>
+> *2026-11-15: `scripts/verify_backup_run.py`, cited below as the live
+> measurement, was retired in own authentication phase 4 (it signed in with an
+> identity provider's bearer token, which `/api/v1` has not accepted since
+> phase 1, so it could not complete).
+> `HANDOFF.md` §5 says what CI holds of what it measured, and what it does not.*
 
 ---
 

@@ -85,7 +85,7 @@ async def test_my_security_needs_the_console_session(auth_env: Any) -> None:
     `_account_ctx`, now refuses the token)."""
     org = await auth_env.create_org("mysec-bearer")
     sub = await auth_env.create_user(org, "technician")
-    token = auth_env.idp.token(sub, await auth_env.org_slug(org), email=f"{sub}@test.local")
+    token = auth_env.foreign.token(sub, await auth_env.org_slug(org), email=f"{sub}@test.local")
 
     response = await auth_env.client.get(
         "/api/v1/me/security", headers={"Authorization": f"Bearer {token}"}
