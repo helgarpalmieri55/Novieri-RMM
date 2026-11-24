@@ -1771,3 +1771,4 @@ async def test_an_invitations_72_hours_start_when_the_relay_has_taken_the_mail(
             )
         ).scalar_one()
     assert row.expires_at - row.created_at >= timedelta(hours=72, seconds=1.4)
+    assert row.expires_at - row.created_at < timedelta(hours=72, seconds=30)

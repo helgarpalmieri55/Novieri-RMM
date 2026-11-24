@@ -1202,6 +1202,39 @@ async def test_a_refresh_token_reused_after_its_grant_ended_is_audited_too(env: 
     assert family.revoked_reason == "revoked_by_app"
     (event,) = await _events(env, "mcp.refresh_reused")
     assert event.actor_type == "system"
+    assert event.target_id == str(await user_id_of(env.api, env.sub))
+    assert event.meta == {
+        "app": env.app.client_id,
+        "family": str(family.id),
+        "grant": "already_ended",
+    }
+
+
+async def test_a_used_refresh_token_of_an_idle_expired_family_is_audited_too(env: Env) -> None:
+    """The other way a grant ends without a revocation: left idle past its
+    `expires_at`. The used token is still a reuse to audit."""
+    first = await _tokens(env)
+    assert (await _refresh(env, first["refresh_token"])).status_code == 200
+    (family,) = await _families(env)
+    now = datetime.now(UTC)
+    async with oauth_session(env.org_id, env.api.app_engine) as session:
+        await session.execute(
+            update(OAuthRefreshFamily)
+            .where(OAuthRefreshFamily.id == family.id)
+            .values(
+                created_at=now - timedelta(days=31),
+                last_used_at=now - timedelta(days=31),
+                expires_at=now - timedelta(seconds=1),
+            )
+        )
+    reused = await _refresh(env, first["refresh_token"])
+    assert reused.status_code == 400
+    assert reused.json()["error"] == "invalid_grant"
+    (after,) = await _families(env)
+    assert after.revoked_at is None  # expired, never revoked
+    (event,) = await _events(env, "mcp.refresh_reused")
+    assert event.actor_type == "system"
+    assert event.target_id == str(await user_id_of(env.api, env.sub))
     assert event.meta == {
         "app": env.app.client_id,
         "family": str(family.id),
