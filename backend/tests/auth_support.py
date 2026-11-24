@@ -17,6 +17,7 @@ address of the documentation prefix (RFC 3849), so one test's attempts never
 count against another's.
 """
 
+import asyncio
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -336,6 +337,8 @@ class MailBox:
     sent: list[Sent] = field(default_factory=list)
     configured: bool = True
     failing: bool = False
+    #: Seconds the relay takes before it answers: a slow SMTP server.
+    delay_s: float = 0.0
 
 
 def capture_mail(monkeypatch: pytest.MonkeyPatch) -> MailBox:
@@ -357,6 +360,8 @@ def capture_mail(monkeypatch: pytest.MonkeyPatch) -> MailBox:
     ) -> None:
         if not box.configured:
             raise MailNotConfigured()
+        if box.delay_s:
+            await asyncio.sleep(box.delay_s)
         if box.failing:
             raise MailSendFailed(MailFailure.UNREACHABLE)
         box.sent.append(Sent(to=to, subject=subject, text=text))

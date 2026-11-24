@@ -188,6 +188,27 @@ async def test_without_mail_the_link_is_shown_once(auth_env: Any) -> None:
     assert sent.json()["invite_link"].startswith("https://itms.test/invite#")
 
 
+async def test_a_contact_invitations_72_hours_start_when_the_relay_has_taken_the_mail(
+    auth_env: Any,
+) -> None:
+    """Design 2026-11-23 §6, third caller: a slow relay spends none of the
+    link's 72 hours."""
+    who, headers = await _world(auth_env)
+    auth_env.mail.delay_s = 1.5
+    sent = await auth_env.client.post(_invite_url(who), headers=headers)
+    assert sent.status_code == 200, sent.text
+    async with AsyncSession(auth_env.admin_engine) as s:
+        row = (
+            await s.execute(
+                select(AuthActionToken).where(
+                    AuthActionToken.user_id == who.user_id, AuthActionToken.purpose == "invite"
+                )
+            )
+        ).scalar_one()
+    assert row.expires_at - row.created_at >= timedelta(hours=72, seconds=1.4)
+    assert row.expires_at - row.created_at < timedelta(hours=72, seconds=30)
+
+
 async def test_the_answers_that_can_carry_a_link_are_never_cached(auth_env: Any) -> None:
     """Phase 3's cross-phase re-review, X2: an invitation and a reset may
     answer a one-time link, so both are `Cache-Control: no-store`

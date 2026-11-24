@@ -187,7 +187,10 @@ async def _issue(
         created_by=actor_id,
     )
     link = action_tokens.link(console_url, "invite", token)
-    return link, await deliver(user, link, reset)
+    delivered = await deliver(user, link, reset)
+    if delivered:
+        await action_tokens.start_clock(session, token, action_tokens.INVITE_TTL)
+    return link, delivered
 
 
 async def invite(
