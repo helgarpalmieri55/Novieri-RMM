@@ -1122,7 +1122,7 @@ func TestAPanickingCapabilityFailsItsJobAndTheAgentKeepsServing(t *testing.T) {
 // 4-way CPU contention on a 4-core box, did not reproduce it. Raising 15 s to
 // a number that would have passed THAT run would destroy the only signal this
 // test has ever produced about the property it guards, which is that a
-// dropped connection must not strand a running job. The deadline stays; a
+// dropped connection must not strand a running job. The deadline stayed; a
 // third occurrence with this data is what would separate "slow" from "stuck".
 //
 // SINCE 2026-11-23 THE WAIT IS A CONDITION (design 2026-11-23-vps-y-marca-

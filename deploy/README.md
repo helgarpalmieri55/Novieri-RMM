@@ -223,7 +223,8 @@ command.
   address nobody has checked serves this stack — or, if it is another
   machine's, to that machine. (Not for Let's Encrypt's sake: its TLS-ALPN-01
   validation falls back to IPv4 after any IPv6 error.) `scripts/preflight.sh`
-  asks the public DNS, not `/etc/hosts`, and refuses either mistake.
+  asks the public DNS, not `/etc/hosts`, for the A record (the AAAA check
+also reads `/etc/hosts`), and refuses either mistake.
 - **Inbound 22 (SSH), 443 (console, API, object storage) and 8443 (agents),
   and nothing else.** Both 443 and 8443 must be reachable **from every managed
   endpoint**, not only from operators: `8443` is the agent gateway, and `443`
@@ -946,8 +947,9 @@ installs the timer that renews it every month.
 The certificate step 6 issued is valid for 365 days and **does not renew
 itself**, and it is the only server certificate every agent dials: the day it
 expires, the whole fleet disconnects at once. This timer re-issues it on the
-first of every month, as root, from the `0600` token of step 3.4 (GO-LIVE.md
-§5 says why a redirect is right here and a pipe in step 6):
+first of every month, as root, from the `0600` token of step 3.4 (the section
+"Renewing the gateway certificate" below says why a redirect is right here and
+a pipe in step 6):
 
 ```sh
 sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
@@ -1079,7 +1081,11 @@ X509v3 Subject Alternative Name:
 ```
 
 Two different issuers on the two ports is the correct picture. If `:8443`
-shows a Let's Encrypt issuer, an agent will never connect.
+shows a Let's Encrypt issuer, an agent will never connect. The likeliest
+cause is an absent or unhealthy gateway: with no TCP router, Traefik answers
+`:8443` itself with the public certificate, which agents refuse because they
+trust only the CA pinned at enrollment. Check `docker compose ps gateway`
+first.
 
 **From a computer outside this VPS**, once: the check above dials this
 machine from itself and never crosses your provider's firewall, and Let's
@@ -3551,7 +3557,7 @@ went wrong, and none of them can happen on a release after it.
 | 12 | an `app.deploy` job dispatches, reaches the endpoint, and fails at the artifact download with a name-resolution error; nothing in the control plane looks wrong | MinIO had **no published port and no Traefik router**, and presigned URLs were signed against `ITS_S3_ENDPOINT` (`http://minio:9000`) — a Docker-internal name. Every grant was correctly scoped, correctly time-bounded and unreachable | a `minio` router on `:443` matching `/<bucket>/`, and a separate `ITS_S3_PUBLIC_ENDPOINT` used only for signing (required in production). See "Object storage on :443" |
 | 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server. (Since own authentication phase 1 the console has no OIDC client at all -- `lib/auth.ts` is gone -- and fetches no discovery document) |
 | 14 | Keycloak answers **`Invalid parameter: redirect_uri`** on a correctly-formed authorization request | the `it-suite-web` client shipped `redirectUris: ["https://*/auth/callback"]`. Keycloak honours a wildcard **only as a trailing `*`**; one in the host position is compared as a literal string and matches nothing. `rootUrl` was also `https://localhost`, so even a relative URI resolved to the wrong host | `rootUrl` emptied and the redirect made **relative** (`/auth/callback`), which resolves against the request and is therefore correct at any hostname. **A running realm is not re-imported** — an existing deployment must be patched through the admin API |
-| 15 | `worker` and `backup-replicator` restart for ever, each log ending `ModuleNotFoundError: No module named 'packaging'` under `kombu/transport/redis.py`; the api, the gateway and jobs work, so nothing else looks wrong | the backend asked for `celery>=5.4` without its `redis` extra, although Redis is its broker. kombu 5.7.0's Redis transport imports `packaging`, which kombu declares only under that extra, so an image built from a fresh `pip install` had none. CI's `deploy` job never starts `worker`, and the backend suite's environment has `packaging` through pytest | `celery[redis]>=5.4` in `backend/pyproject.toml` (`backend/tests/test_celery_broker_dependency.py`) |
+| 15 | `worker` and `backup-replicator` restart for ever, each log ending `ModuleNotFoundError: No module named 'packaging'` under `kombu/transport/redis.py`; the api, the gateway and jobs work, so nothing else looks wrong | the backend asked for `celery>=5.4` without its `redis` extra, although Redis is its broker. kombu 5.7.0's Redis transport imports `packaging`, which kombu declares only under that extra, so an image built from a fresh `pip install` had none. CI's `deploy` job did not start `worker` until 2026-11-24 (it now checks that it is healthy); `backup-replicator` is still never started in CI. The backend suite's environment has `packaging` through pytest | `celery[redis]>=5.4` in `backend/pyproject.toml` (`backend/tests/test_celery_broker_dependency.py`) |
 | 16 | the first backup of a new host fails: `mc: <ERROR> Unable to stat source 'src/it-suite'. Bucket 'it-suite' does not exist.`, and `last-success` is never written | `backup.conf` mirrors the MinIO bucket (`OBJECTS=all`), which `ObjectStore` creates on first use; on the rehearsal nothing had used it, because #15 had stopped the replicator whose checks create it | `backup.sh` lists the buckets first: no bucket is nothing to mirror, and a listing that fails still fails the backup (`backend/tests/test_platform_backup_scripts.py`) |
 | 17 | `build-images.sh` ends `Recent tags:` `(none yet)` and lists nothing under `built:`, with tags in the store | the docker CLI trims the spaces at both ends of a `--format` template, so the indented templates printed no indent and the greps for the indented form never matched | no indent in the templates; it is added after the match (`backend/tests/test_build_images_script.py`) |
 
