@@ -4,7 +4,7 @@
  * Save" -- for the whole console. Atera's walkthrough counts six ways to save;
  * this console has one. A page with changes asks before it is left.
  */
-import { useCallback, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
 import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker, type Location } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/confirm";
@@ -237,39 +237,79 @@ export function useDraft<T>(saved: T | undefined): {
  * effect, so a handler that saves and navigates in one step is judged by the
  * render before the save, with the change still in it (pre-flight I-1,
  * reproduced with react-router 7.18.1). `release()` is read at once and lets
- * ONE navigation through, the next one the guard would have stopped, if it
- * starts in the same step: call it right before the `navigate()` it is for.
- * Unused, it expires at the end of that step, so a save that did not leave
- * (it failed, or the code took another branch) leaves the guard armed
- * (review fix round 1, item 7).
+ * ONE navigation through: the next one the guard would have stopped. Call it
+ * when the save has succeeded, right before the navigation it is for.
+ *
+ * IT EXPIRES ON THE PERSON'S NEXT ACT, NOT ON A CLOCK (review fix rounds 1
+ * and 2). A release no navigation used (the save took another branch) must
+ * not leave the guard disarmed, so the next click (`pointerdown`) or
+ * keystroke (`keydown`) anywhere expires it. A timer could not do this: a
+ * browser router judges a Back (`useNewParam`'s `close()` after `start()`) in
+ * its `popstate` listener, a later task than the click, so a release that
+ * ended with the click's task made save-and-close ask "Leave without saving?"
+ * after a successful save. A Back the person makes with the browser's own
+ * button between a release and its navigation is not an act in the page, and
+ * would be let through: the release is meant to be used at once.
  */
 export function useUnsavedGuard(
   dirty: boolean,
   options: { search?: GuardedQuery } = {},
 ): { guard: ReactElement | null; release: () => void } {
-  const released = useRef(false);
+  const [pass] = useState(() => new ReleasePass());
   useEffect(() => {
-    if (!dirty) released.current = false;
-  }, [dirty]);
-  const release = useCallback(() => {
-    released.current = true;
-    setTimeout(() => {
-      released.current = false;
-    }, 0);
-  }, []);
+    if (!dirty) pass.expire();
+  }, [dirty, pass]);
+  // A page that unmounts with a release unused leaves no listener behind.
+  useEffect(() => () => pass.expire(), [pass]);
+  const release = useCallback(() => pass.arm(), [pass]);
   useBeforeUnload(
     useCallback(
       (event: BeforeUnloadEvent) => {
-        if (!dirty || released.current) return;
+        if (!dirty || pass.armed) return;
         event.preventDefault();
         event.returnValue = "";
       },
-      [dirty],
+      [dirty, pass],
     ),
   );
   const dataRouter = useContext(UNSAFE_DataRouterContext);
-  const guard = dataRouter && dirty ? <LeaveQuestion search={options.search ?? false} released={released} /> : null;
+  const guard = dataRouter && dirty ? <LeaveQuestion search={options.search ?? false} pass={pass} /> : null;
   return { guard, release };
+}
+
+/**
+ * One navigation's leave to go, until the person next acts. `arm()` listens,
+ * in the capture phase so nothing on the page can swallow it, for the next
+ * `pointerdown` or `keydown`; `take()` spends it on the navigation the guard
+ * would have stopped, and stops listening.
+ */
+class ReleasePass {
+  armed = false;
+  private stopListening: (() => void) | null = null;
+
+  arm(): void {
+    this.expire();
+    this.armed = true;
+    const expire = () => this.expire();
+    window.addEventListener("pointerdown", expire, { capture: true, once: true });
+    window.addEventListener("keydown", expire, { capture: true, once: true });
+    this.stopListening = () => {
+      window.removeEventListener("pointerdown", expire, { capture: true });
+      window.removeEventListener("keydown", expire, { capture: true });
+    };
+  }
+
+  expire(): void {
+    this.armed = false;
+    this.stopListening?.();
+    this.stopListening = null;
+  }
+
+  take(): boolean {
+    if (!this.armed) return false;
+    this.expire();
+    return true;
+  }
 }
 
 /** The guard for a page that does not leave when it saves. */
@@ -293,7 +333,7 @@ function leavesForm(current: Location, next: Location, search: GuardedQuery): bo
 /** How many questions are mounted, that is how many guards hold changes right now. */
 let guardsHoldingChanges = 0;
 
-function LeaveQuestion({ search, released }: { search: GuardedQuery; released: { current: boolean } }) {
+function LeaveQuestion({ search, pass }: { search: GuardedQuery; pass: ReleasePass }) {
   const t = useT();
   useEffect(() => {
     guardsHoldingChanges += 1;
@@ -310,11 +350,7 @@ function LeaveQuestion({ search, released }: { search: GuardedQuery; released: {
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
     if (!leavesForm(currentLocation, nextLocation, search)) return false;
     // `release()` lets this one through, and only this one.
-    if (released.current) {
-      released.current = false;
-      return false;
-    }
-    return true;
+    return !pass.take();
   });
   return (
     <ConfirmDialog

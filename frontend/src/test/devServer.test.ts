@@ -27,7 +27,8 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
   }
 }
 
-describe("scripts/devServer.mjs", () => {
+// POSIX process groups: Windows has none to signal (review fix round 2, item 4).
+describe.skipIf(process.platform === "win32")("scripts/devServer.mjs", () => {
   it("stops every process the server started, not only the one it spawned", async () => {
     const server = spawnGroup("sh", PARENT_WITH_CHILDREN, { stdio: "ignore" });
     await until(() => livingMembers(server.pgid).length >= 3);

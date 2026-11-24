@@ -137,9 +137,19 @@ describe("BulkBar (design §2: only where bulk actions exist, and only with a se
   });
 });
 
+/**
+ * The chip takes the page's `filters` and writes its own `client` key (review
+ * fix round 2, item 2): there is no `onChange` a page could wire so that a
+ * stale client is dropped with a history entry, which was the Back trap.
+ */
+function ChipPage() {
+  const filters = useUrlFilters(["client", "state"] as const);
+  return <ClientFilter filters={filters} />;
+}
+
 describe("ClientFilter (design §1.3: a Client chip while every client is shown)", () => {
   it("offers every client of the person, drawn as a chip", () => {
-    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
+    renderPage("/x", <ChipPage />);
     const select = screen.getByRole("combobox", { name: "Client" });
     expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual([
       "All clients",
@@ -151,16 +161,25 @@ describe("ClientFilter (design §1.3: a Client chip while every client is shown)
     expect(select.closest(".chip")).toHaveClass("chip-select");
   });
 
-  it("drops a client the person does not have from the URL, instead of drawing All clients over an empty list", () => {
-    const onChange = vi.fn();
-    renderPage("/x", <ClientFilter value={FOREIGN} onChange={onChange} />);
-    // In place (`replace`), so the stale link leaves no entry to come Back to.
-    expect(onChange).toHaveBeenCalledWith("", { replace: true });
+  it("drops a client the person does not have from the URL, instead of drawing All clients over an empty list", async () => {
+    const { router } = renderPage(`/x?client=${FOREIGN}&state=open`, <ChipPage />);
+    await waitFor(() => expect(router.state.location.search).toBe("?state=open"));
+    // In place, so the stale link leaves no entry to come Back to.
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("writes a person's choice as a new entry, so Back undoes it", async () => {
+    const { router } = renderPage("/x", <ChipPage />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), ANDES);
+    expect(router.state.location.search).toBe(`?client=${ANDES}`);
+    expect(router.state.historyAction).toBe("PUSH");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
   });
 
   it("is not drawn when the top bar has chosen a client, because that choice already decides", () => {
     scope.selected = ANDES;
-    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
+    renderPage("/x", <ChipPage />);
     expect(screen.queryByRole("combobox", { name: "Client" })).toBeNull();
   });
 });
@@ -218,7 +237,7 @@ function ChipList() {
   });
   return (
     <>
-      <ClientFilter value={filters.values.client} onChange={(value, options) => filters.set("client", value, options)} />
+      <ClientFilter filters={filters} />
       <p>read as {list.data ?? "nothing yet"}</p>
     </>
   );
@@ -286,17 +305,13 @@ function withHistory(entries: string[], pattern: string, element: ReactElement) 
   return router;
 }
 
-function ChipPage() {
+/** A page that re-renders on demand, while the chip holds a client. */
+function Rerendering() {
   const filters = useUrlFilters(["client"] as const);
-  return <ClientFilter value={filters.values.client} onChange={(value, options) => filters.set("client", value, options)} />;
-}
-
-/** A page that draws the chip with a new `onChange` on every render, as an inline arrow does. */
-function Rerendering({ onChange }: { onChange: (value: string, options?: { replace?: boolean }) => void }) {
   const [renders, setRenders] = useState(0);
   return (
     <>
-      <ClientFilter value={FOREIGN} onChange={(value, options) => onChange(value, options)} />
+      <ClientFilter filters={filters} />
       <button type="button" onClick={() => setRenders(renders + 1)}>
         Again
       </button>
@@ -304,7 +319,7 @@ function Rerendering({ onChange }: { onChange: (value: string, options?: { repla
   );
 }
 
-describe("ClientFilter and a stale link (review fix round 1, item 1)", () => {
+describe("ClientFilter and a stale link (review fix rounds 1 and 2)", () => {
   it("drops a foreign client in place, so Back leaves the page instead of coming back to drop it again", async () => {
     const router = withHistory(["/start", `/devices?client=${FOREIGN}`], "/devices", <ChipPage />);
     await waitFor(() => expect(router.state.location.search).toBe(""));
@@ -313,13 +328,13 @@ describe("ClientFilter and a stale link (review fix round 1, item 1)", () => {
     expect(router.state.location.pathname).toBe("/start");
   });
 
-  it("drops it once, however often the page re-renders with a new onChange", async () => {
-    const onChange = vi.fn();
-    renderPage("/x", <Rerendering onChange={onChange} />);
+  it("re-renders of the page write nothing while the chip holds one of the person's clients", async () => {
+    const router = withHistory(["/start", `/devices?client=${ANDES}`], "/devices", <Rerendering />);
     await userEvent.click(screen.getByRole("button", { name: "Again" }));
     await userEvent.click(screen.getByRole("button", { name: "Again" }));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith("", { replace: true });
+    expect(router.state.location.search).toBe(`?client=${ANDES}`);
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
   });
 });
 

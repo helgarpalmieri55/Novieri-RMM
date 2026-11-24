@@ -1,7 +1,7 @@
-import { act, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { createBrowserRouter, Link, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { renderPage } from "../test/renderPage";
@@ -414,15 +414,89 @@ function Unused() {
   );
 }
 
-describe("release() (review fix round 1, item 7)", () => {
-  it("lets through only a navigation started in the same step: unused, it expires and the guard asks again", async () => {
+/**
+ * A `?new=` dialog that saves and closes, under the router the console runs on
+ * (`createBrowserRouter`). Close after `start()` is Back, and a browser router
+ * judges a POP in its `popstate` listener, a later task than the click: jsdom
+ * delivers `popstate` asynchronously too, which a memory router never does.
+ */
+function CreateDialog({ onCreated }: { onCreated: () => void }) {
+  const [title, setTitle] = useState("");
+  const { guard, release } = useUnsavedGuard(title !== "", { search: ["new"] });
+  return (
+    <div role="dialog" aria-label="New ticket">
+      {guard}
+      <input aria-label="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
+      <button
+        type="button"
+        onClick={() => {
+          // The server has the ticket: let the close through.
+          release();
+          onCreated();
+        }}
+      >
+        Create
+      </button>
+    </div>
+  );
+}
+
+function SaveAndClose() {
+  const created = useNewParam("ticket");
+  return (
+    <>
+      <button type="button" onClick={created.start}>
+        New ticket
+      </button>
+      {created.open ? <CreateDialog onCreated={created.close} /> : null}
+    </>
+  );
+}
+
+describe("release() (review fix rounds 1 and 2, item 7 and item 1)", () => {
+  it("lets a save that closes its ?new= dialog go unasked under a browser router, whose Back is judged a task later", async () => {
+    window.history.replaceState(null, "", "/service-desk");
+    const router = createBrowserRouter([{ path: "/service-desk", element: <SaveAndClose /> }]);
+    try {
+      render(<RouterProvider router={router} />);
+      await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+      expect(router.state.location.search).toBe("?new=ticket");
+      await userEvent.type(screen.getByLabelText("Title"), "Printer");
+      await userEvent.click(screen.getByRole("button", { name: "Create" }));
+      await waitFor(() => expect(router.state.location.search).toBe(""));
+      expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+    } finally {
+      router.dispose();
+    }
+  });
+
+  it("expires on the person's next click: a release no navigation used leaves the guard armed", async () => {
     const { router } = renderPage("/settings", <Unused />, "/settings");
     await userEvent.type(screen.getByLabelText("Name"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Release" }));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await userEvent.click(screen.getByLabelText("Name"));
     await userEvent.click(screen.getByRole("link", { name: "Admin" }));
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("expires on the person's next keystroke too", async () => {
+    const { router } = renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Release" }));
+    await userEvent.keyboard("y");
+    await act(() => router.navigate("/admin"));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("is not vacuous: with no act in between, the release lets the navigation through", async () => {
+    const { router } = renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Release" }));
+    await act(() => router.navigate("/admin"));
+    expect(router.state.location.pathname).toBe("/admin");
   });
 });
 

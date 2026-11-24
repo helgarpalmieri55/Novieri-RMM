@@ -194,37 +194,42 @@ export function ListEmpty({
  * person with fewer than two clients, where it could change nothing.
  */
 export function ClientFilter({
-  value,
-  onChange,
+  filters,
 }: {
-  value: string;
-  /** Pass `options` on to `UrlFilters.set`: it is how a stale client is dropped in place. */
-  onChange: (value: string, options?: WriteOptions) => void;
+  /**
+   * The page's `useUrlFilters`, with `client` among its keys. The chip reads
+   * and writes that key itself (review fix round 2, item 2): there is no
+   * `onChange` a page could wire so that a stale client is dropped with a
+   * history entry of its own.
+   */
+  filters: UrlFilters<"client">;
 }) {
   const t = useT();
   const { selected, clients, ready } = useClientScope();
+  const value = filters.values.client;
   // A CLIENT THE PERSON DOES NOT HAVE (a stale or edited link) leaves the URL
   // once /me has listed theirs, rather than being drawn as "All clients" over
   // the empty list the server answers for it (decision D17).
   //
-  // IN PLACE, AND ONCE (review fix round 1, item 1). Dropped with a new
+  // IN PLACE, AND ONCE (review fix rounds 1 and 2). Dropped with a new
   // history entry, the stale link stayed one Back away, and Back reopened it,
   // which dropped it again: a page Back could never leave. So `replace`, and
-  // the effect runs on `foreign` alone; the latest `onChange` is read from a
-  // ref, so an inline arrow re-created on every render cannot fire it again.
-  const latest = useRef(onChange);
+  // the effect runs on `foreign` alone; the latest `filters` is read from a
+  // ref, since its identity changes with every query.
+  const latest = useRef(filters);
   useLayoutEffect(() => {
-    latest.current = onChange;
+    latest.current = filters;
   });
   const foreign = ready && value !== "" && !clients.some((client) => client.id === value);
   useEffect(() => {
-    if (foreign) latest.current("", { replace: true });
+    if (foreign) latest.current.set("client", "", { replace: true });
   }, [foreign]);
   if (selected !== null || clients.length < 2) return null;
   return (
     <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
       <span aria-hidden="true">{t("shell.kit.client")}</span>
-      <select aria-label={t("shell.kit.client")} value={value} onChange={(event) => onChange(event.target.value)}>
+      {/* A person's choice is a new entry, so Back undoes it, as for any chip. */}
+      <select aria-label={t("shell.kit.client")} value={value} onChange={(event) => filters.set("client", event.target.value)}>
         <option value="">{t("shell.kit.allClients")}</option>
         {clients.map((client) => (
           <option key={client.id} value={client.id}>
@@ -243,6 +248,11 @@ export function ClientFilter({
  *
  *   const { api, client, ready } = useNarrowedApi(filters.values.client);
  *   useQuery({ queryKey: ["devices", ..., client], queryFn: () => api.listDevices(...), enabled: ready });
+ *
+ * BOTH, ALWAYS: `client` in the key AND `ready` in `enabled` (review fix
+ * round 2, item 3). `ready` never goes in the key in place of `enabled`: a
+ * query keyed on `ready: false` still runs, against the API that refuses, and
+ * its error is what the list would show until `/me` answers.
  *
  * - `client`: the identifier actually sent as `X-Client-Id`, or `null` when the
  *   list reads with the top bar's choice. It goes in the query key, so a change
