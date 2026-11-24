@@ -998,10 +998,11 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
  * "Forms"): every piece a list, a record or a form is built from, on the one
  * page the browser pass measures, each in the state that paints something the
  * others do not -- a selected chip with its count, a selection, both empty
- * states, a status beside a record's context, a tab strip, an open section, a
- * save bar with a change in it and one that has just saved. Fixed data, no
- * API. `ClientFilter` is not here: it needs `/me`, and the harmony walk
- * measures it on the lists themselves.
+ * states, a status beside a record's context, a tab strip, an open section,
+ * the save bar with a change, failed, not allowed and saved. Three sections,
+ * each drawn the way its pages draw it (critique answer 1): no card inside a
+ * card. Fixed data, no API. `ClientFilter` is not here: it needs `/me`, and
+ * the harmony walk measures it on the lists themselves.
  *
  * THE TABS USE THEIR OWN PARAMETER (`?kit=`), so they never fight this page's
  * other strip for `?tab=`.
@@ -1017,39 +1018,45 @@ function KitPreview() {
   const [state, setState] = useState("online");
   const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
   return (
-    // BARE, as a list's panel is: the toolbar and the bulk bar run flush to its
-    // edges, the geometry every list page draws.
-    <Panel title="Kit v4" subtitle="The list, record and form patterns every page is built from" bare>
-      <ListToolbar
-        search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
-        chips={
-          <FilterChips
-            label="State"
-            options={[
-              { value: "", label: "All", count: 12 },
-              { value: "online", label: "Online", count: 9 },
-              { value: "offline", label: "Offline" },
-            ]}
-            value={state}
-            onChange={setState}
-          />
-        }
-        end={<ShowingCount shown={9} total={12} />}
-      />
-      <BulkBar count={2} onClear={() => undefined}>
-        <Btn label="Approve" small />
-      </BulkBar>
-      <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <ListEmpty filtered onClear={() => undefined} nothingYet="No computers yet." />
-        <ListEmpty
-          filtered={false}
-          onClear={() => undefined}
-          nothingYet="No computers yet."
-          icon="devices"
-          action={<Btn label="Add a computer" icon="plus" small variant="primary" />}
+    <>
+      {/* A LIST: one bare panel, as every list page draws it, so the toolbar
+          and the bulk bar run flush to its edges. */}
+      <Panel title="Kit v4: a list" subtitle="Search, filter chips with counts, the count, the bulk bar, both empty states" bare>
+        <ListToolbar
+          search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
+          chips={
+            <FilterChips
+              label="State"
+              options={[
+                { value: "", label: "All", count: 12 },
+                { value: "online", label: "Online", count: 9 },
+                { value: "offline", label: "Offline" },
+              ]}
+              value={state}
+              onChange={setState}
+            />
+          }
+          end={<ShowingCount shown={9} total={12} />}
         />
-      </div>
-      <div style={{ padding: 18 }}>
+        <BulkBar count={2} onClear={() => undefined}>
+          <Btn label="Approve" small />
+        </BulkBar>
+        <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <ListEmpty filtered onClear={() => undefined} nothingYet="No computers yet." />
+          <ListEmpty
+            filtered={false}
+            onClear={() => undefined}
+            nothingYet="No computers yet."
+            icon="devices"
+            action={<Btn label="Add a computer" icon="plus" small variant="primary" />}
+          />
+        </div>
+      </Panel>
+
+      {/* A RECORD, on the page ground as its pages draw it (critique answer 1,
+          `.impeccable/critica-respuestas.md`): the head, the tabs, and the two
+          panels side by side, none of them inside another card. */}
+      <div style={{ marginTop: 24 }}>
         <DetailHead
           back={{ to: "/devices", label: "All computers" }}
           title="srv-app02"
@@ -1076,23 +1083,49 @@ function KitPreview() {
             }
           />
         </UrlTabs>
-        <div style={{ marginTop: 16 }}>
-          <FormSection title="Organization" icon="settings">
-            <div className="form-grid">
-              <Field label="Name">
-                <input className={inputClass} defaultValue="Andes Logistics" />
-              </Field>
-            </div>
-          </FormSection>
-          {/* Their own block, so the sticky bar has no room to ride over the
-              rest of the kit while the browser pass measures it. */}
-          <div>
-            <SaveBar dirty saving={false} onDiscard={() => undefined} onSave={() => undefined} />
-            <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
+      </div>
+
+      {/* A FORM, on the page ground: a section, then the one save bar in each
+          state that paints something the others do not (critique answer 2):
+          with a change, failed, not allowed, and saved. Each bar has a name of
+          its own, which axe's landmark-unique needs, and a block of its own,
+          so a sticky bar has no room to ride over another while measured. */}
+      <div style={{ marginTop: 24 }}>
+        <FormSection title="Organization" icon="settings">
+          <div className="form-grid">
+            <Field label="Name">
+              <input className={inputClass} defaultValue="Andes Logistics" />
+            </Field>
           </div>
+        </FormSection>
+        <div>
+          <SaveBar dirty saving={false} onDiscard={() => undefined} onSave={() => undefined} />
+        </div>
+        <div>
+          <SaveBar
+            dirty
+            saving={false}
+            label="Unsaved changes, the save failed"
+            error={new Error("The server refused the change.")}
+            onDiscard={() => undefined}
+            onSave={() => undefined}
+          />
+        </div>
+        <div>
+          <SaveBar
+            dirty
+            saving={false}
+            label="Unsaved changes, saving not allowed"
+            blockedReason="You can read these settings, and an org-admin can change them."
+            onDiscard={() => undefined}
+            onSave={() => undefined}
+          />
+        </div>
+        <div>
+          <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
         </div>
       </div>
-    </Panel>
+    </>
   );
 }
 

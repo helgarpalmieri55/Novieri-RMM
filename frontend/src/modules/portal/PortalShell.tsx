@@ -20,7 +20,10 @@
  * second `<main>`, which axe refuses (`landmark-no-duplicate-main`). Embedded,
  * it is a picture of the frame and nobody's session: it forgets no stored
  * client and records no person, as `AuthCard`'s `embedded` leaves the tab's
- * title alone.
+ * title alone. Nor does it draw "Sign out" (the /__preview critique, answer 3
+ * in `.impeccable/critica-respuestas.md`): a picture has no session to end, a
+ * live button would end the developer's console session, and a disarmed one
+ * would be a dead control.
  */
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -67,14 +70,16 @@ export function PortalShell({ children, embedded = false }: { children: ReactNod
         <span className="ml-auto text-sm text-[var(--muted)]">
           {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}
         </span>
-        <Btn
-          small
-          label={t("shell.accountMenu.signOut")}
-          onClick={() => {
-            setSignOutFailed(false);
-            signOut(api, PORTAL_SIGN_IN_PATH).catch(() => setSignOutFailed(true));
-          }}
-        />
+        {embedded ? null : (
+          <Btn
+            small
+            label={t("shell.accountMenu.signOut")}
+            onClick={() => {
+              setSignOutFailed(false);
+              signOut(api, PORTAL_SIGN_IN_PATH).catch(() => setSignOutFailed(true));
+            }}
+          />
+        )}
       </header>
       {signOutFailed ? (
         <p role="alert" className="notice red">

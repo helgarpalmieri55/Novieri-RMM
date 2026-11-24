@@ -93,6 +93,21 @@ describe("SaveBar and useDraft (design §2: one save bar for the whole console)"
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  // Critique answer 2 (.impeccable/critica-respuestas.md): the bench draws the
+  // resting, failing and blocked bars side by side, so each needs its own name
+  // or axe's landmark-unique fails. A page draws one bar and names none.
+  it("takes a region name, so more than one bar can be drawn and told apart", () => {
+    renderPage(
+      "/x",
+      <>
+        <SaveBar dirty saving={false} onDiscard={vi.fn()} onSave={vi.fn()} />
+        <SaveBar dirty saving={false} label="Unsaved changes, the save failed" error={new Error("x")} onDiscard={vi.fn()} onSave={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Unsaved changes, the save failed" })).toHaveTextContent("Unsaved changes");
+  });
+
   it("submits the page's form when asked, so Enter in a field still saves", async () => {
     const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
     renderPage(

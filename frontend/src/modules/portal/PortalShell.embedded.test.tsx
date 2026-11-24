@@ -68,6 +68,18 @@ describe("the portal's frame, embedded in a page", () => {
     expect(hadSession()).toBe(false);
   });
 
+  // Critique answer 3 (.impeccable/critica-respuestas.md): a picture of the
+  // frame has no session to end, and a disarmed button would be a dead control.
+  it("draws no Sign out: there is no session in a picture of the frame", async () => {
+    renderFrame(
+      <PortalShell embedded>
+        <p>A portal page draws here.</p>
+      </PortalShell>,
+    );
+    expect(await screen.findByText("Ana Gómez")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+  });
+
   it("is not vacuous: the frame a contact gets still draws its main and forgets the stored client", async () => {
     setSelectedClient(ANDES);
     renderFrame(
@@ -77,6 +89,7 @@ describe("the portal's frame, embedded in a page", () => {
     );
     expect(await screen.findByText("Ana Gómez")).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveTextContent("A portal page draws here.");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(localStorage.getItem(CLIENT_STORAGE_KEY)).not.toBe(ANDES);
     expect(hadSession()).toBe(true);
   });

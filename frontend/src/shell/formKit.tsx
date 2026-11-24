@@ -112,6 +112,7 @@ export function SaveBar({
   savedMessage,
   problems = [],
   blockedReason,
+  label,
 }: {
   dirty: boolean;
   saving: boolean;
@@ -123,6 +124,12 @@ export function SaveBar({
   savedMessage?: string;
   problems?: readonly Problem[];
   blockedReason?: string;
+  /**
+   * The region's name, "Unsaved changes" by default. A page draws one bar and
+   * names none; `/__preview` draws several side by side, and two regions with
+   * one name fail axe's `landmark-unique` (critique answer 2).
+   */
+  label?: string;
 }) {
   const t = useT();
   if (!dirty && !saving && !error) {
@@ -139,7 +146,7 @@ export function SaveBar({
       ? `${problems.map((problem) => problem.message).join(". ")}.`
       : null;
   return (
-    <div className="savebar" role="region" aria-label={t("shell.kit.unsaved")}>
+    <div className="savebar" role="region" aria-label={label ?? t("shell.kit.unsaved")}>
       <span className="savebar-what">{saving ? t("shell.kit.saving") : t("shell.kit.unsaved")}</span>
       {failure ? (
         <span className="savebar-error" role="alert">
