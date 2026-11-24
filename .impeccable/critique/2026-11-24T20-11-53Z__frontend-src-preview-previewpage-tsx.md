@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-p3/frontend/src/preview/PreviewPage.tsx"
+target_identity: "file:frontend/src/preview/PreviewPage.tsx"
 target_fingerprint: "sha256:4c07b7d6b5730d8f7062914145025eb1783daceaa0b14f52d3d3e58b58e0da96"
-target_path: /home/user/rmm-p3/frontend/src/preview/PreviewPage.tsx
+target_path: frontend/src/preview/PreviewPage.tsx
 timestamp: 2026-11-24T20-11-53Z
 slug: frontend-src-preview-previewpage-tsx
 closed: true

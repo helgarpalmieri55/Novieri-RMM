@@ -61,7 +61,7 @@
  * a global install, the same way that script does it.
  */
 
-import { spawn } from "node:child_process";
+import { spawnGroup } from "./devServer.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
@@ -587,10 +587,15 @@ async function startVite() {
     return { url: process.env.HARMONY_URL.replace(/\/$/, ""), stop: async () => {} };
   }
   const port = await freePort();
-  const child = spawn("npx", ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"], {
-    cwd: FRONTEND,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // IN A PROCESS GROUP OF ITS OWN, stopped whole (`devServer.mjs`): signalling
+  // `npx` alone left its `vite` running on the worktree's cache.
+  const server = spawnGroup(
+    "npx",
+    ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
+    { cwd: FRONTEND, stdio: ["ignore", "pipe", "pipe"] },
+    { what: "vite" },
+  );
+  const { child } = server;
   let log = "";
   await new Promise((ok, fail) => {
     const timer = setTimeout(() => fail(new Error(`vite did not start on ${port} within 60s\n${log}`)), 60_000);
@@ -608,8 +613,13 @@ async function startVite() {
       clearTimeout(timer);
       fail(new Error(`vite exited with ${code}\n${log}`));
     });
+  }).catch(async (err) => {
+    await server.stop().catch(() => {});
+    throw err;
   });
-  return { url: `http://127.0.0.1:${port}`, stop: async () => child.kill("SIGTERM") };
+  // `stop()` rejects when a process of the group survives it: the walk then
+  // fails rather than leave a server behind for the next pass.
+  return { url: `http://127.0.0.1:${port}`, stop: () => server.stop() };
 }
 
 /** The prototype, served from disk so the browser sees a real origin. */

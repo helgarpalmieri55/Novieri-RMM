@@ -68,7 +68,7 @@
  * `npx playwright install --with-deps chromium`.
  */
 
-import { spawn } from "node:child_process";
+import { spawnGroup } from "./devServer.mjs";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -158,10 +158,15 @@ async function startServer() {
 }
 
 function startServerOn(port) {
-  const child = spawn("npx", ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"], {
-    cwd: FRONTEND,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // IN A PROCESS GROUP OF ITS OWN, stopped whole (`devServer.mjs`): signalling
+  // `npx` alone left its `vite` running on the worktree's cache.
+  const server = spawnGroup(
+    "npx",
+    ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
+    { cwd: FRONTEND, stdio: ["ignore", "pipe", "pipe"] },
+    { what: "vite" },
+  );
+  const { child } = server;
   const url = `http://127.0.0.1:${port}/__preview`;
   let said = "";
   const keep = (d) => {
@@ -170,20 +175,26 @@ function startServerOn(port) {
   child.stderr.on("data", keep);
   return new Promise((ok, fail) => {
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
       fail(new Error(`vite did not start on ${port} within 60s\n${said}`));
     }, 60_000);
     child.stdout.on("data", (d) => {
       keep(d);
       if (String(d).includes("ready in")) {
         clearTimeout(timer);
-        ok({ url, stop: async () => child.kill("SIGTERM") });
+        // `stop()` rejects when a process of the group survives it, and the
+        // pass then fails rather than leave a server behind.
+        ok({ url, stop: () => server.stop() });
       }
     });
     child.on("exit", (code) => {
       clearTimeout(timer);
       fail(new Error(`vite exited with ${code} on port ${port}\n${said}`));
     });
+  }).catch(async (err) => {
+    // A port taken, or a server that never said it was ready: nothing of this
+    // attempt is left running before the next one.
+    await server.stop().catch(() => {});
+    throw err;
   });
 }
 
