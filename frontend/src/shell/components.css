@@ -57,7 +57,7 @@
  * button here, which is what SC 1.4.11 means by "information required to
  * identify a user interface component". `--line-control` clears 3:1 on every
  * surface a button lands on; `contrast.test.ts` computes it. */
-.btn { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--t-body)/1 var(--sans); padding: 9px 13px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+.btn { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--t-body)/1 var(--sans); padding: 9px 13px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap; min-height: 36px;
 }
 /* Console addition (design first). Hover repaints the ground AND hardens the
  * edge; a ground wash alone (`--surface-2` on `--surface`, 1.02:1) would be a
@@ -78,6 +78,11 @@
  * (design edit 8), and white on it is 7.57:1. */
 .btn.primary:hover, .btn.pri:hover { background: var(--accent-2); border-color: var(--accent-2);
 }
+/* PRESSED (DESIGN.md v4, "Buttons"; redesign decision D5): the brand's third
+ * accent step, `--accent-3`, one deeper than the hover, so white on it reads
+ * at least as well as on the hover. */
+.btn.primary:active, .btn.pri:active { background: var(--accent-3); border-color: var(--accent-3);
+}
 /* v3 `.btn.ghost`: no edge, accent ink. */
 .btn.ghost { border-color: transparent; background: transparent; color: var(--accent);
 }
@@ -96,7 +101,7 @@
 }
 .btn.ghost.danger:hover { background: var(--sev-crit-s);
 }
-.btn.small { padding: 6px 10px; font-size: var(--t-sm);
+.btn.small { padding: 6px 10px; font-size: var(--t-sm); min-height: 30px;
 }
 .btn.icon-only { padding: 9px;
 }
@@ -399,7 +404,7 @@ td.cell-clip .cell-title, td.cell-clip .cell-sub { display: block; overflow: hid
  * a pill with no kind is colourless on purpose, so `StatusPill` cannot paint
  * a state it has not classified. Every pill also carries its kind's icon
  * (`kindOf` in components.tsx), because colour is never the only carrier. */
-.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; padding: 3px 9px 3px 7px; border-radius: var(--r-badge); white-space: nowrap;
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; min-height: 24px; padding: 0 9px 0 7px; border-radius: var(--r-badge); white-space: nowrap;
 }
 .p-crit { background: var(--sev-crit-s); color: var(--sev-crit);
 }
@@ -646,9 +651,15 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
  * a <button>, which would otherwise bring the user agent's font. No
  * `line-height`: v3's `.chip` declares none, and stating 1.2 here drew every
  * chip in the console 3px shorter than the design. */
-.chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); padding: 6px 11px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink-2); font-family: inherit;
+.chip { display: inline-flex; align-items: center; gap: 7px; font-size: var(--t-body); font-weight: 500; min-height: 32px; padding: 0 11px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); font-family: inherit;
 }
 .chip.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent);
+}
+/* A chip's count (`FilterChips`, DESIGN.md v4 "Chips"): smaller and quieter
+ * than its label, in tabular figures, and in the accent once selected. */
+.chip .n { font-size: var(--t-sm); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.chip.on .n { color: var(--accent);
 }
 /* `disabled` (console addition, wave 8): genuinely inert, not merely dimmed
  * -- `Chips` puts the real `disabled` attribute on each `<button>`, which is

@@ -1,0 +1,37 @@
+/* The pattern kit (DESIGN.md v4: "Lists", "Records (detail)", "Forms").
+ * Tokens only: the harmony gate reads every value here at runtime. */
+.list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chip-select { padding: 0 4px 0 11px; gap: 6px; }
+.chip-select select { min-height: 30px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.chip-select:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; background: var(--accent-s); border-bottom: 1px solid var(--line); }
+.bulkbar-count { font-weight: 600; color: var(--accent); }
+
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; font-size: var(--t-sm); color: var(--muted); text-decoration: none; }
+.back-link:hover { color: var(--accent); }
+.back-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+
+.detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.detail-context { font-size: var(--t-sm); color: var(--muted); }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; gap: 16px; }
+.detail-main, .detail-aside { display: grid; gap: 16px; min-width: 0; }
+.tab-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1024px) { .detail-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.form-page { max-width: 1100px; }
+.form-section { margin-bottom: 16px; }
+.form-section-h { margin: 0; }
+.form-section-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 18px; border: 0; background: transparent; color: var(--ink); font: 600 var(--t-h2)/1.3 var(--sans); text-align: left; cursor: pointer; }
+.form-section-toggle .chev { margin-left: auto; transition: transform .15s ease; }
+.form-section-toggle .chev.open { transform: rotate(180deg); }
+.form-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.savebar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
+.savebar-what { margin-right: auto; font-weight: 500; color: var(--ink); }
+.savebar-error { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--sev-crit); }
+.savebar-blocked { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--muted); }
+.savebar.saved { gap: 8px; }
+.savebar.saved .ic { color: var(--sev-ok); }
+
+@media (prefers-reduced-motion: reduce) { .form-section-toggle .chev { transition: none; } }

@@ -1821,6 +1821,18 @@ export class ApiClient {
   ) {}
 
   /**
+   * THIS CLIENT, NARROWED TO ONE CLIENT for every request it makes
+   * (`X-Client-Id`), whatever the top bar says: a list's "Client" chip and the
+   * client 360 page (redesign design §1.3, §2; decision D6). It narrows and
+   * never widens -- the server answers with the session's scope intersected
+   * with this id, and RLS enforces it (invariant 5a). Global routes still go
+   * without the header (`requestHeaders`).
+   */
+  forClient(clientId: string): ApiClient {
+    return new ApiClient(this.onUnauthorized, this.base, () => clientId);
+  }
+
+  /**
    * What `requestHeaders` needs to know about one request to this API.
    * `global` is a request global by its body (`RequestRoute.global`); a
    * request global by its path needs nothing here, `globalRoutes.json` says so.

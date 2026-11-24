@@ -21,7 +21,7 @@
  * reason beside it.
  *
  * NOT INVENTED HERE. Two implementations in this codebase already do it right
- * and are generalised rather than replaced: `modules/settings/SaveBar.tsx`
+ * and are generalised rather than replaced: `shell/formKit.tsx`'s `SaveBar`
  * (disabled with a visible reason, `role="alert"` on failure, `role="status"`
  * on success, no optimistic success anywhere) and
  * `modules/reporting/paramsForm.ts#missingRequired` (the one route in the

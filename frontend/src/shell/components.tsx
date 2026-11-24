@@ -353,6 +353,7 @@ export function Tabs({
   onSelect,
   panelId,
   scroll = false,
+  label,
 }: {
   items: readonly TabItem[];
   active: string;
@@ -363,6 +364,9 @@ export function Tabs({
   /** One row that scrolls sideways instead of folding into several, for a
    *  strip too long for a phone. */
   scroll?: boolean;
+  /** The tablist's name (`UrlTabs`, redesign Task 3): what the strip switches
+   *  between, for assistive technology. Omitted, the list is unnamed as before. */
+  label?: string;
 }) {
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
@@ -381,7 +385,7 @@ export function Tabs({
   };
 
   return (
-    <div className={scroll ? "tabs scroll" : "tabs"} role="tablist" onKeyDown={move}>
+    <div className={scroll ? "tabs scroll" : "tabs"} role="tablist" aria-label={label} onKeyDown={move}>
       {items.map((item) => (
         <button
           type="button"
@@ -833,3 +837,12 @@ export function Toggle({
     </button>
   );
 }
+
+/* ------------------------------------------------------------- pattern kit */
+
+// The list, record and form patterns (redesign design §2): pages import every
+// piece from this one module. The cycle is safe -- each kit file uses what it
+// imports from here only inside functions, never while it is evaluated.
+export * from "./listKit";
+export * from "./detailKit";
+export * from "./formKit";
