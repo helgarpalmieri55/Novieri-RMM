@@ -69,7 +69,7 @@ Las oleadas corren en paralelo y **ningún archivo tiene dos dueños**. Cada arc
 | `frontend/src/modules/portal/PortalShell.tsx` (solo la prop `embedded`) y `frontend/src/modules/portal/PortalShell.embedded.test.tsx` | Task 3 (Step 10), antes de que la O2 sea dueña de `portal/**`; después la O2 rehace el marco y **conserva** `embedded` y su prueba (la sección «Portal frame» la usa) |
 | `frontend/src/modules/clients/**`, `frontend/src/modules/onboarding/journey.ts` y los comentarios de `journeyTarget.ts` (el parámetro del recorrido, Task 5 Step 3b) | Task 5; después, `onboarding/**` es de la O1 |
 | `DESIGN.md`, `PRODUCT.md`, `.impeccable/design.json`, `docs/product.md` | Task 1 (y Task 14 si la revisión final pide un cambio) |
-| `.impeccable/critica-respuestas.md` (las respuestas a las preguntas de la crítica) | **el coordinador**: la Task 3 (Step 11) la inaugura, la Task 4 (Step 12) la amplía y después solo la escribe el coordinador en la rama base; cada oleada la recibe en su encargo |
+| `.impeccable/critica-respuestas.md` (las respuestas a las preguntas de la crítica) | **el coordinador**: **ya existe** (la Task 3 lo creó con sus respuestas a la crítica de `/__preview`); la Task 4 (Step 12) y cada oleada **lo amplían**, nunca lo crean; después solo lo escribe el coordinador en la rama base, y cada oleada lo recibe en su encargo |
 | `.impeccable/config.json` (las excepciones del detector, `impeccable ignores add-value … --shared`) y `.impeccable/critique/ignore.md` | **el coordinador**, en la rama base. Una oleada propone la entrada exacta en su informe |
 
 **2. Partidos por oleada (la Task 3 los parte, Step 3b):** `frontend/src/i18n/identical-ok.o1.ts` a `identical-ok.o8.ts`. Cada oleada pone y quita en el suyo, y solo en el suyo, las entradas de sus catálogos (la que deja idéntica una clave nueva en inglés y en español, y la que borra la entrada de una clave que renombra o borra). `catalogue.identical.test.ts` fija que cada archivo solo nombre las claves de su oleada.
@@ -143,8 +143,8 @@ Forma (diseño §2, «Lista»; Atera: `Atera_recorrido_menus_UI_UX.md`, «Custom
 3. El estado vacío es `ListEmpty`: «nada todavía» con la acción de crear, o «nada con estos filtros» con «Quitar filtros». Nunca las dos frases a la vez, nunca un vacío sin causa.
 4. Los filtros son `useUrlFilters`. Los conteos de los chips salen de la respuesta del servidor cuando la trae (`state_counts`, `by_state`, `total`); si no la trae, el chip va **sin** número (regla «Absent Zero»), nunca con uno calculado sobre la página visible.
 5. Una pestaña que filtraba la lista (`Tabs` con `?state=`) pasa a `FilterChips` con el mismo parámetro: la URL no cambia.
-6. **El chip «Cliente» estrecha la lectura de la lista, y solo la lectura** (decisión D6). La lista lee con `useApiFor(filters.values.client)`, no lee nada hasta que `useNarrowing(filters.values.client).ready` (hasta que `/me` dice si ese cliente es de la persona), y su clave de consulta lleva `narrowing.client`: cambiar el chip vuelve a leer y nunca deja en pantalla las filas del cliente anterior bajo el chip nuevo. Un identificador que no es de la persona no se manda: `ClientFilter` lo quita de la URL y la lista lee como si no estuviera. **Las escrituras siguen con `useApi()`**: una acción de fila o de lote manda la elección de la barra de arriba, como hoy; el chip no cambia a qué cliente va una escritura.
-7. **Una lista que lee por un hook de su módulo** (`useLicenses`, `useSubscriptions`, `useIpamSubnets`, `useHealthAlerts`, `useDeployments`, `useBackupPoints`, `usePlans`, `useChanges`, `useSiteServers`, `usePatchFleetReport`…: hoy llaman a `useApi()` dentro y usan una clave fija) cambia **el hook**, no la llamada: toma el valor del chip, lee con `useApiFor` y pone el cliente en su clave. Es la misma llamada a la API, con los mismos argumentos; cambia a quién estrecha y bajo qué clave se guarda, así que no choca con «Prohibido … cambiar una llamada a la API». Ejemplo exacto, `modules/licenses/api.ts`:
+6. **El chip «Cliente» estrecha la lectura de la lista, y solo la lectura** (decisión D6). La lista lee con **un solo** `useNarrowedApi(filters.values.client)`, que devuelve `{ api, client, ready }`; la consulta usa **las dos cosas**: `queryKey: [..., client]` y `enabled: ready` (`ready` es `false` hasta que `/me` dice si ese cliente es de la persona, y hasta entonces `api` rechaza toda llamada con `NarrowingPending`, así que una lista que olvida `enabled` no lee por la API de la consola). Con `client` en la clave, cambiar el chip vuelve a leer y nunca deja en pantalla las filas del cliente anterior bajo el chip nuevo. Un identificador que no es de la persona no se manda: `ClientFilter` lo quita de la URL, en el sitio, y la lista lee como si no estuviera. **Las escrituras siguen con `useApi()`**: una acción de fila o de lote manda la elección de la barra de arriba, como hoy; el chip no cambia a qué cliente va una escritura.
+7. **Una lista que lee por un hook de su módulo** (`useLicenses`, `useSubscriptions`, `useIpamSubnets`, `useHealthAlerts`, `useDeployments`, `useBackupPoints`, `usePlans`, `useChanges`, `useSiteServers`, `usePatchFleetReport`…: hoy llaman a `useApi()` dentro y usan una clave fija) cambia **el hook**, no la llamada: toma el valor del chip, lee con `useNarrowedApi` y pone `client` en su clave junto con `enabled: ready`. Es la misma llamada a la API, con los mismos argumentos; cambia a quién estrecha y bajo qué clave se guarda, así que no choca con «Prohibido … cambiar una llamada a la API». Ejemplo exacto, `modules/licenses/api.ts`:
    ```ts
    // Antes:
    export function useLicenses() {
@@ -153,12 +153,11 @@ Forma (diseño §2, «Lista»; Atera: `Atera_recorrido_menus_UI_UX.md`, «Custom
    }
    // Después: `chip` es el valor de `?client=` ("" sin chip, como lo llaman los demás).
    export function useLicenses(chip = "") {
-     const narrowing = useNarrowing(chip);
-     const api = useApiFor(chip);
+     const { api, client, ready } = useNarrowedApi(chip);
      return useQuery({
-       queryKey: ["licenses", narrowing.client],
+       queryKey: ["licenses", client],
        queryFn: () => api.listLicenses(),
-       enabled: narrowing.ready,
+       enabled: ready,
      });
    }
    ```
@@ -169,12 +168,11 @@ Forma (diseño §2, «Lista»; Atera: `Atera_recorrido_menus_UI_UX.md`, «Custom
 // Receta L, esqueleto. Las claves de filtro son las que la página ya usaba en
 // la URL (o, si las tenía en useState, las nuevas que nombra su oleada).
 const filters = useUrlFilters(["q", "state", "client"] as const);
-const narrowing = useNarrowing(filters.values.client);
-const api = useApiFor(filters.values.client); // solo para leer la lista
+const { api, client, ready } = useNarrowedApi(filters.values.client); // solo para leer la lista
 const list = useQuery({
-  queryKey: ["<módulo>", "list", filters.values.q, filters.values.state, narrowing.client],
+  queryKey: ["<módulo>", "list", filters.values.q, filters.values.state, client],
   queryFn: () => api.listX({ q: filters.values.q, state: filters.values.state }),
-  enabled: narrowing.ready,
+  enabled: ready,
 });
 const rows = list.data?.items ?? [];
 
@@ -199,12 +197,12 @@ return (
               value={filters.values.state}
               onChange={(value) => filters.set("state", value)}
             />
-            <ClientFilter value={filters.values.client} onChange={(value) => filters.set("client", value)} />
+            <ClientFilter filters={filters} />
           </>
         }
         end={<ShowingCount shown={rows.length} total={list.data?.total ?? null} />}
       />
-      <QueryState loading={list.isLoading || !narrowing.ready} error={list.error} empty={false} emptyLabel="">
+      <QueryState loading={list.isLoading || !ready} error={list.error} empty={false} emptyLabel="">
         {rows.length === 0 ? (
           <ListEmpty
             filtered={filters.active}
@@ -341,19 +339,24 @@ Forma (diseño §2, «Formulario»; Atera: captura «atera 12»):
 1. `FormPage` (volver y título) cuando la página **es** un formulario; si el formulario es una pestaña de una página (Configuración), la pestaña usa directamente las secciones y la barra.
 2. `FormSection` por grupo de campos, plegables, abiertas por defecto.
 3. Los campos con ayuda son `Field` con `help` (`components/ui.tsx`, diseño de ajustes de 2026-09-10).
-4. **Una sola** `SaveBar` por página, fija abajo: «Cambios sin guardar · Descartar · Guardar». Desaparecen los botones «Guardar» sueltos por panel. `useDraft` calcula `dirty`; `UnsavedGuard` avisa antes de salir. Lo que hacía el botón suelto lo hace la barra: «Guardado.» tras el 2xx (`saved`), los problemas del formulario (`problems`), la razón por la que no se puede guardar (`blockedReason`), y Intro en un campo sigue guardando si la barra va dentro del `<Form>` con `submit`.
-5. **Salir es cambiar de ruta.** `UnsavedGuard` pregunta cuando la ruta cambia; un cambio solo de la query (una pestaña, un filtro, `?new=`, el registro que un guardado acaba de seleccionar) no es salir. Una página cuya query **es** lo que edita (Configuración: cada pestaña es otro formulario) lo dice con `search`: `<UnsavedGuard dirty={dirty} search />`.
-6. **Una página que se va al guardar** (un alta que lleva al registro creado, el portal que abre el ticket enviado) usa `useUnsavedGuard`, que devuelve la guarda y `release()`, y llama a `release()` justo antes de navegar: `useBlocker` lee su condición de un efecto, así que un manejador que guarda y navega en el mismo paso sería juzgado con los cambios todavía puestos (revisión previa, I-1, reproducido con react-router 7.18.1).
+4. **Una sola** `SaveBar` por página, fija abajo: «Cambios sin guardar · Descartar · Guardar». Desaparecen los botones «Guardar» sueltos por panel. `useDraft` calcula `dirty`; `UnsavedGuard` avisa antes de salir. Lo que hacía el botón suelto lo hace la barra: «Guardado.» tras el 2xx (`saved`), los problemas del formulario (`problems`), la razón por la que no se puede guardar (`blockedReason`: **un permiso o un estado del registro, nunca un dato que falta**; un campo sin rellenar se dice con `problems` o con el propio campo) y Intro en un campo sigue guardando si la barra va dentro del `<Form>` con `submit`. `SaveBar` lleva `label` (el nombre de su región) **solo** donde una página dibuja más de una barra. **Una sola guarda con cambios por página**: si una página tiene dos formularios (dos paneles, un diálogo `?new=` sobre un formulario), solo una guarda recibe el `dirty` que cuenta; dos guardas sucias a la vez escriben `console.error` y la prueba falla.
+   **`useDraft` y el envío:** la página llama `markSent(draft)` cuando envía (la respuesta del servidor pasa a ser el estado guardado, aunque traiga campos que el formulario nunca edita, y salir no pregunta) y `markSent(null)` cuando el guardado **falla** (un `refetch` posterior no debe pisar el cambio sin guardar).
+5. **Salir es cambiar de ruta.** `UnsavedGuard` pregunta cuando la ruta cambia; un cambio solo de la query (una pestaña, un filtro, `?new=`, el registro que un guardado acaba de seleccionar) no es salir. Qué cambios de query cuentan como salir lo dice `search`, de tipo `GuardedQuery = boolean | readonly string[]`: `search={["new"]}` para un formulario dentro de un diálogo `?new=` (Atrás cierra el diálogo y pierde el borrador: debe preguntar), `search={["tab"]}` para uno dentro de un panel `?tab=` (Configuración: cada pestaña es otro formulario), `search` (`true`) cuando **toda** la query es el formulario. Sin `search`, solo cambiar de ruta es salir. Ejemplo: `<UnsavedGuard dirty={dirty} search={["tab"]} />`.
+6. **Una página que se va al guardar** (un alta que lleva al registro creado, el portal que abre el ticket enviado) usa `useUnsavedGuard`, que devuelve la guarda y `release()`, y llama a `release()` **solo después de un guardado correcto, justo antes de navegar** (nunca antes de enviar, ni en el `onError`; `release()` caduca con el siguiente clic o tecla de la persona): `useBlocker` lee su condición de un efecto, así que un manejador que guarda y navega en el mismo paso sería juzgado con los cambios todavía puestos (revisión previa, I-1, reproducido con react-router 7.18.1).
 7. Una alta pequeña (un diálogo de dos o tres campos) **sigue siendo un diálogo** (`Dialog`); el diseño restiliza los diálogos, no los convierte en páginas.
 
 ```tsx
 const saved = settings.data;                  // lo que el servidor dice hoy
-const { draft, setDraft, dirty, discard } = useDraft(saved);
-const save = useMutation({ mutationFn: (body: X) => api.updateX(body), onSuccess: () => settings.refetch() });
+const { draft, setDraft, dirty, discard, markSent } = useDraft(saved);
+const save = useMutation({
+  mutationFn: (body: X) => api.updateX(body),
+  onSuccess: () => settings.refetch(),
+  onError: () => markSent(null), // el guardado falló: el cambio sigue sin guardar
+});
 
 return (
   <FormPage back={{ to: "/<lista>", label: t("<m>.back") }} title={t("<m>.title")}>
-    <UnsavedGuard dirty={dirty} />
+    <UnsavedGuard dirty={dirty} />{/* search={["tab"]} / ["new"] / true según dónde viva el formulario */}
     <FormSection title={t("<m>.section.general")} icon="settings">
       {/* Field ... value={draft?.x} onChange={(e) => setDraft({ ...draft!, x: e.target.value })} */}
     </FormSection>
@@ -363,7 +366,11 @@ return (
       error={save.error}
       saved={save.isSuccess && !dirty}
       onDiscard={discard}
-      onSave={() => draft && save.mutate(draft)}
+      onSave={() => {
+        if (!draft) return;
+        markSent(draft); // lo que se envía pasa a ser lo guardado cuando el servidor conteste
+        save.mutate(draft);
+      }}
     />
   </FormPage>
 );
@@ -374,11 +381,15 @@ La forma de la página que se va al guardar (6):
 ```tsx
 const { guard, release } = useUnsavedGuard(dirty);
 const create = useMutation({
-  mutationFn: (body: X) => api.createX(body),
+  mutationFn: (body: X) => {
+    markSent(body); // se envía: lo escrito después sigue siendo un cambio
+    return api.createX(body);
+  },
   onSuccess: (created) => {
-    release();
+    release(); // solo tras el guardado correcto, justo antes de navegar
     navigate(`/<lista>/${created.id}`);
   },
+  onError: () => markSent(null),
 });
 return (
   <FormPage back={{ to: "/<lista>", label: t("<m>.back") }} title={t("<m>.newTitle")}>
@@ -448,7 +459,7 @@ Cada oleada termina con estos pasos, **después** de que sus pruebas, `npm run t
    - **dos subagentes aislados en paralelo** cuando la sesión tiene la herramienta de subagentes: A (revisión de diseño: lee el archivo de la página y sus capturas en los dos idiomas y en 1440 y 390, y puntúa las 10 heurísticas de Nielsen) y B (`.claude/skills/impeccable/scripts/impeccable detect --json frontend/src/modules/<m>`, **desde la raíz de la worktree**, que es donde el detector aplica las excepciones de `.impeccable/config.json`; desde `frontend/` no las aplica, revisión de verificación N2; más la capa en el navegador: `npx vite` desde `frontend/` en esta worktree, que imprime su puerto propio (`Local: http://localhost:<puerto>/`); `impeccable live-server --background`, que imprime el suyo; Chromium por Playwright en una pestaña nueva sobre `http://localhost:<puerto de vite>/<ruta>?__fixtures`, inyectar `http://localhost:<puerto del live-server>/detect.js`, leer los mensajes `impeccable` de la consola y terminar con `impeccable live-server stop --keep-inject` y parando `npx vite`). Si la sesión no tiene herramienta de subagentes, el informe empieza con `⚠️ DEGRADED: single-context (no sub-agent tool exposed)` y se hacen A y B en serie, como manda la referencia;
    - un hallazgo del detector que es un falso positivo no se «corrige»: el informe de la oleada da la orden exacta para el coordinador (`impeccable ignores add-value <regla> <valor> --file <ruta relativa> --reason "<por qué>" --shared`), que la aplica en la rama base porque `.impeccable/config.json` es suyo;
    - el informe completo va en el informe de la oleada; se persiste con `IMPECCABLE_CRITIQUE_META='{…}' .claude/skills/impeccable/scripts/impeccable critique-storage write "frontend/src/modules/<m>/<Pagina>.tsx" <archivo-temporal>` y se lee la tendencia con `critique-storage trend`;
-   - **las preguntas de la crítica** (resolución del coordinador del 2026-11-24): no van al operador. Las contesta el coordinador con `DESIGN.md`, el diseño aprobado y las decisiones del operador, y las respuestas viven en **`.impeccable/critica-respuestas.md`**, versionado en la rama base (es del coordinador). La primera crítica del programa (la de `/__preview`, Task 3, Step 11) lo inaugura y la del armazón (Task 4, Step 12) lo amplía; las siguientes (Task 5 y las oleadas) lo leen como respuestas vigentes, y solo la pregunta que esas fuentes no zanjan sube al operador, a través del coordinador. Si una crítica tiene menos de tres asuntos prioritarios, se escribe la línea literal `Questions skipped: <n> priority issues`.
+   - **las preguntas de la crítica** (resolución del coordinador del 2026-11-24): no van al operador. Las contesta el coordinador con `DESIGN.md`, el diseño aprobado y las decisiones del operador, y las respuestas viven en **`.impeccable/critica-respuestas.md`**, versionado en la rama base (es del coordinador). El archivo **ya existe**: la primera crítica del programa (la de `/__preview`, Task 3, Step 11) lo creó; la del armazón (Task 4, Step 12) y las de las oleadas lo **amplían** (añaden sus respuestas al final, nunca lo crean ni lo reescriben) y leen lo que ya dice como respuestas vigentes, y solo la pregunta que esas fuentes no zanjan sube al operador, a través del coordinador. Si una crítica tiene menos de tres asuntos prioritarios, se escribe la línea literal `Questions skipped: <n> priority issues`.
 4. **Pulido de impeccable, página por página** (`reference/polish.md`): `critique-storage latest "frontend/src/modules/<m>/<Pagina>.tsx" --json`, corregir los P0 y P1 que la crítica dejó (en este orden: tareas rotas, estados que faltan, jerarquía y deriva del kit, detalles visuales, limpieza), sin rediseño escondido, y al terminar `critique-storage close "frontend/src/modules/<m>/<Pagina>.tsx" "<snapshot_file>"`, donde `<snapshot_file>` es el nombre (sin carpeta) que devolvió `latest --json`. Un `close` cerrado escribe `closed: true` en la cabecera de la crítica, que es lo que la Task 14 cuenta. Lo que el pulido no corrige se anota como P2/P3 en el informe.
 5. **Repetir el paso 2** tras el pulido y adjuntar al informe la lista de PNG de 1440x900 y 390x844 de cada ruta en los dos idiomas.
 6. `npx vitest run`, `npm run typecheck`, `npm run build` completos: verde.
@@ -2673,6 +2684,10 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 
 ### Task 3: El kit de patrones (lista, ficha, formulario) y lo que necesita debajo
 
+> **HECHA** (rama `p3/base`, tras dos rondas de arreglos de revisión). **El código construido es la fuente de verdad**: `frontend/src/shell/{listKit,formKit,detailKit}.tsx` y sus pruebas. Las rondas de revisión cambiaron la API pública del kit, así que el bloque «Interfaces» de abajo es **final, tal como se construyó**; los pasos 1, 4 y 6 ya no repiten el código del primer borrador (quedan como descripción de lo construido). La oleada o la tarea que necesite una firma exacta lee el archivo, no este texto. `.impeccable/critica-respuestas.md` **ya existe**: la Task 3 lo creó con las respuestas del coordinador a la crítica de `/__preview`; la Task 4 y las oleadas lo **amplían** (se añaden respuestas al final, nunca se crea ni se reescribe).
+>
+> *Nota histórica:* el primer borrador de esta tarea definía `useNarrowing` y `useApiFor` por separado y `ClientFilter` con `value`/`onChange`; la revisión los sustituyó por `useNarrowedApi` y `ClientFilter({ filters })`, y ningún texto posterior del plan usa los nombres viejos.
+
 Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview` (`src/preview/PreviewPage.tsx`, una de las 86), donde se enseñan las piezas nuevas para que `a11y-browser.mjs` las mida en píxeles. **Restilo de lo que ya existe:** el selector de cliente, las tablas, los avisos, los diálogos y los cajones (diseño §1.2 y §2, «Ya existentes, que se restilizan») cambian **solo por los tokens** de la Task 1 y por la geometría de `.btn`, `.chip` y `.pill` del Step 7; ninguna de sus reglas propias cambia, y un revisor no debe buscar otra cosa.
 
 **Files:**
@@ -2690,21 +2705,27 @@ Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview
 - Modify: `frontend/src/preview/PreviewPage.tsx` (tres secciones al final: «Kit v4», «AuthCard embedded» y «Portal frame»)
 - Modify: `frontend/src/modules/portal/PortalShell.tsx` (la prop `embedded`, Step 10; revisión de verificación, N1) y Create: `frontend/src/modules/portal/PortalShell.embedded.test.tsx`
 
-**Interfaces:**
+**Interfaces** (final, tal como se construyó):
 - Consumes: `useApi` (`lib/ApiContext`), `useClientScope` (`lib/clientScope`), `isClientId` (`lib/clientChoice`), `Btn`, `FilterBar`, `ResultCount`, `Tabs`, `Panel` (`shell/components`), `Pill`, `type Kind` (`shell/viz`), `ConfirmDialog` (`components/confirm`), `describeSubmitError` (`components/form`).
 - Produces (`shell/listKit.tsx`):
-  - `useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K>` con `values: Record<K, string>` (`""` si falta), `active: boolean`, `set(key: K, value: string): void` (`""` borra; siempre borra `offset`; la búsqueda `q` sustituye la entrada del historial, cualquier otra clave añade una, así que Atrás deshace un chip), `clear(): void` (añade una entrada);
+  - `useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K>`; `UrlFilters<K> = { values: Readonly<Record<K, string>> (`""` si falta); active: boolean; set(key: K, value: string, options?: WriteOptions): void; clear(): void }` y `WriteOptions = { replace?: boolean }`. `""` borra; `set` y `clear` siempre borran `offset`; la búsqueda `q` sustituye la entrada del historial y cualquier otra clave añade una (Atrás deshace un chip; `options.replace` lo cambia); **una escritura que no cambiaría la query no escribe nada**; `clear` añade una entrada;
   - `FilterChips({ label, options, value, onChange })`, `options: readonly { value: string; label: string; count?: number }[]` (el valor `""` es «todos»);
   - `ShowingCount({ shown: number; total: number | null })`;
   - `BulkBar({ count: number; onClear(): void; children })` (nada si `count === 0`);
   - `ListEmpty({ filtered: boolean; onClear(): void; nothingYet: string; action?: ReactNode; icon?: string })`;
-  - `ClientFilter({ value: string; onChange(value: string): void })` (nada si arriba hay un cliente elegido o la persona tiene menos de dos; quita de la URL, con `onChange("")`, un valor que no es un cliente de la persona en cuanto `/me` lo sabe);
-  - `useNarrowing(clientId: string): { client: string | null; ready: boolean }` (`client`: el identificador que de verdad se manda, o `null` si se lee con la elección de arriba; `ready`: `false` mientras `/me` no ha dicho si ese cliente es de la persona: no se lee nada antes);
-  - `useApiFor(clientId: string): ApiClient` (la API estrechada a `useNarrowing(clientId).client`, o la de siempre);
-  - `useNewParam(kind: string): { open: boolean; start(): void; close(): void }`;
+  - `ClientFilter({ filters }: { filters: UrlFilters<"client"> })`: el `UrlFilters` de la página, que **incluye la clave `"client"`**; el chip **escribe él mismo** esa clave (no hay `onChange`) y quita de la URL **en el sitio** un valor que no es un cliente de la persona en cuanto `/me` lo sabe; no se dibuja si arriba hay un cliente elegido o la persona tiene menos de dos clientes;
+  - `useNarrowedApi(clientId: string): { api: ApiClient; client: string | null; ready: boolean }` (`api`: la API estrechada al cliente del chip, o la de siempre; `client`: el identificador que de verdad se manda, o `null` si se lee con la elección de arriba; `ready`: `false` mientras `/me` no ha dicho si ese cliente es de la persona; **hasta entonces `api` rechaza toda llamada con `NarrowingPending`**). Una lista usa **las dos**: `queryKey: [..., client]` y `enabled: ready`;
+  - `class NarrowingPending extends Error`;
+  - `useNewParam(kind: string): { open: boolean; start(): void; close(): void }` (`close()` vuelve Atrás desde la entrada que añadió el `start()` de esta página; si no la añadió esta página, sustituye);
   - `ListToolbar({ search?, chips?, end? })`.
+  - Quitadas las dos funciones sueltas del primer borrador (véase la nota histórica de arriba).
 - Produces (`shell/detailKit.tsx`): `SectionNav({ label: string; items: readonly { to: string; label: string; end?: boolean }[] })` (las páginas de un módulo como una fila de enlaces: sustituye a los ocho `*Nav.tsx` de módulo que hoy dibujan cada uno la suya), `DetailHead({ back: { to: string; label: string }; title: string; status?: { kind: Kind; label: string }; context?: ReactNode; actions?: ReactNode })`, `useUrlTab<K extends string>(keys: readonly K[], fallback: K, param?: string): [K, (key: K) => void]`, `UrlTabs<K extends string>({ items: readonly { key: K; label: string; count?: number }[]; active: K; onSelect(key: K): void; label: string; children })`, `DetailGrid({ main: ReactNode; aside: ReactNode })`, `ClientContext({ clientId: string | null; siteName?: string | null })`.
-- Produces (`shell/formKit.tsx`): `FormPage({ back; title; description?; children })`, `FormSection({ title: string; icon?: string; defaultOpen?: boolean; children })`, `SaveBar({ dirty: boolean; saving: boolean; error?: unknown; onDiscard(): void; onSave?(): void; submit?: boolean; saved?: boolean; savedMessage?: string; problems?: readonly Problem[]; blockedReason?: string })`, `useUnsavedGuard(dirty: boolean, options?: { search?: boolean }): { guard: ReactElement | null; release(): void }`, `UnsavedGuard({ dirty: boolean; search?: boolean })`, `useDraft<T>(saved: T | undefined): { draft: T | undefined; setDraft(next: T): void; dirty: boolean; discard(): void }`.
+- Produces (`shell/formKit.tsx`):
+  - `FormPage({ back; title; description?; children })`, `FormSection({ title: string; icon?: string; defaultOpen?: boolean; children })`;
+  - `SaveBar({ dirty, saving, error?, onDiscard, onSave?, submit?, saved?, savedMessage?, problems?, blockedReason?, label? })`: `blockedReason` es un permiso o un estado del registro, nunca un dato que falta; `label` (el nombre de la región) solo donde una página dibuja más de una barra;
+  - `useDraft<T>(saved: T | undefined): { draft: T | undefined; setDraft(next: T): void; dirty: boolean; discard(): void; markSent(sent: T | null): void }`: la página llama `markSent(draft)` al enviar y `markSent(null)` cuando el guardado falla;
+  - `type GuardedQuery = boolean | readonly string[]`: `["new"]` para un formulario dentro de un diálogo `?new=`, `["tab"]` para uno dentro de un panel `?tab=`, `true` cuando toda la query es el formulario;
+  - `useUnsavedGuard(dirty: boolean, options?: { search?: GuardedQuery }): { guard: ReactElement | null; release(): void }` y `UnsavedGuard({ dirty: boolean; search?: GuardedQuery })`: `release()` solo después de un guardado correcto, justo antes de la navegación (caduca con el siguiente clic o tecla de la persona); **una sola guarda con cambios por página**: dos sucias a la vez escriben `console.error`, que hace fallar la prueba.
 - Produces (`lib/api.ts`): `ApiClient.forClient(clientId: string): ApiClient`.
 - Produces (`App.tsx`): `appRoutes(): RouteObject[]` (exportada) y `App` sobre `createBrowserRouter` + `RouterProvider`.
 - Produces (`test/renderPage.tsx`): `renderPage(path: string, element: ReactElement, pattern?: string, options?: { page?: MessageKey }): RenderResult & { router; queryClient }` y `TitleShell({ page: MessageKey; children })`, la mitad del título de pestaña que pone `AppShell`, para una prueba que monta una ficha sin el armazón.
@@ -2714,14 +2735,14 @@ Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview
 - Todo lo de `listKit`, `detailKit` y `formKit` se reexporta desde `shell/components.tsx`: las páginas importan de un solo sitio.
 
 **Decisiones de esta tarea** (Apéndice A):
-- **D6. El chip «Cliente» y la ficha 360 leen con `X-Client-Id`, no con un `?client_id=` nuevo en el servidor.** `ApiClient.forClient(id)` devuelve un cliente de la API que manda ese cliente en cada petición. El servidor ya responde con la intersección del alcance de la sesión y ese cliente, y la base de datos lo impone (invariante 5a). Así ninguna lista necesita un parámetro nuevo en el backend del proyecto 4, y el filtro es exactamente tan estricto como el selector. Cuando el selector de arriba ya eligió un cliente, `useApiFor` lo respeta y el chip no se dibuja: la elección de arriba manda.
+- **D6. El chip «Cliente» y la ficha 360 leen con `X-Client-Id`, no con un `?client_id=` nuevo en el servidor.** `ApiClient.forClient(id)` devuelve un cliente de la API que manda ese cliente en cada petición. El servidor ya responde con la intersección del alcance de la sesión y ese cliente, y la base de datos lo impone (invariante 5a). Así ninguna lista necesita un parámetro nuevo en el backend del proyecto 4, y el filtro es exactamente tan estricto como el selector. Cuando el selector de arriba ya eligió un cliente, `useNarrowedApi` lo respeta y el chip no se dibuja: la elección de arriba manda.
 - **D7. El router pasa a ser de datos** (`createBrowserRouter`). `useBlocker`, lo único que permite «avisar antes de salir» dentro de la consola, solo funciona con un router de datos. Las rutas son las mismas `<Route>` de hoy dentro de una ruta de diseño que dibuja `SetupGate`; `routes-covered.test.ts` las sigue leyendo igual. Fuera de un router de datos (las pruebas que montan con `MemoryRouter`), `UnsavedGuard` solo protege la recarga y el cierre (`beforeunload`).
 - **D8. `?new=<tipo>` abre el diálogo de alta de una lista.** Así cada entrada del menú «Nuevo» es una URL real y un alta se puede enlazar. Cerrar el diálogo quita el parámetro.
 - **D16. Salir de una página con cambios es cambiar de ruta, y un guardado que lleva a otro sitio no pregunta** (revisión previa, I-1, reproducido con react-router 7.18.1). `useBlocker` registra su condición en un efecto, así que un manejador que limpia `dirty` y navega en el mismo paso es juzgado con la condición vieja: el alta del portal (`NewTicketPage.tsx:120-140`) se quedaba en `/portal/new` con «¿Salir sin guardar?» abierto. Por eso la guarda compara solo la ruta salvo que la página pida también la query (`search`), y `useUnsavedGuard` da un `release()` que se lee en el acto.
-- **D17. El chip «Cliente» solo estrecha con un cliente de la persona, y espera a saberlo** (revisión previa, I-5). Con un identificador ajeno en la URL el servidor responde cero filas (`client_scope.py:30-36`), pero el `<select>` no tiene esa opción y enseñaría «Todos los clientes» sobre una lista vacía; y antes de que `/me` conteste, leer con la API de la consola mostraría las filas de todos bajo el chip de uno. `useNarrowing` decide las dos cosas y `ClientFilter` quita el valor ajeno.
+- **D17. El chip «Cliente» solo estrecha con un cliente de la persona, y espera a saberlo** (revisión previa, I-5). Con un identificador ajeno en la URL el servidor responde cero filas (`client_scope.py:30-36`), pero el `<select>` no tiene esa opción y enseñaría «Todos los clientes» sobre una lista vacía; y antes de que `/me` conteste, leer con la API de la consola mostraría las filas de todos bajo el chip de uno. `useNarrowedApi` decide las dos cosas (`ready` y `NarrowingPending`) y `ClientFilter` quita el valor ajeno.
 - **D18. El router de datos tiene pantalla de error propia** (resolución del coordinador del 2026-11-24). Sin `errorElement`, una página que lanza un error enseña la de React Router, en inglés y con estilos en línea (`Unexpected Application Error!`); con `RouteError` en la ruta de diseño se ve una frase traducida con la forma de `QueryState` y un enlace al inicio.
 
-- [ ] **Step 1: Escribir las pruebas del kit (fallan)**
+- [x] **Step 1: Escribir las pruebas del kit (fallan)**
 
 `frontend/src/test/renderPage.tsx`:
 
@@ -2806,286 +2827,7 @@ export function recordingNarrowing<T extends object>(api: T): { api: T; narrowed
 }
 ```
 
-`frontend/src/shell/listKit.test.tsx`:
-
-```tsx
-import { useQuery } from "@tanstack/react-query";
-import { act, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { MeClient } from "../lib/api";
-import { renderPage } from "../test/renderPage";
-import {
-  BulkBar,
-  ClientFilter,
-  FilterChips,
-  ListEmpty,
-  ShowingCount,
-  useApiFor,
-  useNarrowing,
-  useNewParam,
-  useUrlFilters,
-} from "./listKit";
-
-const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
-const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
-/** A well-formed client id that is not one of this person's (a stale or edited link). */
-const FOREIGN = "9d1f0c2a-4b3e-4c5d-8e6f-7a8b9c0d1e2f";
-
-const scope = vi.hoisted(() => ({ selected: null as string | null, clients: [] as unknown[], ready: true }));
-vi.mock("../lib/clientScope", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/clientScope")>()),
-  useClientScope: () => ({ selected: scope.selected, clients: scope.clients, select: vi.fn(), ready: scope.ready }),
-}));
-const api = vi.hoisted(() => ({ forClient: vi.fn((id: string) => ({ narrowedTo: id })) }));
-vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
-
-function client(id: string, name: string): MeClient {
-  return { id, name, kind: "customer", enabled_modules: [], permissions: [] } as unknown as MeClient;
-}
-
-beforeEach(() => {
-  scope.selected = null;
-  scope.ready = true;
-  scope.clients = [client(ANDES, "Andes Logistics"), client(BOGOTA, "Bogotá Retail")];
-  api.forClient.mockClear();
-});
-
-function Fleet() {
-  const filters = useUrlFilters(["state", "q"] as const);
-  const online = filters.values.state === "online";
-  return (
-    <>
-      <input aria-label="Search" value={filters.values.q} onChange={(event) => filters.set("q", event.target.value)} />
-      <FilterChips
-        label="State"
-        options={[
-          { value: "", label: "All", count: 12 },
-          { value: "online", label: "Online", count: 9 },
-          { value: "offline", label: "Offline" },
-        ]}
-        value={filters.values.state}
-        onChange={(value) => filters.set("state", value)}
-      />
-      <ShowingCount shown={online ? 9 : 12} total={12} />
-      {filters.values.state === "offline" ? (
-        <ListEmpty filtered={filters.active} onClear={filters.clear} nothingYet="No computers yet." />
-      ) : null}
-    </>
-  );
-}
-
-describe("useUrlFilters and FilterChips (design §2: filters live in the URL)", () => {
-  it("reads the filter from the URL, so a filtered view is a link", () => {
-    renderPage("/devices?state=online", <Fleet />);
-    expect(screen.getByRole("button", { name: /Online/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /All/ })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByText("Showing 9 of 12")).toBeInTheDocument();
-  });
-
-  it("writes a chip into the URL, goes back to the first page, and drops the default", async () => {
-    const { router } = renderPage("/devices?offset=50", <Fleet />);
-    await userEvent.click(screen.getByRole("button", { name: /Online/ }));
-    expect(router.state.location.search).toBe("?state=online");
-    await userEvent.click(screen.getByRole("button", { name: /All/ }));
-    expect(router.state.location.search).toBe("");
-  });
-
-  it("draws a count only where the caller has one, never a made-up zero", () => {
-    renderPage("/devices", <Fleet />);
-    expect(screen.getByRole("button", { name: /All\s*12/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Offline" })).toBeInTheDocument();
-  });
-
-  it("lets Back undo a chip, while typing a search adds no history entry of its own", async () => {
-    const { router } = renderPage("/devices", <Fleet />);
-    await userEvent.click(screen.getByRole("button", { name: /Online/ }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Search" }), "srv");
-    expect(router.state.location.search).toBe("?state=online&q=srv");
-    await act(() => router.navigate(-1));
-    expect(router.state.location.search).toBe("");
-  });
-});
-
-describe("ShowingCount", () => {
-  it("never claims a total the server did not give", () => {
-    renderPage("/x", <ShowingCount shown={50} total={null} />);
-    expect(screen.getByText("Showing 50")).toBeInTheDocument();
-  });
-});
-
-describe("ListEmpty (design §2: the empty state says the real cause)", () => {
-  it("says nothing matches the filters, and clearing them goes back to the whole list", async () => {
-    const { router } = renderPage("/devices?state=offline&q=srv", <Fleet />);
-    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(router.state.location.search).toBe("");
-  });
-
-  it("says nothing exists yet, and offers the page's own action", () => {
-    renderPage("/x", <ListEmpty filtered={false} onClear={vi.fn()} nothingYet="No computers yet." action={<a href="/devices/onboard">Add a computer</a>} />);
-    expect(screen.getByText("No computers yet.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add a computer" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
-  });
-});
-
-describe("BulkBar (design §2: only where bulk actions exist, and only with a selection)", () => {
-  it("is not drawn until something is selected", () => {
-    renderPage("/x", <BulkBar count={0} onClear={vi.fn()}><button type="button">Approve</button></BulkBar>);
-    expect(screen.queryByRole("region", { name: "Bulk actions" })).toBeNull();
-  });
-
-  it("counts the selection and clears it", async () => {
-    const clear = vi.fn();
-    renderPage("/x", <BulkBar count={3} onClear={clear}><button type="button">Approve</button></BulkBar>);
-    expect(screen.getByRole("region", { name: "Bulk actions" })).toHaveTextContent("3 selected");
-    await userEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-    expect(clear).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("ClientFilter (design §1.3: a Client chip while every client is shown)", () => {
-  it("offers every client of the person, drawn as a chip", () => {
-    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
-    const select = screen.getByRole("combobox", { name: "Client" });
-    expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual([
-      "All clients",
-      "Andes Logistics",
-      "Bogotá Retail",
-    ]);
-    // Design §1.3 says a "Client" chip: a select in the chip's shape, pinned
-    // so a refactor cannot drop the shape (spec pre-flight M-11).
-    expect(select.closest(".chip")).toHaveClass("chip-select");
-  });
-
-  it("drops a client the person does not have from the URL, instead of drawing All clients over an empty list", () => {
-    const onChange = vi.fn();
-    renderPage("/x", <ClientFilter value={FOREIGN} onChange={onChange} />);
-    expect(onChange).toHaveBeenCalledWith("");
-  });
-
-  it("is not drawn when the top bar has chosen a client, because that choice already decides", () => {
-    scope.selected = ANDES;
-    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
-    expect(screen.queryByRole("combobox", { name: "Client" })).toBeNull();
-  });
-});
-
-function Probe({ id }: { id: string }) {
-  const narrowed = useApiFor(id) as unknown as { narrowedTo?: string };
-  return <p>{narrowed.narrowedTo ?? "console"}</p>;
-}
-
-describe("useApiFor (decision D6)", () => {
-  it("narrows to the chip's client with X-Client-Id", () => {
-    renderPage("/x", <Probe id={ANDES} />);
-    expect(screen.getByText(ANDES)).toBeInTheDocument();
-  });
-
-  it("leaves the console's own client alone when the chip is empty, or the top bar has chosen", () => {
-    renderPage("/x", <Probe id="" />);
-    expect(screen.getByText("console")).toBeInTheDocument();
-    scope.selected = BOGOTA;
-    renderPage("/y", <Probe id={ANDES} />);
-    expect(screen.getAllByText("console")).toHaveLength(2);
-  });
-
-  it("never sends a value that is not a client id", () => {
-    renderPage("/x", <Probe id="not-a-uuid" />);
-    expect(screen.getByText("console")).toBeInTheDocument();
-    expect(api.forClient).not.toHaveBeenCalled();
-  });
-
-  it("never sends a client the person does not have (decision D17)", () => {
-    renderPage("/x", <Probe id={FOREIGN} />);
-    expect(screen.getByText("console")).toBeInTheDocument();
-    expect(api.forClient).not.toHaveBeenCalled();
-  });
-});
-
-function Decided({ id }: { id: string }) {
-  const narrowing = useNarrowing(id);
-  return <p>{narrowing.ready ? (narrowing.client ?? "console") : "waiting"}</p>;
-}
-
-/** A list behind the chip, keyed on the narrowed client the way Receta L keys one. */
-function ChipList() {
-  const filters = useUrlFilters(["client"] as const);
-  const narrowing = useNarrowing(filters.values.client);
-  const narrowed = useApiFor(filters.values.client) as unknown as { narrowedTo?: string };
-  const list = useQuery({
-    queryKey: ["probe", narrowing.client],
-    queryFn: async () => narrowed.narrowedTo ?? "console",
-    enabled: narrowing.ready,
-  });
-  return (
-    <>
-      <ClientFilter value={filters.values.client} onChange={(value) => filters.set("client", value)} />
-      <p>read as {list.data ?? "nothing yet"}</p>
-    </>
-  );
-}
-
-describe("useNarrowing (decision D17)", () => {
-  it("decides nothing before /me has listed the person's clients, so a list reads nothing", () => {
-    scope.ready = false;
-    renderPage("/x", <Decided id={ANDES} />);
-    expect(screen.getByText("waiting")).toBeInTheDocument();
-  });
-
-  it("is decided at once for an empty chip, or when the top bar has chosen", () => {
-    scope.ready = false;
-    renderPage("/x", <Decided id="" />);
-    scope.selected = BOGOTA;
-    renderPage("/y", <Decided id={ANDES} />);
-    expect(screen.getAllByText("console")).toHaveLength(2);
-  });
-
-  it("reads again under the new client when the chip changes, so no row of the last one stays", async () => {
-    renderPage("/x", <ChipList />);
-    expect(await screen.findByText("read as console")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), ANDES);
-    expect(await screen.findByText(`read as ${ANDES}`)).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), BOGOTA);
-    expect(await screen.findByText(`read as ${BOGOTA}`)).toBeInTheDocument();
-    expect(api.forClient).toHaveBeenCalledWith(ANDES);
-    expect(api.forClient).toHaveBeenCalledWith(BOGOTA);
-  });
-});
-
-function Creating() {
-  const created = useNewParam("ticket");
-  return (
-    <>
-      <button type="button" onClick={created.start}>New ticket</button>
-      {created.open ? (
-        <div role="dialog" aria-label="New ticket">
-          <button type="button" onClick={created.close}>Close</button>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-describe("useNewParam (decision D8)", () => {
-  it("opens a create dialog from ?new=, which is what the New menu links to", () => {
-    renderPage("/service-desk?new=ticket", <Creating />);
-    expect(screen.getByRole("dialog", { name: "New ticket" })).toBeInTheDocument();
-  });
-
-  it("puts the dialog in the URL when opened here, and takes it out when closed", async () => {
-    const { router } = renderPage("/service-desk?state=open", <Creating />);
-    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
-    expect(router.state.location.search).toBe("?state=open&new=ticket");
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(router.state.location.search).toBe("?state=open");
-    await act(() => router.navigate("/service-desk?new=other"));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-```
+`frontend/src/shell/listKit.test.tsx`: **hecho; ya existe** y es la fuente de verdad. Fija `useUrlFilters` y `FilterChips` (la URL manda; Atrás deshace un chip; una escritura que no cambia nada no escribe), `ShowingCount`, `ListEmpty`, `BulkBar`, `ClientFilter({ filters })` (chip con forma de chip, sin clientes ajenos, un cliente ajeno se quita en el sitio, no se dibuja con cliente elegido arriba), `useNarrowedApi` (estrecha con `X-Client-Id`; nunca manda un valor que no es un cliente de la persona; espera a `/me`: `ready` y `NarrowingPending`; vuelve a leer al cambiar el chip) y `useNewParam` (`?new=`; `close()` vuelve Atrás o sustituye según de dónde vino).
 
 `frontend/src/shell/detailKit.test.tsx`:
 
@@ -3179,232 +2921,7 @@ describe("SectionNav", () => {
 });
 ```
 
-`frontend/src/shell/formKit.test.tsx`:
-
-```tsx
-import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
-
-import { renderPage } from "../test/renderPage";
-import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
-
-interface Org {
-  name: string;
-}
-
-function Settings({ initial, onSave }: { initial: Org; onSave: (org: Org) => void }) {
-  const [saved, setSaved] = useState<Org>(initial);
-  const { draft, setDraft, dirty, discard } = useDraft(saved);
-  return (
-    <FormPage back={{ to: "/admin", label: "Admin" }} title="Settings">
-      <UnsavedGuard dirty={dirty} />
-      <FormSection title="Organization" icon="settings">
-        <label>
-          Name
-          <input value={draft?.name ?? ""} onChange={(event) => setDraft({ name: event.target.value })} />
-        </label>
-      </FormSection>
-      <SaveBar
-        dirty={dirty}
-        saving={false}
-        onDiscard={discard}
-        onSave={() => {
-          if (draft) {
-            onSave(draft);
-            setSaved(draft);
-          }
-        }}
-      />
-    </FormPage>
-  );
-}
-
-describe("SaveBar and useDraft (design §2: one save bar for the whole console)", () => {
-  it("is not drawn until something changed, and Discard puts the page back", async () => {
-    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
-    await userEvent.type(screen.getByLabelText("Name"), " SAS");
-    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(screen.getByLabelText("Name")).toHaveValue("Novieri");
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
-  });
-
-  it("saves through the page, and goes away once the server has the change", async () => {
-    const save = vi.fn();
-    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={save} />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), " SAS");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(save).toHaveBeenCalledWith({ name: "Novieri SAS" });
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
-  });
-
-  it("says the save failed in the bar, and keeps the change", () => {
-    renderPage(
-      "/x",
-      <SaveBar dirty saving={false} error={new Error("The server refused it.")} onDiscard={vi.fn()} onSave={vi.fn()} />,
-    );
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-  });
-
-  // What the per-panel buttons it replaces did (settings' SaveBar, the
-  // ticket's "Save changes"), so a page loses none of it by moving here.
-  it("says it saved once the server answered, until the next change", () => {
-    renderPage("/x", <SaveBar dirty={false} saving={false} saved onDiscard={vi.fn()} onSave={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Saved.");
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
-  });
-
-  it("says why it cannot save, and does not offer to", () => {
-    renderPage(
-      "/x",
-      <SaveBar dirty saving={false} blockedReason="A subject is required." onDiscard={vi.fn()} onSave={vi.fn()} />,
-    );
-    expect(screen.getByText("A subject is required.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-  });
-
-  it("submits the page's form when asked, so Enter in a field still saves", async () => {
-    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
-    renderPage(
-      "/x",
-      <form onSubmit={onSubmit}>
-        <input aria-label="Name" defaultValue="a" />
-        <SaveBar dirty saving={false} submit onDiscard={vi.fn()} />
-      </form>,
-    );
-    await userEvent.type(screen.getByLabelText("Name"), "{Enter}");
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-  });
-});
-
-// LEAVING IS A CLICK ON A LINK, as a person leaves: the form's own back link.
-// (A bare `router.navigate()` that the blocker holds leaves a pending
-// transition behind, and React reports it as an un-awaited suspension.)
-describe("UnsavedGuard (design §5: a page with changes warns before it is left)", () => {
-  it("asks before leaving, and staying keeps the page and the change", async () => {
-    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), " SAS");
-    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/settings");
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(router.state.location.pathname).toBe("/settings");
-    expect(screen.getByLabelText("Name")).toHaveValue("Novieri SAS");
-  });
-
-  it("leaves when the person says so", async () => {
-    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), " SAS");
-    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
-    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
-    expect(router.state.location.pathname).toBe("/admin");
-  });
-
-  it("lets a clean page go without asking", async () => {
-    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
-    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
-    expect(router.state.location.pathname).toBe("/admin");
-  });
-
-  it("asks the browser too, for a reload or a closed tab", async () => {
-    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), " SAS");
-    const event = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(true);
-  });
-});
-
-/** An alta that leaves for what it created, the portal's New ticket shape. */
-function Creating({ releasing }: { releasing: boolean }) {
-  const [title, setTitle] = useState("");
-  const { guard, release } = useUnsavedGuard(title !== "");
-  const navigate = useNavigate();
-  return (
-    <FormPage back={{ to: "/tickets", label: "Tickets" }} title="New ticket">
-      {guard}
-      <label>
-        Title
-        <input value={title} onChange={(event) => setTitle(event.target.value)} />
-      </label>
-      <button
-        type="button"
-        onClick={() => {
-          if (releasing) release();
-          navigate("/tickets/t-1");
-        }}
-      >
-        Send
-      </button>
-    </FormPage>
-  );
-}
-
-/** A form whose links change only the query: a tab, the way Settings has them. */
-function Tabbed({ search }: { search?: boolean }) {
-  const [name, setName] = useState("");
-  return (
-    <>
-      <UnsavedGuard dirty={name !== ""} search={search} />
-      <label>
-        Name
-        <input value={name} onChange={(event) => setName(event.target.value)} />
-      </label>
-      <Link to="/settings?tab=email">Email</Link>
-    </>
-  );
-}
-
-describe("UnsavedGuard, what leaving is (decision D16)", () => {
-  it("lets a save that leaves go without asking", async () => {
-    const { router } = renderPage("/tickets/new", <Creating releasing />, "/tickets/new");
-    await userEvent.type(screen.getByLabelText("Title"), "Printer");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(router.state.location.pathname).toBe("/tickets/t-1");
-    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
-  });
-
-  it("is not vacuous: the same navigation without release() asks", async () => {
-    const { router } = renderPage("/tickets/new", <Creating releasing={false} />, "/tickets/new");
-    await userEvent.type(screen.getByLabelText("Title"), "Printer");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/tickets/new");
-  });
-
-  it("does not call a change of query alone leaving (a tab, a filter, ?new=)", async () => {
-    const { router } = renderPage("/settings", <Tabbed />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), "x");
-    await userEvent.click(screen.getByRole("link", { name: "Email" }));
-    expect(router.state.location.search).toBe("?tab=email");
-    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
-  });
-
-  it("asks on a change of query too where the page says its query is what it edits", async () => {
-    const { router } = renderPage("/settings", <Tabbed search />, "/settings");
-    await userEvent.type(screen.getByLabelText("Name"), "x");
-    await userEvent.click(screen.getByRole("link", { name: "Email" }));
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
-    expect(router.state.location.search).toBe("");
-  });
-});
-
-describe("FormSection", () => {
-  it("folds and unfolds, and says which it is", async () => {
-    renderPage("/x", <FormSection title="Mail">x</FormSection>);
-    const toggle = screen.getByRole("button", { name: "Mail" });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await userEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText("x")).not.toBeVisible();
-  });
-});
-```
+`frontend/src/shell/formKit.test.tsx`: **hecho; ya existe** y es la fuente de verdad. Fija `SaveBar` (solo con cambios; el fallo, «Guardado.», `blockedReason`, `label`, `submit`), `useDraft` y `markSent` (la respuesta pasa a ser el estado guardado, lo escrito después del envío se conserva, un guardado fallido olvida el envío), `UnsavedGuard` (pregunta al salir; la query sola no es salir; `search` con claves `["new"]` y `["tab"]`; una guarda sucia con otra limpia; dos sucias avisan con `console.error`), `release()` (un guardado que se va no pregunta, caduca con el siguiente clic o tecla, y cada caso tiene su par «no es vacuo»), la pregunta sin línea de asunto vacía y `FormSection`.
 
 `frontend/src/lib/api.forClient.test.ts`:
 
@@ -3465,12 +2982,12 @@ describe("the console's router (decision D7)", () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutarlas y verlas fallar**
+- [x] **Step 2: Ejecutarlas y verlas fallar**
 
 Run: `cd frontend && npx vitest run src/shell/listKit.test.tsx src/shell/detailKit.test.tsx src/shell/formKit.test.tsx src/lib/api.forClient.test.ts src/App.router.test.tsx`
 Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` ni `appRoutes`.
 
-- [ ] **Step 3: Los textos del kit**
+- [x] **Step 3: Los textos del kit**
 
 `frontend/src/i18n/en/shell.ts`, después del bloque `ui`:
 
@@ -3532,7 +3049,7 @@ Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` 
   },
 ```
 
-- [ ] **Step 3b: `identical-ok.ts`, partido por oleada** (revisión previa, W-I1 y F-M10)
+- [x] **Step 3b: `identical-ok.ts`, partido por oleada** (revisión previa, W-I1 y F-M10)
 
 `src/i18n/identical-ok.ts` es un solo objeto con 154 entradas de todos los módulos, y cualquier oleada que deja idéntica una clave en los dos catálogos (VRF, VLAN, «Ticket», «Software») o que renombra una que ya está listada tiene que tocarlo: ocho oleadas añadiendo al final del mismo literal chocan. Se parte una vez, aquí, y cada oleada pasa a tener el suyo.
 
@@ -3643,283 +3160,16 @@ Expected: PASS; `IDENTICAL_OK` tiene las mismas 154 claves que antes, así que `
 
 Desde aquí, **la Task 4 y la Task 5 añaden sus entradas a `IDENTICAL_OK_SHARED`** (`shell.*`, `clients.*`) y cada oleada a su `identical-ok.o<N>.ts`.
 
-- [ ] **Step 4: `listKit.tsx`**
+- [x] **Step 4: `listKit.tsx`**
 
-```tsx
-/**
- * THE LIST PATTERN (design §2, "Lista"; DESIGN.md v4, "Lists"). One way every
- * list in the console filters, counts, narrows to a client, selects and says
- * why it is empty. A page composes these pieces; no page draws its own.
- *
- * EVERYTHING IS IN THE URL (design §2, and the reason Atera's walkthrough
- * gives for competing on consistency): a filtered view is a link, a reload
- * keeps it, Back undoes a chip.
- */
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+**Hecho; el código vive en `frontend/src/shell/listKit.tsx` y es la fuente de verdad** (el código que este paso traía al escribirse el plan se sustituyó por esto después de dos rondas de arreglos de revisión; un implementador de oleada no lo reescribe). Lo que construyó, con la forma final de su API (la de «Interfaces»):
 
-import { useT } from "../i18n/context";
-import type { ApiClient } from "../lib/api";
-import { useApi } from "../lib/ApiContext";
-import { isClientId } from "../lib/clientChoice";
-import { useClientScope } from "../lib/clientScope";
-import { Btn, FilterBar, ResultCount } from "./components";
-import { Icon } from "./icons";
-import "./kit.css";
+- `useUrlFilters(keys)` y `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ListToolbar`. `set(key, value, { replace? })`: `q` sustituye la entrada del historial y cualquier otra clave añade una; una escritura que no cambia la query **no escribe nada** (Atrás no se gasta en un duplicado); `set` y `clear` borran `offset`.
+- `ClientFilter({ filters })`: recibe el `UrlFilters` de la página, que **incluye la clave `client`**, y escribe él mismo esa clave; no tiene `onChange`. Quita **en el sitio** (sin añadir una entrada) un cliente que no es de la persona, y no escribe nada mientras el chip tiene uno suyo. No se dibuja si el selector de arriba ya eligió un cliente o si la persona tiene menos de dos.
+- `useNarrowedApi(clientId)` devuelve `{ api, client, ready }` y **sustituye a las dos funciones sueltas del primer borrador** (véase la nota histórica de arriba). Hasta que `ready`, `api` rechaza toda llamada con `NarrowingPending`: una lista que olvida `enabled: ready` no lee a través de la API de la consola. La lista usa **las dos** cosas, `queryKey: [..., client]` y `enabled: ready`.
+- `useNewParam(kind)` devuelve `{ open, start, close }`; `close()` vuelve Atrás **desde la entrada que añadió el `start()` de esta página**, y en cualquier otro caso (el diálogo llegó en un enlace, o la query ya cambió) sustituye.
 
-/** The page cursor of the lists that page; any filter change starts again from the first page. */
-const CURSOR = "offset";
-/** The search box's key: typing in it replaces the history entry instead of adding one per keystroke. */
-const SEARCH = "q";
-
-export interface UrlFilters<K extends string> {
-  /** Every key's value, `""` when the URL does not carry it. */
-  readonly values: Readonly<Record<K, string>>;
-  /** Whether any of the keys holds a value: what tells "nothing yet" from "nothing matches". */
-  readonly active: boolean;
-  /**
-   * `""` removes the key. The search (`q`) replaces the history entry, so
-   * typing is not twenty Backs; any other key adds one, so Back undoes a chip.
-   */
-  set(key: K, value: string): void;
-  /** Removes every key: a new history entry, so Back brings the filters back. */
-  clear(): void;
-}
-
-export function useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K> {
-  const [params, setParams] = useSearchParams();
-  const signature = keys.join("|");
-  const values = useMemo(
-    // `keys` is usually a literal re-created on every render; its contents
-    // (`signature`) are what decide whether the values changed.
-    () => Object.fromEntries(signature.split("|").map((key) => [key, params.get(key) ?? ""])) as Record<K, string>,
-    [params, signature],
-  );
-  const active = keys.some((key) => (params.get(key) ?? "") !== "");
-  const set = useCallback(
-    (key: K, value: string) =>
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          if (value === "") next.delete(key);
-          else next.set(key, value);
-          next.delete(CURSOR);
-          return next;
-        },
-        { replace: key === SEARCH },
-      ),
-    [setParams],
-  );
-  const clear = useCallback(
-    () =>
-      setParams((current) => {
-        const next = new URLSearchParams(current);
-        for (const key of signature.split("|")) next.delete(key);
-        next.delete(CURSOR);
-        return next;
-      }),
-    [setParams, signature],
-  );
-  return { values, active, set, clear };
-}
-
-export interface FilterChipOption {
-  /** `""` is "every value": the default, which writes nothing to the URL. */
-  readonly value: string;
-  readonly label: string;
-  /** From the server. Absent is drawn as no number at all, never as 0 (The Absent Zero Rule). */
-  readonly count?: number;
-}
-
-/** One filter as a row of toggles, each with its count (DESIGN.md v4, "Chips"). */
-export function FilterChips({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: readonly FilterChipOption[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="chips" role="group" aria-label={label}>
-      {options.map((option) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value === "" ? "(all)" : option.value}
-            type="button"
-            className={on ? "chip on" : "chip"}
-            aria-pressed={on}
-            onClick={() => onChange(option.value)}
-          >
-            {/* The second carrier: the selected chip says so by shape too. */}
-            {on ? <Icon name="circle-check" size={13} /> : null}
-            {option.label}
-            {option.count === undefined ? null : <span className="n">{option.count}</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** "Showing 9 of 12" -- or "Showing 50" when the server gave no total, which is never guessed. */
-export function ShowingCount({ shown, total }: { shown: number; total: number | null }) {
-  const t = useT();
-  return (
-    <ResultCount>{total === null ? t("shell.kit.showingSome", { shown }) : t("shell.kit.showing", { shown, total })}</ResultCount>
-  );
-}
-
-/** The bulk bar: only with a selection, so it is never a row of dead buttons (Atera's flaw). */
-export function BulkBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
-  const t = useT();
-  if (count === 0) return null;
-  return (
-    <div className="bulkbar" role="region" aria-label={t("shell.kit.bulkActions")}>
-      <span className="bulkbar-count">{t("shell.kit.selected", { count })}</span>
-      {children}
-      <span className="filter-spacer" />
-      <Btn label={t("shell.kit.clearSelection")} variant="ghost" small onClick={onClear} />
-    </div>
-  );
-}
-
-/**
- * THE EMPTY LIST SAYS ITS REAL CAUSE (design §2): nothing exists yet, with the
- * page's action; or nothing matches these filters, with the way out. Atera
- * says "try adjusting the filters" on an account with no devices at all.
- */
-export function ListEmpty({
-  filtered,
-  onClear,
-  nothingYet,
-  action,
-  icon = "list",
-}: {
-  filtered: boolean;
-  onClear: () => void;
-  nothingYet: string;
-  action?: ReactNode;
-  icon?: string;
-}) {
-  const t = useT();
-  return (
-    <div className="empty">
-      <span className="empty-icon">
-        <Icon name={filtered ? "filter" : icon} size={26} />
-      </span>
-      <b>{filtered ? t("shell.kit.nothingMatches") : nothingYet}</b>
-      {filtered ? <Btn label={t("shell.kit.clearFilters")} small onClick={onClear} /> : (action ?? null)}
-    </div>
-  );
-}
-
-/**
- * THE CLIENT CHIP (design §1.3): a list of one client's things shown with
- * every client gets a "Client" filter. Not drawn when the top bar has chosen a
- * client -- that choice already decides what this session sees -- nor for a
- * person with fewer than two clients, where it could change nothing.
- */
-export function ClientFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const t = useT();
-  const { selected, clients, ready } = useClientScope();
-  // A CLIENT THE PERSON DOES NOT HAVE (a stale or edited link) leaves the URL
-  // once /me has listed theirs, rather than being drawn as "All clients" over
-  // the empty list the server answers for it (decision D17).
-  const foreign = ready && value !== "" && !clients.some((client) => client.id === value);
-  useEffect(() => {
-    if (foreign) onChange("");
-  }, [foreign, onChange]);
-  if (selected !== null || clients.length < 2) return null;
-  return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{t("shell.kit.client")}</span>
-      <select aria-label={t("shell.kit.client")} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{t("shell.kit.allClients")}</option>
-        {clients.map((client) => (
-          <option key={client.id} value={client.id}>
-            {client.name}
-          </option>
-        ))}
-      </select>
-    </span>
-  );
-}
-
-/**
- * WHAT THE CHIP NARROWS TO, AND WHETHER THAT IS DECIDED (decisions D6, D17).
- * The top bar's choice wins when there is one, and an empty chip is the
- * console's own choice: both decided at once. Otherwise the chip's client,
- * only once `/me` has said it is one of the person's: until then `ready` is
- * false and a list reads nothing, so every client's rows never sit under one
- * client's chip. A value that is not one of theirs is never sent (the server
- * answers a malformed header with 400, and a foreign client with zero rows).
- */
-export function useNarrowing(clientId: string): { client: string | null; ready: boolean } {
-  const { selected, clients, ready } = useClientScope();
-  if (clientId === "" || selected !== null) return { client: null, ready: true };
-  if (!ready) return { client: null, ready: false };
-  const mine = isClientId(clientId) && clients.some((client) => client.id === clientId);
-  return { client: mine ? clientId : null, ready: true };
-}
-
-/**
- * THE API, NARROWED TO THE CHIP'S CLIENT (decision D6). `X-Client-Id` narrows
- * and never widens; the database enforces it (invariant 5a). For READS: a
- * write keeps `useApi()`, so the chip never changes where a write goes.
- */
-export function useApiFor(clientId: string): ApiClient {
-  const api = useApi();
-  const { client } = useNarrowing(clientId);
-  return useMemo(() => (client === null ? api : api.forClient(client)), [api, client]);
-}
-
-/** `?new=<kind>` opens the page's create dialog (decision D8), so the New menu can link to it. */
-export function useNewParam(kind: string): { open: boolean; start: () => void; close: () => void } {
-  const [params, setParams] = useSearchParams();
-  const open = params.get("new") === kind;
-  const start = useCallback(
-    () =>
-      setParams((current) => {
-        const next = new URLSearchParams(current);
-        next.set("new", kind);
-        return next;
-      }),
-    [setParams, kind],
-  );
-  const close = useCallback(
-    () =>
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.delete("new");
-          return next;
-        },
-        { replace: true },
-      ),
-    [setParams],
-  );
-  return { open, start, close };
-}
-
-/** The head of a list, flush inside its bare panel: search, chips, then the count at the end. */
-export function ListToolbar({ search, chips, end }: { search?: ReactNode; chips?: ReactNode; end?: ReactNode }) {
-  return (
-    <FilterBar>
-      {search}
-      {chips ? <div className="list-chips">{chips}</div> : null}
-      <span className="filter-spacer" />
-      {end}
-    </FilterBar>
-  );
-}
-```
-
-- [ ] **Step 5: `detailKit.tsx`**
+- [x] **Step 5: `detailKit.tsx`**
 
 ```tsx
 /**
@@ -4081,268 +3331,19 @@ export * from "./formKit";
 
 (Las importaciones son circulares en apariencia: `listKit` importa `Btn` de `components`, y `components` reexporta `listKit`. Es seguro porque ninguna de las dos usa la otra al evaluarse, solo dentro de funciones; `npm run build` lo comprueba.)
 
-- [ ] **Step 6: `formKit.tsx`**
+- [x] **Step 6: `formKit.tsx`**
 
-```tsx
-/**
- * THE FORM PATTERN (design §2, "Formulario"): a full page with back and title,
- * collapsible sections, and ONE sticky bar -- "Unsaved changes · Discard ·
- * Save" -- for the whole console. Atera's walkthrough counts six ways to save;
- * this console has one. A page with changes asks before it is left.
- */
-import { useCallback, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker } from "react-router-dom";
+**Hecho; el código vive en `frontend/src/shell/formKit.tsx` y es la fuente de verdad** (el código que este paso traía al escribirse el plan se sustituyó por esto después de dos rondas de arreglos de revisión; un implementador de oleada no lo reescribe). Lo que construyó, con la forma final de su API (la de «Interfaces»):
 
-import { ConfirmDialog } from "../components/confirm";
-import { describeSubmitError, type Problem } from "../components/form";
-import { useT } from "../i18n/context";
-import { Btn } from "./components";
-import { Icon } from "./icons";
-import { KIND_ICON } from "./viz";
-import "./kit.css";
+- `FormPage`, `FormSection` (plegable, abierta por defecto) y `SaveBar`: la barra fija «Cambios sin guardar · Descartar · Guardar», que solo se dibuja con `dirty`, dice el fallo del guardado (`error`), «Guardado.» (`saved`, `savedMessage`), los problemas (`problems`), la razón por la que no se puede guardar (`blockedReason`: **un permiso o un estado del registro, nunca un dato que falta**) y manda el formulario de la página con Intro (`submit`). Su región se llama «Unsaved changes»; `label` (opcional) la renombra **solo** donde una página dibuja más de una barra.
+- `useDraft(saved)` devuelve `{ draft, setDraft, dirty, discard, markSent }`. `markSent(sent | null)`: la página llama `markSent(draft)` al **enviar** y `markSent(null)` cuando el guardado **falla**; así la respuesta del servidor pasa a ser el estado guardado aunque tenga campos que el formulario nunca edita (salir no pregunta), lo que se escribió después del envío no se pierde, y un guardado fallido no deja que un `refetch` pise el cambio sin guardar.
+- `useUnsavedGuard(dirty, { search })` devuelve `{ guard, release }` y `UnsavedGuard({ dirty, search })` es `useUnsavedGuard(dirty, { search }).guard`. `GuardedQuery = boolean | readonly string[]`: `["new"]` para un formulario dentro de un diálogo `?new=`, `["tab"]` para uno dentro de un panel `?tab=`, `true` cuando toda la query es el formulario; sin `search`, solo cambiar de ruta es salir. `release()` se llama **solo después de un guardado correcto, justo antes de la navegación**; caduca con el siguiente clic o tecla de la persona (y a los 2 s sin ninguna de las dos).
+- **Una sola guarda con cambios por página**: dos guardas sucias a la vez escriben `console.error` (solo una puede preguntar), y eso hace fallar la prueba. Una guarda limpia en otro sitio de la página no desarma a la sucia.
+- La pregunta de salida («¿Salir sin guardar?») no dibuja una línea de asunto vacía.
 
-export function FormPage({
-  back,
-  title,
-  description,
-  children,
-}: {
-  back: { to: string; label: string };
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="form-page">
-      <section className="ph">
-        <Link className="back-link" to={back.to}>
-          <Icon name="chevron-left" size={14} />
-          {back.label}
-        </Link>
-        <div className="ph-row">
-          <div>
-            <h1>{title}</h1>
-            {description ? <p className="sub">{description}</p> : null}
-          </div>
-        </div>
-      </section>
-      {children}
-    </div>
-  );
-}
+(`ConfirmDialog` nombra su botón de cancelar «Cancel» / «Cancelar»; las pruebas lo buscan por ese nombre.)
 
-export function FormSection({
-  title,
-  icon,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  icon?: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const bodyId = useId();
-  return (
-    <section className="panel form-section">
-      <h2 className="form-section-h">
-        <button
-          type="button"
-          className="form-section-toggle"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {icon ? <Icon name={icon} size={16} /> : null}
-          <span>{title}</span>
-          <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
-        </button>
-      </h2>
-      <div id={bodyId} className="panel-b" hidden={!open}>
-        {children}
-      </div>
-    </section>
-  );
-}
-
-/**
- * The one save bar. Drawn only while there is something to say: a change, a
- * save in flight, a failure, or "Saved." once the server answered.
- *
- * IT DOES WHAT THE BUTTONS IT REPLACES DID (settings' `SaveBar`, the ticket's
- * "Save changes"), so no page loses a behaviour by moving here: the reason it
- * cannot save (`blockedReason`: Rule 1, disabled with the reason shown), the
- * form's own `problems`, the confirmation after a 2xx (`saved`, never an
- * optimistic one), and Enter in a field (`submit`: the bar sits inside the
- * page's `<Form>` and its Save is that form's submit button).
- */
-export function SaveBar({
-  dirty,
-  saving,
-  error,
-  onDiscard,
-  onSave,
-  submit = false,
-  saved = false,
-  savedMessage,
-  problems = [],
-  blockedReason,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  error?: unknown;
-  onDiscard: () => void;
-  onSave?: () => void;
-  submit?: boolean;
-  saved?: boolean;
-  savedMessage?: string;
-  problems?: readonly Problem[];
-  blockedReason?: string;
-}) {
-  const t = useT();
-  if (!dirty && !saving && !error) {
-    return saved ? (
-      <div className="savebar saved" role="status">
-        <Icon name={KIND_ICON.ok} size={15} />
-        <span className="savebar-what">{savedMessage ?? t("shell.kit.saved")}</span>
-      </div>
-    ) : null;
-  }
-  const failure = error
-    ? describeSubmitError(error)
-    : problems.length > 0
-      ? `${problems.map((problem) => problem.message).join(". ")}.`
-      : null;
-  return (
-    <div className="savebar" role="region" aria-label={t("shell.kit.unsaved")}>
-      <span className="savebar-what">{saving ? t("shell.kit.saving") : t("shell.kit.unsaved")}</span>
-      {failure ? (
-        <span className="savebar-error" role="alert">
-          {failure}
-        </span>
-      ) : null}
-      {blockedReason ? <span className="savebar-blocked">{blockedReason}</span> : null}
-      <Btn label={t("shell.kit.discard")} onClick={onDiscard} disabled={saving} />
-      <Btn
-        label={saving ? t("shell.kit.saving") : t("shell.kit.save")}
-        variant="primary"
-        type={submit ? "submit" : "button"}
-        onClick={submit ? undefined : onSave}
-        disabled={saving || !dirty || blockedReason !== undefined}
-      />
-    </div>
-  );
-}
-
-/**
- * What the form shows, against what the server has. A new answer from the
- * server replaces the draft only while nothing was being edited: a refetch
- * must not wipe what someone is typing. Compared by value, so a refetch that
- * returns the same record is not a change.
- */
-export function useDraft<T>(saved: T | undefined): {
-  draft: T | undefined;
-  setDraft: (next: T) => void;
-  dirty: boolean;
-  discard: () => void;
-} {
-  const savedKey = JSON.stringify(saved ?? null);
-  const [draft, setDraftState] = useState<T | undefined>(saved);
-  const [baseKey, setBaseKey] = useState(savedKey);
-  const draftKey = JSON.stringify(draft ?? null);
-  if (savedKey !== baseKey) {
-    setBaseKey(savedKey);
-    if (draftKey === baseKey) setDraftState(saved);
-  }
-  const setDraft = useCallback((next: T) => setDraftState(next), []);
-  const discard = useCallback(() => setDraftState(saved), [saved]);
-  return { draft, setDraft, dirty: saved !== undefined && draftKey !== savedKey, discard };
-}
-
-/**
- * A PAGE WITH CHANGES ASKS BEFORE IT IS LEFT (design §5). Inside the console's
- * data router (decision D7) a navigation is blocked and the person chooses;
- * a reload or a closed tab gets the browser's own question. Under a router
- * that cannot block -- a test mounted with `MemoryRouter` -- only the browser
- * half applies.
- *
- * LEAVING IS A CHANGE OF PATH (decision D16). A change of query alone -- a
- * tab, a filter, `?new=`, the record a save just selected -- keeps the page,
- * so it does not ask, unless the page says its query IS what it edits
- * (`search`: Settings, where a tab is another form).
- *
- * A SAVE THAT LEAVES, LEAVES. `useBlocker` reads its condition from an
- * effect, so a handler that saves and navigates in one step is judged by the
- * render before the save, with the change still in it (pre-flight I-1,
- * reproduced with react-router 7.18.1). `release()` is read at once and lets
- * the next navigation through; a new change arms the guard again.
- */
-export function useUnsavedGuard(
-  dirty: boolean,
-  options: { search?: boolean } = {},
-): { guard: ReactElement | null; release: () => void } {
-  const released = useRef(false);
-  useEffect(() => {
-    if (!dirty) released.current = false;
-  }, [dirty]);
-  const release = useCallback(() => {
-    released.current = true;
-  }, []);
-  useBeforeUnload(
-    useCallback(
-      (event: BeforeUnloadEvent) => {
-        if (!dirty || released.current) return;
-        event.preventDefault();
-        event.returnValue = "";
-      },
-      [dirty],
-    ),
-  );
-  const dataRouter = useContext(UNSAFE_DataRouterContext);
-  const guard = dataRouter ? <LeaveQuestion dirty={dirty} search={options.search ?? false} released={released} /> : null;
-  return { guard, release };
-}
-
-/** The guard for a page that does not leave when it saves. */
-export function UnsavedGuard({ dirty, search = false }: { dirty: boolean; search?: boolean }) {
-  return useUnsavedGuard(dirty, { search }).guard;
-}
-
-function LeaveQuestion({
-  dirty,
-  search,
-  released,
-}: {
-  dirty: boolean;
-  search: boolean;
-  released: { readonly current: boolean };
-}) {
-  const t = useT();
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty &&
-      !released.current &&
-      (currentLocation.pathname !== nextLocation.pathname || (search && currentLocation.search !== nextLocation.search)),
-  );
-  return (
-    <ConfirmDialog
-      open={blocker.state === "blocked"}
-      title={t("shell.kit.leaveTitle")}
-      subject=""
-      body={t("shell.kit.leaveBody")}
-      confirmLabel={t("shell.kit.leave")}
-      destructive
-      onCancel={() => blocker.reset?.()}
-      onConfirm={() => blocker.proceed?.()}
-    />
-  );
-}
-```
-
-(`ConfirmDialog` nombra su botón de cancelar «Cancel» / «Cancelar»; la prueba lo busca por ese nombre.)
-
-- [ ] **Step 7: `kit.css` y la geometría de la marca en las piezas que ya existen**
+- [x] **Step 7: `kit.css` y la geometría de la marca en las piezas que ya existen**
 
 `frontend/src/shell/kit.css`:
 
@@ -4410,7 +3411,7 @@ const expectedFor = (design: string, selector: string): string[] =>
 
 y cada `expect(ported).toEqual(declarations(design, selector))` del archivo pasa a `expect(ported).toEqual(expectedFor(design, selector))`. La regla nueva va en `V4_OVERRIDES` con sus declaraciones exactas, como `declarations()` las devuelve. Con los cambios de arriba no hace falta ninguna (ninguno toca un selector transcrito); el mapa queda vacío y listo para la Task 4.
 
-- [ ] **Step 8: `forClient`, el proxy de fixtures y el router de datos**
+- [x] **Step 8: `forClient`, el proxy de fixtures y el router de datos**
 
 `frontend/src/lib/api.ts`, justo después del constructor de `ApiClient`:
 
@@ -4554,12 +3555,12 @@ y en `frontend/src/App.router.test.tsx`, con `import { render, screen } from "@t
   });
 ```
 
-- [ ] **Step 9: Ejecutar las pruebas del kit**
+- [x] **Step 9: Ejecutar las pruebas del kit**
 
 Run: `cd frontend && npx vitest run src/shell/listKit.test.tsx src/shell/detailKit.test.tsx src/shell/formKit.test.tsx src/lib/api.forClient.test.ts src/App.router.test.tsx src/test/routes-covered.test.ts src/App.routing.test.tsx src/App.shell.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 10: El kit, el marco de acceso y el del portal en `/__preview`**
+- [x] **Step 10: El kit, el marco de acceso y el del portal en `/__preview`**
 
 `frontend/src/preview/PreviewPage.tsx` gana tres secciones al final, después de la de `SessionEnded` y antes del `ConfirmDialog`. Son de esta tarea y de ninguna oleada (revisión previa, W-I4): la O8 rehace `AuthCard` y la O2 rehace `PortalShell`, y las dos secciones los dibujan tal como estén, así que cada oleada los mide aquí sin tocar este archivo.
 
@@ -4741,7 +3742,7 @@ Expected antes del cambio: FAIL en los dos primeros casos (dos `<main>`; el clie
 Run: `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs`
 Expected: código 0; las piezas nuevas, el marco de acceso y el del portal aparecen entre los «text runs measured» sin pares por debajo del mínimo.
 
-- [ ] **Step 11: Suite completa y navegador**
+- [x] **Step 11: Suite completa y navegador**
 
 Run: `npx vitest run && npm run typecheck && npm run build`
 Expected: verde.
@@ -4749,9 +3750,9 @@ Expected: verde.
 Run: `node scripts/harmony.mjs --strict-fixtures --lang en` y `--lang es` (todas las rutas: el router cambió)
 Expected: `ok …` en las dos.
 
-`PreviewPage.tsx` es una de las 86 y la Task 14 busca su crítica: «Cierre de cada oleada», pasos 1, 3 y 4, sobre `frontend/src/preview/PreviewPage.tsx` (sin el paso 2: harmony no recorre `/__preview`, que es de `a11y-browser.mjs`; el subagente B de la crítica la abre con `npx vite` en `/__preview`). Su crítica mira la página como lo que es, el banco de pruebas del kit, y sus preguntas las contesta el coordinador como dice el paso 3; es la primera crítica del programa, así que esas respuestas inauguran `.impeccable/critica-respuestas.md` (del coordinador, versionado en la rama base).
+`PreviewPage.tsx` es una de las 86 y la Task 14 busca su crítica: «Cierre de cada oleada», pasos 1, 3 y 4, sobre `frontend/src/preview/PreviewPage.tsx` (sin el paso 2: harmony no recorre `/__preview`, que es de `a11y-browser.mjs`; el subagente B de la crítica la abre con `npx vite` en `/__preview`). Su crítica mira la página como lo que es, el banco de pruebas del kit, y sus preguntas las contesta el coordinador como dice el paso 3; es la primera crítica del programa, así que esas respuestas inauguraron `.impeccable/critica-respuestas.md` (del coordinador, versionado en la rama base): **el archivo ya existe**, y todo lo que viene después lo amplía y no lo crea.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add frontend/src .impeccable/critique .impeccable/critica-respuestas.md
@@ -6586,7 +5587,7 @@ Expected: `ok …`. Mirar en las capturas: `/dashboard` (riel en el orden nuevo,
 
 - [ ] **Step 12: Crítica y pulido de impeccable sobre el armazón**
 
-Aplicar «Cierre de cada oleada», pasos 1 a 5, a `frontend/src/shell/Sidebar.tsx`, `frontend/src/shell/AppShell.tsx` y `frontend/src/shell/AreaPage.tsx`, con las rutas `/dashboard`, `/licenses`, `/audit`, `/admin`, `/assistant`. Sus preguntas las contesta el coordinador con `DESIGN.md`, el diseño aprobado y las decisiones del operador (resolución del coordinador del 2026-11-24), y esas respuestas se añaden a `.impeccable/critica-respuestas.md` (versionado; lo inauguró la Task 3); solo lo que esas fuentes no zanjan sube al operador.
+Aplicar «Cierre de cada oleada», pasos 1 a 5, a `frontend/src/shell/Sidebar.tsx`, `frontend/src/shell/AppShell.tsx` y `frontend/src/shell/AreaPage.tsx`, con las rutas `/dashboard`, `/licenses`, `/audit`, `/admin`, `/assistant`. Sus preguntas las contesta el coordinador con `DESIGN.md`, el diseño aprobado y las decisiones del operador (resolución del coordinador del 2026-11-24), y esas respuestas **se añaden al final** de `.impeccable/critica-respuestas.md` (versionado; **ya existe**: lo creó la Task 3, y aquí no se crea ni se reescribe); solo lo que esas fuentes no zanjan sube al operador.
 
 - [ ] **Step 13: Commit**
 
@@ -6617,7 +5618,7 @@ Diseño §1.3 («La ficha 360 de un cliente reúne sus datos en pestañas con UR
 - Test: `frontend/src/modules/clients/__tests__/clients.test.tsx` (casos que cambian), `frontend/src/modules/clients/__tests__/client360.test.tsx` (nuevo), `frontend/src/modules/clients/clients.es.test.tsx`
 
 **Interfaces:**
-- Consumes: `DetailHead`, `useUrlTab`, `UrlTabs`, `useApiFor`, `useUrlFilters`, `FilterChips`, `ListToolbar`, `ShowingCount`, `ListEmpty`, `useNewParam` (Task 3); `useRecordTitle` (Task 2); `StatsGrid`, `StatCard` (`shell/components`); `api.listDevices({ clientId, limit })`, `api.listTickets({ client_id, scope, limit })`, `api.getHealthAlertSummary()`, `api.listHealthAlerts({ state: "active" })` (`AlertFilters.state` es `AlertState | ""`, `modules/health/types.ts:27,315`: «open» no se puede pedir a la lista), `api.listLicenses()`, `api.listSubscriptions()`, `api.listIpamSubnets()` (todas existen hoy); `useNarrowing` (Task 3), `renderPage` con `options.page` y `recordingNarrowing` (Task 3) en las pruebas.
+- Consumes: `DetailHead`, `useUrlTab`, `UrlTabs`, `useNarrowedApi`, `useUrlFilters`, `FilterChips`, `ListToolbar`, `ShowingCount`, `ListEmpty`, `useNewParam` (Task 3); `useRecordTitle` (Task 2); `StatsGrid`, `StatCard` (`shell/components`); `api.listDevices({ clientId, limit })`, `api.listTickets({ client_id, scope, limit })`, `api.getHealthAlertSummary()`, `api.listHealthAlerts({ state: "active" })` (`AlertFilters.state` es `AlertState | ""`, `modules/health/types.ts:27,315`: «open» no se puede pedir a la lista), `api.listLicenses()`, `api.listSubscriptions()`, `api.listIpamSubnets()` (todas existen hoy); `useNarrowedApi` y `NarrowingPending` (Task 3), `renderPage` con `options.page` y `recordingNarrowing` (Task 3) en las pruebas.
 - Produces: las rutas de la ficha no cambian (`/clients/:clientId`); sus pestañas son `?tab=summary|sites|contacts|devices|tickets|alerts|assets|modules` (`summary`, `sites`, `contacts` y `modules` ya existían con esos nombres). Las oleadas enlazan a una lista filtrada por cliente con `?client=<id>`.
 
 **Decisiones de esta tarea:**
@@ -6915,16 +5916,16 @@ import { RelTime } from "../../components/reltime";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
-import { ListEmpty, Panel, QueryState, StatusPill, useApiFor } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
 import { OsIcon } from "../../shell/viz";
 
 export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
   const t = useT();
-  const api = useApiFor(client.id);
+  const { api, client: sent, ready } = useNarrowedApi(client.id);
   const devices = useQuery({
-    queryKey: ["client360", client.id, "devices"],
+    queryKey: ["client360", client.id, "devices", sent],
     queryFn: () => api.listDevices({ clientId: client.id, limit: 25 }),
-    enabled,
+    enabled: enabled && ready,
   });
   const rows = devices.data?.items ?? [];
   return (
@@ -6937,7 +5938,7 @@ export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: bo
         </Link>
       }
     >
-      <QueryState loading={!enabled || devices.isLoading} error={devices.error} empty={false} emptyLabel="">
+      <QueryState loading={!enabled || !ready || devices.isLoading} error={devices.error} empty={false} emptyLabel="">
         {rows.length === 0 ? (
           <ListEmpty
             filtered={false}
@@ -6987,8 +5988,8 @@ export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: bo
 /**
  * The client's open tickets (design §1.3), the first 25 by the queue's own
  * order, and the way to all of them: the ticket list with its Client chip set.
- * `client_id` narrows the read on the server; `useApiFor` narrows it again with
- * `X-Client-Id` (decision D6), and `enabled` waits until that is decided.
+ * `client_id` narrows the read on the server; `useNarrowedApi` narrows it again with
+ * `X-Client-Id` (decision D6), and `enabled: ready` waits until that is decided.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -6997,18 +5998,18 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
-import { ListEmpty, Panel, QueryState, StatusPill, useApiFor } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
 
 export function TicketsTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
   const t = useT();
-  const api = useApiFor(client.id);
+  const { api, client: sent, ready } = useNarrowedApi(client.id);
   const { clients } = useClientScope();
   // TicketListPage's own create gate (`ticket.write`), in THIS client. Cosmetic (invariant 6).
   const canWrite = clients.find((item) => item.id === client.id)?.permissions.includes("ticket.write") ?? false;
   const tickets = useQuery({
-    queryKey: ["client360", client.id, "tickets"],
+    queryKey: ["client360", client.id, "tickets", sent],
     queryFn: () => api.listTickets({ client_id: client.id, scope: "open", limit: 25 }),
-    enabled,
+    enabled: enabled && ready,
   });
   const rows = tickets.data?.items ?? [];
   return (
@@ -7021,7 +6022,7 @@ export function TicketsTab({ client, enabled }: { client: ClientOut; enabled: bo
         </Link>
       }
     >
-      <QueryState loading={!enabled || tickets.isLoading} error={tickets.error} empty={false} emptyLabel="">
+      <QueryState loading={!enabled || !ready || tickets.isLoading} error={tickets.error} empty={false} emptyLabel="">
         {rows.length === 0 ? (
           <ListEmpty
             filtered={false}
@@ -7079,8 +6080,8 @@ export function TicketsTab({ client, enabled }: { client: ClientOut; enabled: bo
  * one `state`, and "open" (active, acknowledged or muted) cannot be asked of
  * it (`modules/health/types.ts`, `AlertSummary`), so this lists the active
  * ones and says how many are open in all from the server's own count -- never
- * a total made from one page. Every read is this client's: `useApiFor` narrows
- * it with `X-Client-Id` (decision D6), and `enabled` waits until that is decided.
+ * a total made from one page. Every read is this client's: `useNarrowedApi` narrows
+ * it with `X-Client-Id` (decision D6), and `enabled: ready` waits until that is decided.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -7089,21 +6090,21 @@ import { RelTime } from "../../components/reltime";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
-import { ListEmpty, Panel, QueryState, StatusPill, useApiFor } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
 
 export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
   const t = useT();
-  const api = useApiFor(client.id);
+  const { api, client: sent, ready } = useNarrowedApi(client.id);
   const alerts = useQuery({
-    queryKey: ["client360", client.id, "alerts"],
+    queryKey: ["client360", client.id, "alerts", sent],
     queryFn: () => api.listHealthAlerts({ state: "active" }),
-    enabled,
+    enabled: enabled && ready,
   });
   // The same key as the 360's "Open alerts" tile, so the two read once.
   const summary = useQuery({
-    queryKey: ["client360", client.id, "alertSummary"],
+    queryKey: ["client360", client.id, "alertSummary", sent],
     queryFn: () => api.getHealthAlertSummary(),
-    enabled,
+    enabled: enabled && ready,
   });
   const rows = alerts.data ?? [];
   return (
@@ -7117,7 +6118,7 @@ export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boo
         </Link>
       }
     >
-      <QueryState loading={!enabled || alerts.isLoading} error={alerts.error} empty={false} emptyLabel="">
+      <QueryState loading={!enabled || !ready || alerts.isLoading} error={alerts.error} empty={false} emptyLabel="">
         {rows.length === 0 ? (
           <ListEmpty filtered={false} onClear={() => {}} nothingYet={t("clients.alerts.empty")} icon="health" />
         ) : (
@@ -7165,25 +6166,25 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
-import { StatCard, StatsGrid, useApiFor } from "../../shell/components";
+import { StatCard, StatsGrid, useNarrowedApi } from "../../shell/components";
 
 export function AssetsTab({ client, codes, enabled }: { client: ClientOut; codes: ReadonlySet<string>; enabled: boolean }) {
   const t = useT();
-  const api = useApiFor(client.id);
+  const { api, client: sent, ready } = useNarrowedApi(client.id);
   const licenses = useQuery({
-    queryKey: ["client360", client.id, "licenses"],
+    queryKey: ["client360", client.id, "licenses", sent],
     queryFn: () => api.listLicenses(),
-    enabled: enabled && codes.has("licenses.read"),
+    enabled: enabled && ready && codes.has("licenses.read"),
   });
   const subscriptions = useQuery({
-    queryKey: ["client360", client.id, "subscriptions"],
+    queryKey: ["client360", client.id, "subscriptions", sent],
     queryFn: () => api.listSubscriptions(),
-    enabled: enabled && codes.has("subscriptions.read"),
+    enabled: enabled && ready && codes.has("subscriptions.read"),
   });
   const subnets = useQuery({
-    queryKey: ["client360", client.id, "subnets"],
+    queryKey: ["client360", client.id, "subnets", sent],
     queryFn: () => api.listIpamSubnets(),
-    enabled: enabled && codes.has("ipam.read"),
+    enabled: enabled && ready && codes.has("ipam.read"),
   });
   return (
     <StatsGrid columns={3}>
@@ -7213,7 +6214,7 @@ export function AssetsTab({ client, codes, enabled }: { client: ClientOut; codes
  * about one client, in eight tabs that change the URL and fit one row --
  * Atera's eleven wrap into two, a flaw its own walkthrough files.
  *
- * EVERY READ IS THIS CLIENT'S (decision D6): `useApiFor` narrows each request
+ * EVERY READ IS THIS CLIENT'S (decision D6): `useNarrowedApi` narrows each request
  * to it while every client is shown above; with this client chosen above,
  * the console's own client already is.
  *
@@ -7231,7 +6232,7 @@ import { useParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
-import { Btn, DetailHead, QueryState, StatCard, StatsGrid, UrlTabs, useApiFor, useNarrowing, useUrlTab } from "../../shell/components";
+import { Btn, DetailHead, QueryState, StatCard, StatsGrid, UrlTabs, useNarrowedApi, useUrlTab } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useRecordTitle } from "../../shell/title";
 import { KIND_ICON } from "../../shell/viz";
@@ -7283,20 +6284,20 @@ export function ClientDetailPage() {
   const codes = new Set(clients.find((item) => item.id === clientId)?.permissions ?? []);
   const visible = TABS.filter((key) => TAB_CODES[key]?.some((code) => codes.has(code)) ?? true);
   const [tab, setTab] = useUrlTab<Tab>(visible, "summary");
-  const api = useApiFor(clientId);
   // THE READS ARE THIS CLIENT'S AND NOBODY ELSE'S (decisions D6, D17): narrowed
   // to it with X-Client-Id, or the top bar has chosen it. Nothing before /me
-  // has answered, so every client's rows never sit under this client's name.
-  const narrowing = useNarrowing(clientId);
-  const here = narrowing.ready && (narrowing.client === clientId || selected === clientId);
-  const reads = !elsewhere && client.data !== undefined && here;
+  // has answered (`ready`; until then `api` rejects with NarrowingPending), so
+  // every client's rows never sit under this client's name.
+  const { api, client: sent, ready: narrowingReady } = useNarrowedApi(clientId);
+  const onThis = narrowingReady && (sent === clientId || selected === clientId);
+  const reads = !elsewhere && client.data !== undefined && onThis;
   const openTickets = useQuery({
-    queryKey: ["client360", clientId, "openTickets"],
+    queryKey: ["client360", clientId, "openTickets", sent],
     queryFn: () => api.listTickets({ client_id: clientId, scope: "open", limit: 1 }),
     enabled: reads && codes.has("ticket.read"),
   });
   const alerts = useQuery({
-    queryKey: ["client360", clientId, "alertSummary"],
+    queryKey: ["client360", clientId, "alertSummary", sent],
     queryFn: () => api.getHealthAlertSummary(),
     enabled: reads && codes.has("health.read"),
   });
@@ -7670,7 +6671,7 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 
 ## Las oleadas (Tasks 6 a 13)
 
-**Lo que el coordinador copia en el encargo de cada oleada** (el implementador de una oleada solo ve su tarea; revisión previa, W-M6): las Global Constraints; «Archivos compartidos (dueño único)»; las cuatro recetas; «Cierre de cada oleada»; este preámbulo entero; los bloques **Interfaces** de las Tasks 2 y 3 (las firmas exactas de lo que consume); la tarea de la oleada; las decisiones D12, D16, D17, D20 y las de su propia tarea del Apéndice A; y `.impeccable/critica-respuestas.md`, que ya está en la rama base. La worktree se prepara como dicen las Global Constraints («Worktrees»), con su propia carpeta `node_modules`.
+**Lo que el coordinador copia en el encargo de cada oleada** (el implementador de una oleada solo ve su tarea; revisión previa, W-M6): las Global Constraints; «Archivos compartidos (dueño único)»; las cuatro recetas; «Cierre de cada oleada»; este preámbulo entero; los bloques **Interfaces** de las Tasks 2 y 3 (las firmas exactas de lo que consume); la tarea de la oleada; las decisiones D12, D16, D17, D20 y las de su propia tarea del Apéndice A; y `.impeccable/critica-respuestas.md`, que ya está en la rama base (**ya existe**: una oleada que necesita responder una pregunta nueva de su crítica la **añade al final** del archivo, nunca lo crea ni reescribe lo que dice). La worktree se prepara como dicen las Global Constraints («Worktrees»), con su propia carpeta `node_modules`.
 
 Lo común a todas, para no repetirlo en cada página:
 
@@ -7680,14 +6681,15 @@ Lo común a todas, para no repetirlo en cada página:
 - **Filtros en `useState`** pasan a `useUrlFilters` con las claves que nombra cada página.
 - **Un diálogo de alta** se abre con `useNewParam("<tipo>")` (decisión D8) para que su URL sea enlazable; el botón de la cabecera llama a `start`.
 - **Una ficha** llama a `useRecordTitle(<nombre del registro>)`, y su prueba de título usa `renderPage(…, { page: "shell.nav.item.<entrada>" })` (Receta F).
-- **El chip «Cliente»** (`ClientFilter` + `useNarrowing` + `useApiFor`, decisiones D6 y D17) va en las listas de cosas de un cliente: equipos, tickets, alertas, parches, despliegues, copias, sesiones remotas, trabajos, licencias, suscripciones, redes, documentación, credenciales, cambios y continuidad. **Presupuesto no**: trabaja con un cliente cada vez y, con «Todos mis clientes», pide elegir uno arriba (decisión de la fase 3), así que no hay lista de todos que estrechar. La oleada lo pone en las que nombra. **`?client=` solo estrecha la lista** (decisión D20): nunca cambia el cliente de toda la consola, que es lo que hace el selector de arriba; el recorrido de «Añadir un equipo» usa `journey_client` desde la Task 5.
-- **Las listas que leen por un hook de su módulo** cambian el hook como dice la Receta L, punto 7: toma el valor del chip, lee con `useApiFor` y pone el cliente estrechado en su clave. **No es cambiar una llamada a la API**: la misma función con los mismos argumentos. Cada oleada nombra, página por página, qué hook cambia. Las escrituras siguen con `useApi()`.
+- **El chip «Cliente»** (`<ClientFilter filters={filters} />` + `useNarrowedApi(filters.values.client)`, decisiones D6 y D17; `filters` es el `useUrlFilters` de la página y lleva la clave `"client"`, que el chip escribe él mismo: no hay `onChange`) va en las listas de cosas de un cliente: equipos, tickets, alertas, parches, despliegues, copias, sesiones remotas, trabajos, licencias, suscripciones, redes, documentación, credenciales, cambios y continuidad. **Presupuesto no**: trabaja con un cliente cada vez y, con «Todos mis clientes», pide elegir uno arriba (decisión de la fase 3), así que no hay lista de todos que estrechar. La oleada lo pone en las que nombra. **`?client=` solo estrecha la lista** (decisión D20): nunca cambia el cliente de toda la consola, que es lo que hace el selector de arriba; el recorrido de «Añadir un equipo» usa `journey_client` desde la Task 5.
+- **Las listas que leen por un hook de su módulo** cambian el hook como dice la Receta L, punto 7: toma el valor del chip, lee con `useNarrowedApi` y pone el `client` que devuelve en su clave, con `enabled: ready`. **No es cambiar una llamada a la API**: la misma función con los mismos argumentos. Cada oleada nombra, página por página, qué hook cambia. Las escrituras siguen con `useApi()`.
+- **Formularios** (Receta FO): `useDraft` da `markSent`, que la página llama con `markSent(draft)` al enviar y con `markSent(null)` cuando el guardado falla; `useUnsavedGuard(dirty, { search })` y `UnsavedGuard({ dirty, search })` toman `search` como `GuardedQuery` (`["new"]` en un diálogo `?new=`, `["tab"]` en un panel `?tab=`, `true` si toda la query es el formulario); `release()` solo tras un guardado correcto y justo antes de navegar; **una sola guarda con cambios por página** (dos sucias a la vez escriben `console.error` y hacen fallar la prueba); `SaveBar` lleva `label` solo donde una página dibuja más de una barra, y su `blockedReason` es un permiso o un estado del registro, nunca un dato que falta.
 - **Toda lista con chip «Cliente»** añade la prueba de la Receta L «reads the list narrowed to the Client chip's client», con `recordingNarrowing` (`src/test/narrowing.ts`).
 - **Pruebas por página:** las de la receta (L: filtros en la URL y vacío con causa, o la variante de búsqueda, o solo el vacío para una lista sin filtros; F: pestañas en la URL y título; FO: barra de guardado y aviso al salir, y «leaves for what it saved» si se va al guardar) más lo que la página nombre. Las pruebas existentes de la página se conservan; se cambia la consulta, nunca la aserción, salvo donde el diseño cambia lo que se ve, y entonces el comentario cita el diseño.
 - **Textos:** las claves nuevas van en el catálogo del módulo (`src/i18n/{en,es}/<módulo>.ts`), en los dos idiomas; una que queda idéntica en los dos va en el `identical-ok.o<N>.ts` de la oleada, con su razón.
 - **Lo que un módulo exporta a otro conserva su firma** («Archivos compartidos»).
 - **Prohibido en una oleada:** editar un archivo de las clases 1 o 2 de «Archivos compartidos» que no sea suyo; cambiar una llamada a la API, un código de permiso o un texto de error; borrar o saltar una prueba.
-- **Interfaces de toda oleada.** *Consume:* del kit (Task 3) `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useNarrowing`, `useApiFor`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useUnsavedGuard`, `useDraft`, todos desde `../../shell/components`; `useRecordTitle` y `useDocumentTitle` de `../../shell/title`; `NovieriLockup` y `PRODUCT_NAME` de `../../shell/brand` (O2 y O8); en las pruebas, `renderPage` y `TitleShell` de `../../test/renderPage` y `recordingNarrowing` de `../../test/narrowing`; las firmas exactas están en el bloque **Interfaces** de las Tasks 2 y 3. *Produce:* nada que otra oleada consuma; las URL que enlaza la ficha 360 (`/devices?client=`, `/service-desk?client=`, `/health?client=`, `/licenses?client=`, `/subscriptions?client=`, `/ipam?client=`) deben estrechar su lista al cliente, y eso lo cumplen O1, O2, O3 y O5, cada una con su prueba.
+- **Interfaces de toda oleada.** *Consume:* del kit (Task 3) `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useNarrowedApi`, `NarrowingPending`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useUnsavedGuard`, `useDraft` (con `markSent`), todos desde `../../shell/components`; `useRecordTitle` y `useDocumentTitle` de `../../shell/title`; `NovieriLockup` y `PRODUCT_NAME` de `../../shell/brand` (O2 y O8); en las pruebas, `renderPage` y `TitleShell` de `../../test/renderPage` y `recordingNarrowing` de `../../test/narrowing`; las firmas exactas están en el bloque **Interfaces** de las Tasks 2 y 3. *Produce:* nada que otra oleada consuma; las URL que enlaza la ficha 360 (`/devices?client=`, `/service-desk?client=`, `/health?client=`, `/licenses?client=`, `/subscriptions?client=`, `/ipam?client=`) deben estrechar su lista al cliente, y eso lo cumplen O1, O2, O3 y O5, cada una con su prueba.
 
 ### Task 6: Oleada O1, Equipos (11 páginas)
 
@@ -7720,7 +6722,7 @@ Atera: `Atera_recorrido_menus_UI_UX.md`, «Devices» (líneas 164-182) y captura
 - La selección existente pasa a `BulkBar` con sus tres acciones de hoy (mismas condiciones y diálogos).
 - El vacío: `ListEmpty` con «Aún no hay equipos. Instala el agente en el primero.» y la acción «Añadir un equipo».
 - La columna «Cliente» se queda (con «Todos mis clientes» es lo que dice de quién es cada equipo).
-- Lectura (Receta L, 6): la lista lee hoy con `useQuery` directo (`DevicesPage.tsx:331`, clave `["devices", query]`); pasa a `const narrowing = useNarrowing(filters.values.client); const narrowed = useApiFor(filters.values.client);`, `queryKey: ["devices", query, narrowing.client]`, `queryFn: () => narrowed.listDevices(query)` y `enabled: narrowing.ready`. `invalidateQueries({ queryKey: ["devices"] })` (línea 394) sigue alcanzándola. Las tres acciones en lote siguen con `api` (`useApi()`).
+- Lectura (Receta L, 6): la lista lee hoy con `useQuery` directo (`DevicesPage.tsx:331`, clave `["devices", query]`); pasa a `const { api: narrowed, client, ready } = useNarrowedApi(filters.values.client);`, `queryKey: ["devices", query, client]`, `queryFn: () => narrowed.listDevices(query)` y `enabled: ready`. `invalidateQueries({ queryKey: ["devices"] })` (línea 394) sigue alcanzándola. Las tres acciones en lote siguen con `api` (`useApi()`).
 - Pruebas: `DevicesPage.test.tsx`, `DevicesPushSelection.test.tsx`, `DevicesApproveAll.test.tsx`, `DevicesReview.test.tsx` cambian `getByRole("tab", …)` por `getByRole("button", { name: /…/ })` con `aria-pressed`; nuevas: las dos de la receta L, «reads the list narrowed to the Client chip's client» (Receta L, con `recordingNarrowing`), y «puts Add a computer at the head of the page».
 - Acepta: la URL `/devices?state=offline&client=<id>` abre la vista filtrada y solo con equipos de ese cliente; sin selección no hay barra de lote; el vacío dice su causa.
 
@@ -7735,9 +6737,9 @@ Atera: `Atera_recorrido_menus_UI_UX.md`, «Devices» (líneas 164-182) y captura
 
 **1.3 `SoftwarePage.tsx` (`/software`, L, solo búsqueda).** Hoy: `?q=` y `?title=` (el título elegido), dos tablas (títulos; equipos con el elegido) y exportar. Cabecera con «Exportar»; `ListToolbar` con la búsqueda y `ShowingCount`; el título elegido abre su lista de equipos en un `Panel` debajo con un enlace «Quitar» que borra `?title=`. Sin chip «Cliente» (el inventario de software es de la flota). Pruebas: la variante de búsqueda de la Receta L («keeps its search in the URL, so a reload finds the same rows») y «says why the list is empty» con una búsqueda que no encuentra nada; nueva «opens a title's computers from ?title= and Quitar takes it away». Acepta: `?q=` y `?title=` enlazables y recargables; «Exportar» exporta lo mismo que hoy.
 
-**1.4 `CandidatesPage.tsx` (`/discovered`, L).** Hoy: tres tiles, una tabla de máquinas encontradas por barrido con selección y «Avalar», y `ScanSubnetDialog`; es una de las seis páginas del recorrido de «Añadir un equipo» (`useAdoptJourneyClient`, que desde la Task 5 lee `?journey_client=`). `ListToolbar` con `ClientFilter` y la búsqueda (clave `q`, filtro en el navegador sobre dirección y nombre); `BulkBar` con «Avalar» (la acción de hoy); «Escanear una red» como acción principal (`useNewParam("scan")`); vacío con la causa («Ningún barrido ha encontrado máquinas todavía» o «nada con estos filtros»). Lectura: `useQuery` directo (`CandidatesPage.tsx:166`, clave `["asset-candidates"]`) → clave `["asset-candidates", narrowing.client]`, `queryFn` con `useApiFor`, `enabled: narrowing.ready`; avalar sigue con `useApi()`. Pruebas: `CandidatesPage.test.tsx` adaptadas; receta L (búsqueda) y la del chip; nueva «narrows the list and leaves the console's client alone» (decisión D20): con `/discovered?client=<ANDES>` la lectura pasa por `forClient(ANDES)` y `setSelectedClient` no se llama (el selector de arriba sigue en «Todos mis clientes»); y la de `?journey_client=<ANDES>` sigue eligiendo el cliente, como hoy. Acepta: avalar varias sigue mandando una petición por cliente; `?client=` estrecha y `?journey_client=` cambia el cliente, nunca al revés.
+**1.4 `CandidatesPage.tsx` (`/discovered`, L).** Hoy: tres tiles, una tabla de máquinas encontradas por barrido con selección y «Avalar», y `ScanSubnetDialog`; es una de las seis páginas del recorrido de «Añadir un equipo» (`useAdoptJourneyClient`, que desde la Task 5 lee `?journey_client=`). `ListToolbar` con `ClientFilter` y la búsqueda (clave `q`, filtro en el navegador sobre dirección y nombre); `BulkBar` con «Avalar» (la acción de hoy); «Escanear una red» como acción principal (`useNewParam("scan")`); vacío con la causa («Ningún barrido ha encontrado máquinas todavía» o «nada con estos filtros»). Lectura: `useQuery` directo (`CandidatesPage.tsx:166`, clave `["asset-candidates"]`) → clave `["asset-candidates", client]`, `queryFn` con el `api` de `useNarrowedApi(filters.values.client)`, `enabled: ready`; avalar sigue con `useApi()`. Pruebas: `CandidatesPage.test.tsx` adaptadas; receta L (búsqueda) y la del chip; nueva «narrows the list and leaves the console's client alone» (decisión D20): con `/discovered?client=<ANDES>` la lectura pasa por `forClient(ANDES)` y `setSelectedClient` no se llama (el selector de arriba sigue en «Todos mis clientes»); y la de `?journey_client=<ANDES>` sigue eligiendo el cliente, como hoy. Acepta: avalar varias sigue mandando una petición por cliente; `?client=` estrecha y `?journey_client=` cambia el cliente, nunca al revés.
 
-**1.5 `GroupsPage.tsx` (`/device-groups`, L).** Hoy: lista de grupos, «mostrar archivados», editor (crear y editar con reglas y vista previa) y grupo abierto con sus miembros. Lista con `ListToolbar` (búsqueda `q`, chip «Archivados» con la clave `archived`, `ClientFilter`); el grupo abierto pasa a `?group=<id>` (enlazable) en un `Panel` a la derecha con `DetailGrid` en escritorio y debajo en móvil; el editor se abre con `?new=group` o `?edit=<id>` y sigue siendo un diálogo grande. Lectura: `GroupsPage.tsx:517`, clave `["device-groups", showArchived]` → `["device-groups", showArchived, narrowing.client]` con `useApiFor` y `enabled: narrowing.ready`; la del selector de miembros (`["devices", "of-client", memberClient]`) no cambia: ya lee el cliente del grupo. Pruebas: `GroupsPage.test.tsx` adaptadas; nuevas: receta L, la del chip y «opens a group from the URL». Acepta: ningún cambio en las llamadas de reglas, miembros o archivado; `?group=` y `?edit=` enlazables.
+**1.5 `GroupsPage.tsx` (`/device-groups`, L).** Hoy: lista de grupos, «mostrar archivados», editor (crear y editar con reglas y vista previa) y grupo abierto con sus miembros. Lista con `ListToolbar` (búsqueda `q`, chip «Archivados» con la clave `archived`, `ClientFilter`); el grupo abierto pasa a `?group=<id>` (enlazable) en un `Panel` a la derecha con `DetailGrid` en escritorio y debajo en móvil; el editor se abre con `?new=group` o `?edit=<id>` y sigue siendo un diálogo grande. Lectura: `GroupsPage.tsx:517`, clave `["device-groups", showArchived]` → `["device-groups", showArchived, client]` con `useNarrowedApi` (`client`, `api`) y `enabled: ready`; la del selector de miembros (`["devices", "of-client", memberClient]`) no cambia: ya lee el cliente del grupo. Pruebas: `GroupsPage.test.tsx` adaptadas; nuevas: receta L, la del chip y «opens a group from the URL». Acepta: ningún cambio en las llamadas de reglas, miembros o archivado; `?group=` y `?edit=` enlazables.
 
 **1.6 `OnboardPage.tsx` (`/devices/onboard`, O).** «Añadir un equipo», el destino de «Nuevo → Equipo». `FormPage` con volver «Equipos» y su título; las secciones de hoy (instalar en una máquina: instaladores y comando; muchas a la vez: barrido) como `FormSection`, sin barra de guardado (no guarda nada); el paso a paso (`Steps`) se conserva. Pruebas: `OnboardPage.test.tsx` adaptadas; nueva: «leads back to the computers». Acepta: el atajo de Atera «Install agent» queda aquí y en «Nuevo».
 
@@ -7799,9 +6801,9 @@ Atera: «Dashboard» (líneas 98-111), «Tickets» (112-135), «Admin › Suppor
 
 **2.1 `DashboardPage.tsx` (`/dashboard`, O).** El tablero personalizable (diseño 2026-09-01: rejilla de seis columnas, tamaños con nombre, disposición guardada por persona en el servidor) **no cambia de modelo**. Cambia la forma: `PageHead` «Inicio» en español (D13) con «Editar» como acción secundaria; cada mosaico es un `Panel` del kit con su título, su número y un destino (regla «Do give every tile a destination»); un mosaico sin datos dice por qué en una frase (Atera los deja en blanco: «Los widgets vacíos quedan en blanco, sin mensaje ni paso siguiente»); quitar un mosaico en modo edición se puede deshacer (Atera no deja: «Quitar un widget es un clic sin confirmación ni deshacer»): el modo edición tiene «Descartar» y «Guardar» en la `SaveBar` del kit, con `useDraft` sobre la disposición. Pruebas: `DashboardPage.test.tsx` y `__tests__/layout.test.ts` adaptadas; nuevas: «discards an edit of the layout», «a tile with nothing measured says so». Acepta: la disposición de cada persona se lee y se guarda con las mismas llamadas de hoy (`getDashboardLayout`, `saveDashboardLayout`, `resetDashboardLayout`); fuera del modo edición no hay barra de guardado; «Descartar» devuelve la disposición de antes sin llamar al servidor; cada mosaico con datos lleva a su lista.
 
-**2.2 `TicketListPage.tsx` (`/service-desk`, L).** Hoy: ocho selects (`?assignee`, `?origin`, `?priority`, `?queue`, `?scope`, `?sort`, `?status`, `?type`), `?q`, chips, cinco tiles, `NewTicketDialog`, `ServiceDeskNav`. `ServiceDeskNav` → `SectionNav`. `ListToolbar`: búsqueda; `FilterChips` «Alcance» (`scope`: mine, unassigned, open, all; los conteos que el pie ya calcula, si los hay); `FilterChips` «Estado» (`status`); `ClientFilter`; y en una segunda fila del mismo panel los demás filtros como `.chip-select` (cola, prioridad, tipo, origen, responsable) con su etiqueta visible; el orden (`sort`) a la derecha. Las claves de la URL no cambian. **El alcance no es un filtro cualquiera** (revisión previa, W-M4): sin `?scope=` es `open` (`DEFAULT_SCOPE`, `TicketListPage.tsx:60`), no «todos», así que el chip «Abiertos» es el del valor `""` (el que no escribe nada) y «Todos» escribe `scope=all`; y elegir «Míos» o «Sin asignar» sigue borrando `assignee`, como hace hoy `setScope` (líneas 121-126): los chips llaman a ese `setScope`, no a `filters.set("scope", …)`. Lectura: las dos lecturas de `useTickets` (líneas 151 en adelante, la de la cola y la del resto, cada una con su `enabled`) pasan el chip: `useTickets(filters, { enabled, chip: clientChip })`, y el hook (`service-desk/api.ts:105`) pasa a leer con `useApiFor(options.chip ?? "")`, clave `["service-desk-tickets", filters, narrowing.client]` y `enabled: (options.enabled ?? true) && narrowing.ready` (Receta L, 7); `MyWorkPage` lo sigue llamando sin chip. `ShowingCount` con `total` (la respuesta trae `{items, total}`). Vacío con causa. «Nuevo ticket» ya va por `useNewParam` (Task 4). Pruebas: `__tests__/ticketQueue.test.tsx`, `serviceDesk.test.tsx` adaptadas; receta L, la del chip, y nueva «picking Mine clears the assignee, and Open is the chip that writes nothing». Acepta: `/service-desk` sin parámetros enseña los abiertos con el chip «Abiertos» marcado; `/service-desk?client=<id>` (el enlace de la ficha 360) estrecha a ese cliente.
+**2.2 `TicketListPage.tsx` (`/service-desk`, L).** Hoy: ocho selects (`?assignee`, `?origin`, `?priority`, `?queue`, `?scope`, `?sort`, `?status`, `?type`), `?q`, chips, cinco tiles, `NewTicketDialog`, `ServiceDeskNav`. `ServiceDeskNav` → `SectionNav`. `ListToolbar`: búsqueda; `FilterChips` «Alcance» (`scope`: mine, unassigned, open, all; los conteos que el pie ya calcula, si los hay); `FilterChips` «Estado» (`status`); `ClientFilter`; y en una segunda fila del mismo panel los demás filtros como `.chip-select` (cola, prioridad, tipo, origen, responsable) con su etiqueta visible; el orden (`sort`) a la derecha. Las claves de la URL no cambian. **El alcance no es un filtro cualquiera** (revisión previa, W-M4): sin `?scope=` es `open` (`DEFAULT_SCOPE`, `TicketListPage.tsx:60`), no «todos», así que el chip «Abiertos» es el del valor `""` (el que no escribe nada) y «Todos» escribe `scope=all`; y elegir «Míos» o «Sin asignar» sigue borrando `assignee`, como hace hoy `setScope` (líneas 121-126): los chips llaman a ese `setScope`, no a `filters.set("scope", …)`. Lectura: las dos lecturas de `useTickets` (líneas 151 en adelante, la de la cola y la del resto, cada una con su `enabled`) pasan el chip: `useTickets(filters, { enabled, chip: clientChip })`, y el hook (`service-desk/api.ts:105`) pasa a leer con `useNarrowedApi(options.chip ?? "")`, clave `["service-desk-tickets", filters, client]` y `enabled: (options.enabled ?? true) && ready` (Receta L, 7); `MyWorkPage` lo sigue llamando sin chip. `ShowingCount` con `total` (la respuesta trae `{items, total}`). Vacío con causa. «Nuevo ticket» ya va por `useNewParam` (Task 4). Pruebas: `__tests__/ticketQueue.test.tsx`, `serviceDesk.test.tsx` adaptadas; receta L, la del chip, y nueva «picking Mine clears the assignee, and Open is the chip that writes nothing». Acepta: `/service-desk` sin parámetros enseña los abiertos con el chip «Abiertos» marcado; `/service-desk?client=<id>` (el enlace de la ficha 360) estrecha a ese cliente.
 
-**2.3 `TicketDetailPage.tsx` (`/service-desk/tickets/:ticketId`, F, dos paneles de Atera).** `DetailHead`: volver «Tickets»; título `#<número> <asunto>`; estado (`StatusPill` del estado) y prioridad; contexto con el cliente (`ClientContext`) y el solicitante; acciones de hoy (asignar, cambiar estado, sesión remota con `StartSessionDialog`). Debajo, `DetailGrid`: a la izquierda la conversación y el editor de respuesta (pública / nota interna, respuestas guardadas), a la derecha las propiedades (cola, categoría, prioridad, responsable, equipo, asunto, descripción, estado con su motivo). **Hoy ya hay un solo «Save changes»** (`TicketDetailPage.tsx:962-964`), y detrás va una confirmación (`ConfirmDialog`, `:966-978`) y un guardado en orden (al reabrir, primero el estado, después la asignación y los campos; si no, campos, asignación y estado con su motivo; `:798-826`). Ese botón pasa a la `SaveBar` del kit **sin tocar su lógica**: el `dirty` que la página ya calcula (`:794-795`), `onSave={submit}` (el `submit` de hoy, que abre la confirmación cuando toca o llama a `save()`), `saving={saving}`, `error={error}` (la barra lo anuncia con `role="alert"`, como hoy el aviso rojo), `blockedReason` con la frase de que falta el asunto cuando `!subject.trim()` (hoy el botón se desactiva sin decirlo; clave nueva `serviceDesk.detail.subjectRequired`), y `onDiscard` que devuelve los nueve estados a los valores del ticket. Las nueve variables de estado (`:769-777`) se quedan: no hace falta `useDraft`, porque la página ya sabe qué cambió. `UnsavedGuard dirty={dirty}`. El equipo enlazado muestra su estado de parches como hoy. `useRecordTitle("#<número>")`. Pruebas: `__tests__/ticketWorkbench.test.tsx` adaptadas (donde pulsaban «Save changes» pulsan el «Save» de la barra; la confirmación y el orden se prueban igual); nuevas: receta FO sobre las propiedades («asks before leaving with an unsaved property»), «keeps the confirmation and the save order of today», y la de título con `{ page: "shell.nav.item.tickets" }` (espera `"#<número> · Tickets · Novieri RMM"`). Acepta: cerrar un ticket con cambios pide la misma confirmación de hoy; el orden de las tres escrituras no cambia.
+**2.3 `TicketDetailPage.tsx` (`/service-desk/tickets/:ticketId`, F, dos paneles de Atera).** `DetailHead`: volver «Tickets»; título `#<número> <asunto>`; estado (`StatusPill` del estado) y prioridad; contexto con el cliente (`ClientContext`) y el solicitante; acciones de hoy (asignar, cambiar estado, sesión remota con `StartSessionDialog`). Debajo, `DetailGrid`: a la izquierda la conversación y el editor de respuesta (pública / nota interna, respuestas guardadas), a la derecha las propiedades (cola, categoría, prioridad, responsable, equipo, asunto, descripción, estado con su motivo). **Hoy ya hay un solo «Save changes»** (`TicketDetailPage.tsx:962-964`), y detrás va una confirmación (`ConfirmDialog`, `:966-978`) y un guardado en orden (al reabrir, primero el estado, después la asignación y los campos; si no, campos, asignación y estado con su motivo; `:798-826`). Ese botón pasa a la `SaveBar` del kit **sin tocar su lógica**: el `dirty` que la página ya calcula (`:794-795`), `onSave={submit}` (el `submit` de hoy, que abre la confirmación cuando toca o llama a `save()`), `saving={saving}`, `error={error}` (la barra lo anuncia con `role="alert"`, como hoy el aviso rojo), `onDiscard` que devuelve los nueve estados a los valores del ticket; y la falta del asunto **no** es un `blockedReason` (ese es un permiso o un estado del registro, nunca un dato que falta): Guardar con `!subject.trim()` no envía y la barra lo dice con `problems={[{ name: "subject", message: t("serviceDesk.detail.subjectRequired") }]}` (clave nueva; hoy el botón se desactiva sin decirlo), y el aviso se va al escribir el asunto. Las nueve variables de estado (`:769-777`) se quedan: no hace falta `useDraft` (ni `markSent`), porque la página ya sabe qué cambió. `UnsavedGuard dirty={dirty}` (sin `search`: la query de la ficha no es el formulario), y es la única guarda con cambios de la página. El equipo enlazado muestra su estado de parches como hoy. `useRecordTitle("#<número>")`. Pruebas: `__tests__/ticketWorkbench.test.tsx` adaptadas (donde pulsaban «Save changes» pulsan el «Save» de la barra; la confirmación y el orden se prueban igual); nuevas: receta FO sobre las propiedades («asks before leaving with an unsaved property»), «keeps the confirmation and the save order of today», y la de título con `{ page: "shell.nav.item.tickets" }` (espera `"#<número> · Tickets · Novieri RMM"`). Acepta: cerrar un ticket con cambios pide la misma confirmación de hoy; el orden de las tres escrituras no cambia.
 
 **2.4 `MyWorkPage.tsx` (`/service-desk/my-work`, L, sin filtros).** Tres tiles y la lista de lo asignado a la persona (`useTickets({ scope: "mine", sort: "due", limit: 200 })`, sin chip: es lo de la persona, de todos sus clientes); `SectionNav`; `ShowingCount` con el `total` de la respuesta; vacío «No tienes tickets asignados.» con enlace a la cola. Pruebas: solo «says why the list is empty» (Receta L, 8) con una respuesta vacía, y «puts the service desk's section navigation at the top, with My work current». Acepta: los tres tiles cuentan lo mismo que hoy; el vacío enlaza a `/service-desk`.
 
@@ -7809,13 +6811,13 @@ Atera: «Dashboard» (líneas 98-111), «Tickets» (112-135), «Admin › Suppor
 
 **2.6 `SlaAdminPage.tsx` (`/sla`, FO).** Políticas y calendarios: dos `FormSection`; las políticas como lista con alta en diálogo (`useNewParam("policy")`) y chip «Cliente» para las de un cliente (el servidor ya distingue `client_id` nulo de uno): `useSlaPolicies()` (`sla/api.ts:194`) pasa a `useSlaPolicies(chip = "")`, Receta L, 7; los calendarios igual, con `useNewParam("calendar")`, sin chip (son de la organización). Pruebas: `__tests__/sla.test.tsx`, `policiesClient.test.tsx` adaptadas; la del chip sobre las políticas. Acepta: una política «para todos los clientes» se sigue viendo con el chip puesto (el servidor la incluye en la intersección).
 
-**2.7 `EmailIntakeAdminPage.tsx` (`/email-intake`, FO).** Los buzones y su conexión con Microsoft: `FormSection` por buzón; los ajustes editables con `SaveBar` y `UnsavedGuard`; la conexión OAuth sin cambios. El registro de mensajes entrantes es de todos los clientes y solo se lee con el permiso en todos (invariante 5a): **sin** chip «Cliente». `OAuthCallback.tsx`: el mismo panel de hoy dentro del armazón, con `PageHead` y un enlace de vuelta a «Entrada de correo» (la puerta no recorre esta ruta, `EXCLUDED`; se prueba en jsdom). Pruebas: `__tests__/emailIntake.test.tsx`, `oauth.test.tsx` adaptadas; receta FO sobre los ajustes de un buzón. Acepta: conectar con Microsoft sigue el mismo flujo; un ajuste sin guardar avisa al salir.
+**2.7 `EmailIntakeAdminPage.tsx` (`/email-intake`, FO).** Los buzones y su conexión con Microsoft: `FormSection` por buzón; los ajustes editables de todos los buzones con **un solo** `useDraft`, **una** `SaveBar` y **una** `UnsavedGuard` para la página (dos guardas sucias a la vez fallan la prueba; si el coordinador prefiere una barra por buzón, cada una lleva `label` con el nombre del buzón y solo una guarda cuenta); la conexión OAuth sin cambios. El registro de mensajes entrantes es de todos los clientes y solo se lee con el permiso en todos (invariante 5a): **sin** chip «Cliente». `OAuthCallback.tsx`: el mismo panel de hoy dentro del armazón, con `PageHead` y un enlace de vuelta a «Entrada de correo» (la puerta no recorre esta ruta, `EXCLUDED`; se prueba en jsdom). Pruebas: `__tests__/emailIntake.test.tsx`, `oauth.test.tsx` adaptadas; receta FO sobre los ajustes de un buzón. Acepta: conectar con Microsoft sigue el mismo flujo; un ajuste sin guardar avisa al salir.
 
 **2.8 `NotificationAdminPage.tsx` (`/notifications`, FO).** Las reglas y los canales (correo, webhooks): `FormSection` por grupo; las reglas como lista con alta en diálogo (`useNewParam("rule")`); los ajustes con `SaveBar`. El registro de entregas es de todos los clientes (invariante 5a): **sin** chip. Pruebas: `__tests__/notification.test.tsx` adaptadas; receta FO sobre los ajustes. Acepta: los secretos de un canal se siguen escribiendo y nunca se leen (invariante 3); un ajuste sin guardar avisa al salir.
 
 **2.9 `MyTicketsPage.tsx` (`/portal`, L, marco del portal).** Lista de los tickets del solicitante con `FilterChips` de estado (`?state=`: abiertos, el valor `""`, y todos), `ShowingCount` y vacío «Aún no has abierto ningún ticket.» con «Nuevo ticket». Sin chip «Cliente» (el portal es de un contacto). Pruebas: `__tests__/portal.test.tsx` adaptadas; las dos de la receta L. Acepta: `/portal?state=all` recarga con los cerrados; el vacío ofrece «Nuevo ticket» solo con `portal.ticket.write`.
 
-**2.10 `NewTicketPage.tsx` (`/portal/new`, FO, se va al guardar).** `FormPage` con volver «Mis tickets»; una `FormSection`; sugerencias de ayuda (`HelpSuggestions`) a la derecha en escritorio; un formulario de alta se envía una vez, así que su botón es el «Enviar» de hoy y no hay `SaveBar`, pero sí la guarda mientras hay texto escrito (perder una descripción larga es lo que evita). Como al enviar navega al ticket creado (`` navigate(`/portal/tickets/${ticketId}`) ``, `NewTicketPage.tsx:140`), usa `const { guard, release } = useUnsavedGuard(subject.trim() !== "" || description.trim() !== "")` y llama a `release()` justo antes de ese `navigate` (Receta FO, 6; decisión D16): sin él, la página se quedaba en `/portal/new` con «¿Salir sin guardar?» abierto (revisión previa, I-1, reproducido). Pruebas: nuevas «asks before leaving a half-written ticket» y «leaves for the ticket it filed without asking». Acepta: enviar lleva al ticket nuevo sin preguntar; salir con texto escrito pregunta.
+**2.10 `NewTicketPage.tsx` (`/portal/new`, FO, se va al guardar).** `FormPage` con volver «Mis tickets»; una `FormSection`; sugerencias de ayuda (`HelpSuggestions`) a la derecha en escritorio; un formulario de alta se envía una vez, así que su botón es el «Enviar» de hoy y no hay `SaveBar`, pero sí la guarda mientras hay texto escrito (perder una descripción larga es lo que evita). Como al enviar navega al ticket creado (`` navigate(`/portal/tickets/${ticketId}`) ``, `NewTicketPage.tsx:140`), usa `const { guard, release } = useUnsavedGuard(subject.trim() !== "" || description.trim() !== "")` y llama a `release()` en el `onSuccess` del envío, **solo tras el guardado correcto y justo antes de ese `navigate`** (Receta FO, 6; decisión D16; nunca en el `onError`): sin él, la página se quedaba en `/portal/new` con «¿Salir sin guardar?» abierto (revisión previa, I-1, reproducido). Pruebas: nuevas «asks before leaving a half-written ticket» y «leaves for the ticket it filed without asking». Acepta: enviar lleva al ticket nuevo sin preguntar; salir con texto escrito pregunta.
 
 **2.11 `PortalTicketDetailPage.tsx` (`/portal/tickets/:ticketId`, F, sin pestañas).** `DetailHead` con estado y volver «Mis tickets»; la conversación y la respuesta; adjuntos. `useDocumentTitle("#<número>")` (el portal no tiene `AppShell`, así que aquí sí `useDocumentTitle` y no `useRecordTitle`). Pruebas: `__tests__/portal.test.tsx` adaptadas; nueva «names the ticket in the browser tab» (espera `"#<número> · Novieri RMM"`, sin `TitleShell`). Acepta: la respuesta del contacto se envía igual que hoy; los adjuntos se descargan igual.
 
@@ -7883,24 +6885,23 @@ Atera: «Alerts» (184-198), «Patch Management» (199-215), «Admin › Monitor
   }, [location.hash, location.search, navigate]);
   ```
   (con `useLocation` y `useNavigate` de `react-router-dom` y `useEffect` de `react`). Los tres módulos que enlazan no cambian.
-- **La cola** (vista `alerts`): `ListToolbar` con `FilterChips` «Estado» (activas, reconocidas, silenciadas: las de `AlertState` menos `cleared`) y «Gravedad» (crítica, advertencia, información), **con los conteos de `getHealthAlertSummary`** (`by_state`, `by_severity`), `ClientFilter` y `ShowingCount`; la alerta elegida (`?alert=`) se abre en el `Drawer` de hoy. Lectura: `useHealthAlerts(filters)` (`health/api.ts:257`, clave `["health-alerts", filters]`) pasa a `useHealthAlerts(filters, chip = "")` con `useApiFor(chip)`, clave `["health-alerts", filters, narrowing.client]` y `enabled: narrowing.ready` (Receta L, 7); `AlertConsole` le pasa el chip. El vacío dice la causa real: sin equipos, «Ningún equipo envía todavía su estado.» con «Añadir un equipo» (el defecto que el recorrido de Atera señala); con filtros, «nada con estos filtros».
+- **La cola** (vista `alerts`): `ListToolbar` con `FilterChips` «Estado» (activas, reconocidas, silenciadas: las de `AlertState` menos `cleared`) y «Gravedad» (crítica, advertencia, información), **con los conteos de `getHealthAlertSummary`** (`by_state`, `by_severity`), `ClientFilter` y `ShowingCount`; la alerta elegida (`?alert=`) se abre en el `Drawer` de hoy. Lectura: `useHealthAlerts(filters)` (`health/api.ts:257`, clave `["health-alerts", filters]`) pasa a `useHealthAlerts(filters, chip = "")` con `useNarrowedApi(chip)`, clave `["health-alerts", filters, client]` y `enabled: ready` (Receta L, 7); `AlertConsole` le pasa el chip. El vacío dice la causa real: sin equipos, «Ningún equipo envía todavía su estado.» con «Añadir un equipo» (el defecto que el recorrido de Atera señala); con filtros, «nada con estos filtros».
 - **Los conteos, del mismo cliente que la lista** (revisión de verificación, M-e). Hoy los tiles y los conteos salen de `getHealthAlertSummary` con `useApi()` bajo la clave del armazón, `["health-alert-summary"]` (`HealthPage.tsx:88-92`), y el desglose de los tiles de `useHealthAlerts({})`: con `?client=<id>` la cola sería de un cliente y los números de todos. Pasan a leerse con el mismo estrechamiento que la cola (`filters` es el `useUrlFilters` de la cola, con su clave `client`):
   ```tsx
     const chip = filters.values.client;
-    const narrowing = useNarrowing(chip);
-    const summaryApi = useApiFor(chip);
+    const { api: summaryApi, client: sent, ready } = useNarrowedApi(chip);
     /* THE TILES AND THE CHIP COUNTS READ THE SUMMARY OF THE LIST'S OWN CLIENT
        (redesign plan, O3 3.1, verification M-e). With no Client chip, the
        shell's key, so the rail badge and this row cannot disagree; under a
        chip, that client's counts and nobody else's. */
     const summary = useQuery<AlertSummary>({
-      queryKey: narrowing.client === null ? ["health-alert-summary"] : ["health-alert-summary", narrowing.client],
+      queryKey: sent === null ? ["health-alert-summary"] : ["health-alert-summary", sent],
       queryFn: () => summaryApi.getHealthAlertSummary(),
-      enabled: canRead && narrowing.ready,
+      enabled: canRead && ready,
     });
     const alerts = useHealthAlerts({}, chip);
   ```
-  (con `useNarrowing` y `useApiFor` de `../../shell/components`). Las mutaciones que hoy invalidan `["health-alert-summary"]` siguen invalidando ese prefijo, que cubre las dos claves. Prueba nueva en `__tests__/alertTriage.test.tsx`, «counts the chips for the Client chip's client, not every client»: el doble de la API responde `getHealthAlertSummary` con `by_severity.critical = 7` y su `forClient` devuelve una copia que responde `critical = 1`; en `/health?client=<ANDES>` (un cliente de la persona en `/me`), el chip «Critical» del grupo «Severity» dice `1` en su `.n` (`within(screen.getByRole("group", { name: "Severity" })).getByRole("button", { name: /Critical/ })` contiene `1` y no `7`), y en `/health` sin chip dice `7`. Acepta (se suma al de abajo): bajo el chip, ningún número de la página cuenta alertas de otro cliente.
+  (con `useNarrowedApi` de `../../shell/components`). Las mutaciones que hoy invalidan `["health-alert-summary"]` siguen invalidando ese prefijo, que cubre las dos claves. Prueba nueva en `__tests__/alertTriage.test.tsx`, «counts the chips for the Client chip's client, not every client»: el doble de la API responde `getHealthAlertSummary` con `by_severity.critical = 7` y su `forClient` devuelve una copia que responde `critical = 1`; en `/health?client=<ANDES>` (un cliente de la persona en `/me`), el chip «Critical» del grupo «Severity» dice `1` en su `.n` (`within(screen.getByRole("group", { name: "Severity" })).getByRole("button", { name: /Critical/ })` contiene `1` y no `7`), y en `/health` sin chip dice `7`. Acepta (se suma al de abajo): bajo el chip, ningún número de la página cuenta alertas de otro cliente.
 - Pruebas: `__tests__/health.test.tsx`, `alertTriage.test.tsx`, `assignments.test.tsx` adaptadas; receta L; la del chip; nuevas «says no computer reports yet when there are none» y «opens each configuration view from the URL». **Dos casos de `alertTriage.test.tsx` cambian a propósito** (295-313, `describe("Health page anchors")`), con el comentario `// Redesign decision D21 (open question 3, resolved 2026-11-24): each panel lives in its view now; an old anchor opens that view.`: «gives profiles, approved actions and health settings an anchor each, around the right panel» monta cada vista (`/health?view=profiles`, `/health?view=actions`, `/health?view=settings`) y busca en cada una su ancla y su título, que son los de hoy; «scrolls to the panel a link names on arrival» sigue montando `/health#approved-actions` y además espera la pestaña «Approved actions» con `aria-selected="true"` antes de comprobar el `scrollIntoView`. `alertReadiness.test.tsx:75` (el enlace `/health#profiles`) no cambia.
 - Acepta: `/health#profiles`, `/health#approved-actions` y `/health#health-settings` abren su vista y bajan a su panel; `/health?client=<id>` (el enlace de la ficha 360) estrecha la cola; los cuatro paneles de configuración y el informe siguen alcanzables y la puerta los mide en sus variantes.
 
@@ -7912,15 +6913,15 @@ Atera: «Alerts» (184-198), «Patch Management» (199-215), «Admin › Monitor
 
 **3.5 `ScriptsPage.tsx` (`/deploy/scripts`, L).** Hoy: la lista de scripts, «Nuevo script» en `useState` (`authorOpen`, línea 64), editar (`editing`) y ejecutar (`running`) en diálogos. Pasa a: `SectionNav`; `useUrlFilters(["q", "os", "interpreter"])`: búsqueda `q` en el navegador sobre el nombre, `FilterChips` «Sistema» (`os`) e «Intérprete» (`interpreter`: uno por valor de `INTERPRETERS`, `deploy/types.ts:51`, con la etiqueta de `interpreterLabel`), sin conteo; `ShowingCount`; «Nuevo script» con `useNewParam("script")` (`AuthorScriptDialog`); editar y ejecutar siguen en sus diálogos con su estado de hoy (ejecutar firma un trabajo: invariante 1, no cambia); vacío con causa. Sin chip «Cliente». Pruebas: las dos de la receta L; «opens New script from ?new=script»; «runs a script through the same signed-job dialog as today» (la prueba de hoy, adaptada solo en consultas). Acepta: ejecutar un script manda el mismo trabajo y pide lo mismo que hoy.
 
-**3.6 `SessionsPage.tsx` (`/remote`, L), `ScreenViewer.tsx`, `RecordingPlayer.tsx` (O).** La tira `Tabs` de `?state=` pasa a `FilterChips` con el mismo parámetro; `?q`; `ClientFilter`; «Iniciar sesión remota» principal (`useNewParam("session")`, `StartSessionDialog`; el diálogo lo importa también `service-desk`, así que su firma no cambia). Lectura: `useQuery` directo (`SessionsPage.tsx:100`, clave `["remote-sessions"]`) → `["remote-sessions", narrowing.client]` con `useApiFor` y `enabled: narrowing.ready`. El visor y el reproductor conservan su lienzo; su cabecera pasa a `DetailHead` (volver «Sesiones remotas», el equipo, el estado de la sesión, «Finalizar» como acción) y `useRecordTitle` con el equipo. Pruebas: `SessionsPage.test.tsx`, `RecordingPlayer.test.tsx` adaptadas (`ITMSRSP1` se queda: es formato); receta L; la del chip; la de título en el visor con `{ page: "shell.nav.item.remoteSessions" }`. Acepta: iniciar y finalizar una sesión hacen lo mismo que hoy y quedan en el registro (invariante 4).
+**3.6 `SessionsPage.tsx` (`/remote`, L), `ScreenViewer.tsx`, `RecordingPlayer.tsx` (O).** La tira `Tabs` de `?state=` pasa a `FilterChips` con el mismo parámetro; `?q`; `ClientFilter`; «Iniciar sesión remota» principal (`useNewParam("session")`, `StartSessionDialog`; el diálogo lo importa también `service-desk`, así que su firma no cambia). Lectura: `useQuery` directo (`SessionsPage.tsx:100`, clave `["remote-sessions"]`) → `["remote-sessions", client]` con `useNarrowedApi` y `enabled: ready`. El visor y el reproductor conservan su lienzo; su cabecera pasa a `DetailHead` (volver «Sesiones remotas», el equipo, el estado de la sesión, «Finalizar» como acción) y `useRecordTitle` con el equipo. Pruebas: `SessionsPage.test.tsx`, `RecordingPlayer.test.tsx` adaptadas (`ITMSRSP1` se queda: es formato); receta L; la del chip; la de título en el visor con `{ page: "shell.nav.item.remoteSessions" }`. Acepta: iniciar y finalizar una sesión hacen lo mismo que hoy y quedan en el registro (invariante 4).
 
-**3.7 `JobsPage.tsx` (`/jobs`, L).** Hoy: `?q`, `?status` y `?job` (el trabajo abierto) ya están en la URL (`JobsPage.tsx:195-209`), con selects. Pasa a: `FilterChips` de estado sobre `status` (la respuesta de `listJobs` no trae conteos: sin número); la búsqueda `q`; `ClientFilter`; `ShowingCount`; el trabajo abierto en su `Drawer` con `?job=`; cancelar y reintentar con su confirmación. Lectura: `useQuery` directo (`:241`, clave `["jobs"]`) → `["jobs", narrowing.client]` con `useApiFor` y `enabled: narrowing.ready`; `invalidateQueries({ queryKey: ["jobs"] })` (`:287, 311, 321`) la sigue alcanzando; cancelar y reintentar con `useApi()`. Pruebas: las dos de la receta L; la del chip; «opens a job from ?job= in its drawer». Acepta: cancelar y reintentar piden confirmación como hoy; `?job=` enlazable.
+**3.7 `JobsPage.tsx` (`/jobs`, L).** Hoy: `?q`, `?status` y `?job` (el trabajo abierto) ya están en la URL (`JobsPage.tsx:195-209`), con selects. Pasa a: `FilterChips` de estado sobre `status` (la respuesta de `listJobs` no trae conteos: sin número); la búsqueda `q`; `ClientFilter`; `ShowingCount`; el trabajo abierto en su `Drawer` con `?job=`; cancelar y reintentar con su confirmación. Lectura: `useQuery` directo (`:241`, clave `["jobs"]`) → `["jobs", client]` con `useNarrowedApi` y `enabled: ready`; `invalidateQueries({ queryKey: ["jobs"] })` (`:287, 311, 321`) la sigue alcanzando; cancelar y reintentar con `useApi()`. Pruebas: las dos de la receta L; la del chip; «opens a job from ?job= in its drawer». Acepta: cancelar y reintentar piden confirmación como hoy; `?job=` enlazable.
 
 **3.8 `ErrorMonitorPage.tsx` (`/error-monitor`, L).** Hoy: `?q`, `?since`, `?sort`, `?state`, `?where` ya en la URL (`ErrorMonitorPage.tsx:186-201`) con selects, y el grupo elegido en `useState` (`selectedId`). Pasa a: `FilterChips` de estado (`state`) y de origen (`where`: `WHERE_VALUES`), el periodo (`since`) como chips (las claves de `SINCE_DAYS`: 24 h, 7 días, 30 días), el orden (`sort`) como `.chip-select`; el grupo elegido pasa a `?group=<id>` en su panel; resolver con confirmación. Sin chip «Cliente»: los errores son de la plataforma, no de un cliente. Pruebas: las dos de la receta L sobre `state`; «opens a group from ?group=»; «still asks before resolving». Acepta: las mismas lecturas y la misma resolución de hoy; `?since=` y `?where=` recargan igual.
 
 **3.9 `PlatformStatusPage.tsx` (`/platform-status`, O).** Panel de estado: tiles por dependencia con su estado (`StatusPill` con icono), una tabla de sondas y otra de módulos; el estado global en `PageHead` como etiqueta. Sin cambios de datos. Pruebas: `PlatformStatusPage.test.tsx` adaptadas (solo consultas); nueva «says each dependency's state in words, not only in colour» (cada etiqueta lleva su texto y su icono). Acepta: las mismas sondas y los mismos módulos de hoy, con su estado y su motivo; ninguna cifra inventada donde la sonda no respondió.
 
-**3.10 `SecurityPage.tsx` (`/security`, L).** Hoy: eventos de seguridad con filtros en un objeto `filters` (clave `["security-events", filters]`, `SecurityPage.tsx:174`), el elegido en `useState` (`selected`) y «Exportar evidencia». Pasa a: `useUrlFilters(["q", "type", "severity", "client"])` con búsqueda, chips de tipo y gravedad (sin conteo: la respuesta no lo da), `ClientFilter`, `ShowingCount`; el evento elegido en su `Drawer` con `?event=<id>`; «Exportar evidencia» secundaria. Lectura: clave `["security-events", filters, narrowing.client]`, `useApiFor`, `enabled: narrowing.ready` (los eventos son de un cliente en el servidor, `security_logs/api.py:123`). Pruebas: las dos de la receta L; la del chip; «opens an event from ?event=». Acepta: la evidencia exportada es la de hoy; sin `audit.read` la página no se ofrece (el riel ya lo hace, invariante 6).
+**3.10 `SecurityPage.tsx` (`/security`, L).** Hoy: eventos de seguridad con filtros en un objeto `filters` (clave `["security-events", filters]`, `SecurityPage.tsx:174`), el elegido en `useState` (`selected`) y «Exportar evidencia». Pasa a: `useUrlFilters(["q", "type", "severity", "client"])` con búsqueda, chips de tipo y gravedad (sin conteo: la respuesta no lo da), `ClientFilter`, `ShowingCount`; el evento elegido en su `Drawer` con `?event=<id>`; «Exportar evidencia» secundaria. Lectura: clave `["security-events", filters, client]`, `useNarrowedApi`, `enabled: ready` (los eventos son de un cliente en el servidor, `security_logs/api.py:123`). Pruebas: las dos de la receta L; la del chip; «opens an event from ?event=». Acepta: la evidencia exportada es la de hoy; sin `audit.read` la página no se ofrece (el riel ya lo hace, invariante 6).
 
 **3.11 `AuditPage.tsx` (`/audit`, L).** Ya tiene `?tab=` (eventos / integridad) con `TAB_PARAM`: pasa a `UrlTabs` con el mismo parámetro; en Eventos, `search` y `action` (hoy en `useState`) pasan a `useUrlFilters(["q", "action"])`; el registro es de todos los clientes y solo se lee con el permiso en todos (invariante 5a), así que **no** lleva `ClientFilter`. Pruebas: `AuditPage.test.tsx` adaptadas; receta L sobre `q` y `action`. Acepta: `?tab=` sigue eligiendo eventos o integridad como hoy; la verificación de la cadena se pide igual y dice lo mismo; ningún filtro de cliente aparece en esta página.
 
@@ -7968,7 +6969,7 @@ Atera: no tiene copias ni continuidad; se aplican los patrones de «Patrones UI/
 
 **4.3 `CoveragePage.tsx` (`/backup/coverage`, L).** `?coverage` → `FilterChips` (cubiertos, sin cubrir, todos) con los conteos que la página ya calcula del informe (el informe entero llega en una respuesta, así que esos conteos son totales, no de una página); `ClientFilter`. Lectura: `useBackupCoverage(coverage)` (`backup/api.ts:274`) pasa a `useBackupCoverage(coverage, chip = "")`, Receta L, 7. Pruebas: `coverage.fixture.test.tsx` adaptadas; las dos de la receta L; la del chip. Acepta: los conteos de los chips suman el total del informe.
 
-**4.4 `OffsitePage.tsx` (`/backup/offsite`, FO).** El asistente de destino externo (clave pública, prueba, guardado): `FormPage`-like dentro de `PageHead` con `SectionNav`; cada destino como `FormSection`; su edición con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy, «editing/values» en estado y dos primarios); `TargetDialog` para el alta (`useNewParam("target")`). Pruebas: `__tests__/offsite.test.tsx` adaptadas; receta FO sobre la edición de un destino; nueva «opens New target from ?new=target». Acepta: la clave pública sigue empezando por `itms-recovery-public:` (formato de la herramienta de recuperación, que el proyecto 4 conserva), el reto y la prueba de la clave se piden como hoy, y crear o editar un destino manda el mismo cuerpo (`useCreateOffsiteTargetMutation`, `useUpdateOffsiteTargetMutation`).
+**4.4 `OffsitePage.tsx` (`/backup/offsite`, FO).** El asistente de destino externo (clave pública, prueba, guardado): `FormPage`-like dentro de `PageHead` con `SectionNav`; cada destino como `FormSection`; su edición con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy, «editing/values» en estado y dos primarios): se edita **un destino a la vez**, así que hay una sola barra y una sola guarda con cambios; `markSent(draft)` al enviar y `markSent(null)` si falla; el diálogo de alta (`?new=target`) no lleva guarda propia salvo que la de la página se declare con `search={["new"]}` y deje de ser la del destino editado; `TargetDialog` para el alta (`useNewParam("target")`). Pruebas: `__tests__/offsite.test.tsx` adaptadas; receta FO sobre la edición de un destino; nueva «opens New target from ?new=target». Acepta: la clave pública sigue empezando por `itms-recovery-public:` (formato de la herramienta de recuperación, que el proyecto 4 conserva), el reto y la prueba de la clave se piden como hoy, y crear o editar un destino manda el mismo cuerpo (`useCreateOffsiteTargetMutation`, `useUpdateOffsiteTargetMutation`).
 
 **4.5 `PlansPage.tsx` (`/bcp`, L), `PlanDetail.tsx` (F), `TestRecorder.tsx` (FO), `BcpReport.tsx` (O).** Lista de planes con cuatro tiles, búsqueda, `ClientFilter` y alta (`useNewParam("plan")`, el `editing` de hoy). Lectura: `usePlans()` (`bcp/api.ts:53`) pasa a `usePlans(chip = "")`, Receta L, 7. `PlanDetail`: `DetailHead` con el estado del plan, acciones (editar, programar prueba), `UrlTabs` si el plan tiene más de una sección (pasos, pruebas, evidencias), `useRecordTitle` con el nombre del plan. `TestRecorder`: el registro de una prueba es un formulario largo (16 campos): `FormSection` por paso y `SaveBar` con `UnsavedGuard` (perder un ejercicio a medio registrar es lo que la guarda evita); si al guardar va al informe de la prueba, usa `useUnsavedGuard` y `release()` (Receta FO, 6). `BcpReport`: informe imprimible, `PageHead` con «Imprimir» y volver. Pruebas: `__tests__/bcp.test.tsx` adaptadas; recetas L (con la del chip), F (con la de título, `{ page: "shell.nav.item.continuityTests" }`) y FO en sus páginas. Acepta: el registro de una prueba avisa antes de salir; el informe imprime lo mismo que hoy.
 
@@ -7978,7 +6979,7 @@ Atera: no tiene copias ni continuidad; se aplican los patrones de «Patrones UI/
 
 **4.8 `ProfilesPage.tsx` (`/provisioning/profiles`, L).** Hoy: `?enabled` (`ProfilesPage.tsx:45`) y `editing: ProvisionProfile | "new" | null` en `useState` (línea 42). Pasa a: `SectionNav`; `?enabled` → `FilterChips` (activos, el valor `""`; todos), sin conteo; `ShowingCount`; la alta con `useNewParam("profile")` y la edición con `?edit=<id>` (el `ProfileEditor` de hoy, con sus nueve campos, en su diálogo); vacío con causa. Pruebas: las dos de la receta L; «opens a profile's editor from ?edit=<id>». Acepta: el editor siembra sus campos igual que hoy (`ProfilesPage.tsx:225`).
 
-**4.9 `SiteServersPage.tsx` (`/site-servers`, L).** Hoy: `?state` (`SiteServersPage.tsx:58`), «Promover un equipo» en `useState` (`promoteOpen`, línea 52), `useSiteServers()`. Pasa a: `?state` → `FilterChips`, sin conteo; `ClientFilter`; `ShowingCount`; «Promover un equipo» con `useNewParam("promote")` (`PromoteDialog`); vacío con causa («Aún no hay servidores de sitio: promueve un equipo de la red del cliente.»). Lectura: `useSiteServers(filters, options)` (`site-servers/api.ts:76`) gana `chip?: string` en `options`, como `useTickets`: clave `[SITE_SERVERS_KEY, filters, narrowing.client]`, `enabled: (options.enabled ?? true) && narrowing.ready`. Pruebas: las dos de la receta L; la del chip; «opens Promote a computer from ?new=promote». Acepta: promover sigue siendo un acto de una persona y queda en el registro (invariante 2a(a): el servidor de sitio es el único que origina un push).
+**4.9 `SiteServersPage.tsx` (`/site-servers`, L).** Hoy: `?state` (`SiteServersPage.tsx:58`), «Promover un equipo» en `useState` (`promoteOpen`, línea 52), `useSiteServers()`. Pasa a: `?state` → `FilterChips`, sin conteo; `ClientFilter`; `ShowingCount`; «Promover un equipo» con `useNewParam("promote")` (`PromoteDialog`); vacío con causa («Aún no hay servidores de sitio: promueve un equipo de la red del cliente.»). Lectura: `useSiteServers(filters, options)` (`site-servers/api.ts:76`) gana `chip?: string` en `options`, como `useTickets`: lee con `useNarrowedApi(options.chip ?? "")`, clave `[SITE_SERVERS_KEY, filters, client]`, `enabled: (options.enabled ?? true) && ready`. Pruebas: las dos de la receta L; la del chip; «opens Promote a computer from ?new=promote». Acepta: promover sigue siendo un acto de una persona y queda en el registro (invariante 2a(a): el servidor de sitio es el único que origina un push).
 
 **4.10 `SiteServerDetailPage.tsx` (`/site-servers/:siteServerId`, F, sin pestañas).** `DetailHead` con el equipo, su estado y su cliente y sede; «Encender» (Wake-on-LAN, el `wakeJobId` de hoy) como acción; `useRecordTitle`. Prueba: la de título con `{ page: "shell.nav.item.siteServers" }` (espera `"<nombre del equipo> · Site servers · Novieri RMM"`). Acepta: «Encender» manda el mismo trabajo firmado de hoy.
 
@@ -8085,7 +7086,7 @@ Atera: «More › Knowledge Base» (283-295), «Reports › Classic Reports» (2
 | + | `reporting/ReportCatalogue.tsx` | `/reports` | L |
 | + | `reporting/ReportView.tsx` | `/reports/:reportKey` | O |
 
-**6.1 `DocsPage.tsx` (`/docs`).** Hoy: `?article`, `?document`, búsqueda y categoría en `useState`, cinco tiles, editor en línea, registros y documentos subidos, versiones. La lista de artículos es receta L: `search` y `category` → `useUrlFilters(["q", "category", "client"])` con chips de categoría y `ClientFilter`; el artículo abierto (`?article=`) en `DetailGrid` (lista a la izquierda, lector a la derecha en escritorio; el lector solo, con volver, en móvil); el editor de un artículo con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy pierde el texto si se navega fuera); guardar selecciona el artículo guardado con `setSearchParams` (`DocsPage.tsx:221-231`), que solo cambia la query: la guarda no pregunta por eso (decisión D16), y sí al ir a otra ruta con cambios; «Nuevo artículo» ya llega por `?new=article` (Task 4). Lectura de la lista: los `useQuery` directos de los artículos pasan la clave con `narrowing.client`, leen con `useApiFor` y esperan a `narrowing.ready`; guardar y subir siguen con `useApi()`. **El hallazgo del detector que ya hay** (`impeccable detect --json frontend/src/modules/docs/` sale con código 2 hoy: `broken-image` en `DocumentViewer.tsx:255`) es un falso positivo: el `src={url}` está en la línea siguiente, y el `<img>` es el visor de imágenes de un documento, con su propio razonamiento de seguridad en el comentario de encima. La oleada **no** lo «corrige»: lo anota en la crítica y pide al coordinador la excepción (`impeccable ignores add-value broken-image "*" --file "frontend/src/modules/docs/DocumentViewer.tsx" --reason "False positive: the src is on the next line (DocumentViewer.tsx:256); the img is the document image viewer." --shared`). Pruebas: `DocsPage.test.tsx`, `docsClient.test.tsx` adaptadas; recetas L (con la del chip) y FO sobre el editor; nueva «selects the saved article without asking to leave». Acepta: guardar un artículo no pregunta; salir del editor con cambios sí; `/docs?article=<id>` enlazable.
+**6.1 `DocsPage.tsx` (`/docs`).** Hoy: `?article`, `?document`, búsqueda y categoría en `useState`, cinco tiles, editor en línea, registros y documentos subidos, versiones. La lista de artículos es receta L: `search` y `category` → `useUrlFilters(["q", "category", "client"])` con chips de categoría y `ClientFilter`; el artículo abierto (`?article=`) en `DetailGrid` (lista a la izquierda, lector a la derecha en escritorio; el lector solo, con volver, en móvil); el editor de un artículo con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy pierde el texto si se navega fuera; `markSent(draft)` al enviar y `markSent(null)` si el guardado falla; una sola guarda con cambios en la página); guardar selecciona el artículo guardado con `setSearchParams` (`DocsPage.tsx:221-231`), que solo cambia la query: la guarda no nombra `article` en `search` y no pregunta por eso (decisión D16), y sí al ir a otra ruta con cambios; «Nuevo artículo» ya llega por `?new=article` (Task 4). Lectura de la lista: los `useQuery` directos de los artículos pasan la clave con `client`, leen con `useNarrowedApi` y esperan a `ready` (`enabled: ready`); guardar y subir siguen con `useApi()`. **El hallazgo del detector que ya hay** (`impeccable detect --json frontend/src/modules/docs/` sale con código 2 hoy: `broken-image` en `DocumentViewer.tsx:255`) es un falso positivo: el `src={url}` está en la línea siguiente, y el `<img>` es el visor de imágenes de un documento, con su propio razonamiento de seguridad en el comentario de encima. La oleada **no** lo «corrige»: lo anota en la crítica y pide al coordinador la excepción (`impeccable ignores add-value broken-image "*" --file "frontend/src/modules/docs/DocumentViewer.tsx" --reason "False positive: the src is on the next line (DocumentViewer.tsx:256); the img is the document image viewer." --shared`). Pruebas: `DocsPage.test.tsx`, `docsClient.test.tsx` adaptadas; recetas L (con la del chip) y FO sobre el editor; nueva «selects the saved article without asking to leave». Acepta: guardar un artículo no pregunta; salir del editor con cambios sí; `/docs?article=<id>` enlazable.
 
 **6.2 `ChangesPage.tsx` (`/changes`, L) y sus pantallas.** Cuatro tiles; filtros de estado como chips (hoy los da `?state` implícito en la tabla); `ClientFilter`; «Nuevo cambio» por `useNewParam("change")` (Task 4); «Calendario» y «Aprobaciones» en un `SectionNav` nuevo. Lectura: `useChanges()` (`change/api.ts:52`) pasa a `useChanges(chip = "")`, Receta L, 7; `ApprovalQueue` lo sigue llamando sin chip. `ChangeDetail`: `DetailHead` (título, estado, riesgo, cliente; acciones de aprobación según el permiso de hoy), `UrlTabs` si tiene más de una sección; **su `document.title` propio** (`ChangeDetail.tsx:180-197` y la clave `change.detail.tabTitle`) **se sustituye por `useRecordTitle(change.title)`** y la clave se borra de los dos catálogos (el título lo compone `documentTitle`). **`ApprovalQueue`** (`/changes/approvals`, L): `SectionNav`; los cambios que esperan la decisión de la persona, con `ShowingCount`; aprobar y rechazar en su diálogo como hoy; vacío «Nada espera tu aprobación.»; pruebas: «says why the list is empty» y las de hoy; acepta: quien pidió un cambio no puede aprobarlo (la regla del servidor y el texto de hoy, `ChangeDetail.tsx:175-178`). **`ChangeCalendar`** (`/changes/calendar`, O): `PageHead` + `SectionNav`; la ventana de hoy (`useChangeCalendar`, con sus campos «Desde» y «Hasta») pasa a `?from=` y `?to=`; el vacío con su causa de hoy («No hay cambios programados en esta ventana.»); prueba «keeps the window in the URL»; acepta: las mismas horas en la zona del perfil. **Las pruebas del título** (revisión previa, W-I3): `change.es.test.tsx:417-448` monta `ChangeDetail` con su propio `mount` y afirma `document.title`; como `useRecordTitle` no hace nada fuera del armazón, ese `mount` envuelve ahora la ruta en `TitleShell` (`src/test/renderPage.tsx`): `mount(<TitleShell page="shell.nav.item.changes"><Routes>…</Routes></TitleShell>, …)`, y las dos aserciones pasan a `expect(document.title).toBe("Actualizar firmware del conmutador · Cambios · Novieri RMM");` y, tras el cambio de idioma, `expect(document.title).toBe("Actualizar firmware del conmutador · Changes · Novieri RMM");` (la mitad de la página es la etiqueta del riel, `es/shell.ts:32` «Cambios», y sigue al idioma). En `__tests__/change.test.tsx`, la de título usa `renderPage(…, { page: "shell.nav.item.changes" })`. Pruebas: además, recetas L (con la del chip) y F. Acepta: `ChangeDetail` ya no escribe `document.title` por su cuenta; la clave `change.detail.tabTitle` no existe en ningún catálogo.
 
@@ -8103,7 +7104,7 @@ Atera: «More › Knowledge Base» (283-295), «Reports › Classic Reports» (2
 
 **6.8 `UnmatchedPage.tsx` (`/people/unmatched`, L).** Hoy: tres tablas seguidas de lo que no tiene persona (`useUnmatched()`, una sola respuesta con las tres listas). Pasa a: `FilterChips` «Tipo» sobre `?kind=` (equipos, el valor `""`; licencias; asientos) **con su conteo**, que es el tamaño de cada lista de esa respuesta entera (un total, no una página); una sola tabla, la del tipo elegido; `ShowingCount`; asignar en `PersonPickerDialog` como hoy (solo con `people.manage`); vacío «Todo tiene persona.» por tipo. Pruebas: las dos de la receta L sobre `kind`; «assigns a seat to a person as today». Acepta: los tres conteos suman lo mismo que las tres tablas de hoy; asignar manda lo mismo.
 
-**6.9 `CredentialsPage.tsx` (`/credentials`, L; decisión D23).** Hoy: `Tabs` en `?state`, y **`?new=<tipo>` abre «Nueva credencial» con ese tipo elegido** (`CredentialsPage.tsx:218-222, 478-488`): las páginas de instalación remota de la O1 enlazan a `/credentials?new=push_install` (`agent-push/PushReadiness.tsx:59`) y a `` `/credentials?new=${kind}` `` (`PushInstallFlow.tsx:196`). Eso **no cambia** (revisión previa, W-I6): `useNewParam(kind)` solo abre con un valor exacto, así que convertirlo dejaría esos enlaces sin abrir nada. La tira → `FilterChips` con `state`; el botón «Nueva credencial» usa `const created = useNewParam("credential")` y el diálogo se abre con `open={createOpen || created.open || newType != null}` (`newType`, el tipo de `?new=` cuando es uno de `CREDENTIAL_TYPES`, preselecciona como hoy); su `onClose` borra `new` como hoy. Cuatro tiles; `ClientFilter` (las globales llevan su chip «Para todos los clientes» como hoy); lectura: los `useQuery` directos de la lista pasan la clave con `narrowing.client` y leen con `useApiFor`; retirar una credencial pide el motivo como hoy (invariante 3: el secreto se ve una vez, nunca en una lista). Pruebas: `CredentialsPage.test.tsx` adaptadas; las de hoy de `?new=push_install` y `?new=root_password` (líneas 264-272) **sin tocar**; receta L; la del chip; nueva «New credential puts ?new=credential in the URL and opens with no type chosen». Acepta: `/credentials?new=push_install` abre el diálogo con «Push install» elegido; ninguna lista enseña un secreto.
+**6.9 `CredentialsPage.tsx` (`/credentials`, L; decisión D23).** Hoy: `Tabs` en `?state`, y **`?new=<tipo>` abre «Nueva credencial» con ese tipo elegido** (`CredentialsPage.tsx:218-222, 478-488`): las páginas de instalación remota de la O1 enlazan a `/credentials?new=push_install` (`agent-push/PushReadiness.tsx:59`) y a `` `/credentials?new=${kind}` `` (`PushInstallFlow.tsx:196`). Eso **no cambia** (revisión previa, W-I6): `useNewParam(kind)` solo abre con un valor exacto, así que convertirlo dejaría esos enlaces sin abrir nada. La tira → `FilterChips` con `state`; el botón «Nueva credencial» usa `const created = useNewParam("credential")` y el diálogo se abre con `open={createOpen || created.open || newType != null}` (`newType`, el tipo de `?new=` cuando es uno de `CREDENTIAL_TYPES`, preselecciona como hoy); su `onClose` borra `new` como hoy. Cuatro tiles; `ClientFilter` (las globales llevan su chip «Para todos los clientes» como hoy); lectura: los `useQuery` directos de la lista pasan la clave con `client` y leen con `useNarrowedApi` (`enabled: ready`); retirar una credencial pide el motivo como hoy (invariante 3: el secreto se ve una vez, nunca en una lista). Pruebas: `CredentialsPage.test.tsx` adaptadas; las de hoy de `?new=push_install` y `?new=root_password` (líneas 264-272) **sin tocar**; receta L; la del chip; nueva «New credential puts ?new=credential in the URL and opens with no type chosen». Acepta: `/credentials?new=push_install` abre el diálogo con «Push install» elegido; ninguna lista enseña un secreto.
 
 **`ReportCatalogue.tsx` (`/reports`, L) y `ReportView.tsx` (`/reports/:reportKey`, O).** El catálogo: tarjetas por informe con búsqueda y chips de familia; `?access` se conserva. El informe: `PageHead` con volver «Informes», sus parámetros en una `FormSection` («Ejecutar» y «Exportar» como hoy), el resultado debajo; `useRecordTitle(nombre del informe)`. Pruebas: `__tests__/reporting.test.tsx` adaptadas; receta L sobre la búsqueda y la familia; la de título con `{ page: "shell.nav.item.reports" }`. Acepta: `?access` se conserva; ejecutar y exportar mandan los mismos parámetros de hoy; un informe que alguien no puede ver sigue sin aparecer.
 
@@ -8139,7 +7140,7 @@ Atera: «Admin › My account › Account settings» (345-359), «My profile» (
 | + | `ai-admin/ChatPanel.tsx` | `/assistant` | O |
 
 **7.1 `SettingsPage.tsx` (`/settings`, FO).** Ya tiene `?tab=` y una botonera de chips (diseño de ajustes de 2026-09-10). La botonera pasa a `UrlTabs` (una fila que se desplaza) con las mismas claves. Son **doce** pestañas (`settings/tabs.ts:14-27`): `organization`, `email`, `roles`, `users`, `sessions`, `microsoft`, `assistant`, `ai-connections`, `notifications`, `sla`, `health` y `budget`.
-- **Las nueve que hoy guardan con `settings/SaveBar.tsx`** (`OrganizationTab`, `EmailTab`, `RolesTab`, `SessionsTab`, `MicrosoftTab`, `AssistantTab`, `ServiceLevelsTab`, `HealthTab`, `BudgetTab`) pasan a la `SaveBar` del kit, una por pestaña, con `UnsavedGuard dirty={dirty} search` (decisión D16: en Configuración la query **es** lo que se edita, porque cada pestaña es otro formulario, así que cambiar de pestaña con un cambio sin guardar pregunta). Lo que la barra de ajustes hacía y la del kit también hace desde la Task 3: «Guardado.» tras el 2xx (`saved`, el `mutation.isSuccess` de hoy, nunca optimista), los problemas del formulario (`problems`), Intro en un campo (`submit` dentro del `Form` de la pestaña) y la razón cuando no se puede guardar (`blockedReason`). **`requireDirty={false}`** de hoy (Organización tomaba el clic con el formulario limpio para decir «no hay cambios») desaparece: con la barra del kit no hay botón que pulsar sin cambios, que es la forma de no tener un control muerto. **`canEdit`/`disabledReason`** (una persona sin el permiso): sus campos siguen desactivados y la razón pasa a un `notice` encima de la sección, porque sin cambios no hay barra donde decirlo. Las que piden un segundo factor reciente para guardar (correo, roles: own-auth fase 2) lo siguen pidiendo desde `onSave` (`useStepUp`).
+- **Las nueve que hoy guardan con `settings/SaveBar.tsx`** (`OrganizationTab`, `EmailTab`, `RolesTab`, `SessionsTab`, `MicrosoftTab`, `AssistantTab`, `ServiceLevelsTab`, `HealthTab`, `BudgetTab`) pasan a la `SaveBar` del kit, una por pestaña, con `UnsavedGuard dirty={dirty} search={["tab"]}` (decisión D16: en Configuración la clave `tab` de la query **es** lo que se edita, porque cada pestaña es otro formulario, así que cambiar de pestaña con un cambio sin guardar pregunta; solo una pestaña está montada y es la única guarda con cambios). Cada pestaña llama `markSent(draft)` al enviar y `markSent(null)` si el guardado falla. Lo que la barra de ajustes hacía y la del kit también hace desde la Task 3: «Guardado.» tras el 2xx (`saved`, el `mutation.isSuccess` de hoy, nunca optimista), los problemas del formulario (`problems`), Intro en un campo (`submit` dentro del `Form` de la pestaña) y la razón cuando no se puede guardar (`blockedReason`: un permiso o un estado del registro, nunca un campo sin rellenar, que se dice con `problems`). **`requireDirty={false}`** de hoy (Organización tomaba el clic con el formulario limpio para decir «no hay cambios») desaparece: con la barra del kit no hay botón que pulsar sin cambios, que es la forma de no tener un control muerto. **`canEdit`/`disabledReason`** (una persona sin el permiso): sus campos siguen desactivados y la razón pasa a un `notice` encima de la sección, porque sin cambios no hay barra donde decirlo. Las que piden un segundo factor reciente para guardar (correo, roles: own-auth fase 2) lo siguen pidiendo desde `onSave` (`useStepUp`).
 - **`notifications`** guarda hoy cada canal en su fila (`NotificationsTab.tsx:401-407`) y alterna las reglas en el sitio: la edición de un canal pasa a su diálogo (se guarda al confirmarlo) y el interruptor de una regla sigue guardando al pulsarlo, como hoy; sin `SaveBar`.
 - **`users`** es una lista (receta L: búsqueda, chips de estado, `BulkBar` donde hoy hay acciones en lote, `?new=user` para invitar); **`ai-connections`** es una lista de clientes de IA registrados, con revocar en su confirmación (invariante 1c(d)), sin `SaveBar`.
 - Los campos conservan su `help` fuera de la etiqueta (prueba que ya existe).
@@ -8363,8 +7364,8 @@ Qué comprobar después: `./scripts/deploy.sh` termina diciendo que la etiqueta 
 | D13 | En español, «Inicio», «Equipos» y «Documentación» en el riel y en sus páginas; el glosario lo anota; los textos que nombraban «Dispositivos →» pasan a «Equipos →» | Diseño §1.1 | Task 4 y O1 |
 | D14 | La pestaña Activos de la ficha 360 son tres tarjetas (licencias, suscripciones, redes) con su número y su enlace a la lista con el chip puesto | No existe un inventario de activos como el de Atera; los activos del riel son esos tres; resolución del coordinador del 2026-11-24 | Task 5 |
 | D15 | Las claves `itms.*` de `localStorage` y las cabeceras `X-ITMS-*` se quedan; «ITMS» desaparece de todo lo demás | La regla del proyecto 4 para identificadores internos y contratos (su diseño §1.2) | Task 2 |
-| D16 | Salir de una página con cambios es cambiar de ruta (la query sola no, salvo `search`); un guardado que se va llama a `release()` y no pregunta | `useBlocker` lee su condición de un efecto: guardar y navegar en un paso quedaba bloqueado (revisión previa, I-1, reproducido con react-router 7.18.1) | Task 3 |
-| D17 | El chip solo estrecha con un cliente de la persona y espera a `/me` (`useNarrowing`); `ClientFilter` quita de la URL un cliente ajeno | Un identificador ajeno mostraría «Todos los clientes» sobre una lista vacía, y leer antes de `/me` mostraría las filas de todos bajo el chip de uno (revisión previa, I-4 e I-5) | Task 3 |
+| D16 | Salir de una página con cambios es cambiar de ruta (la query sola no, salvo `search`); un guardado que se va llama a `release()` (solo tras guardar bien, justo antes de navegar) y no pregunta; `search` es un `GuardedQuery` (`["new"]`, `["tab"]` o `true`) | `useBlocker` lee su condición de un efecto: guardar y navegar en un paso quedaba bloqueado (revisión previa, I-1, reproducido con react-router 7.18.1) | Task 3 |
+| D17 | El chip solo estrecha con un cliente de la persona y espera a `/me` (`useNarrowedApi`: `ready` y `NarrowingPending`); `ClientFilter` quita de la URL, en el sitio, un cliente ajeno | Un identificador ajeno mostraría «Todos los clientes» sobre una lista vacía, y leer antes de `/me` mostraría las filas de todos bajo el chip de uno (revisión previa, I-4 e I-5) | Task 3 |
 | D18 | El router de datos tiene su pantalla de error traducida (`RouteError`) en la ruta de diseño | Sin ella se ve la de React Router, en inglés y con estilos en línea; resolución del coordinador del 2026-11-24 | Task 3 |
 | D19 | La pestaña Alertas de la ficha 360 lista las activas y dice cuántas hay abiertas en total, con el conteo del servidor | La lista toma un solo `state` y «abierta» no se puede pedir; resolución del coordinador del 2026-11-24 | Task 5 |
 | D20 | `?client=` significa «estrecha esta lista» en toda la consola; el recorrido de «Añadir un equipo» pasa a `journey_client` y `journey_site` | Una clave, un significado; nadie más (ni el backend ni un correo) escribe ese parámetro; resolución del coordinador del 2026-11-24. `journey_site` se renombra con `journey_client` para que las dos claves del recorrido compartan prefijo: **aceptado por el coordinador el 2026-11-24** | Task 5 |
@@ -8521,7 +7522,7 @@ Fuera de las dos listas, a propósito: `Landing` (la ruta `*`, en `App.tsx`, red
 | `frontend/src/test/no-itms.test.ts` | «ITMS» fuera de `frontend/src`, `scripts` e `index.html`, salvo las cabeceras `X-ITMS-*`, `ITMSRSP1` y los comentarios fechados (una cadena con fecha no se excusa); e «itms» en minúsculas fuera de lo que una persona lee (catálogos y JSX), salvo los identificadores que el proyecto 4 conserva, nombrados uno a uno | 2 |
 | `settings/__tests__/microsoft.test.tsx:128`, `settings/__tests__/email.test.tsx:287,292` | Las descargas `novieri-sign-in.cer` y `novieri-sign-in-new.cer`; la etiqueta `+novieri-test` del correo de prueba (Apéndice E, X10) | 2 |
 | `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` (ayudas) | Una página bajo un router de datos, con el título del armazón si se pide (`TitleShell`); un doble de la API que anota a qué cliente se estrechó cada lectura | 3 |
-| `frontend/src/shell/listKit.test.tsx` | Filtros en la URL (Atrás deshace un chip; teclear no llena el historial), conteos sin ceros inventados, «Mostrando x de y», vacío con causa, barra de lote, chip «Cliente» con forma de chip y sin clientes ajenos, `useNarrowing` (espera a `/me`, vuelve a leer al cambiar), `useApiFor`, `?new=` | 3 |
+| `frontend/src/shell/listKit.test.tsx` | Filtros en la URL (Atrás deshace un chip; teclear no llena el historial), conteos sin ceros inventados, «Mostrando x de y», vacío con causa, barra de lote, chip «Cliente» con forma de chip y sin clientes ajenos, `useNarrowedApi` (espera a `/me`: `ready` y `NarrowingPending`; vuelve a leer al cambiar), `useNewParam` (`?new=`; `close()` vuelve Atrás o sustituye), `ClientFilter({ filters })` que quita un cliente ajeno en el sitio, y una escritura que no cambia la query no escribe nada | 3 |
 | `frontend/src/shell/detailKit.test.tsx` | Cabecera de ficha, pestañas en la URL (una fila, historial, por defecto sin parámetro), `SectionNav` | 3 |
 | `frontend/src/shell/formKit.test.tsx` | Una barra de guardado, descartar, error, «Guardado.», razón para no guardar, Intro en un campo, aviso al salir (navegación y `beforeunload`), un guardado que se va no pregunta, la query sola no es salir salvo `search`, secciones plegables | 3 |
 | `frontend/src/lib/api.forClient.test.ts` | `X-Client-Id` del cliente pedido; el 401 de siempre | 3 |
@@ -8657,7 +7658,7 @@ Lo que la revisión previa del 2026-11-24 cambió en el plan (informe: `.git/sdd
 - **Aislamiento de las copias de trabajo.** Cada worktree tiene su propio directorio `node_modules` de enlaces por paquete (Global Constraints), porque la caché de Vite vive dentro y su hash incluye la raíz: reproducido en una copia el 2026-11-24, dos servidores sobre un `node_modules` compartido se invalidan uno a otro y la puerta de armonía de hoy daba `ok` con una página sin dibujar. La puerta reforzada (Task 1 Step 12) falla con un 5xx o un módulo que no carga fuera de `/api`, y con una ruta de sesión que no dibuja la barra.
 - **Archivos compartidos** en tres clases (base, `identical-ok.oN.ts` por oleada, territorio de la oleada) y un procedimiento para pedir una pieza del kit; las oleadas no editan nada de la base.
 - **Estrechamiento por cliente** con su ayuda de pruebas (`recordingNarrowing`), y el parámetro del recorrido renombrado para que `?client=` signifique una sola cosa (D20).
-- **Firmas nuevas o cambiadas**, todas definidas en la Task 3 y usadas con el mismo nombre y tipo después: `useNarrowing(clientId): { client: string | null; ready: boolean }`, `SaveBar({ dirty, saving, error?, onDiscard, onSave?, submit?, saved?, savedMessage?, problems?, blockedReason? })`, `useUnsavedGuard(dirty, options?: { search? }): { guard, release }`, `UnsavedGuard({ dirty, search? })`, `renderPage(path, element, pattern?, options?: { page?: MessageKey })`, `TitleShell({ page, children })`, `recordingNarrowing(api): { api, narrowedTo }`, `RouteError()`, `PortalShell({ children, embedded? })`; cada hook de lectura de una oleada toma `chip` y lo pone en su clave.
+- **Firmas nuevas o cambiadas**, todas definidas en la Task 3 y usadas con el mismo nombre y tipo después: `useNarrowedApi(clientId): { api, client: string | null, ready: boolean }` (hasta `ready`, `api` rechaza con `NarrowingPending`), `ClientFilter({ filters })` (sin `onChange`), `UrlFilters.set(key, value, options?: { replace?: boolean })`, `SaveBar({ dirty, saving, error?, onDiscard, onSave?, submit?, saved?, savedMessage?, problems?, blockedReason?, label? })`, `useDraft(saved): { draft, setDraft, dirty, discard, markSent(sent | null) }`, `useUnsavedGuard(dirty, options?: { search?: GuardedQuery }): { guard, release }`, `UnsavedGuard({ dirty, search? })` con `GuardedQuery = boolean | readonly string[]`, `renderPage(path, element, pattern?, options?: { page?: MessageKey })`, `TitleShell({ page, children })`, `recordingNarrowing(api): { api, narrowedTo }`, `RouteError()`, `PortalShell({ children, embedded? })`; cada hook de lectura de una oleada toma `chip` y lo pone en su clave.
 
 Lo que la revisión de verificación del 2026-11-24 cambió (informe: `.git/sdd/preflight/p3-fix-report.md`, «Round 2»):
 
@@ -8666,4 +7667,4 @@ Lo que la revisión de verificación del 2026-11-24 cambió (informe: `.git/sdd/
 - **Las minúsculas que una persona lee**: los nombres de las descargas de Entra, la etiqueta del correo de prueba, el ejemplo de correo y el del enlace de instalación, con una segunda mitad de `no-itms.test.ts` que las vigila y nombra lo que el proyecto 4 conserva (N3, D27; medido: seis líneas hoy, cero tras la Task 2).
 - **`docs/product.md`** es de este proyecto (D28); **los conteos de Alertas** bajo el chip son los del cliente de la lista (M-e); las decisiones que la primera revisión dejó abiertas están aceptadas en el Apéndice A.
 
-Marcadores: el plan no deja «TBD», «implementar después» ni valores por sustituir en una orden; comprobado con `grep -n "TBD\|TODO\|<sha\|pregunta abierta"` sobre este archivo el 2026-11-24: no hay ningún «TBD», «TODO» ni `<sha`, y «pregunta abierta» solo aparece donde se dice que la 3 quedó resuelta (D21) y en esta línea. Los `<ruta>`, `<N>` y `<Página>` que quedan son de las plantillas de las recetas y del cierre, que cada bloque de oleada concreta; ninguno está en una orden para copiar y pegar. Donde una oleada debe leer un nombre exacto del catálogo antes de escribir una prueba (los títulos de diálogo de la prueba de destinos de la Task 4), el paso dice qué clave leer y con qué orden. Firmas: `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useNarrowing`, `useApiFor`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useUnsavedGuard`, `useDraft`, `documentTitle`, `useRecordTitle`, `useDocumentTitle`, `newMenuEntries`, `navFolders` y `ApiClient.forClient` se usan en las tareas posteriores con los nombres y tipos con que se definen.
+Marcadores: el plan no deja «TBD», «implementar después» ni valores por sustituir en una orden; comprobado con `grep -n "TBD\|TODO\|<sha\|pregunta abierta"` sobre este archivo el 2026-11-24: no hay ningún «TBD», «TODO» ni `<sha`, y «pregunta abierta» solo aparece donde se dice que la 3 quedó resuelta (D21) y en esta línea. Los `<ruta>`, `<N>` y `<Página>` que quedan son de las plantillas de las recetas y del cierre, que cada bloque de oleada concreta; ninguno está en una orden para copiar y pegar. Donde una oleada debe leer un nombre exacto del catálogo antes de escribir una prueba (los títulos de diálogo de la prueba de destinos de la Task 4), el paso dice qué clave leer y con qué orden. Firmas: `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useNarrowedApi`, `NarrowingPending`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useUnsavedGuard`, `useDraft`, `documentTitle`, `useRecordTitle`, `useDocumentTitle`, `newMenuEntries`, `navFolders` y `ApiClient.forClient` se usan en las tareas posteriores con los nombres y tipos con que se definen.
