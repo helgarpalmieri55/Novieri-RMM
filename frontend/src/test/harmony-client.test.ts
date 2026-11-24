@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { VIEWPORTS, chromeProblems, failedLoad, markDrawn, missingShell, servedError, viewportLabel } from "../../scripts/harmony.mjs";
+import { VIEWPORTS, chromeProblems, alreadyServed, failedLoad, markDrawn, missingShell, servedError, viewportLabel } from "../../scripts/harmony.mjs";
 import type { Viewport } from "../../scripts/harmony.mjs";
 import { CHOSEN_CLIENT, FRAMELESS, PARAMS, ROUTES } from "../../scripts/routes.mjs";
 import { fixtureClient } from "../fixtures/client";
@@ -166,6 +166,14 @@ describe("what fails a harmony run even when every measurement passes (pre-fligh
       "/src/lib/format.ts never loaded (net::ERR_NETWORK_CHANGED)",
     );
     expect(failedLoad("http://127.0.0.1:5173/api/v1/ws", "net::ERR_CONNECTION_REFUSED")).toBeNull();
+  });
+
+  it("reports one 5xx module once: a URL already served as an error is not also a failed load", () => {
+    const url = "http://127.0.0.1:5173/src/lib/format.ts";
+    const served = [servedError(504, url) as string];
+    expect(alreadyServed(served, url)).toBe(true);
+    expect(alreadyServed(served, "http://127.0.0.1:5173/src/other.ts")).toBe(false);
+    expect(alreadyServed([], url)).toBe(false);
   });
 
   it("refuses a console route that drew no top bar, and only a console route", () => {

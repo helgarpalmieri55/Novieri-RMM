@@ -132,7 +132,7 @@ svg.sp.sp-info { color: var(--accent);
 /* `fill: none` for the same reason `svg.sp` states: the UA's initial black
  * fill on the root is a stray value the arcs never override, because they
  * are strokes. */
-.don svg { width: 64px; height: 64px; transform: rotate(-90deg); margin: 0 auto; fill: none;
+.don > svg { width: 64px; height: 64px; transform: rotate(-90deg); margin: 0 auto; fill: none;
 }
 .don .trk { fill: none; stroke: var(--line); stroke-width: 7;
 }

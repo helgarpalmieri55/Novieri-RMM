@@ -38,3 +38,5 @@ export declare function servedError(status: number, url: string): string | null;
 export declare function failedLoad(url: string, errorText: string): string | null;
 /** A console route (not in `FRAMELESS`) whose probe found no top bar. */
 export declare function missingShell(route: string, probe: ChromeProbe | null): boolean;
+/** True when `served` already holds a `servedError` entry for this URL. */
+export declare function alreadyServed(served: string[], url: string): boolean;

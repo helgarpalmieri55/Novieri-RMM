@@ -261,7 +261,7 @@
   --font-weight-extrabold: 600;
   /* TAILWIND'S RADIUS SCALE, REMAPPED ONTO THE LADDER. Stock `rounded-sm` is
      2px, `rounded-md` 6px, `rounded-lg` 8px, `rounded-xl` 12px and
-     `rounded-2xl` 16px; the ladder is 6 / 10 / 999 and nothing else (heat
+     `rounded-2xl` 16px; the ladder is 4 / 6 / 10 / 999 and nothing else (heat
      cells at 2px and 3px, and avatars at 50%, are the two exceptions and are
      written as literals where they occur). The small rungs are controls, the
      large ones are panels. */

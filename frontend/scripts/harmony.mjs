@@ -199,6 +199,12 @@ export function failedLoad(url, errorText) {
   return path.startsWith("/api/") ? null : `${path} never loaded (${errorText})`;
 }
 
+/** A URL the dev server already answered 5xx for is not reported again as a failed load (Chromium aborts it too). */
+export function alreadyServed(served, url) {
+  const path = pathOf(url);
+  return served.some((entry) => entry.endsWith(` for ${path}`));
+}
+
 export function missingShell(route, probe) {
   return !FRAMELESS.has(route.split("?")[0]) && !(probe && probe.topbar);
 }
@@ -718,6 +724,7 @@ async function walkApp(args, browser, server, allow) {
         if (served && !result.served.includes(served)) result.served.push(served);
       });
       page.on("requestfailed", (request) => {
+        if (alreadyServed(result.served, request.url())) return;
         const failed = failedLoad(request.url(), request.failure()?.errorText ?? "failed");
         if (failed && !result.served.includes(failed)) result.served.push(failed);
       });

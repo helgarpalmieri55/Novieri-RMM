@@ -90,6 +90,16 @@ describe("running and information, drawn without a badge (DESIGN.md v4, D2)", ()
     expect(running).not.toBe(information);
   });
 
+  it("scopes the donut ring's svg rule to the ring, so the label's icon is not drawn 64px and rotated", () => {
+    // jsdom cannot measure CSS, so read the rules: no selector of viz.css may
+    // reach an svg inside `.don-k` through a bare `.don svg` descendant.
+    const css = read("shell/viz.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const selectors = [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => (m[1] as string).split(",").map((s) => s.trim()));
+    const ring = selectors.filter((s) => /^\.don\b.*\bsvg$/.test(s));
+    expect(ring.length).toBeGreaterThan(0);
+    for (const selector of ring) expect(selector, `${selector} also matches .don-k svg`).toMatch(/^\.don\s*>\s*svg$/);
+  });
+
   it("keeps the icon every timeline row already carries, for the same reason", () => {
     const { container } = render(
       <Timeline
