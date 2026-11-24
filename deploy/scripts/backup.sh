@@ -220,6 +220,19 @@ case "$ITS_BACKUP_OBJECTS" in
                 mkdir -p /tmp/mc && chmod 700 /tmp/mc
                 printf "{\"version\":\"10\",\"aliases\":{\"src\":{\"url\":\"http://minio:9000\",\"accessKey\":\"%s\",\"secretKey\":\"%s\",\"api\":\"s3v4\",\"path\":\"auto\"}}}" \
                     "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" > /tmp/mc/config.json
+                mkdir -p "/out/$ITS_MIRROR_BUCKET"
+                # A NEW HOST HAS NO BUCKET: ObjectStore creates it on first
+                # use, and nothing in first boot stores an object. No bucket
+                # is nothing to mirror, not a failed backup (the first-boot
+                # rehearsal of 2026-11-24 found the first backup failing on
+                # it). Listing the buckets still fails the backup on a wrong
+                # credential or an unreachable store.
+                mc --config-dir /tmp/mc ls --json src > /tmp/mc/buckets
+                if ! grep -qF "\"key\":\"$ITS_MIRROR_BUCKET/\"" /tmp/mc/buckets; then
+                    echo "    the bucket $ITS_MIRROR_BUCKET does not exist yet (nothing has been stored): nothing to mirror"
+                    echo 0 > /out/.source-count
+                    exit 0
+                fi
                 if [ -n "$ITS_MIRROR_EXCLUDE" ]; then
                     mc --config-dir /tmp/mc --quiet mirror --overwrite --exclude "$ITS_MIRROR_EXCLUDE" \
                         "src/$ITS_MIRROR_BUCKET" "/out/$ITS_MIRROR_BUCKET"

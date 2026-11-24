@@ -298,6 +298,123 @@ def test_a_backup_without_it_restores_without_touching_it(tmp_path: Path) -> Non
     assert "keycloak.dump restored" not in restored.stdout
 
 
+# --- the object mirror on a new host (first-boot rehearsal, 2026-11-24) -------
+#
+# Finding F9 of the rehearsal of plan 2026-11-23, Task 12: the first backup of a
+# new host (deploy/README.md step 12; backup.conf says OBJECTS=all) failed with
+# `mc: <ERROR> Unable to stat source 'src/it-suite'. Bucket 'it-suite' does not
+# exist.` -- ObjectStore creates the bucket on first use, and nothing in first
+# boot stores an object. These run the real backup.sh with the fake database
+# tools above and a fake `docker` that runs the one-off minio container's
+# script here: the container's /out and /tmp/mc are directories of the test,
+# and a fake `mc` answers from FAKE_BUCKETS (each bucket holding one object).
+# Its bucket listing is `mc ls --json src`'s, as mc RELEASE.2025-08-13 prints
+# it (measured on the rehearsal's MinIO).
+
+_FAKE_COMPOSE_RUN = r"""#!/usr/bin/env bash
+out=""; script=""; envs=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v) case "$2" in *:/out) out="${2%:/out}" ;; esac; shift 2 ;;
+    -e) envs+=("$2"); shift 2 ;;
+    -c) script="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$script" ] && [ -n "$out" ] || exit 1
+script="${script//\/tmp\/mc/$FAKE_MC_DIR}"
+script="${script//\/out/$out}"
+env "${envs[@]}" MINIO_ROOT_USER=u MINIO_ROOT_PASSWORD=p sh -c "$script"
+"""
+
+_FAKE_MC = r"""#!/usr/bin/env bash
+echo "mc $*" >> "$FAKE_LOG"
+while [ "$1" = --config-dir ] || [ "$1" = --quiet ]; do
+  [ "$1" = --config-dir ] && shift; shift
+done
+has() { case " $FAKE_BUCKETS " in *" $1 "*) return 0 ;; esac; return 1; }
+case "$1" in
+  ls)
+    if [ "$2" = --json ] && [ "$3" = src ]; then
+      [ "${FAKE_MC_LS:-ok}" = fail ] && { echo '{"status":"error"}'; exit 1; }
+      for b in $FAKE_BUCKETS; do
+        printf '{"status":"success","type":"folder","size":0,"key":"%s/"}\n' "$b"
+      done
+    elif [ "$2" = --recursive ]; then
+      b="${3#src/}"; has "$b" || exit 1; echo "[2026-11-24 19:40:30 UTC]     2B obj1"
+    else
+      exit 1
+    fi ;;
+  mirror)
+    dst="${*: -1}"; src="${*: -2:1}"; b="${src#src/}"
+    if ! has "$b"; then
+      echo "mc: <ERROR> Unable to stat source \`$src\`. Bucket \`$b\` does not exist." >&2
+      exit 1
+    fi
+    mkdir -p "$dst" && echo x > "$dst/obj1" ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def _objects(tmp_path: Path, buckets: str, **env: str) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, text in (("docker", _FAKE_COMPOSE_RUN), ("mc", _FAKE_MC)):
+        (bin_dir / name).write_text(text)
+        (bin_dir / name).chmod(0o755)
+    (tmp_path / "mc").mkdir()
+    return {
+        **_pg(tmp_path, "itsuite"),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "FAKE_MC_DIR": str(tmp_path / "mc"),
+        "FAKE_BUCKETS": buckets,
+        "ITS_BACKUP_OBJECTS": "all",
+        "ITS_BACKUP_OBJECTS_DIR": str(tmp_path / "objects"),
+        **env,
+    }
+
+
+def _manifest(path: Path) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in path.read_text().splitlines())
+
+
+def test_a_new_host_without_the_bucket_backs_up_nothing_and_succeeds(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, ""))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "the bucket it-suite does not exist yet" in run.stdout, run.stdout
+    assert _manifest(tmp_path / "bk/objects.manifest") == {
+        "mode": "all",
+        "bucket": "it-suite",
+        "source_objects": "0",
+        "mirrored_files": "0",
+    }
+    assert "mirror" not in (tmp_path / "calls").read_text()
+    assert (tmp_path / "bk/itsuite.dump").read_text() == "dump of itsuite\n"
+
+
+def test_an_existing_bucket_is_still_mirrored(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "other it-suite"))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert (tmp_path / "objects/it-suite/obj1").read_text() == "x\n"
+    assert _manifest(tmp_path / "bk/objects.manifest")["source_objects"] == "1"
+    assert _manifest(tmp_path / "bk/objects.manifest")["mirrored_files"] == "1"
+
+
+def test_a_bucket_listing_that_fails_still_fails_the_backup(tmp_path: Path) -> None:
+    """A wrong credential or an unreachable store is not "no bucket"."""
+    env = _objects(tmp_path, "it-suite", FAKE_MC_LS="fail")
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **env)
+    assert run.returncode != 0, run.stdout
+    assert "does not exist yet" not in run.stdout
+
+
+def test_another_bucket_whose_name_contains_it_is_not_it(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "it-suite-old xit-suite"))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "the bucket it-suite does not exist yet" in run.stdout, run.stdout
+
+
 # --- the timers ---------------------------------------------------------------
 
 
