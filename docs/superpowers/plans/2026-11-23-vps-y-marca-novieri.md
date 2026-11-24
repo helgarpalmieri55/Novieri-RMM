@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - **Producto (A3):** «Novieri RMM» en títulos, correos y equipos; «Novieri» en la barra de la consola (proyecto 3). Host (B2): `rmm.novieri.com`. Organización por defecto: `ITS_DEFAULT_ORG_SLUG=novieri`.
-- **Lo que cambia (diseño §1.1), valor viejo → nuevo, exactos:** `notices.PRODUCT` `"Novieri"` → `"Novieri RMM"`; asuntos `[Toeshee] …` → `[Novieri RMM] …` (con sus `msgid` de `app/core/i18n/es.py`); servidor MCP `"itms"` → `"novieri-rmm"`; CN de la CA interna `it-suite internal CA` → `Novieri RMM internal CA`; `its-agent` → `novieri-agent` (binario, servicio, `novieri-agent-enroll`, `novieri-agent-uninstall`, `novieri-agent-update.service`, artefactos `novieri-agent-<os>-<arch>`, paquete `novieri-agent_<versión>_<arch>.deb`); `/opt/toeshee` y `/var/opt/toeshee` → `/opt/novieri` y `/var/opt/novieri`; `%ProgramFiles%\ITSuite` y `%ProgramData%\ITSuite` → `%ProgramFiles%\NovieriRMM` y `%ProgramData%\NovieriRMM` (sin espacio, CWE-428); nombre visible en Windows «Novieri RMM Agent»; `com.toeshee.itsagent` → `com.novieri.rmm.agent`; producto MSI «Novieri RMM Agent», fabricante «Novieri», `UPGRADE_NAMESPACE` **`8814cc17-6469-4df7-93f9-0f75ecdbb6a9`** (antes `22ad0fe1-20ac-49a3-938c-25347fa54ecb`); prefijo del instalador `ITMS-Agent-Setup_` → `NovieriRMM-Agent-Setup_` en los dos lados; MSI `ITMS-Agent-<host>-<arch>.msi` → `NovieriRMM-Agent-<host>-<arch>.msi`; `itms.toeshee.com` → `rmm.novieri.com` en documentos, ejemplos y fixtures de despliegue; «ITMS» visible → «Novieri RMM».
-- **Lo que no cambia (diseño §1.2), y una prueba lo fija (Task 11):** el prefijo `ITS_` del `.env` y `IT_SUITE_VERSION` (y, por la misma razón de §1.2, `ITMS_BIND_IP` e `ITMS_NETWORK_SUBNET`: Apéndice B, P4-B-08); las imágenes `itsuite/*`, la base `itsuite`, el proyecto y los volúmenes `it-suite`, las rutas del servidor `/opt/it-suite`, `/etc/it-suite`, `/var/lib/it-suite`, `/var/backups/it-suite` (P4-B-07); el módulo Go `github.com/toeshee/it-suite/agent`; `itms-rsp.1`, `ITMSRSP1`, `X-ITS-Agent-*`, `X-ITMS-*`, `ITS_AGENT_*`, las cookies `__Host-itms_*`, `urn:itms:loopback`; `its-agent-release/v1`, `itms recovery key wrap v1`, `itms/password/v1`, `it-suite/push-run/credential-version/v1`; `itms-local:`; la cabecera de webhook `X-Toeshee-Event-Id` (P4-B-09, pregunta abierta Q2).
+- **Lo que cambia (diseño §1.1), valor viejo → nuevo, exactos:** `notices.PRODUCT` `"Novieri"` → `"Novieri RMM"`; asuntos `[Toeshee] …` → `[Novieri RMM] …` (con sus `msgid` de `app/core/i18n/es.py`); servidor MCP `"itms"` → `"novieri-rmm"`; CN de la CA interna `it-suite internal CA` → `Novieri RMM internal CA`; `its-agent` → `novieri-agent` (binario, servicio, `novieri-agent-enroll`, `novieri-agent-uninstall`, `novieri-agent-update.service`, artefactos `novieri-agent-<os>-<arch>`, paquete `novieri-agent_<versión>_<arch>.deb`); `/opt/toeshee` y `/var/opt/toeshee` → `/opt/novieri` y `/var/opt/novieri`; `%ProgramFiles%\ITSuite` y `%ProgramData%\ITSuite` → `%ProgramFiles%\NovieriRMM` y `%ProgramData%\NovieriRMM` (sin espacio, CWE-428); nombre visible en Windows «Novieri RMM Agent»; `com.toeshee.itsagent` → `com.novieri.rmm.agent`; producto MSI «Novieri RMM Agent», fabricante «Novieri», `UPGRADE_NAMESPACE` **`8814cc17-6469-4df7-93f9-0f75ecdbb6a9`** (antes `22ad0fe1-20ac-49a3-938c-25347fa54ecb`); prefijo del instalador `ITMS-Agent-Setup_` → `NovieriRMM-Agent-Setup_` en los dos lados; MSI `ITMS-Agent-<host>-<arch>.msi` → `NovieriRMM-Agent-<host>-<arch>.msi`; `itms.toeshee.com` → `rmm.novieri.com` en documentos, ejemplos y fixtures de despliegue; «ITMS» visible → «Novieri RMM». **Añadidos en la revisión previa (2026-11-24), por decisión del operador y resoluciones del coordinador (`.git/sdd/decisiones-p34.md`):** la cabecera de los *webhooks* `X-Toeshee-Event-Id` → `X-Novieri-Event-Id` (Task 1; no hay consumidores); y las minúsculas que ve un cliente o un tercero: el prefijo `itms:` de los mensajes del comando de instalación → `novieri-agent:`, las instantáneas ZFS `@itms-<tag>` → `@novieri-snap-<tag>` y las de btrfs `.itms-snap-<tag>` → `.novieri-snap-<tag>`, el temporal de una restauración `.itms-restore-*` → `.novieri-restore-*` (Task 8), el CN del certificado de «Sign in with Microsoft» `itms-sign-in-<id>` → `novieri-rmm-sign-in-<id>` y la etiqueta del correo de prueba `+itms-test` → `+novieri-rmm-test` (Task 1; los nombres de descarga `.cer` de la consola son del proyecto 3, Apéndice F).
+- **Lo que no cambia (diseño §1.2), y una prueba lo fija (Task 11):** el prefijo `ITS_` del `.env` y `IT_SUITE_VERSION` (y, por la misma razón de §1.2, `ITMS_BIND_IP` e `ITMS_NETWORK_SUBNET`: Apéndice B, P4-B-08); las imágenes `itsuite/*`, la base `itsuite`, el proyecto y los volúmenes `it-suite`, las rutas del servidor `/opt/it-suite`, `/etc/it-suite`, `/var/lib/it-suite`, `/var/backups/it-suite` (P4-B-07); el módulo Go `github.com/toeshee/it-suite/agent`; `itms-rsp.1`, `ITMSRSP1`, `X-ITS-Agent-*`, `X-ITMS-*`, `ITS_AGENT_*`, las cookies `__Host-itms_*`, `urn:itms:loopback`; `its-agent-release/v1`, `itms recovery key wrap v1`, `itms/password/v1`, `it-suite/push-run/credential-version/v1`; `itms-local:`; y, en minúsculas, lo que guarda un dato o es herramienta del operador: los prefijos del *bucket* de la copia fuera del host (`.itms-probe/`, `OFFSITE_S3_PREFIX=itms-platform`) y `scripts/itms_recover.py` (P4-B-10, P4-B-12). La cabecera de webhook **sí** cambia (arriba; P4-B-09).
 - **TLS (diseño §2):** Traefik v3.6, resolutor `le`, `tlsChallenge` (TLS-ALPN-01), almacén `/etc/traefik/acme/acme.json` en el volumen `traefik-acme`; el 80 sigue cerrado; claves `.env` nuevas `ITS_PUBLIC_HOST`, `ITS_ACME_EMAIL`, `ITS_ACME_CA_SERVER` (por defecto `https://acme-v02.api.letsencrypt.org/directory`; staging `https://acme-staging-v02.api.letsencrypt.org/directory`); el camino `deploy/certs/` desaparece; el 8443 sigue siendo paso TCP al gateway con la CA interna, sin cambio.
 - **Pebble (solo CI y ensayo):** `ghcr.io/letsencrypt/pebble:2.10.1` y `ghcr.io/letsencrypt/pebble-challtestsrv:2.10.1` (publicadas el 2026-04-20; comprobado con `docker pull`), confianza por `LEGO_CA_CERTIFICATES` en el contenedor de Traefik.
 - **Seguridad.** Invariantes 1, 1b, 1c, 2, 2a, 3, 4, 5, 5a y 6 de `CLAUDE.md` intactas, y en concreto:
@@ -31,7 +31,16 @@
 - **Frontend:** no se edita (proyecto 3). El Apéndice F da cada línea de `frontend/src` que este proyecto obliga a cambiar.
 - **Verificación, desde `backend/`:** `.venv/bin/pytest -q <archivos de la tarea>`, `.venv/bin/mypy app`, `.venv/bin/ruff check app tests`. **Desde `agent/`:** `gofmt -l .` (no imprime nada), `go vet ./...`, `go test ./... -count=1`. **Desde `deploy/`:** `docker compose config -q`. La suite completa del backend la corre el coordinador en el árbol fusionado.
 - **Pistas en paralelo (worktrees), igual que en la fase 4:**
-  - La worktree nace de `main`; lo primero, `git log --oneline -1`. Las tareas de la oleada 2 en adelante fusionan antes la rama del coordinador (él da el nombre) y lo comprueban como dice cada tarea en su Step 0.
+  - **La worktree nace de la rama del proyecto, `claude/compassionate-bardeen-vgtwus`, tal como está en `origin`; nunca de la rama local `main`** (resolución del coordinador del 2026-11-24). La `main` local está en `dd062f8` (PR #12), 252 archivos por detrás de `origin/main` (`6a14dbc`, PR #13), y el código de la rama del proyecto es el de `1bc0e5e`, sobre el que se midió todo este plan (`git diff --stat 1bc0e5e origin/claude/compassionate-bardeen-vgtwus -- backend agent deploy .github scripts` no imprime nada). Una worktree de la `main` local tiene otro árbol: cada ancla `count == 1` de los guiones o muere o, peor para un paso a mano, encuentra otro texto. El coordinador la crea con `git fetch -q origin claude/compassionate-bardeen-vgtwus` y, para la Task 1, `git worktree add -b p4-t1 ../wt-p4-t1 origin/claude/compassionate-bardeen-vgtwus` (y así con el número de cada tarea). El Step 0 de cada tarea lo comprueba con estos comandos, desde la raíz de la worktree:
+
+    ```bash
+    git fetch -q origin claude/compassionate-bardeen-vgtwus
+    git log --oneline -1
+    git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+    git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+    ```
+
+    Expected: la primera línea es la cabeza de `origin/claude/compassionate-bardeen-vgtwus` cuando el coordinador creó la worktree (el 2026-11-24, `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)`, o un commit posterior de esa rama), y después `ON-PROJECT-BRANCH` y `HAS-PR-13`. Si la primera línea es `dd062f8 Merge pull request #12 …`, o falta una de las otras dos, la worktree salió de otra rama: se para y se avisa al coordinador, sin tocar nada. Las tareas de la oleada 1 comprueban además que el código es el medido (`CODE-AS-MEASURED`, en su Step 0); las de la oleada 2 en adelante fusionan antes la rama del coordinador (él da el nombre) y comprueban lo que dice su Step 0.
   - `ln -s /home/user/Novieri-RMM/backend/.venv backend/.venv`; `cd backend && export PYTHONPATH=$PWD`, y `.venv/bin/python -c "import app; print(app.__file__)"` imprime una ruta de la worktree.
   - `export ITS_TEST_REDIS_URL=redis://localhost:6379/3`, o la base (0–15) que el coordinador asigne a la worktree si corren varias a la vez (desde la Task 2, toda la suite la respeta).
   - `pg_ctlcluster 16 main start 2>/dev/null; redis-cli ping >/dev/null 2>&1 || redis-server --daemonize yes`.
@@ -63,7 +72,7 @@ ENV SSL_CERT_FILE=/usr/local/share/session-ca.crt PIP_CERT=/usr/local/share/sess
 1. **No renombra lo de §1.2** ni lo interno que el diseño no nombra (Apéndice B, P4-B-07 a P4-B-10).
 2. **No migra nada de `itms.toeshee.com`** (P7 del proyecto 1, B1): se empieza desde cero.
 3. **No toca el frontend** (Apéndice F) **ni `CLAUDE.md`** (Q1).
-4. **No resuelve el pendiente «una `app_session` puede quedar con el alcance vacío»**: no hay nada que se llame así en el código; las tres lecturas posibles y por qué ninguna encaja están en la pregunta abierta Q3. Los otros ocho pendientes de §6 sí (Tasks 2, 3, 5 y 6).
+4. **No resuelve el pendiente «una `app_session` puede quedar con el alcance vacío»**: el coordinador lo quitó el 2026-11-24 (`.git/sdd/decisiones-p34.md`). No hay nada que se llame así en el código (`grep -rn app_session backend/app` no encuentra nada), y la lectura más cercana, una `org_session` con un `ClientScope` vacío, es justo lo que exige la invariante 5a: «Una sesión sin alcance ve cero filas»; rechazarla cambiaría ese fallo seguro por un error. El informe (Task 13) lo dice. Los otros ocho pendientes de §6 sí (Tasks 2, 3, 5 y 6).
 5. **No despliega.** La secuencia completa la da el informe (Task 13), y el operador la corre desde `main`.
 
 ## Oleadas y paralelismo
@@ -97,8 +106,8 @@ ENV SSL_CERT_FILE=/usr/local/share/session-ca.crt PIP_CERT=/usr/local/share/sess
 ## Notas de integración del coordinador
 
 - **Oleada 1 — las Tasks 3, 4 y 7 se fusionan juntas, en el orden 4, 3, 7, antes de empujar.** La 3 añade `Host()` a cada router de :443 y quita `deploy/certs/`; la CI de antes (`https://localhost` con un certificado autofirmado en `certs/`) dejaría de encontrar ningún router en el árbol de la 3 sola. La 7 escribe el `.env` de la CI con el `new-env.sh` de la 4 y comprueba el certificado con el `check-public-tls.sh` de la 4. Por separado, el job `deploy` está rojo en la 3 y en la 7; juntas, verde.
-- **Oleada 1, choques esperados: ninguno.** La 1 y la 5 tocan archivos distintos de `backend/app` (la 1, `modules/user_admin/api.py`; la 5, `modules/user_admin/service.py`). La 1 es la única que toca `es.py` en esta oleada.
-- **Oleada 2:** la 8 es la única que toca `es.py`, `storage.py` y `app/modules/agent_distribution/` salvo `api.py`, que es de la 2 (`HTTP_422`). La 2 edita 43 pruebas; ninguna es de la 8 (las listas están en sus tareas).
+- **Oleada 1, choques esperados: ninguno.** La 1 y la 5 tocan archivos distintos de `backend/app` (la 1, `modules/user_admin/api.py`; la 5, `modules/user_admin/service.py`). La 1 es la única que toca `es.py` en esta oleada. **Un archivo, dos tareas, sin choque:** `.gitignore` lo tocan la 3 (el bloque de `deploy/certs/`, líneas 28-34) y la 4 (una línea nueva tras `.env`, línea 12: el temporal de `new-env.sh`); son trozos separados y `git merge` los une sin conflicto en el orden 4, 3 (comprobado en la revisión previa del 2026-11-24).
+- **Oleada 2:** la 8 es la única que toca `es.py`, `storage.py` y `app/modules/agent_distribution/` salvo `api.py`, que es de la 2 (`HTTP_422`). La 2 edita 43 pruebas; ninguna es de la 8 (las listas están en sus tareas). **La regla del host de la 8 no entra en dos pruebas de la oleada 1** que nombran `itms.toeshee.com` a propósito, para negarlo (`test_deploy_acme.py` de la 3 y `test_deploy_script_steps.py` de la 4): la Task 8 las excluye y las corre en su Step 4.
 - **Oleada 3:** la 9 es dueña de `deploy/README.md`, `deploy/GO-LIVE.md`, `deploy/host-network.md` y `docs/07-backup-restore.md`; la 10, del paso nuevo del job `deploy` de `ci.yml` y de `deploy/ci/agent_flow.py`.
 - **Oleada 4:** la 12 es dueña de `deploy/README.md` (corrige lo que el ensayo desmienta y escribe el estado del runbook); la 11 no lo toca. Si la 12 cambia el runbook, se fusiona antes que la 11, y la 11 vuelve a pasar su prueba sobre el árbol fusionado.
 - **Firmas que una tarea fija y otras consumen:** el Apéndice A.
@@ -109,15 +118,16 @@ No son los comandos (los da la Task 13); son los hechos que esos comandos necesi
 
 1. **Host nuevo, nada que migrar** (B1, P7). En un `.env` nuevo no hay claves viejas, ni base `keycloak`, ni agentes.
 2. **El DNS va antes del primer `up -d`.** Traefik pide el certificado en cuanto ve el router; si `rmm.novieri.com` no resuelve al VPS, la validación falla, Let's Encrypt cuenta un fallo de autorización (5 por nombre, cuenta y hora [E3]) y Traefik sirve su propio certificado. `preflight.sh` lo comprueba antes (Task 4).
-3. **Ningún registro `AAAA`.** Let's Encrypt «will always prefer the IPv6 addresses for the initial connection» y vuelve al IPv4 solo ante un *timeout* [E5]; el stack publica el 443 solo en IPv4 (`ITMS_BIND_IP=0.0.0.0`), así que un `AAAA` hace fallar la validación con un *connection refused*. `preflight.sh` se niega (Task 4).
+3. **Solo IPv4, y ningún registro `AAAA`** (resolución del coordinador del 2026-11-24). Este despliegue es de una dirección IPv4: el runbook, `host-network.md` y `preflight.sh` razonan sobre una IPv4 (`ITMS_BIND_IP`, el registro `A`), y nada comprueba ni documenta que el 443 y el 8443 contesten por IPv6 (que Docker publique `0.0.0.0` también en `[::]` no se puede medir en esta sesión, que no tiene IPv6). Un `AAAA` mandaría a los navegadores y a los agentes, que prueban IPv6 primero, a una dirección que nadie ha comprobado que sirva este stack, o, si es de otra máquina, a esa máquina. **No es por Let's Encrypt:** su validador de TLS-ALPN-01 prueba la primera IPv6 y, ante **cualquier** error, vuelve a la IPv4 (Boulder, `va/tlsalpn.go`, líneas 105-137 [E5]), así que un `AAAA` no hace fallar la emisión por sí mismo. `preflight.sh` se niega ante cualquier `AAAA`, preguntando al DNS y no a `/etc/hosts` (Task 4).
 4. **Límites de Let's Encrypt:** 5 certificados por semana para el mismo conjunto de nombres [E3]. Cada primer arranque con un volumen `traefik-acme` vacío pide uno; un ensayo se hace contra staging (`--acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`), cuyos límites son mucho más altos y cuyos certificados ningún navegador acepta [E4].
 5. **El certificado se renueva solo**, 30 días antes de caducar [E1]. Let's Encrypt baja la vida por defecto a 64 días el 2027-02-10 y a 45 el 2028-02-16 [E6]; con 30 días de margen la renovación sigue cayendo dentro de la vida (a los 34 y a los 15 días). No hace falta cambiar `certificatesDuration`; el informe lo deja como cosa a revisar en 2027 (Task 13).
-6. **El correo de ACME** lo pide `new-env.sh` (Traefik lo marca obligatorio [E1]); Let's Encrypt dejó de mandar avisos de caducidad el 2025-06-04 [E7], así que nada de la renovación depende de ese buzón.
+6. **El correo de ACME sigue siendo obligatorio** (resolución del coordinador del 2026-11-24): lo pide `new-env.sh`, y es **compose** quien no arranca Traefik sin él (`${ITS_ACME_EMAIL:?…}` en `docker-compose.yml`, Task 3), no Traefik, que arranca sin correo (`pkg/provider/acme/provider.go`, `initAccount`, v3.6; medido en la revisión previa con `traefik:v3.6` 3.6.25). Let's Encrypt dejó de mandar avisos de caducidad el 2025-06-04 y ya no guarda la dirección en la cuenta: la pasa a la lista de correo de ISRG [E7]. Nada de la renovación depende de ese buzón; quien vigila la renovación es `check-public-tls.sh` (se niega si quedan menos de 28 días, Task 4) y, según recomienda el informe, un monitor externo (Task 13).
 7. **El volumen `traefik-acme` no es material de clave insustituible**: perderlo cuesta un certificado nuevo (dentro del límite de 5 por semana), no datos. No entra en la copia nocturna; GO-LIVE §6 lo dice (Task 9).
 8. **OpenBao está sellado tras cada reinicio** y un `up -d` con OpenBao sellado *se bloquea* (`CLAUDE.md`); toda secuencia empieza por `docker compose exec openbao bao status`.
 9. **`migrate` corre en cada `up -d`** como dependencia de `api`; este proyecto no añade ninguna migración.
 10. **Vuelta atrás en el host nuevo:** `build-images.sh` imprime `Recent tags:` con una sola etiqueta, la del primer arranque. No hay etiqueta anterior: hasta la primera copia (Task 9, paso 12 del primer arranque) no hay vuelta atrás; después, la única es restaurar la copia (`CLAUDE.md`, «A rollback target has to already exist to be one»).
-11. **`itms.toeshee.com` se apaga** cuando el nuevo funcione (B1): lo hace el operador; nada del repositorio lo toca.
+11. **`itms.toeshee.com` se apaga** cuando el nuevo funcione (B1): lo hace el operador; nada del repositorio lo toca. **Hasta entonces, ese host no toma esta `main`:** su `.env` no tiene `ITS_PUBLIC_HOST` ni `ITS_ACME_EMAIL`, compose se niega a interpolar (Task 3) y, con las claves puestas a mano, Traefik dejaría de servir el certificado copiado y pediría uno a Let's Encrypt. El informe y el runbook lo dicen (Tasks 9 y 13).
+12. **La clave de los artefactos en el *bucket* cambia con el nombre** (`core/storage.py`, `<prefijo>/<versión>/novieri-agent-<os>-<arch>`): `agent_releases.storage_ref` la guarda, y `service.py` y `api.py` la vuelven a derivar del nombre. En una base con versiones subidas antes del cambio, esas versiones apuntarían a un objeto que no existe y habría que subirlas de nuevo. En el host nuevo no hay ninguna (B1, P7), así que no hace falta migración; por eso esta compilación no se apunta nunca a la base de `itms.toeshee.com` (Task 8).
 
 ## Las tareas, una a una
 
@@ -125,24 +135,36 @@ No son los comandos (los da la Task 13); son los hechos que esos comandos necesi
 
 **Files:**
 - Create: `backend/tests/test_brand_names_backend.py`
-- Modify: `backend/app/modules/notification/delivery.py` (36 apariciones de `Toeshee`, todas salvo `X-Toeshee-Event-Id`, `:1194`)
+- Modify: `backend/app/modules/notification/delivery.py` (36 apariciones de `Toeshee` en asuntos, y la cabecera `X-Toeshee-Event-Id` de `:1194`, que pasa a `X-Novieri-Event-Id`)
+- Modify: `backend/app/core/auth/entra.py:204` (el CN del certificado de «Sign in with Microsoft»), `docs/modules/notification/spec.md:190,479` (la cabecera)
 - Modify: `backend/app/core/i18n/es.py` (68 `Toeshee` y 9 entradas con `ITMS` o `itms.example.com` de los archivos de esta tarea; las de `agent_distribution` son de la Task 8)
-- Modify: `backend/app/core/auth/notices.py:33`, `backend/app/mcp/server.py:804`, `backend/app/main.py:162`, `backend/app/api/v1/realm_settings.py:548-551`, `backend/app/api/v1/orgs.py:709,762`, `backend/app/api/v1/setup.py:143`, `backend/app/modules/user_admin/api.py:192,227`, `backend/app/modules/people/checklists.py:131`, `backend/app/services/install_link.py:152`, `backend/app/modules/agent_push/dispatch.py:268`, `backend/app/core/ca.py:132`
+- Modify: `backend/app/core/auth/notices.py:33`, `backend/app/mcp/server.py:804`, `backend/app/main.py:162`, `backend/app/api/v1/realm_settings.py:178,222,230,548-551`, `backend/app/api/v1/orgs.py:709,762`, `backend/app/api/v1/setup.py:143`, `backend/app/modules/user_admin/api.py:192,227`, `backend/app/modules/people/checklists.py:131`, `backend/app/services/install_link.py:152`, `backend/app/modules/agent_push/dispatch.py:268`, `backend/app/core/ca.py:132`
 - Modify: `deploy/openbao/init.sh:37`
-- Modify (pruebas que fijan los nombres viejos): `backend/tests/test_i18n_modules_desk.py`, `test_notification_delivery.py`, `test_notification_email_language.py`, `test_platform_backup_status.py`, `test_mcp_server.py`, `test_realm_settings_api.py`
+- Modify (pruebas que fijan los nombres viejos): `backend/tests/test_i18n_modules_desk.py`, `test_notification_delivery.py` (los asuntos y la cabecera), `test_notification_email_language.py`, `test_platform_backup_status.py`, `test_mcp_server.py`, `test_realm_settings_api.py` (el asunto de prueba y la etiqueta `+itms-test`)
 
 **Interfaces:**
 - Consumes: nada de otras tareas.
-- Produces: `notices.PRODUCT == "Novieri RMM"` (lo leen el emisor TOTP, `flows.py:893`, y el `rp_name` de WebAuthn, `flows.py:958,1671`); el servidor MCP se presenta como `"novieri-rmm"` en `serverInfo.name`; `FastAPI(title="Novieri RMM API")`; la CA interna se llama `Novieri RMM internal CA` (la Task 9 lo escribe en la salida esperada del paso 9 del primer arranque).
+- Produces: `notices.PRODUCT == "Novieri RMM"` (lo leen el emisor TOTP, `flows.py:893`, y el `rp_name` de WebAuthn, `flows.py:958,1671`); el servidor MCP se presenta como `"novieri-rmm"` en `serverInfo.name`; `FastAPI(title="Novieri RMM API")`; la CA interna se llama `Novieri RMM internal CA` (la Task 9 lo escribe en la salida esperada del paso 7 del primer arranque); cada *webhook* lleva `X-Novieri-Event-Id`; `entra.new_certificate` hace un certificado con CN `novieri-rmm-sign-in-<id de la app>`; `realm_settings.suggested_test_recipient` propone `nombre+novieri-rmm-test@dominio`.
 
 **Decisiones de la tarea.**
-- **`X-Toeshee-Event-Id` se queda** (P4-B-09): es la cabecera con la que un consumidor de webhooks deduplica (`docs/modules/notification/spec.md:190,479`), un contrato, como las de §1.2. La pregunta Q2 deja al operador decidir si se renombra ahora que no hay consumidores.
+- **`X-Toeshee-Event-Id` pasa a `X-Novieri-Event-Id`** (P4-B-09; decisión del operador del 2026-11-24, `.git/sdd/decisiones-p34.md`): es la cabecera con la que un consumidor de *webhooks* deduplica (`docs/modules/notification/spec.md:190,479`), un contrato con quien los consume, y por eso se cambia **ahora**, cuando no hay ninguno (B1, P7); después de su primer consumidor, cambiarla rompería la deduplicación. Se renombra, no se duplica: la prueba de `test_notification_delivery.py` exige la nueva y que la vieja no viaje. `docs/modules/notification/plan.md:1837` es un plan fechado y no se toca.
+- **Las dos minúsculas que ve el operador en un tercero se renombran** (resolución del coordinador del 2026-11-24): el CN del certificado que la consola hace para la app de Entra (`entra.py:204`, `itms-sign-in-<id>` → `novieri-rmm-sign-in-<id>`; el portal de Azure lo enseña en la lista de certificados de la app) y la etiqueta del correo de prueba que propone la consola (`realm_settings.py`, `+itms-test` → `+novieri-rmm-test`; llega al buzón del operador). Nada los lee de vuelta: el certificado se identifica por su huella (`x5t#S256`), y la etiqueta es una sugerencia. Los nombres de los archivos `.cer` que descarga la consola (`itms-sign-in.cer`, `itms-sign-in-new.cer`) son de `frontend/src/modules/settings/MicrosoftTab.tsx:215,244`: los cambia el proyecto 3 (Apéndice F, F.1), y el runbook los nombra igual (Task 9).
 - **Los ejemplos de host visibles pasan a `rmm.example.com`** donde un administrador los lee (`agent_push/dispatch.py:268`; los de `msi.py` y `link_page.py`, Task 8). Un `itms.example.com` no es la marca en mayúsculas que la guarda busca, pero dice el nombre viejo a quien lo lee.
 - **El CN y nada más de la CA local** (`ca.py:132`); su `O = it-suite` (`:133`) es de la CA de desarrollo y queda (P4-B-07). La raíz de OpenBao (`init.sh:37`) solo lleva CN.
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1` (el commit de `main` que dio el coordinador) y la preparación de Global Constraints.
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Después, la preparación de Global Constraints.
 
 - [ ] **Step 1: Las pruebas dicen los nombres nuevos**
 
@@ -155,20 +177,23 @@ Crear `backend/tests/test_brand_names_backend.py`:
 Each assertion is a value a person meets: the name the authenticator app and
 the passkey prompt show (`notices.PRODUCT`), the prefix of every notification
 subject in both languages, the API's own title, the name an AI app sees for
-the MCP server, and the CN of the internal CA every agent certificate chains
-to. `tests/test_no_old_brand_names.py` (Task 11) refuses the OLD names
-everywhere; this pins the NEW ones where they live.
+the MCP server, the CN of the internal CA every agent certificate chains to,
+and the CN of the certificate the Azure portal lists for the organization's
+"Sign in with Microsoft" app. `tests/test_no_old_brand_names.py` (Task 11)
+refuses the OLD names everywhere; this pins the NEW ones where they live.
 """
 
 import ast
+import datetime as dt
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 
-from app.core.auth import notices
+from app.core.auth import entra, notices
 from app.core.ca import LocalCA
 from app.core.i18n import tr, use_locale
 
@@ -223,9 +248,19 @@ def test_the_internal_ca_is_named_for_the_product(tmp_path: Path) -> None:
     assert cn.value == "Novieri RMM internal CA"
     init = (REPO / "deploy/openbao/init.sh").read_text()
     assert 'common_name="Novieri RMM internal CA"' in init
+
+
+def test_the_sign_in_with_microsoft_certificate_is_named_for_the_product() -> None:
+    """The CN the Azure portal lists under the app's certificates (decided
+    2026-11-24). Nothing reads it back: Entra matches the thumbprint."""
+    app = uuid.UUID(int=7)
+    made = entra.new_certificate(app_client_id=app, now=dt.datetime.now(dt.UTC))
+    certificate = x509.load_pem_x509_certificate(made.certificate_pem.encode("ascii"))
+    (cn,) = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert cn.value == f"novieri-rmm-sign-in-{app}"
 ```
 
-Y cambiar las seis pruebas que fijan los nombres viejos. Desde la raíz de la worktree (el guion no se guarda en el repositorio; cada recuento que no cuadre lo para antes de escribir nada):
+Y cambiar las seis pruebas que fijan los nombres viejos: los asuntos, el servidor MCP, el asunto del correo de prueba y su etiqueta (`+itms-test` → `+novieri-rmm-test`), y la cabecera de los *webhooks*, que pasa a `X-Novieri-Event-Id` y deja de viajar con el nombre viejo (decisión del operador del 2026-11-24). Desde la raíz de la worktree (el guion no se guarda en el repositorio; cada recuento que no cuadre lo para antes de escribir nada):
 
 ```bash
 python3 - . <<'PY'
@@ -241,17 +276,30 @@ EDITS = {
         (r"Sign in to Toeshee", "Sign in to Novieri RMM", 1),
         (r"Inicia sesión en Toeshee", "Inicia sesión en Novieri RMM", 1),
     ],
-    "backend/tests/test_notification_delivery.py": [(r"\[Toeshee\]", "[Novieri RMM]", 6)],
+    "backend/tests/test_notification_delivery.py": [
+        (r"\[Toeshee\]", "[Novieri RMM]", 6),
+        (r'"x-toeshee-event-id"', '"x-novieri-event-id"', 2),
+    ],
     "backend/tests/test_notification_email_language.py": [(r"\[Toeshee\]", "[Novieri RMM]", 2)],
     "backend/tests/test_platform_backup_status.py": [(r"\[Toeshee\]", "[Novieri RMM]", 1)],
     "backend/tests/test_mcp_server.py": [
         (r'\["serverInfo"\]\["name"\] == "itms"', '["serverInfo"]["name"] == "novieri-rmm"', 1)
     ],
     "backend/tests/test_realm_settings_api.py": [
-        (r'== "ITMS test message"', '== "Novieri RMM test message"', 1)
+        (r'== "ITMS test message"', '== "Novieri RMM test message"', 1),
+        (r"\+itms-test@", "+novieri-rmm-test@", 4),
     ],
 }
 REWRAPS = [
+    # Not a wrap: renamed, not duplicated -- the old header must not travel.
+    (
+        "backend/tests/test_notification_delivery.py",
+        '''    assert request.headers["x-novieri-event-id"] == str(event.id)
+''',
+        '''    assert request.headers["x-novieri-event-id"] == str(event.id)
+    assert "x-toeshee-event-id" not in request.headers, "renamed, not duplicated"
+''',
+    ),
     (
         "backend/tests/test_notification_delivery.py",
         '''    assert subject == "[Novieri RMM] New computer waiting for review: lab-pc-07Bcc: x@evil.test[31m-end"''',
@@ -284,7 +332,7 @@ Expected: seis líneas `rewrote backend/tests/...`.
 - [ ] **Step 2: Las pruebas fallan**
 
 Run: `cd backend && .venv/bin/pytest -q tests/test_brand_names_backend.py tests/test_i18n_modules_desk.py tests/test_notification_delivery.py tests/test_notification_email_language.py tests/test_platform_backup_status.py tests/test_mcp_server.py tests/test_realm_settings_api.py`
-Expected: FAIL — las seis de `test_brand_names_backend.py` (`assert 'Novieri' == 'Novieri RMM'`, `{'Toeshee'}`, `'it-suite internal CA'`…) y las aserciones de asunto (`'[Toeshee] ...' == '[Novieri RMM] ...'`), `serverInfo` (`'itms' == 'novieri-rmm'`) y el asunto de prueba de correo.
+Expected: `28 failed, 217 passed` (medido el 2026-11-24 sobre una copia de `1bc0e5e`): las siete de `test_brand_names_backend.py` (`assert 'Novieri' == 'Novieri RMM'`, `{'Toeshee'}`, `'it-suite internal CA'`, `'itms-sign-in-…'`…), las aserciones de asunto (`'[Toeshee] ...' == '[Novieri RMM] ...'`), las dos de la cabecera (`KeyError: 'x-novieri-event-id'`), `serverInfo` (`'itms' == 'novieri-rmm'`), el asunto de prueba de correo y las tres de la etiqueta `+novieri-rmm-test`.
 
 - [ ] **Step 3: Los nombres nuevos**
 
@@ -303,6 +351,8 @@ ROOT = Path(sys.argv[1])
 EDITS = {
     "backend/app/modules/notification/delivery.py": [
         (r"Toeshee(?!-Event-Id)", "Novieri RMM", 36),
+        # The webhook dedupe header (operator, 2026-11-24): no consumer yet.
+        (r"X-Toeshee-Event-Id", "X-Novieri-Event-Id", 1),
     ],
     "backend/app/core/i18n/es.py": [
         (r"Toeshee", "Novieri RMM", 68),
@@ -323,7 +373,12 @@ EDITS = {
     "backend/app/api/v1/realm_settings.py": [
         (r"ITMS test message", "Novieri RMM test message", 1),
         (r"test message from ITMS", "test message from Novieri RMM", 1),
+        (r"\+itms-test", "+novieri-rmm-test", 3),
     ],
+    "backend/app/core/auth/entra.py": [
+        (r'f"itms-sign-in-\{app_client_id\}"', 'f"novieri-rmm-sign-in-{app_client_id}"', 1)
+    ],
+    "docs/modules/notification/spec.md": [(r"X-Toeshee-Event-Id", "X-Novieri-Event-Id", 2)],
     "backend/app/api/v1/orgs.py": [
         (r"ITMS record", "Novieri RMM record", 1),
         (r"e\.g\. toeshee\.com\.", "e.g. novieri.com.", 1),
@@ -421,6 +476,22 @@ REWRAPS = [
             line=line,
         ),''',
     ),
+    # Not a wrap: the header's comment says when and why it was renamed.
+    (
+        "backend/app/modules/notification/delivery.py",
+        '''    # retries of the same row.
+    headers: dict[str, str] = {"X-Novieri-Event-Id": str(delivery.event_id)}''',
+        '''    # retries of the same row. Renamed with the product on 2026-11-24, while
+    # no consumer existed yet (the operator's decision; spec §7 names it).
+    headers: dict[str, str] = {"X-Novieri-Event-Id": str(delivery.event_id)}''',
+    ),
+    (
+        "backend/app/core/auth/entra.py",
+        '''    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"novieri-rmm-sign-in-{app_client_id}")])''',
+        '''    name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, f"novieri-rmm-sign-in-{app_client_id}")]
+    )''',
+    ),
 ]
 planned = {}
 for rel, edits in EDITS.items():
@@ -441,18 +512,25 @@ for rel, text in planned.items():
 PY
 ```
 
-Expected: catorce líneas `rewrote ...`, la última `rewrote deploy/openbao/init.sh`. Comprobado en una copia de `1bc0e5e` el 2026-11-23: los recuentos son exactos y, con los reajustes, `ruff` queda limpio.
+Expected: dieciséis líneas `rewrote ...` (las catorce de antes, más `backend/app/core/auth/entra.py` y `docs/modules/notification/spec.md`), la última `rewrote deploy/openbao/init.sh`. Comprobado en una copia de `1bc0e5e` el 2026-11-23, y de nuevo con la cabecera, el CN de Entra y la etiqueta del correo de prueba el 2026-11-24: los recuentos son exactos y, con los reajustes, `ruff` queda limpio.
 
 - [ ] **Step 4: Las pruebas pasan**
 
-Run (desde `backend/`): `.venv/bin/pytest -q tests/test_brand_names_backend.py tests/test_i18n_catalog.py tests/test_i18n_modules_desk.py tests/test_notification_delivery.py tests/test_notification_email_language.py tests/test_platform_backup_status.py tests/test_mcp_server.py tests/test_realm_settings_api.py tests/test_ca.py tests/test_auth_passkeys.py tests/test_auth_falsifiers.py tests/test_install_link_api.py tests/test_agent_push_dispatch.py tests/test_setup_api.py tests/test_no_vendor_names_backend.py && .venv/bin/mypy app && .venv/bin/ruff check app tests`
-Expected: PASS (en la copia de `1bc0e5e`, el conjunto ampliado de 688 pruebas: `688 passed, 1 skipped`), `Success: no issues found in 550 source files`, `All checks passed!`. Y `grep -c "Toeshee" app/modules/notification/delivery.py app/core/i18n/es.py` imprime `app/modules/notification/delivery.py:1` (la cabecera de webhook) y `app/core/i18n/es.py:0`.
+Run (desde `backend/`): `.venv/bin/pytest -q tests/test_brand_names_backend.py tests/test_i18n_catalog.py tests/test_i18n_modules_desk.py tests/test_notification_delivery.py tests/test_notification_email_language.py tests/test_platform_backup_status.py tests/test_mcp_server.py tests/test_realm_settings_api.py tests/test_ca.py tests/test_auth_passkeys.py tests/test_auth_falsifiers.py tests/test_install_link_api.py tests/test_agent_push_dispatch.py tests/test_setup_api.py tests/test_no_vendor_names_backend.py tests/test_auth_entra.py tests/test_entra_settings_api.py && .venv/bin/mypy app && .venv/bin/ruff check app tests`
+Expected: `488 passed` (medido el 2026-11-24 en una copia de `1bc0e5e` con esta tarea: las quince primeras recogen 431 pruebas, la nueva incluida, y las dos de Entra 57; el «688 passed, 1 skipped» del borrador era otro conjunto), `Success: no issues found in 550 source files`, `All checks passed!`. Y desde `backend/`:
+
+```bash
+grep -c "Toeshee" app/modules/notification/delivery.py app/core/i18n/es.py
+grep -rn 'X-Toeshee-Event-Id\|itms-sign-in\|+itms-test' app ../docs/modules/notification/spec.md || echo NONE-LEFT
+```
+
+Expected: `app/modules/notification/delivery.py:0`, `app/core/i18n/es.py:0` y `NONE-LEFT`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/tests/test_brand_names_backend.py backend/tests/test_i18n_modules_desk.py backend/tests/test_notification_delivery.py backend/tests/test_notification_email_language.py backend/tests/test_platform_backup_status.py backend/tests/test_mcp_server.py backend/tests/test_realm_settings_api.py backend/app/modules/notification/delivery.py backend/app/core/i18n/es.py backend/app/core/auth/notices.py backend/app/mcp/server.py backend/app/main.py backend/app/api/v1/realm_settings.py backend/app/api/v1/orgs.py backend/app/api/v1/setup.py backend/app/modules/user_admin/api.py backend/app/modules/people/checklists.py backend/app/services/install_link.py backend/app/modules/agent_push/dispatch.py backend/app/core/ca.py deploy/openbao/init.sh
-git commit -m "feat(brand): the backend says Novieri RMM: product, subjects, MCP server, API title, internal CA"
+git add backend/tests/test_brand_names_backend.py backend/tests/test_i18n_modules_desk.py backend/tests/test_notification_delivery.py backend/tests/test_notification_email_language.py backend/tests/test_platform_backup_status.py backend/tests/test_mcp_server.py backend/tests/test_realm_settings_api.py backend/app/modules/notification/delivery.py backend/app/core/i18n/es.py backend/app/core/auth/notices.py backend/app/mcp/server.py backend/app/main.py backend/app/api/v1/realm_settings.py backend/app/api/v1/orgs.py backend/app/api/v1/setup.py backend/app/modules/user_admin/api.py backend/app/modules/people/checklists.py backend/app/services/install_link.py backend/app/modules/agent_push/dispatch.py backend/app/core/ca.py backend/app/core/auth/entra.py deploy/openbao/init.sh docs/modules/notification/spec.md
+git commit -m "feat(brand): the backend says Novieri RMM: product, subjects, webhook header, MCP server, API title, internal CA, Entra certificate"
 ```
 
 ---
@@ -479,7 +557,15 @@ git commit -m "feat(brand): the backend says Novieri RMM: product, subjects, MCP
 
 - [ ] **Step 0: La worktree, con la oleada 1**
 
-Run: `git log --oneline -1`; fusionar la rama del coordinador; `grep -c '"api-unavailable"' backend/tests/test_auth_phase4_falsifiers.py` imprime `1`.
+Run, desde la raíz de la worktree (creada de `origin/claude/compassionate-bardeen-vgtwus`, nunca de la `main` local: Global Constraints, «Pistas en paralelo»), después de fusionar la rama del coordinador con la oleada 1 (`git merge --no-edit` de la rama que él nombra):
+
+```bash
+git log --oneline -1
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+grep -c '"api-unavailable"' backend/tests/test_auth_phase4_falsifiers.py
+```
+
+Expected: la primera línea es la fusión con la rama del coordinador (o su cabeza, si la fusión fue rápida), nunca `dd062f8 Merge pull request #12 …`; después `HAS-PR-13` y `1`. Si no, se para y se avisa al coordinador. Después, la preparación de Global Constraints.
 
 - [ ] **Step 1: La prueba de la suite**
 
@@ -748,7 +834,17 @@ git commit -m "test: one Redis for the suite, unique release versions, the async
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1` y la preparación de Global Constraints (con Docker).
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Después, la preparación de Global Constraints (con Docker).
 
 - [ ] **Step 1: Las pruebas dicen el TLS nuevo**
 
@@ -1296,7 +1392,8 @@ git commit -m "feat(deploy): Let's Encrypt over TLS-ALPN-01 on :443, the host in
 - Create: `deploy/scripts/new-env.sh`, `deploy/scripts/check-public-tls.sh` (ejecutables, `chmod +x`)
 - Modify (reemplazado entero): `deploy/scripts/preflight.sh`
 - Modify: `deploy/.env.example` (las tres claves nuevas, `ITS_PUBLIC_CONSOLE_URL=https://your-host`, `ITS_DEFAULT_ORG_SLUG=novieri`, cinco comentarios con «ITMS» o el host viejo)
-- Modify: `deploy/scripts/deploy.sh:705` (el host de `.env` y la comprobación del certificado), `deploy/scripts/host-check.sh` (13 «ITMS» y «an ITMS»), `deploy/scripts/install-backup-timer.sh` (4 `Description=`)
+- Modify: `deploy/scripts/deploy.sh:705,709` (el host de `.env`, el mensaje de la sonda, que ya no puede ser un 404, y la comprobación del certificado), `deploy/scripts/host-check.sh` (13 «ITMS» y «an ITMS»), `deploy/scripts/install-backup-timer.sh` (4 `Description=`)
+- Modify: `.gitignore:12` (una línea nueva, `deploy/.env.new.*`, tras `.env`; la Task 3 toca otro trozo del mismo archivo, `:28-34`: notas de integración)
 - Create: `backend/tests/test_new_env_script.py`, `backend/tests/test_preflight_script.py`, `backend/tests/test_check_public_tls.py`
 - Modify: `backend/tests/test_deploy_script_steps.py` (`test_the_preflight_checks_the_certificate_against_the_console_address` → `test_the_preflight_takes_the_console_host_from_its_address`, y una prueba nueva al final), `backend/tests/test_deploy_install_link.py:56,62`
 
@@ -1304,7 +1401,7 @@ git commit -m "feat(deploy): Let's Encrypt over TLS-ALPN-01 on :443, the host in
 - Consumes: nada. **Se fusiona junto con las Tasks 3 y 7** (la 3 hace que compose exija las claves que esta añade).
 - Produces:
   - `./scripts/new-env.sh --host <nombre DNS> [--acme-email <dirección>] [--acme-ca-server <URL https>]` desde `deploy/`: escribe `deploy/.env` (0600) o sale 1 sin escribir nada; sin `--acme-email` y con terminal, la pregunta («Let's Encrypt account address (the certificate's contact): »); sin terminal, se niega.
-  - `./scripts/check-public-tls.sh [--connect <IP>] [--cafile <PEM>] [--wait <s>] [--port <n>]`: sale 0 e imprime `ok      <ip>:<puerto> presents a trusted certificate for <host>` con emisor, SAN y `notAfter`, o sale 1 con una línea `REFUSE` en stderr. Lo usan `deploy.sh` (esta tarea), la CI (Tasks 7 y 10), el runbook (Task 9) y el ensayo (Task 12).
+  - `./scripts/check-public-tls.sh [--connect <IP>] [--cafile <PEM>] [--wait <s>] [--port <n>]`: sale 0 e imprime `ok      <ip>:<puerto> presents a trusted certificate for <host>` con emisor, SAN y `notAfter`, o sale 1 con una línea `REFUSE` en stderr; también cuando el certificado es bueno pero le quedan **menos de 28 días** (la renovación lleva días fallando). Lo usan `deploy.sh` (esta tarea), la CI (Tasks 7 y 10), el runbook (Task 9) y el ensayo (Task 12).
   - `preflight.sh`: líneas `ok`, `note` y `REFUSE` como hasta ahora; las nuevas están en la prueba.
   - `.env.example`: `ITS_PUBLIC_HOST=your-host`, `ITS_ACME_EMAIL=`, `ITS_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory`.
 
@@ -1312,13 +1409,27 @@ git commit -m "feat(deploy): Let's Encrypt over TLS-ALPN-01 on :443, the host in
 - **Los dos tokens de OpenBao siguen en `change-me`** (P4-B-04). El diseño dice «un secreto aleatorio nuevo en cada clave `change-me`»; su propósito es que no quede nada que sustituir a mano, y estos dos no se sustituyen a mano: los escribe el paso 3.5 con `read -rsp`, sin marcadores. Un valor aleatorio ahí convertiría «te saltaste el 3.5» en una API que falla con 403 de OpenBao, y `preflight.sh` dejaría de avisarlo.
 - **`openssl rand -hex 24`**: 48 caracteres hexadecimales, seguros dentro de las URLs de base de datos que los interpolan (`postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@…`); el `base64 | tr -d '=+/'` del runbook de antes da longitudes variables.
 - **El enlace duro** (`ln`) en lugar de `mv`: nunca reemplaza un `.env` que haya aparecido mientras corría.
-- **La comprobación del DNS** se niega si el nombre resuelve a una dirección que no es de este host y este tiene alguna pública; si todas las suyas son privadas (un VPS tras NAT) lo anota y no se niega; y se niega ante **cualquier `AAAA`**, porque Let's Encrypt prueba IPv6 primero y no vuelve al IPv4 ante un *connection refused* [E5] y el 443 se publica solo en IPv4.
+- **La comprobación del DNS pregunta al DNS, como Let's Encrypt, y no a `/etc/hosts`.** El registro `A`, con `getent -s dns ahostsv4` (sin `-s dns`, glibc lee antes `/etc/hosts`, donde cloud-init escribe `127.0.1.1 <nombre del host>`: una negativa falsa si el VPS se llama `rmm.novieri.com`, y una línea puesta a mano tapa un registro `A` que falta o es otro). El `AAAA`, con `getaddrinfo(AF_INET6)` de Python **sin** `AI_ADDRCONFIG`: `getent ahosts` lo pone, y en un host sin IPv6 propia —el VPS que construye el runbook— no enseña ningún `AAAA` (medido en la revisión previa con glibc 2.39, la de Ubuntu 24.04). Python viene con Ubuntu Server; sin él, se anota. Y `|| true` en las dos: con `set -o pipefail`, el `exit 2` de `getent` ante un nombre que no resuelve hacía morir el guion en la asignación, sin imprimir la negativa (el *stub* de la prueba sale ahora con `2`, como `getent`). Se niega si el nombre resuelve a una dirección que no es de este host y este tiene alguna pública; si todas las suyas son privadas (un VPS tras NAT) lo anota y no se niega.
+- **Ningún `AAAA`, por la razón verdadera** (resolución del coordinador del 2026-11-24): el despliegue es de una IPv4; nada comprueba que el 443 y el 8443 contesten por IPv6, y un `AAAA` manda a los navegadores y a los agentes, que prueban IPv6 primero, a una dirección que nadie ha comprobado, o a otra máquina. **No** porque Let's Encrypt no vuelva al IPv4: su validador de TLS-ALPN-01 vuelve ante cualquier error de IPv6 (Boulder, `va/tlsalpn.go:105-137` [E5]); el borrador decía lo contrario, citando una página de HTTP-01.
 - **Los puertos ocupados por el Traefik de este proyecto** no son una negativa: `preflight.sh` sirve también para volver a mirar un host en marcha.
 - **`check-public-tls.sh` confía en las raíces del sistema** salvo `--cafile`: un certificado de staging o de Pebble es, a propósito, no confiable, y lo dice.
+- **Y se niega si al certificado le quedan menos de 28 días.** Traefik renueva cuando quedan menos de 30 y lo mira cada 24 h (`provider.go`, v3.6 [E16]): uno sano nunca baja de unos 29. Menos de 28 es una renovación que lleva días fallando, y nada más lo diría: Let's Encrypt ya no manda avisos de caducidad [E7], y con los certificados de 45 días de 2028 [E6] un fallo silencioso deja 15. El `preflight.sh` de antes avisaba a 7 días (`-checkend 604800`); este, a 28.
+- **El temporal de `new-env.sh` no se puede subir a git**: `.env.new.XXXXXX` vive en `deploy/` (el enlace duro necesita el mismo sistema de archivos) y lleva los cuatro secretos nuevos; la trampa `EXIT` lo borra, pero un `SIGKILL` o un corte de luz lo dejan. `.gitignore` solo ignoraba `.env`; la línea nueva `deploy/.env.new.*` y una prueba (`git check-ignore`) lo cubren.
+- **`preflight.sh` propone `openssl rand -hex 24`**, no `-base64 24`: el base64 trae `/` y `+`, que rompen las URLs de base de datos que interpolan esas claves (la razón de `new-env.sh`, arriba).
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1` y la preparación de Global Constraints (`apt-get install -y iproute2` incluido).
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Después, la preparación de Global Constraints (`apt-get install -y iproute2` incluido).
 
 - [ ] **Step 1: Las pruebas**
 
@@ -1506,6 +1617,17 @@ def test_it_runs_where_the_runbook_runs_it_and_nowhere_else(tmp_path: Path) -> N
     )
     assert run.returncode == 0, run.stderr
     assert (deploy / ".env").is_file() and not (tmp_path / ".env").exists()
+
+
+def test_the_temporary_file_a_crash_leaves_is_never_committable() -> None:
+    """The four new secrets sit in `.env.new.XXXXXX`, in deploy/, until the
+    hard link; the EXIT trap removes it, but a SIGKILL or a power cut does
+    not run traps, and `git add -A` would take what is left."""
+    for name in ("deploy/.env.new.Ab12Cd", "deploy/.env.new.zZ9yY8"):
+        run = subprocess.run(
+            ["git", "-C", str(REPO), "check-ignore", "-q", name], capture_output=True
+        )
+        assert run.returncode == 0, f"{name} is not gitignored"
 ```
 
 Crear `backend/tests/test_preflight_script.py`:
@@ -1518,9 +1640,16 @@ Since 2026-11-23 there is no certificate file to check: Traefik asks Let's
 Encrypt for one at the first start. What would make that request fail -- or
 succeed for the wrong machine -- is checked before it is made: the public
 name is the console's, it resolves to this host and has no AAAA record, 443
-and 8443 are free, and Docker is new enough. `getent`, `ip`, `ss` and `docker`
-are stubs on PATH, each answering what the test sets; nothing here resolves a
-name or opens a socket.
+and 8443 are free, and Docker is new enough. `getent`, `python3`, `ip`, `ss`
+and `docker` are stubs on PATH, each answering what the test sets; nothing
+here resolves a name or opens a socket.
+
+The name is asked of DNS alone, as Let's Encrypt asks it: the `getent` stub
+answers `-s dns` from FAKE_V4 and, without it, lets /etc/hosts
+(FAKE_HOSTS_FILE) answer first, as `hosts: files dns` does; and, like glibc's
+`getent ahosts` (AI_ADDRCONFIG), it shows no AAAA on a host with no IPv6
+address of its own. The AAAA is asked through `python3` (getaddrinfo with no
+AI_ADDRCONFIG), whose stub answers FAKE_V6 whatever the host holds.
 """
 
 import os
@@ -1556,11 +1685,24 @@ GOOD_HOST = {
 
 STUBS = {
     "getent": """#!/bin/sh
+if [ "$1" = "-s" ]; then
+  [ "$2" = "dns" ] || exit 1
+  shift 2
+  found="$FAKE_V4"
+else
+  found="${FAKE_HOSTS_FILE:-$FAKE_V4}"
+fi
 case "$1" in
-  ahostsv4) for a in $FAKE_V4; do echo "$a       STREAM $2"; done ;;
-  ahosts) for a in $FAKE_V4; do echo "$a       STREAM $2"; done
-          for a in $FAKE_V6; do echo "$a       STREAM $2"; done ;;
+  ahostsv4) ;;
+  ahosts) case " $FAKE_MINE " in *:*) found="$found $FAKE_V6" ;; esac ;;
+  *) exit 1 ;;
 esac
+# Like glibc's getent: nothing found is exit 2.
+[ -n "$(echo $found)" ] || exit 2
+for a in $found; do echo "$a       STREAM $2"; done
+""",
+    "python3": """#!/bin/sh
+echo $FAKE_V6
 """,
     "ip": """#!/bin/sh
 case "$*" in
@@ -1714,6 +1856,27 @@ def test_a_rehearsal_ca_is_noted_not_refused(tmp_path: Path) -> None:
     run = _run(tmp_path, {**GOOD_ENV, "ITS_ACME_CA_SERVER": staging}, GOOD_HOST)
     assert run.returncode == 0, run.stdout
     assert f"note    ACME CA is {staging}" in run.stdout
+
+
+def test_an_etc_hosts_line_for_the_name_is_not_what_lets_encrypt_sees(tmp_path: Path) -> None:
+    """cloud-init writes `127.0.1.1 <this host's name>` into /etc/hosts: no
+    false refusal when the VPS is named rmm.novieri.com. And a line written
+    by hand does not stand in for the public A record either."""
+    run = _run(tmp_path, GOOD_ENV, {**GOOD_HOST, "FAKE_HOSTS_FILE": "127.0.1.1"})
+    assert run.returncode == 0, run.stdout
+    assert "ok      rmm.novieri.com resolves to 203.0.113.10, an address of this host" in run.stdout
+    run = _run(tmp_path, GOOD_ENV, {**GOOD_HOST, "FAKE_HOSTS_FILE": "203.0.113.10", "FAKE_V4": ""})
+    assert run.returncode == 1, run.stdout
+    assert "does not resolve to an IPv4 address" in run.stdout, run.stdout
+
+
+def test_an_aaaa_record_is_seen_on_a_host_with_no_ipv6_of_its_own(tmp_path: Path) -> None:
+    """The VPS this runbook builds has one IPv4 address and no IPv6, the host
+    on which glibc's getent hides every AAAA (AI_ADDRCONFIG)."""
+    host = {**GOOD_HOST, "FAKE_V6": "2001:db8::7", "FAKE_MINE": "203.0.113.10/24"}
+    run = _run(tmp_path, GOOD_ENV, host)
+    assert run.returncode == 1, run.stdout
+    assert "has an AAAA record (2001:db8::7)" in run.stdout, run.stdout
 ```
 
 Crear `backend/tests/test_check_public_tls.py`:
@@ -1725,10 +1888,12 @@ so").
 
 Traefik serves its own self-signed certificate, without failing, until Let's
 Encrypt has issued one -- and for good when it cannot. So the check refuses
-anything a browser or an agent would refuse, and says which. Each case here is
-a local TLS server presenting one certificate the test made: one a trusted CA
-issued for the host, one for another name, Traefik's default, and an expired
-one. `openssl s_client` does the checking, as on a host.
+anything a browser or an agent would refuse, and says which; and a trusted
+certificate with fewer than 28 days left, which only a renewal that keeps
+failing produces. Each case here is a local TLS server presenting one
+certificate the test made: one a trusted CA issued for the host, one for
+another name, Traefik's default, an expired one, and one with 20 days left.
+`openssl s_client` does the checking, as on a host.
 """
 
 import datetime as dt
@@ -1792,6 +1957,7 @@ def pki(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "good": ("leaf", ca_key, "Test Root", [HOST], (-1, 30)),
         "other": ("leaf", ca_key, "Test Root", ["other.example"], (-1, 30)),
         "expired": ("leaf", ca_key, "Test Root", [HOST], (-60, -1)),
+        "short": ("leaf", ca_key, "Test Root", [HOST], (-60, 20)),
         "default": ("TRAEFIK DEFAULT CERT", None, "TRAEFIK DEFAULT CERT", None, (-1, 30)),
     }
     for case, (cn, issuer_key, issuer, sans, days) in cases.items():
@@ -1885,6 +2051,20 @@ def test_what_a_client_would_refuse_is_refused(
     assert "docker compose logs traefik | grep -i acme" in run.stderr
 
 
+@pytest.mark.parametrize("server", ["short"], indirect=True)
+def test_a_certificate_whose_renewal_is_overdue_is_refused(
+    tmp_path: Path, server: int, pki: dict[str, Path]
+) -> None:
+    """Traefik renews 30 days before expiry and looks once a day: a healthy
+    certificate never has fewer than about 29 days left. Fewer than 28 is a
+    renewal that has been failing, and nothing else says so: Let's Encrypt
+    stopped mailing expiry warnings in 2025."""
+    run = _check(tmp_path, server, "--cafile", str(pki["root"]))
+    assert run.returncode == 1, run.stdout
+    assert "REFUSE" in run.stderr and "fewer than 28 days left" in run.stderr, run.stderr
+    assert "docker compose logs traefik | grep -i acme" in run.stderr
+
+
 def test_nothing_listening_is_refused(tmp_path: Path) -> None:
     with socket.create_server(("127.0.0.1", 0)) as free:
         port = free.getsockname()[1]
@@ -1965,7 +2145,7 @@ PY
 - [ ] **Step 2: Las pruebas fallan**
 
 Run: `cd backend && .venv/bin/pytest -q tests/test_new_env_script.py tests/test_preflight_script.py tests/test_check_public_tls.py tests/test_deploy_script_steps.py tests/test_deploy_install_link.py`
-Expected: FAIL — las de `new-env.sh` y `check-public-tls.sh` porque los guiones no existen (`No such file or directory` en el `read_bytes` del guion); las 16 de `preflight.sh` (comprobado: `16 failed` con el `preflight.sh` de `1bc0e5e`, que busca `certs/fullchain.pem`); la del `host=` sin sangría; la de `deploy.sh` (`itms.toeshee.com` está); y la de `in front of Novieri RMM`.
+Expected: `48 failed, 42 passed` (medido el 2026-11-24 sobre una copia de `1bc0e5e`): las 19 de `new-env.sh` (el guion no existe, y `deploy/.env.new.*` no está en `.gitignore`) y las 8 de `check-public-tls.sh` (`No such file or directory` en el `read_bytes` del guion); las 18 de `preflight.sh` (el `preflight.sh` de `1bc0e5e` busca `certs/fullchain.pem`); la del `host=` sin sangría; la de `deploy.sh` (`itms.toeshee.com` está); y la de `in front of Novieri RMM`.
 
 - [ ] **Step 3: La implementación**
 
@@ -2100,12 +2280,18 @@ Crear `deploy/scripts/check-public-tls.sh`:
 # anything a client would refuse: an untrusted chain, a name that is not the
 # host, an expired certificate, the default one.
 #
+# AND A RENEWAL THAT KEEPS FAILING. Traefik renews 30 days before expiry and
+# looks once a day, so a healthy certificate never has fewer than about 29
+# days left; fewer than 28 means renewal has been failing for days. Nothing
+# else would say so: Let's Encrypt stopped mailing expiry warnings in 2025.
+#
 # --connect is the address to dial (default: ITMS_BIND_IP when it names one
 # address, else 127.0.0.1); the name sent as SNI and checked is always
 # ITS_PUBLIC_HOST. --cafile trusts that file instead of the system's roots:
 # for Pebble in CI, or Let's Encrypt staging's root on a rehearsal. --port is
 # for the script's own tests (backend/tests/test_check_public_tls.py).
-# Exit 0 = the certificate is good. Exit 1 = it is not, and why.
+# Exit 0 = the certificate is good, with 28 days or more left. Exit 1 = it is
+# not, and why.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # deploy/
@@ -2147,6 +2333,12 @@ while :; do
   pem="$(printf '%s\n' "$out" | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p')"
   issuer="$(printf '%s\n' "$pem" | openssl x509 -noout -issuer 2>/dev/null || true)"
   if [ "$code" = "0" ] && [ -n "$pem" ]; then
+    if ! printf '%s\n' "$pem" | openssl x509 -noout -checkend $((28 * 86400)) >/dev/null; then
+      printf 'REFUSE  the certificate on %s:%s for %s is trusted but has fewer than 28 days left (%s): Traefik renews at 30, so its renewal has been failing\n' \
+        "$connect" "$port" "$host" "$(printf '%s\n' "$pem" | openssl x509 -noout -enddate)" >&2
+      printf '        What Traefik said about it: docker compose logs traefik | grep -i acme\n' >&2
+      exit 1
+    fi
     printf 'ok      %s:%s presents a trusted certificate for %s\n' "$connect" "$port" "$host"
     printf '%s\n' "$pem" | openssl x509 -noout -issuer -ext subjectAltName -enddate | sed 's/^/        /'
     exit 0
@@ -2219,7 +2411,7 @@ while IFS='=' read -r key value; do
   if printf '%s\n' $first_boot_only | grep -qx "$key"; then
     printf '  note    %s is still change-me -- expected before first boot; §3.2/§3.4 issue it\n' "$key"
   else
-    refuse "$key is still change-me. openssl rand -base64 24"
+    refuse "$key is still change-me. openssl rand -hex 24 (or start over with scripts/new-env.sh)"
   fi
 done < .env
 
@@ -2281,16 +2473,37 @@ case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
 esac
 
 # The name must reach THIS machine, or Let's Encrypt's validation reaches
-# another. Only IPv4: :443 is published on ITMS_BIND_IP, an IPv4 address, and
-# Let's Encrypt "will always prefer the IPv6 addresses for the initial
-# connection" and falls back to IPv4 only on a timeout -- an AAAA record
-# fails the validation with "connection refused".
+# another. ASKED OF DNS ALONE, as Let's Encrypt asks it: `getent -s dns` skips
+# /etc/hosts, where cloud-init writes `127.0.1.1 <this host's name>` and where
+# a line written by hand would hide a missing or wrong A record.
+#
+# IPv4 ONLY (decided 2026-11-24). This deployment is one IPv4 address: the
+# runbook, host-network.md and this script reason about it, and nothing
+# checks that :443 and :8443 answer on IPv6. So an AAAA record would send
+# browsers and agents, which try IPv6 first, where nobody has checked this
+# stack answers -- or, if it is another machine's, to that machine. (Not for
+# Let's Encrypt's sake: its TLS-ALPN-01 validator falls back to IPv4 after any
+# IPv6 error, Boulder va/tlsalpn.go.) The AAAA is asked through Python's
+# getaddrinfo, not `getent ahosts`: glibc's getent sets AI_ADDRCONFIG, which
+# hides every AAAA on a host with no IPv6 address of its own -- exactly the
+# VPS this runbook builds. `|| true`: getent exits 2 for a name with no
+# address, which pipefail would turn into this script dying silently here.
 if [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
   if ! command -v getent >/dev/null 2>&1; then
     printf '  note    %s could not be resolved -- getent is not installed\n' "$public_host"
   else
-    v4="$(getent ahostsv4 "$public_host" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
-    v6="$(getent ahosts "$public_host" 2>/dev/null | awk '{print $1}' | grep ':' | grep -v '^::ffff:' | sort -u | tr '\n' ' ' || true)"
+    v4="$(getent -s dns ahostsv4 "$public_host" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
+    v6=""
+    if command -v python3 >/dev/null 2>&1; then
+      v6="$(python3 -I -c 'import socket, sys
+try:
+    found = socket.getaddrinfo(sys.argv[1], None, socket.AF_INET6, socket.SOCK_STREAM)
+except OSError:
+    found = []
+print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:")})))' "$public_host" 2>/dev/null || true)"
+    else
+      printf '  note    %s has no AAAA check -- python3 is not installed\n' "$public_host"
+    fi
     if [ -z "$v4" ]; then
       refuse "$public_host does not resolve to an IPv4 address. Create its A record, pointing at this server, and wait for it to answer before the first start."
     else
@@ -2316,7 +2529,7 @@ if [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
       fi
     fi
     if [ -n "$v6" ]; then
-      refuse "$public_host has an AAAA record (${v6% }). :443 is published on IPv4 only, and Let's Encrypt tries IPv6 first and does not fall back on 'connection refused'. Remove the AAAA record."
+      refuse "$public_host has an AAAA record (${v6% }). This deployment is IPv4 only: browsers and agents try IPv6 first, and nothing has checked that this stack answers there (or the address is another machine's). Remove the AAAA record."
     fi
   fi
 fi
@@ -2394,10 +2607,13 @@ BLOCK = """IT_SUITE_VERSION=dev
 # AAAA record. The gateway on :8443 does NOT use this certificate: it presents
 # one from the internal CA (README step 6), which agents pin.
 ITS_PUBLIC_HOST=your-host
-# The address of the Let's Encrypt account Traefik registers, for its account
-# and policy notices. Let's Encrypt stopped mailing expiry warnings on
-# 2025-06-04, so nothing about renewal depends on this mailbox; Traefik will
-# not start without one. scripts/new-env.sh asks for it.
+# The contact address of the Let's Encrypt account Traefik registers.
+# Required: compose will not start Traefik without it (docker-compose.yml,
+# ${ITS_ACME_EMAIL:?}), and scripts/new-env.sh asks for it. Let's Encrypt
+# stopped mailing expiry warnings on 2025-06-04 and no longer keeps the
+# address on the account (it passes it to ISRG's mailing list), so nothing
+# about renewal depends on this mailbox: scripts/check-public-tls.sh refuses
+# a certificate with fewer than 28 days left.
 ITS_ACME_EMAIL=
 # Which ACME directory. Production by default. Let's Encrypt issues at most 5
 # certificates a week for one exact set of names, and every first boot with an
@@ -2475,6 +2691,11 @@ DEPLOY_NEW = (
     "CODE=\"$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "
     "\"https://${PUBLIC_HOST:-localhost}/api/v1/devices\" || echo 000)\"\n"
 )
+PROBE_OLD = 'warn "API returned $CODE (expected 401). 404 usually means api is still starting."\n'
+PROBE_NEW = (
+    'warn "API returned $CODE (expected 401). 503 means the api is not healthy yet '
+    "(Traefik's api-unavailable router); 404 means Traefik has no router for this host.\"\n"
+)
 TLS_OLD = 'DEPLOY_FINISHED=1\n'
 TLS_NEW = (
     "# The certificate on :443, which Traefik asks Let's Encrypt for and renews by\n"
@@ -2494,7 +2715,7 @@ WORD = re.compile(r"(?<![-\w./])ITMS(?![-\w]|\.\w)")
 
 deploy = Path("deploy/scripts/deploy.sh")
 text = deploy.read_text()
-for old, new in ((DEPLOY_OLD, DEPLOY_NEW), (TLS_OLD, TLS_NEW)):
+for old, new in ((DEPLOY_OLD, DEPLOY_NEW), (PROBE_OLD, PROBE_NEW), (TLS_OLD, TLS_NEW)):
     if text.count(old) != 1:
         sys.exit(f"deploy.sh: not there exactly once: {old[:60]!r}")
     text = text.replace(old, new)
@@ -2506,18 +2727,33 @@ for rel, expected in (("deploy/scripts/host-check.sh", 13), ("deploy/scripts/ins
     if count != expected:
         sys.exit(f"{rel}: {count} ITMS, the plan says {expected}")
     path.write_text(new)
-print("rewrote deploy/scripts/deploy.sh, host-check.sh, install-backup-timer.sh")
+# new-env.sh's temporary file holds four fresh secrets until the hard link; a
+# SIGKILL or a power cut leaves it in deploy/. (Task 3 edits another hunk of
+# .gitignore, lines 28-34; the two merge without a conflict.)
+ignore = Path(".gitignore")
+body = ignore.read_text()
+GITIGNORE_OLD = ".ruff_cache/\n.env\n"
+GITIGNORE_NEW = (
+    ".ruff_cache/\n.env\n"
+    "# What deploy/scripts/new-env.sh writes before it links it to deploy/.env:\n"
+    "# four fresh secrets, left behind only by a SIGKILL or a power cut.\n"
+    "deploy/.env.new.*\n"
+)
+if body.count(GITIGNORE_OLD) != 1:
+    sys.exit(".gitignore: the .env line is not there exactly once")
+ignore.write_text(body.replace(GITIGNORE_OLD, GITIGNORE_NEW))
+print("rewrote deploy/scripts/deploy.sh, host-check.sh, install-backup-timer.sh, .gitignore")
 PY
 chmod +x deploy/scripts/new-env.sh deploy/scripts/check-public-tls.sh
 bash -n deploy/scripts/new-env.sh deploy/scripts/check-public-tls.sh deploy/scripts/preflight.sh deploy/scripts/deploy.sh deploy/scripts/host-check.sh deploy/scripts/install-backup-timer.sh && echo syntax-ok
 ```
 
-Expected: `rewrote deploy/.env.example`, `rewrote deploy/scripts/deploy.sh, host-check.sh, install-backup-timer.sh`, `syntax-ok`.
+Expected: `rewrote deploy/.env.example`, `rewrote deploy/scripts/deploy.sh, host-check.sh, install-backup-timer.sh, .gitignore`, `syntax-ok`.
 
 - [ ] **Step 4: Las pruebas pasan**
 
 Run (desde `backend/`): `.venv/bin/pytest -q tests/test_new_env_script.py tests/test_preflight_script.py tests/test_check_public_tls.py tests/test_deploy_script_steps.py tests/test_deploy_install_link.py tests/test_deploy_env_documentation.py tests/test_deploy_scripts.py tests/test_setup_api.py tests/test_openbao_seal_script.py tests/test_deploy_runbook_secrets.py && .venv/bin/ruff check tests`
-Expected: `168 passed` (en una copia de `1bc0e5e` el 2026-11-23), `All checks passed!`.
+Expected: `172 passed` (en una copia de `1bc0e5e`, medido de nuevo el 2026-11-24 con las cuatro pruebas que añadió la revisión previa: el temporal en `.gitignore`, `/etc/hosts`, el `AAAA` en un host sin IPv6 y los 28 días), `All checks passed!`.
 
 Y a mano, desde `deploy/`, lo que verá el operador (con el `.env.example` de esta tarea; borrar el `.env` después):
 
@@ -2553,7 +2789,7 @@ exit 1
 - [ ] **Step 5: Commit**
 
 ```bash
-git add deploy/scripts/new-env.sh deploy/scripts/check-public-tls.sh deploy/scripts/preflight.sh deploy/scripts/deploy.sh deploy/scripts/host-check.sh deploy/scripts/install-backup-timer.sh deploy/.env.example backend/tests/test_new_env_script.py backend/tests/test_preflight_script.py backend/tests/test_check_public_tls.py backend/tests/test_deploy_script_steps.py backend/tests/test_deploy_install_link.py
+git add .gitignore deploy/scripts/new-env.sh deploy/scripts/check-public-tls.sh deploy/scripts/preflight.sh deploy/scripts/deploy.sh deploy/scripts/host-check.sh deploy/scripts/install-backup-timer.sh deploy/.env.example backend/tests/test_new_env_script.py backend/tests/test_preflight_script.py backend/tests/test_check_public_tls.py backend/tests/test_deploy_script_steps.py backend/tests/test_deploy_install_link.py
 git commit -m "feat(deploy): new-env.sh writes a new host's .env; preflight checks the name, DNS, ports and Docker; check-public-tls.sh after start"
 ```
 
@@ -2578,7 +2814,17 @@ git commit -m "feat(deploy): new-env.sh writes a new host's .env; preflight chec
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1` y la preparación de Global Constraints.
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Después, la preparación de Global Constraints.
 
 - [ ] **Step 1: Las pruebas**
 
@@ -2864,7 +3110,7 @@ Expected: cinco líneas `rewrote app/...`.
 - [ ] **Step 4: Las pruebas pasan**
 
 Run: `.venv/bin/pytest -q tests/test_oauth_token.py tests/test_mcp_grant_lifecycle.py tests/test_oauth_retention.py tests/test_mcp_admin_api.py tests/test_audit_actor_names.py tests/test_auth_password_reset.py tests/test_user_admin_api.py tests/test_contact_access_api.py tests/test_auth_retention.py tests/test_auth_recover_command.py && .venv/bin/mypy app && .venv/bin/ruff check app tests`
-Expected: PASS (en la copia: `209 passed` las cinco primeras, `110 passed` las cuatro siguientes), `Success`, `All checks passed!`.
+Expected: PASS (en la copia: `209 passed` las cinco primeras, `132 passed` las cinco siguientes: 130 que recogen sobre `1bc0e5e` más las dos nuevas; recontado el 2026-11-24), `Success`, `All checks passed!`.
 
 - [ ] **Step 5: Commit**
 
@@ -2886,13 +3132,23 @@ git commit -m "fix(auth): a reuse on an ended AI grant is audited; a mailed link
 - Produces (solo en el paquete de pruebas `capabilities_test`): `waitResults(ctx context.Context, outbound <-chan []byte, ids []string) (map[string]wire.JobResult, error)`, `untilTestEnds(t *testing.T) (context.Context, context.CancelFunc)`; `awaitResults(t, ids)` y `awaitReconnect(t, after)` pierden su argumento de duración.
 
 **Decisiones de la tarea.**
-- **Qué prueba es (diseño §6, «el presupuesto fijo de 15 s de la prueba del agente Go»):** `TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect`, la única con un plazo fijo de 15 s del que el código guarda un fallo en un *runner* cargado («no job_result arrived within 15s for 1 of 3 jobs», segunda vez el 2026-09-08, `:1057-1072`). Sus dos esperas de 15 s (`:1133`, `:1148`) pasan a ser una condición. Si el operador se refería a otra prueba, la Q4 lo deja abierto.
+- **Qué prueba es (diseño §6, «el presupuesto fijo de 15 s de la prueba del agente Go»):** `TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect`, la única con un plazo fijo de 15 s del que el código guarda un fallo en un *runner* cargado («no job_result arrived within 15s for 1 of 3 jobs», segunda vez el 2026-09-08, `:1057-1072`). Sus dos esperas de 15 s (`:1133`, `:1148`) pasan a ser una condición. **Es esa prueba**: el coordinador mantuvo esta tarea el 2026-11-24 (`.git/sdd/decisiones-p34.md`) tras la revisión previa, que lo comprobó: el comentario de la prueba (`:1056-1082`) llama «the budget» a esos 15 s y guarda los dos fallos de CI, y ninguna otra prueba Go tiene un plazo fijo de 15 s con un fallo registrado (`remote/remote_test.go:83` es un `select` sin fallo guardado; `backup/snapshot_test.go:504` es una cota superior que tiene que seguir fija).
 - **La condición mantiene la señal que el comentario defendía** («Raising 15 s … would destroy the only signal», `:1074-1082`): un trabajo **varado** no contesta nunca y la prueba sigue fallando, en el plazo del propio binario de prueba (`go test -timeout`, 10 min por defecto) menos 30 s, con el mismo diagnóstico; uno **lento** se espera y su tiempo queda en el registro (`t.Logf`). El comentario de la prueba lo dice, fechado.
 - **`waitResults` devuelve un error en lugar de llamar a `t.Fatal`**: así su fallo se puede probar (la prueba nueva lo hace con un `context` de 200 ms) sin un `testing.T` falso.
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1`.
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Esta tarea no necesita Postgres, Redis ni Docker: solo Go, desde `agent/`.
 
 - [ ] **Step 1: La prueba de la espera**
 
@@ -3189,7 +3445,17 @@ git commit -m "test(agent): the disconnect test waits for its answers until the 
 
 - [ ] **Step 0: La worktree**
 
-Run: `git log --oneline -1`, la preparación de Global Constraints con Docker y las imágenes base de la sesión.
+Run, desde la raíz de la worktree, la comprobación de Global Constraints («Pistas en paralelo») y la de esta oleada:
+
+```bash
+git fetch -q origin claude/compassionate-bardeen-vgtwus
+git log --oneline -1
+git merge-base --is-ancestor HEAD origin/claude/compassionate-bardeen-vgtwus && echo ON-PROJECT-BRANCH
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+git diff --quiet 1bc0e5e HEAD -- backend agent deploy .github scripts && echo CODE-AS-MEASURED
+```
+
+Expected: `21e72ec docs(plan): project 3 plan, pre-flight fixes in progress (snapshot)` (o el commit posterior de `origin/claude/compassionate-bardeen-vgtwus` del que el coordinador creó la worktree), `ON-PROJECT-BRANCH`, `HAS-PR-13`, `CODE-AS-MEASURED`. Si la primera línea es `dd062f8 Merge pull request #12 …` o falta alguna de las otras tres, se para y se avisa al coordinador. Después, la preparación de Global Constraints con Docker y las imágenes base de la sesión.
 
 - [ ] **Step 1: Las pruebas**
 
@@ -3461,7 +3727,8 @@ with; the step that runs both removes it however it ends.
     \"\"\"`NAME:ADDRESS` for `--resolve`; an IPv4 address, the only kind the
     stack publishes on.\"\"\"
     name, _, address = value.rpartition(":")
-    if not re.fullmatch(r"[a-z0-9.-]+", name) or not re.fullmatch(r"\\d{1,3}(\\.\\d{1,3}){3}", address):
+    ipv4 = re.fullmatch(r"\\d{1,3}(\\.\\d{1,3}){3}", address)
+    if not re.fullmatch(r"[a-z0-9.-]+", name) or not ipv4:
         raise argparse.ArgumentTypeError(f"{value!r} is not NAME:IPv4-ADDRESS")
     return name, address
 
@@ -3720,8 +3987,8 @@ Expected: `rewrote deploy/ci/mcp_flow.py`, `rewrote .github/workflows/ci.yml`.
 
 - [ ] **Step 4: Las pruebas pasan**
 
-Run (desde `backend/`): `.venv/bin/pytest -q tests/test_ci_mcp_flow.py && .venv/bin/ruff check tests`
-Expected: `51 passed`, `All checks passed!` (comprobado sobre una copia de `1bc0e5e` con las Tasks 3 y 7).
+Run (desde `backend/`): `.venv/bin/pytest -q tests/test_ci_mcp_flow.py && .venv/bin/ruff check tests && .venv/bin/ruff check --config pyproject.toml ../deploy/ci/mcp_flow.py`
+Expected: `51 passed`, `All checks passed!` dos veces (comprobado sobre una copia de `1bc0e5e` con las Tasks 3 y 7; `mcp_flow.py` estaba limpio antes de esta tarea y lo sigue estando: la CI no lo lee, pero la Task 10 pasa la misma regla a su vecino `agent_flow.py`).
 
 - [ ] **Step 5: Commit**
 
@@ -3812,27 +4079,41 @@ Si un paso falla por algo que este plan no previó, se corrige el paso (no la co
 **Files:**
 - Rename (`git mv`): `agent/packaging/darwin/com.toeshee.itsagent.plist` → `com.novieri.rmm.agent.plist`; `agent/packaging/linux/its-agent-enroll` → `novieri-agent-enroll`; `agent/packaging/linux/its-agent.service` → `novieri-agent.service`; `agent/packaging/windows/its-agent-enroll.ps1` → `novieri-agent-enroll.ps1`; `backend/app/modules/agent_distribution/installers/darwin/com.toeshee.itsagent.plist` → `com.novieri.rmm.agent.plist`; `backend/app/modules/agent_distribution/installers/linux/its-agent.service` → `novieri-agent.service`
 - Modify (por reglas, un guion): 102 archivos de `agent/` (58 de código y empaquetado, 44 pruebas; `testdata/` excluido; la lista la imprime el guion y el Apéndice D la da por archivo); `backend/app/core/i18n/es.py`, `backend/app/core/storage.py`, `backend/app/modules/agent_distribution/{link_page,managed,msi,service}.py` y sus cinco copias de instaladores, `backend/app/services/msi_build.py`; `.github/workflows/{ci.yml,release-agent.yml,agent-update-e2e.yml}`; `scripts/build_agent.sh`; `deploy/WINDOWS-PUSH.md`; `docs/kernel/wire-protocol/README.md` (una frase), `docs/modules/agent-distribution/{first-run-verification,spec,spec-self-update,spec-push-install,spec-managed-distribution,authenticode-signing}.md`, `docs/modules/agent/{README,open-questions}.md`; y 14 pruebas del backend: `test_agent_managed_deployment.py`, `test_agent_push_dispatch.py`, `test_agent_release_api.py`, `test_deploy_runbook_secrets.py`, `test_i18n_modules_ops.py`, `test_install_command_shape.py`, `test_install_link_docs.py`, `test_install_link_msi.py`, `test_install_link_page.py`, `test_installer_scripts.py`, `test_msi_build.py`, `test_objectstore_agent_release.py`, `test_storage_presign_read.py`, `test_storage_public_endpoint.py`
-- Modify (a mano, en el mismo guion de la Step 3b): `agent/cmd/release-sign/main.go:113`, `agent/internal/install/msi_test.go:93`, `agent/packaging/linux/debian/control.in:4,7`, `backend/app/services/msi_build.py:68,73-76,347`, y siete reajustes de línea en `es.py`, `link_page.py` y `msi.py`
+- Modify (a mano, en el mismo guion de la Step 3b): `agent/cmd/release-sign/main.go:113`, `agent/internal/install/msi_test.go:93`, `agent/packaging/linux/debian/control.in:4,7`, `backend/app/services/msi_build.py:68,73-76,347`, `backend/tests/test_msi_build.py:98,200-204` (las dos listas de la tabla `File`, en el orden en que `sorted` las da), y los reajustes de línea en `es.py`, `link_page.py` y `msi.py`
+- Modify (por reglas propias, en el mismo guion de la Step 3a): los nombres en minúsculas que ve un cliente (resolución del coordinador del 2026-11-24): `agent/internal/capabilities/backup/{snapshot.go:29,34,snapshot_auto.go:32,restore.go:534}` y sus pruebas, el prefijo `itms:` de `backend/app/modules/agent_distribution/link_page.py:442,451,455,467,486`, y `docs/modules/backup/{agent-engine.md:109-113,spec-server-backup.md:348-349}`
 - Create: `backend/tests/test_agent_names_both_sides.py`
 
 **Interfaces:**
 - Consumes: el árbol con la oleada 1 (la Task 1 ya cambió las entradas de `es.py` que no son de la distribución del agente; esta cambia las que quedan).
-- Produces (los nombres de §1.1 del lado del agente, que las Tasks 9, 10 y 12 usan): el binario y el servicio `novieri-agent`; `novieri-agent-enroll`; el artefacto `novieri-agent-linux-amd64` (y los otros cinco); `/var/lib/novieri-agent` como directorio de datos por defecto en Linux y macOS, `%ProgramData%\NovieriRMM\agent` en Windows; `FilePrefix = "NovieriRMM-Agent-Setup_"`; `msi_build.UPGRADE_NAMESPACE = uuid.UUID("8814cc17-6469-4df7-93f9-0f75ecdbb6a9")`.
+- Produces (los nombres de §1.1 del lado del agente, que las Tasks 9, 10 y 12 usan): el binario y el servicio `novieri-agent`; `novieri-agent-enroll`; el artefacto `novieri-agent-linux-amd64` (y los otros cinco); `/var/lib/novieri-agent` como directorio de datos por defecto en Linux y macOS, `%ProgramData%\NovieriRMM\agent` en Windows; `/var/lib/novieri-agent-snap` como raíz de los montajes de instantáneas (hermana del directorio de datos, no dentro); las instantáneas `novieri-snap-<tag>` (LVM y ZFS) y `.novieri-snap-<tag>` (btrfs); el temporal de una restauración `.novieri-restore-*`; el prefijo `novieri-agent:` de los mensajes del comando de instalación; `FilePrefix = "NovieriRMM-Agent-Setup_"`; `msi_build.UPGRADE_NAMESPACE = uuid.UUID("8814cc17-6469-4df7-93f9-0f75ecdbb6a9")`.
 
 **Decisiones de la tarea.**
 - **Todo lo que cuelga del nombre del servicio cambia con él** (P4-B-05): `/var/lib/its-agent`, `/etc/its-agent`, `/var/log/its-agent`, `/usr/share/doc/its-agent`, `.its-agent.new`, `its-agent-install` (el directorio temporal de Windows) pasan a `novieri-agent`. El diseño nombra «binario y servicio … y sus rutas»; dejar los directorios con el nombre viejo sería «lo de los equipos» sin cambiar.
-- **Las instantáneas** (`toeshee-snap-`, `/var/lib/toeshee-agent/snap`, `capabilities/backup/snapshot.go:25,29`) pasan a `novieri-snap-` y `/var/lib/novieri-agent/snap`: son nombres que un administrador ve en `lvs` y en el disco del cliente, y no hay instantáneas viejas que limpiar (B1).
-- **Las clases de ventana de Windows** (`ITMSRemoteConsent`, `ITMSRemoteIndicator`, `ITMSRemoteBorder`, `remote/helper/ui_windows.go:117-119`) pasan a `NovieriRMMRemote…`: solo las usa ese archivo (comprobado), y así la guarda no necesita una excepción.
+- **Las instantáneas** (`toeshee-snap-`, `capabilities/backup/snapshot.go:25`) pasan a `novieri-snap-`: son nombres que un administrador ve en `lvs` y en el disco del cliente, y no hay instantáneas viejas que limpiar (B1). **Las de ZFS y btrfs también** (resolución del coordinador del 2026-11-24; el borrador las dejaba): `snapNamePrefix = "itms-"` (`snapshot_auto.go:32`, `tank/data@itms-<tag>` en `zfs list -t snapshot`) pasa a `"novieri-snap-"`, y `btrfsSnapDir = ".itms-snap-"` (`snapshot.go:34`, un subvolumen en el disco del cliente) a `".novieri-snap-"`. El de ZFS no queda en `novieri-`: el barrido de huérfanos borra todo lo que empiece por el prefijo (`snapshot_auto.go:390`), y `novieri-snap-` es más estrecho que cualquier nombre que un administrador use para sus propias instantáneas; es el mismo que el de LVM. Igual el temporal que una restauración deja junto al archivo que restaura, `.itms-restore-*` (`restore.go:534`) → `.novieri-restore-*`. Los documentos que los nombran (`docs/modules/backup/agent-engine.md:109-113`, `spec-server-backup.md:348-349`) cambian con ellos, con esas reglas y ninguna otra.
+- **La raíz de los montajes, `/var/lib/toeshee-agent/snap` (`snapshot.go:29`), pasa a `/var/lib/novieri-agent-snap`, no a `/var/lib/novieri-agent/snap`.** Hoy es hermana del directorio de datos (`/var/lib/its-agent`); la regla de texto del borrador la metía **dentro** del nuevo (`/var/lib/novieri-agent`), un cambio de conducta: la desinstalación hace `os.RemoveAll` del directorio de datos (`uninstall/helper.go:95`) y bajaría a un montaje de solo lectura que un fallo hubiera dejado (EROFS), y `ReadWritePaths=/var/lib/novieri-agent` de la unidad pasaría a cubrir la raíz de los montajes, que hoy no cubre. Hermana, como hoy.
+- **El prefijo de los mensajes del comando de instalación**, `itms:` (`link_page.py:442-487`; «itms: installed. This computer appears in …»), pasa a `novieri-agent:`, el nombre del programa que instala, como dicen los mensajes de una orden de shell. Una prueba nueva lo fija sobre el guion que devuelve `link_page.install_script`.
+- **Las clases de ventana de Windows se quedan** (`ITMSRemoteConsent`, `ITMSRemoteIndicator`, `ITMSRemoteBorder`, `remote/helper/ui_windows.go:117-119`; revisión previa, M-4): son nombres de `RegisterClassEx` que nadie ve (lo que se ve son los títulos de las ventanas, que sí cambian), y el diseño deja lo interno (§1: «Un identificador interno no lo ve nadie, y cambiarlo solo añade riesgo»; §8). La guarda no necesita excepción: `\bITMS\b` no casa dentro de `ITMSRemote…` (Task 11).
 - **Lo que no cambia** (§1.2): `its-agent-release/v1` (la regla lo excluye: es la preimagen de la firma de la versión, `update/releasesig.go:50`, `msi.py:120`); los `ITS_AGENT_*`; `X-ITS-Agent-*`; `ITMSRSP1`; el módulo Go; los `ITMS_E2E_*` de las pruebas del agente; los `Id` internos del WiX (`its_agent_exe`, `ItsMsiInstall`, `ItsMsiUninstall`), que no ve nadie y que `EXPECTED_CUSTOM_ACTIONS` fija.
-- **Un defecto que el cambio de nombre destapa, arreglado aquí:** `verify_msi` compara la tabla `File` ordenada con `[AGENT_FILE, SETTINGS_FILE]` sin ordenar (`msi_build.py:346-347`). Funcionaba porque `its-agent.exe` va antes que `msi-enroll.json`; `novieri-agent.exe` va después, y **todo MSI construido se rechazaría como `wrong_files`**. Lo encontró `test_i18n_modules_ops.py::test_every_builder_error_has_a_spanish_sentence_and_an_english_one_that_is_unchanged` en la copia de prueba (le faltaban `no_service_stop` y `wrong_template`, los dos errores que van después). Pasa a `sorted([AGENT_FILE, SETTINGS_FILE])`.
+- **Un defecto que el cambio de nombre destapa, arreglado aquí:** `verify_msi` compara la tabla `File` ordenada con `[AGENT_FILE, SETTINGS_FILE]` sin ordenar (`msi_build.py:346-347`). Funcionaba porque `its-agent.exe` va antes que `msi-enroll.json`; `novieri-agent.exe` va después, y **todo MSI construido se rechazaría como `wrong_files`**. Lo encontró `test_i18n_modules_ops.py::test_every_builder_error_has_a_spanish_sentence_and_an_english_one_that_is_unchanged` en la copia de prueba (le faltaban `no_service_stop` y `wrong_template`, los dos errores que van después). Pasa a `sorted([AGENT_FILE, SETTINGS_FILE])`. **Y el mismo error está en las pruebas**: `test_msi_build.py:98` y `:200-204` comparan la tabla ordenada con una lista en el orden viejo, que la regla deja `["novieri-agent.exe", "msi-enroll.json", …]`. Sin `msitools` esas pruebas se saltan y el fallo no se ve aquí; la CI los instala (`ci.yml:130-138`, «A missing msitools is a failure here») y se pondría en rojo (revisión previa, R1: `At index 0 diff: 'msi-enroll.json' != 'novieri-agent.exe'`). El Step 3b las pone en el orden de `sorted`, y el Step 4 corre con `wixl` y `msitools` instalados.
+- **La clave de los artefactos en el *bucket* cambia** (revisión previa, R6): `core/storage.py:169` la deriva del nombre (`<prefijo>/<versión>/novieri-agent-<os>-<arch>`), `service.py:97` la guarda en `agent_releases.storage_ref`, y `service.py:144` y `api.py:223` la vuelven a derivar («Re-derive rather than trusting the stored ref»). En una base con versiones subidas antes de esta tarea, esas versiones se firmarían hacia un objeto que no existe (404 a cada agente y comando de instalación) y su borrado dejaría el objeto. En el host nuevo no hay ninguna (B1, P7), así que no hace falta migración; pero esta compilación no se apunta a la base de `itms.toeshee.com` (y «Lo que el despliegue tiene que saber», punto 12).
+- **La regla del host no entra en dos pruebas de la oleada 1** (revisión previa, R5): `test_deploy_acme.py` (Task 3) y `test_deploy_script_steps.py` (Task 4) nombran `itms.toeshee.com` **para negarlo** (un nombre que no es el de la consola no llega a ningún router; `deploy.sh` ya no lleva el host de un despliegue). Con la regla, la primera pediría que `rmm.novieri.com` —el `PUBLIC_HOST` del modelo— no llegara a ningún router (roja), y la segunda dejaría de vigilar el host viejo (verde y vacía). El guion las excluye de esa regla (`NEGATIVE_HOST`), y el Step 4 las corre.
 - **El `UpgradeCode` nuevo** (diseño §1.1): `UPGRADE_NAMESPACE` nuevo, `8814cc17-6469-4df7-93f9-0f75ecdbb6a9` (generado con `uuid.uuid4()` el 2026-11-23 para este plan); el `UpgradeCode` sigue siendo `uuid5(UPGRADE_NAMESPACE, org_id)`, uno por organización. El comentario dice el valor anterior y por qué cambió una vez.
-- **`control.in`:** `Maintainer: Novieri <it@novieri.example>` (un dominio `.example`, como el de antes: no se inventa un buzón real) y **sin `Homepage:`**: el repositorio es privado y no hay una página pública que nombrar (campo opcional en Debian; `packaging_test.go` no lo pide, comprobado). Pregunta Q5.
+- **`control.in`:** `Maintainer: Novieri <it@novieri.example>` (un dominio `.example`, como el de antes: no se inventa un buzón real) y **sin `Homepage:`**: el repositorio es privado y no hay una página pública que nombrar (campo opcional en Debian; `packaging_test.go` no lo pide, comprobado). **Lo confirmó el operador el 2026-11-24** (`.git/sdd/decisiones-p34.md`: no hay buzón real).
 - **`docs/kernel/wire-protocol/README.md:525`** cambia el nombre del binario en la orden que el agente ejecuta en un instalador remoto; ningún esquema ni `testdata` cambia (Step 4 lo comprueba). Esa orden la construye el agente con constantes compiladas (2a(b)): no viaja en ningún campo firmado.
 - **La regla de la palabra `ITMS` no se aplica a las pruebas del backend en general** (allí «ITMS» es a menudo el valor de un *fixture*: el nombre visible de un relé SMTP, un host en mayúsculas), solo a las cinco que leen los textos que esta tarea cambia; y nunca dentro de un nombre de host (`ITMS.Example.com`).
 
 - [ ] **Step 0: La worktree, con la oleada 1**
 
-Run: `git log --oneline -1`; fusionar la rama del coordinador; `grep -c Toeshee backend/app/core/i18n/es.py` imprime `0` (la Task 1 está dentro).
+Run, desde la raíz de la worktree (creada de `origin/claude/compassionate-bardeen-vgtwus`, nunca de la `main` local: Global Constraints, «Pistas en paralelo»), después de fusionar la rama del coordinador con la oleada 1 (`git merge --no-edit` de la rama que él nombra):
+
+```bash
+git log --oneline -1
+git merge-base --is-ancestor 6a14dbc HEAD && echo HAS-PR-13
+grep -c Toeshee backend/app/core/i18n/es.py
+ls backend/tests/test_deploy_acme.py && grep -c 'itms.toeshee.com' backend/tests/test_deploy_acme.py backend/tests/test_deploy_script_steps.py
+```
+
+Expected: la primera línea es la fusión con la rama del coordinador (o su cabeza, si la fusión fue rápida), nunca `dd062f8 Merge pull request #12 …`; después `HAS-PR-13` y `0` (la Task 1 está dentro), `backend/tests/test_deploy_acme.py`, y `backend/tests/test_deploy_acme.py:1` y `backend/tests/test_deploy_script_steps.py:1` (las dos pruebas de las Tasks 3 y 4 que nombran el host viejo para negarlo, y que el Step 3a deja como están). Si no, se para y se avisa al coordinador. Después, la preparación de Global Constraints, y para las pruebas del MSI, `wixl` y `msitools`: `apt-get install -y wixl msitools` (la CI los instala, `ci.yml:130-138`, y sin ellos 17 pruebas se saltan en lugar de correr).
 
 - [ ] **Step 1: La prueba de los dos lados**
 
@@ -3850,6 +4131,8 @@ stores are the files `release-sign` signs and the release workflow uploads,
 and the install command carries byte copies of the packaging. A name changed
 on one side only breaks an install with no error on either side's own tests.
 These read the Go source and the workflow beside the Python they pair with.
+And the names a client's computer shows in lower case (decided 2026-11-24):
+the install command's messages, the snapshots, a restore's temporary file.
 """
 
 import re
@@ -3930,19 +4213,40 @@ def test_the_paths_on_an_endpoint_are_novieris() -> None:
     config = (AGENT / "internal/config/config.go").read_text()
     assert 'filepath.Join(base, "NovieriRMM", "agent")' in config
     assert 'filepath.Join("/var", "lib", "novieri-agent")' in config
-    snapshot = (AGENT / "internal/capabilities/backup/snapshot.go").read_text()
+    backup = AGENT / "internal/capabilities/backup"
+    snapshot = (backup / "snapshot.go").read_text()
     assert 'snapTagPrefix = "novieri-snap-"' in snapshot
-    assert 'snapMountRoot = "/var/lib/novieri-agent/snap"' in snapshot
+    # A sibling of the data directory, as before: never inside it, where the
+    # uninstaller's RemoveAll would walk into a stale read-only mount.
+    assert 'snapMountRoot = "/var/lib/novieri-agent-snap"' in snapshot
+    assert 'btrfsSnapDir = ".novieri-snap-"' in snapshot
+    assert 'snapNamePrefix = "novieri-snap-"' in (backup / "snapshot_auto.go").read_text()
+    assert '".novieri-restore-*"' in (backup / "restore.go").read_text()
     control = (AGENT / "packaging/linux/debian/control.in").read_text()
     assert control.startswith("Package: novieri-agent\n")
     assert "Maintainer: Novieri <it@novieri.example>" in control
+    assert "Homepage:" not in control
     assert "Description: Novieri RMM endpoint agent" in control
+    # The uninstaller removes the package by the name it was built with.
+    linux = (AGENT / "internal/capabilities/uninstall/system_linux.go").read_text()
+    assert '"dpkg", "--purge", "novieri-agent"' in linux
+    assert '"/var/lib/dpkg/info/novieri-agent.list"' in linux
+
+
+def test_the_install_command_speaks_as_the_agent() -> None:
+    """What a person reads in the terminal of the computer being added."""
+    script = link_page.install_script(
+        console="https://rmm.novieri.com", code="c" * 32, releases={}, presign=lambda _r: ""
+    )
+    assert 'echo "novieri-agent: run this with sudo" >&2' in script
+    assert "novieri-agent: installed. This computer appears in Novieri RMM" in script
+    assert "itms" not in script and "ITMS" not in script
 ```
 
 - [ ] **Step 2: Falla**
 
 Run: `cd backend && .venv/bin/pytest -q tests/test_agent_names_both_sides.py`
-Expected: `6 failed` (comprobado sobre `1bc0e5e`): `'ITMS-Agent-Setup_' == 'NovieriRMM-Agent-Setup_'`, `'its-agent' == 'novieri-agent'`, el `UPGRADE_NAMESPACE` viejo, `com.toeshee.itsagent`, `its-agent-linux-amd64`, `/opt/toeshee`.
+Expected: `7 failed` (comprobado el 2026-11-24 sobre `1bc0e5e` con la oleada 1): `'ITMS-Agent-Setup_' == 'NovieriRMM-Agent-Setup_'`, `'its-agent' == 'novieri-agent'`, el `UPGRADE_NAMESPACE` viejo, `com.toeshee.itsagent`, `its-agent-linux-amd64`, `/opt/toeshee`, y el comando de instalación que dice `itms: run this with sudo`.
 
 - [ ] **Step 3a: Los nombres, por reglas**
 
@@ -3980,10 +4284,14 @@ MOVES = [
 RULES = [
     (r"com\.toeshee\.itsagent", "com.novieri.rmm.agent"),
     (r"(/var)?/opt/toeshee", r"\1/opt/novieri"),
-    (r"/var/lib/toeshee-agent", "/var/lib/novieri-agent"),
+    # A SIBLING of the data directory (/var/lib/novieri-agent), as today:
+    # never inside it, where the uninstaller's RemoveAll would walk into a
+    # stale read-only snapshot mount.
+    (r"/var/lib/toeshee-agent/snap", "/var/lib/novieri-agent-snap"),
     (r"toeshee-snap-", "novieri-snap-"),
     (r"ITMS-Agent-", "NovieriRMM-Agent-"),
-    (r"ITMSRemote", "NovieriRMMRemote"),
+    # ITMSRemote* (Windows window classes) is NOT renamed: internal, never
+    # shown (design §1, §8; pre-flight review M-4).
     (r"Toeshee endpoint agent", "Novieri RMM endpoint agent"),
     (r"ITMS endpoint agent", "Novieri RMM endpoint agent"),
     (r"Toeshee agent", "Novieri RMM agent"),
@@ -4009,8 +4317,34 @@ WORD_TESTS = {
     "backend/tests/test_i18n_modules_ops.py",
 }
 #: Only in the control plane's own files: example hosts in the messages an
-#: administrator reads.
-BACKEND_ONLY = [(r"itms\.example\.com", "rmm.example.com")]
+#: administrator reads, and the prefix of the install command's messages
+#: (`echo "itms: installed. ..."`, link_page.py), which a client reads.
+BACKEND_ONLY = [
+    (r"itms\.example\.com", "rmm.example.com"),
+    (r'"itms: ', '"novieri-agent: '),
+]
+#: The lower-case names a client's disk shows (decided 2026-11-24): ZFS and
+#: btrfs snapshots and a restore's temporary file, in the backup capability,
+#: its tests and the two documents that describe them -- and nowhere else.
+SNAPSHOTS = [
+    (r'snapNamePrefix = "itms-"', 'snapNamePrefix = "novieri-snap-"'),
+    (r"\.itms-snap-", ".novieri-snap-"),
+    (r"@itms-", "@novieri-snap-"),
+    (r'"itms-T"', '"novieri-snap-T"'),
+    (r"/\.zfs/snapshot/itms-", "/.zfs/snapshot/novieri-snap-"),
+    (r"\.itms-restore-", ".novieri-restore-"),
+]
+SNAPSHOT_FILES = ("agent/internal/capabilities/backup/",)
+SNAP_DOCS = (
+    "docs/modules/backup/agent-engine.md",
+    "docs/modules/backup/spec-server-backup.md",
+)
+#: Two tests of wave 1 name the OLD host on purpose, to refuse it (Tasks 3
+#: and 4): the host rule must not turn them into tests of the new one.
+NEGATIVE_HOST = {
+    "backend/tests/test_deploy_acme.py",
+    "backend/tests/test_deploy_script_steps.py",
+}
 
 #: The documents that describe these names on an endpoint, and the tests
 #: that read them (`test_install_link_docs.py`). Dated plans under
@@ -4038,7 +4372,7 @@ def main() -> None:
     files = tracked("agent", ".github/workflows", "scripts/build_agent.sh",
                     "backend/app/modules/agent_distribution", "backend/app/services/msi_build.py",
                     "backend/app/core/storage.py", "backend/app/core/i18n/es.py", "backend/tests",
-                    *DOCS)
+                    *DOCS, *SNAP_DOCS)
     changed = []
     for rel in files:
         path = ROOT / rel
@@ -4047,11 +4381,18 @@ def main() -> None:
         except UnicodeDecodeError:
             continue
         new = text
-        rules = list(RULES)
-        if not rel.startswith("backend/tests/") or rel in WORD_TESTS:
-            rules.append(WORD)
-        if rel.startswith("backend/app/"):
-            rules += BACKEND_ONLY
+        if rel in SNAP_DOCS:
+            rules = list(SNAPSHOTS)
+        else:
+            rules = list(RULES)
+            if rel in NEGATIVE_HOST:
+                rules = [r for r in rules if r[0] != r"itms\.toeshee\.com"]
+            if not rel.startswith("backend/tests/") or rel in WORD_TESTS:
+                rules.append(WORD)
+            if rel.startswith("backend/app/"):
+                rules += BACKEND_ONLY
+            if rel.startswith(SNAPSHOT_FILES):
+                rules += SNAPSHOTS
         for pattern, repl in rules:
             new = re.sub(pattern, repl, new)
         if new != text:
@@ -4112,6 +4453,10 @@ EDITS = [
      '''        f"    printf %s '{_b64('linux/novieri-agent.service')}' | base64 -d > \\"$d/novieri-agent.service\\"",''',
      '''        f"    printf %s '{_b64('linux/novieri-agent.service')}'"
         ' | base64 -d > "$d/novieri-agent.service"',''' ),
+    ("backend/app/modules/agent_distribution/link_page.py",
+     '''        '  *) echo "novieri-agent: $os $arch is not a platform the agent is published for" >&2; exit 1 ;;',''',
+     '''        '  *) echo "novieri-agent: $os $arch is not a platform the agent is published for"'
+        " >&2; exit 1 ;;",'''),
     ("backend/app/modules/agent_distribution/msi.py",
      '''            return tr("the built MSI does not stop the novieri-agent service on install and removal")''',
      '''            return tr(
@@ -4138,6 +4483,23 @@ EDITS = [
     ("backend/app/services/msi_build.py",
      "    if files != [AGENT_FILE, SETTINGS_FILE]:",
      "    if files != sorted([AGENT_FILE, SETTINGS_FILE]):"),
+    # The tests carried the same accident: sorted() compared with the old
+    # order. Without msitools they skip, so only CI (which installs it) sees it.
+    ("backend/tests/test_msi_build.py",
+     '''    assert sorted(row[2] for row in _table(msi, "File")) == ["novieri-agent.exe", "msi-enroll.json"]''',
+     '''    assert sorted(row[2] for row in _table(msi, "File")) == [
+        "msi-enroll.json",
+        "novieri-agent.exe",
+    ]'''),
+    ("backend/tests/test_msi_build.py",
+     '''        "novieri-agent.exe",
+        "msi-enroll.json",
+        "run.ps1",
+''',
+     '''        "msi-enroll.json",
+        "novieri-agent.exe",
+        "run.ps1",
+'''),
     ("backend/app/services/msi_build.py",
      '''#: UpgradeCode is uuid5(UPGRADE_NAMESPACE, str(org_id)): constant for an
 #: organisation, so a later MSI upgrades an earlier one instead of installing
@@ -4166,7 +4528,7 @@ for rel, text in texts.items():
 PY
 ```
 
-Expected: siete líneas `rewrote …` (`es.py`, `link_page.py`, `msi.py`, `main.go`, `msi_test.go`, `control.in`, `msi_build.py`).
+Expected: ocho líneas `rewrote …` (`es.py`, `link_page.py`, `msi.py`, `main.go`, `msi_test.go`, `control.in`, `msi_build.py`, `test_msi_build.py`).
 
 - [ ] **Step 4: Todo pasa en los dos lados, y el protocolo no se movió**
 
@@ -7277,8 +7639,8 @@ Al coordinador, en este orden:
 | 1 | `test_brand_names_backend.py` | `test_i18n_modules_desk.py`, `test_notification_delivery.py`, `test_notification_email_language.py`, `test_platform_backup_status.py`, `test_mcp_server.py`, `test_realm_settings_api.py` (los nombres) | las seis nuevas y las de asunto, rojas → `688 passed, 1 skipped` |
 | 2 | `test_suite_support.py`, `redis_support.py` | 43 archivos (la URL de Redis), `agent_update_support.py` | `6 failed` → las seis y `63 passed` |
 | 3 | `test_deploy_acme.py` | `traefik_routes.py`, `test_public_surface.py`, `test_auth_phase4_falsifiers.py`, `test_deploy_object_storage_route.py` | → `65 passed` |
-| 4 | `test_new_env_script.py`, `test_preflight_script.py`, `test_check_public_tls.py` | `test_deploy_script_steps.py` (una renombrada, una nueva), `test_deploy_install_link.py` | → `168 passed` |
-| 5 | tres en `test_oauth_token.py`, una en `test_auth_password_reset.py`, una en `test_user_admin_api.py` | `auth_support.py` | `4 failed, 1 passed` → `209` y `110 passed` |
+| 4 | `test_new_env_script.py`, `test_preflight_script.py`, `test_check_public_tls.py` | `test_deploy_script_steps.py` (una renombrada, una nueva), `test_deploy_install_link.py` | `48 failed, 42 passed` → `172 passed` |
+| 5 | tres en `test_oauth_token.py`, una en `test_auth_password_reset.py`, una en `test_user_admin_api.py` | `auth_support.py` | `4 failed, 1 passed` → `209` y `132 passed` |
 | 6 | `concurrency_wait_test.go` | `concurrency_harness_test.go` | `undefined: waitResults` → las cuatro `--- PASS`, `ok` |
 | 7 | seis en `test_ci_mcp_flow.py` | tres aserciones de `test_ci_mcp_flow.py` | `8 failed, 43 passed` → `51 passed`; el job, rojo con el DNS de Pebble a otra máquina y verde |
 | 8 | `test_agent_names_both_sides.py` | las pruebas del agente y del backend que fijan los nombres (por reglas) | `6 failed` → `6 passed`; `310 passed, 17 skipped`; `go test` 38 ok |
