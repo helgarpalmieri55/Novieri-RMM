@@ -285,7 +285,12 @@ export function Donut({ pct, kind, label, sub }: { pct: number | null; kind: Kin
           t("shell.viz.na")
         )}
       </div>
-      <div className="don-k">{label}</div>
+      {/* THE KIND'S ICON BESIDE THE LABEL (D2): running and information are
+          one cobalt now, and a donut has no badge to carry the difference. */}
+      <div className="don-k">
+        <Icon name={KIND_ICON[shown]} size={13} />
+        {label}
+      </div>
       {sub ? <div className="don-z">{sub}</div> : null}
     </div>
   );

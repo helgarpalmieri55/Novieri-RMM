@@ -15,9 +15,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { VIEWPORTS, chromeProblems, markDrawn, viewportLabel } from "../../scripts/harmony.mjs";
+import { VIEWPORTS, chromeProblems, failedLoad, markDrawn, missingShell, servedError, viewportLabel } from "../../scripts/harmony.mjs";
 import type { Viewport } from "../../scripts/harmony.mjs";
-import { CHOSEN_CLIENT, PARAMS, ROUTES } from "../../scripts/routes.mjs";
+import { CHOSEN_CLIENT, FRAMELESS, PARAMS, ROUTES } from "../../scripts/routes.mjs";
 import { fixtureClient } from "../fixtures/client";
 import { isClientId } from "../lib/clientChoice";
 
@@ -141,5 +141,44 @@ describe("the client mark on the phone, with a client chosen", () => {
     expect(chromeProblems({ toggle: null, profileRight: 1416, innerWidth: 1440, topbar: true }, at(1440, false))).toEqual(
       [],
     );
+  });
+});
+
+/**
+ * WHAT FAILS A RUN EVEN WHEN EVERY MEASUREMENT PASSES (redesign plan,
+ * pre-flight C1, reproduced 2026-11-24): two Vite servers sharing one
+ * `node_modules/.vite` served a page that never loaded, the page drew no
+ * shell, and an empty frame measured clean, so harmony printed "ok".
+ */
+describe("what fails a harmony run even when every measurement passes (pre-flight C1)", () => {
+  it("refuses a 5xx the dev server answered for a page file, and leaves the absent backend alone", () => {
+    expect(servedError(504, "http://127.0.0.1:5173/node_modules/.vite/deps/react.js?v=1")).toBe(
+      "the dev server answered 504 for /node_modules/.vite/deps/react.js",
+    );
+    expect(servedError(500, "http://127.0.0.1:5173/src/main.tsx")).toBe("the dev server answered 500 for /src/main.tsx");
+    expect(servedError(502, "http://127.0.0.1:5173/api/v1/me")).toBeNull();
+    expect(servedError(404, "http://127.0.0.1:5173/src/x.tsx")).toBeNull();
+    expect(servedError(200, "http://127.0.0.1:5173/src/x.tsx")).toBeNull();
+  });
+
+  it("refuses a page file that never loaded, and leaves the absent backend alone", () => {
+    expect(failedLoad("http://127.0.0.1:5173/src/lib/format.ts", "net::ERR_NETWORK_CHANGED")).toBe(
+      "/src/lib/format.ts never loaded (net::ERR_NETWORK_CHANGED)",
+    );
+    expect(failedLoad("http://127.0.0.1:5173/api/v1/ws", "net::ERR_CONNECTION_REFUSED")).toBeNull();
+  });
+
+  it("refuses a console route that drew no top bar, and only a console route", () => {
+    expect(missingShell("/devices", { toggle: null, profileRight: null, innerWidth: 1440, topbar: false })).toBe(true);
+    expect(missingShell("/settings?tab=users", null)).toBe(true);
+    expect(missingShell("/devices", { toggle: null, profileRight: 1420, innerWidth: 1440, topbar: true })).toBe(false);
+    expect(missingShell("/sign-in", { toggle: null, profileRight: null, innerWidth: 1440, topbar: false })).toBe(false);
+  });
+
+  it("calls frameless only the session-less routes it walks (measured: the ten with no .topbar)", () => {
+    expect(FRAMELESS.size).toBe(10);
+    for (const route of FRAMELESS) expect(ROUTES).toContain(route);
+    const sessionless = ["/forgot-password", "/reset-password", "/invite", "/recover", "/portal/sign-in"];
+    expect([...FRAMELESS].filter((route) => !route.startsWith("/sign-in") && !sessionless.includes(route))).toEqual([]);
   });
 });

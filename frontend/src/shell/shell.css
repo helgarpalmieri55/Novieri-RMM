@@ -136,8 +136,7 @@
 .nav-item.sub.active { color: #fff; background: var(--rail-2); border-left-color: transparent; font-weight: 500; }
 /* An open area's section headings: the group caption, indented with its pages. */
 .sidebar .grp.sub { padding: 10px 18px 3px 32px; }
-/* v3 `.rail .ct`: the right-aligned mono count; `.hot` is the alert count in
- * `--rail-hot` (8.01:1 on `--rail`). */
+/* v3 `.rail .ct`: the right-aligned mono count. */
 .sidebar .ct {
   margin-left: auto;
   font-family: var(--mono);
@@ -145,7 +144,16 @@
   font-size: var(--t-sm);
   color: var(--rail-dim);
 }
-.sidebar .ct.hot { color: var(--rail-hot); }
+/* The rail's alert count (DESIGN.md v4, "Navigation"; decision D3): white on
+ * the critical badge. It was `--rail-hot` text on the bare rail. */
+.sidebar .ct.hot {
+  color: var(--accent-ink);
+  background: var(--sev-crit);
+  border-radius: var(--r-badge);
+  padding: 2px 6px;
+  font-family: var(--sans);
+  font-weight: 600;
+}
 
 /* The tenant card -- identity, not a control (both auditors, cycle 2). Not in
  * v3's rail, which names the tenant in the account chip instead; the spec (§3)
@@ -356,8 +364,8 @@
   display: grid;
   place-items: center;
   color: var(--accent-ink);
-  background: var(--accent);
-  border-radius: var(--r-pill);
+  background: var(--sev-crit);
+  border-radius: var(--r-badge);
   border: 2px solid var(--surface);
   font-family: var(--mono);
   font-size: var(--t-sm);

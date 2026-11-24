@@ -83,6 +83,27 @@ export function patternOf(route) {
  */
 export const OPEN_DISCLOSURES = new Set(["/settings?tab=users"]);
 
+/**
+ * THE ROUTES THAT DRAW NO CONSOLE SHELL: the pages reached without a session
+ * (own-auth Task 11), which have the sign-in frame instead. Every other route
+ * draws the top bar, and harmony fails one that does not (`missingShell`,
+ * redesign plan pre-flight C1): a page the dev server could not serve draws
+ * nothing, and an empty frame measures clean. Measured 2026-11-24: these ten
+ * are exactly the routes of a full walk with no `.topbar`.
+ */
+export const FRAMELESS = new Set([
+  "/sign-in",
+  "/sign-in/factor",
+  "/sign-in/enroll",
+  "/sign-in/recovery-codes",
+  "/sign-in/microsoft",
+  "/forgot-password",
+  "/reset-password",
+  "/invite",
+  "/recover",
+  "/portal/sign-in",
+]);
+
 export const ROUTES = [
   // The pages reached without a session (own-auth Task 11). No top bar, so
   // harmony measures their tokens, overflow and axe, and skips the bar.

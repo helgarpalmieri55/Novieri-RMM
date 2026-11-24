@@ -399,7 +399,7 @@ td.cell-clip .cell-title, td.cell-clip .cell-sub { display: block; overflow: hid
  * a pill with no kind is colourless on purpose, so `StatusPill` cannot paint
  * a state it has not classified. Every pill also carries its kind's icon
  * (`kindOf` in components.tsx), because colour is never the only carrier. */
-.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; padding: 3px 9px 3px 7px; border-radius: var(--r-pill); white-space: nowrap;
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; padding: 3px 9px 3px 7px; border-radius: var(--r-badge); white-space: nowrap;
 }
 .p-crit { background: var(--sev-crit-s); color: var(--sev-crit);
 }
@@ -646,7 +646,7 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
  * a <button>, which would otherwise bring the user agent's font. No
  * `line-height`: v3's `.chip` declares none, and stating 1.2 here drew every
  * chip in the console 3px shorter than the design. */
-.chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); padding: 6px 11px; border-radius: var(--r-pill); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink-2); font-family: inherit;
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); padding: 6px 11px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink-2); font-family: inherit;
 }
 .chip.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent);
 }
