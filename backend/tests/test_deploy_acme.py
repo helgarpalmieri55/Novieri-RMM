@@ -8,6 +8,7 @@ Traefik obtains a certificate this way, and answers 503, is the `deploy` job's
 to show (deploy/ci/acme-pebble.yml, Task 7) and the rehearsal's (Task 12).
 """
 
+import re
 from pathlib import Path
 
 from tests.traefik_routes import COMPOSE, DYNAMIC, compose, dynamic, routers, winner
@@ -116,3 +117,24 @@ def test_the_gateway_is_still_tcp_passthrough_on_8443() -> None:
 def test_dynamic_yml_is_where_the_model_reads_it() -> None:
     assert DYNAMIC == Path(COMPOSE.parent / "traefik" / "dynamic.yml") and DYNAMIC.is_file()
     assert "./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro" in _traefik()["volumes"]
+
+
+def test_every_http_router_is_on_websecure_and_nothing_else() -> None:
+    """Without the gateway, Traefik terminates TLS on :8443 itself, so a
+    router that names no entrypoint would answer there too (it listens on
+    every entrypoint). `routers()` filters on websecure; this asserts it."""
+    seen: dict[str, str] = {}
+    for service in compose()["services"].values():
+        labels = service.get("labels") or {}
+        if isinstance(labels, list):
+            labels = dict(item.split("=", 1) for item in labels)
+        for key in labels:
+            match = re.fullmatch(r"traefik\.http\.routers\.([^.]+)\.rule", key)
+            if match:
+                seen[match.group(1)] = str(
+                    labels.get(f"traefik.http.routers.{match.group(1)}.entrypoints")
+                )
+    for name, router in (dynamic().get("http", {}).get("routers") or {}).items():
+        seen[name] = ",".join(router.get("entryPoints") or [])
+    assert seen, "no http routers found"
+    assert {n: e for n, e in seen.items() if e != "websecure"} == {}

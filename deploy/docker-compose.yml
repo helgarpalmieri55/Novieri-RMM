@@ -29,7 +29,9 @@ services:
       # production allows 5 certificates a week for one name -- and Pebble
       # in CI (ci/acme-pebble.yml). NOT THE GATEWAY'S: :8443 is TCP
       # passthrough, and the gateway presents its own certificate from the
-      # internal CA, which agents pin (README step 6).
+      # internal CA, which agents pin (README step 6). While the gateway is
+      # absent or unhealthy Traefik terminates TLS on :8443 itself (the public
+      # certificate for the right SNI); agents refuse it, pinned to the internal CA.
       - --certificatesresolvers.le.acme.tlschallenge=true
       - --certificatesresolvers.le.acme.email=${ITS_ACME_EMAIL:?set in .env (scripts/new-env.sh asks for it)}
       - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json

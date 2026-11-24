@@ -634,6 +634,18 @@ jobs:
           fi
           echo "IT_SUITE_VERSION selects the image reference for all five services"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: the Linux agent, built from this checkout
+        # The binary the OAuth step's 7c enrols (design 2026-11-23-vps-y-marca-
+        # novieri §4): static, as release-agent.yml builds it, so it runs in a
+        # bare busybox container.
+        working-directory: agent
+        run: CGO_ENABLED=0 go build -trimpath -o dist/novieri-agent ./cmd/agent
+
       - name: the platform's own OAuth server and MCP door, live, through Traefik
         # SINCE 2026-11-23 (design 2026-11-23-vps-y-marca-novieri §4) THE
         # CERTIFICATE ON :443 IS THE PRODUCTION PATH'S: Traefik's `le`
@@ -674,7 +686,7 @@ jobs:
           set -euo pipefail
           umask 077
           init_json="$RUNNER_TEMP/bao-init.json"
-          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"' EXIT
+          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; docker rm -f ci-agent >/dev/null 2>&1 || true; rm -rf "$RUNNER_TEMP/agent-data"' EXIT
 
           # 1. Nothing of the old identity provider is defined, at all.
           defined="$(docker compose config --services) $(docker compose config --images)"
@@ -805,6 +817,41 @@ jobs:
           echo "with the api stopped, /api/v1/setup/status answers 503"
           docker compose start api
           wait_for_api
+
+          # 7c. An endpoint (design 2026-11-23 §4, §5): the gateway's
+          #     certificate from the internal CA (deploy/README.md step 6,
+          #     its gateway-issuer token on stdin), the gateway, and the
+          #     Linux agent built from this checkout -- enrolled over :443
+          #     with a one-use token, connected over :8443 with mutual TLS,
+          #     running a hello the server signed and the agent verified.
+          #     The agent dials rmm.novieri.com as an endpoint does: the name
+          #     is traefik's address on the stack's network (--add-host), and
+          #     the root it trusts for :443 is Pebble's.
+          gw_token=$(docker compose exec -T openbao sh -c 'read -r BAO_TOKEN && export BAO_TOKEN &&
+            bao policy write gateway-issuer /bao/gateway-issuer.hcl >/dev/null &&
+            bao token create -orphan -policy=gateway-issuer -ttl=1h -field=token' <<<"$root")
+          echo "::add-mask::$gw_token"
+          docker compose run --rm --no-deps -T \
+            -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+            --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"
+          # --wait: healthy before the agent dials, so a slow start cannot push
+          # its reconnect backoff past agent_flow's window.
+          docker compose up -d --wait --wait-timeout 180 gateway
+          agent_data="$RUNNER_TEMP/agent-data"
+          mkdir -m 700 "$agent_data"
+          agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
+          agents() { python3 ci/agent_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" --state-file "$RUNNER_TEMP/ci-owner.json" "$@"; }
+          agents --phase token --token-file "$agent_data/enroll-token" || { docker compose logs api traefik; exit 1; }
+          docker run -d --name ci-agent --hostname ci-agent --network it-suite_default \
+            --add-host rmm.novieri.com:172.19.240.250 --user "$(id -u):$(id -g)" \
+            -v "$agent_bin:/usr/local/bin/novieri-agent:ro" \
+            -v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro" \
+            -v "$agent_data:/var/lib/novieri-agent" \
+            -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
+            busybox:1.36.1 /usr/local/bin/novieri-agent
+          agents --phase job --hostname ci-agent || { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }
+          test ! -e "$agent_data/enroll-token" || { echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
+          docker logs ci-agent 2>&1 | grep -E 'msg=enrolled|gateway connected'
 
           # 8. And nothing of the old identity provider ever ran in this
           #    project (not the host's: a shared runner may run anything).
