@@ -706,7 +706,7 @@ MAX_PREVIEWED_USERS = 500
 class RefusedUserOut(BaseModel):
     """One person a candidate console email domain would turn away."""
 
-    email: str = Field(description="The address held on this user's ITMS record.")
+    email: str = Field(description="The address held on this user's Novieri RMM record.")
     display_name: str | None = Field(
         description="The person's name as the console shows it, if it is known."
     )
@@ -759,7 +759,7 @@ async def preview_console_domain(
     domain: str = Query(
         min_length=1,
         max_length=253,
-        description="The base domain you are considering, e.g. toeshee.com.",
+        description="The base domain you are considering, e.g. novieri.com.",
     ),
     ctx: AuthContext = Depends(require_permission("orgs.manage")),
 ) -> ConsoleDomainPreviewOut:

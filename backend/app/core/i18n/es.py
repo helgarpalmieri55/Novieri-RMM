@@ -522,9 +522,10 @@ CATALOG: dict[str, str] = {
         "{item} abarca todas las direcciones, no es una red: indica las redes en las que están "
         "los equipos que vas a instalar"
     ),
-    "{item} overlaps {proxy}, the network ITMS's own proxy sits on (ITS_TRUSTED_PROXY_CIDRS). "
-    "Requests can appear to come from there, so listing it would let any computer in": (
-        "{item} se solapa con {proxy}, la red en la que está el proxy propio de ITMS "
+    "{item} overlaps {proxy}, the network Novieri RMM's own proxy sits on "
+    "(ITS_TRUSTED_PROXY_CIDRS). Requests can appear to come from there, so "
+    "listing it would let any computer in": (
+        "{item} se solapa con {proxy}, la red en la que está el proxy propio de Novieri RMM "
         "(ITS_TRUSTED_PROXY_CIDRS). Las solicitudes pueden parecer venir de ahí, así que "
         "indicarla dejaría entrar a cualquier equipo"
     ),
@@ -1262,7 +1263,7 @@ CATALOG: dict[str, str] = {
     "too many test messages for this organization; try again in a minute": (
         "demasiados mensajes de prueba para esta organización; inténtalo de nuevo en un minuto"
     ),
-    "ITMS test message": "Mensaje de prueba de ITMS",
+    "Novieri RMM test message": "Mensaje de prueba de Novieri RMM",
     "the relay password may only contain ASCII characters": (
         "la contraseña del servidor de correo solo puede contener caracteres ASCII"
     ),
@@ -1271,10 +1272,10 @@ CATALOG: dict[str, str] = {
         "Esta credencial pertenece al correo de cuentas de esta organización; cámbiala en "
         "Ajustes, Correo."
     ),
-    "This is a test message from ITMS. It reached you, so this organization's account email "
+    "This is a test message from Novieri RMM. It reached you, so this organization's account email "
     "(invitations and password resets) is working.": (
-        "Este es un mensaje de prueba de ITMS. Te ha llegado, así que el correo de cuentas de "
-        "esta organización (invitaciones y restablecimientos de contraseña) funciona."
+        "Este es un mensaje de prueba de Novieri RMM. Te ha llegado, así que el correo de "
+        "cuentas de esta organización (invitaciones y restablecimientos de contraseña) funciona."
     ),
     "This credential is used only to send this organization's account email and cannot be "
     "revealed.": (
@@ -2478,9 +2479,9 @@ CATALOG: dict[str, str] = {
     "ARM": "ARM",
     # --- agent_push ---
     "ITS_PUBLIC_CONSOLE_URL={raw} is not the console's bare https address (for example "
-    "https://itms.example.com, with no path). {console_url_unset}": (
+    "https://rmm.example.com, with no path). {console_url_unset}": (
         "ITS_PUBLIC_CONSOLE_URL={raw} no es la dirección https simple de la consola (por "
-        "ejemplo https://itms.example.com, sin ruta). {console_url_unset}"
+        "ejemplo https://rmm.example.com, sin ruta). {console_url_unset}"
     ),
     "a {credential_type} credential's secret must be a JSON object with \"username\" and "
     "\"secret\"": (
@@ -3506,44 +3507,44 @@ CATALOG: dict[str, str] = {
     "reason not recorded": "motivo sin registrar",
     "yes": "sí",
     "no": "no",
-    "[Toeshee] Ticket {line} assigned": "[Toeshee] Ticket {line} asignado",
+    "[Novieri RMM] Ticket {line} assigned": "[Novieri RMM] Ticket {line} asignado",
     "Ticket {line} has been assigned to a technician.": (
         "El ticket {line} se ha asignado a un técnico."
     ),
-    "[Toeshee] Ticket {line}: status changed to {to_status}": (
-        "[Toeshee] Ticket {line}: el estado cambió a {to_status}"
+    "[Novieri RMM] Ticket {line}: status changed to {to_status}": (
+        "[Novieri RMM] Ticket {line}: el estado cambió a {to_status}"
     ),
     "Ticket {line} changed status from {from_status} to {to_status}.": (
         "El ticket {line} cambió de estado: de {from_status} a {to_status}."
     ),
-    "[Toeshee] New comment on ticket #{ticket_number}": (
-        "[Toeshee] Comentario nuevo en el ticket #{ticket_number}"
+    "[Novieri RMM] New comment on ticket #{ticket_number}": (
+        "[Novieri RMM] Comentario nuevo en el ticket #{ticket_number}"
     ),
     "A new comment was added to ticket #{ticket_number}.": (
         "Se añadió un comentario nuevo al ticket #{ticket_number}."
     ),
-    "[Toeshee] Internal note added to ticket #{ticket_number}": (
-        "[Toeshee] Nota interna añadida al ticket #{ticket_number}"
+    "[Novieri RMM] Internal note added to ticket #{ticket_number}": (
+        "[Novieri RMM] Nota interna añadida al ticket #{ticket_number}"
     ),
-    "An internal note was added to ticket #{ticket_number}. Sign in to Toeshee to view it.": (
-        "Se añadió una nota interna al ticket #{ticket_number}. Inicia sesión en Toeshee para "
+    "An internal note was added to ticket #{ticket_number}. Sign in to Novieri RMM to view it.": (
+        "Se añadió una nota interna al ticket #{ticket_number}. Inicia sesión en Novieri RMM para "
         "verla."
     ),
-    "[Toeshee] Approval requested: ticket {line}": (
-        "[Toeshee] Aprobación solicitada: ticket {line}"
+    "[Novieri RMM] Approval requested: ticket {line}": (
+        "[Novieri RMM] Aprobación solicitada: ticket {line}"
     ),
     "Ticket {line} requires your approval.": "El ticket {line} necesita tu aprobación.",
-    "[Toeshee] Ticket {line}: approval {decision}": (
-        "[Toeshee] Ticket {line}: aprobación {decision}"
+    "[Novieri RMM] Ticket {line}: approval {decision}": (
+        "[Novieri RMM] Ticket {line}: aprobación {decision}"
     ),
     "Ticket {line} was {decision}.": "El ticket {line} fue {decision}.",
-    "[Toeshee] Ticket {line} resolved": "[Toeshee] Ticket {line} resuelto",
+    "[Novieri RMM] Ticket {line} resolved": "[Novieri RMM] Ticket {line} resuelto",
     "Your ticket {line} has been resolved. If you have further questions, sign in to the "
     "portal and add a comment to this ticket.": (
         "Tu ticket {line} se ha resuelto. Si tienes más preguntas, inicia sesión en el portal "
         "y añade un comentario a este ticket."
     ),
-    "[Toeshee] SLA breached: ticket {line}": "[Toeshee] SLA incumplido: ticket {line}",
+    "[Novieri RMM] SLA breached: ticket {line}": "[Novieri RMM] SLA incumplido: ticket {line}",
     "The {target} SLA for ticket {line} was due at {due_at} and has been breached.": (
         "El SLA de {target} del ticket {line} vencía el {due_at} y se ha incumplido."
     ),
@@ -3551,23 +3552,23 @@ CATALOG: dict[str, str] = {
     "Observed: {value}": "Valor observado: {value}",
     "Threshold: {comparator} {threshold}": "Umbral: {comparator} {threshold}",
     "Severity: {severity}": "Gravedad: {severity}",
-    "[Toeshee] Health alert ({severity}): {line}": (
-        "[Toeshee] Alerta de salud ({severity}): {line}"
+    "[Novieri RMM] Health alert ({severity}): {line}": (
+        "[Novieri RMM] Alerta de salud ({severity}): {line}"
     ),
     "This check is currently flapping.": "Esta comprobación se repite ahora mismo.",
     "A health alert opened for {line}.": "Se abrió una alerta de salud para {line}.",
     "Opened: {opened_at}": "Abierta: {opened_at}",
-    "[Toeshee] Health alert ESCALATED ({severity}): {line}": (
-        "[Toeshee] Alerta de salud ESCALADA ({severity}): {line}"
+    "[Novieri RMM] Health alert ESCALATED ({severity}): {line}": (
+        "[Novieri RMM] Alerta de salud ESCALADA ({severity}): {line}"
     ),
     "The health alert for {line} is still open and has been escalated.": (
         "La alerta de salud de {line} sigue abierta y se ha escalado."
     ),
-    "Nobody has acknowledged it. Sign in to Toeshee to review it.": (
-        "Nadie la ha reconocido. Inicia sesión en Toeshee para revisarla."
+    "Nobody has acknowledged it. Sign in to Novieri RMM to review it.": (
+        "Nadie la ha reconocido. Inicia sesión en Novieri RMM para revisarla."
     ),
-    "[Toeshee] Remediation awaiting approval: {action_key} on {hostname}": (
-        "[Toeshee] Corrección pendiente de aprobación: {action_key} en {hostname}"
+    "[Novieri RMM] Remediation awaiting approval: {action_key} on {hostname}": (
+        "[Novieri RMM] Corrección pendiente de aprobación: {action_key} en {hostname}"
     ),
     "A remediation is waiting for approval for {line}.": (
         "Hay una corrección pendiente de aprobación para {line}."
@@ -3577,12 +3578,12 @@ CATALOG: dict[str, str] = {
         "Script fijado: {script_name} (versión {script_version})"
     ),
     "It will NOT run until someone holding `health.remediate` approves it. Sign in to "
-    "Toeshee to approve or refuse it.": (
+    "Novieri RMM to approve or refuse it.": (
         "NO se ejecutará hasta que alguien con el permiso `health.remediate` la apruebe. "
-        "Inicia sesión en Toeshee para aprobarla o rechazarla."
+        "Inicia sesión en Novieri RMM para aprobarla o rechazarla."
     ),
-    "[Toeshee] IPAM drift ({severity}): {drift_class} at {address}": (
-        "[Toeshee] Deriva de IPAM ({severity}): {drift_class} en {address}"
+    "[Novieri RMM] IPAM drift ({severity}): {drift_class} at {address}": (
+        "[Novieri RMM] Deriva de IPAM ({severity}): {drift_class} en {address}"
     ),
     "The address plan and the fleet disagree about {address}.": (
         "El plan de direcciones y el parque no coinciden sobre {address}."
@@ -3591,13 +3592,13 @@ CATALOG: dict[str, str] = {
     "Confidence: {confidence}": "Confianza: {confidence}",
     "Subnet: {subnet}": "Subred: {subnet}",
     "Documented claimant: device {device_id}": "Titular documentado: dispositivo {device_id}",
-    "Seen on two consecutive reconciliation passes. Sign in to Toeshee to review, "
+    "Seen on two consecutive reconciliation passes. Sign in to Novieri RMM to review, "
     "document, or acknowledge it.": (
-        "Visto en dos pasadas de conciliación consecutivas. Inicia sesión en Toeshee para "
+        "Visto en dos pasadas de conciliación consecutivas. Inicia sesión en Novieri RMM para "
         "revisarlo, documentarlo o reconocerlo."
     ),
-    "[Toeshee] IPAM sweep result REJECTED from device {device}": (
-        "[Toeshee] Resultado de barrido de IPAM RECHAZADO del dispositivo {device}"
+    "[Novieri RMM] IPAM sweep result REJECTED from device {device}": (
+        "[Novieri RMM] Resultado de barrido de IPAM RECHAZADO del dispositivo {device}"
     ),
     "A network sweep result was rejected in full and no observations were recorded from it.": (
         "Un resultado de barrido de red se rechazó por completo y no se registró ninguna "
@@ -3608,15 +3609,15 @@ CATALOG: dict[str, str] = {
     "Sweep run: {sweep_run}": "Ejecución de barrido: {sweep_run}",
     "Addresses outside the signed scope: {count}": "Direcciones fuera del ámbito firmado: {count}",
     "Sample: {sample}": "Muestra: {sample}",
-    "[Toeshee] Platform problem: {name} is {status}": (
-        "[Toeshee] Problema de la plataforma: {name} está {status}"
+    "[Novieri RMM] Platform problem: {name} is {status}": (
+        "[Novieri RMM] Problema de la plataforma: {name} está {status}"
     ),
     "Check: {name} ({probe})": "Comprobación: {name} ({probe})",
     "Status: {status}": "Estado: {status}",
     "Since: {since}": "Desde: {since}",
-    "Sign in to Toeshee and open Platform status for detail. You will be told when it "
+    "Sign in to Novieri RMM and open Platform status for detail. You will be told when it "
     "recovers.": (
-        "Inicia sesión en Toeshee y abre Estado de la plataforma para ver el detalle. Se te "
+        "Inicia sesión en Novieri RMM y abre Estado de la plataforma para ver el detalle. Se te "
         "avisará cuando se recupere."
     ),
     "The platform's own check '{name}' is healthy again.": (
@@ -3628,26 +3629,26 @@ CATALOG: dict[str, str] = {
     "Renews: {renews_at} (in {days} days)": "Se renueva: {renews_at} (en {days} días)",
     "Notice deadline: {deadline} (in {days} days)": "Plazo de aviso: {deadline} (en {days} días)",
     "Auto-renews: {answer}": "Renovación automática: {answer}",
-    "[Toeshee] Cancellation notice deadline for {name}: {deadline}": (
-        "[Toeshee] Plazo de aviso de cancelación de {name}: {deadline}"
+    "[Novieri RMM] Cancellation notice deadline for {name}: {deadline}": (
+        "[Novieri RMM] Plazo de aviso de cancelación de {name}: {deadline}"
     ),
     "The last day to give notice before this subscription renews is coming up.": (
         "Se acerca el último día para dar aviso antes de que se renueve esta suscripción."
     ),
     "After the notice deadline the renewal can no longer be cancelled or renegotiated. "
-    "Sign in to Toeshee to review it.": (
+    "Sign in to Novieri RMM to review it.": (
         "Pasado el plazo de aviso, la renovación ya no se puede cancelar ni renegociar. Inicia "
-        "sesión en Toeshee para revisarla."
+        "sesión en Novieri RMM para revisarla."
     ),
-    "[Toeshee] Subscription renewal: {name} on {renews_at}": (
-        "[Toeshee] Renovación de suscripción: {name} el {renews_at}"
+    "[Novieri RMM] Subscription renewal: {name} on {renews_at}": (
+        "[Novieri RMM] Renovación de suscripción: {name} el {renews_at}"
     ),
     "This subscription renews soon.": "Esta suscripción se renueva pronto.",
-    "Sign in to Toeshee to review it or record the renewal.": (
-        "Inicia sesión en Toeshee para revisarla o registrar la renovación."
+    "Sign in to Novieri RMM to review it or record the renewal.": (
+        "Inicia sesión en Novieri RMM para revisarla o registrar la renovación."
     ),
-    "[Toeshee] New computer waiting for review: {name}": (
-        "[Toeshee] Equipo nuevo pendiente de revisión: {name}"
+    "[Novieri RMM] New computer waiting for review: {name}": (
+        "[Novieri RMM] Equipo nuevo pendiente de revisión: {name}"
     ),
     "A computer joined through the install link and is waiting for review.": (
         "Un equipo se unió mediante el enlace de instalación y está pendiente de revisión."
@@ -3661,8 +3662,8 @@ CATALOG: dict[str, str] = {
         "Hasta que alguien lo apruebe, solo recibe inventario, monitorización de salud y "
         "renovación de certificados. Apruébalo o recházalo en la página Dispositivos."
     ),
-    "[Toeshee] Rejected computer still has the agent: {name}": (
-        "[Toeshee] Un equipo rechazado sigue teniendo el agente: {name}"
+    "[Novieri RMM] Rejected computer still has the agent: {name}": (
+        "[Novieri RMM] Un equipo rechazado sigue teniendo el agente: {name}"
     ),
     "A computer that joined through the install link was rejected. {why}": (
         "Se rechazó un equipo que se unió mediante el enlace de instalación. {why}"
@@ -3681,8 +3682,8 @@ CATALOG: dict[str, str] = {
         "agente siga instalado. Desinstálalo a mano en el equipo y luego pulsa «Ya lo quité» "
         "junto a él, en Pendientes de revisión de la página Dispositivos."
     ),
-    "[Toeshee] Push install finished: {prefix}": (
-        "[Toeshee] Instalación remota terminada: {prefix}"
+    "[Novieri RMM] Push install finished: {prefix}": (
+        "[Novieri RMM] Instalación remota terminada: {prefix}"
     ),
     "A push install run someone confirmed has finished.": (
         "Ha terminado una ejecución de instalación remota que alguien confirmó."
@@ -3696,7 +3697,9 @@ CATALOG: dict[str, str] = {
         "Abre Dispositivos y luego Ejecuciones de instalación remota para ver qué pasó en cada "
         "equipo."
     ),
-    "[Toeshee] Push install stopped: {prefix}": "[Toeshee] Instalación remota detenida: {prefix}",
+    "[Novieri RMM] Push install stopped: {prefix}": (
+        "[Novieri RMM] Instalación remota detenida: {prefix}"
+    ),
     "A push install run was stopped to protect its credential from lockout.": (
         "Se detuvo una ejecución de instalación remota para proteger su credencial de un bloqueo."
     ),
@@ -3808,7 +3811,7 @@ CATALOG: dict[str, str] = {
     "{link_type} {link_id} belongs to another client": "{link_type} {link_id} es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
-    "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",
+    "Nothing installed through Novieri RMM yet": "Todavía no se ha instalado nada con Novieri RMM",
     "Holds no subscriptions": "No tiene ninguna suscripción",
     "Holds no licences": "No tiene ninguna licencia",
     "No computer of theirs is in use": "Ningún equipo suyo está en uso",
@@ -3910,24 +3913,30 @@ CATALOG: dict[str, str] = {
     "Close their open tickets": "Cierra sus tickets abiertos",
     "Resolve or close anything they raised.": "Resuelve o cierra todo lo que crearon.",
     # --- review fixes (Task 16) ---
-    "[Toeshee] Ticket {line}: approval approved": "[Toeshee] Ticket {line}: aprobación aprobada",
+    "[Novieri RMM] Ticket {line}: approval approved": (
+        "[Novieri RMM] Ticket {line}: aprobación aprobada"
+    ),
     "Ticket {line} was approved.": "El ticket {line} fue aprobado.",
-    "[Toeshee] Ticket {line}: approval rejected": "[Toeshee] Ticket {line}: aprobación rechazada",
+    "[Novieri RMM] Ticket {line}: approval rejected": (
+        "[Novieri RMM] Ticket {line}: aprobación rechazada"
+    ),
     "Ticket {line} was rejected.": "El ticket {line} fue rechazado.",
-    "[Toeshee] Ticket {line}: approval decided": "[Toeshee] Ticket {line}: aprobación decidida",
+    "[Novieri RMM] Ticket {line}: approval decided": (
+        "[Novieri RMM] Ticket {line}: aprobación decidida"
+    ),
     "Ticket {line} was decided.": "El ticket {line} fue decidido.",
-    "[Toeshee] Health alert cleared: {line}": "[Toeshee] Alerta de salud cerrada: {line}",
+    "[Novieri RMM] Health alert cleared: {line}": "[Novieri RMM] Alerta de salud cerrada: {line}",
     "The health alert for {line} has cleared.": "La alerta de salud de {line} se ha cerrado.",
     "Cleared: {cleared_at} ({reason})": "Cerrada: {cleared_at} ({reason})",
     "(unknown probe)": "(sonda desconocida)",
-    "[Toeshee] Platform recovered: {name} is ok": (
-        "[Toeshee] Plataforma recuperada: {name} vuelve a estar en buen estado"
+    "[Novieri RMM] Platform recovered: {name} is ok": (
+        "[Novieri RMM] Plataforma recuperada: {name} vuelve a estar en buen estado"
     ),
-    "Sign in to Toeshee to review it.": "Inicia sesión en Toeshee para ver el detalle.",
+    "Sign in to Novieri RMM to review it.": "Inicia sesión en Novieri RMM para ver el detalle.",
     "An agent reporting outside the scope its job was signed for is either faulty or "
-    "controlled by someone else. Sign in to Toeshee to review it.": (
+    "controlled by someone else. Sign in to Novieri RMM to review it.": (
         "Un agente que informa fuera del ámbito para el que se firmó su tarea está averiado o "
-        "lo controla otra persona. Inicia sesión en Toeshee para ver el detalle."
+        "lo controla otra persona. Inicia sesión en Novieri RMM para ver el detalle."
     ),
     "The platform's own check '{name}' has reported {status} for {samples} consecutive "
     "samples.": (

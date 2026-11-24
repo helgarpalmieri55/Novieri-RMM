@@ -801,7 +801,7 @@ def build_mcp(fastapi_app: FastAPI) -> McpMount:
         return tool.input_schema if tool is not None else None
 
     server: Server[Any] = Server(
-        "itms",
+        "novieri-rmm",
         version=fastapi_app.version,
         get_tool_input_schema=input_schema,
         on_list_tools=handlers.list_tools,

@@ -34,7 +34,7 @@ if ! bao read pki/cert/ca >/dev/null 2>&1; then
   bao secrets enable pki || true
   bao secrets tune -max-lease-ttl=87600h pki
   bao write -field=certificate pki/root/generate/internal \
-    common_name="it-suite internal CA" ttl=87600h >/dev/null
+    common_name="Novieri RMM internal CA" ttl=87600h >/dev/null
 fi
 
 # The two roles are written UNCONDITIONALLY (both writes are idempotent), not

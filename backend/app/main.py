@@ -159,7 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     configure_logging()
     settings = settings or get_settings()
-    app = FastAPI(title="ITMS API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Novieri RMM API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     # Parsed once, here, so a bad ITS_TRUSTED_PROXY_CIDRS stops the process at
     # startup instead of 500ing the first install-link request.
