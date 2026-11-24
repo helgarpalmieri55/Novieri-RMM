@@ -16,6 +16,7 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
@@ -324,7 +325,8 @@ done
 [ -n "$script" ] && [ -n "$out" ] || exit 1
 script="${script//\/tmp\/mc/$FAKE_MC_DIR}"
 script="${script//\/out/$out}"
-env "${envs[@]}" MINIO_ROOT_USER=u MINIO_ROOT_PASSWORD=p sh -c "$script"
+env "${envs[@]}" MINIO_ROOT_USER="${FAKE_MINIO_USER-u}" \
+    MINIO_ROOT_PASSWORD="${FAKE_MINIO_PASSWORD-p}" sh -c "$script"
 """
 
 _FAKE_MC = r"""#!/usr/bin/env bash
@@ -419,6 +421,41 @@ def test_a_bucket_listing_that_fails_still_fails_the_backup(tmp_path: Path) -> N
     assert "ERROR: cannot list the buckets:" in run.stderr, run.stderr
     assert "The Access Key Id you provided does not exist in our records." in run.stderr
     assert "mirror" not in (tmp_path / "calls").read_text()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("FAKE_MINIO_PASSWORD", 'pass"word-S3CR3T-7f3a'),
+        ("FAKE_MINIO_PASSWORD", "pass\\word-S3CR3T-7f3a"),
+        ("FAKE_MINIO_USER", "admin\nS3CR3T-7f3a"),
+        ("FAKE_MINIO_PASSWORD", "pass\x01word-S3CR3T-7f3a"),
+    ],
+)
+def test_a_credential_that_is_not_json_safe_is_refused_unprinted(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    """Invariant 3. The credentials go into mc's config.json by printf; a `"`,
+    a `\\` or a control character would make that file malformed, and mc's
+    complaint about it -- copied to stderr when the listing fails -- could
+    carry a fragment of the credential. Refused before the file is written,
+    and the value is never echoed."""
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "it-suite", **{key: value}))
+    assert run.returncode != 0, run.stdout
+    assert "the MinIO credential is not JSON-safe; refusing" in run.stderr, run.stderr
+    assert "S3CR3T" not in run.stdout + run.stderr
+    assert not (tmp_path / "mc" / "config.json").exists()
+    assert not any(line.startswith("mc ") for line in (tmp_path / "calls").read_text().splitlines())
+
+
+def test_a_json_safe_credential_is_accepted(tmp_path: Path) -> None:
+    """The ones new-env.sh writes (hex) and .env.example's user name."""
+    env = _objects(
+        tmp_path, "it-suite", FAKE_MINIO_USER="its-minio", FAKE_MINIO_PASSWORD="0123456789abcdef"
+    )
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "not JSON-safe" not in run.stderr
 
 
 def test_another_bucket_whose_name_contains_it_is_not_it(tmp_path: Path) -> None:

@@ -217,6 +217,16 @@ case "$ITS_BACKUP_OBJECTS" in
             -v "$OBJ_DIR:/out" -e "ITS_MIRROR_BUCKET=$bucket" -e "ITS_MIRROR_EXCLUDE=$exclude" \
             --entrypoint /bin/sh minio -c '
                 set -e
+                # Invariant 3: the credentials go into config.json by printf, so
+                # a quote, a backslash or a control character in one would make
+                # the file malformed, and what mc says about it -- copied to
+                # stderr below -- could carry a fragment of it. Refused, and the
+                # value is never echoed.
+                case "$MINIO_ROOT_USER$MINIO_ROOT_PASSWORD" in
+                    *[\"\\[:cntrl:]]*)
+                        echo "ERROR: the MinIO credential is not JSON-safe; refusing" >&2
+                        exit 1 ;;
+                esac
                 mkdir -p /tmp/mc && chmod 700 /tmp/mc
                 printf "{\"version\":\"10\",\"aliases\":{\"src\":{\"url\":\"http://minio:9000\",\"accessKey\":\"%s\",\"secretKey\":\"%s\",\"api\":\"s3v4\",\"path\":\"auto\"}}}" \
                     "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" > /tmp/mc/config.json
