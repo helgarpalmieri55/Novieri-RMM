@@ -1,0 +1,57 @@
+# Let's Encrypt's own test CA in place of Let's Encrypt, for the CI's `deploy`
+# job and a rehearsal of the first boot (design 2026-11-23-vps-y-marca-novieri
+# §4). NEVER on a real host: Pebble "is not suited for use as a production CA".
+#
+#   COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml   (every docker compose call)
+#   ITS_ACME_CA_SERVER=https://pebble:14000/dir          (in .env, by new-env.sh)
+#   PEBBLE_MINICA=<the pebble image's test/certs/pebble.minica.pem, copied out>
+#
+# What it proves is the production path: Traefik's `le` resolver, TLS-ALPN-01
+# answered on :443, a certificate for ITS_PUBLIC_HOST in traefik-acme. Two
+# things stand in for the Internet. pebble-challtestsrv is the DNS Pebble's
+# validator asks, and it answers every A query with traefik's address on this
+# network, so the validation connects to traefik:443 exactly as Let's Encrypt
+# connects to the VPS. And Traefik is told to trust Pebble's own HTTPS
+# certificate (its ACME directory is https://pebble:14000/dir) through lego's
+# LEGO_CA_CERTIFICATES -- an environment variable, so the production
+# `command:` list is not repeated here and cannot drift from it.
+#
+# Addresses are pinned in the compose network (ITMS_NETWORK_SUBNET, default
+# 172.19.240.0/24) at the top of the range, which Docker hands out last.
+services:
+  traefik:
+    environment:
+      LEGO_CA_CERTIFICATES: /pebble/pebble.minica.pem
+    volumes:
+      - ${PEBBLE_MINICA:?the pebble image's test/certs/pebble.minica.pem, copied out}:/pebble/pebble.minica.pem:ro
+    networks:
+      default:
+        ipv4_address: 172.19.240.250
+    depends_on:
+      - pebble
+
+  challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:2.10.1
+    # DNS only: every A query answers traefik's address, no AAAA, and none of
+    # its own challenge servers (traefik answers TLS-ALPN-01 itself).
+    command: ["-defaultIPv4", "172.19.240.250", "-defaultIPv6", "", "-http01", "", "-https01", "", "-tlsalpn01", "", "-doh", ""]
+    networks:
+      default:
+        ipv4_address: 172.19.240.251
+
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:2.10.1
+    command: ["-config", "/config/pebble-config.json", "-dnsserver", "172.19.240.251:8053"]
+    environment:
+      # Validate at once, and reject no valid nonce: the defaults sleep and
+      # reject 5% of them on purpose, which tests a client's retries, not
+      # this deployment.
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    volumes:
+      - ./ci/pebble-config.json:/config/pebble-config.json:ro
+    networks:
+      default:
+        ipv4_address: 172.19.240.252
+    depends_on:
+      - challtestsrv

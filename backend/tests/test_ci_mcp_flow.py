@@ -318,7 +318,10 @@ def test_no_secret_of_the_vault_travels_in_an_argv() -> None:
             and not line.strip().startswith(SHELL_BUILTINS)
         ]
         assert argv == [], argv
-    assert """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code"' EXIT""" in run
+    assert (
+        """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"' EXIT"""
+        in run
+    )
 
 
 def test_ci_restores_the_old_identity_providers_database_from_a_pre_upgrade_backup() -> None:
@@ -383,7 +386,7 @@ def test_the_api_is_waited_for_until_it_answers_itself() -> None:
     run = _deploy_step(OAUTH_STEP)
     start = run.index("wait_for_api() {")
     wait = run[start : run.index("\n}\n", start)]
-    assert "https://localhost/.well-known/oauth-authorization-server" in wait
+    assert "https://rmm.novieri.com/.well-known/oauth-authorization-server" in wait
     assert "application/json" in wait
     loop = wait[wait.index("for _ in"):]
     metadata = loop.index("oauth-authorization-server")
@@ -657,7 +660,7 @@ INITIALIZED: dict[str, Any] = {
     "result": {
         "protocolVersion": flow.PROTOCOL_VERSION,
         "capabilities": {},
-        "serverInfo": {"name": "itms", "version": "1"},
+        "serverInfo": {"name": "novieri-rmm", "version": "1"},
     },
 }
 
@@ -722,3 +725,89 @@ def test_a_dead_refresh_token_is_refused_as_invalid_grant() -> None:
     ):
         with pytest.raises(flow.Failed):
             flow.Flow(_Answers(_response(status, body))).refused_refresh(GRANT, "a token")
+
+
+# --------------------------------------------------------------------------- #
+# The certificate from Pebble over ACME (design 2026-11-23-vps-y-marca-novieri
+# §4), and the names the runner reaches the stack by
+# --------------------------------------------------------------------------- #
+
+PEBBLE = REPO / "deploy/ci/acme-pebble.yml"
+
+
+def test_the_throwaway_env_is_the_one_a_new_host_gets_with_pebble_as_its_ca() -> None:
+    run = _deploy_step("Throwaway .env, written by the script a new host uses")
+    assert (
+        "./scripts/new-env.sh --host rmm.novieri.com --acme-email ci@novieri.example \\\n"
+        "  --acme-ca-server https://pebble:14000/dir"
+    ) in run
+    assert 'echo "COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml" >> "$GITHUB_ENV"' in run
+    assert 'docker cp "$cid:/test/certs/pebble.minica.pem" "$RUNNER_TEMP/pebble-minica.pem"' in run
+    assert "change-me" not in run, "the .env is new-env.sh's, not a sed of the example"
+
+
+def test_the_deploy_job_copies_no_certificate_and_checks_the_one_acme_gave() -> None:
+    steps = yaml.safe_load(CI.read_text())["jobs"]["deploy"]["steps"]
+    whole = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "deploy/certs" not in whole and "certs/fullchain.pem" not in whole
+    assert "openssl req" not in whole
+    assert "https://localhost" not in whole
+    run = _deploy_step(OAUTH_STEP)
+    check = run.index(
+        './scripts/check-public-tls.sh --connect 127.0.0.1 --cafile "$pebble_root" --wait 180'
+    )
+    assert run.index("https://pebble:15000/roots/0") < check < run.index("flow --phase closed")
+    assert (
+        "flow() { python3 ci/mcp_flow.py --base https://rmm.novieri.com "
+        '--resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" "$@"; }'
+    ) in run
+
+
+def test_with_the_api_stopped_the_job_expects_503() -> None:
+    run = _deploy_step(OAUTH_STEP)
+    stop = run.index("docker compose stop api")
+    assert run.index('[ "$answered" = 503 ]', stop) < run.index("docker compose start api", stop)
+    assert run.index("flow --phase open") < stop
+
+
+def test_the_override_is_pebble_and_trust_in_it_and_nothing_else() -> None:
+    services = yaml.safe_load(PEBBLE.read_text())["services"]
+    assert set(services) == {"traefik", "challtestsrv", "pebble"}
+    assert set(services["traefik"]) == {"environment", "volumes", "networks", "depends_on"}
+    assert services["traefik"]["environment"] == {
+        "LEGO_CA_CERTIFICATES": "/pebble/pebble.minica.pem"
+    }
+    assert "command" not in services["traefik"], "the production command is not repeated"
+    assert services["pebble"]["image"] == "ghcr.io/letsencrypt/pebble:2.10.1"
+    assert services["challtestsrv"]["image"] == "ghcr.io/letsencrypt/pebble-challtestsrv:2.10.1"
+    config = json.loads((REPO / "deploy/ci/pebble-config.json").read_text())["pebble"]
+    assert config["tlsPort"] == 443, "Pebble validates TLS-ALPN-01 where Let's Encrypt does"
+
+
+def test_resolve_pins_one_name_and_leaves_the_rest() -> None:
+    assert flow.parse_resolve("rmm.novieri.com:127.0.0.1") == ("rmm.novieri.com", "127.0.0.1")
+    for bad in ("rmm.novieri.com", "rmm.novieri.com:::1", "RMM:1.2.3.4", ":127.0.0.1"):
+        with pytest.raises(flow.argparse.ArgumentTypeError):
+            flow.parse_resolve(bad)
+    real = flow.socket.getaddrinfo
+    try:
+        flow.pin_resolution({"rmm.novieri.com": "127.0.0.1"})
+        pinned = flow.socket.getaddrinfo("rmm.novieri.com", 443, flow.socket.AF_INET)
+        assert {entry[4][0] for entry in pinned} == {"127.0.0.1"}
+        other = flow.socket.getaddrinfo("localhost", 443, flow.socket.AF_INET)
+        assert other == real("localhost", 443, flow.socket.AF_INET)
+    finally:
+        flow.socket.getaddrinfo = real
+
+
+def test_the_owners_sign_in_is_written_once_and_only_for_the_owner(tmp_path: Path) -> None:
+    path = tmp_path / "ci-owner.json"
+    flow.write_owner_state(str(path), "owner@ci.invalid", "pw", ["r1", "r2"])
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert json.loads(path.read_text()) == {
+        "email": "owner@ci.invalid",
+        "password": "pw",
+        "recovery_codes": ["r1", "r2"],
+    }
+    with pytest.raises(FileExistsError):
+        flow.write_owner_state(str(path), "x", "y", [])

@@ -46,10 +46,21 @@ first assertion that does not hold (each step needs the ones before it) or
 for the sections a phase never reached, 2 when the base cannot be reached at
 all.
 
-    python3 ci/mcp_flow.py --base https://localhost --cafile certs/fullchain.pem \\
+    python3 ci/mcp_flow.py --base https://rmm.novieri.com \\
+        --resolve rmm.novieri.com:127.0.0.1 --cafile "$RUNNER_TEMP/pebble-root.pem" \\
         --phase closed
-    python3 ci/mcp_flow.py --base https://localhost --cafile certs/fullchain.pem \\
-        --phase open --setup-code-file "$RUNNER_TEMP/setup-code"
+    python3 ci/mcp_flow.py --base https://rmm.novieri.com \\
+        --resolve rmm.novieri.com:127.0.0.1 --cafile "$RUNNER_TEMP/pebble-root.pem" \\
+        --phase open --setup-code-file "$RUNNER_TEMP/setup-code" \\
+        --state-file "$RUNNER_TEMP/ci-owner.json"
+
+`--resolve NAME:ADDRESS` (since 2026-11-23, design 2026-11-23-vps-y-marca-
+novieri §4) connects to ADDRESS wherever NAME is asked for, as curl's does:
+the URL, the Host header, SNI and the certificate check all keep NAME, which
+is the only name Traefik's routers answer since every one carries Host().
+`--state-file`, in phase open, writes the owner's address, password and two
+recovery codes to a new file, mode 0600, for `ci/agent_flow.py` to sign in
+with; the step that runs both removes it however it ends.
 """
 
 from __future__ import annotations
@@ -59,8 +70,10 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
+import socket
 import ssl
 import sys
 import time
@@ -272,7 +285,7 @@ def foreign_token(base: str, sub: str) -> str:
         "azp": "it-suite-web",
         "typ": "Bearer",
         "sub": sub,
-        "org": "toeshee",
+        "org": "novieri",
         "iat": now,
         "exp": now + 300,
     }
@@ -413,6 +426,38 @@ class Client:
         return answer
 
 
+def parse_resolve(value: str) -> tuple[str, str]:
+    """`NAME:ADDRESS` for `--resolve`; an IPv4 address, the only kind the
+    stack publishes on."""
+    name, _, address = value.rpartition(":")
+    ipv4 = re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", address)
+    if not re.fullmatch(r"[a-z0-9.-]+", name) or not ipv4:
+        raise argparse.ArgumentTypeError(f"{value!r} is not NAME:IPv4-ADDRESS")
+    return name, address
+
+
+def pin_resolution(pins: Mapping[str, str]) -> None:
+    """From here on, a connection to a pinned name goes to its address. Only
+    the lookup changes: `http.client` still sends the name as SNI and checks
+    the certificate against it."""
+    if not pins:
+        return
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
+        return real(pins.get(host, host), *args, **kwargs)
+
+    socket.getaddrinfo = getaddrinfo  # type: ignore[assignment]
+
+
+def write_owner_state(path: str, email: str, password: str, recovery: list[str]) -> None:
+    """The owner's sign-in for `ci/agent_flow.py`: a NEW file, 0600 from its
+    creation (`O_EXCL`), never printed."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump({"email": email, "password": password, "recovery_codes": recovery}, handle)
+
+
 def ok(message: str) -> None:
     print(f"ok    {message}")
 
@@ -430,8 +475,9 @@ class Grant:
 
 
 class Flow:
-    def __init__(self, client: Client) -> None:
+    def __init__(self, client: Client, state_file: str | None = None) -> None:
         self.http = client
+        self.state_file = state_file
         self.base = client.base
         self.resource = self.base + "/mcp"
         self.kids: set[str] = set()
@@ -634,7 +680,10 @@ class Flow:
         check(confirm.status == 204, f"TOTP confirm answered {confirm.status}")
         finish = self.http.request("POST", "/api/v1/auth/enroll/finish", console=True)
         check(finish.status == 200, f"enrolment finish answered {finish.status}")
-        check(finish.json().get("recovery_codes"), "enrolment returned no recovery codes")
+        codes = finish.json().get("recovery_codes")
+        check(codes, "enrolment returned no recovery codes")
+        if self.state_file:
+            write_owner_state(self.state_file, email, password, list(codes)[:2])
         ok("signed in: password, a TOTP enrolled, recovery codes issued")
         self.done("signed in with a fresh factor")
 
@@ -664,7 +713,7 @@ class Flow:
             "POST",
             "/oauth/register",
             body={
-                "client_name": "ITMS CI",
+                "client_name": "Novieri RMM CI",
                 "redirect_uris": [REDIRECT_URI],
                 "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
@@ -902,10 +951,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase", choices=("closed", "open"), required=True)
     parser.add_argument("--setup-code-file", help="the install code (phase open)")
     parser.add_argument("--wait-registration-s", type=float, default=45.0)
+    parser.add_argument(
+        "--resolve", type=parse_resolve, action="append", default=[], help="NAME:ADDRESS"
+    )
+    parser.add_argument("--state-file", help="phase open: the owner's sign-in, for agent_flow.py")
     args = parser.parse_args(argv)
     if args.phase == "open" and not args.setup_code_file:
         parser.error("--phase open needs --setup-code-file")
-    flow = Flow(Client(args.base, args.cafile))
+    pin_resolution(dict(args.resolve))
+    flow = Flow(Client(args.base, args.cafile), state_file=args.state_file)
     run: Callable[[], None]
     if args.phase == "closed":
         run = flow.closed
