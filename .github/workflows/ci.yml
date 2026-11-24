@@ -853,6 +853,15 @@ jobs:
           test ! -e "$agent_data/enroll-token" || { echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
           docker logs ci-agent 2>&1 | grep -E 'msg=enrolled|gateway connected'
 
+          # 7d. The Celery worker (beat runs inside it), healthy on the image
+          #     this job built: its health check reads its own heartbeat in
+          #     Redis. Until 2026-11-24 nothing here started it, and an image
+          #     without kombu's Redis transport's `packaging` (celery without
+          #     its `redis` extra) restart-looped it on a first boot while
+          #     every check above stayed green (rehearsal of plan 2026-11-23,
+          #     Task 12, finding F7).
+          docker compose up -d --wait --wait-timeout 180 worker || { docker compose logs worker; exit 1; }
+
           # 8. And nothing of the old identity provider ever ran in this
           #    project (not the host's: a shared runner may run anything).
           running="$(docker compose ps -a --format '{{.Image}} {{.Name}}')"
