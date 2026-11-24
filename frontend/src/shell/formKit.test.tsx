@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { renderPage } from "../test/renderPage";
 import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
+import { useNewParam } from "./listKit";
 
 interface Org {
   name: string;
@@ -75,12 +76,20 @@ describe("SaveBar and useDraft (design §2: one save bar for the whole console)"
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
   });
 
+  // A PERMISSION, never missing input (review fix round 1, item 8): input is
+  // explained on submit with Save enabled (`components/form.tsx`, Rule 1).
   it("says why it cannot save, and does not offer to", () => {
     renderPage(
       "/x",
-      <SaveBar dirty saving={false} blockedReason="A subject is required." onDiscard={vi.fn()} onSave={vi.fn()} />,
+      <SaveBar
+        dirty
+        saving={false}
+        blockedReason="You can read these settings, and an org-admin can change them."
+        onDiscard={vi.fn()}
+        onSave={vi.fn()}
+      />,
     );
-    expect(screen.getByText("A subject is required.")).toBeInTheDocument();
+    expect(screen.getByText("You can read these settings, and an org-admin can change them.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -162,7 +171,7 @@ function Creating({ releasing }: { releasing: boolean }) {
 }
 
 /** A form whose links change only the query: a tab, the way Settings has them. */
-function Tabbed({ search }: { search?: boolean }) {
+function Tabbed({ search }: { search?: boolean | readonly string[] }) {
   const [name, setName] = useState("");
   return (
     <>
@@ -207,6 +216,224 @@ describe("UnsavedGuard, what leaving is (decision D16)", () => {
     await userEvent.click(screen.getByRole("link", { name: "Email" }));
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.search).toBe("");
+  });
+});
+
+/** Two forms on one page, each with its own guard: the second one clean. */
+function TwoGuards({ secondDirty }: { secondDirty: boolean }) {
+  const [a, setA] = useState("");
+  return (
+    <>
+      <UnsavedGuard dirty={a !== ""} />
+      <input aria-label="A" value={a} onChange={(event) => setA(event.target.value)} />
+      <UnsavedGuard dirty={secondDirty} />
+      <Link to="/elsewhere">Leave</Link>
+    </>
+  );
+}
+
+describe("UnsavedGuard, one blocker per router (review fix round 1, item 2)", () => {
+  it("a clean guard elsewhere on the page does not disarm a dirty one", async () => {
+    const { router } = renderPage("/settings", <TwoGuards secondDirty={false} />, "/settings");
+    await userEvent.type(screen.getByLabelText("A"), "x");
+    await userEvent.click(screen.getByRole("link", { name: "Leave" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("says so loudly when two guards hold changes at once, because only one of them could ask", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderPage("/settings", <TwoGuards secondDirty />, "/settings");
+      await userEvent.type(screen.getByLabelText("A"), "x");
+      expect(error.mock.calls.map((call) => String(call[0])).join("\n")).toMatch(/two UnsavedGuards hold changes at once/);
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+interface Record {
+  name: string;
+  updated_at: number;
+}
+
+/**
+ * A form whose server answers a save with the record it stored, which carries
+ * a field the form never edits (`updated_at`). `Answer` delivers that answer,
+ * so a test can type between the send and the answer.
+ */
+function Stamped({ fail = false }: { fail?: boolean }) {
+  const [saved, setSaved] = useState<Record>({ name: "Novieri", updated_at: 1 });
+  const [inFlight, setInFlight] = useState<Record | null>(null);
+  const { draft, setDraft, dirty, markSent } = useDraft(saved);
+  return (
+    <>
+      <UnsavedGuard dirty={dirty} />
+      <input
+        aria-label="Name"
+        value={draft?.name ?? ""}
+        onChange={(event) => draft && setDraft({ ...draft, name: event.target.value })}
+      />
+      <SaveBar
+        dirty={dirty}
+        saving={false}
+        onDiscard={() => undefined}
+        onSave={() => {
+          if (!draft) return;
+          markSent(draft);
+          setInFlight(draft);
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          if (!inFlight) return;
+          if (fail) markSent(null);
+          else setSaved({ name: inFlight.name, updated_at: 2 });
+          setInFlight(null);
+        }}
+      >
+        Answer
+      </button>
+      {/* Someone else saved meanwhile: the record changes under the form. */}
+      <button type="button" onClick={() => setSaved((current) => ({ ...current, updated_at: current.updated_at + 10 }))}>
+        Refetch
+      </button>
+      <Link to="/admin">Admin</Link>
+    </>
+  );
+}
+
+describe("useDraft after a save (review fix round 1, item 3)", () => {
+  it("takes the server's answer as the new state, even with a field the form never edits, so leaving does not ask", async () => {
+    const { router } = renderPage("/settings", <Stamped />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Answer" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("Name")).toHaveValue("Novieri SAS");
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(router.state.location.pathname).toBe("/admin");
+  });
+
+  it("keeps what was typed after the send: the answer does not wipe it", async () => {
+    renderPage("/settings", <Stamped />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.type(screen.getByLabelText("Name"), "!");
+    await userEvent.click(screen.getByRole("button", { name: "Answer" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Novieri SAS!");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+  });
+
+  it("forgets the send when the save failed, so a later refetch does not replace the unsaved change", async () => {
+    renderPage("/settings", <Stamped fail />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Answer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Refetch" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Novieri SAS");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+  });
+});
+
+/** A draft inside a `?new=` dialog, guarded on the key whose change closes it. */
+function DialogDraft({ search, onClose }: { search?: boolean | readonly string[]; onClose: () => void }) {
+  const [title, setTitle] = useState("");
+  return (
+    <div role="dialog" aria-label="New ticket">
+      <UnsavedGuard dirty={title !== ""} search={search} />
+      <input aria-label="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
+      <Link to="?new=ticket&state=open">Open only</Link>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+function ListWithCreate({ search }: { search?: boolean | readonly string[] }) {
+  const created = useNewParam("ticket");
+  return (
+    <>
+      <button type="button" onClick={created.start}>
+        New ticket
+      </button>
+      {created.open ? <DialogDraft search={search} onClose={created.close} /> : null}
+    </>
+  );
+}
+
+describe("UnsavedGuard in a ?new= dialog (review fix round 1, item 5)", () => {
+  // Close is Back here (`useNewParam` goes back from the entry it pushed); a
+  // click rather than `router.navigate(-1)`, whose held promise React reports
+  // as an un-awaited suspension (see "LEAVING IS A CLICK ON A LINK" above).
+  it("asks before Back closes a dialog with a change in it, when the guard names the key", async () => {
+    const { router } = renderPage("/service-desk", <ListWithCreate search={["new"]} />, "/service-desk");
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await userEvent.type(screen.getByLabelText("Title"), "Printer");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=ticket");
+    expect(screen.getByLabelText("Title")).toHaveValue("Printer");
+  });
+
+  it("does not ask for a change of a key it does not name", async () => {
+    const { router } = renderPage("/service-desk", <ListWithCreate search={["new"]} />, "/service-desk");
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await userEvent.type(screen.getByLabelText("Title"), "Printer");
+    await userEvent.click(screen.getByRole("link", { name: "Open only" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(router.state.location.search).toBe("?new=ticket&state=open");
+  });
+
+  it("is not vacuous: without the key, Back drops the draft unasked", async () => {
+    const { router } = renderPage("/service-desk", <ListWithCreate />, "/service-desk");
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await userEvent.type(screen.getByLabelText("Title"), "Printer");
+    await act(() => router.navigate(-1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+/** A page that releases its guard but then does not navigate. */
+function Unused() {
+  const [name, setName] = useState("");
+  const { guard, release } = useUnsavedGuard(name !== "");
+  return (
+    <>
+      {guard}
+      <input aria-label="Name" value={name} onChange={(event) => setName(event.target.value)} />
+      <button type="button" onClick={release}>
+        Release
+      </button>
+      <Link to="/admin">Admin</Link>
+    </>
+  );
+}
+
+describe("release() (review fix round 1, item 7)", () => {
+  it("lets through only a navigation started in the same step: unused, it expires and the guard asks again", async () => {
+    const { router } = renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Release" }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+});
+
+describe("the leave question (review fix round 1, item 9)", () => {
+  it("draws no empty subject line", async () => {
+    renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave without saving?" });
+    expect(dialog.querySelector(".confirm-subject")).toBeNull();
+    expect(dialog).toHaveTextContent("The changes on this page have not been saved.");
   });
 });
 

@@ -110,7 +110,10 @@ export function ConfirmDialog({
           <h2 className="modal-title">{title}</h2>
         </div>
         <div className="modal-body">
-          <p className="confirm-subject">{subject}</p>
+          {/* No empty line for a question with no subject (the unsaved-changes
+              guard, shell/formKit.tsx): an empty paragraph is a stop for a
+              screen reader that says nothing. */}
+          {subject ? <p className="confirm-subject">{subject}</p> : null}
           <p className="confirm-body">{body}</p>
 
           {requireTyping ? (
