@@ -17,7 +17,7 @@ import re
 import sys
 from email.message import Message
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -767,6 +767,7 @@ def test_with_the_api_stopped_the_job_expects_503() -> None:
     run = _deploy_step(OAUTH_STEP)
     stop = run.index("docker compose stop api")
     assert run.index('[ "$answered" = 503 ]', stop) < run.index("docker compose start api", stop)
+    assert '[ "$answered" = 503 ] || {' in run, "the branch that fails the job"
     assert run.index("flow --phase open") < stop
 
 
@@ -811,3 +812,70 @@ def test_the_owners_sign_in_is_written_once_and_only_for_the_owner(tmp_path: Pat
     }
     with pytest.raises(FileExistsError):
         flow.write_owner_state(str(path), "x", "y", [])
+
+
+def test_an_existing_state_file_is_a_fail_line_not_a_traceback(tmp_path: Path) -> None:
+    path = tmp_path / "ci-owner.json"
+    path.write_text("old")
+    client = SimpleNamespace(base="https://x.invalid")
+    with pytest.raises(flow.Failed, match="already exists"):
+        flow.Flow(client, state_file=str(path)).remember_owner("e", "p", ["r1"])
+    assert path.read_text() == "old"
+    flow.Flow(client).remember_owner("e", "p", ["r1"])  # no state file: nothing to do
+
+
+def test_main_pins_the_resolution_and_hands_the_state_file_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeFlow:
+        reached = ("sec",)
+
+        def __init__(self, client: object, state_file: str | None = None) -> None:
+            seen["state_file"] = state_file
+
+        def open(self, code: str, wait: float) -> None:
+            seen["code"] = code
+
+    code_file = tmp_path / "code"
+    code_file.write_text("setup-code\n")
+    monkeypatch.setattr(flow, "pin_resolution", lambda pins: seen.update(pins=dict(pins)))
+    monkeypatch.setattr(flow, "Client", lambda base, cafile: object())
+    monkeypatch.setattr(flow, "Flow", FakeFlow)
+    monkeypatch.setitem(flow.PHASES, "open", ("sec",))
+    argv = ["--base", "https://x.invalid", "--phase", "open", "--setup-code-file", str(code_file)]
+    out = flow.main(argv + ["--resolve", "x.invalid:127.0.0.1", "--state-file", "/s.json"])
+    assert out == 0
+    assert seen == {
+        "pins": {"x.invalid": "127.0.0.1"},
+        "state_file": "/s.json",
+        "code": "setup-code",
+    }
+
+
+def test_a_state_file_is_for_the_open_phase_only(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        flow.main(["--base", "https://x.invalid", "--phase", "closed", "--state-file", "/s.json"])
+
+
+def test_the_pebble_image_built_in_certificate_is_not_about_to_expire() -> None:
+    """pebble:2.10.1 serves its :14000/:15000 with a certificate that expires
+    2027-10-03 23:40:05 GMT (noted in acme-pebble.yml). Red from three weeks
+    before: bump the image, whose newer tag ships a newer one."""
+    import datetime
+
+    header = PEBBLE.read_text()
+    assert "2027-10-03" in header
+    assert datetime.date.today() < datetime.date(2027, 10, 3) - datetime.timedelta(weeks=3), (
+        "the Pebble image's built-in certificate expires 2027-10-03: update the image tag"
+    )
+
+
+def test_the_address_the_job_asks_pebble_at_is_the_one_the_override_gives_it() -> None:
+    services = yaml.safe_load(PEBBLE.read_text())["services"]
+    pinned = services["pebble"]["networks"]["default"]["ipv4_address"]
+    run = _deploy_step(OAUTH_STEP)
+    assert f"--resolve pebble:15000:{pinned}" in run
+    traefik = services["traefik"]["networks"]["default"]["ipv4_address"]
+    assert services["challtestsrv"]["command"][1] == traefik, "every name answers traefik's address"

@@ -54,8 +54,8 @@ all.
         --phase open --setup-code-file "$RUNNER_TEMP/setup-code" \\
         --state-file "$RUNNER_TEMP/ci-owner.json"
 
-`--resolve NAME:ADDRESS` (since 2026-11-23, design 2026-11-23-vps-y-marca-
-novieri §4) connects to ADDRESS wherever NAME is asked for, as curl's does:
+`--resolve NAME:ADDRESS` (since 2026-11-23, design
+2026-11-23-vps-y-marca-novieri §4) connects to ADDRESS wherever NAME is asked for, as curl's does:
 the URL, the Host header, SNI and the certificate check all keep NAME, which
 is the only name Traefik's routers answer since every one carries Host().
 `--state-file`, in phase open, writes the owner's address, password and two
@@ -478,10 +478,21 @@ class Flow:
     def __init__(self, client: Client, state_file: str | None = None) -> None:
         self.http = client
         self.state_file = state_file
+
         self.base = client.base
         self.resource = self.base + "/mcp"
         self.kids: set[str] = set()
         self.reached: set[str] = set()
+
+    def remember_owner(self, email: str, password: str, recovery: list[str]) -> None:
+        """Leave the owner's sign-in for agent_flow.py, if asked to. A file that
+        is already there is a FAIL line, not a traceback: it is never reused."""
+        if not self.state_file:
+            return
+        try:
+            write_owner_state(self.state_file, email, password, recovery)
+        except FileExistsError:
+            raise Failed(f"{self.state_file} already exists; it is written once") from None
 
     def done(self, section: str) -> None:
         """`section` of `PHASES` held: every assertion before this line did."""
@@ -682,8 +693,7 @@ class Flow:
         check(finish.status == 200, f"enrolment finish answered {finish.status}")
         codes = finish.json().get("recovery_codes")
         check(codes, "enrolment returned no recovery codes")
-        if self.state_file:
-            write_owner_state(self.state_file, email, password, list(codes)[:2])
+        self.remember_owner(email, password, list(codes)[:2])
         ok("signed in: password, a TOTP enrolled, recovery codes issued")
         self.done("signed in with a fresh factor")
 
@@ -945,7 +955,7 @@ class Flow:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--base", required=True, help="the public entrypoint, e.g. https://localhost"
+        "--base", required=True, help="the public entrypoint, e.g. https://rmm.novieri.com"
     )
     parser.add_argument("--cafile", help="the certificate the entrypoint presents")
     parser.add_argument("--phase", choices=("closed", "open"), required=True)
@@ -956,6 +966,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--state-file", help="phase open: the owner's sign-in, for agent_flow.py")
     args = parser.parse_args(argv)
+    if args.state_file and args.phase != "open":
+        parser.error("--state-file belongs to --phase open: only it signs the owner in")
     if args.phase == "open" and not args.setup_code_file:
         parser.error("--phase open needs --setup-code-file")
     pin_resolution(dict(args.resolve))
