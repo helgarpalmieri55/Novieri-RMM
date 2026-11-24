@@ -231,6 +231,32 @@ export const shell = {
     pageOf: "Page {page} of {count}",
     pageOfScope: "{label} page of {scope}",
   },
+  // The pattern kit (shell/listKit.tsx, detailKit.tsx, formKit.tsx; design §2).
+  kit: {
+    showing: "Showing {shown} of {total}",
+    showingSome: "Showing {shown}",
+    nothingMatches: "Nothing matches these filters.",
+    clearFilters: "Clear filters",
+    client: "Client",
+    allClients: "All clients",
+    bulkActions: "Bulk actions",
+    selected: { one: "{count} selected", other: "{count} selected" },
+    clearSelection: "Clear selection",
+    unsaved: "Unsaved changes",
+    saving: "Saving…",
+    discard: "Discard",
+    save: "Save",
+    saved: "Saved.",
+    leaveTitle: "Leave without saving?",
+    leaveBody: "The changes on this page have not been saved. If you leave, they are lost.",
+    leave: "Leave without saving",
+  },
+  // The data router's error page (shell/RouteError.tsx; decision D18).
+  routeError: {
+    title: "This page could not be shown",
+    body: "Something on this page failed while it was being drawn. Nothing was changed. Reload the page, or go back to the dashboard.",
+    home: "Go to the dashboard",
+  },
   toaster: { dismiss: "Dismiss" },
   // The top bar's client selector (shell/ClientSelector.tsx, phase 3 design §1.1).
   clientSelector: {
