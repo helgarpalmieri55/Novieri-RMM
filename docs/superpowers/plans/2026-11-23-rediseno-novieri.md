@@ -40,7 +40,7 @@
   done
   ls -A "../rmm-w$N/frontend/node_modules" | grep -c '^\.vite'   # 0: la caché aún no existe y será de esta worktree
   ```
-  (`p3/base` es la rama donde quedan las Tasks 1 a 5; si el coordinador la llama de otra forma, la orden usa ese nombre.) Los paquetes siguen siendo los del checkout principal, que ninguna worktree escribe: `npm install` no se ejecuta en una worktree. Cada worktree usa su propio puerto para harmony y para `npx vite` (los dos scripts eligen uno libre; `npx vite` imprime el suyo). Comprobado el 2026-11-24 con dos pasadas de harmony simultáneas en copias de trabajo: con la carpeta compartida una de ellas sirvió 504 y aun así terminó en `ok`; con una carpeta por copia las dos terminaron limpias (informe de la revisión previa, `p3-fix-report.md`).
+  (`p3/base` es la rama donde quedan las Tasks 1 a 5; si el coordinador la llama de otra forma, la orden usa ese nombre.) Los paquetes siguen siendo los del checkout principal, que ninguna worktree escribe: `npm install` no se ejecuta en una worktree. Cada worktree usa su propio puerto para harmony y para `npx vite` (los dos scripts eligen uno libre; `npx vite` imprime el suyo). Comprobado el 2026-11-24 en copias de trabajo (`p3-fix-report.md`): con la carpeta compartida, cada servidor nuevo reescribe el hash de la caché (`7abef529` → `2f4a4a11` al arrancar desde una segunda copia), y en dos de cinco rondas de pasadas simultáneas una página se quedó sin dibujar (el revisor vio `504 (Outdated Optimize Dep)`; la reproducción, módulos que nunca cargaron) y la pasada de hoy terminó en `ok`; con una carpeta por copia, seis pasadas en dos rondas simultáneas terminaron limpias y la caché del checkout principal no se tocó.
 - **Commits.** Uno por paso «Commit», con el formato de los anteriores (`feat(ui): …`, `test(ui): …`) y estas dos líneas al final del mensaje:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -492,7 +492,7 @@ Diseño §3.1 y §3.2. Cambia la marca **sin tocar todavía ninguna forma**: des
 - Modify: `frontend/src/shell/components.css:402` (`.pill`), `:649` (`.chip`)
 - Modify (el segundo portador de D2): `frontend/src/components/chart.tsx:112` (`SERIES_INK`), `frontend/src/shell/viz.css:110-115` (`.heat .h-info`), `frontend/src/shell/viz.tsx:253-293` (`Donut`)
 - Modify (la puerta de armonía, Step 12): `frontend/scripts/harmony.mjs`, `frontend/scripts/routes.mjs`, `frontend/scripts/routes.d.mts`, `frontend/scripts/harmony.d.mts`
-- Test: `frontend/src/test/tokens.test.ts` (reescrito), `frontend/src/test/contrast.test.ts`, `frontend/src/test/radius.test.ts`, `frontend/src/test/second-carrier.test.tsx` (nuevo), `frontend/src/test/harmony-client.test.ts`, `frontend/src/test/routes-covered.test.ts`
+- Test: `frontend/src/test/tokens.test.ts` (reescrito), `frontend/src/test/contrast.test.ts`, `frontend/src/test/radius.test.ts`, `frontend/src/test/second-carrier.test.tsx` (nuevo), `frontend/src/test/harmony-client.test.ts` (se ejecuta también `routes-covered.test.ts`, sin cambios)
 
 **Interfaces:**
 - Consumes: `docs/design/marca/novieri-tokens.json` (no se edita).
@@ -919,10 +919,122 @@ describe("design tokens", () => {
 });
 ```
 
-- [ ] **Step 3: Ejecutar la prueba y verla fallar**
+`frontend/src/test/second-carrier.test.tsx` (nuevo; decisión D2 y la confirmación del operador del 2026-11-24):
 
-Run: `cd frontend && npx vitest run src/test/tokens.test.ts`
-Expected: FAIL. Entre otros: `parsed all three files…` (`colours.get("accent")` es `undefined`: el frontmatter de hoy usa otras claves) y `carries the brand's value in --bg` (`#f5f6f9` frente a `#f3f5f8`).
+```tsx
+/**
+ * "RUNNING" AND "INFORMATION" SHARE THE COBALT (DESIGN.md v4, D2; the
+ * operator confirmed the merge on 2026-11-24), so wherever the two are drawn
+ * without a badge's icon, something other than the hue must tell them apart
+ * (The Second Carrier Rule; WCAG 1.4.1). The four places are the ones the
+ * pre-flight review named (I-3): a chart's series, the heat strip (IPAM's
+ * address grid: DHCP is "info", an assigned address "run"), the donut and the
+ * timeline bar.
+ */
+import { render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { Donut, Timeline } from "../shell/viz";
+
+const SRC = resolve(import.meta.dirname, "..");
+const read = (path: string) => readFileSync(resolve(SRC, path), "utf8");
+
+/** Every `--x: value;` of every `:root` in index.css, so an alias resolves to its paint. */
+function tokens(): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const block of read("index.css").matchAll(/:root\s*\{([^}]*)\}/g)) {
+    for (const line of (block[1] as string).split("\n")) {
+      const match = /^\s*(--[a-z0-9-]+):\s*(.+?);\s*$/.exec(line);
+      if (match) out.set(match[1] as string, match[2] as string);
+    }
+  }
+  return out;
+}
+
+/** `var(--sev-run)` -> `#2747c9`, following aliases. */
+function paint(value: string, table: Map<string, string>): string {
+  let at = value.trim();
+  for (let hops = 0; hops < 5; hops += 1) {
+    const ref = /^var\((--[a-z0-9-]+)\)$/.exec(at);
+    if (!ref) return at.toLowerCase();
+    at = (table.get(ref[1] as string) ?? "(missing)").trim();
+  }
+  throw new Error(`alias loop at ${value}`);
+}
+
+/** The declarations of one rule (`selector {`), without the trailing `;`. */
+function rule(css: string, selector: string): string[] {
+  const at = css.indexOf(`${selector} {`);
+  if (at === -1) throw new Error(`no rule ${selector}`);
+  return css
+    .slice(css.indexOf("{", at) + 1, css.indexOf("}", at))
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean);
+}
+
+describe("running and information, drawn without a badge (DESIGN.md v4, D2)", () => {
+  const table = tokens();
+
+  it("resolve to the same cobalt, which is why a second carrier is owed at all", () => {
+    expect(paint("var(--sev-run)", table)).toBe(paint("var(--accent)", table));
+  });
+
+  it("gives every chart series its own paint, never the same one twice", () => {
+    const inks =
+      /const SERIES_INK = \[([^\]]*)\]/
+        .exec(read("components/chart.tsx"))?.[1]
+        ?.split(",")
+        .map((ink) => ink.trim().replace(/^"|"$/g, "")) ?? [];
+    expect(inks.length).toBeGreaterThanOrEqual(4);
+    const paints = inks.map((ink) => paint(ink, table));
+    expect(new Set(paints).size, paints.join(", ")).toBe(paints.length);
+  });
+
+  it("rings the information cell of a heat strip, so a DHCP address is not an assigned one by colour alone", () => {
+    const css = read("shell/viz.css");
+    const info = rule(css, ".heat .h-info");
+    const run = rule(css, ".heat .h-run");
+    const ground = (declarations: string[]) =>
+      paint(declarations.find((d) => d.startsWith("background:"))?.slice("background:".length) ?? "", table);
+    expect(ground(info)).toBe(ground(run));
+    expect(info.some((d) => /^box-shadow:\s*inset\b/.test(d))).toBe(true);
+    expect(run.some((d) => d.startsWith("box-shadow:"))).toBe(false);
+  });
+
+  it("puts the kind's icon beside a donut's label, and the two kinds' icons differ", () => {
+    const icon = (kind: "run" | "info") =>
+      render(<Donut pct={40} kind={kind} label="Backups" />).container.querySelector(".don-k svg")?.innerHTML;
+    const running = icon("run");
+    const information = icon("info");
+    expect(running).toBeTruthy();
+    expect(information).toBeTruthy();
+    expect(running).not.toBe(information);
+  });
+
+  it("keeps the icon every timeline row already carries, for the same reason", () => {
+    const { container } = render(
+      <Timeline
+        ticks={["00:00", "12:00"]}
+        runs={[
+          { at: "a", kind: "run", label: "Patch", start: 0, width: 50 },
+          { at: "b", kind: "info", label: "Scan", start: 50, width: 50 },
+        ]}
+      />,
+    );
+    const icons = [...container.querySelectorAll(".tl-k svg")].map((svg) => svg.innerHTML);
+    expect(icons).toHaveLength(2);
+    expect(icons[0]).not.toBe(icons[1]);
+  });
+});
+```
+
+- [ ] **Step 3: Ejecutar las pruebas y verlas fallar**
+
+Run: `cd frontend && npx vitest run src/test/tokens.test.ts src/test/second-carrier.test.tsx`
+Expected: FAIL. En `tokens.test.ts`, entre otros: `parsed all three files…` (`colours.get("accent")` es `undefined`: el frontmatter de hoy usa otras claves) y `carries the brand's value in --bg` (`#f5f6f9` frente a `#f3f5f8`). En `second-carrier.test.tsx`: `resolve to the same cobalt` (hoy `--sev-run` es `#0f5f95`, no el acento), `gives every chart series its own paint` no falla todavía (hoy `--sev-run` y `--accent` son dos tonos) y vuelve a fallar en cuanto el Step 5 los une si el Step 6 no cambia `SERIES_INK`; `rings the information cell` y `puts the kind's icon beside a donut's label` fallan.
 
 - [ ] **Step 4: Escribir `DESIGN.md` v4**
 
@@ -1006,7 +1118,7 @@ rounded:
   r-pill: 999px
 spacing:
   rail: 232px
-  rail-collapsed: 64px
+  rail-collapsed: 76px
   topbar: 60px
   content: 22px 24px 40px
   content-max: 1440px
@@ -1090,7 +1202,7 @@ endpoints and keep it open all day; rows, chips and badges are packed onto the
 page, and what keeps that from becoming noise is that colour is rationed.
 
 **Key Characteristics:**
-- A night-blue rail (232px, 64px folded) against a cool white workspace.
+- A night-blue rail (232px, 76px folded) against a cool white workspace.
 - One cobalt accent, which is the only colour that is not a severity or a grey.
 - Five severities, each with a wash and an icon; information shares the accent.
 - Badges at 4px, chips and controls at 6px, panels at 10px: nothing is a pill
@@ -1143,8 +1255,14 @@ ground, and one cobalt accent.
 | run | progress | the accent | the accent wash | 6.35:1 | 7.42:1 |
 
 "Running" is not a sixth colour: it is information's hue with its own icon,
-because the brand has one blue. `--sev-run` is an alias of `--accent` for the
-code that still names it.
+because the brand has one blue (the operator confirmed the merge on
+2026-11-24). `--sev-run` is an alias of `--accent` for the code that still
+names it. Where the two are drawn without a badge, the difference is carried
+by something else, and `frontend/src/test/second-carrier.test.tsx` holds it:
+a chart's second series is the unknown grey, not a second cobalt; a heat cell
+for information is a ring (a cobalt core in a band of the surface), running a
+solid cell; a donut's label carries its kind's icon; a timeline row carries
+its kind's icon already.
 
 The avatar palette (`--av-1..6`) tells people apart; it is not a status, and
 white initials clear 5.10:1 on every fill.
@@ -1192,8 +1310,10 @@ Tailwind's `text-xs..2xl` resolve to Small, Body, Body, H2, H1 and KPI.
 
 ## Layout
 
-A 232px rail (64px folded, icons only), a 60px top bar and a fluid workspace
-padded `22px 24px 40px`, capped at 1440px. Breakpoints: **1300px** (tile grids
+A 232px rail (76px folded, icons only), a 60px top bar and a fluid workspace
+padded `22px 24px 40px`, capped at 1440px; where the Assistant's round button
+is drawn the workspace keeps 88px at its foot instead of 40px, so the last
+line of a page scrolls clear of it. Breakpoints: **1300px** (tile grids
 relax), **1024px** (the rail becomes a drawer, out of the tab order while
 shut), **640px** (the client selector moves into the drawer, tiles go full
 width). The breadcrumb is the first line of the content. Touch targets reach
@@ -1278,6 +1398,9 @@ closes a box, the control line says it can be operated.
   (Changes, Continuity tests, IT budget, only when on for the chosen client).
   Anchored at the bottom: Assistant, and Admin, which swaps the rail for an
   accordion of its sections with a back button and a search.
+- **The Assistant is also a round button at the bottom right of every page**
+  (Atera's AI button, `docs/design/referencias-atera/atera 1.png`; the
+  operator, 2026-11-24), never in the top bar. See "Assistant button".
 - Items at Body in rail text with an outline icon; **current**: lifted ground,
   white text, the icon and a 7px dot in rail mark. Counts in rail dim; the
   alert count is a critical badge with white text.
@@ -1285,9 +1408,20 @@ closes a box, the control line says it can be operated.
 
 ### Top bar
 - 60px, white, a line below: the "New" menu (only real destinations, each
-  shown with its permission), the search (`/`), the client selector, the alert
-  glyph, the platform glyph and the account. No bell: there is no inbox
-  behind one.
+  shown with its permission), the search (`/`, wider than before: up to
+  640px), the client selector, the alert glyph, the platform glyph and the
+  account. No bell: there is no inbox behind one. No Assistant icon: the
+  Assistant is anchored in the rail and is the round button below.
+
+### Assistant button
+- A 48px cobalt circle with the white sparkles glyph, fixed 24px from the
+  bottom right of the viewport (16px on a phone), the one shadow; a link to
+  `/assistant` named "Ask the Assistant", shown only with `ai.use` and not on
+  the Assistant's own page. 48px clears the 44px target on every pointer.
+- **It never covers the save bar.** Atera's walkthrough files exactly that
+  defect ("el botón flotante de IA tapa el botón de guardar"), so while the
+  button is drawn the save bar keeps 72px clear on its right, wherever the
+  bar is: the two cannot share the corner at any width.
 
 ### Brand
 - **Wordmark:** "NOVIERI", built from strokes and arcs (`docs/design/marca/
@@ -1322,6 +1456,7 @@ the brand's own symbol and wordmark.
 - **Don't** ship a dead control: no bell, no "New" entry without a real
   destination.
 - **Don't** draw a second save button where the save bar belongs.
+- **Don't** let a floating control cover the save bar or a page's last line.
 - **Don't** widen a guard to make a colour pass.
 ```
 
@@ -1427,7 +1562,7 @@ En el bloque de alias (el segundo `:root`), añadir estas cuatro líneas al prin
 
 En `@theme inline`: borrar la línea `--color-rail-hot: var(--rail-hot);`; añadir después de `--color-rail-dim: var(--rail-dim);` la línea `--color-rail-mark: var(--rail-mark);`; y en el bloque de radios, antes de `--radius-sm`, la línea `--radius-xs: var(--r-badge);`.
 
-- [ ] **Step 6: Las tres reglas que leían lo que cambia**
+- [ ] **Step 6: Las reglas que leían lo que cambia**
 
 `frontend/src/shell/shell.css`, la regla `.sidebar .ct.hot` (línea 148) y su comentario (139-140):
 
@@ -1447,6 +1582,44 @@ En `@theme inline`: borrar la línea `--color-rail-hot: var(--rail-hot);`; añad
 `frontend/src/shell/shell.css`, en `.counter-dot` (líneas 350-366): `background: var(--accent);` → `background: var(--sev-crit);` y `border-radius: var(--r-pill);` → `border-radius: var(--r-badge);`.
 
 `frontend/src/shell/components.css`: en `.pill` (línea 402) `border-radius: var(--r-pill);` → `border-radius: var(--r-badge);`; en `.chip` (línea 649) `border-radius: var(--r-pill);` → `border-radius: var(--r-ctl);`.
+
+**El segundo portador de «en curso» frente a «información»** (D2; lo fija `second-carrier.test.tsx`):
+
+`frontend/src/components/chart.tsx`, la línea 112 y su comentario (109-111):
+
+```tsx
+/* One accent and the severity inks as series inks, each also with a distinct
+ * hatch, so a fill is never the only thing telling two bars apart. Series 2
+ * WAS `--sev-run`, which is the accent itself since DESIGN.md v4 (D2): two
+ * cobalt bars told apart by their hatch alone. It is the unknown grey now
+ * (6.15:1 on white), the Rationed Hue Rule's own answer. */
+const SERIES_INK = ["var(--accent)", "var(--sev-mut)", "var(--sev-warn)", "var(--sev-ok)"];
+```
+
+`frontend/src/shell/viz.css`, la regla `.heat .h-info` (línea 114) pasa a:
+
+```css
+/* Information shares running's cobalt (DESIGN.md v4, D2), so its cell is a
+ * ring: a cobalt core inside a band of the surface. IPAM's address grid paints
+ * a DHCP address "info" and an assigned one "run". */
+.heat .h-info { background: var(--accent); opacity: 1; box-shadow: inset 0 0 0 2px var(--surface);
+}
+```
+
+y la regla `.don-k` (línea 142) pasa a `.don-k { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; margin-top: 4px;` (con su `}` en la línea siguiente, como las demás).
+
+`frontend/src/shell/viz.tsx`, en `Donut`, la línea `<div className="don-k">{label}</div>` pasa a:
+
+```tsx
+      {/* THE KIND'S ICON BESIDE THE LABEL (D2): running and information are
+          one cobalt now, and a donut has no badge to carry the difference. */}
+      <div className="don-k">
+        <Icon name={KIND_ICON[shown]} size={13} />
+        {label}
+      </div>
+```
+
+Las barras de la línea de tiempo no cambian: cada fila ya dibuja el icono de su tipo (`viz.tsx:345`), y la prueba lo fija.
 
 - [ ] **Step 7: Las puertas de contraste y de radios**
 
@@ -1610,7 +1783,7 @@ Expected: PASS en todas. Si `contrast.test.ts` informa un par por debajo del mí
     "northStar": "The Survey Plan",
     "overview": "The sobriety of a topographic plan: a night-blue rail carries the legend in the order a technician walks it, and a cool white workspace carries the plan, exact and dense, with colour only where it means something. The organisation follows Atera so a technician knows where things are; the look is Novieri's, and the system competes on consistency: one way to save, every view addressable, a unique tab title, empty states that say their cause.",
     "keyCharacteristics": [
-      "A night-blue rail (232px, 64px folded) against a cool white workspace.",
+      "A night-blue rail (232px, 76px folded) against a cool white workspace.",
       "One cobalt accent; five severities with washes and icons; information shares the accent.",
       "Badges 4px, chips and controls 6px, panels 10px; only the switch and progress bar are pills.",
       "Every ratio computed in CI, every page measured in a browser in two languages."
@@ -1639,7 +1812,7 @@ Expected: PASS en todas. Si `contrast.test.ts` informa un par por debajo del mí
 
 - [ ] **Step 10: `docs/product.md` con el nombre elegido**
 
-En `docs/product.md`: el título pasa a `# Product — what Novieri RMM is, and what it does`; cada «ITMS» del cuerpo pasa a «Novieri RMM» (son 14 al 2026-11-23: `grep -c ITMS docs/product.md`); la sección §9 empieza así en lugar del párrafo «`ITMS` IS A PLACEHOLDER…»:
+En `docs/product.md`: el título pasa a `# Product — what Novieri RMM is, and what it does`; la línea 30 («ITMS is a self-hosted IT management platform…») pasa a «Novieri RMM is a self-hosted IT management platform…» (son tres las líneas con «ITMS» al 2026-11-23, la 1, la 30 y la 240: `grep -n ITMS docs/product.md`); la sección §9 empieza así en lugar del párrafo «`ITMS` IS A PLACEHOLDER…» (líneas 240 a 247, hasta «…the size of that job then.»):
 
 ```markdown
 **The product is Novieri RMM** (operator, 2026-11-23, decision A3 of the
@@ -1657,10 +1830,187 @@ y la fila de `tokens.test.ts` en la tabla de §11 dice: `| frontend/src/test/tok
 Run (desde la raíz): `.claude/skills/impeccable/scripts/impeccable context`
 Expected: la salida ya no contiene `NO_PRODUCT_MD` ni `PRODUCT_INIT_REQUIRED`, e incluye `# DESIGN.md` con `name: Novieri RMM`. Si añade `CONTEXT_STALE` por el sidecar, se informa y no se repara aparte (SKILL.md, «Never repair drift as a side effect»): este paso ya lo regeneró.
 
-- [ ] **Step 12: Suite completa y navegador**
+- [ ] **Step 12: La puerta de armonía falla cuando una página no se dibuja** (revisión previa, C1)
+
+Hoy `harmony.mjs` recoge los errores de consola pero no los cuenta como fallo, y no exige el armazón: una página que el servidor de desarrollo no pudo servir no dibuja nada, un marco vacío no tiene ningún valor fuera de los tokens, y la pasada imprime `ok`. Reproducido el 2026-11-24 (`p3-fix-report.md`): con dos worktrees que compartían `node_modules/.vite`, `/licenses @ 1440x900` no dibujó la barra, con 262 módulos que nunca cargaron, y la pasada terminó en `ok` con código 0. Medido el mismo día sobre `main`: una pasada completa (117 rutas, 4 viewports) no tiene **ningún** error de consola, y las únicas diez rutas sin `.topbar` son las de acceso sin sesión; por eso las dos condiciones nuevas no ponen en rojo nada de hoy.
+
+1. Prueba primero. `frontend/src/test/harmony-client.test.ts`: la importación de `../../scripts/harmony.mjs` pasa a `import { VIEWPORTS, chromeProblems, failedLoad, markDrawn, missingShell, servedError, viewportLabel } from "../../scripts/harmony.mjs";`, la de `../../scripts/routes.mjs` a `import { CHOSEN_CLIENT, FRAMELESS, PARAMS, ROUTES } from "../../scripts/routes.mjs";`, y al final del archivo:
+
+```ts
+/**
+ * WHAT FAILS A RUN EVEN WHEN EVERY MEASUREMENT PASSES (redesign plan,
+ * pre-flight C1, reproduced 2026-11-24): two Vite servers sharing one
+ * `node_modules/.vite` served a page that never loaded, the page drew no
+ * shell, and an empty frame measured clean, so harmony printed "ok".
+ */
+describe("what fails a harmony run even when every measurement passes (pre-flight C1)", () => {
+  it("refuses a 5xx the dev server answered for a page file, and leaves the absent backend alone", () => {
+    expect(servedError(504, "http://127.0.0.1:5173/node_modules/.vite/deps/react.js?v=1")).toBe(
+      "the dev server answered 504 for /node_modules/.vite/deps/react.js",
+    );
+    expect(servedError(500, "http://127.0.0.1:5173/src/main.tsx")).toBe("the dev server answered 500 for /src/main.tsx");
+    expect(servedError(502, "http://127.0.0.1:5173/api/v1/me")).toBeNull();
+    expect(servedError(404, "http://127.0.0.1:5173/src/x.tsx")).toBeNull();
+    expect(servedError(200, "http://127.0.0.1:5173/src/x.tsx")).toBeNull();
+  });
+
+  it("refuses a page file that never loaded, and leaves the absent backend alone", () => {
+    expect(failedLoad("http://127.0.0.1:5173/src/lib/format.ts", "net::ERR_NETWORK_CHANGED")).toBe(
+      "/src/lib/format.ts never loaded (net::ERR_NETWORK_CHANGED)",
+    );
+    expect(failedLoad("http://127.0.0.1:5173/api/v1/ws", "net::ERR_CONNECTION_REFUSED")).toBeNull();
+  });
+
+  it("refuses a console route that drew no top bar, and only a console route", () => {
+    expect(missingShell("/devices", { toggle: null, profileRight: null, innerWidth: 1440, topbar: false })).toBe(true);
+    expect(missingShell("/settings?tab=users", null)).toBe(true);
+    expect(missingShell("/devices", { toggle: null, profileRight: 1420, innerWidth: 1440, topbar: true })).toBe(false);
+    expect(missingShell("/sign-in", { toggle: null, profileRight: null, innerWidth: 1440, topbar: false })).toBe(false);
+  });
+
+  it("calls frameless only the session-less routes it walks (measured: the ten with no .topbar)", () => {
+    expect(FRAMELESS.size).toBe(10);
+    for (const route of FRAMELESS) expect(ROUTES).toContain(route);
+    const sessionless = ["/forgot-password", "/reset-password", "/invite", "/recover", "/portal/sign-in"];
+    expect([...FRAMELESS].filter((route) => !route.startsWith("/sign-in") && !sessionless.includes(route))).toEqual([]);
+  });
+});
+```
+
+Run: `cd frontend && npx vitest run src/test/harmony-client.test.ts`
+Expected: FAIL (`failedLoad`, `missingShell`, `servedError` y `FRAMELESS` no existen).
+
+2. `frontend/scripts/routes.mjs`, después de `export const OPEN_DISCLOSURES = new Set(["/settings?tab=users"]);`:
+
+```js
+/**
+ * THE ROUTES THAT DRAW NO CONSOLE SHELL: the pages reached without a session
+ * (own-auth Task 11), which have the sign-in frame instead. Every other route
+ * draws the top bar, and harmony fails one that does not (`missingShell`,
+ * redesign plan pre-flight C1): a page the dev server could not serve draws
+ * nothing, and an empty frame measures clean. Measured 2026-11-24: these ten
+ * are exactly the routes of a full walk with no `.topbar`.
+ */
+export const FRAMELESS = new Set([
+  "/sign-in",
+  "/sign-in/factor",
+  "/sign-in/enroll",
+  "/sign-in/recovery-codes",
+  "/sign-in/microsoft",
+  "/forgot-password",
+  "/reset-password",
+  "/invite",
+  "/recover",
+  "/portal/sign-in",
+]);
+```
+
+y al final de `frontend/scripts/routes.d.mts`:
+
+```ts
+/** Routes with no console shell (no `.topbar`); every other route must draw one. */
+export declare const FRAMELESS: Set<string>;
+```
+
+3. `frontend/scripts/harmony.mjs`, seis cambios:
+
+   a. La importación de `./routes.mjs` pasa a `import { CHOSEN_CLIENT, FRAMELESS, OPEN_DISCLOSURES, ROUTES, patternOf } from "./routes.mjs";`.
+
+   b. En el comentario de cabecera, las cinco líneas 39 a 43 (de ` * EXIT 1 on any stray value, any horizontal overflow, a top bar` a ` * miss. Without that flag a miss is`) pasan a:
+   ```js
+    * EXIT 1 on any stray value, any horizontal overflow, a top bar
+    * `chromeProblems` refuses, any serious or critical axe violation, any route
+    * that fails to load (a client viewport whose selector does not show the
+    * client chosen counts as one, and so does a console route that draws no
+    * shell: `missingShell`), any 5xx the dev server answers for one of the
+    * page's own files and any page file that never loads (`servedError`,
+    * `failedLoad`) -- and, with `--strict-fixtures`, any fixture miss.
+    * Without that flag a miss is
+   ```
+   (las dos líneas que siguen, ` * reported and tolerated, which is the Phase A state: the gate runs and` y ` * names what each module still owes.`, no cambian).
+
+   c. Justo antes del comentario `/** * Whether the viewport draws the client mark in the drawer toggle` (la función `markDrawn`):
+   ```js
+   /**
+    * WHAT A RUN REFUSES EVEN WHEN EVERY MEASUREMENT PASSES (redesign plan,
+    * pre-flight C1, reproduced 2026-11-24). Two harmony runs whose Vite servers
+    * shared one `node_modules/.vite` rewrote it under each other; a page never
+    * loaded, drew no shell, measured clean, and the run printed "ok". An empty
+    * frame has no stray value, no overflow and nothing for axe to object to, so
+    * these are what fail it:
+    *
+    * - `servedError`: the dev server answered 5xx for a file the page asked
+    *   for ("504 (Outdated Optimize Dep)" is how a shared cache shows).
+    * - `failedLoad`: a file the page asked for got no answer at all.
+    *   `/api/` is left out of both: the fixtures replace the backend
+    *   (`?__fixtures`), nothing listens behind Vite's proxy, and a page that
+    *   reached past its fixtures is already `__fixtureMisses`' to name.
+    * - `missingShell`: a console route that drew no top bar. The routes with
+    *   no console shell of their own are `FRAMELESS` (`./routes.mjs`).
+    */
+   function pathOf(url) {
+     try {
+       return new URL(url).pathname;
+     } catch {
+       return url;
+     }
+   }
+
+   export function servedError(status, url) {
+     if (status < 500) return null;
+     const path = pathOf(url);
+     return path.startsWith("/api/") ? null : `the dev server answered ${status} for ${path}`;
+   }
+
+   export function failedLoad(url, errorText) {
+     const path = pathOf(url);
+     return path.startsWith("/api/") ? null : `${path} never loaded (${errorText})`;
+   }
+
+   export function missingShell(route, probe) {
+     return !FRAMELESS.has(route.split("?")[0]) && !(probe && probe.topbar);
+   }
+   ```
+
+   d. En `walkApp`, el objeto `result` gana, después de `chromeProblems: [],`, la línea `served: [],` con el comentario `// What the dev server failed to serve this page (`servedError`, `failedLoad`).`; y después del `page.on("console", …)`:
+   ```js
+         page.on("response", (response) => {
+           const served = servedError(response.status(), response.url());
+           if (served && !result.served.includes(served)) result.served.push(served);
+         });
+         page.on("requestfailed", (request) => {
+           const failed = failedLoad(request.url(), request.failure()?.errorText ?? "failed");
+           if (failed && !result.served.includes(failed)) result.served.push(failed);
+         });
+   ```
+
+   e. En el mismo `try`, justo después de `result.chrome = await page.evaluate(CHROME_IN_PAGE);`:
+   ```js
+           if (missingShell(route, result.chrome)) throw new Error("drew no shell: a console route with no top bar");
+   ```
+
+   f. En `main`, dentro del bucle que llena `failures`, después de la línea de `--strict-fixtures`: `for (const served of r.served ?? []) failures.push(`${where}: ${served}`);`; y en `printAppTable`, después de `if (r.misses.length) lines.push(…)`: `for (const served of r.served) lines.push(`served: ${served}`);`.
+
+   Y al final de `frontend/scripts/harmony.d.mts`:
+   ```ts
+   /** `"the dev server answered 504 for /node_modules/.vite/deps/x.js"` for a 5xx on a page file; null otherwise and for `/api/`. */
+   export declare function servedError(status: number, url: string): string | null;
+   /** `"/src/x.tsx never loaded (net::ERR_ABORTED)"` for a page file that got no answer; null for `/api/`. */
+   export declare function failedLoad(url: string, errorText: string): string | null;
+   /** A console route (not in `FRAMELESS`) whose probe found no top bar. */
+   export declare function missingShell(route: string, probe: ChromeProbe | null): boolean;
+   ```
+
+4. Run: `cd frontend && npx vitest run src/test/harmony-client.test.ts src/test/routes-covered.test.ts && npm run typecheck`
+   Expected: PASS (30 pruebas en los dos archivos al 2026-11-24) y `tsc` sin salida.
+
+Run: `node scripts/harmony.mjs --strict-fixtures --lang en --no-shots`
+Expected: `ok …`, como antes del cambio: ninguna ruta de hoy deja de dibujar el armazón ni recibe un 5xx (comprobado en una copia de trabajo el 2026-11-24).
+
+- [ ] **Step 13: Suite completa y navegador**
 
 Run: `cd frontend && npx vitest run && npm run typecheck && npm run build`
-Expected: todo en verde (365 archivos de prueba o más).
+Expected: todo en verde (366 archivos de prueba o más: los de hoy y `second-carrier.test.tsx`).
 
 Run: `node scripts/harmony.mjs --strict-fixtures --lang en --routes /devices,/health,/settings,/clients` y lo mismo con `--lang es`
 Expected: `ok    every route on the tokens, …` en las dos. Las capturas de `/devices` a 1440x900 ya muestran el riel `#101b30` y el acento cobalto.
@@ -1668,17 +2018,17 @@ Expected: `ok    every route on the tokens, …` en las dos. Las capturas de `/d
 Run: `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs`
 Expected: termina con código 0.
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
-git add PRODUCT.md DESIGN.md .impeccable/design.json docs/product.md frontend/src/index.css frontend/src/shell/shell.css frontend/src/shell/components.css frontend/src/test/tokens.test.ts frontend/src/test/contrast.test.ts frontend/src/test/radius.test.ts
-git commit -m "feat(ui): Novieri brand tokens, DESIGN.md v4 and impeccable product context
+git add PRODUCT.md DESIGN.md .impeccable/design.json docs/product.md frontend/src/index.css frontend/src/shell/shell.css frontend/src/shell/components.css frontend/src/shell/viz.css frontend/src/shell/viz.tsx frontend/src/components/chart.tsx frontend/scripts/harmony.mjs frontend/scripts/harmony.d.mts frontend/scripts/routes.mjs frontend/scripts/routes.d.mts frontend/src/test/tokens.test.ts frontend/src/test/contrast.test.ts frontend/src/test/radius.test.ts frontend/src/test/second-carrier.test.tsx frontend/src/test/harmony-client.test.ts
+git commit -m "feat(ui): Novieri brand tokens, DESIGN.md v4, impeccable product context; harmony fails an undrawn page
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 ```
 
-**Criterios de aceptación:** `tokens.test.ts` compara las tres fuentes y pasa; `impeccable context` carga `PRODUCT.md`; ninguna prueba se debilitó; harmony en verde en las cuatro rutas de muestra en los dos idiomas.
+**Criterios de aceptación:** `tokens.test.ts` compara las tres fuentes y pasa; `second-carrier.test.tsx` fija el segundo portador de «en curso» en los cuatro sitios sin etiqueta; `impeccable context` carga `PRODUCT.md`; harmony falla una ruta de la consola sin armazón y un 5xx del servidor de desarrollo, y sigue en verde en las cuatro rutas de muestra en los dos idiomas; ninguna prueba se debilitó.
 
 ---
 
@@ -1696,7 +2046,10 @@ Diseño §3.1 (logotipo, símbolo, favicon), decisión A3 (nombre) y §5 (las pr
 - Modify: `frontend/src/shell/nav.ts:290,336` (título de reserva)
 - Modify: `frontend/src/i18n/{en,es}/{people,settings,auth,change,agentReleases}.ts` (las cadenas visibles con «ITMS»), `frontend/src/i18n/test-utils.tsx:16`
 - Modify: `frontend/src/modules/auth/fixtures.ts:28,32,60`, `frontend/src/modules/settings/fixtures.ts:55`, `frontend/src/modules/agent-releases/fixtures.ts:207`, `frontend/src/lib/api.ts:1472,4344`
-- Modify: `frontend/src/preview/PreviewPage.tsx:792-794,1618` y `frontend/scripts/a11y-browser.mjs:491` (la sonda XSS)
+- Modify: `frontend/src/preview/PreviewPage.tsx:774,792-794,1618`, `frontend/scripts/a11y-browser.mjs:491` y `frontend/src/test/preview.test.ts:169` (la sonda XSS)
+- Modify (los nombres del agente, diseño del proyecto 4 §1.1): `frontend/src/modules/agent-releases/publish.ts:6,57,63`, `frontend/src/modules/agent-releases/fixtures.ts:104-128`, y sus pruebas `publish.test.ts`, `PublishReleaseDialog.test.tsx`, `agent-releases.es.test.tsx`, `ReleaseChannels.test.tsx`, `ManagedDeploymentDialog.test.tsx`, `AgentReleasesPage.test.tsx`
+- Modify (anfitriones de los datos de prueba): `frontend/src/modules/settings/fixtures.ts:54,342,347,527`, `frontend/src/modules/email-intake/fixtures.ts:182`
+- Modify (lo que la guarda rompe, nombrado de antemano): `frontend/src/i18n/coverage.test.ts:115`, `frontend/src/modules/audit/auditVocabulary.coverage.test.ts:38-43`, `frontend/src/shell/AppShell.test.tsx:140-146,727-742`, `frontend/src/modules/settings/settings.es.test.tsx:315,349`
 - Modify: cada archivo que la guarda nombre (Step 6), comentarios y pruebas incluidos
 
 **Interfaces:**
@@ -1848,10 +2201,13 @@ describe("the brand", () => {
  * `scripts/` and `index.html` is read, comments and tests included. A line
  * may still carry the letters for one of two reasons, and only these:
  *   - a wire contract with the server, which project 4 keeps (its design
- *     §1.2): the request headers `X-ITMS-Request` and `X-ITMS-Background`,
- *     and the recording format's magic `ITMSRSP1`;
- *   - dated history: the line carries a `YYYY-MM-DD` date, so it says what
- *     was true then, and rewriting it would falsify the record.
+ *     §1.2): the `X-ITMS-*` request headers (`X-ITMS-Request` and
+ *     `X-ITMS-Background` today, and any other P4 keeps by that prefix) and
+ *     the recording format's magic `ITMSRSP1`;
+ *   - dated history IN A COMMENT: the line is a comment (`//`, `*`, `/*`,
+ *     `{/*`, `<!--`) and carries a `YYYY-MM-DD` date, so it says what was true
+ *     then, and rewriting it would falsify the record. A date does not excuse
+ *     a string a person can read.
  * Lower-case `itms.` storage keys are identifiers nobody sees and stay
  * (project 4's rule for internal identifiers); this guard is case-sensitive.
  */
@@ -1862,8 +2218,9 @@ import { describe, expect, it } from "vitest";
 const FRONTEND = resolve(import.meta.dirname, "../..");
 const ROOTS = [resolve(FRONTEND, "src"), resolve(FRONTEND, "scripts"), resolve(FRONTEND, "index.html")];
 const SELF = resolve(import.meta.dirname, "no-itms.test.ts");
-const WIRE = ["X-ITMS-Request", "X-ITMS-Background", "ITMSRSP1"];
+const WIRE = /X-ITMS-[A-Za-z-]+|ITMSRSP1/g;
 const DATED = /\b20\d\d-\d\d-\d\d\b/;
+const COMMENT = /^\s*(\/\/|\*|\/\*|\{\/\*|<!--)/;
 
 function files(path: string): string[] {
   if (statSync(path).isDirectory()) return readdirSync(path).flatMap((name) => files(join(path, name)));
@@ -1873,9 +2230,9 @@ function files(path: string): string[] {
 /** The 1-based numbers of the lines that name ITMS for a reason this guard refuses. */
 export function offences(source: string): number[] {
   return source.split("\n").flatMap((line, at) => {
-    const rest = WIRE.reduce((text, wire) => text.split(wire).join(""), line);
+    const rest = line.replace(WIRE, "");
     if (!rest.includes("ITMS")) return [];
-    if (DATED.test(line)) return [];
+    if (COMMENT.test(line) && DATED.test(line)) return [];
     return [at + 1];
   });
 }
@@ -1888,6 +2245,9 @@ describe("the old product name", () => {
     expect(offences('const MAGIC = "ITMSRSP1";')).toEqual([]);
     expect(offences("// ITMS was the placeholder name until 2026-11-23")).toEqual([]);
     expect(offences('headers.set("X-ITMS-Request", "1"); // the ITMS header')).toEqual([1]);
+    expect(offences('const AGENT = "X-ITMS-Agent-Version";')).toEqual([]);
+    expect(offences(" * the ITMS tab title, as it read on 2026-09-08")).toEqual([]);
+    expect(offences('title: "ITMS (2026-11-23)",')).toEqual([1]);
     expect(offences("ok\nstill ITMS\nok")).toEqual([2]);
   });
 
@@ -1909,7 +2269,7 @@ describe("the old product name", () => {
 - [ ] **Step 2: Ejecutarlas y verlas fallar**
 
 Run: `cd frontend && npx vitest run src/shell/title.test.tsx src/shell/brand.test.tsx src/test/no-itms.test.ts`
-Expected: FAIL. `title.test.tsx` y `brand.test.tsx` no compilan (`./title` y `./brand` no existen); `no-itms.test.ts` lista unas 90 líneas (`grep -rn ITMS frontend/src | grep -v "X-ITMS\|ITMSRSP1" | wc -l` daba 92 el 2026-11-23).
+Expected: FAIL. `title.test.tsx` y `brand.test.tsx` no compilan (`./title` y `./brand` no existen); `no-itms.test.ts` pasa sus dos primeros casos y en el tercero lista 94 líneas (medido con esta versión de la guarda en una copia de trabajo el 2026-11-24: las 92 de `grep -rn ITMS frontend/src | grep -v "X-ITMS\|ITMSRSP1"` más dos cadenas fechadas que ya no se excusan por la fecha).
 
 - [ ] **Step 3: `brand.tsx`, `brand.css`, `title.tsx` y el favicon**
 
@@ -2163,16 +2523,38 @@ Datos que imitan al servidor (el proyecto 4 cambia el servidor a `Novieri RMM`, 
 
 El comentario de `lib/clientChoice.ts:11-12` («project 4's rename of the brand renames it with `itms.sidebar.collapsed`») deja de ser cierto: el diseño del proyecto 4 (§1.2) no renombra identificadores internos y este plan conserva las claves `itms.*` (decisión D15). Pasa a: «Kept in `localStorage["itms.client"]` as the id or `all`. The key keeps its old prefix on purpose: it is an identifier nobody sees (project 4's rule, its design §1.2), and the harmony gate and the a11y pass write it by that name.»
 
-La sonda XSS de `/__preview` y su lectura en el script del navegador: `window.__ITMS_XSS_EXECUTED` → `window.__XSS_PROBE_EXECUTED` en `preview/PreviewPage.tsx:792,793,794,1618` y `scripts/a11y-browser.mjs:491`.
+La sonda XSS de `/__preview`, su lectura en el script del navegador y la guarda que comprueba que no llega al paquete de producción: `window.__ITMS_XSS_EXECUTED` → `window.__XSS_PROBE_EXECUTED` en `preview/PreviewPage.tsx:774` (comentario), `:792`, `:793`, `:794`, `:1618` (comentario), `scripts/a11y-browser.mjs:491` y `src/test/preview.test.ts:169` (la cadena `"__ITMS_XSS_EXECUTED"` de su lista pasa a `"__XSS_PROBE_EXECUTED"`; sin este cambio esa guarda buscaría un nombre que ya nadie escribe y no afirmaría nada). Después: `grep -rn "XSS_EXECUTED\|XSS_PROBE" frontend/src frontend/scripts` da siete líneas, todas con `__XSS_PROBE_EXECUTED`.
+
+**Los nombres del agente** (diseño del proyecto 4 §1.1, «Binario y servicio del agente … y los artefactos `its-agent-<os>-<arch>` → `novieri-agent`»; resolución del coordinador del 2026-11-24: P3 hace las ediciones de la consola y las concilia con el Apéndice F del plan del proyecto 4 cuando exista). La consola lee el nombre del binario para saber su plataforma al publicar una versión (`PublishReleaseDialog.tsx:129,249`): si solo cambiara el agente, cada publicación tras la PR conjunta pediría elegir a mano las seis plataformas, y la suite seguiría en verde porque sus pruebas dan a la consola nombres `its-agent-*`.
+- `modules/agent-releases/publish.ts`, en `inferPlatform` (línea 63): `if (parts.length !== 4 || parts[0] !== "its" || parts[1] !== "agent") return null;` → `if (parts.length !== 4 || parts[0] !== "novieri" || parts[1] !== "agent") return null;`. En los dos comentarios, la línea 6 dice `` carrying six binaries named `novieri-agent-<os>-<arch>[.exe]` `` y la 57 `` `novieri-agent-<os>-<arch>` with both halves from the known sets ``. El nombre viejo **no** se sigue aceptando: no hay flota (proyecto 4, B1 y P7), y aceptar dos nombres sería un segundo contrato que nadie usa.
+- `modules/agent-releases/fixtures.ts:104-128`: cada `its-agent` pasa a `novieri-agent` (la URL del artefacto, el binario de las órdenes, `install_command`, `enrol_command`, `verify_command`); `ITS_ENROLL_TOKEN` no cambia (el prefijo `ITS_` se queda, P4 §1.2).
+- Las seis pruebas del módulo: `sed -i 's/its-agent/novieri-agent/g' frontend/src/modules/agent-releases/{publish.test.ts,PublishReleaseDialog.test.tsx,agent-releases.es.test.tsx,ReleaseChannels.test.tsx,ManagedDeploymentDialog.test.tsx,AgentReleasesPage.test.tsx}` (no toca `ITS_AGENT_ENROLL_TOKEN`, que va en mayúsculas). Después, `grep -rn "its-agent" frontend/src` no imprime nada.
+- En `publish.test.ts`, junto a los casos de `inferPlatform` (línea 49), uno nuevo:
+  ```ts
+  it("reads the agent's new name and only that (project 4 design §1.1: no fleet keeps the old one)", () => {
+    expect(inferPlatform("novieri-agent-windows-amd64.exe")).toEqual({ os: "windows", arch: "amd64" });
+    expect(inferPlatform("its-agent-windows-amd64.exe")).toBeNull();
+  });
+  ```
+
+**Los anfitriones de los datos de prueba**, que la puerta de armonía fotografía y el operador revisa (el proyecto 4 deja `rmm.novieri.com`, B2): `itms.toeshee.example` → `rmm.novieri.example` en `modules/settings/fixtures.ts:342,347,527` y `modules/email-intake/fixtures.ts:182`; y `modules/settings/fixtures.ts:54`, `from_address: "itms@toeshee.example"` → `from_address: "rmm@novieri.example"`. Ninguna prueba fija esos valores (`grep -rn "itms.toeshee.example\|itms@toeshee.example" frontend/src` solo los encuentra en los dos `fixtures.ts`).
+
+**La variable de entorno de una guarda**: `modules/audit/auditVocabulary.coverage.test.ts:38-43`, `ITMS_AUDIT_BACKEND_APP` → `ITS_AUDIT_BACKEND_APP` en el comentario y en las dos lecturas de `process.env`: una variable que pone un desarrollador lleva el prefijo `ITS_` de todas (proyecto 4, §1.2). Nada más la pone (`grep -rn AUDIT_BACKEND_APP` solo da ese archivo).
 
 - [ ] **Step 6: Barrer lo que la guarda señale**
 
 Run: `cd frontend && npx vitest run src/test/no-itms.test.ts`
 La prueba imprime cada `archivo:línea`. Para cada una:
 - un comentario que usa «ITMS» como nombre del producto: «Novieri RMM» (o «the console» si se habla de la interfaz);
-- un comentario que cuenta historia: se deja y se añade la fecha del hecho si no la tiene (`(2026-09-23)`), nunca una fecha inventada: se toma de `git log -S ITMS -- <archivo>` o del comentario vecino;
-- una prueba que esperaba «ITMS» en lo que pinta la consola: espera el texto nuevo (`"Devices & Inventory · Novieri RMM"` en `AppShell.test.tsx:732`, el título de esa prueba pasa a `"names the page in the browser tab, not just the product"`; la miga en `App.crumb.test.tsx` y `App.shell.test.tsx` espera `"Novieri"`; `nav.test.ts` espera `title: "Novieri RMM"` en «draws a bare crumb for a route in no model at all»);
-- una prueba que fijaba un dato del servidor (`rp.name`, emisor TOTP, nombre del MSI): el dato nuevo del Step 5.
+- un comentario que cuenta historia: se deja y se añade la fecha del hecho si no la tiene (`(2026-09-23)`), nunca una fecha inventada: se toma de `git log -S ITMS -- <archivo>` o del comentario vecino. La guarda excusa la fecha **solo en una línea que empieza como comentario** (`//`, `*`, `/*`, `{/*`, `<!--`): si «ITMS» cae en la continuación de un comentario de JSX sin marcador, esa línea se reescribe para que lo lleve (o se reparte para que la palabra caiga en la línea fechada);
+- una prueba que esperaba «ITMS» en lo que pinta la consola: espera el texto nuevo (`"Devices & Inventory · Novieri RMM"` en `AppShell.test.tsx:146` y `:732`, el título de esa prueba pasa a `"names the page in the browser tab, not just the product"`; la miga en `App.crumb.test.tsx`, `App.shell.test.tsx` y `AppShell.test.tsx:742` espera el enlace `"Novieri"`; `nav.test.ts` espera `title: "Novieri RMM"` en «draws a bare crumb for a route in no model at all»);
+- una prueba que fijaba un dato del servidor (`rp.name`, emisor TOTP, nombre del MSI): el dato nuevo del Step 5;
+- una variable de entorno de desarrollo: el prefijo `ITS_` (Step 5, `ITS_AUDIT_BACKEND_APP`).
+
+Tres de esas roturas se conocen de antemano y se hacen así, no por descubrimiento:
+- `i18n/coverage.test.ts:115`: la entrada `ITMS:` de `ALLOWED_LITERALS` **se borra**, no se cambia por «Novieri»: la consola ya no escribe el nombre como literal en JSX (la barra dibuja el logotipo y la miga lee `BRAND_NAME`, un identificador), y una entrada que nada usa hace fallar `coverage.test.ts:381` («ALLOWED_LITERALS entries nothing uses: ['ITMS']», medido en una copia de trabajo).
+- `shell/AppShell.test.tsx:140-141`: el comentario dice `// The brand block: the wordmark, which names itself to assistive technology.` y `expect(screen.getByText("ITMS", { selector: ".brand-name" })).toBeInTheDocument();` pasa a `expect(screen.getByRole("img", { name: "Novieri" })).toBeInTheDocument();`: el logotipo es un SVG sin nodo de texto, así que «espera el texto nuevo» fallaría.
+- `modules/settings/settings.es.test.tsx:315` y `:349`: en las listas de `expectNoEnglish`, `"ITMS"` pasa a `"Novieri RMM"` (el remitente de los datos del Step 5); `"itms"` y `"itms@toeshee.com"` se quedan, porque son los datos propios de esa prueba.
 
 Expected al final: PASS.
 
@@ -2197,48 +2579,57 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 ```
 
-**Criterios de aceptación:** el riel muestra el símbolo y «NOVIERI»; la pestaña dice `Dispositivos · Novieri RMM` en español en `/devices` (`Equipos · Novieri RMM` desde la Task 4, que cambia la etiqueta); el favicon es la N cobalto; `no-itms.test.ts` está en verde y sus únicas excepciones son las tres cadenas de protocolo y líneas fechadas.
+**Criterios de aceptación:** el riel muestra el símbolo y «NOVIERI»; la pestaña dice `Dispositivos · Novieri RMM` en español en `/devices` (`Equipos · Novieri RMM` desde la Task 4, que cambia la etiqueta); el favicon es la N cobalto; `no-itms.test.ts` está en verde y sus únicas excepciones son las cabeceras `X-ITMS-*`, `ITMSRSP1` y los comentarios fechados; la consola reconoce `novieri-agent-<os>-<arch>` al publicar una versión y `grep -rn its-agent frontend/src` no imprime nada; la guarda de `preview.test.ts` busca `__XSS_PROBE_EXECUTED`.
 
 ---
 
 ### Task 3: El kit de patrones (lista, ficha, formulario) y lo que necesita debajo
 
-Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview` (`src/preview/PreviewPage.tsx`, una de las 86), donde se enseñan las piezas nuevas para que `a11y-browser.mjs` las mida en píxeles.
+Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview` (`src/preview/PreviewPage.tsx`, una de las 86), donde se enseñan las piezas nuevas para que `a11y-browser.mjs` las mida en píxeles. **Restilo de lo que ya existe:** el selector de cliente, las tablas, los avisos, los diálogos y los cajones (diseño §1.2 y §2, «Ya existentes, que se restilizan») cambian **solo por los tokens** de la Task 1 y por la geometría de `.btn`, `.chip` y `.pill` del Step 7; ninguna de sus reglas propias cambia, y un revisor no debe buscar otra cosa.
 
 **Files:**
 - Create: `frontend/src/shell/listKit.tsx`, `frontend/src/shell/detailKit.tsx`, `frontend/src/shell/formKit.tsx`, `frontend/src/shell/kit.css`
-- Create: `frontend/src/test/renderPage.tsx`
+- Create: `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts`
+- Create: `frontend/src/shell/RouteError.tsx`
+- Create: `frontend/src/i18n/identical-ok.o1.ts` a `frontend/src/i18n/identical-ok.o8.ts` (Step 3b)
 - Create: `frontend/src/shell/listKit.test.tsx`, `frontend/src/shell/detailKit.test.tsx`, `frontend/src/shell/formKit.test.tsx`, `frontend/src/lib/api.forClient.test.ts`, `frontend/src/App.router.test.tsx`
+- Modify: `frontend/src/i18n/identical-ok.ts` (Step 3b: las entradas de cada oleada salen a su archivo), `frontend/src/i18n/catalogue.identical.test.ts` (Step 3b)
 - Modify: `frontend/src/shell/components.tsx` (reexportar el kit; `Tabs` acepta `label`), `frontend/src/shell/components.css` (`.btn`, `.chip`, `.pill`: la geometría de la marca)
 - Modify: `frontend/src/lib/api.ts` (`ApiClient.forClient`, junto al constructor, línea ~1822)
 - Modify: `frontend/src/fixtures/client.ts:121-129` (el proxy responde `forClient`)
 - Modify: `frontend/src/App.tsx:723-1631` (router de datos)
 - Modify: `frontend/src/i18n/en/shell.ts`, `frontend/src/i18n/es/shell.ts` (bloque `kit`)
-- Modify: `frontend/src/preview/PreviewPage.tsx` (una sección «Kit v4» al final)
+- Modify: `frontend/src/preview/PreviewPage.tsx` (tres secciones al final: «Kit v4», «AuthCard embedded» y «Portal frame»)
 
 **Interfaces:**
 - Consumes: `useApi` (`lib/ApiContext`), `useClientScope` (`lib/clientScope`), `isClientId` (`lib/clientChoice`), `Btn`, `FilterBar`, `ResultCount`, `Tabs`, `Panel` (`shell/components`), `Pill`, `type Kind` (`shell/viz`), `ConfirmDialog` (`components/confirm`), `describeSubmitError` (`components/form`).
 - Produces (`shell/listKit.tsx`):
-  - `useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K>` con `values: Record<K, string>` (`""` si falta), `active: boolean`, `set(key: K, value: string): void` (`""` borra; siempre borra `offset`), `clear(): void`;
+  - `useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K>` con `values: Record<K, string>` (`""` si falta), `active: boolean`, `set(key: K, value: string): void` (`""` borra; siempre borra `offset`; la búsqueda `q` sustituye la entrada del historial, cualquier otra clave añade una, así que Atrás deshace un chip), `clear(): void` (añade una entrada);
   - `FilterChips({ label, options, value, onChange })`, `options: readonly { value: string; label: string; count?: number }[]` (el valor `""` es «todos»);
   - `ShowingCount({ shown: number; total: number | null })`;
   - `BulkBar({ count: number; onClear(): void; children })` (nada si `count === 0`);
   - `ListEmpty({ filtered: boolean; onClear(): void; nothingYet: string; action?: ReactNode; icon?: string })`;
-  - `ClientFilter({ value: string; onChange(value: string): void })` (nada si arriba hay un cliente elegido o la persona tiene menos de dos);
-  - `useApiFor(clientId: string): ApiClient`;
+  - `ClientFilter({ value: string; onChange(value: string): void })` (nada si arriba hay un cliente elegido o la persona tiene menos de dos; quita de la URL, con `onChange("")`, un valor que no es un cliente de la persona en cuanto `/me` lo sabe);
+  - `useNarrowing(clientId: string): { client: string | null; ready: boolean }` (`client`: el identificador que de verdad se manda, o `null` si se lee con la elección de arriba; `ready`: `false` mientras `/me` no ha dicho si ese cliente es de la persona: no se lee nada antes);
+  - `useApiFor(clientId: string): ApiClient` (la API estrechada a `useNarrowing(clientId).client`, o la de siempre);
   - `useNewParam(kind: string): { open: boolean; start(): void; close(): void }`;
   - `ListToolbar({ search?, chips?, end? })`.
 - Produces (`shell/detailKit.tsx`): `SectionNav({ label: string; items: readonly { to: string; label: string; end?: boolean }[] })` (las páginas de un módulo como una fila de enlaces: sustituye a los ocho `*Nav.tsx` de módulo que hoy dibujan cada uno la suya), `DetailHead({ back: { to: string; label: string }; title: string; status?: { kind: Kind; label: string }; context?: ReactNode; actions?: ReactNode })`, `useUrlTab<K extends string>(keys: readonly K[], fallback: K, param?: string): [K, (key: K) => void]`, `UrlTabs<K extends string>({ items: readonly { key: K; label: string; count?: number }[]; active: K; onSelect(key: K): void; label: string; children })`, `DetailGrid({ main: ReactNode; aside: ReactNode })`, `ClientContext({ clientId: string | null; siteName?: string | null })`.
-- Produces (`shell/formKit.tsx`): `FormPage({ back; title; description?; children })`, `FormSection({ title: string; icon?: string; defaultOpen?: boolean; children })`, `SaveBar({ dirty: boolean; saving: boolean; error?: unknown; onDiscard(): void; onSave(): void })`, `UnsavedGuard({ dirty: boolean })`, `useDraft<T>(saved: T | undefined): { draft: T | undefined; setDraft(next: T): void; dirty: boolean; discard(): void }`.
+- Produces (`shell/formKit.tsx`): `FormPage({ back; title; description?; children })`, `FormSection({ title: string; icon?: string; defaultOpen?: boolean; children })`, `SaveBar({ dirty: boolean; saving: boolean; error?: unknown; onDiscard(): void; onSave?(): void; submit?: boolean; saved?: boolean; savedMessage?: string; problems?: readonly Problem[]; blockedReason?: string })`, `useUnsavedGuard(dirty: boolean, options?: { search?: boolean }): { guard: ReactElement | null; release(): void }`, `UnsavedGuard({ dirty: boolean; search?: boolean })`, `useDraft<T>(saved: T | undefined): { draft: T | undefined; setDraft(next: T): void; dirty: boolean; discard(): void }`.
 - Produces (`lib/api.ts`): `ApiClient.forClient(clientId: string): ApiClient`.
 - Produces (`App.tsx`): `appRoutes(): RouteObject[]` (exportada) y `App` sobre `createBrowserRouter` + `RouterProvider`.
-- Produces (`test/renderPage.tsx`): `renderPage(path: string, element: ReactElement, pattern?: string): RenderResult & { router; queryClient }`.
+- Produces (`test/renderPage.tsx`): `renderPage(path: string, element: ReactElement, pattern?: string, options?: { page?: MessageKey }): RenderResult & { router; queryClient }` y `TitleShell({ page: MessageKey; children })`, la mitad del título de pestaña que pone `AppShell`, para una prueba que monta una ficha sin el armazón.
+- Produces (`test/narrowing.ts`): `recordingNarrowing<T extends object>(api: T): { api: T; narrowedTo: string[] }`, un doble de la API que anota el cliente de cada `forClient` y devuelve la misma API.
+- Produces (`shell/RouteError.tsx`): `RouteError()`, la pantalla de error del router de datos, traducida.
 - Todo lo de `listKit`, `detailKit` y `formKit` se reexporta desde `shell/components.tsx`: las páginas importan de un solo sitio.
 
 **Decisiones de esta tarea** (Apéndice A):
 - **D6. El chip «Cliente» y la ficha 360 leen con `X-Client-Id`, no con un `?client_id=` nuevo en el servidor.** `ApiClient.forClient(id)` devuelve un cliente de la API que manda ese cliente en cada petición. El servidor ya responde con la intersección del alcance de la sesión y ese cliente, y la base de datos lo impone (invariante 5a). Así ninguna lista necesita un parámetro nuevo en el backend del proyecto 4, y el filtro es exactamente tan estricto como el selector. Cuando el selector de arriba ya eligió un cliente, `useApiFor` lo respeta y el chip no se dibuja: la elección de arriba manda.
 - **D7. El router pasa a ser de datos** (`createBrowserRouter`). `useBlocker`, lo único que permite «avisar antes de salir» dentro de la consola, solo funciona con un router de datos. Las rutas son las mismas `<Route>` de hoy dentro de una ruta de diseño que dibuja `SetupGate`; `routes-covered.test.ts` las sigue leyendo igual. Fuera de un router de datos (las pruebas que montan con `MemoryRouter`), `UnsavedGuard` solo protege la recarga y el cierre (`beforeunload`).
 - **D8. `?new=<tipo>` abre el diálogo de alta de una lista.** Así cada entrada del menú «Nuevo» es una URL real y un alta se puede enlazar. Cerrar el diálogo quita el parámetro.
+- **D16. Salir de una página con cambios es cambiar de ruta, y un guardado que lleva a otro sitio no pregunta** (revisión previa, I-1, reproducido con react-router 7.18.1). `useBlocker` registra su condición en un efecto, así que un manejador que limpia `dirty` y navega en el mismo paso es juzgado con la condición vieja: el alta del portal (`NewTicketPage.tsx:120-140`) se quedaba en `/portal/new` con «¿Salir sin guardar?» abierto. Por eso la guarda compara solo la ruta salvo que la página pida también la query (`search`), y `useUnsavedGuard` da un `release()` que se lee en el acto.
+- **D17. El chip «Cliente» solo estrecha con un cliente de la persona, y espera a saberlo** (revisión previa, I-5). Con un identificador ajeno en la URL el servidor responde cero filas (`client_scope.py:30-36`), pero el `<select>` no tiene esa opción y enseñaría «Todos los clientes» sobre una lista vacía; y antes de que `/me` conteste, leer con la API de la consola mostraría las filas de todos bajo el chip de uno. `useNarrowing` decide las dos cosas y `ClientFilter` quita el valor ajeno.
+- **D18. El router de datos tiene pantalla de error propia** (resolución del coordinador del 2026-11-24). Sin `errorElement`, una página que lanza un error enseña la de React Router, en inglés y con estilos en línea (`Unexpected Application Error!`); con `RouteError` en la ruta de diseño se ve una frase traducida con la forma de `QueryState` y un enlace al inicio.
 
 - [ ] **Step 1: Escribir las pruebas del kit (fallan)**
 
@@ -2250,18 +2641,44 @@ Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview
  * one to block a navigation), with a query client that does not retry, so a
  * test can read `router.state.location` after a click. The API is injected the
  * way the rest of the suite does it: `vi.mock` of `lib/ApiContext`.
+ *
+ * `options.page` also gives the page the shell's half of the tab title
+ * (`TitleShell`): `useRecordTitle` does nothing outside `AppShell`, so a record
+ * page's "names the record in the browser tab" test needs it (pre-flight W-I3).
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import type { MessageKey } from "../i18n/core";
+import { documentTitle, RecordTitleProvider } from "../shell/title";
+
+/**
+ * What `AppShell` does for the tab title, and nothing else: the page half is
+ * the rail entry's label (a catalogue key, so it follows a language switch the
+ * way the shell's does), and a record page puts its name in front.
+ */
+export function TitleShell({ page, children }: { page: MessageKey; children: ReactNode }) {
+  const t = useT();
+  const [record, setRecord] = useState<string | undefined>();
+  const title = t(page);
+  useEffect(() => {
+    document.title = documentTitle(title, record);
+  }, [title, record]);
+  return <RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>;
+}
 
 export function renderPage(
   path: string,
   element: ReactElement,
   pattern = "*",
+  options: { page?: MessageKey } = {},
 ): RenderResult & { router: ReturnType<typeof createMemoryRouter>; queryClient: QueryClient } {
-  const routes = pattern === "*" ? [{ path: "*", element }] : [{ path: pattern, element }, { path: "*", element: <p>elsewhere</p> }];
+  const shown = options.page ? <TitleShell page={options.page}>{element}</TitleShell> : element;
+  const routes =
+    pattern === "*" ? [{ path: "*", element: shown }] : [{ path: pattern, element: shown }, { path: "*", element: <p>elsewhere</p> }];
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const view = render(
@@ -2273,24 +2690,63 @@ export function renderPage(
 }
 ```
 
+`frontend/src/test/narrowing.ts`:
+
+```ts
+/**
+ * AN API DOUBLE THAT RECORDS WHICH CLIENT EACH READ WAS NARROWED TO (decision
+ * D6): every `forClient(id)` is noted and answers with this same double, so a
+ * page test can assert that a list behind the Client chip read through
+ * `forClient(<the chip's client>)`. Anything else is the wrapped API's own.
+ */
+export function recordingNarrowing<T extends object>(api: T): { api: T; narrowedTo: string[] } {
+  const narrowedTo: string[] = [];
+  const wrapped: T = new Proxy(api, {
+    get(target, prop, receiver) {
+      if (prop === "forClient") {
+        return (clientId: string) => {
+          narrowedTo.push(clientId);
+          return wrapped;
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  return { api: wrapped, narrowedTo };
+}
+```
+
 `frontend/src/shell/listKit.test.tsx`:
 
 ```tsx
+import { useQuery } from "@tanstack/react-query";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MeClient } from "../lib/api";
 import { renderPage } from "../test/renderPage";
-import { BulkBar, ClientFilter, FilterChips, ListEmpty, ShowingCount, useApiFor, useNewParam, useUrlFilters } from "./listKit";
+import {
+  BulkBar,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ShowingCount,
+  useApiFor,
+  useNarrowing,
+  useNewParam,
+  useUrlFilters,
+} from "./listKit";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
 const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
+/** A well-formed client id that is not one of this person's (a stale or edited link). */
+const FOREIGN = "9d1f0c2a-4b3e-4c5d-8e6f-7a8b9c0d1e2f";
 
-const scope = vi.hoisted(() => ({ selected: null as string | null, clients: [] as unknown[] }));
+const scope = vi.hoisted(() => ({ selected: null as string | null, clients: [] as unknown[], ready: true }));
 vi.mock("../lib/clientScope", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/clientScope")>()),
-  useClientScope: () => ({ selected: scope.selected, clients: scope.clients, select: vi.fn(), ready: true }),
+  useClientScope: () => ({ selected: scope.selected, clients: scope.clients, select: vi.fn(), ready: scope.ready }),
 }));
 const api = vi.hoisted(() => ({ forClient: vi.fn((id: string) => ({ narrowedTo: id })) }));
 vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
@@ -2301,6 +2757,7 @@ function client(id: string, name: string): MeClient {
 
 beforeEach(() => {
   scope.selected = null;
+  scope.ready = true;
   scope.clients = [client(ANDES, "Andes Logistics"), client(BOGOTA, "Bogotá Retail")];
   api.forClient.mockClear();
 });
@@ -2310,6 +2767,7 @@ function Fleet() {
   const online = filters.values.state === "online";
   return (
     <>
+      <input aria-label="Search" value={filters.values.q} onChange={(event) => filters.set("q", event.target.value)} />
       <FilterChips
         label="State"
         options={[
@@ -2348,6 +2806,15 @@ describe("useUrlFilters and FilterChips (design §2: filters live in the URL)", 
     renderPage("/devices", <Fleet />);
     expect(screen.getByRole("button", { name: /All\s*12/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Offline" })).toBeInTheDocument();
+  });
+
+  it("lets Back undo a chip, while typing a search adds no history entry of its own", async () => {
+    const { router } = renderPage("/devices", <Fleet />);
+    await userEvent.click(screen.getByRole("button", { name: /Online/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Search" }), "srv");
+    expect(router.state.location.search).toBe("?state=online&q=srv");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
   });
 });
 
@@ -2390,7 +2857,7 @@ describe("BulkBar (design §2: only where bulk actions exist, and only with a se
 });
 
 describe("ClientFilter (design §1.3: a Client chip while every client is shown)", () => {
-  it("offers every client of the person", () => {
+  it("offers every client of the person, drawn as a chip", () => {
     renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
     const select = screen.getByRole("combobox", { name: "Client" });
     expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual([
@@ -2398,6 +2865,15 @@ describe("ClientFilter (design §1.3: a Client chip while every client is shown)
       "Andes Logistics",
       "Bogotá Retail",
     ]);
+    // Design §1.3 says a "Client" chip: a select in the chip's shape, pinned
+    // so a refactor cannot drop the shape (spec pre-flight M-11).
+    expect(select.closest(".chip")).toHaveClass("chip-select");
+  });
+
+  it("drops a client the person does not have from the URL, instead of drawing All clients over an empty list", () => {
+    const onChange = vi.fn();
+    renderPage("/x", <ClientFilter value={FOREIGN} onChange={onChange} />);
+    expect(onChange).toHaveBeenCalledWith("");
   });
 
   it("is not drawn when the top bar has chosen a client, because that choice already decides", () => {
@@ -2430,6 +2906,62 @@ describe("useApiFor (decision D6)", () => {
     renderPage("/x", <Probe id="not-a-uuid" />);
     expect(screen.getByText("console")).toBeInTheDocument();
     expect(api.forClient).not.toHaveBeenCalled();
+  });
+
+  it("never sends a client the person does not have (decision D17)", () => {
+    renderPage("/x", <Probe id={FOREIGN} />);
+    expect(screen.getByText("console")).toBeInTheDocument();
+    expect(api.forClient).not.toHaveBeenCalled();
+  });
+});
+
+function Decided({ id }: { id: string }) {
+  const narrowing = useNarrowing(id);
+  return <p>{narrowing.ready ? (narrowing.client ?? "console") : "waiting"}</p>;
+}
+
+/** A list behind the chip, keyed on the narrowed client the way Receta L keys one. */
+function ChipList() {
+  const filters = useUrlFilters(["client"] as const);
+  const narrowing = useNarrowing(filters.values.client);
+  const narrowed = useApiFor(filters.values.client) as unknown as { narrowedTo?: string };
+  const list = useQuery({
+    queryKey: ["probe", narrowing.client],
+    queryFn: async () => narrowed.narrowedTo ?? "console",
+    enabled: narrowing.ready,
+  });
+  return (
+    <>
+      <ClientFilter value={filters.values.client} onChange={(value) => filters.set("client", value)} />
+      <p>read as {list.data ?? "nothing yet"}</p>
+    </>
+  );
+}
+
+describe("useNarrowing (decision D17)", () => {
+  it("decides nothing before /me has listed the person's clients, so a list reads nothing", () => {
+    scope.ready = false;
+    renderPage("/x", <Decided id={ANDES} />);
+    expect(screen.getByText("waiting")).toBeInTheDocument();
+  });
+
+  it("is decided at once for an empty chip, or when the top bar has chosen", () => {
+    scope.ready = false;
+    renderPage("/x", <Decided id="" />);
+    scope.selected = BOGOTA;
+    renderPage("/y", <Decided id={ANDES} />);
+    expect(screen.getAllByText("console")).toHaveLength(2);
+  });
+
+  it("reads again under the new client when the chip changes, so no row of the last one stays", async () => {
+    renderPage("/x", <ChipList />);
+    expect(await screen.findByText("read as console")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), ANDES);
+    expect(await screen.findByText(`read as ${ANDES}`)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), BOGOTA);
+    expect(await screen.findByText(`read as ${BOGOTA}`)).toBeInTheDocument();
+    expect(api.forClient).toHaveBeenCalledWith(ANDES);
+    expect(api.forClient).toHaveBeenCalledWith(BOGOTA);
   });
 });
 
@@ -2562,11 +3094,12 @@ describe("SectionNav", () => {
 ```tsx
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { renderPage } from "../test/renderPage";
-import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft } from "./formKit";
+import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
 
 interface Org {
   name: string;
@@ -2627,6 +3160,36 @@ describe("SaveBar and useDraft (design §2: one save bar for the whole console)"
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
+
+  // What the per-panel buttons it replaces did (settings' SaveBar, the
+  // ticket's "Save changes"), so a page loses none of it by moving here.
+  it("says it saved once the server answered, until the next change", () => {
+    renderPage("/x", <SaveBar dirty={false} saving={false} saved onDiscard={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Saved.");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+
+  it("says why it cannot save, and does not offer to", () => {
+    renderPage(
+      "/x",
+      <SaveBar dirty saving={false} blockedReason="A subject is required." onDiscard={vi.fn()} onSave={vi.fn()} />,
+    );
+    expect(screen.getByText("A subject is required.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("submits the page's form when asked, so Enter in a field still saves", async () => {
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    renderPage(
+      "/x",
+      <form onSubmit={onSubmit}>
+        <input aria-label="Name" defaultValue="a" />
+        <SaveBar dirty saving={false} submit onDiscard={vi.fn()} />
+      </form>,
+    );
+    await userEvent.type(screen.getByLabelText("Name"), "{Enter}");
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
 });
 
 // LEAVING IS A CLICK ON A LINK, as a person leaves: the form's own back link.
@@ -2664,6 +3227,80 @@ describe("UnsavedGuard (design §5: a page with changes warns before it is left)
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+/** An alta that leaves for what it created, the portal's New ticket shape. */
+function Creating({ releasing }: { releasing: boolean }) {
+  const [title, setTitle] = useState("");
+  const { guard, release } = useUnsavedGuard(title !== "");
+  const navigate = useNavigate();
+  return (
+    <FormPage back={{ to: "/tickets", label: "Tickets" }} title="New ticket">
+      {guard}
+      <label>
+        Title
+        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <button
+        type="button"
+        onClick={() => {
+          if (releasing) release();
+          navigate("/tickets/t-1");
+        }}
+      >
+        Send
+      </button>
+    </FormPage>
+  );
+}
+
+/** A form whose links change only the query: a tab, the way Settings has them. */
+function Tabbed({ search }: { search?: boolean }) {
+  const [name, setName] = useState("");
+  return (
+    <>
+      <UnsavedGuard dirty={name !== ""} search={search} />
+      <label>
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      <Link to="/settings?tab=email">Email</Link>
+    </>
+  );
+}
+
+describe("UnsavedGuard, what leaving is (decision D16)", () => {
+  it("lets a save that leaves go without asking", async () => {
+    const { router } = renderPage("/tickets/new", <Creating releasing />, "/tickets/new");
+    await userEvent.type(screen.getByLabelText("Title"), "Printer");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(router.state.location.pathname).toBe("/tickets/t-1");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("is not vacuous: the same navigation without release() asks", async () => {
+    const { router } = renderPage("/tickets/new", <Creating releasing={false} />, "/tickets/new");
+    await userEvent.type(screen.getByLabelText("Title"), "Printer");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/tickets/new");
+  });
+
+  it("does not call a change of query alone leaving (a tab, a filter, ?new=)", async () => {
+    const { router } = renderPage("/settings", <Tabbed />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("link", { name: "Email" }));
+    expect(router.state.location.search).toBe("?tab=email");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("asks on a change of query too where the page says its query is what it edits", async () => {
+    const { router } = renderPage("/settings", <Tabbed search />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    await userEvent.click(screen.getByRole("link", { name: "Email" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("");
   });
 });
 
@@ -2763,9 +3400,16 @@ Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` 
     saving: "Saving…",
     discard: "Discard",
     save: "Save",
+    saved: "Saved.",
     leaveTitle: "Leave without saving?",
     leaveBody: "The changes on this page have not been saved. If you leave, they are lost.",
     leave: "Leave without saving",
+  },
+  // The data router's error page (shell/RouteError.tsx; decision D18).
+  routeError: {
+    title: "This page could not be shown",
+    body: "Something on this page failed while it was being drawn. Nothing was changed. Reload the page, or go back to the dashboard.",
+    home: "Go to the dashboard",
   },
 ```
 
@@ -2786,11 +3430,128 @@ Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` 
     saving: "Guardando…",
     discard: "Descartar",
     save: "Guardar",
+    saved: "Guardado.",
     leaveTitle: "¿Salir sin guardar?",
     leaveBody: "Los cambios de esta página no se han guardado. Si sales, se pierden.",
     leave: "Salir sin guardar",
   },
+  routeError: {
+    title: "No se pudo mostrar esta página",
+    body: "Algo de esta página falló mientras se dibujaba. No se cambió nada. Recarga la página o vuelve al inicio.",
+    home: "Ir al inicio",
+  },
 ```
+
+- [ ] **Step 3b: `identical-ok.ts`, partido por oleada** (revisión previa, W-I1 y F-M10)
+
+`src/i18n/identical-ok.ts` es un solo objeto con 154 entradas de todos los módulos, y cualquier oleada que deja idéntica una clave en los dos catálogos (VRF, VLAN, «Ticket», «Software») o que renombra una que ya está listada tiene que tocarlo: ocho oleadas añadiendo al final del mismo literal chocan. Se parte una vez, aquí, y cada oleada pasa a tener el suyo.
+
+1. Prueba primero. En `frontend/src/i18n/catalogue.identical.test.ts`, la importación `import { IDENTICAL_OK } from "./identical-ok";` pasa a `import { IDENTICAL_OK, IDENTICAL_OK_SHARED, SHARED_NAMESPACES, WAVE_ENTRIES, WAVE_NAMESPACES } from "./identical-ok";`, y antes del caso «the audit itself finds a pasted English value, and a plural form»:
+
+```ts
+  it("keeps each wave's entries in that wave's own file, and only the shared ones in identical-ok.ts (redesign plan, shared files)", () => {
+    const namespace = (path: string) => path.split(".")[0] as string;
+    for (const [wave, entries] of Object.entries(WAVE_ENTRIES)) {
+      const foreign = Object.keys(entries).filter((path) => !(WAVE_NAMESPACES[wave] ?? []).includes(namespace(path)));
+      expect(foreign, `identical-ok.${wave}.ts lists another wave's keys: ${foreign.join(", ")}`).toEqual([]);
+    }
+    const unshared = Object.keys(IDENTICAL_OK_SHARED).filter((path) => !SHARED_NAMESPACES.includes(namespace(path)));
+    expect(unshared, `identical-ok.ts lists a wave's keys: ${unshared.join(", ")}`).toEqual([]);
+    // Every catalogue has an owner, so a new identical key always has a file to go to.
+    const owned = new Set([...SHARED_NAMESPACES, ...Object.values(WAVE_NAMESPACES).flat()]);
+    expect(Object.keys(en).filter((name) => !owned.has(name))).toEqual([]);
+  });
+```
+
+Run: `cd frontend && npx vitest run src/i18n/catalogue.identical.test.ts`
+Expected: FAIL (no existen `IDENTICAL_OK_SHARED`, `SHARED_NAMESPACES`, `WAVE_ENTRIES` ni `WAVE_NAMESPACES`).
+
+2. Guardar este guion como `"${TMPDIR:-/tmp}/split-identical-ok.mjs"` (fuera del repositorio: se usa una vez y no se versiona; si la sesión tiene una carpeta temporal propia, ahí) y ejecutarlo desde `frontend/` con `node "${TMPDIR:-/tmp}/split-identical-ok.mjs"`:
+
+```js
+// Run once from frontend/: node <this file>. Moves each wave's IDENTICAL_OK
+// entries into src/i18n/identical-ok.o<N>.ts and leaves the shared ones.
+import { readFileSync, writeFileSync } from "node:fs";
+
+const WAVES = {
+  o1: ["devices", "inventory", "onboarding", "agentPush", "agentReleases"],
+  o2: ["dashboard", "serviceDesk", "sla", "emailIntake", "notification", "portal"],
+  o3: ["health", "patch", "deploy", "remote", "jobs", "errorMonitor", "platformStatus", "security", "audit", "auditVocabulary"],
+  o4: ["backup", "bcp", "provisioning", "siteServers", "enrollment"],
+  o5: ["licenses", "subscriptions", "ipam"],
+  o6: ["docs", "change", "budget", "people", "credentials", "reporting"],
+  o7: ["settings", "profile", "aiAdmin", "aiAutomation"],
+  o8: ["auth", "setup"],
+};
+const TASK = { o1: 6, o2: 7, o3: 8, o4: 9, o5: 10, o6: 11, o7: 12, o8: 13 };
+const FILE = "src/i18n/identical-ok.ts";
+const source = readFileSync(FILE, "utf8");
+const open = source.indexOf("export const IDENTICAL_OK: Record<string, string> = {");
+const close = source.indexOf("\n};", open);
+const header = source.slice(0, open);
+const lines = source.slice(source.indexOf("\n", open) + 1, close).split("\n");
+const entry = /^  "([a-zA-Z]+)\.[^"]*": ".*",$/;
+const byWave = Object.fromEntries(Object.keys(WAVES).map((wave) => [wave, []]));
+const shared = [];
+for (const line of lines) {
+  const match = entry.exec(line);
+  if (!match) throw new Error(`not a one-line entry: ${line}`);
+  const wave = Object.keys(WAVES).find((key) => WAVES[key].includes(match[1]));
+  (wave ? byWave[wave] : shared).push(line);
+}
+for (const [wave, namespaces] of Object.entries(WAVES)) {
+  const name = `IDENTICAL_OK_${wave.toUpperCase()}`;
+  writeFileSync(
+    `src/i18n/identical-ok.${wave}.ts`,
+    `/**
+ * IDENTICAL_OK entries of wave ${wave.toUpperCase()} (Task ${TASK[wave]}): the catalogues ${namespaces.map((n) => `\`${n}\``).join(", ")}.
+ * The wave adds and removes its own entries here and nowhere else, so the eight
+ * waves that run in parallel never edit one file (redesign plan, "Archivos
+ * compartidos"); \`catalogue.identical.test.ts\` holds each file to its catalogues.
+ */
+export const ${name}: Record<string, string> = {
+${byWave[wave].join("\n")}${byWave[wave].length ? "\n" : ""}};
+`,
+  );
+}
+const imports = Object.keys(WAVES).map((wave) => `import { IDENTICAL_OK_${wave.toUpperCase()} } from "./identical-ok.${wave}";`).join("\n");
+writeFileSync(
+  FILE,
+  `${imports}
+
+${header.trimEnd()}
+
+/** The catalogues each wave owns (redesign plan, "Archivos compartidos"). */
+export const WAVE_NAMESPACES: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(WAVES, null, 2).replace(/"([a-z0-9]+)":/g, "$1:")};
+
+/** The catalogues the base tasks own; their entries stay in this file. */
+export const SHARED_NAMESPACES: readonly string[] = ["common", "components", "shell", "enums", "lib", "time", "validation", "clients"];
+
+/** The shared entries (the base tasks'). */
+export const IDENTICAL_OK_SHARED: Record<string, string> = {
+${shared.join("\n")}
+};
+
+/** Each wave's file, by wave. */
+export const WAVE_ENTRIES: Readonly<Record<string, Record<string, string>>> = {
+${Object.keys(WAVES).map((wave) => `  ${wave}: IDENTICAL_OK_${wave.toUpperCase()},`).join("\n")}
+};
+
+export const IDENTICAL_OK: Record<string, string> = {
+  ...IDENTICAL_OK_SHARED,
+${Object.keys(WAVES).map((wave) => `  ...IDENTICAL_OK_${wave.toUpperCase()},`).join("\n")}
+};
+`,
+);
+console.log(`shared ${shared.length}, ${Object.entries(byWave).map(([wave, list]) => `${wave} ${list.length}`).join(", ")}`);
+```
+
+Expected: imprime `shared 28, o1 19, o2 20, o3 23, o4 17, o5 27, o6 10, o7 10, o8 0` (154 entradas, las de hoy; medido en una copia de trabajo el 2026-11-24), crea `src/i18n/identical-ok.o1.ts` a `identical-ok.o8.ts` (el de la O8 vacío) y reescribe `identical-ok.ts` con las importaciones, las 28 entradas compartidas en `IDENTICAL_OK_SHARED` y el `IDENTICAL_OK` de siempre como su unión. Si el número de una oleada no coincide, alguien añadió una entrada después del 2026-11-24: no es un fallo, siempre que la suma sea el número de entradas que tenía el archivo (`grep -c '^  "' src/i18n/identical-ok.ts` antes de ejecutarlo).
+
+Run: `npx vitest run src/i18n && npm run typecheck`
+Expected: PASS; `IDENTICAL_OK` tiene las mismas 154 claves que antes, así que `catalogue.identical.test.ts` no cambia de veredicto.
+
+Desde aquí, **la Task 4 y la Task 5 añaden sus entradas a `IDENTICAL_OK_SHARED`** (`shell.*`, `clients.*`) y cada oleada a su `identical-ok.o<N>.ts`.
 
 - [ ] **Step 4: `listKit.tsx`**
 
@@ -2802,9 +3563,9 @@ Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` 
  *
  * EVERYTHING IS IN THE URL (design §2, and the reason Atera's walkthrough
  * gives for competing on consistency): a filtered view is a link, a reload
- * keeps it, Back undoes it.
+ * keeps it, Back undoes a chip.
  */
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useT } from "../i18n/context";
@@ -2818,14 +3579,20 @@ import "./kit.css";
 
 /** The page cursor of the lists that page; any filter change starts again from the first page. */
 const CURSOR = "offset";
+/** The search box's key: typing in it replaces the history entry instead of adding one per keystroke. */
+const SEARCH = "q";
 
 export interface UrlFilters<K extends string> {
   /** Every key's value, `""` when the URL does not carry it. */
   readonly values: Readonly<Record<K, string>>;
   /** Whether any of the keys holds a value: what tells "nothing yet" from "nothing matches". */
   readonly active: boolean;
-  /** `""` removes the key. Replaces the history entry: typing in a search is not twenty Backs. */
+  /**
+   * `""` removes the key. The search (`q`) replaces the history entry, so
+   * typing is not twenty Backs; any other key adds one, so Back undoes a chip.
+   */
   set(key: K, value: string): void;
+  /** Removes every key: a new history entry, so Back brings the filters back. */
   clear(): void;
 }
 
@@ -2849,21 +3616,18 @@ export function useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<
           next.delete(CURSOR);
           return next;
         },
-        { replace: true },
+        { replace: key === SEARCH },
       ),
     [setParams],
   );
   const clear = useCallback(
     () =>
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          for (const key of signature.split("|")) next.delete(key);
-          next.delete(CURSOR);
-          return next;
-        },
-        { replace: true },
-      ),
+      setParams((current) => {
+        const next = new URLSearchParams(current);
+        for (const key of signature.split("|")) next.delete(key);
+        next.delete(CURSOR);
+        return next;
+      }),
     [setParams, signature],
   );
   return { values, active, set, clear };
@@ -2972,7 +3736,14 @@ export function ListEmpty({
  */
 export function ClientFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const t = useT();
-  const { selected, clients } = useClientScope();
+  const { selected, clients, ready } = useClientScope();
+  // A CLIENT THE PERSON DOES NOT HAVE (a stale or edited link) leaves the URL
+  // once /me has listed theirs, rather than being drawn as "All clients" over
+  // the empty list the server answers for it (decision D17).
+  const foreign = ready && value !== "" && !clients.some((client) => client.id === value);
+  useEffect(() => {
+    if (foreign) onChange("");
+  }, [foreign, onChange]);
   if (selected !== null || clients.length < 2) return null;
   return (
     <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
@@ -2990,18 +3761,31 @@ export function ClientFilter({ value, onChange }: { value: string; onChange: (va
 }
 
 /**
+ * WHAT THE CHIP NARROWS TO, AND WHETHER THAT IS DECIDED (decisions D6, D17).
+ * The top bar's choice wins when there is one, and an empty chip is the
+ * console's own choice: both decided at once. Otherwise the chip's client,
+ * only once `/me` has said it is one of the person's: until then `ready` is
+ * false and a list reads nothing, so every client's rows never sit under one
+ * client's chip. A value that is not one of theirs is never sent (the server
+ * answers a malformed header with 400, and a foreign client with zero rows).
+ */
+export function useNarrowing(clientId: string): { client: string | null; ready: boolean } {
+  const { selected, clients, ready } = useClientScope();
+  if (clientId === "" || selected !== null) return { client: null, ready: true };
+  if (!ready) return { client: null, ready: false };
+  const mine = isClientId(clientId) && clients.some((client) => client.id === clientId);
+  return { client: mine ? clientId : null, ready: true };
+}
+
+/**
  * THE API, NARROWED TO THE CHIP'S CLIENT (decision D6). `X-Client-Id` narrows
- * and never widens; the database enforces it (invariant 5a). The top bar's
- * choice wins when there is one, and a value that is not a client id is
- * ignored rather than sent (the server answers a malformed header with 400).
+ * and never widens; the database enforces it (invariant 5a). For READS: a
+ * write keeps `useApi()`, so the chip never changes where a write goes.
  */
 export function useApiFor(clientId: string): ApiClient {
   const api = useApi();
-  const { selected } = useClientScope();
-  return useMemo(
-    () => (clientId === "" || selected !== null || !isClientId(clientId) ? api : api.forClient(clientId)),
-    [api, clientId, selected],
-  );
+  const { client } = useNarrowing(clientId);
+  return useMemo(() => (client === null ? api : api.forClient(client)), [api, client]);
 }
 
 /** `?new=<kind>` opens the page's create dialog (decision D8), so the New menu can link to it. */
@@ -3216,14 +4000,15 @@ export * from "./formKit";
  * Save" -- for the whole console. Atera's walkthrough counts six ways to save;
  * this console has one. A page with changes asks before it is left.
  */
-import { useCallback, useContext, useId, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/confirm";
-import { describeSubmitError } from "../components/form";
+import { describeSubmitError, type Problem } from "../components/form";
 import { useT } from "../i18n/context";
 import { Btn } from "./components";
 import { Icon } from "./icons";
+import { KIND_ICON } from "./viz";
 import "./kit.css";
 
 export function FormPage({
@@ -3291,36 +4076,70 @@ export function FormSection({
   );
 }
 
-/** The one save bar. Drawn only while there is something to say: a change, a save, a failure. */
+/**
+ * The one save bar. Drawn only while there is something to say: a change, a
+ * save in flight, a failure, or "Saved." once the server answered.
+ *
+ * IT DOES WHAT THE BUTTONS IT REPLACES DID (settings' `SaveBar`, the ticket's
+ * "Save changes"), so no page loses a behaviour by moving here: the reason it
+ * cannot save (`blockedReason`: Rule 1, disabled with the reason shown), the
+ * form's own `problems`, the confirmation after a 2xx (`saved`, never an
+ * optimistic one), and Enter in a field (`submit`: the bar sits inside the
+ * page's `<Form>` and its Save is that form's submit button).
+ */
 export function SaveBar({
   dirty,
   saving,
   error,
   onDiscard,
   onSave,
+  submit = false,
+  saved = false,
+  savedMessage,
+  problems = [],
+  blockedReason,
 }: {
   dirty: boolean;
   saving: boolean;
   error?: unknown;
   onDiscard: () => void;
-  onSave: () => void;
+  onSave?: () => void;
+  submit?: boolean;
+  saved?: boolean;
+  savedMessage?: string;
+  problems?: readonly Problem[];
+  blockedReason?: string;
 }) {
   const t = useT();
-  if (!dirty && !saving && !error) return null;
+  if (!dirty && !saving && !error) {
+    return saved ? (
+      <div className="savebar saved" role="status">
+        <Icon name={KIND_ICON.ok} size={15} />
+        <span className="savebar-what">{savedMessage ?? t("shell.kit.saved")}</span>
+      </div>
+    ) : null;
+  }
+  const failure = error
+    ? describeSubmitError(error)
+    : problems.length > 0
+      ? `${problems.map((problem) => problem.message).join(". ")}.`
+      : null;
   return (
     <div className="savebar" role="region" aria-label={t("shell.kit.unsaved")}>
       <span className="savebar-what">{saving ? t("shell.kit.saving") : t("shell.kit.unsaved")}</span>
-      {error ? (
+      {failure ? (
         <span className="savebar-error" role="alert">
-          {describeSubmitError(error)}
+          {failure}
         </span>
       ) : null}
+      {blockedReason ? <span className="savebar-blocked">{blockedReason}</span> : null}
       <Btn label={t("shell.kit.discard")} onClick={onDiscard} disabled={saving} />
       <Btn
         label={saving ? t("shell.kit.saving") : t("shell.kit.save")}
         variant="primary"
-        onClick={onSave}
-        disabled={saving || !dirty}
+        type={submit ? "submit" : "button"}
+        onClick={submit ? undefined : onSave}
+        disabled={saving || !dirty || blockedReason !== undefined}
       />
     </div>
   );
@@ -3357,12 +4176,33 @@ export function useDraft<T>(saved: T | undefined): {
  * a reload or a closed tab gets the browser's own question. Under a router
  * that cannot block -- a test mounted with `MemoryRouter` -- only the browser
  * half applies.
+ *
+ * LEAVING IS A CHANGE OF PATH (decision D16). A change of query alone -- a
+ * tab, a filter, `?new=`, the record a save just selected -- keeps the page,
+ * so it does not ask, unless the page says its query IS what it edits
+ * (`search`: Settings, where a tab is another form).
+ *
+ * A SAVE THAT LEAVES, LEAVES. `useBlocker` reads its condition from an
+ * effect, so a handler that saves and navigates in one step is judged by the
+ * render before the save, with the change still in it (pre-flight I-1,
+ * reproduced with react-router 7.18.1). `release()` is read at once and lets
+ * the next navigation through; a new change arms the guard again.
  */
-export function UnsavedGuard({ dirty }: { dirty: boolean }) {
+export function useUnsavedGuard(
+  dirty: boolean,
+  options: { search?: boolean } = {},
+): { guard: ReactElement | null; release: () => void } {
+  const released = useRef(false);
+  useEffect(() => {
+    if (!dirty) released.current = false;
+  }, [dirty]);
+  const release = useCallback(() => {
+    released.current = true;
+  }, []);
   useBeforeUnload(
     useCallback(
       (event: BeforeUnloadEvent) => {
-        if (!dirty) return;
+        if (!dirty || released.current) return;
         event.preventDefault();
         event.returnValue = "";
       },
@@ -3370,15 +4210,30 @@ export function UnsavedGuard({ dirty }: { dirty: boolean }) {
     ),
   );
   const dataRouter = useContext(UNSAFE_DataRouterContext);
-  return dataRouter ? <LeaveQuestion dirty={dirty} /> : null;
+  const guard = dataRouter ? <LeaveQuestion dirty={dirty} search={options.search ?? false} released={released} /> : null;
+  return { guard, release };
 }
 
-function LeaveQuestion({ dirty }: { dirty: boolean }) {
+/** The guard for a page that does not leave when it saves. */
+export function UnsavedGuard({ dirty, search = false }: { dirty: boolean; search?: boolean }) {
+  return useUnsavedGuard(dirty, { search }).guard;
+}
+
+function LeaveQuestion({
+  dirty,
+  search,
+  released,
+}: {
+  dirty: boolean;
+  search: boolean;
+  released: { readonly current: boolean };
+}) {
   const t = useT();
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       dirty &&
-      (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+      !released.current &&
+      (currentLocation.pathname !== nextLocation.pathname || (search && currentLocation.search !== nextLocation.search)),
   );
   return (
     <ConfirmDialog
@@ -3434,6 +4289,9 @@ function LeaveQuestion({ dirty }: { dirty: boolean }) {
 .savebar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
 .savebar-what { margin-right: auto; font-weight: 500; color: var(--ink); }
 .savebar-error { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--sev-crit); }
+.savebar-blocked { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--muted); }
+.savebar.saved { gap: 8px; }
+.savebar.saved .ic { color: var(--sev-ok); }
 
 @media (prefers-reduced-motion: reduce) { .form-section-toggle .chev { transition: none; } }
 ```
@@ -3506,6 +4364,7 @@ con `const proxy: ApiClient = new Proxy({} as ApiClient, { … });` y `return pr
   export function appRoutes(): RouteObject[] {
     return createRoutesFromElements(
       <Route
+        errorElement={<RouteError />}
         element={
           <SetupGate>
             <Outlet />
@@ -3516,11 +4375,16 @@ con `const proxy: ApiClient = new Proxy({} as ApiClient, { … });` y `return pr
     );
   }
   ```
-  y **mover**, sin editarlas, las líneas que hoy están entre `<Routes>` y `</Routes>` en `App` (de `{/* DEV ONLY. Vite substitutes…` en la 735 a la `/>` de la ruta `path="*"` en la 1622: el bloque `import.meta.env.DEV`, las 115 `<Route>` y sus comentarios) a dentro de esa `<Route element={…}>`, entre su `>` y su `</Route>`. Comprobación: `grep -c "<Route" frontend/src/App.tsx` da el mismo número antes y después más uno (la ruta de diseño).
+  con `import { RouteError } from "./shell/RouteError";`, y **mover**, sin editarlas, las líneas que hoy están entre `<Routes>` y `</Routes>` en `App` (de `{/* DEV ONLY. Vite substitutes…` en la 735 a la `/>` de la ruta `path="*"` en la 1623: el bloque `import.meta.env.DEV`, las 115 `<Route>` y sus comentarios) a dentro de esa `<Route element={…}>`, entre su `>` y su `</Route>`. Comprobación: `grep -c 'path="' frontend/src/App.tsx` da **el mismo número** antes y después (la ruta de diseño no tiene `path`). No se compara `grep -c "<Route"`: el nuevo `<RouterProvider` y la palabra `<Route>` del comentario de arriba también cuentan (medido: 116 antes, 118 después, sin que falte ninguna ruta).
 - `App` pasa a:
   ```tsx
   export default function App() {
-    // Built once per mount, from the URL the page was opened at.
+    // Built once per mount, from the URL the page was opened at. Per mount,
+    // not a module singleton, on purpose: `App.portalMeCensus.test.tsx` mounts
+    // `<App/>` at a new URL in each case. Under `StrictMode` (`main.tsx`) the
+    // development build mounts twice and builds two routers; the discarded
+    // one keeps its `popstate` listener until the page unloads. Accepted: it
+    // is development only, and production mounts once.
     const [router] = useState(() => createBrowserRouter(appRoutes()));
     return (
       <QueryClientProvider client={queryClient}>
@@ -3534,17 +4398,141 @@ con `const proxy: ApiClient = new Proxy({} as ApiClient, { … });` y `return pr
   }
   ```
 
+`frontend/src/shell/RouteError.tsx` (decisión D18):
+
+```tsx
+/**
+ * WHAT A PAGE THAT FAILED WHILE DRAWING SHOWS (redesign decision D18). The
+ * data router catches a render error at the layout route and draws this in
+ * place of the console, instead of React Router's own page ("Unexpected
+ * Application Error!", English, inline styles). One sentence that says what
+ * failed and that nothing was changed (copy voice), drawn the way `QueryState`
+ * draws a failed read, and the way out.
+ */
+import { Link, useRouteError } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import { Icon } from "./icons";
+import { KIND_ICON } from "./viz";
+
+export function RouteError() {
+  const t = useT();
+  // Read so the router treats the error as handled here. Never shown: a stack
+  // is nothing a person can act on, and it can carry a record's data.
+  useRouteError();
+  return (
+    <main className="content route-error" id="main">
+      <div role="alert" className="notice red">
+        <Icon name={KIND_ICON.crit} size={17} />
+        <div>
+          <b>{t("shell.routeError.title")}</b>
+          <p>{t("shell.routeError.body")}</p>
+          <Link className="btn small" to="/dashboard">
+            {t("shell.routeError.home")}
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+```
+
+y en `frontend/src/App.router.test.tsx`, con `import { render, screen } from "@testing-library/react";`, `import { createMemoryRouter, RouterProvider } from "react-router-dom";`, `vi` en la importación de `vitest` e `import { RouteError } from "./shell/RouteError";`, dos casos más dentro del `describe`:
+
+```tsx
+  it("puts a translated error page on the layout route (decision D18)", () => {
+    expect(appRoutes()[0]?.errorElement).toBeDefined();
+  });
+
+  it("says what failed in the console's words when a page throws, never React Router's page", () => {
+    function Broken(): never {
+      throw new Error("boom");
+    }
+    const router = createMemoryRouter([{ path: "/", element: <Broken />, errorElement: <RouteError /> }]);
+    // React reports the caught error through console.error; expected here.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(<RouterProvider router={router} />);
+      expect(screen.getByRole("alert")).toHaveTextContent("This page could not be shown");
+      expect(screen.getByRole("link", { name: "Go to the dashboard" })).toHaveAttribute("href", "/dashboard");
+      expect(screen.queryByText(/Unexpected Application Error/)).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+```
+
 - [ ] **Step 9: Ejecutar las pruebas del kit**
 
 Run: `cd frontend && npx vitest run src/shell/listKit.test.tsx src/shell/detailKit.test.tsx src/shell/formKit.test.tsx src/lib/api.forClient.test.ts src/App.router.test.tsx src/test/routes-covered.test.ts src/App.routing.test.tsx src/App.shell.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 10: El kit en `/__preview`**
+- [ ] **Step 10: El kit, el marco de acceso y el del portal en `/__preview`**
 
-`frontend/src/preview/PreviewPage.tsx`: una sección nueva al final, `<Panel title="Kit v4" …>`, que dibuja, con datos fijos y sin API: `ListToolbar` con `SearchField`, `FilterChips` de tres opciones (dos con conteo) y `ShowingCount shown={9} total={12}`; `BulkBar count={2}` con un `Btn`; `ListEmpty` en sus dos formas; `DetailHead` con `status={{ kind: "ok", label: "Online" }}` y un contexto; `UrlTabs` de tres pestañas sobre un `useUrlTab(["a", "b", "c"], "a", "kit")` (parámetro propio, para no chocar con el `tab` de la página); `DetailGrid` con dos `Panel`; `FormSection` con un `Field`; y `SaveBar dirty saving={false}`. `ClientFilter` no se dibuja aquí: necesita `/me`, y lo mide la puerta de armonía en las listas.
+`frontend/src/preview/PreviewPage.tsx` gana tres secciones al final, después de la de `SessionEnded` y antes del `ConfirmDialog`. Son de esta tarea y de ninguna oleada (revisión previa, W-I4): la O8 rehace `AuthCard` y la O2 rehace `PortalShell`, y las dos secciones los dibujan tal como estén, así que cada oleada los mide aquí sin tocar este archivo.
+
+1. **«Kit v4»**: `<Panel title="Kit v4" …>`, que dibuja, con datos fijos y sin API: `ListToolbar` con `SearchField`, `FilterChips` de tres opciones (dos con conteo) y `ShowingCount shown={9} total={12}`; `BulkBar count={2}` con un `Btn`; `ListEmpty` en sus dos formas; `DetailHead` con `status={{ kind: "ok", label: "Online" }}` y un contexto; `UrlTabs` de tres pestañas sobre un `useUrlTab(["a", "b", "c"], "a", "kit")` (parámetro propio, para no chocar con el `tab` de la página); `DetailGrid` con dos `Panel`; `FormSection` con un `Field`; `SaveBar dirty saving={false}` y, debajo, `SaveBar dirty={false} saving={false} saved`. `ClientFilter` no se dibuja aquí: necesita `/me`, y lo mide la puerta de armonía en las listas.
+2. **«AuthCard embedded»** y **«Portal frame»**, con `import { AuthCard } from "../modules/auth/AuthCard";`, `import { PortalShell } from "../modules/portal/PortalShell";`, `import { PORTAL_ME_KEY } from "../modules/portal/usePortalMe";` y `PortalMe` en la importación de tipos de `../lib/api`. Antes de `export function PreviewPage()`:
+   ```tsx
+   /**
+    * The portal's `/portal/me`, answered, and nothing that can reach the
+    * network: `PortalShell` reads it, and this pass runs with no backend.
+    */
+   function portalPreviewClient(): QueryClient {
+     const client = new QueryClient({
+       defaultOptions: {
+         queries: {
+           staleTime: Infinity,
+           gcTime: Infinity,
+           retry: false,
+           refetchOnMount: false,
+           refetchOnWindowFocus: false,
+           refetchOnReconnect: false,
+         },
+       },
+     });
+     const contact: PortalMe = {
+       user_id: "contact-preview",
+       kind: "contact",
+       email: "ana.gomez@andes.example",
+       display_name: "Ana Gómez",
+       timezone: "America/Bogota",
+       permissions: ["portal.ticket.read", "portal.ticket.write"],
+     };
+     client.setQueryData([PORTAL_ME_KEY], contact);
+     return client;
+   }
+   ```
+   en el cuerpo, junto a `patchClient`: `const portalClient = useMemo(() => portalPreviewClient(), []);`, y las dos secciones:
+   ```tsx
+         {/* THE SIGN-IN FRAME (redesign plan, pre-flight W-I4): the card every
+             screen without a session draws. Here so the browser pass measures
+             it, and measures it again when wave 8 repaints `AuthCard`.
+             `embedded`: a region named by its headline, not a second <main>,
+             and it leaves the tab's title alone. */}
+         <div style={{ marginTop: 24 }}>
+           <AuthCard title="Sign in" intro="Use the email address and password your administrator gave you." embedded>
+             <p>The sign-in form goes here.</p>
+           </AuthCard>
+         </div>
+
+         {/* THE PORTAL'S FRAME (pre-flight W-I4), around one fixed line: what
+             a client's contact sees around every portal page, measured here
+             because the harmony walk's fixture person is not a contact. Its
+             `/portal/me` is seeded (`portalPreviewClient`). It forgets the
+             client stored by the top bar on render (decision 7 of its own
+             design), which this pass does not set. */}
+         <div style={{ marginTop: 24 }}>
+           <QueryClientProvider client={portalClient}>
+             <PortalShell>
+               <p>A portal page draws here.</p>
+             </PortalShell>
+           </QueryClientProvider>
+         </div>
+   ```
 
 Run: `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs`
-Expected: código 0; las piezas nuevas aparecen entre los «text runs measured» sin pares por debajo del mínimo.
+Expected: código 0; las piezas nuevas, el marco de acceso y el del portal aparecen entre los «text runs measured» sin pares por debajo del mínimo.
 
 - [ ] **Step 11: Suite completa y navegador**
 
@@ -3564,37 +4552,38 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 ```
 
-**Criterios de aceptación:** las cinco pruebas nuevas en verde; las 115 rutas se recorren igual en harmony; `/__preview` muestra y mide cada pieza; ninguna página de módulo cambió.
+**Criterios de aceptación:** las cinco pruebas nuevas en verde, con los casos de D16 (un guardado que se va no pregunta; la query sola no es salir), D17 (el chip espera a `/me`, no manda un cliente ajeno y vuelve a leer al cambiar) y D18 (la pantalla de error traducida); `catalogue.identical.test.ts` fija a cada oleada en su `identical-ok.o<N>.ts`; las 115 rutas se recorren igual en harmony; `/__preview` muestra y mide cada pieza, el marco de acceso y el del portal; ninguna página de módulo cambió; el selector, las tablas, los avisos, los diálogos y los cajones solo cambiaron por los tokens.
 
 ---
 
 ### Task 4: El armazón: la barra lateral de Atera, Administración en acordeón, «Nuevo» y la barra superior
 
-Diseño §1.1 y §1.2. Es la tarea que cambia la navegación a propósito: `nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx` y `responsive.test.ts` se corrigen aquí, cada cambio con un comentario que cita el diseño, y ninguna prueba se borra.
+Diseño §1.1 y §1.2, y la respuesta del operador del 2026-11-24 sobre el Asistente. Es la tarea que cambia la navegación a propósito: `nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx` y `responsive.test.ts` se corrigen aquí, cada cambio con un comentario que cita el diseño o la respuesta, y ninguna prueba se borra: un caso cuyo asunto el diseño no cambia se conserva tal cual (Step 1 los nombra).
 
 **Files:**
 - Modify: `frontend/src/shell/nav.ts:68-70` (la `group()` vieja se borra), `:131-213` (tipos y `NAV_GROUPS`), `:215-222` (`navItems`), `:296-321` (`destinations`), `:346-405` (`visibleGroups`, `searchDestinations`), `:411-416` (`PORTAL_GROUPS`)
 - Modify: `frontend/src/shell/Sidebar.tsx` (archivo completo)
 - Create: `frontend/src/shell/AdminPanel.tsx`, `frontend/src/shell/newMenu.ts`, `frontend/src/shell/NewMenu.tsx`
-- Modify: `frontend/src/shell/AppShell.tsx` (prop `newMenu`; fuera «Añadir un equipo» y el icono del Asistente de la barra)
+- Modify: `frontend/src/shell/AppShell.tsx` (prop `newMenu`; fuera «Añadir un equipo» y el icono del Asistente de la barra; el botón flotante del Asistente, decisión D12)
 - Modify: `frontend/src/shell/AreaPage.tsx` (la portada de Administración)
-- Modify: `frontend/src/shell/shell.css` (riel, panel de Administración, «Nuevo»)
+- Modify: `frontend/src/shell/shell.css` (riel, panel de Administración, «Nuevo», la búsqueda más ancha, el botón flotante del Asistente y el sitio que la barra de guardado le deja)
 - Modify: `frontend/src/App.tsx` (`Shell` calcula `newMenu`)
-- Modify: `frontend/src/i18n/{en,es}/shell.ts`, `frontend/src/i18n/identical-ok.ts`
+- Modify: `frontend/src/i18n/{en,es}/shell.ts`, `frontend/src/i18n/identical-ok.ts` (`IDENTICAL_OK_SHARED`)
+- Modify (textos que nombran entradas del riel que cambian, revisión previa S-M-1): `frontend/src/i18n/es/{serviceDesk,remote,deploy,backup,agentReleases}.ts` y sus pruebas `modules/service-desk/service-desk.es.test.tsx:1019`, `modules/deploy/deploy.es.test.tsx:807`, `modules/backup/backup.es.test.tsx:1257`
 - Modify (destinos de «Nuevo», decisión D8): `frontend/src/modules/service-desk/TicketListPage.tsx:96,258,460`, `frontend/src/modules/docs/DocsPage.tsx:379-387`, `frontend/src/modules/change/ChangesPage.tsx:64,145,275`, `frontend/src/modules/clients/ClientsPage.tsx:30,110`, `frontend/src/modules/clients/ContactsTab.tsx:63`
-- Test: `frontend/src/shell/nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx`, `frontend/src/test/responsive.test.ts`; nuevos `frontend/src/shell/newMenu.test.ts`, `frontend/src/shell/NewMenu.test.tsx`, `frontend/src/shell/AdminPanel.test.tsx`, `frontend/src/shell/newDestinations.test.tsx`
+- Test: `frontend/src/shell/nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx`, `icons.test.tsx`, `frontend/src/test/responsive.test.ts`; nuevos `frontend/src/shell/newMenu.test.ts`, `frontend/src/shell/NewMenu.test.tsx`, `frontend/src/shell/AdminPanel.test.tsx`, `frontend/src/shell/newDestinations.test.tsx`
 
 **Interfaces:**
 - Consumes: `NovieriSymbol`, `NovieriWordmark` (Task 2); `SearchField` (kit); `useNewParam` (Task 3).
-- Produces (`nav.ts`): `interface NavFolder { kind: "folder"; key: "assets" | "more"; label: string; icon: string; items: readonly NavItem[] }`; `type RailEntry = NavItem | NavArea | NavFolder`; `isFolder(entry): entry is NavFolder`; `interface NavGroup { key: "main" | "anchored" | "help"; label: string; items: readonly RailEntry[] }`. `visibleGroups`, `navItems`, `crumbFor`, `activeNavTo` y `searchDestinations` conservan su firma.
+- Produces (`nav.ts`): `interface NavFolder { kind: "folder"; key: "assets" | "more"; label: string; icon: string; items: readonly NavItem[] }`; `type RailEntry = NavItem | NavArea | NavFolder`; `isFolder(entry): entry is NavFolder`; `navFolders(groups?: readonly NavGroup[]): NavFolder[]`; `interface NavGroup { key: "main" | "anchored" | "help"; label: string; items: readonly RailEntry[] }`. `visibleGroups`, `navItems`, `crumbFor`, `activeNavTo` y `searchDestinations` conservan su firma.
 - Produces (`newMenu.ts`): `type NewMenuKind = "ticket" | "client" | "contact" | "device" | "document" | "change"`, `interface NewMenuEntry { kind; to: string; icon: string }`, `newMenuEntries(input: NewMenuInput): NewMenuEntry[]` con `NewMenuInput = { permissions; everywhere; clients: readonly MeClient[]; selected: string | null; modules: ReadonlySet<string> }`.
-- Produces (`AppShell`): prop `newMenu?: readonly NewMenuEntry[]`.
+- Produces (`AppShell`): prop `newMenu?: readonly NewMenuEntry[]`; el botón flotante del Asistente (`.assistant-fab`), que se dibuja solo con `ai.use` y fuera de `/assistant`, y pone en `<body>` la clase `assistant-fab-on` mientras está, que es lo que aparta la `SaveBar` (Task 3) de su esquina.
 
 **Decisiones de esta tarea** (Apéndice A):
 - **D9.** «Activos» y «Más» son carpetas del riel: un botón con `aria-expanded` que despliega sus páginas en el sitio. La carpeta que contiene la página actual se abre sola. Plegado el riel, sus páginas se ven como iconos debajo del icono de la carpeta, así que nada queda a un clic de más. «Más» no se dibuja si ningún módulo opcional está activo para la elección de arriba (`visibleGroups` ya quita un grupo vacío).
 - **D10.** «Administración» es un botón anclado abajo que cambia el riel por su panel (volver, búsqueda y acordeón) **sin navegar**. El panel se abre solo cuando la página actual es de Administración; «Volver al menú» lo cierra sin salir de la página. El título del panel enlaza a `/admin`, que sigue siendo la portada (la miga apunta allí).
 - **D11.** «Añadir un equipo» sale de la barra superior y pasa a «Nuevo → Equipo» y a la cabecera de Equipos (diseño §1.2). «Nuevo» es ahora el único primario de la barra (DESIGN.md v4, «Buttons»).
-- **D12.** El icono del Asistente sale de la barra superior: el diseño §1.2 enumera la barra y no lo incluye, y §1.1 ancla el Asistente al pie del riel, visible en toda pantalla de escritorio. La fila «Preguntar al Asistente» de la búsqueda sigue en todas las anchuras. Esto deshace la decisión del operador del 2026-09-08 («AI Analyst needs to be there») en la barra y la cumple en el riel: queda como **pregunta abierta** para el operador (Apéndice A).
+- **D12. El Asistente, como en las capturas de Atera** (respuesta del operador del 2026-11-24, «Como queda en las capturas de atera»; comprobado en `docs/design/referencias-atera/atera 1.png` y en el recorrido, líneas 22, 82 y 87). **Sale de la barra superior** (la de Atera lleva búsqueda, «Install agent», campana, triángulo, ayuda y perfil, sin icono de IA), **queda anclado al pie del riel** con Administración, y **es además un botón redondo flotante abajo a la derecha en todas las páginas** de la consola: un enlace a `/assistant`, como el icono de hoy, con el permiso `ai.use`, que no se dibuja en la propia página del Asistente (`/assistant`; sí en sus subpáginas de ajustes, autonomía y acciones), de 48 px (más que los 44 de un objetivo táctil) y que **nunca tapa la barra de guardado**: el recorrido de Atera apunta ese defecto en su propio producto (línea 639, «el botón flotante de IA tapa el botón de guardar»). Mientras el botón está, `<body>` lleva `assistant-fab-on` y la `SaveBar` deja 72 px libres a su derecha, así que los dos no comparten la esquina a ningún ancho; el contenido deja 88 px al pie para que su última línea suba por encima del botón. Abre la página del Asistente: no es un panel de chat superpuesto, que sería una función nueva. La fila «Preguntar al Asistente» de la búsqueda sigue en todas las anchuras. Esto sustituye la decisión del 2026-09-08 («AI Analyst needs to be there», que puso el icono en la barra): el operador decide ahora dónde está, y el comentario de `AppShell.tsx` que la citaba pasa a citar esta respuesta.
 - **D13.** En español, el riel dice «Inicio», «Equipos» y «Documentación», como pide el diseño §1.1 (hoy «Panel», «Dispositivos» y «Documentación de TI»). El inglés no cambia. «Equipos» para la lista de máquinas sigue el glosario («computer → equipo, a machine on the list»); la entrada `device → dispositivo` del glosario de `src/i18n/es/index.ts` gana una nota: «la lista de máquinas (`/devices`) se llama Equipos en el riel y en su página (rediseño 2026-11-23)». La O1 cambia el título de la página a juego.
 
 - [ ] **Step 1: Las pruebas del modelo (fallan)**
