@@ -552,3 +552,27 @@ async def test_the_reset_mails_sentence_about_the_second_factor_is_true(auth_env
     assert done.status_code == 204, done.text
     who.session, who.network, who.password = None, browser(), "Pelican-Orbit-Lantern-58"
     assert (await login(auth_env, who)).json()["state"] == "factor_required"
+
+
+async def test_the_links_half_hour_starts_when_the_relay_has_taken_the_mail(
+    auth_env: Any,
+) -> None:
+    """Design 2026-11-23 §6: a relay that takes its time spends none of the
+    link's 30 minutes. The clock starts when the mail is handed over, not
+    when the link is minted."""
+    org = await auth_env.create_org("reset-slow-relay")
+    who = await signed_in(auth_env, org, "technician")
+    auth_env.mail.delay_s = 1.5
+
+    await _forgot(auth_env, who.email)
+
+    async with AsyncSession(auth_env.admin_engine) as session:
+        row = (
+            await session.execute(
+                select(AuthActionToken).where(
+                    AuthActionToken.user_id == who.user_id, AuthActionToken.purpose == "reset"
+                )
+            )
+        ).scalar_one()
+    assert row.expires_at - row.created_at >= timedelta(minutes=30, seconds=1.4)
+    assert row.expires_at - row.created_at < timedelta(minutes=30, seconds=30)

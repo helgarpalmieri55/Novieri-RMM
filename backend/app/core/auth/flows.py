@@ -1384,7 +1384,7 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
                     action_tokens.link(settings.public_console_url, "reset-password", token),
                     second_factor=second_factor,
                 )
-            await notices.deliver(
+            if await notices.deliver(
                 session,
                 org_id=user.org_id,
                 to=user.email,
@@ -1392,7 +1392,8 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
                 text=text,
                 vault=app.state.vault,
                 actor_id=None,
-            )
+            ):
+                await action_tokens.start_clock(session, token, action_tokens.RESET_TTL)
 
 
 async def _may_still_reset(session: AsyncSession, user: User) -> bool:

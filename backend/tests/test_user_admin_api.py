@@ -40,6 +40,7 @@ and after `app/main.py` wires it, and never register it twice.
 
 import urllib.error
 import urllib.request
+from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -55,6 +56,7 @@ from app.core.config import Settings
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
 from app.models import AuditEvent, Client, Role, User, UserRole
+from app.models.auth import AuthActionToken
 from app.modules.user_admin import service as user_admin_service
 from app.modules.user_admin.api import router as users_router
 from tests.auth_support import CONSOLE, capture_mail, console_ready, signed_in
@@ -1746,3 +1748,26 @@ async def test_a_contact_is_not_a_user_this_surface_administers(users_env: Any) 
     row = await _user_row(users_env.admin_engine, contact.id)
     assert row is not None and (row.kind, row.status) == ("contact", "active")
     assert [a.id for a in await _assignments(users_env.admin_engine, contact.id)] == [grant.id]
+
+
+async def test_an_invitations_72_hours_start_when_the_relay_has_taken_the_mail(
+    users_env: Any,
+) -> None:
+    """Design 2026-11-23 §6: the link's clock starts after the send, so a
+    slow relay spends none of it."""
+    org = await users_env.create_org("invite-slow-relay")
+    _sub, headers, _id = await _admin(users_env, org)
+    users_env.mail.delay_s = 1.5
+
+    body = (await _invite(users_env, headers)).json()
+
+    async with AsyncSession(users_env.admin_engine) as session:
+        row = (
+            await session.execute(
+                select(AuthActionToken).where(
+                    AuthActionToken.user_id == UUID(body["user_id"]),
+                    AuthActionToken.purpose == "invite",
+                )
+            )
+        ).scalar_one()
+    assert row.expires_at - row.created_at >= timedelta(hours=72, seconds=1.4)

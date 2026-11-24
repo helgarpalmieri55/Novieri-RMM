@@ -1159,3 +1159,60 @@ async def test_a_reused_codes_audit_row_names_the_app_that_presented_it(
     if presenter == "another-app":
         expected["presented_by"] = other.client_id
     assert event.meta == expected
+
+
+# --------------------------------------------------------------------------- #
+# A reuse after the grant already ended (design 2026-11-23 §6)
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_code_reused_after_its_grant_ended_is_audited_too(env: Env) -> None:
+    """The grant the code opened was ended by the app's own revocation; the
+    code presented again ends nothing more, and is still a reuse to audit:
+    a spent code in somebody's hands is the trace of a theft whenever it
+    arrives."""
+    code, verifier = await _code(env)
+    first = await _exchange(env, code, verifier)
+    assert first.status_code == 200
+    assert (await _revoke(env, first.json()["refresh_token"])).status_code == 200
+    again = await _exchange(env, code, verifier)
+    assert again.status_code == 400
+    assert again.json()["error"] == "invalid_grant"
+    (family,) = await _families(env)
+    assert family.revoked_reason == "revoked_by_app"  # not overwritten
+    (event,) = await _events(env, "mcp.code_reused")
+    assert event.actor_type == "system"
+    assert event.target_id == str(await user_id_of(env.api, env.sub))
+    assert event.meta == {
+        "app": env.app.client_id,
+        "family": str(family.id),
+        "grant": "already_ended",
+    }
+
+
+async def test_a_refresh_token_reused_after_its_grant_ended_is_audited_too(env: Env) -> None:
+    first = await _tokens(env)
+    rotated = await _refresh(env, first["refresh_token"])
+    assert rotated.status_code == 200
+    assert (await _revoke(env, rotated.json()["refresh_token"])).status_code == 200
+    reused = await _refresh(env, first["refresh_token"])
+    assert reused.status_code == 400
+    assert reused.json()["error"] == "invalid_grant"
+    (family,) = await _families(env)
+    assert family.revoked_reason == "revoked_by_app"
+    (event,) = await _events(env, "mcp.refresh_reused")
+    assert event.actor_type == "system"
+    assert event.meta == {
+        "app": env.app.client_id,
+        "family": str(family.id),
+        "grant": "already_ended",
+    }
+
+
+async def test_the_live_token_of_an_ended_grant_is_not_a_reuse(env: Env) -> None:
+    """Never used, so never reused: the token the revocation ended is refused
+    plainly, and nothing is audited for it."""
+    tokens = await _tokens(env)
+    assert (await _revoke(env, tokens["refresh_token"])).status_code == 200
+    assert (await _refresh(env, tokens["refresh_token"])).json()["error"] == "invalid_grant"
+    assert await _events(env, "mcp.refresh_reused") == []
