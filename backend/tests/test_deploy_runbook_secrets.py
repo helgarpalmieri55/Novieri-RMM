@@ -5,7 +5,7 @@
 
     docker compose run --rm --no-deps \\
       -e BAO_TOKEN="$(grep '^OPENBAO_TOKEN=' .env | cut -d= -f2-)" \\
-      ... /tmp/issue-gateway-cert.py itms.toeshee.com
+      ... /tmp/issue-gateway-cert.py rmm.novieri.com
 
 The shell expands that before `docker` is executed, so the **root** OpenBao
 token — the credential that can re-key `transit/job-signing`, the key

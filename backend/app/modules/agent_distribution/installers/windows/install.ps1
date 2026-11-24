@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Install the Toeshee agent as a Windows service.
+    Install the Novieri RMM agent as a Windows service.
 
 .DESCRIPTION
-    Places its-agent.exe, optionally writes the enrollment token to a file only
+    Places novieri-agent.exe, optionally writes the enrollment token to a file only
     SYSTEM and Administrators can read, and registers the service with the
     Service Control Manager.
 
@@ -12,7 +12,7 @@
     and the recovery actions configured below would turn that into a restart
     loop. On the managed path (GPO, Intune) "installed, not yet enrolled" is the
     NORMAL intermediate state -- install.ps1 puts the service on the machine and
-    its-agent-enroll.ps1 puts the credential on it, afterwards, from the
+    novieri-agent-enroll.ps1 puts the credential on it, afterwards, from the
     channel's own secret mechanism.
 
     THE TOKEN IS NEVER A PARAMETER. -Token is REFUSED, with the reason.
@@ -38,7 +38,7 @@
     On a re-install the previously configured URL is kept when this is omitted.
 
 .PARAMETER Binary
-    Path to its-agent.exe. Defaults to ..\..\dist\its-agent-windows-amd64.exe.
+    Path to novieri-agent.exe. Defaults to ..\..\dist\novieri-agent-windows-amd64.exe.
 
 .PARAMETER TokenFromStdin
     Read the enrollment token from the process's standard input instead of the
@@ -68,7 +68,7 @@
 
 .EXAMPLE
     # Managed deployment: install only, enrol separately.
-    .\install.ps1 -Binary .\its-agent-windows-amd64.exe -NoStart
+    .\install.ps1 -Binary .\novieri-agent-windows-amd64.exe -NoStart
 #>
 [CmdletBinding()]
 param(
@@ -76,11 +76,11 @@ param(
     [string]$Binary,
     [switch]$TokenFromStdin,
     [switch]$NoStart,
-    [string]$InstallDir = "$env:ProgramFiles\ITSuite",
-    [string]$DataDir = "$env:ProgramData\ITSuite\agent",
-    # -Token EXISTS ONLY TO BE REFUSED, exactly as in its-agent-enroll.ps1 and
+    [string]$InstallDir = "$env:ProgramFiles\NovieriRMM",
+    [string]$DataDir = "$env:ProgramData\NovieriRMM\agent",
+    # -Token EXISTS ONLY TO BE REFUSED, exactly as in novieri-agent-enroll.ps1 and
     # as `--token` is refused by linux/install.sh, darwin/install.sh and
-    # linux/its-agent-enroll. Left out of the parameter block entirely,
+    # linux/novieri-agent-enroll. Left out of the parameter block entirely,
     # PowerShell answers a bare "A parameter cannot be found that matches
     # parameter name 'Token'", which teaches the operator nothing and sends
     # them looking for the right spelling rather than the right method.
@@ -90,9 +90,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ServiceName = 'its-agent'
-$DisplayName = 'ITMS Agent'
-$Description = 'Toeshee endpoint agent. Maintains one outbound mutual-TLS connection to the control plane and executes only cryptographically signed jobs. Opens no listening port.'
+$ServiceName = 'novieri-agent'
+$DisplayName = 'Novieri RMM Agent'
+$Description = 'Novieri RMM endpoint agent. Maintains one outbound mutual-TLS connection to the control plane and executes only cryptographically signed jobs. Opens no listening port.'
 
 if ($Token) {
     throw @'
@@ -145,14 +145,14 @@ function Assert-ItsOwner([string]$Path) {
     throw "$Path already exists and belongs to $name, not to an administrator. Nothing was installed; delete it and run install.ps1 again."
 }
 
-# The data directory's PARENT, %ProgramData%\ITSuite, is where the data
+# The data directory's PARENT, %ProgramData%\NovieriRMM, is where the data
 # directory's protection actually lives. On a default Windows install
 # BUILTIN\Users may create folders in C:\ProgramData and CREATOR OWNER gets
-# Full Control on them, so a standard user can create ITSuite before this
+# Full Control on them, so a standard user can create NovieriRMM before this
 # script runs -- and whoever owns a directory holds FILE_DELETE_CHILD on it:
 # they rename the protected `agent` directory away afterwards and put their
 # own in its place, with an identity that points this SYSTEM service at their
-# gateway and their job-signing key. So ITSuite gets the data directory's own
+# gateway and their job-signing key. So NovieriRMM gets the data directory's own
 # treatment -- owner Administrators, SYSTEM and Administrators only, nothing
 # inherited -- BEFORE `agent` is created or touched. The self-installer does
 # the same (internal/install prepareDirs, secdir.SecureOwned).
@@ -197,15 +197,15 @@ function Protect-ItsDirectory([string]$Path, [switch]$RefuseForeignOwner) {
 if (-not $Binary) {
     $here = $PSScriptRoot
     foreach ($candidate in @(
-            (Join-Path $here '..\..\dist\its-agent-windows-amd64.exe'),
-            (Join-Path $here '..\..\dist\its-agent-windows-arm64.exe'),
-            (Join-Path $here '..\..\dist\its-agent.exe'),
-            (Join-Path $here 'its-agent.exe'))) {
+            (Join-Path $here '..\..\dist\novieri-agent-windows-amd64.exe'),
+            (Join-Path $here '..\..\dist\novieri-agent-windows-arm64.exe'),
+            (Join-Path $here '..\..\dist\novieri-agent.exe'),
+            (Join-Path $here 'novieri-agent.exe'))) {
         if (Test-Path $candidate) { $Binary = (Resolve-Path $candidate).Path; break }
     }
 }
 if (-not $Binary -or -not (Test-Path $Binary)) {
-    throw 'No its-agent.exe found. Build one with agent/packaging/build.sh and pass -Binary.'
+    throw 'No novieri-agent.exe found. Build one with agent/packaging/build.sh and pass -Binary.'
 }
 
 # --- the token -------------------------------------------------------------
@@ -234,7 +234,7 @@ if ($token -and -not $Url) { throw '-Url is required alongside an enrollment tok
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 $fresh = -not $existing
 
-# %ProgramFiles%\ITSuite keeps the ACL it inherits: C:\Program Files grants
+# %ProgramFiles%\NovieriRMM keeps the ACL it inherits: C:\Program Files grants
 # BUILTIN\Users read and execute only, so they cannot pre-create it. A link
 # there is still refused.
 Assert-NotReparsePoint $InstallDir
@@ -245,10 +245,10 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 # ours to lock down: a custom -DataDir of C:\ITS must not end with a
 # protected DACL on C:\.
 $DataParent = Split-Path -Parent $DataDir
-if ((Split-Path -Leaf $DataParent) -eq 'ITSuite') {
+if ((Split-Path -Leaf $DataParent) -eq 'NovieriRMM') {
     Protect-ItsDirectory -Path $DataParent -RefuseForeignOwner:$fresh
 } else {
-    Write-Warning "$DataParent is not an ITSuite directory, so install.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
+    Write-Warning "$DataParent is not an NovieriRMM directory, so install.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
 }
 Assert-NotReparsePoint $DataDir
 if ($fresh) { Assert-ItsOwner $DataDir }
@@ -292,7 +292,7 @@ if ($token) {
 
 # --- stop an existing service BEFORE the binary is replaced ----------------
 # ORDER IS LOAD-BEARING AND WAS WRONG. Windows holds an open section on a
-# running executable's image file, so Copy-Item over its-agent.exe while the
+# running executable's image file, so Copy-Item over novieri-agent.exe while the
 # service runs fails with "The process cannot access the file because it is
 # being used by another process" -- and with ErrorActionPreference=Stop that
 # aborts the whole re-install, after the token has already been written. Every
@@ -307,14 +307,14 @@ if ($existing -and $existing.Status -ne 'Stopped') {
 # --- binary ----------------------------------------------------------------
 # The SCM can report Stopped a moment before the process has actually exited
 # and released its image, so this is retried rather than attempted once.
-$target = Join-Path $InstallDir 'its-agent.exe'
+$target = Join-Path $InstallDir 'novieri-agent.exe'
 $copied = $false
 foreach ($attempt in 1..20) {
     try { Copy-Item -Path $Binary -Destination $target -Force; $copied = $true; break }
     catch { Start-Sleep -Milliseconds 500 }
 }
 if (-not $copied) {
-    throw "could not write $target -- the previous its-agent.exe is still in use. Stop the $ServiceName service and re-run."
+    throw "could not write $target -- the previous novieri-agent.exe is still in use. Stop the $ServiceName service and re-run."
 }
 
 # --- service ---------------------------------------------------------------
@@ -386,17 +386,17 @@ if ($NoStart) {
     Write-Host '  service registered and NOT started: this endpoint has no enrollment token'
     Write-Host '  and no identity, so the agent would exit 2 on every start and the failure'
     Write-Host '  actions above would restart it forever.'
-    Write-Host '  Enroll it with:  .\its-agent-enroll.ps1 -Url https://its.example.com'
+    Write-Host '  Enroll it with:  .\novieri-agent-enroll.ps1 -Url https://its.example.com'
 }
 
 Write-Host ''
-Write-Host 'its-agent installed.'
+Write-Host 'novieri-agent installed.'
 Write-Host "  status    Get-Service $ServiceName"
 Write-Host "  logs      the agent writes to STDERR and nothing here registers an event"
 Write-Host "            source, so the Application log has nothing to read yet."
 Write-Host "            Run '$target' from an elevated console to watch it (agent/packaging/README.md)."
 Write-Host "  enrolled  Test-Path '$DataDir\identity.json'"
-Write-Host "  enroll    .\its-agent-enroll.ps1 -Url https://its.example.com  (separate step; token from the environment or stdin)"
+Write-Host "  enroll    .\novieri-agent-enroll.ps1 -Url https://its.example.com  (separate step; token from the environment or stdin)"
 Write-Host "  remove    .\uninstall.ps1"
 Write-Host ''
 Write-Host 'NOT done here and required before a real rollout: the binary is UNSIGNED.'

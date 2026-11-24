@@ -419,7 +419,7 @@ class _StubStore(ObjectStore):
     def presign_agent_release_get(
         self, version: str, os_name: str, arch: str, *, expires_in: int
     ) -> str:
-        return f"https://minio.test/agent-releases/{version}/its-agent-{os_name}-{arch}?sig=x"
+        return f"https://minio.test/agent-releases/{version}/novieri-agent-{os_name}-{arch}?sig=x"
 
 
 async def _publish_with_artifact(
@@ -518,14 +518,14 @@ async def test_the_linux_install_command_installs_and_starts_a_service(
     command = body["command"]
     # Runs the real installer with the binary it just downloaded.
     assert 'sudo bash "$d/install.sh"' in command
-    assert '--binary "$d/its-agent"' in command
+    assert '--binary "$d/novieri-agent"' in command
     # Carries the unit the installer needs, next to the script.
-    assert '> "$d/its-agent.service"' in command
+    assert '> "$d/novieri-agent.service"' in command
     # The control-plane URL the agent enrols against -- absent from the old
     # command, so the token had nowhere to be spent.
     assert "--url 'http://api.test'" in command
     # And NOT the old shape: no bare binary placement standing in for an install.
-    assert "install -m755 /tmp/its-agent /usr/local/bin/its-agent" not in command
+    assert "install -m755 /tmp/novieri-agent /usr/local/bin/novieri-agent" not in command
 
 
 async def test_the_command_carries_the_exact_reviewed_installer(
@@ -545,7 +545,7 @@ async def test_the_command_carries_the_exact_reviewed_installer(
 
     sh_b64 = base64.b64encode(_installer_bytes("linux/install.sh")).decode("ascii")
     unit_b64 = base64.b64encode(
-        _installer_bytes("linux/its-agent.service")
+        _installer_bytes("linux/novieri-agent.service")
     ).decode("ascii")
     assert sh_b64 in body["command"]
     assert unit_b64 in body["command"]

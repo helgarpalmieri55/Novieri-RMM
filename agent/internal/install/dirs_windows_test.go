@@ -16,13 +16,13 @@ import (
 	"github.com/toeshee/it-suite/agent/internal/secdir"
 )
 
-// The data directory's PARENT (2026-09-29). %ProgramData%\ITSuite was never
+// The data directory's PARENT (2026-09-29). %ProgramData%\NovieriRMM was never
 // protected: a standard user can create it before the install (Users may
 // create folders in C:\ProgramData, and CREATOR OWNER gets Full Control on
 // them), and owning it is FILE_DELETE_CHILD -- after the install they rename
 // the protected `agent` directory away and put their own in its place, with
 // an identity.json, pins.json and agent.key that point the SYSTEM service at
-// their gateway and their job-signing key. prepareDirs secures ITSuite before
+// their gateway and their job-signing key. prepareDirs secures NovieriRMM before
 // `agent` is created or touched.
 //
 // These run in the agent-windows CI job (go test ./... on windows-latest).
@@ -64,7 +64,7 @@ func fakeDirs(t *testing.T, failOn string) (*[]dirCall, *map[string]func(*window
 	return &calls, &accepts
 }
 
-var dirsPlan = NewPlan(`C:\Program Files`, `C:\ProgramData`, "https://itms.toeshee.com")
+var dirsPlan = NewPlan(`C:\Program Files`, `C:\ProgramData`, "https://rmm.novieri.com")
 
 func TestTheDataDirectorysParentIsSecuredBeforeTheDataDirectory(t *testing.T) {
 	calls, _ := fakeDirs(t, "")
@@ -72,10 +72,10 @@ func TestTheDataDirectorysParentIsSecuredBeforeTheDataDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []dirCall{
-		{"check", `C:\Program Files\ITSuite`, true},
-		{"mkdir", `C:\Program Files\ITSuite`, false},
-		{"secure", `C:\ProgramData\ITSuite`, true},
-		{"secure", `C:\ProgramData\ITSuite\agent`, true},
+		{"check", `C:\Program Files\NovieriRMM`, true},
+		{"mkdir", `C:\Program Files\NovieriRMM`, false},
+		{"secure", `C:\ProgramData\NovieriRMM`, true},
+		{"secure", `C:\ProgramData\NovieriRMM\agent`, true},
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("directory operations = %+v\nwant %+v", *calls, want)
@@ -83,12 +83,12 @@ func TestTheDataDirectorysParentIsSecuredBeforeTheDataDirectory(t *testing.T) {
 }
 
 func TestARefusedParentStopsBeforeTheDataDirectoryIsTouched(t *testing.T) {
-	calls, _ := fakeDirs(t, `C:\ProgramData\ITSuite`)
+	calls, _ := fakeDirs(t, `C:\ProgramData\NovieriRMM`)
 	if err := prepareDirs(dirsPlan, true); err == nil {
 		t.Fatal("prepareDirs went on after the parent was refused")
 	}
 	for _, c := range *calls {
-		if c.dir == `C:\ProgramData\ITSuite\agent` {
+		if c.dir == `C:\ProgramData\NovieriRMM\agent` {
 			t.Fatalf("the data directory was touched after its parent was refused: %+v", *calls)
 		}
 	}
@@ -104,7 +104,7 @@ func TestAFreshInstallRefusesAForeignOwnerOnEveryDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	ba, _ := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
-	for _, dir := range []string{`C:\Program Files\ITSuite`, `C:\ProgramData\ITSuite`, `C:\ProgramData\ITSuite\agent`} {
+	for _, dir := range []string{`C:\Program Files\NovieriRMM`, `C:\ProgramData\NovieriRMM`, `C:\ProgramData\NovieriRMM\agent`} {
 		accept := (*accepts)[dir]
 		if accept == nil {
 			t.Fatalf("%s: no owner check on a fresh install", dir)
@@ -130,7 +130,7 @@ func TestAReinstallSecuresWithoutAnOwnerCheck(t *testing.T) {
 			t.Fatalf("a re-install passed an owner check: %+v", *calls)
 		}
 	}
-	if len(*calls) != 4 || (*calls)[2].dir != `C:\ProgramData\ITSuite` || (*calls)[3].dir != `C:\ProgramData\ITSuite\agent` {
+	if len(*calls) != 4 || (*calls)[2].dir != `C:\ProgramData\NovieriRMM` || (*calls)[3].dir != `C:\ProgramData\NovieriRMM\agent` {
 		t.Fatalf("a re-install did not secure the parent and then the data directory: %+v", *calls)
 	}
 }
@@ -138,22 +138,22 @@ func TestAReinstallSecuresWithoutAnOwnerCheck(t *testing.T) {
 func TestOwnerAllowed(t *testing.T) {
 	for _, k := range []windows.WELL_KNOWN_SID_TYPE{windows.WinBuiltinAdministratorsSid, windows.WinLocalSystemSid} {
 		sid, _ := windows.CreateWellKnownSid(k)
-		if err := ownerAllowed(`C:\ProgramData\ITSuite`, sid); err != nil {
+		if err := ownerAllowed(`C:\ProgramData\NovieriRMM`, sid); err != nil {
 			t.Errorf("%s refused: %v", sid, err)
 		}
 	}
 	if u, err := windows.GetCurrentProcessToken().GetTokenUser(); err == nil {
-		if err := ownerAllowed(`C:\ProgramData\ITSuite`, u.User.Sid); err != nil {
+		if err := ownerAllowed(`C:\ProgramData\NovieriRMM`, u.User.Sid); err != nil {
 			t.Errorf("the installing user refused: %v", err)
 		}
 	}
 	for _, k := range []windows.WELL_KNOWN_SID_TYPE{windows.WinBuiltinUsersSid, windows.WinLocalServiceSid, windows.WinAuthenticatedUserSid} {
 		sid, _ := windows.CreateWellKnownSid(k)
-		if err := ownerAllowed(`C:\ProgramData\ITSuite`, sid); err == nil {
+		if err := ownerAllowed(`C:\ProgramData\NovieriRMM`, sid); err == nil {
 			t.Errorf("%s accepted as an owner", sid)
 		}
 	}
-	if err := ownerAllowed(`C:\ProgramData\ITSuite`, nil); err == nil {
+	if err := ownerAllowed(`C:\ProgramData\NovieriRMM`, nil); err == nil {
 		t.Error("an unreadable owner was accepted")
 	}
 }
@@ -174,7 +174,7 @@ func realPlan(t *testing.T) Plan {
 			t.Fatal(err)
 		}
 	}
-	return NewPlan(filepath.Join(base, "PF"), filepath.Join(base, "PD"), "https://itms.toeshee.com")
+	return NewPlan(filepath.Join(base, "PF"), filepath.Join(base, "PD"), "https://rmm.novieri.com")
 }
 
 func ownerSID(t *testing.T, dir string) *windows.SID {
@@ -190,7 +190,7 @@ func ownerSID(t *testing.T, dir string) *windows.SID {
 	return o
 }
 
-// The attack, on a real directory: ITSuite pre-created and owned by a
+// The attack, on a real directory: NovieriRMM pre-created and owned by a
 // non-administrator (LOCAL SERVICE stands in for the standard user; icacls
 // assigns it with the SeRestorePrivilege an elevated token holds).
 func TestAForeignOwnedParentIsRefusedOnAFreshInstallAndLeftAlone(t *testing.T) {

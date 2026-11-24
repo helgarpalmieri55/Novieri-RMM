@@ -90,7 +90,7 @@ func MkdirOwned(dir string) error {
 // RestrictOwned is Restrict plus the OWNER: BUILTIN\Administrators.
 //
 // The DACL alone does not protect a directory a local user could have
-// PRE-CREATED -- `%ProgramData%\ITSuite\agent` before the first install, or a
+// PRE-CREATED -- `%ProgramData%\NovieriRMM\agent` before the first install, or a
 // staging directory under `%ProgramData%` -- because that user is its owner,
 // and an owner is always granted READ_CONTROL and WRITE_DAC whatever the DACL
 // says. Taking ownership for Administrators removes the one principal the
@@ -142,7 +142,7 @@ func ownedParts() (*windows.SID, *windows.ACL, error) {
 // symbolic link.
 //
 // It exists for the PARENT of a protected directory, which is where that
-// protection actually lives: whoever owns `%ProgramData%\ITSuite` holds
+// protection actually lives: whoever owns `%ProgramData%\NovieriRMM` holds
 // FILE_DELETE_CHILD on it, and can rename the protected `agent` directory
 // away and put their own in its place. On a default Windows install
 // BUILTIN\Users may create folders in C:\ProgramData and CREATOR OWNER is
@@ -165,7 +165,7 @@ func ownedParts() (*windows.SID, *windows.ACL, error) {
 // granted. A directory a non-administrator owned is only safe if refused.
 //
 // The caller must be elevated or SYSTEM. Executed on windows-latest by
-// secure_windows_test.go; the install-link e2e reads ITSuite back.
+// secure_windows_test.go; the install-link e2e reads NovieriRMM back.
 func SecureOwned(dir string, accept func(owner *windows.SID) error) error {
 	err := MkdirOwned(dir)
 	if err == nil || !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {

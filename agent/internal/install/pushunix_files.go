@@ -8,16 +8,16 @@ package install
 // "` + "`" + `" because a Go raw string cannot hold one.
 
 const (
-	// linuxUnit is agent/packaging/linux/its-agent.service.
+	// linuxUnit is agent/packaging/linux/novieri-agent.service.
 	linuxUnit = `[Unit]
-# The Toeshee endpoint agent.
+# The Novieri RMM endpoint agent.
 #
 # Invariant #2, stated here because a unit file is where someone would try to
 # break it: this service opens NO listening port. There is no matching .socket
 # unit, no socket activation, and nothing for ` + "`" + `After=network.target` + "`" + ` to wait to
 # accept on. It dials outbound and only outbound.
-Description=ITMS Agent
-Documentation=file:///usr/share/doc/its-agent/README.md
+Description=Novieri RMM Agent
+Documentation=file:///usr/share/doc/novieri-agent/README.md
 # network-online rather than network: the first thing the agent does on a
 # never-enrolled host is an HTTPS POST to the control plane. Failing that resolve
 # is survivable (Restart=always retries) but noisy on every boot.
@@ -36,7 +36,7 @@ Type=simple
 # NOT Type=notify. That needs sd_notify -- a fourth dependency, or a hand-rolled
 # unix socket protocol -- for a readiness signal that nothing in this platform
 # waits on. Type=simple with Restart=always is the honest shape.
-ExecStart=/usr/local/bin/its-agent
+ExecStart=/usr/local/bin/novieri-agent
 # No arguments, ever. Everything on this line is world-readable through
 # /proc/<pid>/cmdline for the life of the process, which is why the enrollment
 # token arrives as a 0600 file in the state directory instead
@@ -54,13 +54,13 @@ TimeoutStopSec=30s
 
 # --- Configuration -------------------------------------------------------
 # Two variables, neither of them a secret. The token is deliberately NOT here:
-# ` + "`" + `systemctl show its-agent` + "`" + ` prints Environment= to any user who can read the
+# ` + "`" + `systemctl show novieri-agent` + "`" + ` prints Environment= to any user who can read the
 # unit, and a spent token would sit in /etc forever.
-Environment=ITS_AGENT_DATA_DIR=/var/lib/its-agent
+Environment=ITS_AGENT_DATA_DIR=/var/lib/novieri-agent
 # Written 0600 by install.sh; carries ITS_AGENT_ENROLL_URL. The leading ` + "`" + `-` + "`" + `
 # means an absent file is not a startup failure -- an enrolled agent needs
 # neither the URL nor the token.
-EnvironmentFile=-/etc/its-agent/agent.env
+EnvironmentFile=-/etc/novieri-agent/agent.env
 
 # --- Privilege -----------------------------------------------------------
 # ROOT, and the reason is written down rather than assumed.
@@ -109,17 +109,17 @@ CapabilityBoundingSet=CAP_NET_RAW
 AmbientCapabilities=CAP_NET_RAW
 
 # --- Filesystem ----------------------------------------------------------
-# StateDirectory creates and chowns /var/lib/its-agent at start, and 0700 is the
+# StateDirectory creates and chowns /var/lib/novieri-agent at start, and 0700 is the
 # same mode internal/config enforces from the other side: the device private key
 # lives in there.
-StateDirectory=its-agent
+StateDirectory=novieri-agent
 StateDirectoryMode=0700
 
 # The whole hierarchy read-only except /dev, /proc, /sys...
 ProtectSystem=strict
 # ...and the one directory the agent legitimately writes: identity, key, pins,
 # replay store, outbound buffer. Nothing else.
-ReadWritePaths=/var/lib/its-agent
+ReadWritePaths=/var/lib/novieri-agent
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
@@ -153,19 +153,19 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # (asserted in internal/enroll's tests).
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=its-agent
+SyslogIdentifier=novieri-agent
 
 [Install]
 WantedBy=multi-user.target
 `
 
-	// darwinPlistTemplate is agent/packaging/darwin/com.toeshee.itsagent.plist.
+	// darwinPlistTemplate is agent/packaging/darwin/com.novieri.rmm.agent.plist.
 	// darwinPlist adds ITS_AGENT_ENROLL_URL to its EnvironmentVariables, as
 	// darwin/install.sh does with PlistBuddy.
 	darwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The Toeshee endpoint agent as a launchd SYSTEM daemon
+  The Novieri RMM endpoint agent as a launchd SYSTEM daemon
   (/Library/LaunchDaemons, loaded into the ` + "`" + `system` + "`" + ` domain, running as root).
 
   Invariant #2: there is no Sockets key and no socket activation. launchd never
@@ -174,7 +174,7 @@ WantedBy=multi-user.target
 
   The enrollment token is NOT here. EnvironmentVariables in a plist under
   /Library/LaunchDaemons is world-readable and is echoed by ` + "`" + `launchctl print
-  system/com.toeshee.itsagent` + "`" + `. The token goes to /var/lib/its-agent/enroll-token
+  system/com.novieri.rmm.agent` + "`" + `. The token goes to /var/lib/novieri-agent/enroll-token
   at mode 0600 (config.EnrollTokenPath), and the agent deletes it once it has
   exchanged it for a certificate.
 
@@ -184,11 +184,11 @@ WantedBy=multi-user.target
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.toeshee.itsagent</string>
+    <string>com.novieri.rmm.agent</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/libexec/its-agent</string>
+        <string>/usr/local/libexec/novieri-agent</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -226,7 +226,7 @@ WantedBy=multi-user.target
     <key>EnvironmentVariables</key>
     <dict>
         <key>ITS_AGENT_DATA_DIR</key>
-        <string>/var/lib/its-agent</string>
+        <string>/var/lib/novieri-agent</string>
         <!--
           ITS_AGENT_ENROLL_URL is written here by install.sh. It is not a
           secret. The token is not, and must never be.
@@ -234,14 +234,14 @@ WantedBy=multi-user.target
     </dict>
 
     <!--
-      The agent logs to stderr. /var/log/its-agent is created 0750 root:wheel by
+      The agent logs to stderr. /var/log/novieri-agent is created 0750 root:wheel by
       install.sh; no credential is ever logged (asserted in internal/enroll's
       tests). Rotation is newsyslog's job (see packaging/README.md).
     -->
     <key>StandardErrorPath</key>
-    <string>/var/log/its-agent/agent.log</string>
+    <string>/var/log/novieri-agent/agent.log</string>
     <key>StandardOutPath</key>
-    <string>/var/log/its-agent/agent.log</string>
+    <string>/var/log/novieri-agent/agent.log</string>
 
     <key>ProcessType</key>
     <string>Background</string>

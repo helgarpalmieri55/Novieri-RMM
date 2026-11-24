@@ -57,11 +57,11 @@ func runQuiet(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// agentLines keeps the lines of a tool's output that name an its-agent process.
+// agentLines keeps the lines of a tool's output that name an novieri-agent process.
 func agentLines(out string) []string {
 	var found []string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(strings.ToLower(line), "its-agent") {
+		if strings.Contains(strings.ToLower(line), "novieri-agent") {
 			found = append(found, strings.TrimSpace(line))
 		}
 	}

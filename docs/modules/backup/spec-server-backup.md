@@ -345,8 +345,8 @@ database data directory is not a backup.
 | Filesystem | Mechanism | Commands (only during a `backup.run`) |
 | --- | --- | --- |
 | LVM logical volume | existing `openLVM` | as `agent-engine.md` §2 |
-| btrfs | `btrfs subvolume snapshot -r <subvol> <subvol>/.itms-snap-<tag>` for the subvolume containing the root and each nested subvolume under it (snapshots are not recursive); read via the snapshot path; `btrfs subvolume delete` of this agent's tagged snapshots only, including in the orphan sweep | `btrfs` |
-| ZFS dataset | `zfs snapshot <ds>@itms-<tag>` for the dataset and each child dataset under the root; read via `<mountpoint>/.zfs/snapshot/itms-<tag>/`; `zfs destroy` of this agent's `@itms-` snapshots only | `zfs` |
+| btrfs | `btrfs subvolume snapshot -r <subvol> <subvol>/.novieri-snap-<tag>` for the subvolume containing the root and each nested subvolume under it (snapshots are not recursive); read via the snapshot path; `btrfs subvolume delete` of this agent's tagged snapshots only, including in the orphan sweep | `btrfs` |
+| ZFS dataset | `zfs snapshot <ds>@novieri-snap-<tag>` for the dataset and each child dataset under the root; read via `<mountpoint>/.zfs/snapshot/novieri-snap-<tag>/`; `zfs destroy` of this agent's `@novieri-snap-` snapshots only | `zfs` |
 | anything else (ext4/XFS on a partition, cloud images) | live read with change detection, if `allow_live`; otherwise the existing refusal | none |
 
 The params' `snapshot` value becomes `auto` for Linux under format 2 (§5.1);

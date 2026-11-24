@@ -1,8 +1,8 @@
 #!/bin/sh
-# its-agent prerm — stop the service before its binary is removed.
+# novieri-agent prerm — stop the service before its binary is removed.
 set -e
 
-SERVICE=its-agent.service
+SERVICE=novieri-agent.service
 
 case "$1" in
   remove|deconfigure)

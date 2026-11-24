@@ -31,7 +31,7 @@ type Link struct {
 // Web): the console comes from the file name itself, so a copy made from a
 // share or a USB stick installs exactly as a fresh download does. The name is
 //
-//	ITMS-Agent-Setup_<host>[@<port>]_<code><suffix>.exe
+//	NovieriRMM-Agent-Setup_<host>[@<port>]_<code><suffix>.exe
 //
 // read in this order: the base name; `.exe` stripped in any case; one browser
 // suffix stripped -- ` (n)` (Chrome, Edge) or `(n)` (Firefox), what a browser

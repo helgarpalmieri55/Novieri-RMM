@@ -1,19 +1,19 @@
 // Package install is the Windows self-installer for the install link
 // (docs/superpowers/specs/2026-09-28-install-link-and-windows-push-design.md
 // §1.3), and the Linux and macOS install mode the SSH push runs on its target
-// (pushunix.go, push_unix.go: `its-agent install --token-file <file>
+// (pushunix.go, push_unix.go: `novieri-agent install --token-file <file>
 // --enroll-url <origin>`, which does what packaging/{linux,darwin}/install.sh
 // do).
 //
 // A technician opens the organisation's install link on the machine and
-// downloads `ITMS-Agent-Setup_<host>[@<port>]_<code>.exe` -- the published,
+// downloads `NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe` -- the published,
 // signed artefact, byte for byte, under a name that carries the console's host
 // and the link code (FromFileName; the operator's decision of 2026-09-28
 // replaced plan D6's Mark of the Web, so a copy from a share or a USB stick
 // works too). Started with no arguments under that name, the binary installs
 // itself: it re-launches elevated (one UAC prompt), copies itself to
-// %ProgramFiles%\ITSuite, sets install.ps1's owner and ACL on the data
-// directory and on its parent %ProgramData%\ITSuite (parent first), writes
+// %ProgramFiles%\NovieriRMM, sets install.ps1's owner and ACL on the data
+// directory and on its parent %ProgramData%\NovieriRMM (parent first), writes
 // the code to the token file, registers and starts the service with
 // `https://<host>[:<port>]` as its enrollment URL, and shows one small window.
 // That URL is verified against the system trust store like any other; nothing
@@ -35,7 +35,7 @@ import "strings"
 
 // FilePrefix is the start of the file name the install link serves
 // (backend link_page.windows_file_name).
-const FilePrefix = "ITMS-Agent-Setup_"
+const FilePrefix = "NovieriRMM-Agent-Setup_"
 
 // ElevatedArg is the ONLY argument the UAC re-launch carries.
 const ElevatedArg = "--elevated-install"
@@ -65,6 +65,6 @@ func asksHost(relaunched, noUI, elevated bool) bool {
 // a technician a file can write; the question puts that name in front of the
 // person who is about to approve the UAC prompt.
 func confirmText(link Link) string {
-	return "Install the ITMS agent and connect this computer to " +
+	return "Install the Novieri RMM agent and connect this computer to " +
 		strings.TrimPrefix(link.Console, "https://") + "?"
 }

@@ -35,7 +35,7 @@ func Run(main func(context.Context) int) int {
 		// guess towards "console" produces a service that exits with 1053 and a
 		// clear event; a wrong guess towards "service" produces a hand-started
 		// binary that hangs waiting for a dispatcher that will never connect.
-		fmt.Fprintf(os.Stderr, "its-agent: cannot tell whether this is a service start (%v); running as a console program\n", err)
+		fmt.Fprintf(os.Stderr, "novieri-agent: cannot tell whether this is a service start (%v); running as a console program\n", err)
 		isService = false
 	}
 	if !isService {
@@ -44,7 +44,7 @@ func Run(main func(context.Context) int) int {
 
 	h := &handler{main: main, stopGrace: defaultStopGrace}
 	if err := svc.Run(Name, h); err != nil {
-		fmt.Fprintf(os.Stderr, "its-agent: service dispatcher: %v\n", err)
+		fmt.Fprintf(os.Stderr, "novieri-agent: service dispatcher: %v\n", err)
 		return 1
 	}
 	return int(h.code.Load())
@@ -108,7 +108,7 @@ func (h *handler) Execute(args []string, r <-chan svc.ChangeRequest, s chan<- sv
 				case code := <-done:
 					h.code.Store(int32(code))
 				case <-time.After(h.stopGrace):
-					fmt.Fprintf(os.Stderr, "its-agent: agent did not stop within %s; stopping anyway\n", h.stopGrace)
+					fmt.Fprintf(os.Stderr, "novieri-agent: agent did not stop within %s; stopping anyway\n", h.stopGrace)
 				}
 				return false, 0
 			default:

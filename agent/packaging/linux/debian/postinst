@@ -1,15 +1,15 @@
 #!/bin/sh
-# its-agent postinst — POSIX sh, as dpkg requires of a maintainer script.
+# novieri-agent postinst — POSIX sh, as dpkg requires of a maintainer script.
 #
 # It does NOT enroll and it does NOT invent credentials. The package carries no
-# token by design (see its-agent-enroll's header, and invariant #3): an
+# token by design (see novieri-agent-enroll's header, and invariant #3): an
 # enrollment token inside a .deb would be a credential in an artifact that gets
 # copied to file servers, baked into images and cached by apt.
 set -e
 
-STATEDIR=/var/lib/its-agent
-CONFDIR=/etc/its-agent
-SERVICE=its-agent.service
+STATEDIR=/var/lib/novieri-agent
+CONFDIR=/etc/novieri-agent
+SERVICE=novieri-agent.service
 
 case "$1" in
   configure)
@@ -35,9 +35,9 @@ case "$1" in
         # 2 on every start, and Restart=always would turn a missing enrolment
         # step into a restart loop that looks like a crash.
         echo ""
-        echo "its-agent installed but NOT started: this endpoint is not enrolled."
+        echo "novieri-agent installed but NOT started: this endpoint is not enrolled."
         echo ""
-        echo "  sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://<control-plane>"
+        echo "  sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://<control-plane>"
         echo ""
         echo "The token is never a command-line argument; --token-stdin also works."
       fi

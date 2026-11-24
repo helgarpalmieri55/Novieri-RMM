@@ -1069,7 +1069,7 @@ jobs:
     #
     # Running it on a bare-metal self-hosted runner was considered and rejected:
     # the job `dpkg -i`s a real package with a systemd unit, runs the agent as
-    # root, and then ASSERTS THAT /var/lib/its-agent SURVIVES `dpkg -r`. That
+    # root, and then ASSERTS THAT /var/lib/novieri-agent SURVIVES `dpkg -r`. That
     # assertion only means what it says on a machine that is thrown away
     # afterwards. On a persistent runner each run would start dirty, and a Spot
     # eviction mid-job would leave the agent installed and running on the CI host.
@@ -1302,7 +1302,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck packaging/build.sh packaging/linux/*.sh packaging/darwin/*.sh \
-                     packaging/linux/its-agent-enroll
+                     packaging/linux/novieri-agent-enroll
           # dpkg maintainer scripts are POSIX sh, not bash.
           shellcheck -s sh packaging/linux/debian/postinst \
                            packaging/linux/debian/prerm \
@@ -1314,10 +1314,10 @@ jobs:
         # ExecStart is pointed at a real file first, because verify checks that
         # the binary exists and is executable.
         run: |
-          CGO_ENABLED=0 go build -o /tmp/its-agent ./cmd/agent
-          sed 's|^ExecStart=.*|ExecStart=/tmp/its-agent|' \
-            packaging/linux/its-agent.service > /tmp/its-agent.service
-          systemd-analyze verify /tmp/its-agent.service
+          CGO_ENABLED=0 go build -o /tmp/novieri-agent ./cmd/agent
+          sed 's|^ExecStart=.*|ExecStart=/tmp/novieri-agent|' \
+            packaging/linux/novieri-agent.service > /tmp/novieri-agent.service
+          systemd-analyze verify /tmp/novieri-agent.service
 
       - name: build and install the .deb, then purge it
         # The Ubuntu path is the one that must actually work: the control plane
@@ -1328,35 +1328,35 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=0.0.0-ci ./packaging/linux/build-deb.sh
-          sudo dpkg -i dist/its-agent_0.0.0-ci_amd64.deb
-          test "$(/usr/bin/its-agent --version)" = "0.0.0-ci"
+          sudo dpkg -i dist/novieri-agent_0.0.0-ci_amd64.deb
+          test "$(/usr/bin/novieri-agent --version)" = "0.0.0-ci"
           # The package must not have shipped a credential.
-          if dpkg -L its-agent | grep -q 'enroll-token'; then
+          if dpkg -L novieri-agent | grep -q 'enroll-token'; then
             echo "the package ships a token file"; exit 1
           fi
           # argv is refused...
-          if sudo its-agent-enroll --url https://example.invalid --token nope; then
-            echo "its-agent-enroll accepted a token in argv"; exit 1
+          if sudo novieri-agent-enroll --url https://example.invalid --token nope; then
+            echo "novieri-agent-enroll accepted a token in argv"; exit 1
           fi
           # ...the environment is not.
           sudo ITS_AGENT_ENROLL_TOKEN=ci.throwaway.token \
-            its-agent-enroll --url https://example.invalid --no-start
+            novieri-agent-enroll --url https://example.invalid --no-start
           # `sudo` goes INSIDE the substitution. Written the other way round,
           # the shell expands $(stat ...) as the unprivileged runner and only
-          # `test` runs as root -- and /var/lib/its-agent is root-only, so stat
+          # `test` runs as root -- and /var/lib/novieri-agent is root-only, so stat
           # is denied, the substitution is empty, and `test "" = "600"` fails.
           # That is what this step did the first time it was ever reached.
-          test "$(sudo stat -c %a /var/lib/its-agent/enroll-token)" = "600"
-          test "$(sudo stat -c %U /var/lib/its-agent/enroll-token)" = "root"
+          test "$(sudo stat -c %a /var/lib/novieri-agent/enroll-token)" = "600"
+          test "$(sudo stat -c %U /var/lib/novieri-agent/enroll-token)" = "root"
           # A token file others can read must stop the agent, not be tolerated.
-          sudo chmod 0644 /var/lib/its-agent/enroll-token
-          if sudo timeout 30 env ITS_AGENT_DATA_DIR=/var/lib/its-agent /usr/bin/its-agent; then
+          sudo chmod 0644 /var/lib/novieri-agent/enroll-token
+          if sudo timeout 30 env ITS_AGENT_DATA_DIR=/var/lib/novieri-agent /usr/bin/novieri-agent; then
             echo "the agent started with a world-readable enrollment token"; exit 1
           fi
-          sudo dpkg -r its-agent
-          sudo test -f /var/lib/its-agent/enroll-token   # remove keeps state
-          sudo dpkg -P its-agent
-          if sudo test -e /var/lib/its-agent; then echo "purge left the state dir"; exit 1; fi
+          sudo dpkg -r novieri-agent
+          sudo test -f /var/lib/novieri-agent/enroll-token   # remove keeps state
+          sudo dpkg -P novieri-agent
+          if sudo test -e /var/lib/novieri-agent; then echo "purge left the state dir"; exit 1; fi
 
   agent-windows:
     # The `agent` job above proves the module builds for six targets and RUNS

@@ -66,7 +66,7 @@ mkdir -p "$dist"
 for t in "${targets[@]}"; do
   goos="${t%/*}"
   goarch="${t#*/}"
-  out="$dist/its-agent-${goos}-${goarch}"
+  out="$dist/novieri-agent-${goos}-${goarch}"
   if [ "$goos" = "windows" ]; then out="${out}.exe"; fi
   printf '== %s\n' "$t"
   (
@@ -79,8 +79,8 @@ done
 # A convenience copy for the host platform, which is what the install scripts
 # look for first.
 hostos="$(go env GOOS)"
-host="$dist/its-agent-${hostos}-$(go env GOARCH)"
-plain="$dist/its-agent"
+host="$dist/novieri-agent-${hostos}-$(go env GOARCH)"
+plain="$dist/novieri-agent"
 if [ "$hostos" = "windows" ]; then
   host="${host}.exe"
   plain="${plain}.exe"

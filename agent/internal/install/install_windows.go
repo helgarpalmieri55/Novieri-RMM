@@ -23,12 +23,12 @@ import (
 )
 
 const (
-	windowTitle    = "ITMS agent"
-	msgInstalled   = "Installed — this computer will appear in ITMS within a minute."
+	windowTitle    = "Novieri RMM agent"
+	msgInstalled   = "Installed — this computer will appear in Novieri RMM within a minute."
 	msgCancelled   = "The installation was cancelled. It needs an administrator to approve the Windows prompt."
 	msgNotElevated = "Windows did not give the installer administrator rights. Open it again and approve the prompt."
 	msgDeclined    = "Nothing was installed."
-	msgNotRelease  = "This file could not be confirmed as the ITMS agent the install link serves, so nothing " +
+	msgNotRelease  = "This file could not be confirmed as the Novieri RMM agent the install link serves, so nothing " +
 		"was installed. Download it again from the install link. Details: "
 )
 
@@ -211,7 +211,7 @@ func apply(p Plan, src *os.File, meta ReleaseMeta, pub ed25519.PublicKey, code s
 		return err
 	}
 
-	staged := filepath.Join(p.InstallDir, ".its-agent.exe.new")
+	staged := filepath.Join(p.InstallDir, ".novieri-agent.exe.new")
 	if err := stage(src, staged); err != nil {
 		return err
 	}
@@ -335,16 +335,16 @@ func registerAndStart(m *mgr.Mgr, existing *mgr.Service, p Plan) error {
 
 // prepareDirs creates or secures the three directories, PARENT FIRST.
 //
-// `%ProgramData%\ITSuite` is secured before `agent` is created or touched
+// `%ProgramData%\NovieriRMM` is secured before `agent` is created or touched
 // (2026-09-29). Protecting `agent` alone protected nothing: on a default
 // Windows install BUILTIN\Users may create folders in C:\ProgramData and
 // CREATOR OWNER gets Full Control on them, so a standard user could
-// `mkdir C:\ProgramData\ITSuite` before the install and own it -- and an
+// `mkdir C:\ProgramData\NovieriRMM` before the install and own it -- and an
 // owner of a directory holds FILE_DELETE_CHILD on it. After the install they
 // renamed the protected `agent` away and put their own in its place, holding
 // an identity.json, pins.json and agent.key that point the SYSTEM service at
 // their gateway and their job-signing key; the same control let them race the
-// token file. secdir.SecureOwned creates ITSuite with its descriptor, or
+// token file. secdir.SecureOwned creates NovieriRMM with its descriptor, or
 // takes ownership of an existing one through a handle that did not follow a
 // junction, and refuses a junction or symbolic link outright.
 //
@@ -355,7 +355,7 @@ func registerAndStart(m *mgr.Mgr, existing *mgr.Service, p Plan) error {
 // A re-install's directories are the previous install's, and are secured
 // without that check.
 //
-// `%ProgramFiles%\ITSuite` is checked (no junction; owner on a fresh install)
+// `%ProgramFiles%\NovieriRMM` is checked (no junction; owner on a fresh install)
 // but keeps the ACL it inherits: C:\Program Files grants BUILTIN\Users read
 // and execute only, so they cannot pre-create it, and install.ps1 installs
 // the binary under the same inherited ACL.
@@ -453,7 +453,7 @@ func stop(s *mgr.Service) error {
 			return nil
 		}
 	}
-	return errors.New("the existing its-agent service did not stop within 30 seconds")
+	return errors.New("the existing novieri-agent service did not stop within 30 seconds")
 }
 
 // renameWithRetry: the SCM can report Stopped a moment before the old process
@@ -467,7 +467,7 @@ func renameWithRetry(staged, dst string) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	_ = os.Remove(staged)
-	return fmt.Errorf("could not write %s -- the previous its-agent.exe is still in use: %w", dst, err)
+	return fmt.Errorf("could not write %s -- the previous novieri-agent.exe is still in use: %w", dst, err)
 }
 
 // report shows the result window (or, with EnvNoUI=1, only the stderr line)

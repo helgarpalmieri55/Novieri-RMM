@@ -74,7 +74,7 @@ async def test_the_msi_carries_the_agent_and_the_link_and_is_audited_without_the
     assert response.headers["cache-control"] == "no-store"
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="ITMS-Agent-itms.example.com-amd64.msi"'
+        == 'attachment; filename="NovieriRMM-Agent-itms.example.com-amd64.msi"'
     )
     digest = hashlib.sha256(response.content).hexdigest()
     assert response.headers["x-content-sha256"] == digest
@@ -84,8 +84,8 @@ async def test_the_msi_carries_the_agent_and_the_link_and_is_audited_without_the
     msi.write_bytes(response.content)
     out = tmp_path / "x"
     subprocess.run(["msiextract", "-C", str(out), str(msi)], check=True, capture_output=True)
-    assert (out / "ITSuite" / "its-agent.exe").read_bytes() == release.data
-    assert json.loads((out / "ITSuite" / "msi-enroll.json").read_text()) == {
+    assert (out / "NovieriRMM" / "novieri-agent.exe").read_bytes() == release.data
+    assert json.loads((out / "NovieriRMM" / "msi-enroll.json").read_text()) == {
         "console": CONSOLE,
         "code": code,
     }

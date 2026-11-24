@@ -522,7 +522,7 @@ or renamed, and none became required.
   service's `ITS_AGENT_ENROLL_URL` (the agent appends `/enroll/v1`). The server
   sets it on every install (`winrm` and `ssh`) and refuses an install before
   any credential is decrypted when it is not configured. Over `ssh` it is the
-  one value in the fixed `its-agent install ... --enroll-url '<origin>'`
+  one value in the fixed `novieri-agent install ... --enroll-url '<origin>'`
   command, which writes it where `packaging/linux/install.sh` and
   `packaging/darwin/install.sh` do. It is never derived from the presigned
   `release.url` (plan W2, superseded 2026-09-29).

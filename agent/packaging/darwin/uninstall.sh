@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the Toeshee agent from a Mac.
+# Remove the Novieri RMM agent from a Mac.
 #
 # Removes: the launchd job, the plist, the binary, the logs, and -- unless
 # --keep-state -- the state directory (identity, private key, pins).
@@ -18,16 +18,16 @@ set -euo pipefail
 DESTDIR=""
 BINDIR="/usr/local/libexec"
 PLISTDIR="/Library/LaunchDaemons"
-STATEDIR="/var/lib/its-agent"
-LOGDIR="/var/log/its-agent"
-LABEL="com.toeshee.itsagent"
+STATEDIR="/var/lib/novieri-agent"
+LOGDIR="/var/log/novieri-agent"
+LABEL="com.novieri.rmm.agent"
 KEEP_STATE=0
 
 usage() {
   cat <<'USAGE'
 Usage: sudo uninstall.sh [--keep-state] [--destdir DIR]
 
-  --keep-state   Leave /var/lib/its-agent in place. Without it the enrolled
+  --keep-state   Leave /var/lib/novieri-agent in place. Without it the enrolled
                  identity is destroyed: re-installing needs a NEW enrollment
                  token and mints a NEW device record.
   --destdir DIR  Operate on a staged tree instead of the live system.
@@ -53,7 +53,7 @@ if [ -z "$DESTDIR" ] && command -v launchctl >/dev/null 2>&1; then
 fi
 
 rm -f "${DESTDIR}${PLISTDIR}/${LABEL}.plist"
-rm -f "${DESTDIR}${BINDIR}/its-agent"
+rm -f "${DESTDIR}${BINDIR}/novieri-agent"
 rm -rf "${DESTDIR}${LOGDIR}"
 
 if [ "$KEEP_STATE" -eq 1 ]; then
@@ -73,7 +73,7 @@ else
 fi
 
 cat <<'EOF'
-its-agent removed from this Mac.
+novieri-agent removed from this Mac.
 
 Still present, on purpose:
   * the device record in the control plane (retire it in the console)

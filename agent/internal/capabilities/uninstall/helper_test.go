@@ -49,8 +49,8 @@ func layout(t *testing.T) Targets {
 			t.Fatal(err)
 		}
 	}
-	bin := filepath.Join(root, "bin", "its-agent")
-	extra := filepath.Join(root, "etc-its-agent")
+	bin := filepath.Join(root, "bin", "novieri-agent")
+	extra := filepath.Join(root, "etc-novieri-agent")
 	for _, dir := range []string{filepath.Dir(bin), extra} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -60,7 +60,7 @@ func layout(t *testing.T) Targets {
 		t.Fatal(err)
 	}
 	return Targets{
-		ServiceName:   "its-agent",
+		ServiceName:   "novieri-agent",
 		Binary:        bin,
 		DataDir:       data,
 		Credentials:   []string{"enroll-token", "agent.key", "agent.key.pending", "previous.json"},
@@ -90,14 +90,14 @@ func TestTheHelperWaitsThenStopsThenRemovesEverything(t *testing.T) {
 		t.Fatalf("the first wait was %v, want %v: the job result must reach the gateway "+
 			"before the service stops", waited, HelperDelay)
 	}
-	if want := []string{"stop its-agent", "purge", "delete its-agent", "exiting"}; !reflect.DeepEqual(sys.calls, want) {
+	if want := []string{"stop novieri-agent", "purge", "delete novieri-agent", "exiting"}; !reflect.DeepEqual(sys.calls, want) {
 		t.Fatalf("calls = %v, want %v", sys.calls, want)
 	}
 	gone(t, tg.DataDir, tg.Binary, tg.Remove[0], tg.RemoveIfEmpty[0])
 }
 
 func TestAPackageManagedAgentIsPurgedNotDeletedFileByFile(t *testing.T) {
-	// dpkg owns /usr/bin/its-agent and the unit: deleting them by hand leaves
+	// dpkg owns /usr/bin/novieri-agent and the unit: deleting them by hand leaves
 	// a package database that says they exist.
 	tg := layout(t)
 	sys := &fakeSystem{purged: true}
@@ -130,11 +130,11 @@ func TestAHelperRunningFromACopyAsksForItsOwnDeletionAtBoot(t *testing.T) {
 	// process cannot delete its own image. The copy goes at the next boot.
 	tg := layout(t)
 	sys := &fakeSystem{}
-	self := filepath.Join(t.TempDir(), "its-agent-uninstall-1.exe")
+	self := filepath.Join(t.TempDir(), "novieri-agent-uninstall-1.exe")
 	if err := RunHelper(context.Background(), sys, tg, self, func(time.Duration) {}); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(sys.calls[len(sys.calls)-2:], []string{"schedule its-agent-uninstall-1.exe", "exiting"}) {
+	if !reflect.DeepEqual(sys.calls[len(sys.calls)-2:], []string{"schedule novieri-agent-uninstall-1.exe", "exiting"}) {
 		t.Fatalf("calls = %v", sys.calls)
 	}
 }

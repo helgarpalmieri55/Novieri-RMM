@@ -44,7 +44,7 @@ func signedRelease(t *testing.T, version, goarch string, body []byte) release {
 }
 
 func TestStagedBytesThatAreTheSignedReleaseAreAccepted(t *testing.T) {
-	r := signedRelease(t, "1.6.0", "amd64", []byte("MZ...the published its-agent.exe"))
+	r := signedRelease(t, "1.6.0", "amd64", []byte("MZ...the published novieri-agent.exe"))
 	if err := verifyStaged(r.pub, r.meta, "amd64", bytes.NewReader(r.bytes)); err != nil {
 		t.Fatalf("verifyStaged: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestStagedBytesThatAreTheSignedReleaseAreAccepted(t *testing.T) {
 }
 
 func TestStagedBytesThatDifferFromTheReleaseAreRefused(t *testing.T) {
-	r := signedRelease(t, "1.6.0", "amd64", []byte("MZ...the published its-agent.exe"))
+	r := signedRelease(t, "1.6.0", "amd64", []byte("MZ...the published novieri-agent.exe"))
 	swapped := []byte("MZ...something a local user put in Downloads")
 	err := verifyStaged(r.pub, r.meta, "amd64", bytes.NewReader(swapped))
 	if err == nil || !strings.Contains(err.Error(), "SHA-256") {
@@ -122,7 +122,7 @@ func TestTheReleaseMetadataIsFetchedFromTheLinkAndValidated(t *testing.T) {
 }
 
 func TestTheStagedDigestIsLowerCaseHex(t *testing.T) {
-	body := []byte("MZ...the published its-agent.exe")
+	body := []byte("MZ...the published novieri-agent.exe")
 	sum := sha256.Sum256(body)
 	got, err := sha256Hex(bytes.NewReader(body))
 	if err != nil || got != hex.EncodeToString(sum[:]) {

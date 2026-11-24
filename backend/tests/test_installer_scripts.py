@@ -30,9 +30,9 @@ _PACKAGING = Path(__file__).resolve().parents[2] / "agent" / "packaging"
 _PAIRS = [
     ("windows/install.ps1", "windows/install.ps1"),
     ("linux/install.sh", "linux/install.sh"),
-    ("linux/its-agent.service", "linux/its-agent.service"),
+    ("linux/novieri-agent.service", "linux/novieri-agent.service"),
     ("darwin/install.sh", "darwin/install.sh"),
-    ("darwin/com.toeshee.itsagent.plist", "darwin/com.toeshee.itsagent.plist"),
+    ("darwin/com.novieri.rmm.agent.plist", "darwin/com.novieri.rmm.agent.plist"),
 ]
 
 

@@ -44,7 +44,7 @@ import (
 // os.Open on an EMPTY directory at the exact path openAPFS mounts to -- that
 // real read is the whole of the TCC simulation (see snapshot.go's
 // verifyPresents doc comment) -- and the real snapMountRoot
-// (/var/lib/toeshee-agent/snap) is not writable by the unprivileged account CI
+// (/var/lib/novieri-agent-snap) is not writable by the unprivileged account CI
 // runs `go test` as. Without this seam that one test would need either root
 // (unavailable in CI) or a fake past a REAL os.Open call, which is exactly the
 // trap the note atop snapshot_lvm_test.go warns about. Every other test in
@@ -303,7 +303,7 @@ func underSnapMountRoot(p string) bool {
 }
 
 // parseMountTarget extracts the mountpoint from one line of `mount`'s output,
-// e.g. "/dev/disk1s5s1 on /var/lib/toeshee-agent/snap/toeshee-snap-42-0
+// e.g. "/dev/disk1s5s1 on /var/lib/novieri-agent-snap/novieri-snap-42-0
 // (apfs, local, read-only, journaled, nobrowse)" -> the path between " on "
 // and the trailing "(...)" options.
 //

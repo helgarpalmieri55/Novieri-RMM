@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Build its-agent_<version>_<arch>.deb — the primary Ubuntu artifact.
+# Build novieri-agent_<version>_<arch>.deb — the primary Ubuntu artifact.
 #
 #   ./build-deb.sh                       # amd64, version from git describe
 #   ARCH=arm64 VERSION=1.4.0 ./build-deb.sh
 #
 # Why a .deb and not a tarball plus a shell script: an Ubuntu operator expects
-# `apt install ./its-agent_x.y.z_amd64.deb`, and dpkg's maintainer scripts make
+# `apt install ./novieri-agent_x.y.z_amd64.deb`, and dpkg's maintainer scripts make
 # install, upgrade and removal transactional in a way a hand-rolled installer
 # never quite is — the service is stopped before its binary is replaced, the
 # unit is disabled before it is deleted, and `apt purge` is a real, defined
 # operation rather than a flag someone remembered to pass.
 #
 # THE PACKAGE CARRIES NO CREDENTIALS. Enrollment is a separate, post-install
-# step (`its-agent-enroll`), because a per-org token inside a .deb would be a
+# step (`novieri-agent-enroll`), because a per-org token inside a .deb would be a
 # credential in a distributable artifact — see invariant #3 and the header of
-# its-agent-enroll.
+# novieri-agent-enroll.
 #
 # Requires: dpkg-deb (dpkg-dev on Ubuntu). Produces a package that depends on
 # nothing: the binary is CGO_ENABLED=0 and statically linked, so there is no
@@ -43,12 +43,12 @@ command -v dpkg-deb >/dev/null 2>&1 || {
 if [ -z "$BINARY" ]; then
   # ALWAYS rebuilt, never reused from dist/. A binary left there by an earlier
   # run carries that run's -X main.version, and a package whose version and
-  # whose `its-agent --version` disagree is an unanswerable support question.
-  # (Observed: dist/ held a `git describe` build, and its-agent_0.1.0.deb
+  # whose `novieri-agent --version` disagree is an unanswerable support question.
+  # (Observed: dist/ held a `git describe` build, and novieri-agent_0.1.0.deb
   # shipped a binary reporting "2baebb0-dirty".)
   printf '== building linux/%s at version %s\n' "$ARCH" "$VERSION"
   VERSION="$VERSION" "$here/../build.sh" "linux/${ARCH}" >/dev/null
-  BINARY="$dist/its-agent-linux-${ARCH}"
+  BINARY="$dist/novieri-agent-linux-${ARCH}"
 fi
 [ -f "$BINARY" ] || { printf 'build-deb.sh: no binary at %s\n' "$BINARY" >&2; exit 1; }
 
@@ -79,23 +79,23 @@ install -d -m 0755 "$root/usr/sbin"
 # `dpkg -L` shows it. /usr/lib/systemd/system is the correct modern location and
 # systemd has read it for years.
 install -d -m 0755 "$root/usr/lib/systemd/system"
-install -d -m 0755 "$root/usr/share/doc/its-agent"
+install -d -m 0755 "$root/usr/share/doc/novieri-agent"
 
-install -m 0755 "$BINARY" "$root/usr/bin/its-agent"
-install -m 0755 "$here/its-agent-enroll" "$root/usr/sbin/its-agent-enroll"
+install -m 0755 "$BINARY" "$root/usr/bin/novieri-agent"
+install -m 0755 "$here/novieri-agent-enroll" "$root/usr/sbin/novieri-agent-enroll"
 
 # One unit file in the repository, two install paths. The shell installer puts
 # the binary in /usr/local/bin (where a hand-installed binary belongs); a
 # package must not write to /usr/local, so the packaged unit points at /usr/bin.
-sed 's|^ExecStart=/usr/local/bin/its-agent$|ExecStart=/usr/bin/its-agent|' \
-  "$here/its-agent.service" > "$root/usr/lib/systemd/system/its-agent.service"
-chmod 0644 "$root/usr/lib/systemd/system/its-agent.service"
-grep -q '^ExecStart=/usr/bin/its-agent$' "$root/usr/lib/systemd/system/its-agent.service" || {
+sed 's|^ExecStart=/usr/local/bin/novieri-agent$|ExecStart=/usr/bin/novieri-agent|' \
+  "$here/novieri-agent.service" > "$root/usr/lib/systemd/system/novieri-agent.service"
+chmod 0644 "$root/usr/lib/systemd/system/novieri-agent.service"
+grep -q '^ExecStart=/usr/bin/novieri-agent$' "$root/usr/lib/systemd/system/novieri-agent.service" || {
   printf 'build-deb.sh: the ExecStart rewrite did not apply; refusing to ship a unit that points nowhere\n' >&2
   exit 1
 }
 
-install -m 0644 "$here/../README.md" "$root/usr/share/doc/its-agent/README.md"
+install -m 0644 "$here/../README.md" "$root/usr/share/doc/novieri-agent/README.md"
 
 for script in postinst prerm postrm; do
   install -m 0755 "$here/debian/$script" "$root/DEBIAN/$script"
@@ -112,7 +112,7 @@ chmod 0644 "$root/DEBIAN/control"
 
 # --- build -----------------------------------------------------------------
 mkdir -p "$dist"
-out="$dist/its-agent_${VERSION}_${ARCH}.deb"
+out="$dist/novieri-agent_${VERSION}_${ARCH}.deb"
 # --root-owner-group: build without fakeroot and still record root:root, so the
 # package is identical whether or not the builder is root.
 dpkg-deb --root-owner-group --build "$root" "$out" >/dev/null

@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	msiExe          = `C:\Program Files\ITSuite\its-agent.exe`
-	msiSettingsPath = `C:\Program Files\ITSuite\msi-enroll.json`
+	msiExe          = `C:\Program Files\NovieriRMM\novieri-agent.exe`
+	msiSettingsPath = `C:\Program Files\NovieriRMM\msi-enroll.json`
 	msiCode         = "AbCdEfGhIjKlMnOpQrStUvWxYz012_-9"
 )
 
@@ -61,7 +61,7 @@ func TestMsiInstallJoinsThroughTheSettingsFileAndDeletesIt(t *testing.T) {
 	if err := msiInstall(sys, msiExe, `C:\Program Files`, `C:\ProgramData`); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"elevated?", `enrolled? C:\ProgramData\ITSuite\agent`, "read " + msiSettingsPath, "install", "remove " + msiSettingsPath}
+	want := []string{"elevated?", `enrolled? C:\ProgramData\NovieriRMM\agent`, "read " + msiSettingsPath, "install", "remove " + msiSettingsPath}
 	if !reflect.DeepEqual(sys.calls, want) {
 		t.Fatalf("calls = %v\nwant %v", sys.calls, want)
 	}
@@ -84,13 +84,13 @@ func TestMsiInstallRefusesUnlessElevated(t *testing.T) {
 
 func TestMsiInstallSetsUpOnlyTheBinaryTheMsiPlaced(t *testing.T) {
 	sys := &fakeMsi{elevated: true, settings: msiGood}
-	err := msiInstall(sys, `C:\Users\Public\its-agent.exe`, `C:\Program Files`, `C:\ProgramData`)
+	err := msiInstall(sys, `C:\Users\Public\novieri-agent.exe`, `C:\Program Files`, `C:\ProgramData`)
 	if err == nil || len(sys.calls) != 1 {
-		t.Fatalf("err=%v calls=%v; a binary outside Program Files\\ITSuite must be refused before anything is read", err, sys.calls)
+		t.Fatalf("err=%v calls=%v; a binary outside Program Files\\NovieriRMM must be refused before anything is read", err, sys.calls)
 	}
 	// Windows paths are case-insensitive, and the MSI may launch either way.
 	sys = &fakeMsi{elevated: true, settings: msiGood}
-	if err := msiInstall(sys, `c:\program files\itsuite\ITS-AGENT.EXE`, `C:\Program Files`, `C:\ProgramData`); err != nil {
+	if err := msiInstall(sys, `c:\program files\novierirmm\NOVIERI-AGENT.EXE`, `C:\Program Files`, `C:\ProgramData`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -100,7 +100,7 @@ func TestMsiInstallChangesNothingWhenAlreadyEnrolled(t *testing.T) {
 	if err := msiInstall(sys, msiExe, `C:\Program Files`, `C:\ProgramData`); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"elevated?", `enrolled? C:\ProgramData\ITSuite\agent`, "remove " + msiSettingsPath, "ensure-running its-agent"}
+	want := []string{"elevated?", `enrolled? C:\ProgramData\NovieriRMM\agent`, "remove " + msiSettingsPath, "ensure-running novieri-agent"}
 	if !reflect.DeepEqual(sys.calls, want) {
 		t.Fatalf("calls = %v\nwant %v", sys.calls, want)
 	}
@@ -164,14 +164,14 @@ func TestMsiSettingsAreValidated(t *testing.T) {
 
 var msiNow = time.Date(2026, 9, 30, 10, 11, 12, 0, time.FixedZone("CEST", 2*60*60))
 
-// ONE LINE PER OUTCOME in %ProgramData%\ITSuite\msi.log: the timestamp (UTC),
+// ONE LINE PER OUTCOME in %ProgramData%\NovieriRMM\msi.log: the timestamp (UTC),
 // the mode, and ok or the reason (review item 12).
 func TestMsiInstallLogsOneLinePerOutcome(t *testing.T) {
 	sys := &fakeMsi{elevated: true, settings: msiGood}
 	if err := runMsiInstall(sys, msiExe, `C:\Program Files`, `D:\ProgramData\`, msiNow); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{`D:\ProgramData\ITSuite|2026-09-30T08:11:12Z --msi-install ok`}; !reflect.DeepEqual(sys.logs, want) {
+	if want := []string{`D:\ProgramData\NovieriRMM|2026-09-30T08:11:12Z --msi-install ok`}; !reflect.DeepEqual(sys.logs, want) {
 		t.Fatalf("logs = %q, want %q", sys.logs, want)
 	}
 
@@ -179,7 +179,7 @@ func TestMsiInstallLogsOneLinePerOutcome(t *testing.T) {
 	if err := runMsiInstall(sys, msiExe, `C:\Program Files`, `C:\ProgramData`, msiNow); err == nil {
 		t.Fatal("an unelevated run succeeded")
 	}
-	if len(sys.logs) != 1 || !strings.HasPrefix(sys.logs[0], `C:\ProgramData\ITSuite|2026-09-30T08:11:12Z --msi-install failed: --msi-install must run as SYSTEM`) {
+	if len(sys.logs) != 1 || !strings.HasPrefix(sys.logs[0], `C:\ProgramData\NovieriRMM|2026-09-30T08:11:12Z --msi-install failed: --msi-install must run as SYSTEM`) {
 		t.Fatalf("logs = %q", sys.logs)
 	}
 }

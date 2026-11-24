@@ -1,6 +1,6 @@
-# its-agent
+# novieri-agent
 
-The Toeshee endpoint agent. One static Go binary per endpoint: one long-lived
+The Novieri RMM endpoint agent. One static Go binary per endpoint: one long-lived
 outbound mTLS WebSocket, one timer wheel, and a registry of capabilities that
 are dormant until a signed job for them arrives.
 
@@ -35,8 +35,8 @@ plist, and a Windows service. Start at
 
 ```sh
 VERSION=0.1.0 ./packaging/linux/build-deb.sh
-sudo apt install ./dist/its-agent_0.1.0_amd64.deb
-sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
+sudo apt install ./dist/novieri-agent_0.1.0_amd64.deb
+sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://its.example.com
 ```
 
 The enrollment token is a credential and is treated as one: it never appears in
@@ -53,7 +53,7 @@ breaks every agent already installed.
 |---|---|
 | `ITS_AGENT_ENROLL_URL` | API base URL. Enrollment posts to `<url>/enroll/v1` — the enrollment router is mounted with **no** prefix, so it is not under `/api/v1`. |
 | `ITS_AGENT_ENROLL_TOKEN` | Single-use enrollment token. Needed only on a first run. |
-| `ITS_AGENT_DATA_DIR` | Identity, key, pins and replay store. Defaults to `/var/lib/its-agent`, or `%ProgramData%\ITSuite\agent` on Windows. |
+| `ITS_AGENT_DATA_DIR` | Identity, key, pins and replay store. Defaults to `/var/lib/novieri-agent`, or `%ProgramData%\NovieriRMM\agent` on Windows. |
 
 The token may instead arrive as a **`0600` file** at
 `<data dir>/enroll-token`, which is how every installer under `packaging/`

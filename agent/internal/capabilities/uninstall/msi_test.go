@@ -19,7 +19,7 @@ func TestAnMsiRemovalLeavesTheBinaryToWindowsInstaller(t *testing.T) {
 	if err := RunForMSI(context.Background(), sys, tg, ""); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"stop its-agent", "purge", "delete its-agent"}; !reflect.DeepEqual(sys.calls, want) {
+	if want := []string{"stop novieri-agent", "purge", "delete novieri-agent"}; !reflect.DeepEqual(sys.calls, want) {
 		t.Fatalf("calls = %v, want %v (no wait, no boot-time delete, no helper exit)", sys.calls, want)
 	}
 	gone(t, tg.DataDir, tg.Remove[0])
@@ -64,31 +64,31 @@ func TestAnMsiRemovalRefusesTargetsThatAreNotAnAgent(t *testing.T) {
 }
 
 func TestMsiTargetsAreTheWindowsLayout(t *testing.T) {
-	got := msiTargets(`D:\ProgramData\`, `C:\Program Files\ITSuite\its-agent.exe`)
-	if got.DataDir != `D:\ProgramData\ITSuite\agent` || got.Binary != `C:\Program Files\ITSuite\its-agent.exe` ||
-		got.ServiceName != "its-agent" {
+	got := msiTargets(`D:\ProgramData\`, `C:\Program Files\NovieriRMM\novieri-agent.exe`)
+	if got.DataDir != `D:\ProgramData\NovieriRMM\agent` || got.Binary != `C:\Program Files\NovieriRMM\novieri-agent.exe` ||
+		got.ServiceName != "novieri-agent" {
 		t.Fatalf("msiTargets = %+v", got)
 	}
-	// %ProgramData%\ITSuite goes if it is empty; %ProgramFiles%\ITSuite is
+	// %ProgramData%\NovieriRMM goes if it is empty; %ProgramFiles%\NovieriRMM is
 	// the MSI's own directory, which Windows Installer removes.
-	if !reflect.DeepEqual(got.RemoveIfEmpty, []string{`D:\ProgramData\ITSuite`}) {
+	if !reflect.DeepEqual(got.RemoveIfEmpty, []string{`D:\ProgramData\NovieriRMM`}) {
 		t.Fatalf("RemoveIfEmpty = %v", got.RemoveIfEmpty)
 	}
-	if msiLogDir("") != `C:\ProgramData\ITSuite` || msiLogDir(`D:\ProgramData\`) != `D:\ProgramData\ITSuite` {
+	if msiLogDir("") != `C:\ProgramData\NovieriRMM` || msiLogDir(`D:\ProgramData\`) != `D:\ProgramData\NovieriRMM` {
 		t.Fatalf("msiLogDir = %q, %q", msiLogDir(""), msiLogDir(`D:\ProgramData\`))
 	}
-	if def := msiTargets("", `C:\x\its-agent.exe`); def.DataDir != `C:\ProgramData\ITSuite\agent` {
+	if def := msiTargets("", `C:\x\novieri-agent.exe`); def.DataDir != `C:\ProgramData\NovieriRMM\agent` {
 		t.Fatalf("default ProgramData: %+v", def)
 	}
 }
 
-// msiLayout is layout() under an ITSuite directory, as an MSI installs it:
-// <root>/ITSuite/agent holding the data, <root>/ITSuite/msi.log the install's
-// line, and ITSuite in RemoveIfEmpty.
+// msiLayout is layout() under an NovieriRMM directory, as an MSI installs it:
+// <root>/NovieriRMM/agent holding the data, <root>/NovieriRMM/msi.log the install's
+// line, and NovieriRMM in RemoveIfEmpty.
 func msiLayout(t *testing.T) (Targets, string) {
 	t.Helper()
 	tg := layout(t)
-	suite := filepath.Join(filepath.Dir(tg.DataDir), "ITSuite")
+	suite := filepath.Join(filepath.Dir(tg.DataDir), "NovieriRMM")
 	if err := os.Mkdir(suite, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +105,8 @@ func msiLayout(t *testing.T) (Targets, string) {
 }
 
 // A clean removal leaves nothing: the install's msi.log, then the empty
-// %ProgramData%\ITSuite, go too (review item 14).
-func TestAnMsiRemovalRemovesAnEmptyITSuite(t *testing.T) {
+// %ProgramData%\NovieriRMM, go too (review item 14).
+func TestAnMsiRemovalRemovesAnEmptyNovieriRMM(t *testing.T) {
 	tg, suite := msiLayout(t)
 	if err := RunForMSI(context.Background(), &fakeSystem{}, tg, filepath.Join(suite, MsiLogFile)); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestAnMsiRemovalRemovesAnEmptyITSuite(t *testing.T) {
 	gone(t, tg.DataDir, suite)
 }
 
-func TestAnMsiRemovalKeepsAnITSuiteThatHoldsSomethingElse(t *testing.T) {
+func TestAnMsiRemovalKeepsAnNovieriRMMThatHoldsSomethingElse(t *testing.T) {
 	tg, suite := msiLayout(t)
 	other := filepath.Join(suite, "push")
 	if err := os.Mkdir(other, 0o700); err != nil {
@@ -125,7 +125,7 @@ func TestAnMsiRemovalKeepsAnITSuiteThatHoldsSomethingElse(t *testing.T) {
 	}
 	gone(t, tg.DataDir, filepath.Join(suite, MsiLogFile))
 	if _, err := os.Stat(other); err != nil {
-		t.Fatalf("something else in ITSuite was removed: %v", err)
+		t.Fatalf("something else in NovieriRMM was removed: %v", err)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestMsiUninstallRefusesUnlessElevated(t *testing.T) {
 
 // A clean removal writes NO line: it has just deleted msi.log on purpose, and
 // the real log writer (secdir.AppendLine) creates the file when the directory
-// is still there -- which it is whenever %ProgramData%\ITSuite holds something
+// is still there -- which it is whenever %ProgramData%\NovieriRMM holds something
 // that is not the MSI's. windows-latest showed exactly that on 2026-09-30:
 // "msi.log survived msiexec /x". Only a failure is logged, with its reason.
 func TestMsiUninstallLogsOnlyAFailure(t *testing.T) {
@@ -195,10 +195,10 @@ func TestMsiUninstallLogsOnlyAFailure(t *testing.T) {
 	}
 }
 
-// The runner's case end to end: ITSuite also holds something else, so it
+// The runner's case end to end: NovieriRMM also holds something else, so it
 // stays, and a log writer that creates a missing file (as AppendLine's
 // OPEN_ALWAYS does) must still leave no msi.log after a clean removal.
-func TestACleanMsiRemovalLeavesNoLogEvenWhenITSuiteStays(t *testing.T) {
+func TestACleanMsiRemovalLeavesNoLogEvenWhenNovieriRMMStays(t *testing.T) {
 	tg, suite := msiLayout(t)
 	if err := os.Mkdir(filepath.Join(suite, "uninstall-1"), 0o700); err != nil {
 		t.Fatal(err)
@@ -218,6 +218,6 @@ func TestACleanMsiRemovalLeavesNoLogEvenWhenITSuiteStays(t *testing.T) {
 		t.Fatalf("msi.log survived a clean removal: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(suite, "uninstall-1")); err != nil {
-		t.Fatalf("something else in ITSuite was removed: %v", err)
+		t.Fatalf("something else in NovieriRMM was removed: %v", err)
 	}
 }

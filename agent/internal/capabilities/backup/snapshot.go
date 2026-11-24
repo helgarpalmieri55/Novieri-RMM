@@ -22,16 +22,16 @@ import (
 // It is an EXACT string, not a convention: the orphan sweep removes anything
 // carrying it, so a sweep matching a wider pattern than it creates would delete
 // a volume the agent does not own.
-const snapTagPrefix = "toeshee-snap-"
+const snapTagPrefix = "novieri-snap-"
 
 // snapMountRoot is where the agent mounts snapshots it takes. The sweep
 // reclaims mountpoints under this directory and nowhere else.
-const snapMountRoot = "/var/lib/toeshee-agent/snap"
+const snapMountRoot = "/var/lib/novieri-agent-snap"
 
 // btrfsSnapDir is the directory name a btrfs snapshot is created under, inside
 // the subvolume it snapshots. The walk skips it, on every platform, because a
 // source tree can carry one from a Linux host.
-const btrfsSnapDir = ".itms-snap-"
+const btrfsSnapDir = ".novieri-snap-"
 
 type snapResult struct {
 	Stdout   string

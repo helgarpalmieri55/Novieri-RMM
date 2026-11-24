@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the agent for THIS host, into agent/dist/its-agent.
+# Build the agent for THIS host, into agent/dist/novieri-agent.
 #
 # It exists so "build the agent" is a command rather than a paragraph, now
 # that the agent is in this tree (CLAUDE.md commit `a32cead`) and there is
@@ -18,7 +18,7 @@ mkdir -p dist
 # CGO_ENABLED=0 matches every packaged build and every CI cross-compile: a
 # binary that links libc here and not there is a difference a local run would
 # hide.
-CGO_ENABLED=0 go build -o dist/its-agent ./cmd/agent
+CGO_ENABLED=0 go build -o dist/novieri-agent ./cmd/agent
 
-echo "built $repo_root/agent/dist/its-agent"
-"$repo_root/agent/dist/its-agent" --version
+echo "built $repo_root/agent/dist/novieri-agent"
+"$repo_root/agent/dist/novieri-agent" --version

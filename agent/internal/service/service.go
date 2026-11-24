@@ -32,14 +32,14 @@ package service
 // Name is the Windows service name, and the label the packaging scripts use for
 // the systemd unit and the launchd job. One string, so a rename cannot half
 // happen.
-const Name = "its-agent"
+const Name = "novieri-agent"
 
 // DisplayName is what the Windows Services console shows.
-const DisplayName = "ITMS Agent"
+const DisplayName = "Novieri RMM Agent"
 
 // Description is the Windows service description. It names the outbound-only
 // property because a service with domain-admin-equivalent reach should say what
 // it does in the one place an operator will actually read.
-const Description = "Toeshee endpoint agent. Maintains one outbound mutual-TLS " +
+const Description = "Novieri RMM endpoint agent. Maintains one outbound mutual-TLS " +
 	"connection to the control plane and executes only cryptographically signed jobs. " +
 	"Opens no listening port."

@@ -13,22 +13,22 @@ import (
 	"syscall"
 )
 
-// RunPush is `its-agent install ...` (pushunix.go): the Linux and macOS
+// RunPush is `novieri-agent install ...` (pushunix.go): the Linux and macOS
 // install mode the SSH push runs on the target. It returns the exit code.
 func RunPush(args []string, exe string) int {
 	l, err := UnixLayoutFor(runtime.GOOS)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "its-agent install:", err)
+		fmt.Fprintln(os.Stderr, "novieri-agent install:", err)
 		return 2
 	}
 	// Every file this creates is owner-only unless explicitly widened
 	// (install.sh's `umask 077`).
 	syscall.Umask(0o077)
 	if err := pushInstall(realUnix{chown: true}, l, args, exe); err != nil {
-		fmt.Fprintln(os.Stderr, "its-agent install:", err)
+		fmt.Fprintln(os.Stderr, "novieri-agent install:", err)
 		return 1
 	}
-	fmt.Println("its-agent installed; the service enrolls with the control plane now")
+	fmt.Println("novieri-agent installed; the service enrolls with the control plane now")
 	return 0
 }
 

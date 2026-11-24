@@ -27,15 +27,15 @@ class TestAgentReleaseSuffix:
     def test_it_builds_the_documented_layout(self) -> None:
         assert (
             agent_release_suffix("873d666", "linux", "amd64")
-            == "agent-releases/873d666/its-agent-linux-amd64"
+            == "agent-releases/873d666/novieri-agent-linux-amd64"
         )
 
     def test_windows_carries_no_exe_suffix_here(self) -> None:
-        # build.sh emits `its-agent-windows-amd64` with no extension; naming the
+        # build.sh emits `novieri-agent-windows-amd64` with no extension; naming the
         # object differently from the artefact is how a download ends up under a
         # key nothing wrote to.
         assert agent_release_suffix("v1", "windows", "amd64").endswith(
-            "its-agent-windows-amd64"
+            "novieri-agent-windows-amd64"
         )
 
     @pytest.mark.parametrize(

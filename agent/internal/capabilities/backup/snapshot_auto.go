@@ -29,7 +29,7 @@ import (
 
 // snapNamePrefix marks btrfs and ZFS snapshots this agent creates. The orphan
 // sweeps remove only names carrying it.
-const snapNamePrefix = "itms-"
+const snapNamePrefix = "novieri-snap-"
 
 // btrfsSubvolRootIno is BTRFS_FIRST_FREE_OBJECTID: the inode number of every
 // subvolume's root directory.

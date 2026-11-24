@@ -61,7 +61,7 @@ func winrmInstallParamsJSON(t *testing.T, mutate func(m map[string]any)) json.Ra
 		m["host_key_fingerprint"] = "kerberos"
 		// External object storage (W2 superseded): the presigned host is the
 		// storage provider's, and the console is the separate, signed enroll_url.
-		m["release"].(map[string]any)["url"] = "https://s3.eu-west-1.amazonaws.com/it-suite/its-agent/1.6.0?sig=abc"
+		m["release"].(map[string]any)["url"] = "https://s3.eu-west-1.amazonaws.com/it-suite/novieri-agent/1.6.0?sig=abc"
 		m["enroll_url"] = "https://console.example"
 		m["credential"] = map[string]any{"username": "svc-push@corp.example.com", "secret": string(secret)}
 		if mutate != nil {
@@ -102,7 +102,7 @@ func TestWinRMInstallRunsTheFixedScriptAndNeverTheSSHDialer(t *testing.T) {
 		t.Fatal("the password buffer was not zeroed")
 	}
 	// The script is the shared layout; the token is on stdin, not in it.
-	for _, want := range []string{`Join-Path $env:ProgramFiles 'ITSuite\its-agent.exe'`, `Join-Path $env:ProgramData 'ITSuite\push'`, `$enrollUrl = 'https://console.example'`} {
+	for _, want := range []string{`Join-Path $env:ProgramFiles 'NovieriRMM\novieri-agent.exe'`, `Join-Path $env:ProgramData 'NovieriRMM\push'`, `$enrollUrl = 'https://console.example'`} {
 		if !strings.Contains(w.runScript, want) {
 			t.Errorf("script lacks %s", want)
 		}

@@ -95,17 +95,20 @@ def test_both_actions_run_inside_the_install_script_where_they_must(tmp_path: Pa
 
 def test_it_holds_exactly_the_agent_and_its_settings_file(tmp_path: Path) -> None:
     msi = _build(tmp_path)
-    assert sorted(row[2] for row in _table(msi, "File")) == ["its-agent.exe", "msi-enroll.json"]
+    assert sorted(row[2] for row in _table(msi, "File")) == [
+        "msi-enroll.json",
+        "novieri-agent.exe",
+    ]
     out = tmp_path / "extracted"
     subprocess.run(["msiextract", "-C", str(out), str(msi)], check=True, capture_output=True)
-    assert (out / "ITSuite" / "its-agent.exe").read_bytes() == EXE
-    assert json.loads((out / "ITSuite" / "msi-enroll.json").read_text()) == {
+    assert (out / "NovieriRMM" / "novieri-agent.exe").read_bytes() == EXE
+    assert json.loads((out / "NovieriRMM" / "msi-enroll.json").read_text()) == {
         "console": CONSOLE,
         "code": CODE,
     }
     dirs = {row[0]: (row[1], row[2]) for row in _table(msi, "Directory")}
-    assert dirs["INSTALLFOLDER"] == ("ProgramFiles64Folder", "ITSuite")
-    assert _table(msi, "ServiceControl") == [["StopAgent", "its-agent", "34", "", "1", "Agent"]]
+    assert dirs["INSTALLFOLDER"] == ("ProgramFiles64Folder", "NovieriRMM")
+    assert _table(msi, "ServiceControl") == [["StopAgent", "novieri-agent", "34", "", "1", "Agent"]]
 
 
 def test_the_upgrade_code_is_the_organisations_and_the_version_the_agents(tmp_path: Path) -> None:
@@ -198,8 +201,8 @@ def test_a_built_msi_with_an_extra_file_is_refused(tmp_path: Path) -> None:
         f"`Sequence`) VALUES ('extra_ps1', '{component}', 'run.ps1', 10, 512, 3)",
     )
     assert sorted(row[2] for row in _table(msi, "File")) == [
-        "its-agent.exe",
         "msi-enroll.json",
+        "novieri-agent.exe",
         "run.ps1",
     ]
     with pytest.raises(MsiBuildError, match="holds"):
@@ -215,7 +218,7 @@ def test_a_built_msi_whose_template_was_changed_is_refused(
 ) -> None:
     msi = _build(tmp_path, arch=arch)
     msi_build.verify_msi(msi, arch=arch)  # as built: accepted
-    _tamper(msi, "-s", "ITMS Agent", "Toeshee", template)
+    _tamper(msi, "-s", "Novieri RMM Agent", "Toeshee", template)
     assert _template(msi) == template
     with pytest.raises(MsiBuildError, match="is not marked"):
         msi_build.verify_msi(msi, arch=arch)
@@ -339,7 +342,7 @@ def test_the_builder_imports_only_the_standard_library() -> None:
 
 def test_the_builder_runs_as_a_script_with_the_code_in_a_file(tmp_path: Path) -> None:
     _need_msitools()
-    exe = tmp_path / "its-agent.exe"
+    exe = tmp_path / "novieri-agent.exe"
     exe.write_bytes(EXE)
     code_file = tmp_path / "code"
     code_file.write_text(CODE)

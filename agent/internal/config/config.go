@@ -239,7 +239,7 @@ func defaultDataDir() string {
 		if base == "" {
 			base = `C:\ProgramData`
 		}
-		return filepath.Join(base, "ITSuite", "agent")
+		return filepath.Join(base, "NovieriRMM", "agent")
 	}
-	return filepath.Join("/var", "lib", "its-agent")
+	return filepath.Join("/var", "lib", "novieri-agent")
 }

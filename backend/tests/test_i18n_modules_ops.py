@@ -170,7 +170,7 @@ def _verify_with(
         "CustomAction": [list(row) for row in sorted(msi_build.EXPECTED_CUSTOM_ACTIONS)],
         "InstallExecuteSequence": _sequence({}),
         "File": [["a", "b", msi_build.AGENT_FILE], ["c", "d", msi_build.SETTINGS_FILE]],
-        "ServiceControl": [["StopAgent", "its-agent", "34", "", "1", "Agent"]],
+        "ServiceControl": [["StopAgent", "novieri-agent", "34", "", "1", "Agent"]],
     }
     good.update(tables)
     monkeypatch.setattr(msi_build, "_tool", lambda name: name)
@@ -377,12 +377,12 @@ def test_agent_distribution_the_install_page_is_worded_in_the_requests_language(
         )
 
     english = page()
-    assert 'lang="en"' in english and "<h1>Install the ITMS agent</h1>" in english
+    assert 'lang="en"' in english and "<h1>Install the Novieri RMM agent</h1>" in english
     assert "Download for Windows (ARM)" in english
     assert "Download for Windows (64-bit Intel or AMD) instead" in english
     with use_locale("es"):
         spanish = page()
-    assert 'lang="es"' in spanish and "<h1>Instalar el agente de ITMS</h1>" in spanish
+    assert 'lang="es"' in spanish and "<h1>Instalar el agente de Novieri RMM</h1>" in spanish
     assert "Descargar para Windows (ARM)" in spanish
     assert "Descargar para Windows (Intel o AMD de 64 bits) en su lugar" in spanish
     assert "macOS y Linux" in spanish

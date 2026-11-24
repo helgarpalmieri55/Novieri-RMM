@@ -85,7 +85,7 @@ approvers, not in the deployment.
 
 **Before the upload, and this is the load-bearing detail.** Signing rewrites the
 PE: it appends a certificate table and updates the header, so the SHA-256 of a
-signed `its-agent-windows-amd64.exe` **is not** the SHA-256 of what `build.sh`
+signed `novieri-agent-windows-amd64.exe` **is not** the SHA-256 of what `build.sh`
 just emitted. Sign first, then take the digest, then upload. Signing after
 publish makes every digest in `deploy/README.md` wrong and every staging
 comparison fail.
@@ -93,7 +93,7 @@ comparison fail.
 Today's path:
 
 ```
-build.sh  ->  agent/dist/its-agent-windows-amd64.exe  ->  sha256sum  ->  POST .../artifact
+build.sh  ->  agent/dist/novieri-agent-windows-amd64.exe  ->  sha256sum  ->  POST .../artifact
 ```
 
 With signing:
@@ -126,9 +126,9 @@ Verify in the same job, because a signing step that silently no-ops is the
 failure mode:
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 its-agent-windows-amd64.exe
-signtool verify /pa /v its-agent-windows-amd64.exe
-Get-AuthenticodeSignature .\its-agent-windows-amd64.exe | Format-List Status, SignerCertificate
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 novieri-agent-windows-amd64.exe
+signtool verify /pa /v novieri-agent-windows-amd64.exe
+Get-AuthenticodeSignature .\novieri-agent-windows-amd64.exe | Format-List Status, SignerCertificate
 ```
 
 **This is entangled with `spec.md` §8 item 1 ("who uploads artefacts?") and the
@@ -180,7 +180,7 @@ This is the half a procurement decision usually gets wrong, so it is itemised.
 ### 5.1 It does not, by itself, make the endpoint check anything
 
 **Windows does not verify Authenticode before running an executable.** A GPO
-startup script that runs `install.ps1`, which runs a signed `its-agent.exe`,
+startup script that runs `install.ps1`, which runs a signed `novieri-agent.exe`,
 verifies exactly as much as it does today: nothing. Signing creates the
 *possibility* of a check; it does not create the check.
 
@@ -189,7 +189,7 @@ What creates it is a policy the estate already has to deploy:
 - **WDAC (Windows Defender Application Control)** with a publisher rule, or
 - **AppLocker** with a publisher condition, or
 - at minimum, **PowerShell `AllSigned` execution policy** for the scripts (which
-  would then require `install.ps1` and `its-agent-enroll.ps1` to be signed too —
+  would then require `install.ps1` and `novieri-agent-enroll.ps1` to be signed too —
   they are not, and are not in scope above).
 
 **So the honest statement of the benefit is:** signing plus a publisher rule

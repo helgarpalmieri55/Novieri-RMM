@@ -12,15 +12,15 @@ import (
 func TestThePlanIsInstallPs1sLayout(t *testing.T) {
 	p := NewPlan(`C:\Program Files`, `C:\ProgramData`, "https://itms.example.com")
 	want := Plan{
-		InstallDir:     `C:\Program Files\ITSuite`,
-		Target:         `C:\Program Files\ITSuite\its-agent.exe`,
-		DataDir:        `C:\ProgramData\ITSuite\agent`,
-		TokenPath:      `C:\ProgramData\ITSuite\agent\enroll-token`,
-		StagingDir:     `C:\ProgramData\ITSuite\push`,
-		ServiceName:    "its-agent",
-		DisplayName:    "ITMS Agent",
+		InstallDir:     `C:\Program Files\NovieriRMM`,
+		Target:         `C:\Program Files\NovieriRMM\novieri-agent.exe`,
+		DataDir:        `C:\ProgramData\NovieriRMM\agent`,
+		TokenPath:      `C:\ProgramData\NovieriRMM\agent\enroll-token`,
+		StagingDir:     `C:\ProgramData\NovieriRMM\push`,
+		ServiceName:    "novieri-agent",
+		DisplayName:    "Novieri RMM Agent",
 		Description:    serviceDescription,
-		Environment:    []string{`ITS_AGENT_DATA_DIR=C:\ProgramData\ITSuite\agent`, "ITS_AGENT_ENROLL_URL=https://itms.example.com"},
+		Environment:    []string{`ITS_AGENT_DATA_DIR=C:\ProgramData\NovieriRMM\agent`, "ITS_AGENT_ENROLL_URL=https://itms.example.com"},
 		RecoveryResetS: 300,
 		RecoveryDelays: []time.Duration{5 * time.Second, 15 * time.Second, 60 * time.Second},
 	}
@@ -31,7 +31,7 @@ func TestThePlanIsInstallPs1sLayout(t *testing.T) {
 
 func TestEmptyEnvironmentFallsBackToTheWindowsDefaults(t *testing.T) {
 	p := NewPlan("", "", "https://itms.example.com")
-	if p.Target != `C:\Program Files\ITSuite\its-agent.exe` || p.DataDir != `C:\ProgramData\ITSuite\agent` {
+	if p.Target != `C:\Program Files\NovieriRMM\novieri-agent.exe` || p.DataDir != `C:\ProgramData\NovieriRMM\agent` {
 		t.Fatalf("plan = %+v", p)
 	}
 }
@@ -50,8 +50,8 @@ func TestThePlanAgreesWithInstallPs1(t *testing.T) {
 		`$ServiceName = '` + p.ServiceName + `'`,
 		`$DisplayName = '` + p.DisplayName + `'`,
 		`$Description = '` + p.Description + `'`,
-		`[string]$InstallDir = "$env:ProgramFiles\ITSuite"`,
-		`[string]$DataDir = "$env:ProgramData\ITSuite\agent"`,
+		`[string]$InstallDir = "$env:ProgramFiles\NovieriRMM"`,
+		`[string]$DataDir = "$env:ProgramData\NovieriRMM\agent"`,
 		`$tokenFile = Join-Path $DataDir 'enroll-token'`,
 		`reset= 300 actions= restart/5000/restart/15000/restart/60000`,
 		`'NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators'`,

@@ -14,7 +14,7 @@ WHAT THE PAGE SENDS BACK AND WHY:
   * `Referrer-Policy: origin` -- the download redirect goes to the object store,
     and a full referrer would put the code in its request log.
   * The Windows download's saved-as name carries the console as well as the
-    code, `ITMS-Agent-Setup_<host>[@<port>]_<code>.exe` (operator decision
+    code, `NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe` (operator decision
     D6a, 2026-09-28, superseding the Mark-of-the-Web plan D6): the installer
     reads both from its own file name, so a copy from a share or a USB stick
     installs too. Only a DNS name can be carried; a console reached by an IP
@@ -224,7 +224,7 @@ def windows_file_name(host_part: str, code: str) -> str:
     """Parsed from the RIGHT by the installer: the code is the last 32
     characters after a `_`, and everything between the prefix and that `_` is
     the console. A code may itself contain `_` and `-`."""
-    return f"ITMS-Agent-Setup_{host_part}_{code}.exe"
+    return f"NovieriRMM-Agent-Setup_{host_part}_{code}.exe"
 
 
 def _not_found() -> JSONResponse:
@@ -305,9 +305,9 @@ def render_page(
         win = (
             "<p>"
             + text(tr(
-                "The Windows installer needs ITMS to be reached by a DNS name, such as "
-                "itms.example.com, not an IP address: the installer learns where to join "
-                "from the name of the file it downloads. Ask whoever runs ITMS to set one "
+                "The Windows installer needs Novieri RMM to be reached by a DNS name, such as "
+                "rmm.example.com, not an IP address: the installer learns where to join "
+                "from the name of the file it downloads. Ask whoever runs Novieri RMM to set one "
                 "up."
             ))
             + "</p>"
@@ -346,7 +346,7 @@ def render_page(
         win = (
             "<p>"
             + text(tr(
-                "No Windows installer is available yet. Ask whoever runs ITMS to mark "
+                "No Windows installer is available yet. Ask whoever runs Novieri RMM to mark "
                 "a signed agent release 1.6.0 or later as stable."
             ))
             + "</p>"
@@ -362,7 +362,7 @@ def render_page(
         unix = (
             "<p>"
             + text(tr(
-                "No macOS or Linux installer is available yet. Ask whoever runs ITMS to "
+                "No macOS or Linux installer is available yet. Ask whoever runs Novieri RMM to "
                 "mark an agent release 1.6.0 or later as stable."
             ))
             + "</p>"
@@ -372,7 +372,7 @@ def render_page(
         sections.reverse()
     body = "".join(f"<section><h2>{title}</h2>{content}</section>" for title, content in sections)
     lang = "es" if locale_var.get() == "es" else "en"
-    heading = text(tr("Install the ITMS agent"))
+    heading = text(tr("Install the Novieri RMM agent"))
     return (
         f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
@@ -383,7 +383,7 @@ def render_page(
         "<p>"
         + text(tr(
             "This installs the agent on the computer you are using now. It appears in "
-            "ITMS within a minute and waits there until a technician approves it."
+            "Novieri RMM within a minute and waits there until a technician approves it."
         ))
         + f"</p>{body}</main></body></html>"
     )
@@ -427,7 +427,7 @@ def install_script(
     )
     lines = [
         "#!/bin/sh",
-        "# Installs the ITMS agent on this computer. Generated for one install link:",
+        "# Installs the Novieri RMM agent on this computer. Generated for one install link:",
         "# the code below is what lets this computer join, so do not pass this file on.",
         "set -eu",
         f"CONSOLE={_sh_quote(console.rstrip('/'))}",
@@ -439,7 +439,8 @@ def install_script(
         "  Linux/aarch64|Linux/arm64) key=linux-arm64 ;;",
         "  Darwin/x86_64) key=darwin-amd64 ;;",
         "  Darwin/arm64) key=darwin-arm64 ;;",
-        '  *) echo "itms: $os $arch is not a platform the agent is published for" >&2; exit 1 ;;',
+        '  *) echo "novieri-agent: $os $arch is not a platform the agent is published for"'
+        " >&2; exit 1 ;;",
         "esac",
         "url=''",
         "sha=''",
@@ -448,42 +449,43 @@ def install_script(
         "  *) : ;;",
         "esac",
         'if [ -z "$url" ]; then',
-        '  echo "itms: no stable agent 1.6.0 or later is published for $key yet" >&2',
+        '  echo "novieri-agent: no stable agent 1.6.0 or later is published for $key yet" >&2',
         "  exit 1",
         "fi",
         'if [ "$(id -u)" -ne 0 ]; then',
-        '  echo "itms: run this with sudo" >&2',
+        '  echo "novieri-agent: run this with sudo" >&2',
         "  exit 1",
         "fi",
         "d=$(mktemp -d)",
         "trap 'rm -rf \"$d\"' EXIT",
-        'curl -fsSL "$url" -o "$d/its-agent"',
+        'curl -fsSL "$url" -o "$d/novieri-agent"',
         "if command -v sha256sum >/dev/null 2>&1; then",
-        "  got=$(sha256sum \"$d/its-agent\" | cut -d ' ' -f 1)",
+        "  got=$(sha256sum \"$d/novieri-agent\" | cut -d ' ' -f 1)",
         "else",
-        "  got=$(shasum -a 256 \"$d/its-agent\" | cut -d ' ' -f 1)",
+        "  got=$(shasum -a 256 \"$d/novieri-agent\" | cut -d ' ' -f 1)",
         "fi",
         'if [ "$got" != "$sha" ]; then',
-        '  echo "itms: the download does not match its published checksum;'
+        '  echo "novieri-agent: the download does not match its published checksum;'
         ' nothing was installed" >&2',
         "  exit 1",
         "fi",
         'case "$key" in',
         "  linux-*)",
         f"    printf %s '{_b64('linux/install.sh')}' | base64 -d > \"$d/install.sh\"",
-        f"    printf %s '{_b64('linux/its-agent.service')}' | base64 -d > \"$d/its-agent.service\"",
+        f"    printf %s '{_b64('linux/novieri-agent.service')}'"
+        ' | base64 -d > "$d/novieri-agent.service"',
         "    ;;",
         "  darwin-*)",
         f"    printf %s '{_b64('darwin/install.sh')}' | base64 -D > \"$d/install.sh\"",
-        f"    printf %s '{_b64('darwin/com.toeshee.itsagent.plist')}'"
-        ' | base64 -D > "$d/com.toeshee.itsagent.plist"',
+        f"    printf %s '{_b64('darwin/com.novieri.rmm.agent.plist')}'"
+        ' | base64 -D > "$d/com.novieri.rmm.agent.plist"',
         "    ;;",
         "esac",
         'chmod +x "$d/install.sh"',
         "# The code reaches the installer on stdin, through the shell's own printf.",
         "printf '%s' \"$CODE\""
-        ' | bash "$d/install.sh" --token-stdin --url "$CONSOLE" --binary "$d/its-agent"',
-        'echo "itms: installed. This computer appears in ITMS within a minute,'
+        ' | bash "$d/install.sh" --token-stdin --url "$CONSOLE" --binary "$d/novieri-agent"',
+        'echo "novieri-agent: installed. This computer appears in Novieri RMM within a minute,'
         ' waiting for review."',
         "",
     ]

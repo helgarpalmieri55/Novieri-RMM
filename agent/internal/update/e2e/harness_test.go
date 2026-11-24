@@ -63,7 +63,7 @@ func newPKI(t *testing.T) *pki {
 	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	caTmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "its-agent e2e throwaway CA"},
+		Subject:               pkix.Name{CommonName: "novieri-agent e2e throwaway CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		IsCA:                  true,
@@ -455,7 +455,7 @@ func (r *rig) expectDeferred(res result, state, outcome, reason string) {
 
 // ---------------------------------------------------------------- sampler
 
-// sampler records listening sockets owned by any its-agent process for the
+// sampler records listening sockets owned by any novieri-agent process for the
 // whole run (scenario 7).
 type sampler struct {
 	mu         sync.Mutex
