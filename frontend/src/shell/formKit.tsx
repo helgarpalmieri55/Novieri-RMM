@@ -250,7 +250,8 @@ export function useDraft<T>(saved: T | undefined): {
  * IT EXPIRES ON THE PERSON'S NEXT ACT, NOT ON A CLOCK (review fix rounds 1
  * and 2). A release no navigation used (the save took another branch) must
  * not leave the guard disarmed, so the next click (`pointerdown`) or
- * keystroke (`keydown`) anywhere expires it. A timer could not do this: a
+ * keystroke (`keydown`) anywhere expires it, and so do 2 s with neither (a
+ * backstop for a release used wrongly). A timer alone could not do this: a
  * browser router judges a Back (`useNewParam`'s `close()` after `start()`) in
  * its `popstate` listener, a later task than the click, so a release that
  * ended with the click's task made save-and-close ask "Leave without saving?"
@@ -289,7 +290,15 @@ export function useUnsavedGuard(
  * in the capture phase so nothing on the page can swallow it, for the next
  * `pointerdown` or `keydown`; `take()` spends it on the navigation the guard
  * would have stopped, and stops listening.
+ *
+ * AND AT MOST `RELEASE_BACKSTOP_MS` (Task 3 re-review). A release used
+ * wrongly -- `release(); await save(); navigate()` with a save that failed --
+ * must not leave a dirty form disarmed for the toolbar's Back, a reload or a
+ * navigation in code while nobody touches the page. A real Back reaches the
+ * guard in milliseconds, so save-and-close is unaffected.
  */
+const RELEASE_BACKSTOP_MS = 2000;
+
 class ReleasePass {
   armed = false;
   private stopListening: (() => void) | null = null;
@@ -300,9 +309,11 @@ class ReleasePass {
     const expire = () => this.expire();
     window.addEventListener("pointerdown", expire, { capture: true, once: true });
     window.addEventListener("keydown", expire, { capture: true, once: true });
+    const backstop = setTimeout(expire, RELEASE_BACKSTOP_MS);
     this.stopListening = () => {
       window.removeEventListener("pointerdown", expire, { capture: true });
       window.removeEventListener("keydown", expire, { capture: true });
+      clearTimeout(backstop);
     };
   }
 

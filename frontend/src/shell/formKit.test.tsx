@@ -506,6 +506,52 @@ describe("release() (review fix rounds 1 and 2, item 7 and item 1)", () => {
     expect(router.state.location.pathname).toBe("/settings");
   });
 
+  // A misused release (`release(); await save(); navigate()` with a save that
+  // failed) must not leave a dirty form disarmed for the toolbar's Back, a
+  // reload or a navigation in code: a backstop expires it after 2 s. A real
+  // Back reaches the guard in milliseconds.
+  //
+  // Release is pressed with `focus()` and `click()`, which fire no pointerdown
+  // or keydown, so only the clock can expire it. (Focus on the button, as a
+  // person's click leaves it: a held navigation with focus still in the text
+  // field makes jsdom's React report an un-awaited suspension.)
+  async function pressReleaseWithoutAnAct() {
+    await act(async () => {
+      const button = screen.getByRole("button", { name: "Release" });
+      button.focus();
+      button.click();
+    });
+  }
+
+  it("expires after 2 s with no act and no navigation, so a later navigation in code asks again", async () => {
+    const { router } = renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await pressReleaseWithoutAnAct();
+      vi.advanceTimersByTime(2000);
+    } finally {
+      vi.useRealTimers();
+    }
+    await act(() => router.navigate("/admin"));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("is not vacuous: just under 2 s the release still lets the navigation through", async () => {
+    const { router } = renderPage("/settings", <Unused />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), "x");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await pressReleaseWithoutAnAct();
+      vi.advanceTimersByTime(1900);
+    } finally {
+      vi.useRealTimers();
+    }
+    await act(() => router.navigate("/admin"));
+    expect(router.state.location.pathname).toBe("/admin");
+  });
+
   it("is not vacuous: with no act in between, the release lets the navigation through", async () => {
     const { router } = renderPage("/settings", <Unused />, "/settings");
     await userEvent.type(screen.getByLabelText("Name"), "x");
