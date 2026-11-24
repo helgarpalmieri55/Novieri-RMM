@@ -87,7 +87,7 @@ func TestCopyFileAndWriteFileReplaceWithTheGivenMode(t *testing.T) {
 	if err := os.WriteFile(src, []byte("new binary"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dst := filepath.Join(dir, "its-agent")
+	dst := filepath.Join(dir, "novieri-agent")
 	if err := os.WriteFile(dst, []byte("old binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}

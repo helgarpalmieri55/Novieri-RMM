@@ -150,7 +150,7 @@ func TestInterrogateEchoesStatusAndKeepsRunning(t *testing.T) {
 // process's parent is services.exe in session 0. A `go test` binary is
 // started by the test runner, not by the SCM, so the real answer here must be
 // "no" -- and getting that wrong in either direction is a real incident, not
-// a theoretical one: a false "yes" would make `its-agent --version` on an
+// a theoretical one: a false "yes" would make `novieri-agent --version` on an
 // operator's own machine hang waiting for an SCM dispatcher that will never
 // call it, and a false "no" would make the installed service fail to start
 // under the SCM at all.

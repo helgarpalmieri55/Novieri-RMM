@@ -106,11 +106,11 @@ runs nothing at all.
 | `lvs` | once per root whose source is a `/dev/` device and is not btrfs or ZFS; then as in the LVM table above for the roots that are LVs |
 | `lvcreate`, `mkdir`, `mount`, `umount`, `lvremove` | as in the LVM table above, for LV roots only |
 | `btrfs subvolume list -o` | once per subvolume holding or nested under a btrfs root, to find nested subvolumes (snapshots are not recursive) |
-| `btrfs subvolume snapshot -r` | once per such subvolume, to `<subvolume>/.itms-snap-<tag>` |
-| `btrfs subvolume delete` | **teardown and sweep only** — this agent's `.itms-snap-*` snapshots, never another name |
+| `btrfs subvolume snapshot -r` | once per such subvolume, to `<subvolume>/.novieri-snap-<tag>` |
+| `btrfs subvolume delete` | **teardown and sweep only** — this agent's `.novieri-snap-*` snapshots, never another name |
 | `zfs list` | once per dataset for the orphan sweep (`-t snapshot`), once to map child datasets (`-t filesystem`) |
-| `zfs snapshot -r` | once per dataset, `<dataset>@itms-<tag>` (atomic across children) |
-| `zfs destroy` | **teardown and sweep only** — `@itms-` snapshots only; a `@daily-…` or any other snapshot is never touched |
+| `zfs snapshot -r` | once per dataset, `<dataset>@novieri-snap-<tag>` (atomic across children) |
+| `zfs destroy` | **teardown and sweep only** — `@novieri-snap-` snapshots only; a `@daily-…` or any other snapshot is never touched |
 
 ### macOS — `snapshot_apfs.go`, only during a `backup.run` carrying `snapshot: "apfs"`
 

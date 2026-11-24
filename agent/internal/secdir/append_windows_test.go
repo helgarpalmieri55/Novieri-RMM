@@ -18,7 +18,7 @@ import (
 
 func TestAppendLineSecuresAnAbsentParentFirstThenAppends(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	for _, line := range []string{"first", "second"} {
 		if err := AppendLine(dir, "msi.log", line, true); err != nil {
 			t.Fatalf("AppendLine(%q): %v", line, err)
@@ -36,7 +36,7 @@ func TestAppendLineSecuresAnAbsentParentFirstThenAppends(t *testing.T) {
 
 func TestAppendLineWithoutCreateLeavesAnAbsentParentAbsent(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := AppendLine(dir, "msi.log", "x", false); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want os.ErrNotExist", err)
 	}
@@ -47,7 +47,7 @@ func TestAppendLineWithoutCreateLeavesAnAbsentParentAbsent(t *testing.T) {
 
 func TestAppendLineRefusesAParentSomeoneElseOwnsAndChangesNothing(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAppendLineRefusesAParentSomeoneElseOwnsAndChangesNothing(t *testing.T) 
 func TestAppendLineRefusesAHardLinkedFile(t *testing.T) {
 	needElevated(t)
 	root := t.TempDir()
-	dir := filepath.Join(root, "ITSuite")
+	dir := filepath.Join(root, "NovieriRMM")
 	if err := MkdirOwned(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestAppendLineRefusesAHardLinkedFile(t *testing.T) {
 func TestAppendLineRefusesASymbolicLink(t *testing.T) {
 	needElevated(t)
 	root := t.TempDir()
-	dir := filepath.Join(root, "ITSuite")
+	dir := filepath.Join(root, "NovieriRMM")
 	if err := MkdirOwned(dir); err != nil {
 		t.Fatal(err)
 	}

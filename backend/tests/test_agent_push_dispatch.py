@@ -187,8 +187,8 @@ async def test_an_install_is_a_signed_job_carrying_the_confirmed_key_and_no_more
     assert p["release"]["url"].startswith("https://store.test/")
     assert p["enroll_token"]
     # Where the pushed machine enrolls: the configured console, never the
-    # presigned release URL's origin (W2 superseded). `its-agent install`
-    # writes it into /etc/its-agent/agent.env or the launchd plist.
+    # presigned release URL's origin (W2 superseded). `novieri-agent install`
+    # writes it into /etc/novieri-agent/agent.env or the launchd plist.
     assert p["enroll_url"] == CONSOLE
     assert not p["release"]["url"].startswith(CONSOLE)
     # Nothing that could carry a command.

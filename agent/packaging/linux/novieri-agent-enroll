@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# its-agent-enroll — hand this endpoint its control-plane URL and its
+# novieri-agent-enroll — hand this endpoint its control-plane URL and its
 # enrollment token, then start the service.
 #
-#   sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
-#   printf %s "<token>" | sudo its-agent-enroll --token-stdin --url https://its.example.com
+#   sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://its.example.com
+#   printf %s "<token>" | sudo novieri-agent-enroll --token-stdin --url https://its.example.com
 #
 # This is deliberately a SEPARATE STEP from installing the package.
 #
@@ -23,16 +23,16 @@
 # THE TOKEN NEVER APPEARS IN ARGV. `--token` is refused.
 set -euo pipefail
 
-CONFDIR="/etc/its-agent"
-STATEDIR="/var/lib/its-agent"
-SERVICE="its-agent"
+CONFDIR="/etc/novieri-agent"
+STATEDIR="/var/lib/novieri-agent"
+SERVICE="novieri-agent"
 URL="${ITS_AGENT_ENROLL_URL:-}"
 TOKEN_FROM_STDIN=0
 START=1
 
 usage() {
   cat <<'USAGE'
-Usage: sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url <control-plane-url>
+Usage: sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url <control-plane-url>
 
   --url URL        Control-plane API base URL (e.g. https://its.example.com).
                    Also accepted as ITS_AGENT_ENROLL_URL.
@@ -41,13 +41,13 @@ Usage: sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url <control-plane
   --no-start       Write the configuration but do not (re)start the service.
   -h, --help       This.
 
-The token is written to /var/lib/its-agent/enroll-token, mode 0600, root-owned.
+The token is written to /var/lib/novieri-agent/enroll-token, mode 0600, root-owned.
 The agent reads it once and deletes it as soon as it has exchanged it for a
 certificate — so seeing that file gone is how you know enrollment succeeded.
 USAGE
 }
 
-die() { printf 'its-agent-enroll: %s\n' "$*" >&2; exit 1; }
+die() { printf 'novieri-agent-enroll: %s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,8 +59,8 @@ while [ $# -gt 0 ]; do
     --token|--token=*)
       die 'the enrollment token must not be passed as an argument: argv is world-readable
        through /proc/<pid>/cmdline and is kept in your shell history.
-       Use:  sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url ...
-       or:   printf %s "<token>" | sudo its-agent-enroll --token-stdin --url ...' ;;
+       Use:  sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url ...
+       or:   printf %s "<token>" | sudo novieri-agent-enroll --token-stdin --url ...' ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -92,7 +92,7 @@ envfile="${CONFDIR}/agent.env"
 : > "$envfile"
 chmod 0600 "$envfile"
 cat > "$envfile" <<EOF
-# Written by its-agent-enroll. Not a secret — the enrollment token is NOT here,
+# Written by novieri-agent-enroll. Not a secret — the enrollment token is NOT here,
 # it is ${STATEDIR}/enroll-token (0600) and the agent deletes it once spent.
 ITS_AGENT_ENROLL_URL=${URL}
 EOF

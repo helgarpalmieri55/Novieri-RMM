@@ -486,7 +486,7 @@ func (s *Service) install(ctx context.Context, raw json.RawMessage) (any, error)
 }
 
 // InstallCommand is the FIXED, compiled-in installer invocation: the placed
-// binary's install mode (internal/install, `its-agent install`), which does
+// binary's install mode (internal/install, `novieri-agent install`), which does
 // what packaging/{linux,darwin}/install.sh do. A constant template of
 // compiled-in paths with ONE value filled in, the signed enroll origin, which
 // must pass layout.CheckEnrollOrigin -- letters, digits, dots, hyphens and a

@@ -1,5 +1,5 @@
 #!/bin/sh
-# its-agent postrm.
+# novieri-agent postrm.
 #
 # `remove` keeps the state directory: the enrolled identity survives, so
 # reinstalling the package resumes as the SAME device rather than minting a
@@ -16,8 +16,8 @@
 #   * the audit log, which is append-only and hash-chained (invariant #4).
 set -e
 
-STATEDIR=/var/lib/its-agent
-CONFDIR=/etc/its-agent
+STATEDIR=/var/lib/novieri-agent
+CONFDIR=/etc/novieri-agent
 
 case "$1" in
   purge)
@@ -30,12 +30,12 @@ case "$1" in
           "$STATEDIR/agent.key.pending" "$STATEDIR/previous.json" || true
     rm -rf "$STATEDIR" || true
     rm -rf "$CONFDIR" || true
-    echo "its-agent purged. The device record in the control plane, its certificate"
+    echo "novieri-agent purged. The device record in the control plane, its certificate"
     echo "at the gateway and the audit log are untouched — retire or revoke there."
     ;;
   remove)
-    echo "its-agent removed. $STATEDIR kept (identity, key, pins): reinstalling"
-    echo "resumes as the same device. Use 'apt purge its-agent' to destroy it."
+    echo "novieri-agent removed. $STATEDIR kept (identity, key, pins): reinstalling"
+    echo "resumes as the same device. Use 'apt purge novieri-agent' to destroy it."
     ;;
 esac
 

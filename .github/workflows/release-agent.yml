@@ -116,17 +116,17 @@ jobs:
         run: |
           files=()
           for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64.exe windows-arm64.exe; do
-            files+=("dist/its-agent-$t")
+            files+=("dist/novieri-agent-$t")
           done
           go run ./cmd/release-sign sign -version "$VERSION" "${files[@]}" | tee dist/SIGNATURES
-          (cd dist && sha256sum its-agent-linux-* its-agent-darwin-* its-agent-windows-* | grep -v '\.sig$' > SHA256SUMS)
+          (cd dist && sha256sum novieri-agent-linux-* novieri-agent-darwin-* novieri-agent-windows-* | grep -v '\.sig$' > SHA256SUMS)
           printf '%s\n' "$RELEASE_SIGNING_PUBKEY" > dist/release-signing-key.pub
 
       - uses: actions/upload-artifact@v4
         with:
-          name: its-agent-${{ env.VERSION }}
+          name: novieri-agent-${{ env.VERSION }}
           path: |
-            agent/dist/its-agent-*-*
+            agent/dist/novieri-agent-*-*
             agent/dist/SHA256SUMS
             agent/dist/SIGNATURES
             agent/dist/release-signing-key.pub
@@ -136,6 +136,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "agent-v$VERSION" --draft --target "$GITHUB_SHA" \
-            --title "its-agent $VERSION" \
+            --title "novieri-agent $VERSION" \
             --notes "Signed with the offline release key (public half: $RELEASE_SIGNING_PUBKEY). Windows binaries are not Authenticode-signed. Self-update has been executed on Windows and macOS only where the agent-update-e2e job says so." \
-            dist/its-agent-*-* dist/SHA256SUMS dist/SIGNATURES dist/release-signing-key.pub
+            dist/novieri-agent-*-* dist/SHA256SUMS dist/SIGNATURES dist/release-signing-key.pub

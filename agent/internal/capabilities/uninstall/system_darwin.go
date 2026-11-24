@@ -16,7 +16,7 @@ const Supported = true
 
 // helperLabel is a launchd job of its own: launchd kills a job's children
 // when it boots the job out, so the helper cannot be the service's child.
-const helperLabel = "com.toeshee.itsagent.uninstall"
+const helperLabel = "com.novieri.rmm.agent.uninstall"
 
 // LaunchHelper submits `<binary> --uninstall-helper` as its own launchd job.
 // `/usr/bin/env` carries the two variables; `launchctl submit` takes no

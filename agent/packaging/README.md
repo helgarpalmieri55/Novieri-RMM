@@ -26,11 +26,11 @@ it must never end up:
 | Where | Why not |
 |---|---|
 | **argv** | `/proc/<pid>/cmdline` is world-readable for the life of the process, and your shell keeps it in history. Every install script here **refuses** `--token` and tells you what to use instead. |
-| **A service definition** | `systemctl show its-agent` prints `Environment=` to anyone who can read the unit; `launchctl print` does the same for a plist. Both outlive the token by months. |
+| **A service definition** | `systemctl show novieri-agent` prints `Environment=` to anyone who can read the unit; `launchctl print` does the same for a plist. Both outlive the token by months. |
 | **A distributable artifact** | A token inside a `.deb` is copied to file servers, baked into golden images and cached by apt. One image build and the whole fleet shares one token. The install link is the first recorded exception, and it puts a code in a file's NAME, never in its bytes — see the next section. Its Group Policy MSI is the second, and it does put the code in the bytes — see [The Group Policy MSI](#the-group-policy-msi-the-code-inside-a-file-on-sysvol-operator-decision-2026-09-30). |
 
 What it does instead: the token goes into **one file, `0600`, root-owned, in the
-data directory** — `/var/lib/its-agent/enroll-token` — which the agent reads once
+data directory** — `/var/lib/novieri-agent/enroll-token` — which the agent reads once
 and **deletes the moment it has exchanged it for a certificate**
 (`internal/enroll`, asserted by `TestASuccessfulEnrollmentDeletesTheInstallersTokenFile`).
 A rejected enrollment keeps it, so a typo in the URL does not cost you a token.
@@ -44,10 +44,10 @@ You give the token to an installer in one of two ways, never a third:
 
 ```sh
 # environment
-sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
+sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://its.example.com
 
 # stdin (preferred in pipelines — never lands in an environment either)
-printf %s "$TOKEN" | sudo its-agent-enroll --token-stdin --url https://its.example.com
+printf %s "$TOKEN" | sudo novieri-agent-enroll --token-stdin --url https://its.example.com
 ```
 
 ---
@@ -63,7 +63,7 @@ machine, and the agent installs itself with no token to paste.
 published artefact, byte-identical for every tenant, and its release signature
 (and, later, Authenticode) stays valid. The **link code** and the **console's
 address** ride in the downloaded file's **name**,
-`ITMS-Agent-Setup_<host>[@<port>]_<code>.exe`, and on macOS and Linux in the
+`NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe`, and on macOS and Linux in the
 one-line `install.sh` the page shows. A link code is not an enrollment token:
 it enrols a machine only while the link is on, only from a network the
 operator listed, only under the hourly limit — and what it enrols is a machine
@@ -135,7 +135,7 @@ its other purpose — keeping the code out of the object store's request logs.
 
 **The host in the file name is unauthenticated, so a person confirms it.**
 Anyone who can hand a technician a file can name it. Before anything is
-elevated, the installer asks, in a Yes/No window, *"Install the ITMS agent and
+elevated, the installer asks, in a Yes/No window, *"Install the Novieri RMM agent and
 connect this computer to &lt;host&gt;?"*; No exits and installs nothing. (The
 Windows e2e sets `ITS_AGENT_INSTALLER_NO_UI=1`, which replaces every result
 window with a line on stderr, and skips the question **only when the process
@@ -157,7 +157,7 @@ request format is frozen from 1.6.0 on), requires the staged bytes' SHA-256 to
 be that release's, and requires the release to carry the offline release
 signature under the key compiled into the binary --
 `update.CheckReleaseSignature`, the check self-update makes. Anything else
-fails closed: *"This file could not be confirmed as the ITMS agent the install
+fails closed: *"This file could not be confirmed as the Novieri RMM agent the install
 link serves"*. A saved copy of an older release (the link has since moved on
 to a newer stable) still installs, as long as that release is still stable,
 1.6.0 or later, and in the catalogue; the service then updates itself through
@@ -173,33 +173,33 @@ sits in Downloads, next to whatever else was downloaded). The data directory is
 owned by Administrators as well as ACL'd (an owner keeps `WRITE_DAC` whatever
 the DACL says), a pre-existing data directory owned by anyone else is refused on
 a fresh install, and the token file is created `O_EXCL` after removing any
-file already at that name. `install.ps1` and `its-agent-enroll.ps1` do the same
+file already at that name. `install.ps1` and `novieri-agent-enroll.ps1` do the same
 (`SetOwner(BUILTIN\Administrators)`, `FileMode.CreateNew`).
 
 **The data directory's parent too (2026-09-29).** Protecting `agent` alone
 protected nothing: on a default Windows install `BUILTIN\Users` may create
 folders in `C:\ProgramData` and `CREATOR OWNER` gets Full Control on them, so a
-standard user could `mkdir C:\ProgramData\ITSuite` before the install, own it,
+standard user could `mkdir C:\ProgramData\NovieriRMM` before the install, own it,
 and -- owning it is `FILE_DELETE_CHILD` -- afterwards rename the protected
 `agent` away and put their own in its place, with an `identity.json`,
 `pins.json` and `agent.key` pointing the SYSTEM service at their gateway and
-job-signing key. The self-installer, `install.ps1`, `its-agent-enroll.ps1` and
-the uninstall helper now secure `%ProgramData%\ITSuite` **before** `agent` is
+job-signing key. The self-installer, `install.ps1`, `novieri-agent-enroll.ps1` and
+the uninstall helper now secure `%ProgramData%\NovieriRMM` **before** `agent` is
 created or touched: created owned by Administrators with the protected
 SYSTEM+Administrators DACL, or, if it exists, taken over (the Go side through
 a handle that does not follow a link, `secdir.SecureOwned`); a junction or
-symbolic link at `ITSuite` or `agent` is refused; and on a **fresh** install an
-`ITSuite` or `agent` owned by anyone but Administrators, SYSTEM or the
+symbolic link at `NovieriRMM` or `agent` is refused; and on a **fresh** install an
+`NovieriRMM` or `agent` owned by anyone but Administrators, SYSTEM or the
 installing administrator is refused and left alone -- taking it over would not
 remove what its owner planted inside. The scripts lock down a parent only when
-it is named `ITSuite`; a custom `-DataDir` elsewhere gets a warning instead.
-`%ProgramFiles%\ITSuite` keeps its inherited ACL (`C:\Program Files` grants
+it is named `NovieriRMM`; a custom `-DataDir` elsewhere gets a warning instead.
+`%ProgramFiles%\NovieriRMM` keeps its inherited ACL (`C:\Program Files` grants
 Users read and execute only, so they cannot pre-create it) but is checked for
 a link and, on a fresh install, for its owner. **Observed in CI:** the unit
 tests on `windows-latest` (`agent-windows`) and `TestInstallLinkWindows`, which
-reads `ITSuite` back and refuses an `ITSuite` owned by a local non-admin.
+reads `NovieriRMM` back and refuses an `NovieriRMM` owned by a local non-admin.
 **Not covered:** an endpoint installed before this, where a user already owned
-`ITSuite`, may already have had `agent` swapped; re-running the installer
+`NovieriRMM`, may already have had `agent` swapped; re-running the installer
 secures the parent from then on but cannot tell a planted identity from a real
 one.
 
@@ -213,7 +213,7 @@ agent answers `scheduled` and a detached helper removes the service, the
 binary, the credentials and the data directory -- recursively only if the
 directory holds an `identity.json`; otherwise only the named credentials go.
 On Windows the helper runs from a copy staged in
-`%ProgramData%\ITSuite\uninstall-<n>\`, created owned by Administrators and
+`%ProgramData%\NovieriRMM\uninstall-<n>\`, created owned by Administrators and
 SYSTEM+Administrators-only, and deleted with its directory at the next boot.
 **Observed in CI:** Windows (`TestInstallLinkWindows`) and Linux under systemd
 (`TestUninstallLinux`), both in `agent-update-e2e`. **Not yet verified: macOS.**
@@ -233,10 +233,10 @@ code.
 re-hashes it against the catalogue and verifies its offline release signature
 under `ITS_AGENT_RELEASE_PUBLIC_KEY` before wrapping it, and refuses otherwise —
 and `msi-enroll.json`, `{"console": "https://<host>", "code": "<link code>"}`,
-both into `%ProgramFiles%\ITSuite`. Windows Installer then runs the installed
+both into `%ProgramFiles%\NovieriRMM`. Windows Installer then runs the installed
 binary as SYSTEM with one argument, `--msi-install`, never the code. It reads
 the settings file, does what the self-installer does (secures
-`%ProgramData%\ITSuite`, then `agent`; creates the token file `O_EXCL`;
+`%ProgramData%\NovieriRMM`, then `agent`; creates the token file `O_EXCL`;
 registers and starts the service) and **deletes `msi-enroll.json`**; if it
 cannot, the install fails and Windows Installer rolls back its files (what
 the custom action itself did is not rolled back: item 6 below). On a computer that is already
@@ -268,9 +268,9 @@ a new MSI.
    still unsigned](#what-is-still-unsigned)). The console shows the SHA-256 of
    the file it just built — every download is a different file — so it can be
    checked once, before the file is copied to the share
-   (`Get-FileHash .\ITMS-Agent-<host>-amd64.msi`).
+   (`Get-FileHash .\NovieriRMM-Agent-<host>-amd64.msi`).
 3. **The code sits on disk briefly.** `msi-enroll.json` exists in
-   `%ProgramFiles%\ITSuite` between Windows Installer copying the files and the
+   `%ProgramFiles%\NovieriRMM` between Windows Installer copying the files and the
    custom action running, and the custom action deletes it. The directory is
    *writable* only by administrators, not readable only by them: a local user
    can read `msi-enroll.json` during that short window. That adds nothing
@@ -288,11 +288,11 @@ a new MSI.
 6. **A failed `--msi-install` is not rolled back by the MSI.** Windows
    Installer rolls back what it did itself — the files it copied — but the
    custom action has no rollback counterpart, so what it had already done
-   stays: a registered `its-agent` service, or the token file in
-   `%ProgramData%\ITSuite\agent`. Both are in the data directory only
+   stays: a registered `novieri-agent` service, or the token file in
+   `%ProgramData%\NovieriRMM\agent`. Both are in the data directory only
    administrators and SYSTEM can reach, and the next attempt (the next
    startup, for an assigned GPO) recovers: it replaces the token file, and
-   reconfigures and starts the service it finds. `%ProgramData%\ITSuite\msi.log`
+   reconfigures and starts the service it finds. `%ProgramData%\NovieriRMM\msi.log`
    says why the attempt failed (`deploy/WINDOWS-PUSH.md` §7).
 
 ## Build
@@ -309,9 +309,9 @@ Targets: `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`,
 statically linked:
 
 ```
-$ file dist/its-agent-linux-amd64
+$ file dist/novieri-agent-linux-amd64
 ELF 64-bit LSB executable, x86-64, ... statically linked, stripped
-$ ldd dist/its-agent-linux-amd64
+$ ldd dist/novieri-agent-linux-amd64
 	not a dynamic executable
 ```
 
@@ -362,20 +362,20 @@ itself.
 
 ```sh
 cd agent
-VERSION=0.1.0 ./packaging/linux/build-deb.sh          # -> dist/its-agent_0.1.0_amd64.deb
+VERSION=0.1.0 ./packaging/linux/build-deb.sh          # -> dist/novieri-agent_0.1.0_amd64.deb
 ARCH=arm64 VERSION=0.1.0 ./packaging/linux/build-deb.sh
 ```
 
 On the endpoint:
 
 ```sh
-sudo apt install ./its-agent_0.1.0_amd64.deb
+sudo apt install ./novieri-agent_0.1.0_amd64.deb
 # installed, enabled, and deliberately NOT started: it is not enrolled yet
-sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
+sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://its.example.com
 ```
 
-The package installs `/usr/bin/its-agent`, `/usr/sbin/its-agent-enroll`,
-`/usr/lib/systemd/system/its-agent.service` and this README. It **depends on
+The package installs `/usr/bin/novieri-agent`, `/usr/sbin/novieri-agent-enroll`,
+`/usr/lib/systemd/system/novieri-agent.service` and this README. It **depends on
 nothing** and carries no credentials. (`/usr/lib`, not `/lib`: Ubuntu 24.04 is
 usr-merged and `base-files` diverts `/lib`, so a package shipping
 `/lib/systemd/system` installs through a diversion.)
@@ -386,10 +386,10 @@ a forgotten enrollment step into a restart loop that reads like a crash.
 
 | Operation | What happens |
 |---|---|
-| `apt install ./its-agent_*.deb` | binary, helper, unit; service enabled; started only if already enrolled |
+| `apt install ./novieri-agent_*.deb` | binary, helper, unit; service enabled; started only if already enrolled |
 | upgrade | `prerm` leaves it running, `postinst` restarts it — a restart, not a dark window |
-| `apt remove its-agent` | service stopped and disabled, binary gone, **`/var/lib/its-agent` kept** so a reinstall resumes as the *same* device |
-| `apt purge its-agent` | the above, plus the token, the private key, the identity and `/etc/its-agent` |
+| `apt remove novieri-agent` | service stopped and disabled, binary gone, **`/var/lib/novieri-agent` kept** so a reinstall resumes as the *same* device |
+| `apt purge novieri-agent` | the above, plus the token, the private key, the identity and `/etc/novieri-agent` |
 
 ## Ubuntu / any systemd host — the shell installer
 
@@ -400,18 +400,18 @@ sudo ITS_AGENT_ENROLL_TOKEN=<token> \
   agent/packaging/linux/install.sh --url https://its.example.com
 ```
 
-It installs `/usr/local/bin/its-agent` (not `/usr/bin` — that is dpkg's), the
-unit, `/etc/its-agent/agent.env` (0600), and the token file (0600), then
+It installs `/usr/local/bin/novieri-agent` (not `/usr/bin` — that is dpkg's), the
+unit, `/etc/novieri-agent/agent.env` (0600), and the token file (0600), then
 enables and starts the service. `--destdir DIR` stages the whole tree without
 touching systemd, which is how it is tested in CI.
 
 ### Verify it is running
 
 ```sh
-systemctl status its-agent
-journalctl -u its-agent -f
-test -f /var/lib/its-agent/identity.json && echo enrolled
-test -f /var/lib/its-agent/enroll-token && echo "STILL HOLDING A TOKEN — not enrolled yet"
+systemctl status novieri-agent
+journalctl -u novieri-agent -f
+test -f /var/lib/novieri-agent/identity.json && echo enrolled
+test -f /var/lib/novieri-agent/enroll-token && echo "STILL HOLDING A TOKEN — not enrolled yet"
 ```
 
 The first log line names the data directory and whether the endpoint is
@@ -464,8 +464,8 @@ CapabilityBoundingSet=CAP_NET_RAW
 AmbientCapabilities=CAP_NET_RAW
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/its-agent
-StateDirectory=its-agent   StateDirectoryMode=0700
+ReadWritePaths=/var/lib/novieri-agent
+StateDirectory=novieri-agent   StateDirectoryMode=0700
 ProtectHome=yes  PrivateTmp=yes  LockPersonality=yes  RestrictSUIDSGID=yes
 RestrictNamespaces=yes  RestrictRealtime=yes  ProtectKernelTunables=yes
 ProtectKernelModules=yes  ProtectControlGroups=yes  ProtectClock=yes
@@ -519,13 +519,13 @@ remains **unexecuted** — nobody here has a Mac.
 ```sh
 sudo ITS_AGENT_ENROLL_TOKEN=<token> \
   agent/packaging/darwin/install.sh --url https://its.example.com
-sudo launchctl print system/com.toeshee.itsagent   # verify
+sudo launchctl print system/com.novieri.rmm.agent   # verify
 sudo agent/packaging/darwin/uninstall.sh
 ```
 
 A system daemon in `/Library/LaunchDaemons`, `RunAtLoad` + `KeepAlive`, binary
-at `/usr/local/libexec/its-agent`, logs at `/var/log/its-agent/agent.log`. The
-data directory is `/var/lib/its-agent` — **not** `/Library/Application Support`
+at `/usr/local/libexec/novieri-agent`, logs at `/var/log/novieri-agent/agent.log`. The
+data directory is `/var/lib/novieri-agent` — **not** `/Library/Application Support`
 — because that is the agent binary's own default for every non-Windows platform
 (`internal/config.defaultDataDir`), and an installer that disagrees with the
 binary produces an agent that silently enrolls a second time into a second
@@ -536,7 +536,7 @@ device record.
 ```powershell
 $env:ITS_AGENT_ENROLL_TOKEN = '<token>'
 .\install.ps1 -Url https://its.example.com
-Get-Service its-agent
+Get-Service novieri-agent
 .\uninstall.ps1
 ```
 
@@ -567,14 +567,14 @@ Executed in an Ubuntu 24.04 container, as part of building this:
 | Check | Result |
 |---|---|
 | `go test ./... -count=1` (whole agent module) | pass |
-| `shellcheck` on every `.sh`, on `its-agent-enroll`, and `-s sh` on the three maintainer scripts | clean |
+| `shellcheck` on every `.sh`, on `novieri-agent-enroll`, and `-s sh` on the three maintainer scripts | clean |
 | `systemd-analyze verify` on the unit | exit 0 (after it caught the `StartLimitIntervalSec` misplacement) |
 | `install.sh --destdir /tmp/stage` | token `0600` root, state dir `0700`, env file `0600`, unit `0644`, binary `0755` |
 | the token in any other staged file | zero occurrences |
 | the real binary reading the installed token file | enrolls (fails at the unreachable URL, exit 3) — the token came from the file |
 | the same with the token file at `0644` | refuses to start, exit 2, error names the file |
-| `dpkg -i` → `its-agent-enroll` → `dpkg -r` → `dpkg -P` | binary at the package's version, token `0600` root, remove keeps state, purge destroys it and `/etc/its-agent` |
-| `its-agent-enroll --token <secret>` | refused, with the reason |
+| `dpkg -i` → `novieri-agent-enroll` → `dpkg -r` → `dpkg -P` | binary at the package's version, token `0600` root, remove keeps state, purge destroys it and `/etc/novieri-agent` |
+| `novieri-agent-enroll --token <secret>` | refused, with the reason |
 | the deb-installed agent under the unit's environment | reads `ITS_AGENT_DATA_DIR` from `Environment=`, the URL from `EnvironmentFile=`, the token from the file, and enrolls |
 | `file` / `ldd` on the linux/amd64 binary | statically linked, not a dynamic executable |
 | the darwin/arm64 Mach-O's load commands | `LC_CODE_SIGNATURE` present; `CS_ADHOC` set; SHA-256; `codeLimit` reaches the signature; **all 1704 page hashes recomputed and matching**. Flipping one bit in the signed range is detected — the checker's own falsifier, run in CI |
@@ -586,7 +586,7 @@ Three defects were found by executing rather than reading, and are fixed:
 `StartLimitIntervalSec` sat in `[Service]` where systemd 255 ignores it; the
 staging root inherited `mktemp -d`'s `0700`, which would have applied **mode
 0700 to `/`** on install; and `build-deb.sh` reused whatever binary was already
-in `dist/`, so `its-agent_0.1.0.deb` shipped a binary reporting
+in `dist/`, so `novieri-agent_0.1.0.deb` shipped a binary reporting
 `2baebb0-dirty`. Each now has a check that would catch it again.
 
 `agent/packaging/packaging_test.go` runs in `go test ./...` and is the standing
@@ -643,15 +643,15 @@ silently wrong token.
 
 | # | Where | What | Why nothing caught it |
 |---|---|---|---|
-| 1 | `windows/install.ps1` | `Copy-Item` replaced `its-agent.exe` **before** the service was stopped. Windows holds a section on a running image, so every upgrade-in-place died on a locked file — after the token had been written | first installs never hit it |
+| 1 | `windows/install.ps1` | `Copy-Item` replaced `novieri-agent.exe` **before** the service was stopped. Windows holds a section on a running image, so every upgrade-in-place died on a locked file — after the token had been written | first installs never hit it |
 | 2 | `windows/install.ps1` | `-Token` was not declared, so PowerShell answered its own unknown-parameter error instead of the reason. Every other entry point refuses it with an explanation | the structural test knew this and did not check it |
 | 3 | `windows/install.ps1` | `-TokenFromStdin` with empty stdin silently installed an unenrolled agent instead of failing | `[Console]::In.ReadLine()` returns `$null` at EOF and `if ($token)` is false |
 | 4 | `windows/install.ps1` | a re-install without `-Url` **erased** `ITS_AGENT_ENROLL_URL` from the service `Environment`, stranding a staged machine with a token it could never spend | `New-ItemProperty -Force` replaces the whole MultiString |
 | 5 | `windows/install.ps1` | the `.EXAMPLE` used `ConvertFrom-SecureString -AsPlainText`, which is **PowerShell 7.0+**. On Windows PowerShell 5.1 the same line *succeeds* and yields a DPAPI blob, so the token in the environment was an encrypted string and the control plane answered a bare 403 | it fails by succeeding |
 | 6 | `windows/install.ps1` | `.DESCRIPTION` still said "and starts it", contradicting the §5.1 fix in the same file; the printed `Get-EventLog` advice is 5.1-only *and* names an event source nothing registers | prose is not executed |
 | 7 | `windows/install.ps1` | `sc.exe failure`'s exit code was discarded — a native command's non-zero exit does not trip `ErrorActionPreference`, so a service with no recovery actions looked identical to one with them | |
-| 8 | `windows/its-agent-enroll.ps1` | **the token was written to disk before the "is the service installed?" check**, so on a machine where `install.ps1` had never succeeded the deployment credential was left behind with nothing to spend it and nothing to remove it. On a GPO rollout that is the fleet token on every machine the install missed | the check existed; it was just last |
-| 9 | `windows/its-agent-enroll.ps1` | `-DataDir` defaulted to this script's own default rather than the installed service's, so a mismatched install wrote the token where the service does not read — and the already-enrolled check then missed the identity and re-enrolled, minting a second device record | |
+| 8 | `windows/novieri-agent-enroll.ps1` | **the token was written to disk before the "is the service installed?" check**, so on a machine where `install.ps1` had never succeeded the deployment credential was left behind with nothing to spend it and nothing to remove it. On a GPO rollout that is the fleet token on every machine the install missed | the check existed; it was just last |
+| 9 | `windows/novieri-agent-enroll.ps1` | `-DataDir` defaulted to this script's own default rather than the installed service's, so a mismatched install wrote the token where the service does not read — and the already-enrolled check then missed the identity and re-enrolled, minting a second device record | |
 | 10 | `windows/*.ps1` | the documented `<token> \| .\script.ps1 -TokenFromStdin` form **does not work inside PowerShell at all**: a `.ps1` runs in the calling process, so the pipeline object goes to `$input` while `[Console]::In` stays attached to the console and the script waits for somebody to type. The redirect has to happen at the OS level | there is no PowerShell in CI to try it in |
 | 11 | `darwin/install.sh` | it **bootstrapped an unenrolled daemon**. `KeepAlive` in the plist is unconditional and the agent exits 2 with neither identity nor token, so the Mac got the exact restart loop that falsifier 7 fixed for Windows — one exec every `ThrottleInterval`, forever. The plist's own comment claimed ThrottleInterval prevented this; it bounds the rate | the Windows fix was not carried across |
 
@@ -750,7 +750,7 @@ because a path-pinned profile works.
 
 | Platform | Where the step slots in | What it needs |
 |---|---|---|
-| Windows | after `build.sh`, before `build-deb.sh`'s equivalent MSI step: `signtool sign /fd sha256 /tr <timestamp-url> its-agent.exe` | an EV or OV code-signing certificate; CI secrets along the lines of `WINDOWS_SIGNING_CERT` (base64 PFX) and `WINDOWS_SIGNING_PASSWORD` |
+| Windows | after `build.sh`, before `build-deb.sh`'s equivalent MSI step: `signtool sign /fd sha256 /tr <timestamp-url> novieri-agent.exe` | an EV or OV code-signing certificate; CI secrets along the lines of `WINDOWS_SIGNING_CERT` (base64 PFX) and `WINDOWS_SIGNING_PASSWORD` |
 | macOS (**#2 only**) | after `build.sh`: `codesign --sign "Developer ID Application: ..." --options runtime`, then `notarytool submit` and `stapler staple` on the `.pkg`. Needed for distribution **outside** managed devices, i.e. commercialization — an MDM-delivered payload is not quarantined and so is not Gatekeeper-assessed | an Apple Developer ID, `APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_NOTARY_KEY` |
 | Linux | `dpkg-sig` / a signed apt repository (`Release.gpg`) rather than the package itself | a repository signing key, `APT_SIGNING_KEY` |
 
@@ -795,7 +795,7 @@ against an Ed25519 signature the control plane cannot produce. The key:
   ./cmd/release-sign pubkey) VERSION=1.4.0 ./packaging/build.sh`, which sets
   `internal/update.releaseSigningKey`.
 
-`release-sign sign -version 1.4.0 dist/its-agent-<os>-<arch>` writes a `.sig`
+`release-sign sign -version 1.4.0 dist/novieri-agent-<os>-<arch>` writes a `.sig`
 beside each binary; it signs the version, platform and digest together, so a
 signed binary cannot be relabelled. Upload each binary as today, then record
 its signature with `PUT /api/v1/agent/releases/{id}/release-signature` (the
@@ -847,7 +847,7 @@ top of this file — *a token must never reach a distributable artifact* — is 
 its sharpest on this path, so:
 
 1. **The package carries no credential.** Binary, `install.ps1`,
-   `its-agent-enroll.ps1`. Nothing else, and nothing tenant-specific: the
+   `novieri-agent-enroll.ps1`. Nothing else, and nothing tenant-specific: the
    artefact is byte-identical for every organization.
 2. **The install runs first and does not enrol.** `install.ps1` with no token
    registers the service and — since this cycle — **does not start it**. An
@@ -856,18 +856,18 @@ its sharpest on this path, so:
    every machine in the domain. `linux/debian/postinst` has always refused to
    start an unenrolled agent for exactly this reason; Windows now matches it.
 3. **The enrol runs second, with the token from your own secret mechanism.**
-   `its-agent-enroll.ps1` is the Windows counterpart of `its-agent-enroll`. It
+   `novieri-agent-enroll.ps1` is the Windows counterpart of `novieri-agent-enroll`. It
    takes the token from `ITS_AGENT_ENROLL_TOKEN` or `-TokenFromStdin`,
    **refuses `-Token`**, writes it to one ACL-restricted file the agent deletes
    on success, and is a no-op on an endpoint that already has an identity —
    which matters, because a startup script runs at every boot.
 
 ```powershell
-# staged on \\<dfs-or-sysvol>\its-agent\ , run by a computer startup script (SYSTEM)
-.\install.ps1 -Binary .\its-agent-windows-amd64.exe -NoStart
+# staged on \\<dfs-or-sysvol>\novieri-agent\ , run by a computer startup script (SYSTEM)
+.\install.ps1 -Binary .\novieri-agent-windows-amd64.exe -NoStart
 
 $env:ITS_AGENT_ENROLL_TOKEN = <read from a location only machine accounts can read>
-.\its-agent-enroll.ps1 -Url https://its.example.com
+.\novieri-agent-enroll.ps1 -Url https://its.example.com
 ```
 
 ### The token for a fleet, and what it costs
@@ -936,5 +936,5 @@ estates that keep the install link off.
   (`install.sh`) works on RHEL-family hosts; the package does not exist.
 - **A `.pkg` for macOS.** Same shape: the script works, the double-clickable,
   MDM-deployable package does not.
-- **Log rotation on macOS.** `/var/log/its-agent/agent.log` grows unbounded
+- **Log rotation on macOS.** `/var/log/novieri-agent/agent.log` grows unbounded
   until a `newsyslog.d` entry exists.

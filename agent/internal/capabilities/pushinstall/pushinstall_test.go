@@ -224,8 +224,8 @@ func TestInstallSignsNothingIntoArgvAndZeroesTheCredential(t *testing.T) {
 		// Review I3: whatever was there -- a directory someone else made, or a
 		// symlink (rm removes the link, never its target) -- is removed, and
 		// a fresh root-only directory made; no -p, so a race is a failure.
-		"rm -rf /opt/toeshee && mkdir -m 0700 /opt/toeshee",
-		"/opt/toeshee/agent.pkg install --token-file /opt/toeshee/enroll.token --enroll-url 'https://itms.example.com'",
+		"rm -rf /opt/novieri && mkdir -m 0700 /opt/novieri",
+		"/opt/novieri/agent.pkg install --token-file /opt/novieri/enroll.token --enroll-url 'https://itms.example.com'",
 	}
 	if strings.Join(sess.runCalls, "\n") != strings.Join(wantRuns, "\n") {
 		t.Fatalf("remote commands =\n%s\nwant\n%s", strings.Join(sess.runCalls, "\n"), strings.Join(wantRuns, "\n"))
@@ -325,7 +325,7 @@ func TestInstallCommandIsAConstantTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/opt/toeshee/agent.pkg install --token-file /opt/toeshee/enroll.token --enroll-url 'https://itms.example.com:8443'"
+	want := "/opt/novieri/agent.pkg install --token-file /opt/novieri/enroll.token --enroll-url 'https://itms.example.com:8443'"
 	if got != want {
 		t.Fatalf("installCommand = %q, want %q", got, want)
 	}
@@ -449,9 +449,9 @@ func hexSum(b []byte) string {
 // pushing agent can help it: after any failure once the staging directory
 // exists, one more constant command removes both staged files, best effort.
 func TestAFailedSSHInstallCleansUpTheStagedFiles(t *testing.T) {
-	const cleanup = "rm -f /opt/toeshee/enroll.token /opt/toeshee/agent.pkg"
+	const cleanup = "rm -f /opt/novieri/enroll.token /opt/novieri/agent.pkg"
 	for name, sess := range map[string]*fakeSession{
-		"the install command failed": {unameOut: "Linux x86_64", failRuns: []string{"/opt/toeshee/agent.pkg install"}},
+		"the install command failed": {unameOut: "Linux x86_64", failRuns: []string{"/opt/novieri/agent.pkg install"}},
 		"the artefact copy failed":   {unameOut: "Linux x86_64", failPutAt: 1},
 		"the token copy failed":      {unameOut: "Linux x86_64", failPutAt: 2},
 	} {
@@ -468,7 +468,7 @@ func TestAFailedSSHInstallCleansUpTheStagedFiles(t *testing.T) {
 		}
 	}
 	// A cleanup that itself fails does not change the reported outcome.
-	sess := &fakeSession{unameOut: "Linux x86_64", failRuns: []string{"/opt/toeshee/agent.pkg install", "rm -f "}}
+	sess := &fakeSession{unameOut: "Linux x86_64", failRuns: []string{"/opt/novieri/agent.pkg install", "rm -f "}}
 	s := New(Options{Dialer: &fakeDialer{session: sess}, Downloader: &fakeDownloader{data: artefactBytes()}})
 	out, _ := s.install(context.Background(), installParamsJSON(t, nil))
 	if r := out.(installResult); !strings.Contains(r.Detail, "install:") {

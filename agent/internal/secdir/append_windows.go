@@ -11,8 +11,8 @@ import (
 )
 
 // AppendLine appends line, then CRLF, to the file `name` inside dir: the Group
-// Policy MSI's diagnostics (`%ProgramData%\ITSuite\msi.log`, written by
-// `its-agent --msi-install` and `--msi-uninstall`).
+// Policy MSI's diagnostics (`%ProgramData%\NovieriRMM\msi.log`, written by
+// `novieri-agent --msi-install` and `--msi-uninstall`).
 //
 // THE PARENT IS SECURED BEFORE THE FILE IS TOUCHED. dir goes through
 // SecureOwned -- created owned and protected when absent, otherwise opened
@@ -21,7 +21,7 @@ import (
 // refused unchanged: a directory someone else owns is an administrator's to
 // look at, and taking it over here would make the next install accept it.
 // With create false, an absent dir is left absent (a removal that took
-// %ProgramData%\ITSuite away must not bring it back) and os.ErrNotExist is
+// %ProgramData%\NovieriRMM away must not bring it back) and os.ErrNotExist is
 // returned.
 //
 // The file is opened for appending only, without following a reparse point,

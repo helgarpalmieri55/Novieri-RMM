@@ -50,7 +50,7 @@ func (r *resumeRig) trialState(deadlineIn time.Duration, starts int) *State {
 	d := r.clock.Now().Add(deadlineIn)
 	return &State{
 		Phase: PhaseTrial, JobID: jobA, FromVersion: oldV, ToVersion: newV,
-		SHA256: testSHA, PrevSHA256: testSHA, TargetPath: "/usr/local/bin/its-agent",
+		SHA256: testSHA, PrevSHA256: testSHA, TargetPath: "/usr/local/bin/novieri-agent",
 		HealthWindowS: 600, TrialDeadline: &d, Starts: starts, Signature: SignatureVerified,
 	}
 }

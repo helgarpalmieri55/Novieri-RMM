@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The Toeshee endpoint agent as a launchd SYSTEM daemon
+  The Novieri RMM endpoint agent as a launchd SYSTEM daemon
   (/Library/LaunchDaemons, loaded into the `system` domain, running as root).
 
   Invariant #2: there is no Sockets key and no socket activation. launchd never
@@ -10,7 +10,7 @@
 
   The enrollment token is NOT here. EnvironmentVariables in a plist under
   /Library/LaunchDaemons is world-readable and is echoed by `launchctl print
-  system/com.toeshee.itsagent`. The token goes to /var/lib/its-agent/enroll-token
+  system/com.novieri.rmm.agent`. The token goes to /var/lib/novieri-agent/enroll-token
   at mode 0600 (config.EnrollTokenPath), and the agent deletes it once it has
   exchanged it for a certificate.
 
@@ -20,11 +20,11 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.toeshee.itsagent</string>
+    <string>com.novieri.rmm.agent</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/libexec/its-agent</string>
+        <string>/usr/local/libexec/novieri-agent</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -62,7 +62,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>ITS_AGENT_DATA_DIR</key>
-        <string>/var/lib/its-agent</string>
+        <string>/var/lib/novieri-agent</string>
         <!--
           ITS_AGENT_ENROLL_URL is written here by install.sh. It is not a
           secret. The token is not, and must never be.
@@ -70,14 +70,14 @@
     </dict>
 
     <!--
-      The agent logs to stderr. /var/log/its-agent is created 0750 root:wheel by
+      The agent logs to stderr. /var/log/novieri-agent is created 0750 root:wheel by
       install.sh; no credential is ever logged (asserted in internal/enroll's
       tests). Rotation is newsyslog's job (see packaging/README.md).
     -->
     <key>StandardErrorPath</key>
-    <string>/var/log/its-agent/agent.log</string>
+    <string>/var/log/novieri-agent/agent.log</string>
     <key>StandardOutPath</key>
-    <string>/var/log/its-agent/agent.log</string>
+    <string>/var/log/novieri-agent/agent.log</string>
 
     <key>ProcessType</key>
     <string>Background</string>

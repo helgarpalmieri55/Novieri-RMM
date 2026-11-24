@@ -89,8 +89,8 @@ PowerShell with `-ExecutionPolicy Bypass`.
 **Observe.** The command's own SHA-256 comparison passes (computed with
 `[Security.Cryptography.SHA256]`, **not** `Get-FileHash` — the cmdlet the field
 hit as `not recognized`), then the script prints `enrollment token written to
-C:\ProgramData\ITSuite\agent\enroll-token (SYSTEM and Administrators only)` and
-`its-agent installed.` in the same run. Installation and verification are no
+C:\ProgramData\NovieriRMM\agent\enroll-token (SYSTEM and Administrators only)` and
+`novieri-agent installed.` in the same run. Installation and verification are no
 longer two hand-run steps.
 
 > **Falsifies:** a digest mismatch here means the catalogue and your build
@@ -104,9 +104,9 @@ longer two hand-run steps.
 If you would rather do the download and the digest by hand first:
 
 ```powershell
-Invoke-WebRequest -Uri '<presigned-url>' -OutFile .\its-agent-windows-amd64.exe
+Invoke-WebRequest -Uri '<presigned-url>' -OutFile .\novieri-agent-windows-amd64.exe
 [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(
-  [IO.File]::ReadAllBytes('.\its-agent-windows-amd64.exe'))).Replace('-','')
+  [IO.File]::ReadAllBytes('.\novieri-agent-windows-amd64.exe'))).Replace('-','')
 # compare, case-insensitively, against the sha256 the console shows
 ```
 
@@ -123,33 +123,33 @@ $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
 try   { $env:ITS_AGENT_ENROLL_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 
-.\install.ps1 -Url https://<your-console> -Binary .\its-agent-windows-amd64.exe
+.\install.ps1 -Url https://<your-console> -Binary .\novieri-agent-windows-amd64.exe
 
 $env:ITS_AGENT_ENROLL_TOKEN = $null
 ```
 
 **Observe.** Either way, the script prints `enrollment token written to
-C:\ProgramData\ITSuite\agent\enroll-token (SYSTEM and Administrators only)` and
-then `its-agent installed.` Step B6 is where you confirm — from the 4688 record
+C:\ProgramData\NovieriRMM\agent\enroll-token (SYSTEM and Administrators only)` and
+then `novieri-agent installed.` Step B6 is where you confirm — from the 4688 record
 — that no token value reached any argv, including the child `install.ps1`'s.
 
 > **Falsifies:** `install.ps1 must run from an elevated PowerShell session` —
-> you are not elevated. `No its-agent.exe found` — pass `-Binary`. Anything
+> you are not elevated. `No novieri-agent.exe found` — pass `-Binary`. Anything
 > else is a defect: capture the full error including the line number.
 
 ### A3. The service exists, with no arguments and no token
 
 ```powershell
-Get-Service its-agent | Format-List Name, Status, StartType
-sc.exe qc its-agent
-(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\its-agent').Environment
-sc.exe qfailure its-agent
+Get-Service novieri-agent | Format-List Name, Status, StartType
+sc.exe qc novieri-agent
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\novieri-agent').Environment
+sc.exe qfailure novieri-agent
 ```
 
 **Observe, all four:**
 
 1. `Status : Running`, `StartType : Automatic`.
-2. `BINARY_PATH_NAME : "C:\Program Files\ITSuite\its-agent.exe"` — **the path
+2. `BINARY_PATH_NAME : "C:\Program Files\NovieriRMM\novieri-agent.exe"` — **the path
    and nothing after it**. Every argument on a service command line is readable
    by any local user for the life of the process.
 3. The `Environment` value holds **exactly two** entries,
@@ -168,7 +168,7 @@ sc.exe qfailure its-agent
 ### A4. The data directory is SYSTEM + Administrators, and nothing else
 
 ```powershell
-$acl = Get-Acl "$env:ProgramData\ITSuite\agent"
+$acl = Get-Acl "$env:ProgramData\NovieriRMM\agent"
 $acl.AreAccessRulesProtected
 $acl.Access | Format-Table IdentityReference, FileSystemRights, IsInherited
 ```
@@ -186,8 +186,8 @@ both `FullControl`, both `IsInherited: False`.
 ### A5. It enrolled, and the token is gone
 
 ```powershell
-Test-Path "$env:ProgramData\ITSuite\agent\identity.json"     # want True
-Test-Path "$env:ProgramData\ITSuite\agent\enroll-token"      # want False
+Test-Path "$env:ProgramData\NovieriRMM\agent\identity.json"     # want True
+Test-Path "$env:ProgramData\NovieriRMM\agent\enroll-token"      # want False
 ```
 
 **Observe.** `True` then `False`, within a few seconds of the service starting.
@@ -213,7 +213,7 @@ Service Control Manager's own view:
 
 ```powershell
 Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'} -MaxEvents 20 |
-  Where-Object { $_.Message -match 'its-agent' } | Format-List TimeCreated, Id, Message
+  Where-Object { $_.Message -match 'novieri-agent' } | Format-List TimeCreated, Id, Message
 ```
 
 **Observe.** A `7036` ("entered the running state") and nothing else.
@@ -229,9 +229,9 @@ To watch the agent directly, stop the service and run the binary in the
 console — `svc.IsWindowsService()` keeps the same binary usable that way:
 
 ```powershell
-Stop-Service its-agent
-$env:ITS_AGENT_DATA_DIR = "$env:ProgramData\ITSuite\agent"
-& "$env:ProgramFiles\ITSuite\its-agent.exe"
+Stop-Service novieri-agent
+$env:ITS_AGENT_DATA_DIR = "$env:ProgramData\NovieriRMM\agent"
+& "$env:ProgramFiles\NovieriRMM\novieri-agent.exe"
 ```
 
 Exit codes are load-bearing: **2** configuration (no identity and no token),
@@ -254,10 +254,10 @@ carrying `jobs.dispatched` and `jobs.succeeded`.
 ### A8. Stop, restart, reboot
 
 ```powershell
-Restart-Service its-agent
-Get-Service its-agent
+Restart-Service novieri-agent
+Get-Service novieri-agent
 Restart-Computer            # then, after it comes back:
-Get-Service its-agent
+Get-Service novieri-agent
 ```
 
 **Observe.** Running after each, and the device goes offline and back online in
@@ -273,16 +273,16 @@ the agent's context and it flushed its outbound buffer.
 
 ```powershell
 .\uninstall.ps1
-Get-Service its-agent -ErrorAction SilentlyContinue      # want nothing
-Test-Path "$env:ProgramFiles\ITSuite\its-agent.exe"      # want False
-Test-Path "$env:ProgramData\ITSuite\agent"               # want False
+Get-Service novieri-agent -ErrorAction SilentlyContinue      # want nothing
+Test-Path "$env:ProgramFiles\NovieriRMM\novieri-agent.exe"      # want False
+Test-Path "$env:ProgramData\NovieriRMM\agent"               # want False
 ```
 
-**Observe.** The banner reads `its-agent removed from this endpoint.` — not
-`its-agent PARTIALLY removed`. The device row, its certificate at the gateway
+**Observe.** The banner reads `novieri-agent removed from this endpoint.` — not
+`novieri-agent PARTIALLY removed`. The device row, its certificate at the gateway
 and the audit log all survive, on purpose; retire the device in the console.
 
-> **Falsifies:** `PARTIALLY removed ... still present: ...its-agent.exe` means
+> **Falsifies:** `PARTIALLY removed ... still present: ...novieri-agent.exe` means
 > something still holds the image open after `sc.exe delete`. The credentials
 > were removed by name regardless, which is why they are removed first.
 
@@ -301,7 +301,7 @@ Agent Packages → Managed deployment…**, and run the `Get-FileHash` compariso
 the dialog gives you **before** the file reaches the share.
 
 **Observe.** The digests match. Then copy the binary, `install.ps1` and
-`its-agent-enroll.ps1` to the distribution point.
+`novieri-agent-enroll.ps1` to the distribution point.
 
 > **This is the last integrity check anybody performs on this path.** The
 > endpoint does not verify anything: GPO and Intune copy a file and run it.
@@ -312,7 +312,7 @@ the dialog gives you **before** the file reaches the share.
 Check the share's ACL now, while you are looking at it:
 
 ```powershell
-(Get-Acl \\<dfs-or-sysvol>\its-agent).Access |
+(Get-Acl \\<dfs-or-sysvol>\novieri-agent).Access |
   Where-Object { $_.FileSystemRights -match 'Write|Modify|FullControl' } |
   Format-Table IdentityReference, FileSystemRights
 ```
@@ -324,13 +324,13 @@ machine in scope.
 ### B2. Install without enrolling
 
 ```powershell
-.\install.ps1 -Binary .\its-agent-windows-amd64.exe -NoStart
+.\install.ps1 -Binary .\novieri-agent-windows-amd64.exe -NoStart
 ```
 
 **Observe.** `service registered, not started (-NoStart)`.
 
 ```powershell
-Get-Service its-agent | Format-List Name, Status, StartType
+Get-Service novieri-agent | Format-List Name, Status, StartType
 ```
 
 `Status : Stopped`, `StartType : Automatic`.
@@ -346,7 +346,7 @@ enrollment token and no identity...`
 > the service starts here, it exits 2, the `sc.exe failure` actions restart it,
 > and you have just reproduced the restart loop that a GPO rollout would put on
 > every machine in the domain. Watch for it with the A6 `Get-WinEvent` query:
-> repeated 7031/7034 for `its-agent` is the signature.
+> repeated 7031/7034 for `novieri-agent` is the signature.
 
 ### B3. Enrol, with the token from stdin
 
@@ -355,24 +355,24 @@ because it is the one a pipeline uses and the one no PowerShell pipeline can
 exercise:
 
 ```powershell
-cmd /c "type \\<secret-share>\token.txt | powershell -NoProfile -ExecutionPolicy Bypass -File .\its-agent-enroll.ps1 -TokenFromStdin -Url https://<your-console>"
+cmd /c "type \\<secret-share>\token.txt | powershell -NoProfile -ExecutionPolicy Bypass -File .\novieri-agent-enroll.ps1 -TokenFromStdin -Url https://<your-console>"
 ```
 
-**Observe.** `enrollment token written to ...` then `started its-agent`, and
+**Observe.** `enrollment token written to ...` then `started novieri-agent`, and
 A5's two `Test-Path` results.
 
 > **Falsifies:** if this **hangs**, stdin was not actually redirected — that is
 > the trap the `-TokenFromStdin` documentation warns about, because a
-> PowerShell pipeline (`'tok' | .\its-agent-enroll.ps1 -TokenFromStdin`) leaves
+> PowerShell pipeline (`'tok' | .\novieri-agent-enroll.ps1 -TokenFromStdin`) leaves
 > the process's stdin on the console and the script waits for somebody to type.
-> Confirm it by running the `.\its-agent-enroll.ps1` form with
+> Confirm it by running the `.\novieri-agent-enroll.ps1` form with
 > `$env:ITS_AGENT_ENROLL_TOKEN` set instead; if that works and the redirect
 > does not, report the redirect form.
 
 Also test the environment form and the two refusals:
 
 ```powershell
-.\its-agent-enroll.ps1 -Token abc123 -Url https://<your-console>
+.\novieri-agent-enroll.ps1 -Token abc123 -Url https://<your-console>
 ```
 
 **Observe.** It throws, and the message names Security event 4688 and the two
@@ -381,7 +381,7 @@ refused with a reason** rather than answered with PowerShell's own
 "A parameter cannot be found that matches parameter name 'Token'".
 
 ```powershell
-.\its-agent-enroll.ps1 -Url https://<your-console>      # on an already-enrolled machine
+.\novieri-agent-enroll.ps1 -Url https://<your-console>      # on an already-enrolled machine
 ```
 
 **Observe.** `this endpoint is already enrolled (...); nothing to do`, exit 0.
@@ -394,11 +394,11 @@ And the one that was a real defect until 2026-08-26 — run the enrol helper on 
 machine where **install.ps1 has never run**:
 
 ```powershell
-.\its-agent-enroll.ps1 -Url https://<your-console>       # service not installed
-Test-Path "$env:ProgramData\ITSuite\agent\enroll-token"
+.\novieri-agent-enroll.ps1 -Url https://<your-console>       # service not installed
+Test-Path "$env:ProgramData\NovieriRMM\agent\enroll-token"
 ```
 
-**Observe.** It throws `the service its-agent is not installed; run install.ps1
+**Observe.** It throws `the service novieri-agent is not installed; run install.ps1
 first`, **and the second line answers `False`.**
 
 > **Falsifies:** `True` means the script wrote the deployment credential to disk
@@ -410,7 +410,7 @@ first`, **and the second line answers `False`.**
 
 Re-run `install.ps1` over a **running** agent, pointing at a newer binary.
 
-**Observe.** It completes, and `its-agent.exe` has the new timestamp.
+**Observe.** It completes, and `novieri-agent.exe` has the new timestamp.
 
 > **Falsifies:** *"The process cannot access the file because it is being used
 > by another process"* means the service is not being stopped before the binary
@@ -420,7 +420,7 @@ Re-run `install.ps1` over a **running** agent, pointing at a newer binary.
 Then re-run `install.ps1` **without** `-Url`:
 
 ```powershell
-(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\its-agent').Environment
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\novieri-agent').Environment
 ```
 
 **Observe.** `ITS_AGENT_ENROLL_URL` is **still there**, carried over from the
@@ -440,12 +440,12 @@ With §0.2's auditing on:
 
 ```powershell
 Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4688} -MaxEvents 400 |
-  Where-Object { $_.Message -match 'its-agent|install\.ps1|powershell' } |
+  Where-Object { $_.Message -match 'novieri-agent|install\.ps1|powershell' } |
   ForEach-Object { ($_.Message -split "`n" | Select-String 'Process Command Line').ToString() }
 ```
 
 **Observe.** Every recorded command line for `install.ps1`,
-`its-agent-enroll.ps1` and `its-agent.exe` carries **the script path, `-Url`,
+`novieri-agent-enroll.ps1` and `novieri-agent.exe` carries **the script path, `-Url`,
 `-Binary`, `-NoStart`, `-TokenFromStdin` — and no token value.** Search the
 output for the token's first eight characters and get nothing.
 
@@ -475,8 +475,8 @@ Select-String -Path (Get-PSReadLineOption).HistorySavePath -Pattern '<first 8 ch
 ### C1. Verify and place the binary
 
 ```sh
-shasum -a 256 its-agent-darwin-arm64      # compare against the console's sha256
-sudo mkdir -p /opt/its-agent && sudo cp -R agent/packaging/darwin /opt/its-agent/
+shasum -a 256 novieri-agent-darwin-arm64      # compare against the console's sha256
+sudo mkdir -p /opt/novieri-agent && sudo cp -R agent/packaging/darwin /opt/novieri-agent/
 ```
 
 ### C2. Confirm the ad-hoc signature the kernel demands — before installing
@@ -487,14 +487,14 @@ start. `agent/packaging/machosign_test.go` verifies this by arithmetic in CI;
 this is the same claim from the other side.
 
 ```sh
-codesign -dv --verbose=4 ./its-agent-darwin-arm64 2>&1 | head -20
+codesign -dv --verbose=4 ./novieri-agent-darwin-arm64 2>&1 | head -20
 ```
 
 **Observe.** `flags=0x20002(adhoc,linker-signed)`, `CodeDirectory ... hashes=1704+...`,
 `Signature=adhoc`.
 
 ```sh
-spctl -a -vv ./its-agent-darwin-arm64
+spctl -a -vv ./novieri-agent-darwin-arm64
 ```
 
 **Observe — and this is expected to FAIL:** `rejected (the code is valid but
@@ -508,18 +508,18 @@ message.
 ### C3. Install, with the token from the environment
 
 ```sh
-sudo ITS_AGENT_ENROLL_TOKEN='<token>' /opt/its-agent/darwin/install.sh \
-  --url https://<your-console> --binary ./its-agent-darwin-arm64
+sudo ITS_AGENT_ENROLL_TOKEN='<token>' /opt/novieri-agent/darwin/install.sh \
+  --url https://<your-console> --binary ./novieri-agent-darwin-arm64
 ```
 
-**Observe.** `enrollment token written to /var/lib/its-agent/enroll-token (0600,
-root)`, then `its-agent installed.`
+**Observe.** `enrollment token written to /var/lib/novieri-agent/enroll-token (0600,
+root)`, then `novieri-agent installed.`
 
 Also test the refusal and the stdin form:
 
 ```sh
-sudo /opt/its-agent/darwin/install.sh --token abc123 --url https://x   # must refuse, with the reason
-printf %s '<token>' | sudo /opt/its-agent/darwin/install.sh --token-stdin --url https://<your-console>
+sudo /opt/novieri-agent/darwin/install.sh --token abc123 --url https://x   # must refuse, with the reason
+printf %s '<token>' | sudo /opt/novieri-agent/darwin/install.sh --token-stdin --url https://<your-console>
 ```
 
 > Unlike PowerShell, a shell pipe **does** feed this script's stdin, so the
@@ -528,14 +528,14 @@ printf %s '<token>' | sudo /opt/its-agent/darwin/install.sh --token-stdin --url 
 ### C4. Permissions on disk
 
 ```sh
-ls -ld /var /var/lib /var/lib/its-agent /var/log/its-agent
-ls -l  /var/lib/its-agent
-ls -l  /Library/LaunchDaemons/com.toeshee.itsagent.plist
+ls -ld /var /var/lib /var/lib/novieri-agent /var/log/novieri-agent
+ls -l  /var/lib/novieri-agent
+ls -l  /Library/LaunchDaemons/com.novieri.rmm.agent.plist
 ```
 
 **Observe.**
 
-- `/var/lib/its-agent` is `drwx------  root  wheel` (0700).
+- `/var/lib/novieri-agent` is `drwx------  root  wheel` (0700).
 - `enroll-token` is `-rw-------  root  wheel` (0600).
 - the plist is `-rw-r--r--  root  wheel` (0644) — launchd refuses a plist that
   is group- or world-writable.
@@ -546,19 +546,19 @@ ls -l  /Library/LaunchDaemons/com.toeshee.itsagent.plist
   hides. **This is an open question, not a known defect** — GNU `install` does
   not behave that way and nobody has run BSD `install` here.
 
-> **Falsifies:** anything group- or world-readable under `/var/lib/its-agent`
+> **Falsifies:** anything group- or world-readable under `/var/lib/novieri-agent`
 > exposes the device private key.
 
 ### C5. The daemon is loaded, running, and carries no token
 
 ```sh
-sudo launchctl print system/com.toeshee.itsagent
+sudo launchctl print system/com.novieri.rmm.agent
 ```
 
 **Observe, in that output:**
 
 - `state = running` and a `pid`.
-- `program = /usr/local/libexec/its-agent` with **`arguments` holding the
+- `program = /usr/local/libexec/novieri-agent` with **`arguments` holding the
   binary and nothing else** — argv is visible in `ps` to every user.
 - `environment` showing `ITS_AGENT_DATA_DIR` and `ITS_AGENT_ENROLL_URL`, and
   **no token**. This output is printable by any user; the plist under
@@ -575,9 +575,9 @@ ps -Ao pid,args | grep '[i]ts-agent'
 ### C6. It enrolled
 
 ```sh
-test -f /var/lib/its-agent/identity.json && echo enrolled
-test -f /var/lib/its-agent/enroll-token  && echo "STILL HOLDING A TOKEN"
-tail -50 /var/log/its-agent/agent.log
+test -f /var/lib/novieri-agent/identity.json && echo enrolled
+test -f /var/lib/novieri-agent/enroll-token  && echo "STILL HOLDING A TOKEN"
+tail -50 /var/log/novieri-agent/agent.log
 ```
 
 **Observe.** `enrolled`, no second line, and the log showing `enrolling` then
@@ -596,7 +596,7 @@ log stream --predicate 'subsystem == "com.apple.TCC"' --info &
 
 **Observe.** Whether any inventory field comes back empty on macOS that is
 populated on Linux, and whether TCC logs a denial naming
-`/usr/local/libexec/its-agent`.
+`/usr/local/libexec/novieri-agent`.
 
 > **Falsifies:** a TCC denial means a PPPC profile is needed, delivered by MDM.
 > Note that against an **ad-hoc-signed** binary a PPPC profile can only pin by
@@ -611,8 +611,8 @@ Dispatch `hello` at this device. Same expectation as A7.
 ### C9. Restart, and reboot
 
 ```sh
-sudo launchctl kickstart -k system/com.toeshee.itsagent
-sudo launchctl print system/com.toeshee.itsagent | head -20
+sudo launchctl kickstart -k system/com.novieri.rmm.agent
+sudo launchctl print system/com.novieri.rmm.agent | head -20
 sudo reboot
 ```
 
@@ -623,9 +623,9 @@ with **no second device row**.
 ### C10. The `launchctl disable` trap
 
 ```sh
-sudo launchctl bootout system/com.toeshee.itsagent
-sudo launchctl disable system/com.toeshee.itsagent
-sudo ITS_AGENT_ENROLL_TOKEN='' /opt/its-agent/darwin/install.sh --url https://<your-console>
+sudo launchctl bootout system/com.novieri.rmm.agent
+sudo launchctl disable system/com.novieri.rmm.agent
+sudo ITS_AGENT_ENROLL_TOKEN='' /opt/novieri-agent/darwin/install.sh --url https://<your-console>
 ```
 
 **Observe.** The install still succeeds and the daemon runs, because
@@ -639,12 +639,12 @@ sudo ITS_AGENT_ENROLL_TOKEN='' /opt/its-agent/darwin/install.sh --url https://<y
 ### C11. Uninstall
 
 ```sh
-sudo /opt/its-agent/darwin/uninstall.sh
-sudo launchctl print system/com.toeshee.itsagent   # want "Could not find service"
-ls /var/lib/its-agent /usr/local/libexec/its-agent /Library/LaunchDaemons/com.toeshee.itsagent.plist
+sudo /opt/novieri-agent/darwin/uninstall.sh
+sudo launchctl print system/com.novieri.rmm.agent   # want "Could not find service"
+ls /var/lib/novieri-agent /usr/local/libexec/novieri-agent /Library/LaunchDaemons/com.novieri.rmm.agent.plist
 ```
 
-**Observe.** All three gone. `--keep-state` leaves `/var/lib/its-agent` and only
+**Observe.** All three gone. `--keep-state` leaves `/var/lib/novieri-agent` and only
 that.
 
 ---

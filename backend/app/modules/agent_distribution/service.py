@@ -340,9 +340,9 @@ def install_command(
         # visible. The finally clears the token from this shell's environment.
         return (
             "$ErrorActionPreference='Stop'; "
-            "$d=Join-Path $env:TEMP 'its-agent-install'; "
+            "$d=Join-Path $env:TEMP 'novieri-agent-install'; "
             "New-Item -ItemType Directory -Force -Path $d | Out-Null; "
-            "$exe=Join-Path $d 'its-agent.exe'; "
+            "$exe=Join-Path $d 'novieri-agent.exe'; "
             f"(New-Object Net.WebClient).DownloadFile('{download_url}', $exe); "
             "$h=[BitConverter]::ToString("
             "[Security.Cryptography.SHA256]::Create().ComputeHash("
@@ -363,34 +363,34 @@ def install_command(
         # name the script looks for.
         sh_b64 = base64.b64encode(_installer_bytes("darwin/install.sh")).decode("ascii")
         plist_b64 = base64.b64encode(
-            _installer_bytes("darwin/com.toeshee.itsagent.plist")
+            _installer_bytes("darwin/com.novieri.rmm.agent.plist")
         ).decode("ascii")
         return (
             "set -e; d=$(mktemp -d); "
-            f"curl -fsSL '{download_url}' -o \"$d/its-agent\"; "
-            f"printf '%s  %s' '{sha256}' \"$d/its-agent\" | shasum -a 256 -c -; "
+            f"curl -fsSL '{download_url}' -o \"$d/novieri-agent\"; "
+            f"printf '%s  %s' '{sha256}' \"$d/novieri-agent\" | shasum -a 256 -c -; "
             f"printf %s '{sh_b64}' | base64 -D > \"$d/install.sh\"; "
-            f"printf %s '{plist_b64}' | base64 -D > \"$d/com.toeshee.itsagent.plist\"; "
+            f"printf %s '{plist_b64}' | base64 -D > \"$d/com.novieri.rmm.agent.plist\"; "
             "chmod +x \"$d/install.sh\"; "
             f"printf '%s' '{token}' | sudo bash \"$d/install.sh\" "
-            f"--token-stdin --url '{enroll_url}' --binary \"$d/its-agent\""
+            f"--token-stdin --url '{enroll_url}' --binary \"$d/novieri-agent\""
         )
 
-    # Linux. install.sh reads its-agent.service from its own directory and does
+    # Linux. install.sh reads novieri-agent.service from its own directory and does
     # the rest: places the binary, writes the token file 0600, writes the URL
     # env file, installs the hardened unit, enables and starts the service. The
     # token reaches it on stdin via --token-stdin, never as an argument.
     sh_b64 = base64.b64encode(_installer_bytes("linux/install.sh")).decode("ascii")
-    unit_b64 = base64.b64encode(_installer_bytes("linux/its-agent.service")).decode(
+    unit_b64 = base64.b64encode(_installer_bytes("linux/novieri-agent.service")).decode(
         "ascii"
     )
     return (
         "set -e; d=$(mktemp -d); "
-        f"curl -fsSL '{download_url}' -o \"$d/its-agent\"; "
-        f"printf '%s  %s' '{sha256}' \"$d/its-agent\" | sha256sum -c -; "
+        f"curl -fsSL '{download_url}' -o \"$d/novieri-agent\"; "
+        f"printf '%s  %s' '{sha256}' \"$d/novieri-agent\" | sha256sum -c -; "
         f"printf %s '{sh_b64}' | base64 -d > \"$d/install.sh\"; "
-        f"printf %s '{unit_b64}' | base64 -d > \"$d/its-agent.service\"; "
+        f"printf %s '{unit_b64}' | base64 -d > \"$d/novieri-agent.service\"; "
         "chmod +x \"$d/install.sh\"; "
         f"printf '%s' '{token}' | sudo bash \"$d/install.sh\" "
-        f"--token-stdin --url '{enroll_url}' --binary \"$d/its-agent\""
+        f"--token-stdin --url '{enroll_url}' --binary \"$d/novieri-agent\""
     )

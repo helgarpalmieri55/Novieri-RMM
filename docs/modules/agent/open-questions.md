@@ -567,5 +567,5 @@ Items 1–3 are procurement and cost; item 4 is a supply-chain boundary.
 - **The Windows path is the one that is genuinely unsigned** and carries the
   SmartScreen/EDR consequence above.
 - **Updating an endpoint is `dpkg -i` of a newer package**, which preserves
-  `/var/lib/its-agent` and therefore the device identity (the `remove` keeps
+  `/var/lib/novieri-agent` and therefore the device identity (the `remove` keeps
   state / `purge` destroys it split is asserted in CI).

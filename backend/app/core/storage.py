@@ -166,7 +166,7 @@ def agent_release_suffix(version: str, os_name: str, arch: str) -> str:
                 version=repr(version),
             )
         )
-    return f"{AGENT_RELEASE_PREFIX}/{safe_version}/its-agent-{os_name}-{arch}"
+    return f"{AGENT_RELEASE_PREFIX}/{safe_version}/novieri-agent-{os_name}-{arch}"
 
 
 class PublicEndpointError(ValueError):
@@ -227,7 +227,7 @@ def resolve_presign_endpoint(settings: Settings) -> str | None:
         raise PublicEndpointError(  # i18n-exempt: misconfiguration, logged; client gets a 500
             f"ITS_S3_PUBLIC_ENDPOINT={public!r} is not an absolute http(s) URL. It "
             "must be the scheme+host (+port) an endpoint reaches object storage on, "
-            "e.g. https://itms.toeshee.com"
+            "e.g. https://rmm.novieri.com"
         )
     if settings.environment == "production" and parsed.scheme != "https":
         raise PublicEndpointError(  # i18n-exempt: misconfiguration, logged; client gets a 500
@@ -301,7 +301,7 @@ class ObjectStore:
             # for a custom endpoint, but the public route DEPENDS on it: the
             # bucket has to be the first path segment for the Traefik rule to
             # match, and virtual-host style would instead produce
-            # `https://<bucket>.itms.toeshee.com/<key>` — a hostname that needs
+            # `https://<bucket>.rmm.novieri.com/<key>` — a hostname that needs
             # a DNS record and a certificate SAN the operator does not have.
             # A botocore default that drifts must not silently break the fleet.
             signing_kwargs["config"] = BotoConfig(
@@ -339,7 +339,7 @@ class ObjectStore:
         `ResponseContentDisposition` so the browser saves the object under that
         name rather than under the storage KEY. The key has no file extension
         -- it is `agent_release_suffix`'s (version, os, arch) triple -- so
-        without this a Windows artefact downloads as `its-agent-windows-amd64`
+        without this a Windows artefact downloads as `novieri-agent-windows-amd64`
         with no `.exe` and will not run. The name is part of the signature, so
         it cannot be swapped after the URL is minted.
         """
@@ -399,7 +399,7 @@ class ObjectStore:
         written.
 
         `download_filename` replaces the default saved-as name. The install link
-        passes `ITMS-Agent-Setup_<host>[@<port>]_<code>.exe` (spec 2026-09-28
+        passes `NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe` (spec 2026-09-28
         §1.2, plan D6a): the bytes are the same published artefact, and the
         name is signed into the URL like the default one.
         """
@@ -408,7 +408,7 @@ class ObjectStore:
         # file the OS will not run. `.exe` for Windows; Linux and macOS agents
         # are extensionless executables and take no suffix.
         filename = download_filename or (
-            f"its-agent-{os_name}-{arch}{'.exe' if os_name == 'windows' else ''}"
+            f"novieri-agent-{os_name}-{arch}{'.exe' if os_name == 'windows' else ''}"
         )
         return self._presign(
             "get_object",

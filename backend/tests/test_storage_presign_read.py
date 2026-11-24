@@ -94,16 +94,16 @@ def test_an_empty_batch_is_refused(object_store: ObjectStore) -> None:
 # The agent-release download must save WITH the platform's extension. The object
 # key is `agent_release_suffix`'s (version, os, arch) triple and carries none,
 # so without a signed Content-Disposition a Windows artefact lands as
-# `its-agent-windows-amd64` -- an extensionless file Windows will not run. This
+# `novieri-agent-windows-amd64` -- an extensionless file Windows will not run. This
 # was reported from the field: the operator downloaded the binary and could not
 # install it. The name is part of the signature, so it cannot be swapped after.
 @pytest.mark.parametrize(
     "os_name, arch, expected",
     [
-        ("windows", "amd64", "its-agent-windows-amd64.exe"),
-        ("windows", "arm64", "its-agent-windows-arm64.exe"),
-        ("linux", "amd64", "its-agent-linux-amd64"),
-        ("darwin", "arm64", "its-agent-darwin-arm64"),
+        ("windows", "amd64", "novieri-agent-windows-amd64.exe"),
+        ("windows", "arm64", "novieri-agent-windows-arm64.exe"),
+        ("linux", "amd64", "novieri-agent-linux-amd64"),
+        ("darwin", "arm64", "novieri-agent-darwin-arm64"),
     ],
 )
 def test_the_release_download_carries_its_platform_filename(
@@ -120,10 +120,10 @@ def test_the_release_download_carries_its_platform_filename(
 
 
 def test_a_caller_may_name_the_saved_file(object_store: ObjectStore) -> None:
-    """The install link signs `ITMS-Agent-Setup_<code>.exe` into the grant
+    """The install link signs `NovieriRMM-Agent-Setup_<code>.exe` into the grant
     (spec 2026-09-28 §1.2); the bytes are the published artefact, untouched."""
     url = object_store.presign_agent_release_get(
         "1.6.0", "windows", "amd64", expires_in=900,
-        download_filename="ITMS-Agent-Setup_" + "A" * 32 + ".exe",
+        download_filename="NovieriRMM-Agent-Setup_" + "A" * 32 + ".exe",
     )
-    assert 'filename="ITMS-Agent-Setup_' + "A" * 32 + '.exe"' in unquote(url)
+    assert 'filename="NovieriRMM-Agent-Setup_' + "A" * 32 + '.exe"' in unquote(url)

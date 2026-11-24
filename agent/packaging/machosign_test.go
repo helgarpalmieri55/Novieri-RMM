@@ -261,7 +261,7 @@ func buildDarwin(t *testing.T, target string) (path string, raw []byte) {
 	if !ok {
 		t.Fatalf("bad target %q", target)
 	}
-	path = filepath.Join(dist, fmt.Sprintf("its-agent-%s-%s", goos, goarch))
+	path = filepath.Join(dist, fmt.Sprintf("novieri-agent-%s-%s", goos, goarch))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("build.sh %s produced no readable %s: %v", target, path, err)

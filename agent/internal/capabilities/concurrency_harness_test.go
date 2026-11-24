@@ -257,7 +257,7 @@ func newConcurrencyHarness(t *testing.T, opts harnessOptions) *concurrencyHarnes
 // test process that is about to exit.
 func harnessSpoolDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "its-agent-harness-")
+	dir, err := os.MkdirTemp("", "novieri-agent-harness-")
 	if err != nil {
 		t.Fatalf("creating the harness spool directory: %v", err)
 	}

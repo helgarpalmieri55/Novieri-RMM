@@ -152,10 +152,10 @@ func (s *Service) installWinRM(ctx context.Context, p installParams) (any, error
 		return result(outcomeFailed, "a directory of the agent's layout on the target is a reparse point "+
 			"(a junction or link); nothing was installed through it", arch), nil
 	case code == scriptExitForeignRoot:
-		return result(outcomeFailed, "%ProgramData%\\ITSuite on the target is owned by an account other than Administrators or SYSTEM; "+
+		return result(outcomeFailed, "%ProgramData%\\NovieriRMM on the target is owned by an account other than Administrators or SYSTEM; "+
 			"it was left untouched and nothing was installed. An administrator must check that folder and remove it", arch), nil
 	case code == scriptExitInstalledMismatch:
-		return result(outcomeFailed, "the installed its-agent.exe does not match the signed SHA-256 after it was placed; "+
+		return result(outcomeFailed, "the installed novieri-agent.exe does not match the signed SHA-256 after it was placed; "+
 			"it was deleted and the service was not started", arch), nil
 	case code == scriptExitNoLayout:
 		return result(outcomeFailed, "the target's session has no %ProgramFiles% or %ProgramData% to install under", arch), nil

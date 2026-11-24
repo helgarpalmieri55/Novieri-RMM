@@ -57,7 +57,7 @@ class _StubStore(ObjectStore):
                 "download_filename": download_filename,
             }
         )
-        return f"https://minio.test/agent-releases/{version}/its-agent-{os_name}-{arch}?sig=x"
+        return f"https://minio.test/agent-releases/{version}/novieri-agent-{os_name}-{arch}?sig=x"
 
 
 @pytest.fixture()
@@ -193,7 +193,7 @@ async def test_the_windows_download_is_a_15_minute_grant_named_for_the_code(
             "os": "windows",
             "arch": "arm64",
             "expires_in": 900,
-            "download_filename": f"ITMS-Agent-Setup_itms.example.test_{code}.exe",
+            "download_filename": f"NovieriRMM-Agent-Setup_itms.example.test_{code}.exe",
         }
     ]
 
@@ -218,7 +218,7 @@ async def test_the_saved_name_carries_the_console_host_and_any_port(
     code = await switch_on(api_env, org_id, ["10.50.0.0/16"])
     response = await _get(api_env, f"/i/{code}/windows?arch=amd64")
     assert response.status_code == 302, response.text
-    assert store.calls[0]["download_filename"] == f"ITMS-Agent-Setup_{host_part}_{code}.exe"
+    assert store.calls[0]["download_filename"] == f"NovieriRMM-Agent-Setup_{host_part}_{code}.exe"
 
 
 @pytest.mark.parametrize("console", ["https://10.1.2.3", "https://[fd00::1]:8443"])

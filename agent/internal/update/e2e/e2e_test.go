@@ -123,7 +123,7 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 		}
 		entries, _ := os.ReadDir(filepath.Dir(plat.target()))
 		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".its-agent.new") {
+			if strings.HasPrefix(e.Name(), ".novieri-agent.new") {
 				t.Fatalf("%s appeared in the target directory", e.Name())
 			}
 		}
@@ -161,13 +161,13 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 		r.waitHelperGone(time.Minute)
 	})
 
-	step("7: no its-agent process ever listened", func() {
+	step("7: no novieri-agent process ever listened", func() {
 		samples, violations := r.sampler.finish()
 		if samples < 10 {
 			t.Fatalf("only %d socket samples were taken", samples)
 		}
 		if len(violations) > 0 {
-			t.Fatalf("listening sockets owned by its-agent: %v", violations)
+			t.Fatalf("listening sockets owned by novieri-agent: %v", violations)
 		}
 		t.Logf("%d samples, no listening socket", samples)
 	})

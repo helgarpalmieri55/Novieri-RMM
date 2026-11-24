@@ -34,7 +34,7 @@ func (SystemServices) Identify(ctx context.Context) (string, error) {
 	return checkIdentity(pid, path, false)
 }
 
-// LaunchHelper starts a transient unit outside its-agent.service's cgroup,
+// LaunchHelper starts a transient unit outside novieri-agent.service's cgroup,
 // which KillMode=control-group would otherwise kill on restart.
 func (SystemServices) LaunchHelper(ctx context.Context, prev, phase string, l Layout, targetDir string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -103,7 +103,7 @@ func removeServiceAndData(ctx context.Context, sys System, t Targets, note func(
 	return purged
 }
 
-// HelperMain is `its-agent --uninstall-helper`. Its inputs are the environment
+// HelperMain is `novieri-agent --uninstall-helper`. Its inputs are the environment
 // the capability set when it launched this process -- never a job's params.
 func HelperMain() int {
 	// FIRST, before anything can load a library (review I2): on Windows, DLLs
@@ -125,6 +125,6 @@ func HelperMain() int {
 		log.Error("uninstall helper finished with errors", "err", err)
 		return 1
 	}
-	log.Info("its-agent removed")
+	log.Info("novieri-agent removed")
 	return 0
 }

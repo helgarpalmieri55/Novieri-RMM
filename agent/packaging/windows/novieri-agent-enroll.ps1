@@ -4,7 +4,7 @@
     enrollment token, then start the service.
 
 .DESCRIPTION
-    The Windows counterpart of linux/its-agent-enroll, and it exists for the
+    The Windows counterpart of linux/novieri-agent-enroll, and it exists for the
     same reason that script does: INSTALLING AND ENROLLING ARE TWO STEPS.
 
     A managed rollout (GPO startup script, Intune Win32 app) stages one package
@@ -38,7 +38,7 @@
     environment.
 
     THIS MEANS REAL REDIRECTED STDIN, NOT A POWERSHELL PIPELINE. A .ps1 runs in
-    the calling PowerShell process, so `'tok' | .\its-agent-enroll.ps1
+    the calling PowerShell process, so `'tok' | .\novieri-agent-enroll.ps1
     -TokenFromStdin` puts the string on the PowerShell pipeline (where nothing
     reads it) and leaves the process's stdin attached to the console -- the
     script sits waiting for somebody to type. Redirect at the OS level instead,
@@ -55,17 +55,17 @@
 
 .EXAMPLE
     $env:ITS_AGENT_ENROLL_TOKEN = <read from your secret store>
-    .\its-agent-enroll.ps1 -Url https://its.example.com
+    .\novieri-agent-enroll.ps1 -Url https://its.example.com
 
 .EXAMPLE
-    cmd /c "type \\server\secrets\token.txt | powershell -NoProfile -ExecutionPolicy Bypass -File its-agent-enroll.ps1 -TokenFromStdin -Url https://its.example.com"
+    cmd /c "type \\server\secrets\token.txt | powershell -NoProfile -ExecutionPolicy Bypass -File novieri-agent-enroll.ps1 -TokenFromStdin -Url https://its.example.com"
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)][string]$Url = $env:ITS_AGENT_ENROLL_URL,
     [switch]$TokenFromStdin,
     [switch]$NoStart,
-    [string]$DataDir = "$env:ProgramData\ITSuite\agent",
+    [string]$DataDir = "$env:ProgramData\NovieriRMM\agent",
     # -Token EXISTS ONLY TO BE REFUSED. Left out of the parameter block
     # entirely, PowerShell answers a bare "A parameter cannot be found that
     # matches parameter name 'Token'", which teaches the operator nothing and
@@ -76,7 +76,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ServiceName = 'its-agent'
+$ServiceName = 'novieri-agent'
 
 if ($Token) {
     throw @'
@@ -84,15 +84,15 @@ the enrollment token must not be passed as an argument: PowerShell keeps command
 lines in its history file, Windows records them in Security event 4688 where
 command-line auditing is on, and any local user can read them from a running
 process.
-  Use:  $env:ITS_AGENT_ENROLL_TOKEN = <token>; .\its-agent-enroll.ps1 -Url ...
-  or:   cmd /c "type token.txt | powershell -NoProfile -File its-agent-enroll.ps1 -TokenFromStdin -Url ..."
+  Use:  $env:ITS_AGENT_ENROLL_TOKEN = <token>; .\novieri-agent-enroll.ps1 -Url ...
+  or:   cmd /c "type token.txt | powershell -NoProfile -File novieri-agent-enroll.ps1 -TokenFromStdin -Url ..."
 '@
 }
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($id)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'its-agent-enroll.ps1 must run elevated (a GPO startup script and an Intune Win32 app both run as SYSTEM, which qualifies).'
+    throw 'novieri-agent-enroll.ps1 must run elevated (a GPO startup script and an Intune Win32 app both run as SYSTEM, which qualifies).'
 }
 if (-not $Url) { throw '-Url is required (or set ITS_AGENT_ENROLL_URL).' }
 
@@ -102,7 +102,7 @@ function Assert-NotReparsePoint([string]$Path) {
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item) { return }
     if (([int]$item.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "$Path is a junction or symbolic link, not a directory. No token was written; an administrator must remove it and run its-agent-enroll.ps1 again."
+        throw "$Path is a junction or symbolic link, not a directory. No token was written; an administrator must remove it and run novieri-agent-enroll.ps1 again."
     }
     if (-not $item.PSIsContainer) {
         throw "$Path exists and is not a directory. No token was written."
@@ -119,7 +119,7 @@ function Assert-ItsOwner([string]$Path) {
     throw "$Path already exists and belongs to $name, not to an administrator. No token was written."
 }
 
-# %ProgramData%\ITSuite, the data directory's PARENT: whoever owns it holds
+# %ProgramData%\NovieriRMM, the data directory's PARENT: whoever owns it holds
 # FILE_DELETE_CHILD on it and can swap the protected data directory for their
 # own, and on a default Windows install a standard user can create it. Owner
 # Administrators, SYSTEM and Administrators only, a link refused -- before the
@@ -183,10 +183,10 @@ if (-not $PSBoundParameters.ContainsKey('DataDir')) {
 # Only a parent that is ours to lock down: a custom data directory of C:\ITS
 # must not end with a protected DACL on C:\.
 $DataParent = Split-Path -Parent $DataDir
-if ((Split-Path -Leaf $DataParent) -eq 'ITSuite') {
+if ((Split-Path -Leaf $DataParent) -eq 'NovieriRMM') {
     Protect-ItsDirectory -Path $DataParent
 } else {
-    Write-Warning "$DataParent is not an ITSuite directory, so its-agent-enroll.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
+    Write-Warning "$DataParent is not a NovieriRMM directory, so novieri-agent-enroll.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
 }
 Assert-NotReparsePoint $DataDir
 
@@ -212,7 +212,7 @@ if (-not $secret) {
     throw 'no enrollment token: set ITS_AGENT_ENROLL_TOKEN or use -TokenFromStdin.
 Note that a PowerShell pipeline does NOT feed this script''s stdin -- redirect
 at the OS level, e.g. cmd /c "type token.txt | powershell -NoProfile -File
-its-agent-enroll.ps1 -TokenFromStdin -Url ...".'
+novieri-agent-enroll.ps1 -TokenFromStdin -Url ...".'
 }
 
 if (-not (Test-Path $DataDir)) {

@@ -304,7 +304,7 @@ func mustBuild() *Registry {
 	// server pushes to Windows as well as a Windows one does.
 	must(r.AdvertiseOnly(pushinstall.CapabilityWinRM))
 	// Review Minor 1: this build's SSH push hands the placed binary its enroll
-	// URL (`its-agent install --enroll-url`). An older build ran `install
+	// URL (`novieri-agent install --enroll-url`). An older build ran `install
 	// --token-file` alone, which installs an agent that never learns where to
 	// enroll, so the control plane uses a site server as an SSH originator only
 	// when it advertises this marker. Advertise-only, like the WinRM one.

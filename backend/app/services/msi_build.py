@@ -16,14 +16,14 @@ accident. Running wixl opens no connection. The guard stays exact; the
 process-running code lives here, and `agent_distribution/msi.py` calls it.
 
 WHAT THE MSI HOLDS, AND NOTHING ELSE:
-  * `its-agent.exe` -- bytes the caller verified against `agent_releases`;
+  * `novieri-agent.exe` -- bytes the caller verified against `agent_releases`;
   * `msi-enroll.json` -- `{"console": <https origin>, "code": <link code>}`;
   * `ItsMsiInstall` -- deferred, no impersonation (SYSTEM): the installed
-    `its-agent.exe --msi-install`, after InstallFiles, on install;
+    `novieri-agent.exe --msi-install`, after InstallFiles, on install;
   * `ItsMsiUninstall` -- the same with `--msi-uninstall`, before RemoveFiles,
     on a real removal only (never while an upgrade removes the older MSI),
     with its exit code ignored so a machine can always be removed;
-  * a ServiceControl row that stops the `its-agent` service on install and on
+  * a ServiceControl row that stops the `novieri-agent` service on install and on
     removal, so neither ever writes over a running image.
 
 THE CODE NEVER REACHES A COMMAND LINE. It is written into `msi-enroll.json`
@@ -62,19 +62,23 @@ __all__ = [
     "verify_msi",
 ]
 
-AGENT_FILE = "its-agent.exe"
+AGENT_FILE = "novieri-agent.exe"
 SETTINGS_FILE = "msi-enroll.json"
-PRODUCT_NAME = "ITMS Agent"
-MANUFACTURER = "Toeshee"
+PRODUCT_NAME = "Novieri RMM Agent"
+MANUFACTURER = "Novieri"
 #: The whole build -- every tool together -- must finish inside this (spec §2.2).
 BUILD_TIMEOUT_S = 60.0
 #: At most this many builds at once in one process; a third waits, then is refused.
 MAX_CONCURRENT_BUILDS = 2
 #: UpgradeCode is uuid5(UPGRADE_NAMESPACE, str(org_id)): constant for an
 #: organisation, so a later MSI upgrades an earlier one instead of installing
-#: beside it (spec §2.2 item 3). This value is fixed forever: changing it
-#: would make every MSI already assigned in a domain a different product.
-UPGRADE_NAMESPACE = uuid.UUID("22ad0fe1-20ac-49a3-938c-25347fa54ecb")
+#: beside it (spec §2.2 item 3). Fixed from here on: changing it makes every
+#: MSI already assigned in a domain a different product. It changed once, on
+#: 2026-11-23, when the product became "Novieri RMM Agent" (design
+#: 2026-11-23-vps-y-marca-novieri §1.1): a new product, and no "ITMS Agent"
+#: MSI is assigned anywhere to upgrade (operator decision B1). The namespace
+#: before it was 22ad0fe1-20ac-49a3-938c-25347fa54ecb.
+UPGRADE_NAMESPACE = uuid.UUID("8814cc17-6469-4df7-93f9-0f75ecdbb6a9")
 #: The Summary Information "Template" per architecture. wixl 0.103-0.106 knows
 #: x86, x64 and ia64 only, so the ARM64 package is built as x64 and its
 #: Template rewritten with msibuild; the tables are the same (one 64-bit
@@ -175,16 +179,16 @@ def render_wxs(*, upgrade: uuid.UUID, version: str) -> str:
              Description="{PRODUCT_NAME}" Manufacturer="{MANUFACTURER}"/>
     <Media Id="1" Cabinet="agent.cab" EmbedCab="yes"/>
     <MajorUpgrade AllowSameVersionUpgrades="yes"
-                  DowngradeErrorMessage="A newer ITMS agent is already installed."/>
+                  DowngradeErrorMessage="A newer Novieri RMM agent is already installed."/>
     <Property Id="ARPNOMODIFY" Value="1"/>
     <Property Id="ARPNOREPAIR" Value="1"/>
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="ITSuite">
+        <Directory Id="INSTALLFOLDER" Name="NovieriRMM">
           <Component Id="Agent" Guid="*">
             <File Id="its_agent_exe" Name="{AGENT_FILE}" Source="{AGENT_FILE}" KeyPath="yes"/>
             <File Id="msi_enroll_json" Name="{SETTINGS_FILE}" Source="{SETTINGS_FILE}"/>
-            <ServiceControl Id="StopAgent" Name="its-agent" Stop="both" Wait="yes"/>
+            <ServiceControl Id="StopAgent" Name="novieri-agent" Stop="both" Wait="yes"/>
           </Component>
         </Directory>
       </Directory>
@@ -339,18 +343,18 @@ def verify_msi(msi: Path, *, arch: str, deadline: float | None = None) -> None:
             "the built MSI runs its custom actions outside the install script",
         )
     files = sorted(row[2] for row in _table(msiinfo, msi, "File", deadline))
-    if files != [AGENT_FILE, SETTINGS_FILE]:
+    if files != sorted([AGENT_FILE, SETTINGS_FILE]):
         raise MsiBuildError(  # i18n-exempt: translated in msi.py by code (build_error_text)
             "wrong_files",
             f"the built MSI holds {files}, not the agent and its settings file",
             files=str(files),
         )
     if _table(msiinfo, msi, "ServiceControl", deadline) != [
-        ["StopAgent", "its-agent", "34", "", "1", "Agent"]
+        ["StopAgent", "novieri-agent", "34", "", "1", "Agent"]
     ]:
         raise MsiBuildError(  # i18n-exempt: translated in msi.py by code (build_error_text)
             "no_service_stop",
-            "the built MSI does not stop the its-agent service on install and removal",
+            "the built MSI does not stop the novieri-agent service on install and removal",
         )
     if _template(msiinfo, msi, deadline) != TEMPLATES[arch]:
         raise MsiBuildError(  # i18n-exempt: translated in msi.py by code (build_error_text)
@@ -416,7 +420,7 @@ def build_agent_msi(
 def main(argv: list[str] | None = None) -> int:
     """`python backend/app/services/msi_build.py ...`, for the Windows e2e.
     The code comes from a FILE, like everywhere else: never an argument."""
-    parser = argparse.ArgumentParser(description="Build the ITMS Group Policy MSI.")
+    parser = argparse.ArgumentParser(description="Build the Novieri RMM Group Policy MSI.")
     parser.add_argument("--exe", required=True, type=Path)
     parser.add_argument("--console", required=True)
     parser.add_argument("--code-file", required=True, type=Path)

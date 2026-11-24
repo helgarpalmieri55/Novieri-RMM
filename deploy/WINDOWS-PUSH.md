@@ -75,7 +75,7 @@ and it is presented only on the address ranges it is bound to.
 
 ## 1. The Group Policy that enables WinRM
 
-Create one GPO (for example **"ITMS — WinRM for push install"**) and link it to
+Create one GPO (for example **"Novieri RMM — WinRM for push install"**) and link it to
 the OU that holds the workstations — **a test OU with one computer in it first**
 (§6). Every setting is under *Computer Configuration → Policies*.
 
@@ -425,7 +425,7 @@ one computer you can walk up to, before the GPO is linked anywhere else.
     dispatched batch; **Jobs** shows the install job on the site server, which
     should end **Succeeded**. If it fails with *"this computer only offered
     NTLM"*, Kerberos was not accepted — recheck §1.2 and §1.4. If it fails
-    with *"%ProgramData%\ITSuite on the target is owned by an account other
+    with *"%ProgramData%\NovieriRMM on the target is owned by an account other
     than Administrators or SYSTEM"*, someone created that folder before the
     agent was installed. Nothing was changed. Find out who and why, delete the
     folder as an administrator, and push again.
@@ -435,11 +435,11 @@ one computer you can walk up to, before the GPO is linked anywhere else.
 11. On PC1:
 
    ```powershell
-   Get-Service its-agent
-   Test-Path "$env:ProgramData\ITSuite\push"
+   Get-Service novieri-agent
+   Test-Path "$env:ProgramData\NovieriRMM\push"
    ```
 
-   `its-agent` is **Running**, and the staging folder is gone (`False`).
+   `novieri-agent` is **Running**, and the staging folder is gone (`False`).
 12. In the console, PC1 appears in **Devices** as an enrolled agent (approve it
    if it is waiting for review), and **Audit** shows `push.dispatched` and
    `push.result` for the install.
@@ -494,7 +494,7 @@ in **Devices → Waiting for review**.
    to every computer in the domain.
 3. Paste the link (the one shown when it was generated) and click **Download
    MSI for Group Policy** (64-bit Intel or AMD, or ARM). Note the SHA-256 the
-   console shows, and check it on the file: `Get-FileHash .\ITMS-Agent-<host>-amd64.msi`.
+   console shows, and check it on the file: `Get-FileHash .\NovieriRMM-Agent-<host>-amd64.msi`.
 4. Copy the MSI to a share the computers' accounts can read — normally under
    `\\<domain>\SYSVOL\<domain>\` — whose write access is limited to the
    administrators who manage it. That ACL is the only thing protecting the
@@ -504,11 +504,11 @@ in **Devices → Waiting for review**.
    UNC path, then **Assigned**. Link the GPO to one test OU first.
 6. Restart one computer in the OU. At startup it installs the agent, joins, and
    appears in **Devices → Waiting for review**; `msi-enroll.json` is no longer in
-   `C:\Program Files\ITSuite`.
+   `C:\Program Files\NovieriRMM`.
 7. Link the GPO to the rest, and after the next restarts click **Approve all**.
 
 **When a computer does not install or join,** look on it at
-`C:\ProgramData\ITSuite\msi.log` (as an administrator: the directory is
+`C:\ProgramData\NovieriRMM\msi.log` (as an administrator: the directory is
 readable by Administrators and SYSTEM only). Each run of the MSI's install or
 removal step adds one line — the time in UTC, `--msi-install` or
 `--msi-uninstall`, and `ok` or `failed:` with the reason, for example

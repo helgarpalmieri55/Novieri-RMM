@@ -14,7 +14,7 @@ def test_the_packaging_readme_records_the_exception_and_its_bounds() -> None:
     text = (REPO / "agent" / "packaging" / "README.md").read_text()
     assert "## The install link: a code in a file name (operator decision, 2026-09-28)" in text
     for fragment in (
-        "ITMS-Agent-Setup_<host>[@<port>]_<code>.exe",
+        "NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe",
         "--elevated-install",
         "object-store access log",
         "Waiting for review",
@@ -30,7 +30,7 @@ def test_the_packaging_readme_describes_the_file_name_and_not_the_mark_of_the_we
     text = (REPO / "agent" / "packaging" / "README.md").read_text()
     assert "Mark of the Web" in text  # named, to say it is not the source
     assert "not read" in text
-    assert "ITMS-Agent-Setup_<code>.exe" not in text
+    assert "NovieriRMM-Agent-Setup_<code>.exe" not in text
     assert "refuses to install and says to download it again" not in text
 
 
@@ -38,8 +38,8 @@ def test_the_distribution_spec_amends_section_2_and_section_7() -> None:
     text = (REPO / "docs" / "modules" / "agent-distribution" / "spec.md").read_text()
     assert "**Amended 2026-09-28 (operator's decision" in text
     assert "except the install link's page" in text
-    assert "ITMS-Agent-Setup_<host>[@<port>]_<code>.exe" in text
-    assert "ITMS-Agent-Setup_<code>.exe" not in text
+    assert "NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe" in text
+    assert "NovieriRMM-Agent-Setup_<code>.exe" not in text
 
 
 MSI_SECTION = (
@@ -82,7 +82,7 @@ def test_the_windows_guide_says_how_to_assign_the_msi() -> None:
 def test_the_windows_guide_says_where_to_look_when_a_gpo_install_fails() -> None:
     text = (REPO / "deploy" / "WINDOWS-PUSH.md").read_text()
     section = text[text.index("## 7. The Group Policy MSI") :]
-    assert "C:\\ProgramData\\ITSuite\\msi.log" in section
+    assert "C:\\ProgramData\\NovieriRMM\\msi.log" in section
     assert "It never holds the link code" in section
 
 

@@ -17,19 +17,19 @@ import (
 	"github.com/toeshee/it-suite/agent/internal/secdir"
 )
 
-// RunMsi is `its-agent.exe --msi-install` (msi.go). It returns the process
+// RunMsi is `novieri-agent.exe --msi-install` (msi.go). It returns the process
 // exit code: anything but 0 fails the MSI, which rolls back.
 func RunMsi(exe string) int {
 	// FIRST, before anything can load a library (review I2).
 	if err := windows.SetDefaultDllDirectories(windows.LOAD_LIBRARY_SEARCH_SYSTEM32); err != nil {
-		fmt.Fprintln(os.Stderr, "its-agent --msi-install: cannot restrict the DLL search path:", err)
+		fmt.Fprintln(os.Stderr, "novieri-agent --msi-install: cannot restrict the DLL search path:", err)
 		return 1
 	}
 	if err := runMsiInstall(realMsi{}, exe, os.Getenv("ProgramFiles"), os.Getenv("ProgramData"), time.Now()); err != nil {
-		fmt.Fprintln(os.Stderr, "its-agent --msi-install:", err)
+		fmt.Fprintln(os.Stderr, "novieri-agent --msi-install:", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "its-agent --msi-install: installed; the service joins through the install link")
+	fmt.Fprintln(os.Stderr, "novieri-agent --msi-install: installed; the service joins through the install link")
 	return 0
 }
 
@@ -110,7 +110,7 @@ func (realMsi) Install(p Plan, code string) error { return applyInPlace(p, code)
 
 func (realMsi) Remove(path string) error { return os.Remove(path) }
 
-// Log appends to %ProgramData%\ITSuite\msi.log. secdir.AppendLine secures
+// Log appends to %ProgramData%\NovieriRMM\msi.log. secdir.AppendLine secures
 // the directory first (creating it, as the install would), refuses one that
 // anyone but Administrators or SYSTEM owns, and never follows a link. A line
 // it cannot write is dropped: diagnostics never fail an install.

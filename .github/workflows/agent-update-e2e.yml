@@ -123,7 +123,7 @@ jobs:
       - name: agent.uninstall on systemd (Linux)
         # Review M4: a signed agent.uninstall against a service the shipped
         # linux/install.sh installed; the transient helper unit must remove the
-        # unit, /etc/its-agent, the binary and the data directory.
+        # unit, /etc/novieri-agent, the binary and the data directory.
         if: runner.os == 'Linux'
         run: |
           sudo env E2E_BIN_DIR="$E2E_BIN_DIR" E2E_REPO_ROOT="$E2E_REPO_ROOT" RUNNER_OS="$RUNNER_OS" \
@@ -144,17 +144,17 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux)
-              sudo journalctl -u its-agent -u its-agent-update -u its-agent-uninstall --no-pager -n 400 || true
-              sudo cat /var/lib/its-agent/update/helper.log /var/lib/its-agent/update/state.json || true ;;
+              sudo journalctl -u novieri-agent -u novieri-agent-update -u novieri-agent-uninstall --no-pager -n 400 || true
+              sudo cat /var/lib/novieri-agent/update/helper.log /var/lib/novieri-agent/update/state.json || true ;;
             macOS)
-              sudo tail -n 400 /var/log/its-agent/agent.log || true
-              sudo cat /var/lib/its-agent/update/helper.log /var/lib/its-agent/update/state.json || true ;;
+              sudo tail -n 400 /var/log/novieri-agent/agent.log || true
+              sudo cat /var/lib/novieri-agent/update/helper.log /var/lib/novieri-agent/update/state.json || true ;;
             Windows)
-              cat "$PROGRAMDATA/ITSuite/agent/update/helper.log" "$PROGRAMDATA/ITSuite/agent/update/state.json" || true
-              powershell -NoProfile -Command "Get-WinEvent -LogName System -MaxEvents 200 | Where-Object { \$_.Message -like '*its-agent*' } | Format-List TimeCreated,Message" || true
+              cat "$PROGRAMDATA/NovieriRMM/agent/update/helper.log" "$PROGRAMDATA/NovieriRMM/agent/update/state.json" || true
+              powershell -NoProfile -Command "Get-WinEvent -LogName System -MaxEvents 200 | Where-Object { \$_.Message -like '*novieri-agent*' } | Format-List TimeCreated,Message" || true
               # agent.uninstall's helper copy: was it staged (review M1:
-              # %ProgramData%\ITSuite\uninstall-<n>\its-agent-uninstall.exe)?
+              # %ProgramData%\NovieriRMM\uninstall-<n>\novieri-agent-uninstall.exe)?
               # $env: is PowerShell's, not bash's: the single quotes are the point.
               # shellcheck disable=SC2016
-              powershell -NoProfile -Command 'Get-ChildItem "$env:ProgramData\ITSuite\uninstall-*" -Recurse -ErrorAction SilentlyContinue | Format-List FullName' || true ;;
+              powershell -NoProfile -Command 'Get-ChildItem "$env:ProgramData\NovieriRMM\uninstall-*" -Recurse -ErrorAction SilentlyContinue | Format-List FullName' || true ;;
           esac

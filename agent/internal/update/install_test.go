@@ -35,7 +35,7 @@ func okSelfTest(context.Context, string) error { return nil }
 
 func TestInstallFileReplacesTheTargetAndLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "staged", "its-agent")
+	src := filepath.Join(dir, "staged", "novieri-agent")
 	sha := writeFile(t, src, "new binary")
 	target := filepath.Join(dir, "bin", BinaryName())
 	writeFile(t, target, "old binary")
@@ -61,7 +61,7 @@ func TestInstallFileReplacesTheTargetAndLeavesNoTempFile(t *testing.T) {
 
 func TestInstallFileRefusesASourceThatNoLongerMatches(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "staged", "its-agent")
+	src := filepath.Join(dir, "staged", "novieri-agent")
 	sha := writeFile(t, src, "verified bytes")
 	// Swapped after staging.
 	writeFile(t, src, "attacker bytes")
@@ -89,7 +89,7 @@ func TestInstallFileRefusesASourceThatNoLongerMatches(t *testing.T) {
 
 func TestInstallFileFailedSelfTestLeavesTheTarget(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "staged", "its-agent")
+	src := filepath.Join(dir, "staged", "novieri-agent")
 	sha := writeFile(t, src, "new binary")
 	target := filepath.Join(dir, "bin", BinaryName())
 	writeFile(t, target, "old binary")
@@ -107,7 +107,7 @@ func TestInstallFileFailedSelfTestLeavesTheTarget(t *testing.T) {
 
 func TestInstallFileReplacesAStaleTempFile(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "staged", "its-agent")
+	src := filepath.Join(dir, "staged", "novieri-agent")
 	sha := writeFile(t, src, "new binary")
 	target := filepath.Join(dir, "bin", BinaryName())
 	writeFile(t, target, "old binary")

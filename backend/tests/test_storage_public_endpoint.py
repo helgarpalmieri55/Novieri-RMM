@@ -65,8 +65,8 @@ BUCKET = "it-suite-public-test"
 # no assertion below can pass by coincidence.
 INTERNAL = "http://minio:9000"
 INTERNAL_HOST = "minio:9000"
-PUBLIC = "https://itms.toeshee.com"
-PUBLIC_HOST = "itms.toeshee.com"
+PUBLIC = "https://rmm.novieri.com"
+PUBLIC_HOST = "rmm.novieri.com"
 
 
 def _settings(tmp_path, **overrides) -> Settings:
@@ -133,7 +133,7 @@ def test_the_bucket_is_the_first_path_segment(store) -> None:
 
     The public route is a path prefix on the operator's existing hostname, so
     the bucket has to be the first segment of the path — that is the prefix
-    Traefik matches. Virtual-host style (`<bucket>.itms.toeshee.com`) would
+    Traefik matches. Virtual-host style (`<bucket>.rmm.novieri.com`) would
     need a DNS name and a certificate SAN the operator does not have, and
     botocore chooses it whenever it decides an endpoint looks like AWS.
 
@@ -179,7 +179,7 @@ def test_internal_reads_and_writes_still_use_the_internal_endpoint(store) -> Non
     and back would put every backup chunk on the public entrypoint.
 
     Falsifier: point the one client at the public endpoint (the lazy fix) and
-    this reads `itms.toeshee.com`.
+    this reads `rmm.novieri.com`.
     """
     assert store._client.meta.endpoint_url == INTERNAL
     assert store._signing_client.meta.endpoint_url == PUBLIC
@@ -376,7 +376,7 @@ def test_a_public_endpoint_with_a_path_prefix_is_refused(tmp_path) -> None:
 
 
 def test_a_public_endpoint_that_is_not_an_absolute_url_is_refused(tmp_path) -> None:
-    for bad in ("itms.toeshee.com", "//itms.toeshee.com", "https://", "s3://bucket"):
+    for bad in ("rmm.novieri.com", "//rmm.novieri.com", "https://", "s3://bucket"):
         kind, detail = _outcome(_settings(tmp_path, s3_public_endpoint=bad))
         assert kind == "refused", f"{bad!r} was accepted, signing at {detail}"
 

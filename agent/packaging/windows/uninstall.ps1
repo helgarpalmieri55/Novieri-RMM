@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Remove the Toeshee agent from this Windows endpoint.
+    Remove the Novieri RMM agent from this Windows endpoint.
 
 .DESCRIPTION
     Stops and deletes the service, removes the binary, and -- unless
@@ -25,19 +25,19 @@
     UNTESTED. No Windows host has run this script.
 
 .PARAMETER KeepState
-    Leave %ProgramData%\ITSuite\agent in place.
+    Leave %ProgramData%\NovieriRMM\agent in place.
 #>
 [CmdletBinding()]
 param(
     [switch]$KeepState,
-    [string]$InstallDir = "$env:ProgramFiles\ITSuite",
-    [string]$DataDir = "$env:ProgramData\ITSuite\agent"
+    [string]$InstallDir = "$env:ProgramFiles\NovieriRMM",
+    [string]$DataDir = "$env:ProgramData\NovieriRMM\agent"
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ServiceName = 'its-agent'
+$ServiceName = 'novieri-agent'
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($id)
@@ -53,7 +53,7 @@ if ($svc) {
         # to avoid here.
         Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         # WAITED FOR, not fired and forgotten. Windows keeps a section open on
-        # a running executable's image, so removing its-agent.exe below fails
+        # a running executable's image, so removing novieri-agent.exe below fails
         # while the process is still exiting -- and every removal here is
         # -ErrorAction SilentlyContinue, so it would fail into the success
         # banner at the bottom.
@@ -62,7 +62,7 @@ if ($svc) {
     & sc.exe delete $ServiceName | Out-Null
 }
 
-$binary = Join-Path $InstallDir 'its-agent.exe'
+$binary = Join-Path $InstallDir 'novieri-agent.exe'
 foreach ($attempt in 1..20) {
     Remove-Item -Path $binary -Force -ErrorAction SilentlyContinue
     if (-not (Test-Path $binary)) { break }
@@ -90,12 +90,12 @@ $leftBinary = Test-Path $binary
 $leftState = (-not $KeepState) -and (Test-Path $DataDir)
 Write-Host ''
 if ($leftBinary -or $leftState) {
-    Write-Host 'its-agent PARTIALLY removed from this endpoint.'
+    Write-Host 'novieri-agent PARTIALLY removed from this endpoint.'
     if ($leftBinary) { Write-Host "  still present: $binary (something still holds it open)" }
     if ($leftState) { Write-Host "  still present: $DataDir (the credentials in it were removed by name)" }
     Write-Host '  reboot and re-run, or remove these by hand.'
 } else {
-    Write-Host 'its-agent removed from this endpoint.'
+    Write-Host 'novieri-agent removed from this endpoint.'
 }
 Write-Host 'Still present, on purpose:'
 Write-Host '  * the device record in the control plane (retire it in the console)'

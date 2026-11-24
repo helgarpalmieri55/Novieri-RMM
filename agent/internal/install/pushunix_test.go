@@ -16,7 +16,7 @@ import (
 )
 
 // The Linux and macOS install mode the SSH push runs on the target
-// (`its-agent install --token-file ... --enroll-url ...`), exercised as a
+// (`novieri-agent install --token-file ... --enroll-url ...`), exercised as a
 // plan against a fake system: every file operation and every systemctl /
 // launchctl call is recorded, so the ORDER and the MODES are asserted, not
 // inferred. The real system (push_unix.go) is a thin layer over os and
@@ -31,7 +31,7 @@ type fakeUnix struct {
 	dirs   map[string]stagingDirInfo
 	links  map[string]string // path -> what filepath.EvalSymlinks returns
 	ops    []string
-	runErr map[string]error // "systemctl restart its-agent.service" -> err
+	runErr map[string]error // "systemctl restart novieri-agent.service" -> err
 }
 
 func newFakeUnix() *fakeUnix {
@@ -136,22 +136,22 @@ func TestTheLinuxLayoutIsInstallShs(t *testing.T) {
 	want := UnixLayout{
 		GOOS:        "linux",
 		BinDir:      "/usr/local/bin",
-		Binary:      "/usr/local/bin/its-agent",
-		DataDir:     "/var/lib/its-agent",
-		TokenPath:   "/var/lib/its-agent/enroll-token",
-		ConfDir:     "/etc/its-agent",
-		EnvFile:     "/etc/its-agent/agent.env",
+		Binary:      "/usr/local/bin/novieri-agent",
+		DataDir:     "/var/lib/novieri-agent",
+		TokenPath:   "/var/lib/novieri-agent/enroll-token",
+		ConfDir:     "/etc/novieri-agent",
+		EnvFile:     "/etc/novieri-agent/agent.env",
 		ServiceDir:  "/etc/systemd/system",
-		ServiceFile: "/etc/systemd/system/its-agent.service",
-		Service:     "its-agent",
+		ServiceFile: "/etc/systemd/system/novieri-agent.service",
+		Service:     "novieri-agent",
 	}
 	if got := mustLayout(t, "linux"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("linux layout =\n%+v\nwant\n%+v", got, want)
 	}
 	script := readPackaging(t, "linux/install.sh")
 	for _, line := range []string{
-		`BINDIR="/usr/local/bin"`, `UNITDIR="/etc/systemd/system"`, `CONFDIR="/etc/its-agent"`,
-		`STATEDIR="/var/lib/its-agent"`, `SERVICE="its-agent"`, `envfile="${DESTDIR}${CONFDIR}/agent.env"`,
+		`BINDIR="/usr/local/bin"`, `UNITDIR="/etc/systemd/system"`, `CONFDIR="/etc/novieri-agent"`,
+		`STATEDIR="/var/lib/novieri-agent"`, `SERVICE="novieri-agent"`, `envfile="${DESTDIR}${CONFDIR}/agent.env"`,
 		`tokenfile="${DESTDIR}${STATEDIR}/enroll-token"`, `ITS_AGENT_ENROLL_URL=${URL}`,
 	} {
 		if !strings.Contains(script, line) {
@@ -164,21 +164,21 @@ func TestTheDarwinLayoutIsInstallShs(t *testing.T) {
 	want := UnixLayout{
 		GOOS:        "darwin",
 		BinDir:      "/usr/local/libexec",
-		Binary:      "/usr/local/libexec/its-agent",
-		DataDir:     "/var/lib/its-agent",
-		TokenPath:   "/var/lib/its-agent/enroll-token",
-		LogDir:      "/var/log/its-agent",
+		Binary:      "/usr/local/libexec/novieri-agent",
+		DataDir:     "/var/lib/novieri-agent",
+		TokenPath:   "/var/lib/novieri-agent/enroll-token",
+		LogDir:      "/var/log/novieri-agent",
 		ServiceDir:  "/Library/LaunchDaemons",
-		ServiceFile: "/Library/LaunchDaemons/com.toeshee.itsagent.plist",
-		Service:     "com.toeshee.itsagent",
+		ServiceFile: "/Library/LaunchDaemons/com.novieri.rmm.agent.plist",
+		Service:     "com.novieri.rmm.agent",
 	}
 	if got := mustLayout(t, "darwin"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("darwin layout =\n%+v\nwant\n%+v", got, want)
 	}
 	script := readPackaging(t, "darwin/install.sh")
 	for _, line := range []string{
-		`BINDIR="/usr/local/libexec"`, `PLISTDIR="/Library/LaunchDaemons"`, `STATEDIR="/var/lib/its-agent"`,
-		`LOGDIR="/var/log/its-agent"`, `LABEL="com.toeshee.itsagent"`,
+		`BINDIR="/usr/local/libexec"`, `PLISTDIR="/Library/LaunchDaemons"`, `STATEDIR="/var/lib/novieri-agent"`,
+		`LOGDIR="/var/log/novieri-agent"`, `LABEL="com.novieri.rmm.agent"`,
 		`Add :EnvironmentVariables:ITS_AGENT_ENROLL_URL string ${URL}`,
 	} {
 		if !strings.Contains(script, line) {
@@ -199,12 +199,12 @@ func TestOtherSystemsHaveNoInstallMode(t *testing.T) {
 // mode carries copies because the service must not link `embed` for the
 // installer's sake (imports_test.go), and this test is what keeps them equal.
 func TestTheServiceDefinitionsAreTheShippedFiles(t *testing.T) {
-	if got, want := linuxUnit, readPackaging(t, "linux/its-agent.service"); got != want {
-		t.Fatalf("linuxUnit differs from agent/packaging/linux/its-agent.service (%d vs %d bytes); "+
+	if got, want := linuxUnit, readPackaging(t, "linux/novieri-agent.service"); got != want {
+		t.Fatalf("linuxUnit differs from agent/packaging/linux/novieri-agent.service (%d vs %d bytes); "+
 			"copy the file into pushunix.go", len(got), len(want))
 	}
-	if got, want := darwinPlistTemplate, readPackaging(t, "darwin/com.toeshee.itsagent.plist"); got != want {
-		t.Fatalf("darwinPlistTemplate differs from agent/packaging/darwin/com.toeshee.itsagent.plist (%d vs %d bytes)",
+	if got, want := darwinPlistTemplate, readPackaging(t, "darwin/com.novieri.rmm.agent.plist"); got != want {
+		t.Fatalf("darwinPlistTemplate differs from agent/packaging/darwin/com.novieri.rmm.agent.plist (%d vs %d bytes)",
 			len(got), len(want))
 	}
 }
@@ -234,33 +234,33 @@ func TestLinuxPushInstallFollowsInstallSh(t *testing.T) {
 		"read " + layout.UnixStagedToken,
 		// The staged token is removed the moment it has been read.
 		"remove " + layout.UnixStagedToken,
-		"dir /var/lib/its-agent 0700 root=true",
-		"excl /var/lib/its-agent/enroll-token 0600",
-		"dir /etc/its-agent 0700 root=true",
-		"write /etc/its-agent/agent.env 0600",
+		"dir /var/lib/novieri-agent 0700 root=true",
+		"excl /var/lib/novieri-agent/enroll-token 0600",
+		"dir /etc/novieri-agent 0700 root=true",
+		"write /etc/novieri-agent/agent.env 0600",
 		"dir /usr/local/bin 0755 root=false",
-		"copy " + layout.UnixStagedBinary + " /usr/local/bin/its-agent 0755",
+		"copy " + layout.UnixStagedBinary + " /usr/local/bin/novieri-agent 0755",
 		"dir /etc/systemd/system 0755 root=false",
-		"write /etc/systemd/system/its-agent.service 0644",
+		"write /etc/systemd/system/novieri-agent.service 0644",
 		"run systemctl daemon-reload",
-		"run systemctl enable its-agent.service",
-		"run systemctl restart its-agent.service",
+		"run systemctl enable novieri-agent.service",
+		"run systemctl restart novieri-agent.service",
 		"remove " + layout.UnixStagedBinary,
 	}
 	if !reflect.DeepEqual(f.ops, want) {
 		t.Fatalf("ops =\n%s\nwant\n%s", strings.Join(f.ops, "\n"), strings.Join(want, "\n"))
 	}
-	if got := string(f.files["/var/lib/its-agent/enroll-token"]); got != "PUSH-TOKEN" {
+	if got := string(f.files["/var/lib/novieri-agent/enroll-token"]); got != "PUSH-TOKEN" {
 		t.Fatalf("token file = %q", got)
 	}
-	env := string(f.files["/etc/its-agent/agent.env"])
+	env := string(f.files["/etc/novieri-agent/agent.env"])
 	if !strings.Contains(env, "\nITS_AGENT_ENROLL_URL="+testOrigin+"\n") {
 		t.Fatalf("agent.env = %q", env)
 	}
 	if strings.Contains(env, "PUSH-TOKEN") {
 		t.Fatal("the token is in agent.env")
 	}
-	if got := string(f.files["/etc/systemd/system/its-agent.service"]); got != linuxUnit {
+	if got := string(f.files["/etc/systemd/system/novieri-agent.service"]); got != linuxUnit {
 		t.Fatal("the unit written is not the shipped unit")
 	}
 	for _, staged := range []string{layout.UnixStagedToken, layout.UnixStagedBinary} {
@@ -279,23 +279,23 @@ func TestDarwinPushInstallFollowsInstallSh(t *testing.T) {
 	if err := pushInstall(f, mustLayout(t, "darwin"), pushArgs(), layout.UnixStagedBinary); err != nil {
 		t.Fatal(err)
 	}
-	plist := "/Library/LaunchDaemons/com.toeshee.itsagent.plist"
+	plist := "/Library/LaunchDaemons/com.novieri.rmm.agent.plist"
 	want := []string{
 		// Review I3: the staging directory is checked before anything in it
 		// is read.
 		"lstat " + layout.UnixPushStagingDir,
 		"read " + layout.UnixStagedToken,
 		"remove " + layout.UnixStagedToken,
-		"dir /var/lib/its-agent 0700 root=true",
-		"dir /var/log/its-agent 0750 root=true",
+		"dir /var/lib/novieri-agent 0700 root=true",
+		"dir /var/log/novieri-agent 0750 root=true",
 		"dir /usr/local/libexec 0755 root=false",
-		"excl /var/lib/its-agent/enroll-token 0600",
-		"copy " + layout.UnixStagedBinary + " /usr/local/libexec/its-agent 0755",
+		"excl /var/lib/novieri-agent/enroll-token 0600",
+		"copy " + layout.UnixStagedBinary + " /usr/local/libexec/novieri-agent 0755",
 		"dir /Library/LaunchDaemons 0755 root=false",
 		"write " + plist + " 0644",
-		"run launchctl bootout system/com.toeshee.itsagent",
+		"run launchctl bootout system/com.novieri.rmm.agent",
 		// Enable BEFORE bootstrap (darwin/install.sh says why).
-		"run launchctl enable system/com.toeshee.itsagent",
+		"run launchctl enable system/com.novieri.rmm.agent",
 		"run launchctl bootstrap system " + plist,
 		"remove " + layout.UnixStagedBinary,
 	}
@@ -304,7 +304,7 @@ func TestDarwinPushInstallFollowsInstallSh(t *testing.T) {
 	}
 	body := f.files[plist]
 	env := plistEnvironment(t, body)
-	if env["ITS_AGENT_ENROLL_URL"] != testOrigin || env["ITS_AGENT_DATA_DIR"] != "/var/lib/its-agent" {
+	if env["ITS_AGENT_ENROLL_URL"] != testOrigin || env["ITS_AGENT_DATA_DIR"] != "/var/lib/novieri-agent" {
 		t.Fatalf("plist EnvironmentVariables = %v", env)
 	}
 	if bytes.Contains(body, []byte("PUSH-TOKEN")) {
@@ -315,7 +315,7 @@ func TestDarwinPushInstallFollowsInstallSh(t *testing.T) {
 func TestADarwinBootoutFailureIsNotFatal(t *testing.T) {
 	// install.sh: `launchctl bootout ... || true` -- nothing loaded is normal.
 	f := newFakeUnix()
-	f.runErr = map[string]error{"launchctl bootout system/com.toeshee.itsagent": errors.New("no such service")}
+	f.runErr = map[string]error{"launchctl bootout system/com.novieri.rmm.agent": errors.New("no such service")}
 	if err := pushInstall(f, mustLayout(t, "darwin"), pushArgs(), layout.UnixStagedBinary); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestPushInstallRefusesBeforeTouchingTheSystem(t *testing.T) {
 		"a stray argument":         append(pushArgs(), "extra"),
 		"a repeated flag":          append(pushArgs(), layout.FlagEnrollURL, testOrigin),
 		"the token file is the final token path": {
-			layout.FlagTokenFile, "/var/lib/its-agent/enroll-token", layout.FlagEnrollURL, testOrigin,
+			layout.FlagTokenFile, "/var/lib/novieri-agent/enroll-token", layout.FlagEnrollURL, testOrigin,
 		},
 	}
 	for name, args := range cases {
@@ -437,7 +437,7 @@ func TestPushInstallRefusesAMissingOrEmptyToken(t *testing.T) {
 
 func TestAFailedServiceStartIsReportedAndTheStagedFilesAreStillRemoved(t *testing.T) {
 	f := newFakeUnix()
-	f.runErr = map[string]error{"systemctl restart its-agent.service": errors.New("exit status 1")}
+	f.runErr = map[string]error{"systemctl restart novieri-agent.service": errors.New("exit status 1")}
 	err := pushInstall(f, mustLayout(t, "linux"), pushArgs(), layout.UnixStagedBinary)
 	if err == nil || !strings.Contains(err.Error(), "restart") {
 		t.Fatalf("err = %v", err)
@@ -452,7 +452,7 @@ func TestAFailedServiceStartIsReportedAndTheStagedFilesAreStillRemoved(t *testin
 func TestOnlyAStagedBinaryIsDeleted(t *testing.T) {
 	// Run as the INSTALLED binary (or anything outside the push staging
 	// directory), the install mode must never delete the file it runs from.
-	for _, exe := range []string{"/usr/local/bin/its-agent", "/home/op/its-agent"} {
+	for _, exe := range []string{"/usr/local/bin/novieri-agent", "/home/op/novieri-agent"} {
 		f := newFakeUnix()
 		f.files[exe] = []byte("the agent binary")
 		if err := pushInstall(f, mustLayout(t, "linux"), pushArgs(), exe); err != nil {
@@ -511,11 +511,11 @@ func TestPushInstallRefusesAStagingDirectorySomeoneElseCouldWrite(t *testing.T) 
 
 // REVIEW Minor 5. os.Executable resolves symlinks, so on a host where /opt is
 // a symlink (`/opt -> var/opt`) the running staged binary reports
-// /var/opt/toeshee/agent.pkg. Both sides are resolved before comparing, or
+// /var/opt/novieri/agent.pkg. Both sides are resolved before comparing, or
 // the staged copy would be left behind.
 func TestTheStagedBinaryIsDeletedThroughASymlinkedOpt(t *testing.T) {
 	f := newFakeUnix()
-	real := "/var/opt/toeshee/agent.pkg"
+	real := "/var/opt/novieri/agent.pkg"
 	f.links = map[string]string{layout.UnixStagedBinary: real}
 	f.files[real] = []byte("the agent binary")
 	if err := pushInstall(f, mustLayout(t, "linux"), pushArgs(), real); err != nil {
@@ -530,14 +530,14 @@ func TestAFileThatMerelyResolvesElsewhereIsNotDeleted(t *testing.T) {
 	// The installed binary is a symlink to somewhere else entirely: still not
 	// the staged copy, still never deleted.
 	f := newFakeUnix()
-	exe := "/usr/local/bin/its-agent"
-	f.links = map[string]string{exe: "/usr/local/lib/its-agent-1.6.0"}
+	exe := "/usr/local/bin/novieri-agent"
+	f.links = map[string]string{exe: "/usr/local/lib/novieri-agent-1.6.0"}
 	f.files[exe] = []byte("the agent binary")
 	if err := pushInstall(f, mustLayout(t, "linux"), pushArgs(), exe); err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range f.ops {
-		if op == "remove "+exe || op == "remove /usr/local/lib/its-agent-1.6.0" {
+		if op == "remove "+exe || op == "remove /usr/local/lib/novieri-agent-1.6.0" {
 			t.Fatalf("deleted the running binary: %s", op)
 		}
 	}

@@ -12,7 +12,7 @@ import (
 // with these compiled-in paths and ONE validated value, the enroll origin. The
 // enrollment token is never an argument -- it is a 0600 file.
 const (
-	// PushSubcommand is the placed binary's install mode: `its-agent install`.
+	// PushSubcommand is the placed binary's install mode: `novieri-agent install`.
 	PushSubcommand = "install"
 	// FlagTokenFile names the staged 0600 token file. The token itself is
 	// never an argument (argv is world-readable through /proc/<pid>/cmdline).
@@ -21,7 +21,7 @@ const (
 	FlagEnrollURL = "--enroll-url"
 	// UnixPushStagingDir is where the SSH push places the artefact and the
 	// token before running the install mode, which deletes both.
-	UnixPushStagingDir = "/opt/toeshee"
+	UnixPushStagingDir = "/opt/novieri"
 	// UnixStagedBinary and UnixStagedToken are the two files placed there.
 	UnixStagedBinary = UnixPushStagingDir + "/agent.pkg"
 	UnixStagedToken  = UnixPushStagingDir + "/enroll.token"

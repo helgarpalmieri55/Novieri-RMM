@@ -1143,11 +1143,11 @@ enrollment token as a `0600` root-owned file (never argv, `packaging/README.md`)
 register the service; report; zero the credential; close everything.
 
 **How the service is registered over SSH (2026-09-29).** The pushing agent
-creates the root-only staging directory `/opt/toeshee`, places the verified
-artefact at `/opt/toeshee/agent.pkg` and the token at
-`/opt/toeshee/enroll.token` (0600), and runs one fixed command against the
-placed binary: `/opt/toeshee/agent.pkg install --token-file
-/opt/toeshee/enroll.token --enroll-url '<enroll_url>'`. That binary's install
+creates the root-only staging directory `/opt/novieri`, places the verified
+artefact at `/opt/novieri/agent.pkg` and the token at
+`/opt/novieri/enroll.token` (0600), and runs one fixed command against the
+placed binary: `/opt/novieri/agent.pkg install --token-file
+/opt/novieri/enroll.token --enroll-url '<enroll_url>'`. That binary's install
 mode (`agent/internal/install/pushunix.go`, the "installer compiled into the
 agent" of clause (b)) does what `agent/packaging/linux/install.sh` and
 `agent/packaging/darwin/install.sh` do, to the same layout, and deletes both

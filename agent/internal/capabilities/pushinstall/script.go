@@ -18,7 +18,7 @@ const (
 	scriptExitArchMismatch   = 3
 	scriptExitDigestMismatch = 4
 	scriptExitNoToken        = 5
-	// scriptExitUnsafeDirectory: %ProgramData%\ITSuite, push or agent is a
+	// scriptExitUnsafeDirectory: %ProgramData%\NovieriRMM, push or agent is a
 	// reparse point (or not a directory). Nothing under it is used.
 	scriptExitUnsafeDirectory = 6
 	// scriptExitInstalledMismatch: the binary in %ProgramFiles% does not hash
@@ -28,7 +28,7 @@ const (
 	// scriptExitNoLayout: the session has no rooted %ProgramFiles% or
 	// %ProgramData%, so there is nowhere to resolve the layout against.
 	scriptExitNoLayout = 8
-	// scriptExitForeignRoot: %ProgramData%\ITSuite already exists and is
+	// scriptExitForeignRoot: %ProgramData%\NovieriRMM already exists and is
 	// owned by neither Administrators nor SYSTEM. It is left untouched: what
 	// its owner planted inside, or a handle they opened earlier, would survive
 	// a new owner and a new DACL (the install link refuses it for the same
@@ -98,11 +98,11 @@ func checkConsole(console string) error {
 
 // BuildInstallScript is the FIXED PowerShell a WinRM push runs on the target
 // (design §2.2). It is a constant template filled ONLY with layout.Plan layout
-// (PR 1's self-installer layout, D5 -- one place names %ProgramFiles%\ITSuite
-// and %ProgramData%\ITSuite\agent) and signed-param VALUES: the presigned URL,
+// (PR 1's self-installer layout, D5 -- one place names %ProgramFiles%\NovieriRMM
+// and %ProgramData%\NovieriRMM\agent) and signed-param VALUES: the presigned URL,
 // the SHA-256, the declared arch, and the signed enroll_url. No operator- or
 // platform-authored command travels (2a clause (b)); the only thing that
-// executes is the platform's own published its-agent.exe, placed by these
+// executes is the platform's own published novieri-agent.exe, placed by these
 // fixed steps. Every value is validated and single-quoted.
 //
 // THE ENROLMENT TOKEN IS NOT IN THE SCRIPT. The script is powershell.exe's
@@ -114,15 +114,15 @@ func checkConsole(console string) error {
 // staging dir with a protected SYSTEM+Administrators DACL owned by
 // Administrators; download and verify the SHA-256 (refuse on mismatch, before
 // anything is placed); stop an existing service; copy to
-// %ProgramFiles%\ITSuite\its-agent.exe and VERIFY IT AGAIN THERE; write the
+// %ProgramFiles%\NovieriRMM\novieri-agent.exe and VERIFY IT AGAIN THERE; write the
 // token file (CreateNew, no BOM) in the protected data dir; register the
 // service with no arguments and the data dir + enrol URL in its Environment;
 // recovery actions from the plan; start; delete the staging dir.
 //
-// REVIEW C1 (2026-09-29). A standard user may create %ProgramData%\ITSuite
+// REVIEW C1 (2026-09-29). A standard user may create %ProgramData%\NovieriRMM
 // before any agent is installed, and would then own it -- and with it the
 // staging and data directories, whatever DACL they were later given: swap
-// push\its-agent.exe between the hash and the copy (an oplock makes that race
+// push\novieri-agent.exe between the hash and the copy (an oplock makes that race
 // deterministic), or plant an agent\ identity, and their code runs as SYSTEM.
 // So, before anything under it is used, the root is created WITH its
 // descriptor or taken (owner BUILTIN\Administrators, protected SYSTEM +
@@ -349,7 +349,7 @@ New-ProtectedDirectory $staging
 
 # 4. Download, then verify the signed SHA-256 BEFORE anything is placed.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$pkg = Join-Path $staging 'its-agent.exe'
+$pkg = Join-Path $staging 'novieri-agent.exe'
 Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $pkg
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pkg).Hash.ToLowerInvariant()
 if ($hash -ne $want) {
@@ -369,7 +369,7 @@ foreach ($attempt in 1..20) {
     try { Copy-Item -LiteralPath $pkg -Destination $target -Force; $copied = $true; break }
     catch { Start-Sleep -Milliseconds 500 }
 }
-if (-not $copied) { throw 'the previous its-agent.exe is still in use' }
+if (-not $copied) { throw 'the previous novieri-agent.exe is still in use' }
 
 # 5b. VERIFY AGAIN WHERE IT WILL RUN (review C1). %ProgramFiles% is
 # administrators-only; whatever happened in the staging directory, the file the
