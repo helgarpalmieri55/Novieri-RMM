@@ -33,5 +33,13 @@
 .savebar-blocked { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--muted); }
 .savebar.saved { gap: 8px; }
 .savebar.saved .ic { color: var(--sev-ok); }
+/* A PHONE (DESIGN.md v4, "Forms"; the /__preview critique's P1): the label takes
+ * the first row and Discard and Save stay together at the end of the next,
+ * instead of Save wrapping alone to the left edge, away from its pair. The
+ * saved line is one icon and one sentence, and keeps its own row. */
+@media (max-width: 640px) {
+  .savebar:not(.saved) { justify-content: flex-end; }
+  .savebar:not(.saved) .savebar-what { flex-basis: 100%; margin-right: 0; }
+}
 
 @media (prefers-reduced-motion: reduce) { .form-section-toggle .chev { transition: none; } }

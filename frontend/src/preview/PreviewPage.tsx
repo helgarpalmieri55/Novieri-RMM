@@ -1017,7 +1017,9 @@ function KitPreview() {
   const [state, setState] = useState("online");
   const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
   return (
-    <Panel title="Kit v4" subtitle="The list, record and form patterns every page is built from">
+    // BARE, as a list's panel is: the toolbar and the bulk bar run flush to its
+    // edges, the geometry every list page draws.
+    <Panel title="Kit v4" subtitle="The list, record and form patterns every page is built from" bare>
       <ListToolbar
         search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
         chips={
@@ -1035,9 +1037,9 @@ function KitPreview() {
         end={<ShowingCount shown={9} total={12} />}
       />
       <BulkBar count={2} onClear={() => undefined}>
-        <Btn label="Approve" small variant="primary" />
+        <Btn label="Approve" small />
       </BulkBar>
-      <div className="g2">
+      <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <ListEmpty filtered onClear={() => undefined} nothingYet="No computers yet." />
         <ListEmpty
           filtered={false}
