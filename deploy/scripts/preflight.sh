@@ -91,7 +91,7 @@ host="$(grep -E '^ITS_PUBLIC_CONSOLE_URL=' .env | tail -1 \
         | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
 if [ -z "$public_host" ] || [ "$public_host" = "your-host" ]; then
   if [ -n "$host" ] && [ "$host" != "your-host" ]; then
-    fix="add the line ITS_PUBLIC_HOST=$host to .env (the host of ITS_PUBLIC_CONSOLE_URL)."
+    fix="set ITS_PUBLIC_HOST=$host in .env (the host of ITS_PUBLIC_CONSOLE_URL); replace the existing ITS_PUBLIC_HOST line if there is one, do not add a second."
   else
     fix="set ITS_PUBLIC_HOST and ITS_PUBLIC_CONSOLE_URL in .env to the console's DNS name (scripts/new-env.sh writes both, but only for a host with no .env yet)."
   fi
@@ -104,7 +104,7 @@ fi
 
 acme_email="$(grep -E '^ITS_ACME_EMAIL=' .env | tail -1 | cut -d= -f2- || true)"
 if [ -z "$acme_email" ]; then
-  refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Set ITS_ACME_EMAIL in .env to the Let's Encrypt account's contact address (scripts/new-env.sh asks for it, but only for a host with no .env yet)."
+  refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Set ITS_ACME_EMAIL in .env (replace the existing ITS_ACME_EMAIL line, do not add a second) to the Let's Encrypt account's contact address (scripts/new-env.sh asks for it, but only for a host with no .env yet)."
 else
   ok "ITS_ACME_EMAIL is set"
 fi
@@ -159,7 +159,6 @@ print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:
         mine="$bind_ip"
       elif command -v ip >/dev/null 2>&1; then
         mine="$(ip -4 -o address show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ' || true)"
-        [ -n "$mine" ] || printf '  note    this host'"'"'s addresses could not be read (ip failed); compare them by hand\n'
       else
         mine=""
       fi
@@ -170,7 +169,7 @@ print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:
       if [ -n "$match" ]; then
         ok "$public_host resolves to $match, an address of this host"
       elif [ -z "$mine" ]; then
-        printf '  note    %s resolves to %s; this host'"'"'s addresses could not be read (iproute2 is not installed) -- compare them by hand\n' "$public_host" "${v4% }"
+        printf '  note    %s resolves to %s; this host'"'"'s addresses could not be read -- compare them by hand\n' "$public_host" "${v4% }"
       elif printf '%s\n' $mine | grep -qvE '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)'; then
         refuse "$public_host resolves to ${v4% }, which is not an address of this host (${mine% }). Let's Encrypt would validate whatever answers there."
       else

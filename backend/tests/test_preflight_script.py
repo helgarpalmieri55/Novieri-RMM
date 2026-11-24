@@ -249,13 +249,13 @@ def test_the_host_refusal_names_the_exact_line_to_add(tmp_path: Path) -> None:
     env = {k: v for k, v in GOOD_ENV.items() if k != "ITS_PUBLIC_HOST"}
     run = _run(tmp_path, env, GOOD_HOST)
     assert run.returncode == 1
-    assert "add the line ITS_PUBLIC_HOST=rmm.novieri.com to .env" in run.stdout, run.stdout
+    assert "set ITS_PUBLIC_HOST=rmm.novieri.com in .env" in run.stdout, run.stdout
     assert "<" not in run.stdout and "new-env.sh --host" not in run.stdout
 
 
 def test_the_email_refusal_has_no_placeholder(tmp_path: Path) -> None:
     run = _run(tmp_path, {**GOOD_ENV, "ITS_ACME_EMAIL": ""}, GOOD_HOST)
-    assert "Set ITS_ACME_EMAIL in .env" in run.stdout and "<" not in run.stdout
+    assert "Set ITS_ACME_EMAIL in .env (replace" in run.stdout and "<" not in run.stdout
 
 
 def _failing(tmp_path: Path, name: str, host: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -277,5 +277,12 @@ def test_a_failing_ss_is_refused_not_a_silent_exit(tmp_path: Path) -> None:
 
 def test_a_failing_ip_is_noted_not_a_silent_exit(tmp_path: Path) -> None:
     run = _failing(tmp_path, "ip", GOOD_HOST)
-    assert "ip failed" in run.stdout, run.stdout + run.stderr
+    assert "this host's addresses could not be read -- compare" in run.stdout, run.stdout
+    assert "iproute2" not in run.stdout and "ip failed" not in run.stdout, run.stdout
     assert "ok      Docker Engine" in run.stdout, "the script went on past it"
+
+
+def test_an_ip_that_prints_nothing_gets_the_same_neutral_note(tmp_path: Path) -> None:
+    run = _run(tmp_path, GOOD_ENV, {**GOOD_HOST, "FAKE_MINE": ""})
+    assert "this host's addresses could not be read -- compare" in run.stdout, run.stdout
+    assert "iproute2" not in run.stdout and "ip failed" not in run.stdout

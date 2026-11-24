@@ -209,7 +209,7 @@ def test_a_host_with_a_newline_cannot_inject_settings(tmp_path: Path) -> None:
 def test_help_works_from_anywhere_and_prints_only_the_header(tmp_path: Path) -> None:
     deploy = _deploy(tmp_path)
     run = subprocess.run(
-        ["bash", str(deploy / "scripts" / SCRIPT.name), "--help"],
+        ["bash", "deploy/scripts/new-env.sh", "--help"],  # relative: the original bug
         cwd=tmp_path,
         capture_output=True,
         text=True,

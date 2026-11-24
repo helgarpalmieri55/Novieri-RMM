@@ -267,9 +267,7 @@ def _already(
     HOME (where `backups/pre-upgrade-*` live) a directory of its own.
     BASELINE is `BASE` unless one is given: `--full` leaves it empty."""
     known = BASE if baseline is None else baseline
-    return (
-        _containers(listing, docker_fails=docker_fails)
-        + f"""
+    return _containers(listing, docker_fails=docker_fails) + f"""
 HOME={home!r}; [ -n "$HOME" ] || HOME="$PWD"
 git() {{ echo 2f20afbe00000000000000000000000000000000; }}
 BASELINE={known!r}; AFTER=2f20afbe00000000000000000000000000000000
@@ -283,7 +281,6 @@ stop_if_already_deployed
 echo "CONTINUED baseline=[$BASELINE] running=[$RUNNING_TAG] half_done=[$HALF_DONE_UPGRADE]"
 echo "back=[$ROLLBACK_BACKUP_DIR] base=[$ROLLBACK_BASE]"
 """
-    )
 
 
 def _backups(home: Path) -> dict[str, Path]:
@@ -333,14 +330,11 @@ def test_the_way_back_from_a_half_done_upgrade_is_the_backup_from_before_0248(
     help prints that backup, that tag and that commit."""
     made = _backups(tmp_path)
     finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
-    script = (
-        _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path))
-        + f"""
+    script = _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path)) + f"""
 {_fn("rollback_help")}
 BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
 rollback_help
 """
-    )
     run = _run_bash(script)
     assert run.returncode == 0, run.stdout + run.stderr
     assert f"back=[{made['0247']}]" in run.stdout, run.stdout
@@ -364,14 +358,11 @@ def test_a_full_rerun_of_a_half_done_upgrade_still_names_the_way_back(tmp_path: 
     made = _backups(tmp_path)
     finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
     old = "it-suite-keycloak-1 it-suite keycloak\n"
-    script = (
-        _already(old, home=str(tmp_path), baseline="")
-        + f"""
+    script = _already(old, home=str(tmp_path), baseline="") + f"""
 {_fn("rollback_help")}
 BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
 rollback_help
 """
-    )
     run = _run_bash(script)
     assert run.returncode == 0, run.stdout + run.stderr
     assert "half_done=[1]" in run.stdout, run.stdout
@@ -407,14 +398,11 @@ def test_without_a_backup_from_before_0248_the_closing_help_names_none(tmp_path:
     past.mkdir(parents=True)
     (past / "alembic_version").write_text("0248\n")
     finishing = tmp_path / "backups" / "pre-upgrade-2026-11-20T1030Z"
-    script = (
-        _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path))
-        + f"""
+    script = _already("it-suite-keycloak-1 it-suite keycloak\n", home=str(tmp_path)) + f"""
 {_fn("rollback_help")}
 BACKUP_DIR={str(finishing)!r}; NEED_MIGRATE=1; NEED_COMPOSE=1
 rollback_help
 """
-    )
     run = _run_bash(script)
     assert run.returncode == 0, run.stdout + run.stderr
     help_ = run.stdout[run.stdout.index("If you need to go back") :]
@@ -481,18 +469,14 @@ def test_a_rerun_in_the_same_minute_does_not_overwrite_the_backup(tmp_path: Path
 
     def step(minute: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [
-                "bash",
-                "-c",
-                f"""
+            ["bash", "-c", f"""
 set -euo pipefail
 die() {{ printf 'FAILED %s\\n' "$*" >&2; exit 1; }}
 date() {{ echo {minute}; }}
 HOME={str(tmp_path)!r}
 {_backup_step()}
 echo BACKED_UP
-""",
-            ],
+"""],
             capture_output=True,
             text=True,
             cwd=tmp_path,
@@ -783,16 +767,12 @@ def test_with_no_known_base_the_rollback_says_which_keys_it_cannot_rule_out() ->
 def test_a_run_that_dies_part_way_still_prints_how_to_go_back() -> None:
     """With `set -e`, a failed migration exits at once. The guidance used to be
     printed only at the very end, so the worst failures got none."""
-    script = (
-        _harness(migrate=1)
-        + _fn("on_exit")
-        + """
+    script = _harness(migrate=1) + _fn("on_exit") + """
 DEPLOY_FINISHED=0
 trap on_exit EXIT
 say "Migrating"
 false
 """
-    )
     run = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert run.returncode != 0
     assert 'Stopped part-way, during "Migrating"' in run.stdout, run.stdout
