@@ -26,9 +26,10 @@ import uvicorn
 import websockets
 
 from app.gateway.dispatch import publish_ui_event
+from tests.redis_support import TEST_REDIS_URL
 from tests.session_support import CONSOLE, cookie_header, sign_in, ws_cookie
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _free_port() -> int:

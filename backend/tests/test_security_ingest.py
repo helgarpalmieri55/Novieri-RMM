@@ -13,8 +13,9 @@ from app.gateway.protocol import SecurityEventDoc, parse_agent_message
 from app.jobs.engine import JobEngine
 from app.models import Device, Organization, Policy, SecurityEvent
 from app.modules.security_logs.ingest import ingest_events
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _events(n: int, prefix: str = "e") -> list[SecurityEventDoc]:

@@ -17,6 +17,7 @@ from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from tests.conftest import PgCluster
 from tests.push_run_fixtures import CONSOLE, FakeStore, FakeVault, run_world, start_run
+from tests.redis_support import TEST_REDIS_URL
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +33,7 @@ def _settings(pg_cluster: PgCluster, tmp_path: Path) -> Settings:
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
         public_console_url=CONSOLE,
     )
 

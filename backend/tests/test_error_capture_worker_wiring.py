@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.config import Settings, override_settings
 from app.core.errors.capture import drained
 from tests.conftest import PgCluster
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _settings(pg_cluster: PgCluster, tmp_path: Path) -> Settings:

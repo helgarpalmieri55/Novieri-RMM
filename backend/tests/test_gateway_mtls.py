@@ -35,8 +35,9 @@ from app.gateway.main import GatewayServer
 from app.jobs.canonical import canonical_bytes
 from app.jobs.engine import JobEngine
 from app.models import Agent, Job, JobStatus
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _free_port() -> int:

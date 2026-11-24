@@ -26,8 +26,9 @@ from app.models import AuditEvent, BackupPoint, BackupRun, Device, User
 from app.modules.backup.repository import create_repository, open_repo_key
 from app.modules.backup.restore import seal_manifest
 from app.modules.backup.schema import BackupManifest, FiletreeStream, ManifestEntry
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 _KNOWN_MANIFEST = BackupManifest(
     schema_version=1,

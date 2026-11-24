@@ -8,7 +8,6 @@ the line of `rate_limit.py` it protects -- delete that line and it goes red.
 
 import asyncio
 import logging
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
@@ -21,8 +20,9 @@ from starlette.requests import Request
 
 from app.core import rate_limit
 from app.core.client_address import parse_trusted_proxies
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9")
+REDIS_URL = TEST_REDIS_URL
 
 
 @pytest.fixture()

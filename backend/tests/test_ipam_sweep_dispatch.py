@@ -76,6 +76,7 @@ from tests.ipam_fixtures import (
     seed_vrf,
     upsert_observation_row,
 )
+from tests.redis_support import TEST_REDIS_URL
 
 NOW = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
 
@@ -1293,7 +1294,7 @@ async def test_the_hourly_sweep_dispatches_due_subnets_and_publishes_after_commi
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:

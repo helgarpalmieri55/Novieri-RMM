@@ -7,7 +7,6 @@ the TTL is what bounds it to connect_by.
 
 import asyncio
 import json
-import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -21,8 +20,9 @@ from app.modules.remote.relay import (
     registration_key,
     stop_channel,
 )
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9")
+REDIS_URL = TEST_REDIS_URL
 
 
 @pytest.fixture()

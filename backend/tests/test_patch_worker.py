@@ -44,8 +44,9 @@ from app.models import (
     PatchPolicy,
 )
 from app.modules.patch.handler import register_job_types
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 # The job-type registry is populated at app-startup time (app.modules.patch.
 # register(app)), not merely on import. Register directly so this file's

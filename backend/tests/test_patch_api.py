@@ -38,8 +38,9 @@ from app.modules.patch.approve import (
     revoke_approval,
 )
 from app.modules.patch.policy import resolve_ring_populations
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 async def _device(api_env, org_id: UUID, hostname: str = "wks-patch") -> UUID:

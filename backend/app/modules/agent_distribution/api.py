@@ -141,7 +141,7 @@ async def create_release_route(
         except ValueError as exc:
             # `agent_release_suffix` refused the version. A 422 naming it beats
             # a 500: the operator typed this and can fix it.
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
         except IntegrityError as exc:
             # The (version, os, arch) uniqueness constraint. Republishing the
             # same triple is a thing an operator does by accident -- re-running
@@ -175,7 +175,7 @@ async def upload_artifact_route(
     reject_oversized_content_length(request, _MAX_ARTIFACT_BYTES)
     data = await read_bounded_body(request, _MAX_ARTIFACT_BYTES)
     if not data:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, tr("artifact body is empty"))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, tr("artifact body is empty"))
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -431,7 +431,7 @@ async def deployment_package_route(
                 download_url=url,
             )
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
         await audit_service.record(
             session,
             org_id=ctx.org_id,
@@ -489,7 +489,7 @@ async def deployment_token_route(
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such agent release")) from exc
         if body.channel not in managed.CHANNELS:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 tr("unknown distribution channel {body_channel}", body_channel=repr(body.channel)),
             )
         try:

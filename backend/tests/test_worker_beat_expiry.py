@@ -28,8 +28,9 @@ from pathlib import Path
 
 from app.core.config import Settings, override_settings
 from tests.conftest import PgCluster
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _settings(pg_cluster: PgCluster, tmp_path: Path) -> Settings:

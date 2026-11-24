@@ -199,7 +199,7 @@ async def dispatch_job(
         get_job_type(body.type)
     except UnknownJobType:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             tr("unknown job type {job_type}", job_type=repr(body.type)),
         ) from None
     governed = module_governed_reason(body.type)
@@ -224,11 +224,11 @@ async def dispatch_job(
             )
         except UnknownJobType:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 tr("unknown job type {job_type}", job_type=repr(body.type)),
             ) from None
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         envelope = await state.job_engine.signed_envelope(job)
         out = _job_out(job)
     await publish_job(state.redis, body.device_id, envelope)

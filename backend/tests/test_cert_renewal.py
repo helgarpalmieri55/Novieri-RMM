@@ -57,8 +57,9 @@ from app.services.cert_renewal import (
     confirm_installed_cert,
     renewal_due,
 )
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 pytestmark = pytest.mark.usefixtures("admin_engine")
 

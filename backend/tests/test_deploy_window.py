@@ -38,6 +38,7 @@ from tests.mcp_support import (
     running_mcp,
     tool_error_text,
 )
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_backup_policy_window import BAD, GOOD, NEVER, REFUSED, REFUSED_ES, UNREAD
 from tests.test_deploy_dispatch import _FakeArtifactSigner, _FakeJobEngine
 
@@ -202,7 +203,7 @@ async def test_one_unreadable_stored_window_stops_only_its_own_deployment(
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
     now = datetime(2026, 7, 19, 15, 30, tzinfo=UTC)
     with (

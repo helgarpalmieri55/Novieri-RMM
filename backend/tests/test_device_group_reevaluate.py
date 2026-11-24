@@ -50,6 +50,7 @@ from app.services.device_groups import (
     MOVES_RECORDED,
     reevaluate_org_membership,
 )
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_inventory_schema import FULL_DOC
 
 WINDOWS = {"all": [{"fact": "os_family", "op": "eq", "value": "windows"}]}
@@ -479,7 +480,7 @@ async def test_the_worker_task_reconciles_health_only_when_something_moved(
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(worker, "run_policy_reconcile", _fake_reconcile)
