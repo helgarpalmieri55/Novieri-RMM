@@ -43,7 +43,7 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 | 7 | CA material on disk | `its-ca` volume | the gateway's client-CA trust anchor (and, with `ITS_CA_BACKEND=local`, the CA private key itself) |
 | 8 | `deploy/.env` | the host, gitignored | DB passwords, OpenBao token, MinIO credentials, the console address |
 | 9 | Gateway server cert | `its-gateway-tls` volume | re-issuable from the CA with `deploy/scripts/issue-gateway-cert.py`; not critical if #4/#7 survive |
-| 10 | Operator TLS cert for `:443` | `deploy/certs/` on the host, **gitignored** | not in the compose volume set at all — it is a bind mount, so a volume-only backup misses it. Re-issuable from your public CA |
+| 10 | Operator TLS cert for `:443` | `traefik-acme` volume (Traefik's ACME store, since 2026-11-23) | not key material, and not backed up: a lost volume costs one new certificate, which Traefik asks Let's Encrypt for at its next start (at most 5 a week for the same name) |
 
 Items **4, 5, 6, 7 and 8 are key material, not data.** They must go to a
 different medium and a different trust domain from the database dump — an
@@ -298,7 +298,7 @@ EOF
 ```
 
 ```
-toeshee {"ok": true, "count": 12345, "broken_at": null}
+novieri {"ok": true, "count": 12345, "broken_at": null}
 ```
 
 `ok: false` with a `broken_at` id names the first event that failed. **If `ok`
