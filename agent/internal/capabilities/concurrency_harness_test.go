@@ -361,8 +361,49 @@ func (h *concurrencyHarness) awaitResult(t *testing.T, jobID string, d time.Dura
 // not reproduced since (see that test's comment) -- so the next occurrence,
 // whenever it comes, is the only chance to see why, and a bare list of
 // missing ids does not say whether the job ever started.
-func (h *concurrencyHarness) awaitResults(t *testing.T, ids []string, d time.Duration) map[string]wire.JobResult {
+func (h *concurrencyHarness) awaitResults(t *testing.T, ids []string) map[string]wire.JobResult {
 	t.Helper()
+	ctx, cancel := untilTestEnds(t)
+	defer cancel()
+	started := time.Now()
+	got, err := waitResults(ctx, h.gateway.outbound, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Logged, not asserted: "slow" is data for the next reader of a failure
+	// in this test, never a reason to fail it (design 2026-11-23 §6).
+	t.Logf("all %d job_results arrived in %s", len(ids), time.Since(started))
+	return got
+}
+
+// untilTestEnds is the bound every condition wait in this file uses: the
+// test binary's own deadline (`go test -timeout`, ten minutes unless set),
+// less half a minute for the failure to be written. A missing answer still
+// fails -- at that bound, with the diagnosis below -- and a slow one is
+// waited for. The fixed 15 s this replaced failed a loaded runner whose
+// third job was merely slow (the 2026-09-08 occurrence, recorded above
+// TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect).
+func untilTestEnds(t *testing.T) (context.Context, context.CancelFunc) {
+	deadline, ok := t.Deadline()
+	if !ok {
+		deadline = time.Now().Add(10 * time.Minute)
+	}
+	return context.WithDeadline(context.Background(), deadline.Add(-30*time.Second))
+}
+
+// waitResults reads outbound until a job_result has arrived for every id in
+// ids, and returns them keyed by job id; or, when ctx ends first, an error
+// that says what a reproduction would otherwise be needed to find out:
+// which ids never got a job_result, whether each of those ever produced a
+// job_status (started, as opposed to never dispatched), and how many frames
+// of each kind were drained while waiting.
+//
+// It exists because a loop over awaitResult DISCARDS every job_result that is
+// not the one it was asked for, and so loses one when the answers cross the
+// wire in another order -- which produced a timeout naming the wrong job
+// while this file's disconnect test was being written. Anything expecting
+// more than one answer must use this.
+func waitResults(ctx context.Context, outbound <-chan []byte, ids []string) (map[string]wire.JobResult, error) {
 	want := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		want[id] = true
@@ -370,14 +411,17 @@ func (h *concurrencyHarness) awaitResults(t *testing.T, ids []string, d time.Dur
 	got := make(map[string]wire.JobResult, len(ids))
 	started := make(map[string]bool, len(ids)) // ids for which a job_status was seen
 	frameCounts := make(map[string]int)        // every frame kind drained, including ones not addressed to `ids`
-	deadline := time.NewTimer(d)
-	defer deadline.Stop()
 	for len(got) < len(want) {
 		select {
-		case frame := <-h.gateway.outbound:
-			kind := kindOf(t, frame)
-			frameCounts[kind]++
-			switch kind {
+		case frame := <-outbound:
+			var envelope struct {
+				Kind string `json:"kind"`
+			}
+			if err := json.Unmarshal(frame, &envelope); err != nil {
+				return nil, fmt.Errorf("outbound frame is not JSON: %v (%s)", err, frame)
+			}
+			frameCounts[envelope.Kind]++
+			switch envelope.Kind {
 			case wire.KindJobStatus:
 				var s wire.JobStatus
 				if err := json.Unmarshal(frame, &s); err == nil && want[s.JobID] {
@@ -386,13 +430,13 @@ func (h *concurrencyHarness) awaitResults(t *testing.T, ids []string, d time.Dur
 			case wire.KindJobResult:
 				var r wire.JobResult
 				if err := json.Unmarshal(frame, &r); err != nil {
-					t.Fatalf("undecodable job_result frame: %v (%s)", err, frame)
+					return nil, fmt.Errorf("undecodable job_result frame: %v (%s)", err, frame)
 				}
 				if want[r.JobID] {
 					got[r.JobID] = r
 				}
 			}
-		case <-deadline.C:
+		case <-ctx.Done():
 			var missing []string
 			total := 0
 			for _, n := range frameCounts {
@@ -408,11 +452,11 @@ func (h *concurrencyHarness) awaitResults(t *testing.T, ids []string, d time.Dur
 				}
 				missing = append(missing, fmt.Sprintf("%s (%s)", id, status))
 			}
-			t.Fatalf("no job_result arrived within %s for %d of %d jobs: %v; drained %d frames total "+
-				"while waiting, by kind: %v", d, len(missing), len(ids), missing, total, frameCounts)
+			return nil, fmt.Errorf("no job_result arrived before the test's deadline for %d of %d jobs: %v; "+
+				"drained %d frames total while waiting, by kind: %v", len(missing), len(ids), missing, total, frameCounts)
 		}
 	}
-	return got
+	return got, nil
 }
 
 // kindOf peeks an outbound frame's `kind` without committing to a full
@@ -621,20 +665,20 @@ func (g *harnessGateway) drop(t *testing.T) {
 	_ = conn.CloseNow()
 }
 
-// awaitReconnect blocks until a connection NEWER than after has been accepted.
-// Polling rather than a channel because the accept happens inside net/http's
-// handler goroutine, which this harness does not own.
-func (g *harnessGateway) awaitReconnect(t *testing.T, after int, d time.Duration) {
+// awaitReconnect blocks until a connection NEWER than after has been accepted,
+// or the test binary's own deadline is near (untilTestEnds). Polling rather
+// than a channel because the accept happens inside net/http's handler
+// goroutine, which this harness does not own.
+func (g *harnessGateway) awaitReconnect(t *testing.T, after int) {
 	t.Helper()
-	deadline := time.Now().Add(d)
-	for {
-		if g.gen() > after {
-			return
+	ctx, cancel := untilTestEnds(t)
+	defer cancel()
+	for g.gen() <= after {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the agent did not reconnect before the test's deadline (still on connection %d)", g.gen())
+		case <-time.After(5 * time.Millisecond):
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the agent did not reconnect within %s (still on connection %d)", d, g.gen())
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -1080,6 +1124,13 @@ func TestAPanickingCapabilityFailsItsJobAndTheAgentKeepsServing(t *testing.T) {
 // test has ever produced about the property it guards, which is that a
 // dropped connection must not strand a running job. The deadline stays; a
 // third occurrence with this data is what would separate "slow" from "stuck".
+//
+// SINCE 2026-11-23 THE WAIT IS A CONDITION (design 2026-11-23-vps-y-marca-
+// novieri §6), and that keeps the signal rather than widening it away: a
+// STRANDED job still never answers, so this still fails -- at the test
+// binary's own deadline (untilTestEnds), with the same diagnosis -- while a
+// SLOW one is waited for and its time logged. "Slow" and "stuck" are now told
+// apart by the outcome instead of by a guess at a number.
 func TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect(t *testing.T) {
 	started := make(chan struct{}, 3)
 	release := make(chan struct{})
@@ -1130,9 +1181,9 @@ func TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect(t *testing.T) 
 	gen := h.gateway.gen()
 	h.gateway.drop(t)
 	dropTime := time.Now()
-	h.gateway.awaitReconnect(t, gen, 15*time.Second)
+	h.gateway.awaitReconnect(t, gen)
 	// awaitReconnect above would have called t.Fatalf if the reconnect did not
-	// complete within 15s, so reaching this line already proves it completed;
+	// complete before the test's deadline, so reaching this line already proves it completed;
 	// this records how long it took. Logged rather than asserted -- t.Logf
 	// output is captured and printed alongside a later failure in this same
 	// test (including one from awaitResults below), so if the eventual missing
@@ -1145,7 +1196,7 @@ func TestAJobSurvivesADisconnectAndItsResultArrivesAfterReconnect(t *testing.T) 
 	// until one of the first two frees its budget slot.
 	closeRelease()
 
-	results := h.awaitResults(t, ids, 15*time.Second)
+	results := h.awaitResults(t, ids)
 	for i, id := range ids {
 		if res := results[id]; res.State != wire.StateSucceeded {
 			t.Fatalf("job %d (%s, %s) = %s, want %s: a dropped connection must not cancel a running "+
