@@ -226,8 +226,14 @@ case "$ITS_BACKUP_OBJECTS" in
                 # is nothing to mirror, not a failed backup (the first-boot
                 # rehearsal of 2026-11-24 found the first backup failing on
                 # it). Listing the buckets still fails the backup on a wrong
-                # credential or an unreachable store.
-                mc --config-dir /tmp/mc ls --json src > /tmp/mc/buckets
+                # credential or an unreachable store, and says why: with
+                # --json, mc writes its error to stdout, into the file, so it
+                # is copied to stderr (its URL and cause, never a key).
+                if ! mc --config-dir /tmp/mc ls --json src > /tmp/mc/buckets 2>&1; then
+                    echo "ERROR: cannot list the buckets:" >&2
+                    cat /tmp/mc/buckets >&2
+                    exit 1
+                fi
                 if ! grep -qF "\"key\":\"$ITS_MIRROR_BUCKET/\"" /tmp/mc/buckets; then
                     echo "    the bucket $ITS_MIRROR_BUCKET does not exist yet (nothing has been stored): nothing to mirror"
                     echo 0 > /out/.source-count

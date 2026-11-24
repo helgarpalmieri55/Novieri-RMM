@@ -336,7 +336,14 @@ has() { case " $FAKE_BUCKETS " in *" $1 "*) return 0 ;; esac; return 1; }
 case "$1" in
   ls)
     if [ "$2" = --json ] && [ "$3" = src ]; then
-      [ "${FAKE_MC_LS:-ok}" = fail ] && { echo '{"status":"error"}'; exit 1; }
+      # mc --json writes its error to STDOUT, as this one does (measured on
+      # the rehearsal's MinIO with a wrong access key).
+      if [ "${FAKE_MC_LS:-ok}" = fail ]; then
+        cause="The Access Key Id you provided does not exist in our records."
+        e='"error":{"message":"Unable to list folder.","cause":{"message":"%s"}}'
+        printf "{\"status\":\"error\",$e}\n" "$cause"
+        exit 1
+      fi
       for b in $FAKE_BUCKETS; do
         printf '{"status":"success","type":"folder","size":0,"key":"%s/"}\n' "$b"
       done
@@ -402,11 +409,16 @@ def test_an_existing_bucket_is_still_mirrored(tmp_path: Path) -> None:
 
 
 def test_a_bucket_listing_that_fails_still_fails_the_backup(tmp_path: Path) -> None:
-    """A wrong credential or an unreachable store is not "no bucket"."""
+    """A wrong credential or an unreachable store is not "no bucket", and the
+    nightly log says why: mc's error JSON (its URL and cause, never a key)
+    reaches stderr instead of staying in the file the listing went to."""
     env = _objects(tmp_path, "it-suite", FAKE_MC_LS="fail")
     run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **env)
     assert run.returncode != 0, run.stdout
     assert "does not exist yet" not in run.stdout
+    assert "ERROR: cannot list the buckets:" in run.stderr, run.stderr
+    assert "The Access Key Id you provided does not exist in our records." in run.stderr
+    assert "mirror" not in (tmp_path / "calls").read_text()
 
 
 def test_another_bucket_whose_name_contains_it_is_not_it(tmp_path: Path) -> None:
