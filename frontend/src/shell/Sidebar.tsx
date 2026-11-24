@@ -1,28 +1,22 @@
 /**
- * The rail -- v3's `.rail` markup (`rail()` in `docs/design/itms-prototype-v3
- * .html`: a brand row, then per group a `.grp` caption and one `<a>` per
- * destination with a Tabler glyph, a `.lbl` and an optional mono `.ct` count,
- * `.hot` for the alert count), with authorization.
- *
- * Structure, class names and order are the design's (see `shell.css`). What
- * this adds is `visibleGroups`: the prototype renders all thirty items because
- * a mock has no operator, and a real console must not offer a technician a
- * link that answers 403.
+ * The rail (redesign design §1.1; DESIGN.md v4, "Navigation"): Atera's order
+ * with no captions, the Assets and More folders (decision D9), and the
+ * Assistant and Admin anchored at the foot; Admin swaps the rail for its own
+ * panel (decision D10, `AdminPanel`).
  *
  * THE HIDING IS COSMETIC, AND SAYING SO MATTERS. Invariant 6 -- the frontend
- * never gates security. Every route behind these links is enforced server-side
- * by `require_permission`, and RBAC completeness is derived from the router by
- * reflection rather than from any list here. If this component rendered every
- * link to everyone, the platform would be exactly as secure and merely ruder.
+ * never gates security. Every route behind these links is enforced
+ * server-side by `require_permission`; if this component rendered every link
+ * to everyone, the platform would be exactly as secure and merely ruder.
  */
-
-import { Fragment, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
+import { AdminPanel } from "./AdminPanel";
 import { NovieriSymbol, NovieriWordmark } from "./brand";
 import { Icon } from "./icons";
-import { activeNavTo, isArea, OPTIONAL_MODULES, visibleGroups } from "./nav";
+import { activeNavTo, isArea, isFolder, OPTIONAL_MODULES, visibleGroups, type NavFolder, type NavItem } from "./nav";
 
 export interface SidebarProps {
   permissions: readonly string[];
@@ -33,11 +27,77 @@ export interface SidebarProps {
   /** Live counts, keyed by route. Absent = no badge, which is not the same as zero. */
   badges?: Readonly<Record<string, number>>;
   orgName: string;
-  /**
-   * The client selector, on a handset only (`AppShell`, `./handset`): the top
-   * bar has no room for it at that width, so it heads the drawer instead.
-   */
+  /** The client selector, on a handset only: it heads the drawer there (`./handset`). */
   clientSelector?: ReactNode;
+}
+
+/** One destination in the rail. The current one carries `aria-current` and its dot. */
+export function RailLink({
+  item,
+  lit,
+  count,
+  sub = false,
+}: {
+  item: NavItem;
+  lit: boolean;
+  count?: number;
+  sub?: boolean;
+}) {
+  // `.hot` is the alert count, drawn as a critical badge (DESIGN.md v4, D3).
+  const hot = item.badgeTone !== undefined;
+  return (
+    <Link
+      className={`nav-item${sub ? " sub" : ""}${lit ? " active" : ""}`}
+      aria-current={lit ? "page" : undefined}
+      to={item.to}
+      title={item.label}
+    >
+      <Icon name={item.icon} size={sub ? 16 : 17} />
+      <span className="lbl">{item.label}</span>
+      {/* A zero renders nothing: "nothing to deal with" is not a 0 beside the label. */}
+      {count ? <span className={hot ? "ct hot" : "ct"}>{count}</span> : null}
+      {lit ? <span className="nav-dot" aria-hidden="true" /> : null}
+    </Link>
+  );
+}
+
+/** Assets or More: a heading that opens its pages in place, open by itself when it holds the current page. */
+function Folder({
+  folder,
+  activeTo,
+  badges,
+}: {
+  folder: NavFolder;
+  activeTo: string | undefined;
+  badges: Readonly<Record<string, number>>;
+}) {
+  const holds = folder.items.some((item) => item.to === activeTo);
+  const [open, setOpen] = useState(holds);
+  useEffect(() => {
+    if (holds) setOpen(true);
+  }, [holds]);
+  const id = `nav-folder-${folder.key}`;
+  return (
+    <div className="nav-folder">
+      <button
+        type="button"
+        className={holds && !open ? "nav-item nav-folder-h active" : "nav-item nav-folder-h"}
+        aria-expanded={open}
+        aria-controls={id}
+        title={folder.label}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name={folder.icon} size={17} />
+        <span className="lbl">{folder.label}</span>
+        <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
+      </button>
+      <div id={id} hidden={!open}>
+        {folder.items.map((item) => (
+          <RailLink key={item.to} item={item} lit={item.to === activeTo} count={badges[item.to]} sub />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function Sidebar({
@@ -53,16 +113,22 @@ export function Sidebar({
   const groups = visibleGroups(permissions, modules ?? OPTIONAL_MODULES);
   const pathname = useLocation().pathname;
   const activeTo = activeNavTo(pathname, groups);
+  // Every group but the foot: the operator's `main`, or a requester's `help`
+  // (`PORTAL_GROUPS`), whose two pages are their whole rail.
+  const main = groups.filter((group) => group.key !== "anchored").flatMap((group) => group.items);
+  const anchored = groups.find((group) => group.key === "anchored")?.items ?? [];
+  const admin = anchored.find(isArea);
+  const inAdmin = admin !== undefined && activeTo === admin.to;
+  const [view, setView] = useState<"main" | "admin">(inAdmin ? "admin" : "main");
+  // Arriving on an Admin page opens its panel; leaving Admin puts the rail back.
+  useEffect(() => setView(inAdmin ? "admin" : "main"), [inAdmin]);
 
   return (
     <aside className="sidebar" id="sidebar">
       <div className="brand">
-        {/* The brand (DESIGN.md v4): the N on its cobalt tile and the white
-            wordmark. The wordmark folds away with the rail (`.brand-name`). */}
         <NovieriSymbol tile size={28} />
         <NovieriWordmark className="brand-name" height={14} />
-        {/* Not in v3, which has no collapse. Kept: density is a standing
-            preference and the shell persists it (`itms.sidebar.collapsed`). */}
+        {/* Density is a standing preference and the shell persists it. */}
         <button
           className="collapse-btn"
           onClick={onToggleCollapsed}
@@ -74,81 +140,45 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* FIRST UNDER THE BRAND, ON A HANDSET: the client is the context of
-          every link below it. `:empty` in `shell.css` folds the box away when
-          the selector draws nothing (no client to choose between). */}
       {clientSelector ? <div className="sidebar-client">{clientSelector}</div> : null}
 
-      <nav className="nav-scroll" id="nav" aria-label={t("shell.sidebar.main")}>
-        {groups.map((group) => (
-          <section className="nav-group" key={group.label}>
-            <div className="grp">{group.label}</div>
-            {group.items.map((entry) => {
-              // A count of zero renders no `.ct`. "Nothing to deal with" and
-              // "a 0 sitting beside the label" read differently, and the
-              // design uses the count to draw the eye.
-              const count = badges[entry.to];
-              // `.hot` is the alert count. The nav model marks it with a
-              // badge tone rather than this file naming a route.
-              const hot = !isArea(entry) && entry.badgeTone !== undefined;
-              const lit = entry.to === activeTo;
-              // THE SECOND LAYER OPENS UNDER ITS AREA while the operator is in
-              // it, so moving between two Admin pages is one click rather than
-              // a trip through the landing page. One link carries
-              // `aria-current`: the page, or the area on its own landing page.
-              const sections = lit && isArea(entry) ? entry.sections : [];
-              const pages = sections.flatMap((s) => s.items);
-              const pageTo = activeNavTo(pathname, [{ label: "", items: pages }]);
-              return (
-                <Fragment key={`${group.label}:${entry.label}`}>
-                  <Link
-                    className={`nav-item${lit ? " active" : ""}`}
-                    aria-current={lit && pageTo === undefined ? "page" : undefined}
-                    aria-expanded={isArea(entry) ? lit : undefined}
-                    to={entry.to}
-                    title={entry.label}
-                  >
-                    <Icon name={entry.icon} size={17} />
-                    <span className="lbl">{entry.label}</span>
-                    {count ? <span className={`ct${hot ? " hot" : ""}`}>{count}</span> : null}
-                  </Link>
-                  {/* FULL-SIZE, WITH ICONS AND THEIR SECTION HEADINGS. The first
-                      version drew these as small grey text with no icon, and
-                      the operator read that as "without importance". They are
-                      the same kind of destination as the items above; the
-                      indent and the headings are what say they belong to Admin. */}
-                  {sections.map((section) => (
-                    <Fragment key={section.label}>
-                      <div className="grp sub">{section.label}</div>
-                      {section.items.map((item) => (
-                        <Link
-                          className={`nav-item sub${item.to === pageTo ? " active" : ""}`}
-                          aria-current={item.to === pageTo ? "page" : undefined}
-                          to={item.to}
-                          key={item.to}
-                          title={item.label}
-                        >
-                          <Icon name={item.icon} size={16} />
-                          <span className="lbl">{item.label}</span>
-                        </Link>
-                      ))}
-                    </Fragment>
-                  ))}
-                </Fragment>
-              );
-            })}
-          </section>
-        ))}
+      {view === "admin" && admin ? (
+        <AdminPanel area={admin} pathname={pathname} collapsed={collapsed} onBack={() => setView("main")} />
+      ) : (
+        <nav className="nav-scroll" id="nav" aria-label={t("shell.sidebar.main")}>
+          {main.map((entry) =>
+            isFolder(entry) ? (
+              <Folder key={entry.key} folder={entry} activeTo={activeTo} badges={badges} />
+            ) : isArea(entry) ? null : (
+              <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
+            ),
+          )}
+        </nav>
+      )}
+
+      <nav className="nav-anchored" aria-label={t("shell.sidebar.anchored")}>
+        {anchored.map((entry) =>
+          isArea(entry) ? (
+            <button
+              key={entry.to}
+              type="button"
+              className={inAdmin ? "nav-item active" : "nav-item"}
+              aria-expanded={view === "admin"}
+              aria-controls="nav"
+              title={entry.label}
+              onClick={() => setView(view === "admin" ? "main" : "admin")}
+            >
+              <Icon name={entry.icon} size={17} />
+              <span className="lbl">{entry.label}</span>
+              {inAdmin ? <span className="nav-dot" aria-hidden="true" /> : null}
+            </button>
+          ) : isFolder(entry) ? null : (
+            <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
+          ),
+        )}
       </nav>
 
-      {/* IDENTITY, NOT A CONTROL, and it was a `<button>` with no handler --
-          filed by both auditors. A button that does nothing on click leaves the
-          user unable to tell whether the click registered, the app hung, or
-          they lack permission. This is the ONE place the tenant is named; v3
-          puts the org in the account chip's small line instead, and the spec
-          (§3) keeps the card here so the chip stays the account and the rail
-          foot stays the workspace. It becomes a switcher again when this
-          deployment has a second tenant to switch to. */}
+      {/* IDENTITY, NOT A CONTROL: the one place the tenant is named. */}
       <div className="sidebar-footer">
         <div className="tenant-card" data-testid="tenant-identity">
           <div className="tenant-avatar">{orgName.slice(0, 2).toUpperCase()}</div>

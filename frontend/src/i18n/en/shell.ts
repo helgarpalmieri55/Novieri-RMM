@@ -11,10 +11,9 @@ export const shell = {
   // one-line hints an area's landing page shows under each page.
   nav: {
     group: {
-      daily: "Daily",
-      governance: "Governance",
-      assetsSpend: "Assets & Spend",
-      configure: "Configure",
+      // One caption for the whole rail now (redesign design §1.1: no group
+      // captions are drawn); it names the main and the anchored groups.
+      main: "Main menu",
       help: "Help",
     },
     item: {
@@ -55,11 +54,13 @@ export const shell = {
       errorMonitor: "Error monitor",
       settings: "Settings",
       clients: "Clients",
+      // The rail's two folders (decision D9).
+      assets: "Assets",
+      more: "More",
       myTickets: "My tickets",
       newTicket: "New ticket",
     },
     section: {
-      organization: "Organization",
       serviceDesk: "Service desk",
       computers: "Computers",
       automation: "Automation",
@@ -110,7 +111,22 @@ export const shell = {
     expand: "Expand sidebar",
     collapse: "Collapse sidebar",
     main: "Main",
+    // The rail's foot (redesign design §1.1) and the Admin panel (decision D10).
+    anchored: "Assistant and Admin",
+    backToMenu: "Back to the menu",
+    adminSearch: "Search Admin",
+    adminNoMatch: "No Admin page matches that.",
     plan: "Self-hosted enterprise",
+  },
+  // The top bar's New menu (redesign design §1.2; shell/NewMenu.tsx).
+  newMenu: {
+    label: "New",
+    ticket: "Ticket",
+    client: "Client",
+    contact: "Contact",
+    device: "Computer",
+    document: "Document",
+    change: "Change",
   },
   app: {
     skipToMain: "Skip to main content",

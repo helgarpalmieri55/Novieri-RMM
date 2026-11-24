@@ -15,11 +15,11 @@ import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Icon, ICON_NAMES } from "./icons";
-import { navAreas, navItems } from "./nav";
+import { navAreas, navFolders, navItems } from "./nav";
 import { TABLER } from "./tabler";
 
 const NAV_ICON_NAMES = [
-  ...new Set([...navItems(), ...navAreas()].map((item) => item.icon)),
+  ...new Set([...navItems(), ...navAreas(), ...navFolders()].map((item) => item.icon)),
 ];
 
 describe("Icon", () => {

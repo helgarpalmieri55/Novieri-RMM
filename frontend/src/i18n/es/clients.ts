@@ -32,6 +32,8 @@ export const clients: Shape<typeof en> = {
     colSites: "Sedes",
     colStatus: "Estado",
     empty: "No hay clientes que mostrar.",
+    newContactTitle: "Nuevo contacto",
+    newContactContinue: "Continuar",
   },
   form: {
     createTitle: "Nuevo cliente",

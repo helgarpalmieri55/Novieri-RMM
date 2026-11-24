@@ -11,7 +11,7 @@ export const remote: Shape<typeof en> = {
   duration: "{minutes} min {seconds} s",
   picker: {
     deviceEmptyHint:
-      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
+      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     credentialEmptyHint:
       "No hay credenciales en la bóveda. Guarda una en Flota → Credenciales y podrás elegirla aquí; también puede que no tengas permiso para listarlas.",
     unreachableNoAgent: "no tiene agente — una sesión remota necesita uno, así que no se puede establecer la conexión",

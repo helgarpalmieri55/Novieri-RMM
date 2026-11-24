@@ -14,20 +14,23 @@ import {
   ADD_COMPUTER_TO,
   crumbFor,
   isArea,
+  isFolder,
   isPortalOnly,
   NAV_GROUPS,
   NAV_UNLISTED,
   OPTIONAL_MODULES,
   navAreas,
+  navFolders,
   navItems,
   ORPHAN_SECTION,
   portalCrumbFor,
   searchDestinations,
   visibleGroups,
+  type RailEntry,
 } from "./nav";
 
 const ALL_ITEMS = navItems();
-const RAIL = NAV_GROUPS.flatMap((group) => group.items);
+const RAIL = NAV_GROUPS.flatMap((group) => group.items).flatMap((entry) => (isFolder(entry) ? [...entry.items] : [entry]));
 const EVERY_PERMISSION = ALL_ITEMS.map((item) => item.permission).filter(
   (code): code is string => code !== null,
 );
@@ -37,49 +40,77 @@ function railLabels(permissions: readonly string[]): string[] {
   return visibleGroups(permissions, OPTIONAL_MODULES).flatMap((group) => group.items.map((entry) => entry.label));
 }
 
-describe("two layers", () => {
-  it("puts the daily work first, the business modules shown, and Admin last", () => {
-    expect(NAV_GROUPS.map((group) => group.label)).toEqual([
-      "Daily",
-      "Governance",
-      "Assets & Spend",
-      "Configure",
+/** Every code the model names: an operator holding all of them sees every page. */
+const EVERYTHING = navItems()
+  .map((item) => item.permission)
+  .filter((code): code is string => code !== null);
+
+/** A rail entry as a short string: an item's route, or a folder's key and its routes. */
+function shape(entry: RailEntry): string {
+  if (isFolder(entry)) return `${entry.key}:[${entry.items.map((item) => item.to).join(",")}]`;
+  return entry.to;
+}
+
+describe("the Atera order (redesign design §1.1, 2026-11-23)", () => {
+  // REPLACES "two layers" (2026-09-23): daily work, governance and assets
+  // under captions, and Admin folded. The redesign takes Atera's rail: no
+  // captions, Clients third, two folders, and the Assistant and Admin
+  // anchored at the bottom.
+  const groups = visibleGroups(EVERYTHING, OPTIONAL_MODULES);
+  const main = groups.find((group) => group.key === "main")?.items ?? [];
+  const anchored = groups.find((group) => group.key === "anchored")?.items ?? [];
+
+  it("lists the main rail in Atera's order, with Assets and More as folders", () => {
+    expect(main.map(shape)).toEqual([
+      "/dashboard",
+      "/service-desk",
+      "/clients",
+      "/devices",
+      "/health",
+      "/patch",
+      "/deploy",
+      "/backup",
+      "/remote",
+      "assets:[/licenses,/subscriptions,/ipam]",
+      "/docs",
+      "/reports",
+      "more:[/changes,/bcp,/budget]",
     ]);
-    expect(NAV_GROUPS[0]?.items.map((entry) => entry.label)).toEqual([
-      "Dashboard",
-      "Devices",
-      "Alerts",
-      "Tickets",
-      "Patching",
-      "Software",
-      "Backup",
-      "Remote sessions",
-      "Assistant",
-    ]);
-    expect(NAV_GROUPS[1]?.items.map((entry) => entry.label)).toEqual([
-      "IT documentation",
-      "Changes",
-      "Continuity tests",
-      "Reports",
-    ]);
-    expect(NAV_GROUPS[2]?.items.map((entry) => entry.label)).toEqual([
-      "Licenses",
-      "Subscriptions",
-      "IT budget",
-      "IP addresses",
-    ]);
-    expect(NAV_GROUPS[3]?.items.map((entry) => entry.label)).toEqual(["Admin"]);
   });
 
-  it("folds only configuration away", () => {
-    // 36 peers was the finding. Nine daily items (People left on 2026-09-23),
-    // eight business pages under two headings, and one Admin entry standing
-    // for twenty-odd more.
-    expect(RAIL.length).toBeLessThanOrEqual(19);
+  it("anchors the Assistant and Admin at the bottom", () => {
+    expect(anchored.map(shape)).toEqual(["/assistant", "/admin"]);
+  });
+
+  it("keeps Admin the only area, with today's sections in order and Clients out of it", () => {
     expect(navAreas().map((area) => area.to)).toEqual(["/admin"]);
-    for (const group of NAV_GROUPS.slice(0, 3)) {
-      expect(group.items.every((entry) => !isArea(entry))).toBe(true);
-    }
+    expect(navAreas()[0]?.sections.map((section) => section.items.map((item) => item.to))).toEqual([
+      ["/notifications", "/email-intake", "/sla", "/portal"],
+      ["/enrollment", "/agent-packages", "/agent-push/authorizations", "/device-groups", "/site-servers"],
+      ["/assistant/autonomy", "/jobs"],
+      ["/credentials", "/audit", "/security"],
+      ["/platform-status", "/error-monitor", "/settings"],
+    ]);
+  });
+
+  it("puts in More exactly the three optional modules, and drops More when none is on", () => {
+    const more = main.find((entry) => isFolder(entry) && entry.key === "more");
+    expect(more && isFolder(more) ? more.items.map((item) => item.module) : []).toEqual(["change", "bcp", "budget"]);
+    const none = visibleGroups(EVERYTHING, new Set());
+    expect(none.flatMap((group) => group.items).some((entry) => isFolder(entry) && entry.key === "more")).toBe(false);
+  });
+
+  it("keeps every code the rail had before the redesign (the permissions do not change, §1.1)", () => {
+    expect(new Set(EVERYTHING)).toEqual(
+      new Set([
+        "devices.read", "health.read", "ticket.read", "patch.read", "deploy.read", "backup.read",
+        "remote.control", "ai.use", "docs.read", "change.read", "bcp.read", "reporting.read",
+        "licenses.read", "subscriptions.read", "budget.read", "ipam.read", "clients.read",
+        "notification.read", "email_intake.read", "sla.read", "portal.ticket.read",
+        "agent.release.read", "agent.push.scope.manage", "site.read", "ai.admin", "jobs.read",
+        "credentials.read", "audit.read", "platform.status.read", "platform.errors.read", "orgs.manage",
+      ]),
+    );
   });
 
   it("puts every configuration and platform page in Admin", () => {
@@ -103,15 +134,6 @@ describe("two layers", () => {
         "Job history",
       ]),
     );
-  });
-
-  it("shows Governance and Assets & Spend pages as ordinary items", () => {
-    // Folded on 2026-09-23 and unfolded the same day: the operator read the
-    // folded pages as "small and without importance".
-    const tos = (label: string) =>
-      NAV_GROUPS.find((group) => group.label === label)?.items.map((entry) => entry.to);
-    expect(tos("Governance")).toEqual(["/docs", "/changes", "/bcp", "/reports"]);
-    expect(tos("Assets & Spend")).toEqual(["/licenses", "/subscriptions", "/budget", "/ipam"]);
   });
 
   it("names tasks, not machinery", () => {
@@ -165,7 +187,7 @@ describe("navigation model", () => {
   });
 
   it("uses only icons the design actually defines", () => {
-    const unknown = [...ALL_ITEMS, ...navAreas()]
+    const unknown = [...ALL_ITEMS, ...navAreas(), ...navFolders()]
       .filter((item) => !ICON_NAMES.includes(item.icon))
       .map((item) => `${item.label} -> ${item.icon}`);
     expect(unknown).toEqual([]);
@@ -197,7 +219,7 @@ describe("visibleGroups", () => {
     // `devices.read` opens Enrollment and Device groups, both in Admin.
     const admin = visibleGroups(held, OPTIONAL_MODULES)
       .flatMap((group) => group.items)
-      .find((entry) => entry.to === "/admin");
+      .find((entry) => "to" in entry && entry.to === "/admin");
     expect(admin && isArea(admin)).toBe(true);
     const pages =
       admin && isArea(admin)
@@ -209,9 +231,20 @@ describe("visibleGroups", () => {
   });
 
   it("drops an area none of whose pages is visible", () => {
-    const labels = railLabels(held);
-    expect(labels).not.toContain("Governance");
-    expect(labels).not.toContain("Assets & Spend");
+    // An operator with devices.read and patch.read reaches no Assets page
+    // and no optional module: neither folder is drawn (redesign §1.1).
+    const keys = visibleGroups(held, OPTIONAL_MODULES)
+      .flatMap((group) => group.items)
+      .filter(isFolder)
+      .map((folder) => folder.key);
+    expect(keys).toEqual([]);
+    // NON-VACUITY: with a license code the Assets folder is there.
+    expect(
+      visibleGroups([...held, "licenses.read"], OPTIONAL_MODULES)
+        .flatMap((group) => group.items)
+        .filter(isFolder)
+        .map((folder) => folder.key),
+    ).toEqual(["assets"]);
   });
 
   it("keeps items explicitly marked ungated, and nothing else, for no permissions", () => {
@@ -229,6 +262,7 @@ describe("visibleGroups", () => {
       expect(group.items.length).toBeGreaterThan(0);
       for (const entry of group.items) {
         if (isArea(entry)) expect(entry.sections.every((s) => s.items.length > 0)).toBe(true);
+        if (isFolder(entry)) expect(entry.items.length).toBeGreaterThan(0);
       }
     }
   });
@@ -382,6 +416,15 @@ describe("crumbFor", () => {
     });
   });
 
+  it("names a folder's page after itself, linked to itself: a folder is not a page", () => {
+    expect(crumbFor("/licenses")).toEqual({ section: "Licenses", sectionTo: "/licenses", title: "Licenses" });
+    expect(crumbFor("/licenses/lic-1")).toEqual({ section: "Licenses", sectionTo: "/licenses", title: "Licenses" });
+  });
+
+  it("names Clients as a main page now, not as an Admin page", () => {
+    expect(crumbFor("/clients/c-1").sectionTo).toBe("/clients");
+  });
+
   it("gives every page a section that links to a rail entry", () => {
     const rail = RAIL.map((entry) => entry.to);
     for (const item of ALL_ITEMS) {
@@ -496,19 +539,14 @@ describe("Imaging", () => {
 });
 
 describe("the Clients page (MSP clients phase 3, design §4.1)", () => {
-  it("sits in Admin, gated on clients.read", () => {
-    const item = ALL_ITEMS.find((entry) => entry.to === "/clients");
-    expect(item?.permission).toBe("clients.read");
-    expect(item?.label).toBe("Clients");
-    expect(crumbFor("/clients/c1")).toEqual({ section: "Admin", sectionTo: "/admin", title: "Clients" });
+  it("sits third in the main rail, gated on clients.read (redesign design §1.1: it leaves Admin)", () => {
+    const main = NAV_GROUPS.find((group) => group.key === "main")?.items ?? [];
+    expect(main.map((entry) => ("to" in entry ? entry.to : null))[2]).toBe("/clients");
+    expect(navItems().find((item) => item.to === "/clients")?.permission).toBe("clients.read");
   });
 
-  it("is offered to a person holding only clients.read", () => {
-    const admin = visibleGroups(["clients.read"], new Set())
-      .flatMap((group) => group.items)
-      .find((entry) => entry.to === "/admin");
-    expect(admin && isArea(admin) ? admin.sections.map((section) => section.label) : []).toEqual([
-      "Organization",
-    ]);
+  it("is offered to a person holding only clients.read, in the main rail (redesign design §1.1)", () => {
+    const main = visibleGroups(["clients.read"], new Set()).find((group) => group.key === "main");
+    expect(main?.items.map((entry) => ("to" in entry ? entry.to : entry.key))).toEqual(["/dashboard", "/clients"]);
   });
 });

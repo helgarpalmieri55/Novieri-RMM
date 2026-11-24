@@ -69,57 +69,34 @@
 .collapse-btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
 .nav-scroll {
-  padding: 0 0 24px;
+  padding: 8px 0 16px;
   overflow-y: auto;
   flex: 1 1 auto;
   scrollbar-width: thin;
   scrollbar-color: var(--rail-2) transparent;
 }
-.nav-group { margin: 0; }
-/* v3 `.rail .grp`: the group caption, 10.5px uppercase in `--rail-dim`
- * (lightened in the design file to 5.51:1 on `--rail`, 4.78:1 on `--rail-2`,
- * because this is text). Scoped to the rail so `contrast.test.ts` grades it
- * on both rail grounds. */
-.sidebar .grp {
-  padding: 14px 18px 5px;
-  font-size: var(--t-cap);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: .13em;
-  color: var(--rail-dim);
-  white-space: nowrap;
-}
-/* v3 `.rail a`: 7px 18px, 10px gap, body size, a 2px left edge that only the
- * active item paints. */
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 18px;
-  color: var(--rail-ink);
-  font-size: var(--t-body);
-  border-left: 2px solid transparent;
-  white-space: nowrap;
-  text-decoration: none;
-}
-.nav-item:hover { color: #fff; background: var(--rail-2); }
-/* THE ACTIVE STATE HAS THREE CARRIERS: white text, the `--rail-2` ground and
- * the accent edge. `--accent` on `--rail-2` is 2.64:1, so the edge is never
- * the only one (v3's own note on its token block). */
-.nav-item.active { color: #fff; background: var(--rail-2); border-left-color: var(--accent); }
-.nav-item svg { opacity: .7; }
-.nav-item.active svg { opacity: 1; }
-.nav-item .lbl { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* The rail's items (DESIGN.md v4, "Navigation"; direction A's mock: 38px,
+ * inset 10px, 6px radius). Current: the lifted ground, white text, and the
+ * icon and a dot in the rail mark -- no accent edge: cobalt measures 2.32:1
+ * on the rail (The Two Grounds Rule). */
+.nav-item { display: flex; align-items: center; gap: 11px; min-height: 38px; margin: 1px 10px; padding: 0 12px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--rail-ink); font: 400 var(--t-body)/1.2 var(--sans); white-space: nowrap; text-decoration: none; text-align: left; cursor: pointer; width: calc(100% - 20px); }
+.nav-item:hover { color: var(--accent-ink); background: var(--rail-2); }
+.nav-item.active { color: var(--accent-ink); background: var(--rail-2); font-weight: 500; }
+.nav-item svg { flex: 0 0 auto; opacity: .9; }
+.nav-item.active svg { color: var(--rail-mark); opacity: 1; }
+.nav-item .lbl { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .nav-item:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
-/* An open area's pages: the SAME size as every other item, with their own
- * icons, indented one step under their section heading. The first version
- * (console additions wave 10) drew them a size smaller with no glyph, and the
- * operator read that as "without importance" (2026-09-23). Lit by ground, ink
- * and weight, never the accent edge, so the parent keeps the rail's one. */
-.nav-item.sub { padding: 6px 18px 6px 32px; }
-.nav-item.sub.active { color: #fff; background: var(--rail-2); border-left-color: transparent; font-weight: 500; }
-/* An open area's section headings: the group caption, indented with its pages. */
-.sidebar .grp.sub { padding: 10px 18px 3px 32px; }
+.nav-item.sub { padding-left: 40px; }
+.nav-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--rail-mark); }
+.nav-item .chev { margin-left: auto; transition: transform .15s ease; }
+.nav-item .chev.open { transform: rotate(180deg); }
+.nav-anchored { flex: 0 0 auto; padding: 8px 0; border-top: 1px solid var(--rail-2); }
+.sidebar .admin-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+.sidebar .admin-title { margin: 6px 22px 2px; color: var(--accent-ink); font-weight: 600; font-size: var(--t-h2); text-decoration: none; }
+.sidebar .admin-title:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: var(--r-ctl); }
+.admin-search { padding: 4px 10px 8px; }
+.sidebar .admin-none { margin: 8px 22px; color: var(--rail-ink); font-size: var(--t-sm); }
+.nav-item.admin-acc { font-weight: 500; }
 /* v3 `.rail .ct`: the right-aligned mono count. */
 .sidebar .ct {
   margin-left: auto;
@@ -200,7 +177,9 @@
   z-index: 30;
 }
 
-/* --- Find or ask: v3 `.top .srch` (flex 1, max 520px) drawn as a real field.
+/* --- Find or ask: v3 `.top .srch` (flex 1), capped at 640px (redesign design
+ * §1.2, "ensanchada": the bar lost Add a computer and the Assistant's icon),
+ * drawn as a real field.
  *
  * "The search bar is a pop-up, it shouldn't be like that" -- the operator. The
  * field is an `<input>` and `.palette` (overlays.css) hangs off this wrapper,
@@ -209,10 +188,10 @@
 .topbar-find {
   position: relative;
   flex: 1 1 auto;
-  max-width: 520px;
+  max-width: 640px;
   /* THE ACCOUNT BLOCK BELONGS IN THE CORNER, and this one property is what
      puts it there. `.topbar` is a flex row in which the search is the only
-     child that grows, and it is capped at 520px -- so on any viewport wider
+     child that grows, and it is capped (520px then, 640px now) -- so on any viewport wider
      than about 1100px the whole bar packed left and the avatar floated in the
      middle with ~600px of empty surface to its right. `margin-right: auto`
      on the ONLY growable child hands the slack to the gap after it instead,
@@ -360,39 +339,13 @@
   .ib .counter-dot { display: none; }
 }
 
-/* THE INSTALL ACTION, IN THE PRIMARY VOICE, as v3 draws it (`.btn.pri` in
- * `topbar()`). Geometry is v3's `.btn` at 36px so it sits level with `.ib`.
- *
- * THE DEVIATION IS SETTLED. The port drew this secondary and
- * `AppShell.test.tsx` held it there, reading DESIGN.md's one-primary rule as
- * "one per screen". The rule is one per page BODY: this control lives in the
- * chrome, on the same rung as the search field and the account menu, never
- * on the page's own rung, so it does not compete with a page's primary for
- * the first glance. It is also the one action the product is a promise
- * about -- the operator could not find how to install an agent, which is why
- * it is in the bar at all. DESIGN.md now records the exception, and the
- * guard asserts the primary class rather than its absence. */
-.top-enrol {
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 13px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: var(--r-ctl);
-  font-size: var(--t-body);
-  font-weight: 500;
-  white-space: nowrap;
-  text-decoration: none;
-}
-/* A FILLED BUTTON ANSWERS THE POINTER ON ITS FILL, not on a border 1.80:1
- * from it -- which is what the hover-step guard in `contrast.test.ts`
- * measured when this control became primary. `--accent-2` is the design's
- * deeper accent (edit 8); `--accent-ink` clears 7.57:1 on it. */
-.top-enrol:hover { background: var(--accent-2); border-color: var(--accent-2); }
-.top-enrol:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The New menu (redesign design §1.2): the chrome's one primary, and its list.
+ * It took the place of "Add a computer", which is New -> Computer now
+ * (decision D11). */
+.new-menu-anchor { position: relative; flex: 0 0 auto; }
+.new-menu-btn .chev { margin-right: -3px; }
+.top-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
+.top-menu .menu-item { display: flex; align-items: center; gap: 9px; }
 
 /* v3 `.top .me`: avatar, name, a `--t-sm` muted line. A button here because
  * it opens the account menu (cycle 2); borderless like v3's chip, with a ring
@@ -440,6 +393,21 @@
 .profile-name { display: block; font-size: var(--t-body); font-weight: 500; line-height: 1.2; white-space: nowrap; }
 .profile-role { display: block; color: var(--muted); font-size: var(--t-sm); line-height: 1.2; }
 
+/* THE ASSISTANT'S ROUND BUTTON (DESIGN.md v4, "Assistant button"; decision
+ * D12, the operator on 2026-11-24): bottom right on every console page, the
+ * one shadow, 48px -- over the 44px target on every pointer. Under the
+ * drawer's scrim (35) and every dialog. */
+.assistant-fab { position: fixed; right: 24px; bottom: 24px; z-index: 25; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow); text-decoration: none; }
+.assistant-fab:hover { background: var(--accent-2); }
+.assistant-fab:active { background: var(--accent-3); }
+.assistant-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* IT NEVER COVERS THE SAVE BAR (Atera's walkthrough, line 639: "el botón
+ * flotante de IA tapa el botón de guardar"). While it is drawn the bar keeps
+ * 72px clear on its right (48 + 24), wherever the bar sits, so the two never
+ * share the corner; and the page keeps room at its foot for its last line. */
+body.assistant-fab-on .savebar { margin-right: 72px; }
+body.assistant-fab-on .content { padding-bottom: 88px; }
+
 /* --------------------------------------------------------------- content */
 
 /* v3 `.content`: `22px 24px 40px`, max 1440. This is the `<main>` and the skip
@@ -461,6 +429,12 @@
 .crumb a:hover { color: var(--accent); text-decoration: underline; }
 .crumb [aria-current="page"] { color: var(--ink); font-weight: 500; }
 
+/* The Admin index (/admin): its sections as cards (redesign design §1.1). */
+.admin-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.admin-index-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.admin-index-list li { display: flex; align-items: flex-start; gap: 10px; }
+@media (max-width: 1024px) { .admin-index { grid-template-columns: minmax(0, 1fr); } }
+
 /* The design's one wide-desktop step, kept where it was. */
 @media (max-width: 1300px) {
   .profile-copy { display: none; }
@@ -470,7 +444,10 @@
  * class and persists it under `itms.sidebar.collapsed`. */
 body.sidebar-collapsed { --sidebar-w: 76px; }
 body.sidebar-collapsed .brand-name,
-body.sidebar-collapsed .sidebar .grp,
+body.sidebar-collapsed .nav-item .chev,
+body.sidebar-collapsed .admin-search,
+body.sidebar-collapsed .sidebar .admin-title,
+body.sidebar-collapsed .nav-dot,
 body.sidebar-collapsed .nav-item .lbl,
 body.sidebar-collapsed .sidebar .ct,
 body.sidebar-collapsed .tenant-meta { display: none; }
@@ -488,10 +465,10 @@ body.sidebar-collapsed .collapse-btn {
   border-color: var(--accent);
   box-shadow: var(--shadow);
 }
-body.sidebar-collapsed .nav-item { justify-content: center; padding: 7px 0; }
-/* A sub-page has its own glyph now, so a 76px rail shows it like any item. */
-body.sidebar-collapsed .nav-item.sub { padding: 6px 0; }
-body.sidebar-collapsed .nav-group + .nav-group { margin-top: 10px; }
+/* A folder's or Admin's page has its own glyph, so a 76px rail shows it like
+ * any item, centred: the folder's pages sit under the folder's own icon
+ * (decision D9), so nothing is a click further away when folded. */
+body.sidebar-collapsed .nav-item, body.sidebar-collapsed .nav-item.sub { justify-content: center; padding: 0; }
 body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
 
 /* --- Skip link, account menu, session notice (UX remediation cycle 2) ----- */
@@ -640,14 +617,16 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .collapse-btn { display: none; }
   body.sidebar-collapsed { --sidebar-w: 232px; }
   body.sidebar-collapsed .brand-name,
-  body.sidebar-collapsed .sidebar .grp,
+  body.sidebar-collapsed .nav-item .chev,
+  body.sidebar-collapsed .admin-search,
+  body.sidebar-collapsed .sidebar .admin-title,
+  body.sidebar-collapsed .nav-dot,
   body.sidebar-collapsed .nav-item .lbl,
   body.sidebar-collapsed .sidebar .ct,
   body.sidebar-collapsed .tenant-meta { display: revert; }
   body.sidebar-collapsed .brand { padding: 6px 18px 18px; justify-content: flex-start; }
-  body.sidebar-collapsed .nav-item { justify-content: flex-start; padding: 7px 18px; }
-  body.sidebar-collapsed .nav-item.sub { padding: 6px 18px 6px 32px; }
-  body.sidebar-collapsed .nav-group + .nav-group { margin-top: 0; }
+  body.sidebar-collapsed .nav-item { justify-content: flex-start; padding: 0 12px; }
+  body.sidebar-collapsed .nav-item.sub { padding: 0 12px 0 40px; }
 
   /* The drawer is modal over the page, so the page behind it must not scroll. */
   body.nav-open { overflow: hidden; }
@@ -661,12 +640,13 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .topbar { gap: 10px; padding: 0 14px; }
 
   /* THE SELECTOR GIVES WAY, AND NOTHING ELSE IN THE CLUSTER DOES. From 641 to
-   * 1024px the selector sits in the bar beside the labelled "Add a computer".
+   * 1024px the selector sits in the bar (with the labelled "Add a computer"
+   * beside it when this was measured; that is New now, left of the search).
    * Measured at 641px with a client chosen (harmony): in Spanish the cluster
    * ran 13px past the bar's padding, the account menu ending at 640 of 641.
    * `.top-actions .top-client` already shrinks (`min-width: 0`), but the
    * cluster's own automatic minimum is its content's, so it never let it.
-   * The glyphs, the install action and the account menu keep their size: a
+   * The glyphs and the account menu keep their size: a
    * flex item with a `width` still shrinks to its content's minimum, and a
    * 36px icon squeezed to 19 is not a smaller button, it is a broken one.
    * Below 641px the selector is in the drawer, so the 640px block hands the
@@ -787,27 +767,21 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
    * -- so one chrome link was hidden at this step. The operator then removed
    * the /docs link outright (2026-09-09), which drops that target at EVERY
    * width, so there is nothing left for this breakpoint to stand down. The
-   * search, the install action, the assistant, the two live glyphs and the
-   * account menu all stay; harmony re-measures the fit on every push. */
+   * New menu, the search, the two live glyphs and the account menu all stay
+   * (the Assistant left the bar for its round button, decision D12); harmony
+   * re-measures the fit on every push. */
   /* v3: `.content{padding:14px}` at this step. */
   .content { padding: 14px; }
-  /* THE WORD GOES, THE NAME STAYS. There is no room for "Add a computer" beside
-   * a hamburger and three icons on a handset -- but the label IS the
-   * accessible name, and `display: none` would take it out of the
-   * accessibility tree. Geometry copied from `.sr-only` in `base.css`. */
-  .top-enrol { padding: 0; width: 36px; justify-content: center; }
-  .top-enrol-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border-width: 0;
-  }
+  /* THE WORD GOES, THE NAME STAYS (the New menu, redesign design §1.2). There
+   * is no room for "New" beside a hamburger and three icons on a handset --
+   * but the label IS the button's accessible name, and `display: none` would
+   * take it out of the accessibility tree. Geometry from `.sr-only`. */
+  .new-menu-btn .new-menu-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .new-menu-btn .chev { display: none; }
+  /* The Assistant's round button sits 16px from the corner on a phone, and
+   * the save bar keeps 64px clear beside it (48 + 16). */
+  .assistant-fab { right: 16px; bottom: 16px; }
+  body.assistant-fab-on .savebar { margin-right: 64px; }
 }
 
 /* Tap targets. WCAG 2.5.8 sets 24px as the AA minimum and 2.5.5 asks for 44px.
@@ -818,7 +792,6 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .nav-item,
   .ib,
   .top-icon-btn,
-  .top-enrol,
   .profile-btn,
   .collapse-btn,
   .btn,
@@ -864,6 +837,8 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .app-shell,
   .btn,
   .nav-item,
+  /* A folder's chevron turns as it opens (redesign §1.1). */
+  .nav-item .chev,
   body.nav-open .sidebar {
     transition-duration: .01ms !important;
     animation-duration: .01ms !important;

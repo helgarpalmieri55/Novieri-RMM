@@ -46,13 +46,18 @@ const inDays = (days: number): string => new Date(Date.now() + days * DAY).toISO
  * see every control a page can draw, and the frontend gates nothing
  * (invariant 6), so a permission the server would refuse costs a screenshot
  * nothing.
+ *
+ * `clients.manage` was added on 2026-11-24 (redesign Task 4): the catalogue
+ * predates MSP clients, so the fixture session could not see New client or a
+ * client's Add contact, the two creates the New menu leads to (`rbac.py`
+ * lists it beside `clients.read`).
  */
 const CATALOGUE = [
   "agent.push.run", "agent.push.scope.manage", "agent.release.manage", "agent.release.read",
   "ai.act.confirm", "ai.act.propose", "ai.admin", "ai.use", "assets.manage", "audit.read",
   "backup.policy.manage", "backup.read", "backup.restore", "backup.run",
   "bcp.approve", "bcp.manage", "bcp.read", "budget.manage", "budget.read",
-  "change.approve", "change.manage", "change.read", "change.request",
+  "change.approve", "change.manage", "change.read", "change.request", "clients.manage",
   "credentials.checkout", "credentials.manage", "credentials.read",
   "deploy.create", "deploy.execute", "deploy.package.manage", "deploy.read",
   "deploy.script.manage", "deploy.script.run", "devices.manage", "devices.read", "devices.review",

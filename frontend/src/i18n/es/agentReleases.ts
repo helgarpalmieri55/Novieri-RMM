@@ -192,7 +192,7 @@ export const agentReleases: Shape<typeof en> = {
   },
   msi: {
     title: "MSI para la directiva de grupo",
-    intro: "Para la instalación de software por directiva de grupo: Configuración del equipo → Directivas → Configuración de software → Instalación de software → Nuevo → Paquete, y luego Asignado. Cada equipo instala el agente en su próximo arranque y espera en Dispositivos → Pendientes de revisión.",
+    intro: "Para la instalación de software por directiva de grupo: Configuración del equipo → Directivas → Configuración de software → Instalación de software → Nuevo → Paquete, y luego Asignado. Cada equipo instala el agente en su próximo arranque y espera en Equipos → Pendientes de revisión.",
     switchOn: "Activa el enlace para descargar el MSI: los equipos se unen a través de él.",
     linkLabel: "Enlace de instalación",
     linkHelp: "El MSI lleva el enlace. Pega el que se mostró al generarlo; Novieri RMM solo guarda una huella de él.",

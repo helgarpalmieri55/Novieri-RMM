@@ -38,7 +38,7 @@ export const deploy: Shape<typeof en> = {
     packageEmptyHint:
       "No hay paquetes en el catálogo. Añade uno en Software → Paquetes y vuelve; también puede que no tengas permiso para listarlos.",
     deviceEmptyHint:
-      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
+      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     groupEmptyHint:
       "No hay grupos de dispositivos entre los que elegir. Crea uno en Administración → Grupos de dispositivos y vuelve; también puede que no tengas permiso para listarlos.",
     noAgent: "sin agente",

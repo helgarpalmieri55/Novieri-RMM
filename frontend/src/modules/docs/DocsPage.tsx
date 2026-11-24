@@ -22,7 +22,7 @@ import { renderMarkdown } from "./markdown";
 import { RowButton } from "./RowButton";
 import { groupHits } from "./searchGroups";
 import { PortalVisibility } from "./PortalVisibility";
-import { FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid } from "../../shell/components";
+import { FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, useNewParam } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Chips } from "../../shell/viz";
 
@@ -385,6 +385,17 @@ export function DocsPage() {
     save.reset();
     setEditing(true);
   };
+  // New → Document (redesign decision D8): the editor is inline, not a
+  // dialog, so the parameter is consumed: it starts a new article once. NOT
+  // BEFORE /me HAS ANSWERED: `canManage` is false until then, and consuming
+  // the parameter on that first render would drop it with nothing opened
+  // (pre-flight F-I4, measured).
+  const newArticle = useNewParam("article");
+  useEffect(() => {
+    if (!newArticle.open || me.data === undefined) return;
+    if (canManage) startNew();
+    newArticle.close();
+  }, [newArticle.open, canManage, me.data]);
   const startEdit = () => {
     if (!article.data) return;
     setDraft({

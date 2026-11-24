@@ -11,10 +11,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-import { Table, Td, Th } from "../../components/ui";
+import { Form } from "../../components/form";
+import { Button, Dialog, Field, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { useClientScope } from "../../lib/clientScope";
 import { useEverywherePermissions } from "../../lib/mePermissions";
-import { Btn, FilterBar, PageHead, Panel, QueryState, StatusPill, Toggle } from "../../shell/components";
+import { Btn, FilterBar, PageHead, Panel, QueryState, StatusPill, Toggle, useNewParam } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useClientList } from "./api";
 import { ClientFormDialog } from "./ClientForm";
@@ -27,7 +29,16 @@ export function ClientsPage() {
   const archived = params.get("archived") === "1";
   const everywhere = useEverywherePermissions();
   const clients = useClientList(archived);
-  const [creating, setCreating] = useState(false);
+  // New → Client and New → Contact (redesign decision D8): `?new=client`
+  // opens New client; `?new=contact` asks which client first.
+  const created = useNewParam("client");
+  const contact = useNewParam("contact");
+  const creating = created.open && everywhere.has("clients.manage");
+  // Asked only of someone with a client whose contacts they may manage, and
+  // so only once `/me` has answered: the dialog takes its first choice when it
+  // opens, and a bare `?new=contact` opens nothing for a reader.
+  const { clients: mine } = useClientScope();
+  const contactable = mine.some((client) => client.kind !== "unassigned" && client.permissions.includes("clients.manage"));
   const rows = clients.data ?? [];
 
   function showArchived(next: boolean) {
@@ -48,7 +59,7 @@ export function ClientsPage() {
               label={t("clients.list.newClient")}
               icon="plus"
               variant="primary"
-              onClick={() => setCreating(true)}
+              onClick={created.start}
             />
           ) : undefined
         }
@@ -111,12 +122,52 @@ export function ClientsPage() {
         key={creating ? "open" : "closed"}
         open={creating}
         client={null}
-        onClose={() => setCreating(false)}
+        onClose={created.close}
         onSaved={(saved) => {
-          setCreating(false);
-          navigate(`/clients/${saved.id}`);
+          // A replacing navigation: the new client's page takes the place of
+          // the list with its dialog open, so Back returns to the list.
+          navigate(`/clients/${saved.id}`, { replace: true });
         }}
       />
+      {contact.open && contactable ? <ContactClientDialog onClose={contact.close} /> : null}
     </>
+  );
+}
+
+/**
+ * New → Contact with every client shown (redesign design §1.2): a contact
+ * belongs to a client, so the first question is which one. Only clients
+ * where the person may manage contacts, never Unassigned -- the same rule
+ * ContactsTab applies -- and the answer goes to that client's contacts tab,
+ * where the form opens.
+ */
+function ContactClientDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const { clients } = useClientScope();
+  const choices = clients.filter((client) => client.kind !== "unassigned" && client.permissions.includes("clients.manage"));
+  const [picked, setPicked] = useState(choices[0]?.id ?? "");
+  return (
+    <Dialog open onClose={onClose} title={t("clients.list.newContactTitle")}>
+      <Form onSubmit={() => picked && navigate(`/clients/${picked}?tab=contacts&new=contact`)}>
+        <Field label={t("shell.kit.client")}>
+          <select className="select-field" value={picked} onChange={(event) => setPicked(event.target.value)}>
+            {choices.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("common.actions.cancel")}
+          </Button>
+          <Button type="submit" disabled={!picked}>
+            {t("clients.list.newContactContinue")}
+          </Button>
+        </div>
+      </Form>
+    </Dialog>
   );
 }

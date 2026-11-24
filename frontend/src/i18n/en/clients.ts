@@ -29,6 +29,9 @@ export const clients = {
     colSites: "Sites",
     colStatus: "Status",
     empty: "No clients to show.",
+    // New → Contact with every client shown (redesign design §1.2): which client first.
+    newContactTitle: "New contact",
+    newContactContinue: "Continue",
   },
   form: {
     createTitle: "New client",

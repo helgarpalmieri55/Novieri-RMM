@@ -110,6 +110,7 @@ export const IDENTICAL_OK_SHARED: Record<string, string> = {
   "enums.ExpenseSource.manual": "\"Manual\" is the same word in Spanish.",
   "enums.ChangeType.normal": "\"Normal\" is the same word in Spanish.",
   "enums.AiSourceType.ticket": "\"Ticket\" is the glossary term for a ticket in Spanish too (a loanword).",
+  "shell.newMenu.ticket": "\"Ticket\" is the glossary term for a ticket in Spanish too (a loanword).",
 };
 
 /** Each wave's file, by wave. */

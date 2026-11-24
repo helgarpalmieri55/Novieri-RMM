@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -19,7 +19,7 @@ import {
 } from "./serviceDeskState";
 import { TicketTable } from "./TicketTable";
 import type { TicketOut, TicketScope, TicketSort } from "./types";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid } from "../../shell/components";
+import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, useNewParam } from "../../shell/components";
 import { Chips } from "../../shell/viz";
 import { intlLocale } from "../../lib/datetime";
 
@@ -93,7 +93,8 @@ const FOOT_PRIORITY: Record<string, MessageKey> = {
 export function TicketListPage() {
   const t = useT();
   const api = useApi();
-  const [creating, setCreating] = useState(false);
+  // New → Ticket (redesign decision D8): `?new=ticket` opens New ticket.
+  const created = useNewParam("ticket");
 
   // Every filter lives in the URL, so a tile, a pasted link or Back can carry
   // it. An empty value is absent from the URL; typing replaces history.
@@ -255,7 +256,7 @@ export function TicketListPage() {
         description={t("serviceDesk.list.description")}
         actions={
           canWrite ? (
-            <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={() => setCreating(true)} />
+            <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={created.start} />
           ) : undefined
         }
       />
@@ -457,7 +458,9 @@ export function TicketListPage() {
         </QueryState>
       </Panel>
 
-      <NewTicketDialog open={creating} onClose={() => setCreating(false)} myUserId={myUserId} />
+      {/* Open only for someone who may write a ticket: the same code the
+          button checks, so a bare `?new=ticket` opens nothing for a reader. */}
+      <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} />
     </div>
   );
 }

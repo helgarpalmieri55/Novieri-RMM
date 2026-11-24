@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -21,6 +21,7 @@ import {
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -61,7 +62,8 @@ const OPEN_VIEW = "open";
 export function ChangesPage() {
   const t = useT();
   const api = useApi();
-  const [editing, setEditing] = useState<ChangeRequest | "new" | null>(null);
+  // New → Change (redesign decision D8): `?new=change` opens the new form.
+  const created = useNewParam("change");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRequest = (me.data?.permissions ?? []).includes("change.request");
@@ -142,7 +144,7 @@ export function ChangesPage() {
               {t("change.list.calendar")}
             </Link>
             {canRequest && (
-              <Button onClick={() => setEditing("new")}>
+              <Button onClick={created.start}>
                 <Icon name="plus" size={14} />
                 {t("change.list.newChange")}
               </Button>
@@ -272,7 +274,9 @@ export function ChangesPage() {
 
       <GatesPanel canManage={canManageGates} />
 
-      <ChangeRequestForm change={editing} onClose={() => setEditing(null)} />
+      {/* Open only for someone who may request a change: the same code the
+          button checks, so a bare `?new=change` opens nothing for a reader. */}
+      <ChangeRequestForm change={created.open && canRequest ? "new" : null} onClose={created.close} />
     </div>
   );
 }

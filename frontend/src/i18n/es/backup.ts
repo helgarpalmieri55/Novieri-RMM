@@ -74,7 +74,7 @@ export const backup: Shape<typeof en> = {
   },
   picker: {
     deviceEmptyHint:
-      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
+      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     repositoryEmptyHint:
       "No hay ningún repositorio de copia de seguridad del cliente de esta política. Crea uno en la pestaña Repositorios; también puede que no tengas permiso para listarlos.",
     repositoryEmptyHintElsewhere:

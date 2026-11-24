@@ -32,7 +32,8 @@ import {
 } from "./healthSignal";
 import { useHandset } from "./handset";
 import { Icon } from "./icons";
-import { ADD_COMPUTER_TO } from "./nav";
+import { NewMenu } from "./NewMenu";
+import type { NewMenuEntry } from "./newMenu";
 import { selectorChangePending } from "./selectorChange";
 import { Sidebar } from "./Sidebar";
 import { documentTitle, RecordTitleProvider } from "./title";
@@ -93,6 +94,8 @@ export interface AppShellProps {
    * slot filled by `Shell` (`useClientMark`), for the selector's reason.
    */
   clientMark?: { short: string; name: string };
+  /** The New menu's entries (newMenu.ts), computed by the app from /me. Absent: no menu. */
+  newMenu?: readonly NewMenuEntry[];
   children: ReactNode;
 }
 
@@ -233,6 +236,7 @@ export function AppShell({
   onAsk,
   clientSelector,
   clientMark,
+  newMenu,
   children,
 }: AppShellProps) {
   const t = useT();
@@ -423,6 +427,17 @@ export function AppShell({
     return () => document.body.classList.remove("sidebar-collapsed");
   }, [collapsed]);
 
+  // THE ASSISTANT'S ROUND BUTTON (decision D12): on every console page for
+  // someone with `ai.use`, except the Assistant's own page. While it is drawn,
+  // `body.assistant-fab-on` keeps the save bar out of its corner (`shell.css`):
+  // Atera's walkthrough files its own AI button covering the save button
+  // (Atera_recorrido_menus_UI_UX.md, line 639).
+  const assistantFab = permissions.includes("ai.use") && location.pathname !== "/assistant";
+  useLayoutEffect(() => {
+    document.body.classList.toggle("assistant-fab-on", assistantFab);
+    return () => document.body.classList.remove("assistant-fab-on");
+  }, [assistantFab]);
+
   // "its collapsed state is not persisted anywhere I could observe" -- the
   // audit, on the collapse control. Density is a standing preference; making
   // the operator re-set it on every load is the kind of small tax that makes
@@ -487,6 +502,12 @@ export function AppShell({
             ) : null}
           </button>
 
+          {/* THE NEW MENU (redesign design §1.2): the bar's one primary, left
+              of the search as Atera draws it. Only real destinations, each
+              offered with the code its page's own create button checks
+              (`newMenu.ts`); with none, nothing is drawn. */}
+          <NewMenu entries={newMenu ?? []} />
+
           {/* THE BREADCRUMB AND THE PAGE TITLE ARE NOT IN THE BAR ANY MORE.
               v3 draws the crumb as the first line of `.content`, above the
               page's own `PageHead` h1, and draws no title in the bar at all;
@@ -529,70 +550,42 @@ export function AppShell({
           />
 
           {/* THE ICON CLUSTER, and what is deliberately NOT in it.
-              Atera's top bar carries six controls; this carries one action and
-              three destinations, because the operator's own rule — "I don't
-              want dead tiles everywhere" — does not stop applying at the top of
-              the page. An icon is a promise that something is behind it.
+              Atera's top bar carries six controls; this carries the client,
+              two live glyphs and the person, because the operator's own rule
+              — "I don't want dead tiles everywhere" — does not stop applying
+              at the top of the page. An icon is a promise that something is
+              behind it. The quick-create Atera puts here is the New menu, left
+              of the search (redesign design §1.2).
 
-              NOT PRESENT, and why: a "+ New" quick-create needs a menu of
-              create actions that does not exist yet; a notification bell needs
-              a personal feed, and /notifications is admin configuration rather
-              than an inbox. Both are worth building. Neither is worth faking.
+              NOT PRESENT, and why: a notification bell needs a personal feed,
+              and /notifications is admin configuration rather than an inbox.
+              It is worth building; it is not worth faking.
 
               Each is gated on the permission its destination requires, so the
               cluster never offers a technician a 403. */}
           <div className="top-actions">
             {/* THE CLIENT EVERYTHING IN THIS CLUSTER, AND ON THE PAGE, IS FOR
                 (phase 3 design §1.1): first, because it is the context of the
-                rest -- "Add a computer" included. On a handset it is in the
+                rest. On a handset it is in the
                 drawer instead: there is no room for it here (`./handset`). */}
             {handset ? null : clientSelector}
-            {/* THE FIRST THING ANYONE DOES WITH THIS PRODUCT, on every route.
-
-                ONE "ADD A COMPUTER" ENTRY. The review (2026-09-23) counted six
-                install entry points; this and the Devices head now lead to the
-                same page, whose first panel is the one-machine install (the
-                installers and the command), with the network sweep below it
-                for many machines at once.
-
-                Kept on the `devices.read` gate -- the technician who installs
-                -- while each destination refuses an under-privileged caller
-                server-side. LABELLED, AND PRIMARY: this sits in the chrome, so
-                it never competes with a page's own primary. */}
-            {permissions.includes("devices.read") ? (
-              <Link className="top-enrol primary" to={ADD_COMPUTER_TO}>
-                <Icon name="plus" size={14} />
-                {/* Visually hidden rather than removed below 640px: the label
-                    IS the accessible name (SC 2.5.3 wants the two to agree),
-                    so `display: none` would leave a nameless icon exactly
-                    where a small screen can least afford to guess. */}
-                <span className="top-enrol-label">{t("shell.app.addComputer")}</span>
-              </Link>
-            ) : null}
+            {/* ADD A COMPUTER LEFT THE BAR (redesign design §1.2, decision D11): it is New → Computer and the Devices page's own head. */}
             {permissions.includes("health.read") ? <HealthGlyph reading={reading} /> : null}
             {permissions.includes("platform.status.read") ? (
               <PlatformGlyph reading={reading} />
             ) : null}
-            {/* ONE CHROME SHORTCUT, AND IT IS THE ASSISTANT.
-
-                THE OPERATOR'S RULING, 2026-09-08: "AI Analyst needs to be
-                there, documentation link doesn't need to be there". That was
-                first read narrowly -- docs hidden below 640px, kept on the
-                desktop -- because the finding it answered was a handset width
-                measurement (seven 44px controls plus their gaps ran the bar to
-                402px at 390px, a horizontal page scroll on every route). The
-                operator corrected it on 2026-09-09 looking at the deployed
-                bar: the link is gone at EVERY width. /docs remains a rail item
-                and a command-palette destination, so nothing is unreachable.
-
-                The health and platform glyphs stay, because a live reading is
-                not a shortcut to anything and exists nowhere else in the
-                chrome. */}
-            {permissions.includes("ai.use") ? (
-              <Link className="ib top-icon-btn" to="/assistant" aria-label={t("shell.app.askAssistant")}>
-                <Icon name="sparkles" size={17} />
-              </Link>
-            ) : null}
+            {/* THE ASSISTANT IS NOT IN THE BAR (decision D12; the operator,
+                2026-11-24, on the redesign plan: "Como queda en las capturas
+                de atera"). Atera's bar -- docs/design/referencias-atera/atera
+                1.png -- is search, Install agent, bell, alerts, help and the
+                profile, with no AI icon; its AI is anchored at the rail's foot
+                and is a round button at the bottom right of every page. This
+                console does the same: `nav.ts` anchors the Assistant, and the
+                round button is drawn after `<main>` below (`.assistant-fab`).
+                This replaces the ruling of 2026-09-08 ("AI Analyst needs to be
+                there") that put the icon here. Its other half stands: no
+                documentation link in the bar at any width (2026-09-09); /docs
+                is a rail item and a search destination. */}
             <AccountMenu user={user} onSignOut={onSignOut} />
           </div>
         </header>
@@ -643,6 +636,14 @@ export function AppShell({
           </nav>
           <RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>
         </main>
+        {/* THE ASSISTANT, ONE TAP FROM EVERY PAGE (decision D12). A link to
+            the Assistant's page, as the bar's icon was: not a chat drawn over
+            the page, which would be a feature this console does not have. */}
+        {assistantFab ? (
+          <Link className="assistant-fab" to="/assistant" aria-label={t("shell.app.askAssistant")} title={t("shell.app.askAssistant")}>
+            <Icon name="sparkles" size={22} />
+          </Link>
+        ) : null}
       </div>
     </div>
   );

@@ -114,6 +114,7 @@ function renderShellWith(
     onSignOut?: () => void;
     searchItems?: ComponentProps<typeof AppShell>["searchItems"];
     health?: ComponentProps<typeof AppShell>["health"];
+    newMenu?: ComponentProps<typeof AppShell>["newMenu"];
   } = {},
 ) {
   return render(
@@ -127,6 +128,7 @@ function renderShellWith(
         onSignOut={overrides.onSignOut ?? vi.fn()}
         searchItems={overrides.searchItems}
         health={overrides.health}
+        newMenu={overrides.newMenu}
       >
         <p>page content</p>
       </AppShell>
@@ -374,24 +376,27 @@ describe("AppShell", () => {
     expect(sidebar().queryByRole("link", { name: /Backup/ })).not.toBeInTheDocument();
   });
 
-  it("does not leave an empty area behind", () => {
+  it("does not leave an empty folder behind", () => {
+    // Redesign design §1.1: no group captions any more ("Daily",
+    // "Governance"); what can be left empty now is a folder. With only
+    // patch.read neither Assets nor More has a page to show.
     renderShell(["patch.read"]);
-    expect(sidebar().getByText("Daily")).toBeInTheDocument();
-    expect(sidebar().queryByText("Manage")).not.toBeInTheDocument();
-    expect(sidebar().queryByText("Governance")).not.toBeInTheDocument();
+    expect(sidebar().getByRole("link", { name: /Patching/ })).toBeInTheDocument();
+    expect(sidebar().queryByRole("button", { name: "Assets" })).toBeNull();
+    expect(sidebar().queryByRole("button", { name: "More" })).toBeNull();
   });
 
-  it("is not vacuous: with the permissions, the hidden areas appear", () => {
-    // NON-VACUITY. The two assertions above are about ABSENCE and would both
-    // pass against a sidebar that rendered nothing at all.
-    renderShell(["devices.read", "patch.read", "budget.read", "backup.read", "docs.read"]);
-    expect(sidebar().getByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
+  it("is not vacuous: with the permissions, the folders appear and open on their pages", async () => {
+    // NON-VACUITY. The assertions above are about ABSENCE and would pass
+    // against a rail that rendered nothing at all.
+    renderShell(["devices.read", "patch.read", "budget.read", "backup.read", "docs.read", "licenses.read"]);
     expect(sidebar().getByRole("link", { name: /IT documentation/ })).toBeInTheDocument();
-    expect(sidebar().getByText("Governance")).toBeInTheDocument();
-    expect(sidebar().getByText("Assets & Spend")).toBeInTheDocument();
+    expect(sidebar().getByRole("button", { name: "Assets" })).toBeInTheDocument();
+    await user.click(sidebar().getByRole("button", { name: "More" }));
+    expect(sidebar().getByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
   });
 
-  it("hides a module's page when no client of the choice uses the module (phase 3 design §2)", () => {
+  it("hides a module's page when no client of the choice uses the module (phase 3 design §2)", async () => {
     const shell = (modules: ReadonlySet<string>) => (
       <MemoryRouter>
         <AppShell
@@ -407,9 +412,12 @@ describe("AppShell", () => {
       </MemoryRouter>
     );
     const { unmount } = render(shell(new Set()));
+    // No optional module on: More is not drawn at all (decision D9).
+    expect(sidebar().queryByRole("button", { name: "More" })).toBeNull();
     expect(sidebar().queryByRole("link", { name: /IT budget/ })).not.toBeInTheDocument();
     unmount();
     render(shell(new Set(["budget"])));
+    await user.click(sidebar().getByRole("button", { name: "More" }));
     expect(sidebar().getByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
   });
 
@@ -950,31 +958,59 @@ describe("AppShell session notice", () => {
     expect(onAsk).toHaveBeenCalledWith("why did patching stall");
   });
 
-  it("carries the assistant in the chrome and no documentation link at all", async () => {
-    // THE OPERATOR'S RULING, twice. On 2026-09-08: "AI Analyst needs to be
-    // there, documentation link doesn't need to be there". That was first read
-    // as "hide docs on a handset", because the finding it answered was a
-    // handset measurement -- seven 44px targets ran the bar to 402px at 390px.
-    // On 2026-09-09, looking at the deployed bar, the operator meant what the
-    // words say: the link is gone at every width.
+  it("carries the Assistant as the round button and at the rail's foot, not in the bar, and no documentation link at all", async () => {
+    // THE OPERATOR, 2026-11-24 ("Como queda en las capturas de atera",
+    // docs/design/referencias-atera/atera 1.png): the Assistant leaves the
+    // top bar for the rail's foot and a round button at the bottom right of
+    // every page. This replaces the ruling of 2026-09-08 that put it in the
+    // bar; its other half stands -- on 2026-09-09 the operator removed the
+    // documentation link at every width.
     //
     // ASSERTED WITH `docs.read` GRANTED, which is the whole point: an operator
-    // who MAY read documentation still gets no top-bar link. A test run
-    // without the permission would pass on the gate rather than on the
-    // removal, and would go green again the day somebody puts the link back.
+    // who MAY read documentation still gets no top-bar link.
     renderShell(["ai.use", "docs.read"]);
-    expect(await screen.findByRole("link", { name: "Ask the Assistant" })).toBeInTheDocument();
-    // THE TOP BAR, specifically: the rail lists IT documentation as an
-    // ordinary page (Governance), which is where it belongs.
     const bar = document.querySelector("header.topbar") as HTMLElement;
     expect(bar).not.toBeNull();
+    expect(within(bar).queryByRole("link", { name: "Ask the Assistant" })).toBeNull();
+    const fab = await screen.findByRole("link", { name: "Ask the Assistant" });
+    expect(fab).toHaveAttribute("href", "/assistant");
+    expect(fab).toHaveClass("assistant-fab");
+    expect(bar.contains(fab)).toBe(false);
+    const anchored = screen.getByRole("navigation", { name: "Assistant and Admin" });
+    expect(within(anchored).getByRole("link", { name: "Assistant" })).toHaveAttribute("href", "/assistant");
     expect(within(bar).queryByRole("link", { name: "IT documentation" })).toBeNull();
+  });
+
+  it("does not draw the round button on the Assistant's own page", () => {
+    render(
+      <MemoryRouter initialEntries={["/assistant"]}>
+        <AppShell permissions={["ai.use"]} orgName="Operations" title="Assistant" user={{ name: "A B", role: "Operator" }} onSignOut={vi.fn()}>
+          <p>x</p>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("link", { name: "Ask the Assistant" })).toBeNull();
+    expect(document.body).not.toHaveClass("assistant-fab-on");
+  });
+
+  it("tells the save bar to keep its corner clear while the round button is drawn", () => {
+    // Atera's walkthrough files its own AI button covering the save button
+    // (Atera_recorrido_menus_UI_UX.md, line 639). `shell.css` keys the save
+    // bar's room off this class; responsive.test.ts checks the rule.
+    const { unmount } = renderShell(["ai.use"]);
+    expect(document.body).toHaveClass("assistant-fab-on");
+    unmount();
+    expect(document.body).not.toHaveClass("assistant-fab-on");
   });
 
   it("never offers the assistant to an operator who cannot reach it", async () => {
     renderShell(["devices.read"]);
     await user.type(screen.getByRole("combobox", { name: /Find or ask/ }), "why did patching stall");
     expect(screen.queryByRole("button", { name: /Ask/ })).toBeNull();
+    // Nor the round button (decision D12): without `ai.use`, neither the
+    // search's ask row nor the button.
+    expect(screen.queryByRole("link", { name: "Ask the Assistant" })).toBeNull();
+    expect(document.body).not.toHaveClass("assistant-fab-on");
   });
 });
 
@@ -1314,43 +1350,40 @@ describe("the health glyph's rules", () => {
  * the Devices head, whose first panel is the one-machine install -- the
  * installers and the command, never a bare enrollment token ("it redirects me
  * to enroll a token which again is not the agent installation", the operator)
- * -- with the network sweep below it.
+ * -- with the network sweep below it. Since the redesign (decision D11) the
+ * bar's way to it is New → Computer, still on every route.
  */
-describe("the top bar's enrol affordance", () => {
-  const enrol = () => screen.getByRole("link", { name: /add a computer/i });
+describe("Add a computer, in New (decision D11)", () => {
+  // RE-POINTED (redesign plan, Task 4, decision D11; design §1.2): "Add a
+  // computer" left the top bar for the New menu ("New → Computer") and the
+  // Computers page head. The six cases that held the old button are kept,
+  // each pointed at New, the bar's one primary.
+  const DEVICE = [{ kind: "device", to: "/devices/onboard", icon: "devices" }] as const;
+  const newButton = () => screen.getByRole("button", { name: "New" });
 
-  it("puts getting an agent onto a machine on every page", () => {
-    renderShellWith({ permissions: ["devices.read"] });
-    expect(enrol()).toHaveAttribute("href", "/devices/onboard");
+  it("puts getting an agent onto a machine on every page", async () => {
+    renderShellWith({ permissions: ["devices.read"], newMenu: DEVICE });
+    await userEvent.click(newButton());
+    expect(screen.getByRole("menuitem", { name: "Computer" })).toHaveAttribute("href", "/devices/onboard");
   });
 
   it("carries a visible label, because an unlabelled icon is what made it unfindable", () => {
-    renderShellWith({ permissions: ["devices.read"] });
-    expect(within(enrol()).getByText("Add a computer")).toBeInTheDocument();
+    renderShellWith({ permissions: ["devices.read"], newMenu: DEVICE });
+    expect(within(newButton()).getByText("New")).toBeInTheDocument();
   });
 
-  it("is gated on the technician permission, not shown to someone with neither", () => {
-    // The control keeps its `devices.read` gate -- the technician who enrols
-    // and manages endpoints -- rather than switching to the destination's
-    // `agent.release.read`: the page itself refuses an under-privileged caller
-    // server-side (invariant 6), so the button need not re-gate on it, and a
-    // reader with neither permission is offered no dead affordance.
-    renderShellWith({ permissions: ["health.read"] });
+  it("is gated: with no destination the person may use, there is no New at all", () => {
+    // `newMenuEntries` (App.tsx) offers only what the destination's own page
+    // would let the person do; cosmetic, like every rule here (invariant 6):
+    // the server refuses the rest. With none, no dead control.
+    renderShellWith({ permissions: ["health.read"], newMenu: [] });
+    expect(screen.queryByRole("button", { name: "New" })).toBeNull();
     expect(screen.queryByRole("link", { name: /add a computer/i })).toBeNull();
   });
 
-  it("is drawn in the primary voice, as v3 draws it", () => {
-    // RULED 2026-09-08, closing the v3 port. This assertion used to read
-    // `not.toHaveClass("primary")`, from DESIGN.md's one-primary rule read as
-    // "one per screen". The rule is one per page BODY, and this control is
-    // chrome: it sits on the top bar's rung with the search field and the
-    // account menu, never on the page's own, so it does not compete with a
-    // page's primary for the first glance. v3's `topbar()` draws it
-    // `.btn.pri`, DESIGN.md now records the exception, and the console
-    // paints the accent. The guard is kept and pointed at what is now true,
-    // not deleted.
-    renderShellWith({ permissions: ["devices.read"] });
-    expect(enrol()).toHaveClass("primary");
+  it("is drawn in the primary voice: New is the bar's one primary (DESIGN.md v4)", () => {
+    renderShellWith({ permissions: ["devices.read"], newMenu: DEVICE });
+    expect(newButton()).toHaveClass("primary");
   });
 
   it("does not push the chrome off the side of a phone", () => {
@@ -1369,11 +1402,11 @@ describe("the top bar's enrol affordance", () => {
 
   it("keeps its name where the layout drops the label", () => {
     // Narrow viewports have no room for the word, and `display: none` on the
-    // label would take the accessible name with it — leaving a nameless icon
-    // exactly where the smallest screens can least afford to guess.
+    // label would take the accessible name with it: the label is hidden
+    // visually below 640px, never removed.
     const css = readFileSync(resolve(import.meta.dirname, "shell.css"), "utf8");
-    const narrow = css.slice(css.indexOf(".top-enrol-label"));
-    expect(narrow).not.toMatch(/\.top-enrol-label[^}]*display:\s*none/);
+    expect(css).toContain(".new-menu-label");
+    expect(css).not.toMatch(/\.new-menu-label[^}]*display:\s*none/);
   });
 });
 

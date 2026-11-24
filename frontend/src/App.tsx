@@ -16,10 +16,11 @@ import { useHealthReading } from "./shell/healthSignal";
 import { useReviewCount } from "./shell/useReviewCount";
 import { RouteError } from "./shell/RouteError";
 import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./shell/nav";
+import { newMenuEntries } from "./shell/newMenu";
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
-import { ClientScopeProvider, emptyQueryCache, useEnabledModules } from "./lib/clientScope";
+import { ClientScopeProvider, emptyQueryCache, useClientScope, useEnabledModules } from "./lib/clientScope";
 import { ClientSelector, useClientMark } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
@@ -209,6 +210,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
   });
   const permissions = me.data?.permissions ?? [];
   const modules = useEnabledModules();
+  const { selected } = useClientScope();
+  // The New menu (redesign design §1.2): every entry a real destination, each
+  // gated on the code its page's own create button checks (`shell/newMenu.ts`).
+  const newMenu = useMemo(
+    () =>
+      newMenuEntries({
+        permissions,
+        everywhere: me.data?.permissions_everywhere ?? permissions,
+        clients: me.data?.clients ?? [],
+        selected,
+        modules,
+      }),
+    [permissions, me.data, selected, modules],
+  );
   // The client chosen, for the phone's drawer toggle (operator decision 4).
   const clientMark = useClientMark();
   const navigate = useNavigate();
@@ -337,6 +352,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       modules={modules}
       clientSelector={<ClientSelector />}
       clientMark={clientMark}
+      newMenu={newMenu}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}
       searchPending={records.pending}

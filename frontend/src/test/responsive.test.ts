@@ -196,8 +196,13 @@ describe("the chrome below the drawer breakpoint", () => {
     expect(block).not.toMatch(/\.top-shortcut\s*\{/);
     const shellTsx = read("frontend/src/shell/AppShell.tsx");
     expect(shellTsx).not.toContain("top-shortcut");
-    // The link's name is a catalogue entry now; the shortcut survives when the
-    // shell still renders that key and the English entry still says it.
+    // The link's name is a catalogue entry; the shortcut survives where the
+    // shell still renders that key and the English entry still says it. It
+    // is the round button at the bottom right now (decision D12, the operator
+    // on 2026-11-24), drawn after `</main>` and never inside the top bar.
+    const header = shellTsx.slice(shellTsx.indexOf('<header className="topbar">'), shellTsx.indexOf("</header>"));
+    expect(header, "the top bar draws the Assistant again").not.toContain("shell.app.askAssistant");
+    expect(shellTsx).toContain('className="assistant-fab"');
     expect(shellTsx, "the assistant shortcut itself must survive").toContain("shell.app.askAssistant");
     expect(en.shell.app.askAssistant).toBe("Ask the Assistant");
   });
@@ -418,5 +423,28 @@ describe("the tile row's column count can be overridden by its own media queries
     expect(components.indexOf('.stats-grid[data-columns="4"]')).toBeLessThan(
       components.indexOf(".stats-grid[data-columns] {"),
     );
+  });
+});
+
+/**
+ * THE ASSISTANT'S ROUND BUTTON (decision D12; DESIGN.md v4, "Assistant
+ * button"). jsdom lays nothing out, so this is asserted on the declarations:
+ * a 48px target, fixed in the corner, and the save bar's room beside it at
+ * every width. The defect it guards is Atera's own (its walkthrough, line
+ * 639: the floating AI button covers the save button).
+ */
+describe("the Assistant's round button", () => {
+  it("is a fixed 48px circle, over the 44px target on every pointer", () => {
+    const fab = /\.assistant-fab\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(fab, "no `.assistant-fab` rule in shell.css").not.toBe("");
+    expect(fab).toMatch(/position:\s*fixed/);
+    expect(fab).toMatch(/width:\s*48px/);
+    expect(fab).toMatch(/height:\s*48px/);
+  });
+
+  it("keeps the save bar out of its corner on a desk and on a phone", () => {
+    expect(SHELL).toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*72px;/);
+    expect(SHELL_BLOCKS.get(640) ?? "").toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*64px;/);
+    expect(SHELL).toMatch(/body\.assistant-fab-on \.content\s*\{\s*padding-bottom:\s*88px;/);
   });
 });

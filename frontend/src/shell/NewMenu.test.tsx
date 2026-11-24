@@ -1,0 +1,42 @@
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { renderPage } from "../test/renderPage";
+import { NewMenu } from "./NewMenu";
+import type { NewMenuEntry } from "./newMenu";
+
+const ENTRIES: NewMenuEntry[] = [
+  { kind: "ticket", to: "/service-desk?new=ticket", icon: "ticket" },
+  { kind: "device", to: "/devices/onboard", icon: "devices" },
+];
+
+describe("NewMenu", () => {
+  it("is a menu button in the primary voice, and draws nothing when there is nothing to create", () => {
+    renderPage("/x", <NewMenu entries={ENTRIES} />);
+    const button = screen.getByRole("button", { name: "New" });
+    expect(button).toHaveAttribute("aria-haspopup", "menu");
+    expect(button).toHaveClass("primary");
+    const empty = renderPage("/y", <NewMenu entries={[]} />);
+    expect(empty.container.querySelector("button")).toBeNull();
+  });
+
+  it("opens on the first entry, and each entry goes to its destination", async () => {
+    const { router } = renderPage("/x", <NewMenu entries={ENTRIES} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.getByRole("menuitem", { name: "Ticket" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Computer" })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(router.state.location.pathname).toBe("/devices/onboard");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("closes on Escape and gives focus back to the button", async () => {
+    renderPage("/x", <NewMenu entries={ENTRIES} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("button", { name: "New" })).toHaveFocus();
+  });
+});

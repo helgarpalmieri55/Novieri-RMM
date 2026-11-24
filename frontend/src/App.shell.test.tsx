@@ -316,11 +316,15 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
 
     const { unmount } = renderWith([]);
     await screen.findByText("Ada");
+    // RE-POINTED (redesign design §1.1, decision D9): IT budget is in the
+    // More folder now, and with no optional module on More is not drawn.
+    expect(rail().queryByRole("button", { name: "More" })).toBeNull();
     expect(rail().queryByRole("link", { name: /IT budget/ })).not.toBeInTheDocument();
     unmount();
 
     renderWith(["budget"]);
     await screen.findByText("Ada");
+    await user.click(await rail().findByRole("button", { name: "More" }));
     expect(await rail().findByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
   });
 });

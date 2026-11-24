@@ -1016,7 +1016,8 @@ describe("labels and sentences built outside React", () => {
   it("words the picker hints and the sublabels of people and devices", () => {
     setActiveLanguage("es");
     expect(userPickerEmptyHint()).toMatch(/^No hay personas entre las que elegir/);
-    expect(devicePickerEmptyHint()).toMatch(/Dispositivos → Añadir un equipo/);
+    // The rail names the machine list "Equipos" (redesign design §1.1, decision D13).
+    expect(devicePickerEmptyHint()).toMatch(/Equipos → Añadir un equipo/);
     const users = userPickerOptions(USERS as never);
     expect(users.map((u) => u.sublabel)).toEqual(["t@example.com", "r@example.com", "o@example.com · deshabilitado"]);
     const devices = devicePickerOptions(DEVICES.items as unknown as Device[]);

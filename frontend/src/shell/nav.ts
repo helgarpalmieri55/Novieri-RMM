@@ -1,21 +1,9 @@
 /**
- * The sidebar's navigation model, in two layers.
+ * The sidebar's navigation model.
  *
- * THE DAILY WORK FIRST: about ten destinations a technician uses every day.
- * THEN THE BUSINESS MODULES, SHOWN: Governance and Assets & Spend, four pages
- * each, as ordinary full-size items under their own headings. THEN ONE AREA,
- * Admin: twenty-odd configuration pages behind one rail entry whose route is a
- * landing page, opening in place (with its section headings) while the
- * operator is inside it. The review of 2026-09-23 (reviewer 2, §1) counted 36
- * peers in seven groups, with configuration spread across four of them and
- * Settings below the fold.
- *
- * WHY ONLY ADMIN IS FOLDED. The first two-layer version (2026-09-23) folded
- * Governance and Assets & Spend too, and the operator's verdict the same day
- * was that their pages "look so small now and without importance". They are
- * modules this product is sold on, visited by the people who own them, and
- * eight items do not need hiding. Configuration does: it is visited rarely
- * and by few.
+ * THE RAIL IN ATERA'S ORDER (redesign 2026-11-23): fourteen destinations with
+ * no captions, two folders, and the Assistant and Admin anchored at the foot;
+ * Admin swaps the rail for its own panel.
  *
  * NAMES ARE THE TASK'S, NOT THE MACHINERY'S: "Job history", not "Signed Job
  * Engine"; "Audit log", not "Immutable Audit"; "Service levels", not "SLA
@@ -64,10 +52,6 @@ function page(
   const texts: Record<string, MessageKey> = { label };
   if (hint) texts.hint = hint;
   return named({ to, icon, permission, ...rest }, texts) as unknown as NavItem;
-}
-
-function group(label: MessageKey, items: readonly RailEntry[]): NavGroup {
-  return named({ items }, { label });
 }
 
 function section(label: MessageKey, items: readonly NavItem[]): NavSection {
@@ -129,9 +113,25 @@ export interface NavArea {
   readonly sections: readonly NavSection[];
 }
 
-export type RailEntry = NavItem | NavArea;
+/**
+ * A FOLDER IN THE RAIL (redesign design §1.1, decision D9): Assets and More.
+ * A heading that opens in place, not a page; each of its pages is a rail
+ * destination of its own. No permission of its own: it shows when one of its
+ * pages does.
+ */
+export interface NavFolder {
+  readonly kind: "folder";
+  readonly key: "assets" | "more";
+  readonly label: string;
+  readonly icon: string;
+  readonly items: readonly NavItem[];
+}
 
+export type RailEntry = NavItem | NavArea | NavFolder;
+
+/** `main` is the rail; `anchored` is its foot (the Assistant, Admin); `help` is the requester's. */
 export interface NavGroup {
+  readonly key: "main" | "anchored" | "help";
   readonly label: string;
   readonly items: readonly RailEntry[];
 }
@@ -140,41 +140,56 @@ export function isArea(entry: RailEntry): entry is NavArea {
   return "sections" in entry;
 }
 
+export function isFolder(entry: RailEntry): entry is NavFolder {
+  return "kind" in entry && entry.kind === "folder";
+}
+
+function group(key: NavGroup["key"], label: MessageKey, items: readonly RailEntry[]): NavGroup {
+  return named({ key, items }, { label });
+}
+
+function folder(key: NavFolder["key"], label: MessageKey, icon: string, items: readonly NavItem[]): NavFolder {
+  return named({ kind: "folder" as const, key, icon, items }, { label });
+}
+
+/**
+ * THE RAIL IN ATERA'S ORDER (redesign design §1.1, approved 2026-11-23): no
+ * group captions; Clients third, out of Admin; Assets and More as folders, More
+ * holding only the optional modules on for the choice; the Assistant and Admin
+ * anchored at the foot. Every item keeps the permission code its route
+ * enforces server-side -- the codes did not change, only the order.
+ */
 export const NAV_GROUPS: readonly NavGroup[] = [
-  group("shell.nav.group.daily", [
+  group("main", "shell.nav.group.main", [
     page("/dashboard", "shell.nav.item.dashboard", "dashboard", null),
+    page("/service-desk", "shell.nav.item.tickets", "ticket", "ticket.read"),
+    page("/clients", "shell.nav.item.clients", "building", "clients.read", { hint: "shell.nav.hint.clients" }),
     page("/devices", "shell.nav.item.devices", "devices", "devices.read"),
     page("/health", "shell.nav.item.alerts", "health", "health.read", { badgeTone: "gold" }),
-    page("/service-desk", "shell.nav.item.tickets", "ticket", "ticket.read"),
     page("/patch", "shell.nav.item.patching", "patch", "patch.read"),
     page("/deploy", "shell.nav.item.software", "package", "deploy.read"),
     page("/backup", "shell.nav.item.backup", "backup", "backup.read"),
     page("/remote", "shell.nav.item.remoteSessions", "remote", "remote.control"),
-    page("/assistant", "shell.nav.item.assistant", "sparkles", "ai.use"),
-  ]),
-  group("shell.nav.group.governance", [
+    folder("assets", "shell.nav.item.assets", "archive", [
+      page("/licenses", "shell.nav.item.licenses", "license", "licenses.read", { hint: "shell.nav.hint.licenses" }),
+      page("/subscriptions", "shell.nav.item.subscriptions", "subscription", "subscriptions.read", { hint: "shell.nav.hint.subscriptions" }),
+      page("/ipam", "shell.nav.item.ipAddresses", "network", "ipam.read", { hint: "shell.nav.hint.ipam" }),
+    ]),
     page("/docs", "shell.nav.item.itDocumentation", "book", "docs.read", { hint: "shell.nav.hint.docs" }),
-    page("/changes", "shell.nav.item.changes", "changes", "change.read", { hint: "shell.nav.hint.changes", module: "change" }),
-    page("/bcp", "shell.nav.item.continuityTests", "bcp", "bcp.read", { hint: "shell.nav.hint.bcp", module: "bcp" }),
     page("/reports", "shell.nav.item.reports", "chart", "reporting.read", { hint: "shell.nav.hint.reports" }),
+    folder("more", "shell.nav.item.more", "dots", [
+      page("/changes", "shell.nav.item.changes", "changes", "change.read", { hint: "shell.nav.hint.changes", module: "change" }),
+      page("/bcp", "shell.nav.item.continuityTests", "bcp", "bcp.read", { hint: "shell.nav.hint.bcp", module: "bcp" }),
+      page("/budget", "shell.nav.item.itBudget", "budget", "budget.read", { hint: "shell.nav.hint.budget", module: "budget" }),
+    ]),
   ]),
-  group("shell.nav.group.assetsSpend", [
-    page("/licenses", "shell.nav.item.licenses", "license", "licenses.read", { hint: "shell.nav.hint.licenses" }),
-    page("/subscriptions", "shell.nav.item.subscriptions", "subscription", "subscriptions.read", { hint: "shell.nav.hint.subscriptions" }),
-    page("/budget", "shell.nav.item.itBudget", "budget", "budget.read", { hint: "shell.nav.hint.budget", module: "budget" }),
-    page("/ipam", "shell.nav.item.ipAddresses", "network", "ipam.read", { hint: "shell.nav.hint.ipam" }),
-  ]),
-  group("shell.nav.group.configure", [
+  group("anchored", "shell.nav.group.main", [
+    page("/assistant", "shell.nav.item.assistant", "sparkles", "ai.use"),
     named(
       {
         to: "/admin",
         icon: "adjustments",
         sections: [
-          // MSP clients phase 3 (design §4.1): the companies served, their
-          // sites, contacts and optional modules.
-          section("shell.nav.section.organization", [
-            page("/clients", "shell.nav.item.clients", "building", "clients.read", { hint: "shell.nav.hint.clients" }),
-          ]),
           section("shell.nav.section.serviceDesk", [
             page("/notifications", "shell.nav.item.notifications", "bell", "notification.read", { hint: "shell.nav.hint.notifications" }),
             page("/email-intake", "shell.nav.item.emailIntake", "mail", "email_intake.read", { hint: "shell.nav.hint.emailIntake" }),
@@ -213,13 +228,23 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   ]),
 ];
 
-/** Every page item in these groups: rail items and every area's pages. */
+/** Every page in these groups: rail items, folder pages, and every area's pages. */
 export function navItems(groups: readonly NavGroup[] = NAV_GROUPS): NavItem[] {
   return groups.flatMap((group) =>
     group.items.flatMap((entry) =>
-      isArea(entry) ? entry.sections.flatMap((section) => section.items) : [entry],
+      isFolder(entry) ? [...entry.items] : isArea(entry) ? entry.sections.flatMap((section) => section.items) : [entry],
     ),
   );
+}
+
+/** The rail's folders (Assets, More) in these groups, for the guards that read every icon and every page. */
+export function navFolders(groups: readonly NavGroup[] = NAV_GROUPS): NavFolder[] {
+  return groups.flatMap((group) => group.items.filter(isFolder));
+}
+
+/** What can own a destination: an item, a folder's page (it owns itself) or an area. */
+function ownersOf(groups: readonly NavGroup[]): (NavItem | NavArea)[] {
+  return groups.flatMap((group) => group.items.flatMap((entry) => (isFolder(entry) ? [...entry.items] : [entry])));
 }
 
 /** Every area in these groups. */
@@ -246,8 +271,9 @@ function unlisted(to: string, label: MessageKey, under: string): NavUnlisted {
 }
 
 export const NAV_UNLISTED: readonly NavUnlisted[] = [
-  // The single "Add a computer" entry: the top bar and the Devices head both
-  // lead here, and it links on to packages, enrollment and push install.
+  // The single "Add a computer" entry: New -> Computer (decision D11) and the
+  // Devices head both lead here, and it links on to packages, enrollment and
+  // push install.
   unlisted("/devices/onboard", "shell.nav.page.addComputer", "/devices"),
   // Subnet push runs (design 2026-09-30 §1.7): reached from Devices.
   unlisted("/devices/push-runs", "shell.nav.page.pushRuns", "/devices"),
@@ -295,13 +321,14 @@ export interface Crumb {
 interface Destination {
   readonly to: string;
   readonly label: string;
-  /** The rail entry lit while this page is open. */
-  readonly owner: RailEntry;
+  /** The rail entry lit while this page is open: an item, a folder's page or an area. */
+  readonly owner: NavItem | NavArea;
 }
 
 /** Every route the model can name, with the rail entry that owns it. */
 function destinations(groups: readonly NavGroup[]): Destination[] {
-  const entries = groups.flatMap((group) => group.items);
+  // A folder is not a destination: its pages are, each owning itself.
+  const entries = ownersOf(groups);
   const own: Destination[] = entries.flatMap((entry): Destination[] =>
     isArea(entry)
       ? [
@@ -340,7 +367,7 @@ export function crumbFor(pathname: string): Crumb {
 
 /**
  * The groups an operator may actually see. An area keeps only the pages the
- * operator may open; an empty section, area or group is dropped entirely,
+ * operator may open; an empty section, area, folder or group is dropped entirely,
  * because a heading over nothing reads as a broken render. A page of an
  * optional module also needs the module in `modules` (phase 3 design §2).
  */
@@ -357,8 +384,13 @@ export function visibleGroups(
     (item.module === undefined || modules.has(item.module));
   return source
     .map((group) => ({
+      key: group.key,
       label: group.label,
       items: group.items.flatMap((entry): RailEntry[] => {
+        if (isFolder(entry)) {
+          const items = entry.items.filter(allowed);
+          return items.length > 0 ? [{ ...entry, items }] : [];
+        }
         if (!isArea(entry)) return allowed(entry) ? [entry] : [];
         const sections = entry.sections
           .map((section) => ({ label: section.label, items: section.items.filter(allowed) }))
@@ -381,7 +413,9 @@ export interface SearchDestination {
 export function searchDestinations(permissions: readonly string[], modules: ReadonlySet<string>): SearchDestination[] {
   return visibleGroups(permissions, modules).flatMap((group) =>
     group.items.flatMap((entry): SearchDestination[] =>
-      isArea(entry)
+      isFolder(entry)
+        ? entry.items.map((item) => ({ to: item.to, label: item.label, icon: item.icon, within: entry.label }))
+        : isArea(entry)
         ? [
             { to: entry.to, label: entry.label, icon: entry.icon, within: group.label },
             ...entry.sections.flatMap((section) =>
@@ -410,7 +444,7 @@ export function isPortalOnly(permissions: readonly string[]): boolean {
 
 /** The requester's whole rail. Gated like the portal's own pages. */
 export const PORTAL_GROUPS: readonly NavGroup[] = [
-  group("shell.nav.group.help", [
+  group("help", "shell.nav.group.help", [
     page("/portal", "shell.nav.item.myTickets", "ticket", "portal.ticket.read"),
     page("/portal/new", "shell.nav.item.newTicket", "plus", "portal.ticket.write"),
   ]),

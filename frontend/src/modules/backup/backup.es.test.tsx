@@ -1254,7 +1254,8 @@ describe("the sentences the module builds outside React, in Spanish", () => {
       "s3://copias/principal · activo",
       "s3://copias/principal · retirado",
     ]);
-    expect(devicePickerEmptyHint()).toMatch(/Dispositivos → Añadir un equipo/);
+    // The rail names the machine list "Equipos" (redesign design §1.1, decision D13).
+    expect(devicePickerEmptyHint()).toMatch(/Equipos → Añadir un equipo/);
     expect(repositoryPickerEmptyHint()).toMatch(/pestaña Repositorios/);
     setActiveLanguage("en");
     expect(devicePickerOptions(DEVICES.items).map((o) => o.sublabel)).toEqual(["windows · online", "linux · offline", "no agent"]);

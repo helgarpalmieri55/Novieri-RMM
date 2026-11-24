@@ -41,7 +41,7 @@ export const serviceDesk: Shape<typeof en> = {
     userEmptyHint:
       "No hay personas entre las que elegir. Los usuarios se añaden en Configuración → Usuarios; también puede que no tengas permiso para listarlos.",
     deviceEmptyHint:
-      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
+      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     noAgent: "sin agente",
     agentOnline: "en línea",
     agentOffline: "sin conexión",

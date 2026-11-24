@@ -804,7 +804,8 @@ describe("the deploy sentences built outside React, in Spanish", () => {
     expect(devicePickerOptions(DEVICES).map((o) => o.sublabel)).toEqual(["windows · en línea", "linux · sin conexión", "linux · sin agente"]);
     expect(groupPickerOptions([GROUP, SOLO_GROUP]).map((o) => o.sublabel)).toEqual(["3 dispositivos", "1 dispositivo"]);
     expect(packagePickerOptions(PACKAGES).map((o) => o.sublabel)).toEqual(["windows · msi", "linux · deb · sin archivo"]);
-    expect(devicePickerEmptyHint()).toContain("Dispositivos → Añadir un equipo");
+    // The rail names the machine list "Equipos" (redesign design §1.1, decision D13).
+    expect(devicePickerEmptyHint()).toContain("Equipos → Añadir un equipo");
     expect(groupPickerEmptyHint()).toContain("Administración → Grupos de dispositivos");
     expect(scriptOptions(SCRIPTS, "windows").map((o) => o.sublabel)).toEqual([
       "PowerShell · Windows",
