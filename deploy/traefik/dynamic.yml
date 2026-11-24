@@ -12,8 +12,13 @@
 #
 # NOT THE AGENT-FACING TLS EITHER. :8443 is TCP passthrough -- the gateway
 # terminates mutual TLS itself, with a certificate from the INTERNAL CA
-# (scripts/issue-gateway-cert.py), which agents pin at enrollment. Public
-# certificate on :443, internal CA on :8443, and the two never swap.
+# (scripts/issue-gateway-cert.py), which agents pin at enrollment. While the
+# gateway is absent or not yet healthy there is no TCP router, and Traefik
+# terminates TLS on :8443 itself (with SNI ITS_PUBLIC_HOST it presents the
+# public certificate; without SNI, its default). Invariant 2 does not rest on
+# the two never swapping: the agent dials with the CA pinned at enrollment
+# and refuses anything the internal CA did not sign. Every http router must
+# therefore name entrypoints websecure (test_deploy_acme.py).
 #
 # WHILE THE API IS DOWN, ITS PATHS ANSWER 503 (design §6). Traefik's Docker
 # provider leaves out a container that is stopped or not yet healthy, and its

@@ -686,7 +686,7 @@ jobs:
           set -euo pipefail
           umask 077
           init_json="$RUNNER_TEMP/bao-init.json"
-          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; rm -rf "$RUNNER_TEMP/agent-data"; docker rm -f ci-agent >/dev/null 2>&1 || true' EXIT
+          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; docker rm -f ci-agent >/dev/null 2>&1 || true; rm -rf "$RUNNER_TEMP/agent-data"' EXIT
 
           # 1. Nothing of the old identity provider is defined, at all.
           defined="$(docker compose config --services) $(docker compose config --images)"
@@ -834,7 +834,9 @@ jobs:
           docker compose run --rm --no-deps -T \
             -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
             --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"
-          docker compose up -d gateway
+          # --wait: healthy before the agent dials, so a slow start cannot push
+          # its reconnect backoff past agent_flow's window.
+          docker compose up -d --wait gateway
           agent_data="$RUNNER_TEMP/agent-data"
           mkdir -m 700 "$agent_data"
           agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"

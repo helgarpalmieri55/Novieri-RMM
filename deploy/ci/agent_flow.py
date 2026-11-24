@@ -19,7 +19,8 @@ agent itself is started by the `deploy` job between the two phases.
 `token`: a one-use, one-hour enrollment token for the organization's own
 client's Principal site, written to a NEW file, 0600 (`O_EXCL`), and never
 printed. `job`: the device the agent enrolled, online; a `hello` dispatched to
-it, signed, verified by the agent and answered with its greeting; and the
+it, signed by the server and answered by the agent with its greeting (that the
+agent VERIFIES is the red run's claim, not this script's); and the
 audit chain verified, with the enrolment, the dispatch and the result in it.
 It prints what held, never a token, a password or a code.
 """
@@ -62,7 +63,7 @@ PHASES: dict[str, tuple[str, ...]] = {
     "job": (
         "signed in with a recovery code",
         "the agent's device, online",
-        "a signed hello, verified and answered",
+        "a server-signed hello, answered by the agent",
         "the audit chain verifies, with the agent in it",
     ),
 }
@@ -114,6 +115,26 @@ def chain_order(events: list[dict[str, Any]]) -> list[str]:
     Not by `ts`, which is whole seconds: a job dispatched and answered in the
     same second would read answered first (measured on 2026-11-23)."""
     return [event["action"] for event in sorted(events, key=lambda event: str(event["id"]))]
+
+
+def trail_for(events: list[dict[str, Any]], device_id: str, job_id: str) -> list[str]:
+    """The chain's actions, oldest first, that belong to THIS agent and THIS
+    hello: the device's enrolment and connection (`target_id` the device's) and
+    the hello's `jobs.*` events (`target_id` the job's). The gateway sends the
+    device an `inventory.collect` of its own on connect, so a check on names
+    alone is satisfied by a job that is not the hello."""
+    target = {
+        "enrollment.device_enrolled": device_id,
+        "gateway.connected": device_id,
+        "jobs.dispatched": job_id,
+        "jobs.succeeded": job_id,
+    }
+    return [
+        event["action"]
+        for event in sorted(events, key=lambda event: str(event["id"]))
+        if event["action"] == "enrollment.token_created"
+        or target.get(event["action"]) == event.get("target_id")
+    ]
 
 
 def trail_in_order(actions: list[str], expected: tuple[str, ...] = AGENT_TRAIL) -> bool:
@@ -215,8 +236,8 @@ class AgentFlow:
             job = self.get(f"/api/v1/jobs/{job['id']}")
         check(job["status"] == "succeeded", f"the hello job ended {job['status']}")
         check(job.get("result") == {"greeting": message}, "the hello result is not its greeting")
-        ok("hello: signed, verified by the agent, answered with its greeting")
-        self.done("a signed hello, verified and answered")
+        ok("hello: server-signed, answered by the agent with its greeting")
+        self.done("a server-signed hello, answered by the agent")
 
         verified = self.get("/api/v1/audit/verify")
         check(
@@ -224,8 +245,9 @@ class AgentFlow:
         )
         events = self.get("/api/v1/audit?limit=200")["items"]
         check(
-            trail_in_order(chain_order(events)),
-            f"the audit log lacks, in order: {', '.join(AGENT_TRAIL)}",
+            trail_in_order(trail_for(events, device_id, str(job["id"]))),
+            f"the audit log lacks, for this device and this hello, in order: "
+            f"{', '.join(AGENT_TRAIL)}",
         )
         ok(f"the audit chain verifies over {verified['count']} events, the agent's included")
         self.done("the audit chain verifies, with the agent in it")

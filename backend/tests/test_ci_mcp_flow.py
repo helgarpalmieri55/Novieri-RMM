@@ -318,11 +318,10 @@ def test_no_secret_of_the_vault_travels_in_an_argv() -> None:
             and not line.strip().startswith(SHELL_BUILTINS)
         ]
         assert argv == [], argv
-    # Since plan 2026-11-23, Task 10, the same trap removes the agent's data
-    # directory and its container (test_ci_agent_flow.py).
+    # The rest of the trap (the agent's container and data directory) is
+    # asserted whole in test_ci_agent_flow.py, its owner.
     assert (
         """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; """
-        """rm -rf "$RUNNER_TEMP/agent-data"; docker rm -f ci-agent >/dev/null 2>&1 || true' EXIT"""
         in run
     )
 
@@ -391,7 +390,7 @@ def test_the_api_is_waited_for_until_it_answers_itself() -> None:
     wait = run[start : run.index("\n}\n", start)]
     assert "https://rmm.novieri.com/.well-known/oauth-authorization-server" in wait
     assert "application/json" in wait
-    loop = wait[wait.index("for _ in"):]
+    loop = wait[wait.index("for _ in") :]
     metadata = loop.index("oauth-authorization-server")
     assert "application/json" in loop[metadata:], "checked on the metadata answer itself"
     assert run.count("wait_for_api\n") >= 2, "both waits: the first start and the recreate"

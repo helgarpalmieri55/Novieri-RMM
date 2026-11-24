@@ -108,9 +108,53 @@ def test_the_token_is_written_once_0600_and_never_printed(
     assert path.read_text() == "tok-123"
     with pytest.raises(FileExistsError):
         agents.write_secret(str(path), "again")
-    source = SCRIPT.read_text()
-    assert 'print(body["token"])' not in source and "token']" not in source.split("write_secret")[0]
     assert capsys.readouterr().out == ""
+
+
+class _Answer:
+    def __init__(self, status: int, body: Any, path: str = "/x") -> None:
+        self.status, self._body, self.path = status, body, path
+
+    def json(self) -> Any:
+        return self._body
+
+
+class _Cookies:
+    values = {agents.SESSION_COOKIE: "session"}
+
+
+class _FakeClient:
+    """Answers the token phase's calls; the token it mints is a marker that
+    must reach the file and nothing else."""
+
+    cookies = _Cookies()
+    TOKEN = "SECRET-ENROLL-TOKEN-0123456789"
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/auth/login":
+            return _Answer(200, {"state": "factor_required"}, path)
+        if path == "/api/v1/auth/factor/recovery":
+            return _Answer(200, {"state": "signed_in"}, path)
+        if path == "/api/v1/clients":
+            return _Answer(200, [{"id": "c2", "kind": "internal"}], path)
+        if path == "/api/v1/clients/c2/sites":
+            return _Answer(200, [{"id": "s1", "name": "Principal"}], path)
+        if path == "/api/v1/enrollment-tokens":
+            return _Answer(201, {"token": self.TOKEN, "max_uses": 1, "site_id": "s1"}, path)
+        raise AssertionError(f"unexpected call {method} {path}")
+
+
+def test_the_token_phase_never_prints_the_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = {"email": "e", "password": "p", "recovery_codes": ["a", "b"]}
+    flow = agents.AgentFlow(_FakeClient(), owner)
+    path = tmp_path / "enroll-token"
+    flow.token(str(path))
+    assert path.read_text() == _FakeClient.TOKEN
+    seen = capsys.readouterr()
+    assert _FakeClient.TOKEN not in seen.out + seen.err
+    assert "a one-use enrollment token, written and not printed" in flow.reached
 
 
 def test_an_owner_without_two_recovery_codes_is_refused(tmp_path: Path) -> None:
@@ -149,6 +193,34 @@ def test_the_audit_trail_is_found_in_order_and_only_in_order() -> None:
     )
 
 
+def test_the_trail_is_this_device_and_this_job_not_any_with_the_same_name() -> None:
+    """The gateway sends the device an `inventory.collect` of its own on
+    connect, so a name-only check is satisfied by a job that is not the
+    hello. The trail is the hello's `jobs.*` events (target_id the job's) and
+    this device's enrolment and connection (target_id the device's)."""
+
+    def event(n: int, action: str, target: str) -> dict[str, str]:
+        return {
+            "id": f"06b04ea5-2723-7825-8000-00000000000{n}",
+            "action": action,
+            "target_id": target,
+        }
+
+    events = [
+        event(1, "enrollment.token_created", "token-1"),
+        event(2, "enrollment.device_enrolled", "dev-1"),
+        event(3, "gateway.connected", "dev-1"),
+        event(4, "jobs.dispatched", "job-inventory"),
+        event(5, "jobs.succeeded", "job-inventory"),
+        event(6, "jobs.dispatched", "job-hello"),
+    ]
+    assert not agents.trail_in_order(agents.trail_for(events, "dev-1", "job-hello"))
+    assert agents.trail_in_order(agents.trail_for(events, "dev-1", "job-inventory"))
+    events.append(event(7, "jobs.succeeded", "job-hello"))
+    assert agents.trail_in_order(agents.trail_for(events, "dev-1", "job-hello"))
+    assert not agents.trail_in_order(agents.trail_for(events, "dev-2", "job-hello"))
+
+
 def test_the_chain_is_read_in_its_own_order_not_by_the_second() -> None:
     """The first live run (2026-11-23) failed here: `ts` is whole seconds, and
     the audit API answers newest first, so a hello dispatched and answered in
@@ -185,7 +257,7 @@ def test_the_agent_enrols_after_the_claim_and_before_the_last_checks() -> None:
         run.index("flow --phase open"),
         run.index("docker compose stop api"),
         run.index('/tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"'),
-        run.index("docker compose up -d gateway"),
+        run.index("docker compose up -d --wait gateway"),
         run.index("agents --phase token"),
         run.index("docker run -d --name ci-agent"),
         run.index("agents --phase job --hostname ci-agent"),
@@ -220,10 +292,12 @@ def test_the_gateway_issuer_token_is_masked_and_travels_on_stdin() -> None:
 
 def test_what_the_agent_held_goes_however_the_step_ends() -> None:
     run = _run(OAUTH_STEP)
+    # The one place the whole trap is asserted (test_ci_mcp_flow.py holds only
+    # its first half): the container goes before the directory it writes to.
     assert (
         """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; """
-        """rm -rf "$RUNNER_TEMP/agent-data"; docker rm -f ci-agent >/dev/null 2>&1 || true' EXIT"""
-        in run
+        """docker rm -f ci-agent >/dev/null 2>&1 || true; """
+        """rm -rf "$RUNNER_TEMP/agent-data"' EXIT""" in run
     )
     line = next(x.strip() for x in run.splitlines() if "agents --phase job" in x)
     assert line.endswith(
