@@ -81,16 +81,38 @@ def offending(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
+HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "api_route"}
+
+
+def _published(node: ast.AST) -> bool:
+    """A docstring FastAPI/Pydantic publish in the OpenAPI schema: a route
+    handler's (decorated `x.get/post/put/patch/delete/...` or `x.api_route`)
+    and a model's (a base named `BaseModel`, or ending `Model` or `Schema`,
+    which catches a project base model by name)."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for deco in node.decorator_list:
+            call = deco.func if isinstance(deco, ast.Call) else deco
+            if isinstance(call, ast.Attribute) and call.attr in HTTP_METHODS:
+                return True
+    if isinstance(node, ast.ClassDef):
+        for base in node.bases:
+            name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
+            if name == "BaseModel" or name.endswith(("Model", "Schema")):
+                return True
+    return False
+
+
 def python_strings(source: str) -> list[tuple[int, str]]:
     """`(line, text)` of every string constant but a docstring; an f-string
-    is its literal parts, joined."""
+    is its literal parts, joined. The docstrings of route handlers and
+    Pydantic models are kept: the OpenAPI schema publishes them."""
     tree = ast.parse(source)
     docstrings: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             body = node.body
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                if isinstance(body[0].value.value, str):
+                if isinstance(body[0].value.value, str) and not _published(node):
                     docstrings.add(id(body[0].value))
     found: list[tuple[int, str]] = []
     joined: set[int] = set()
@@ -185,7 +207,7 @@ def offenders_in(path: Path) -> Iterator[str]:
             for index, line in enumerate(lines)
             if offending(line)
             and not _dated(lines, index)
-            and not (rel == WARNING_FILE and line.startswith(WARNING_LINE))
+            and not (rel == WARNING_FILE and not offending(line.removeprefix(WARNING_LINE)))
         ]
     for line, text in pairs:
         if offending(text):
@@ -309,3 +331,41 @@ def test_the_walk_reaches_all_three_trees() -> None:
 def test_no_old_name_is_shown() -> None:
     found = [hit for path in _files() for hit in offenders_in(path)]
     assert found == [], "old names (design 2026-11-23 §1.1):\n" + "\n".join(found)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "router = APIRouter()\n"
+        '@router.get("/x")\n'
+        "async def f() -> None:\n"
+        '    """The ITMS rows."""\n',
+        'app = object()\n@app.api_route("/x")\ndef f() -> None:\n    """Toeshee."""\n',
+        'from pydantic import BaseModel\nclass M(BaseModel):\n    """The ITMS model."""\n',
+        'class M(ProjectModel):\n    """The ITMS model."""\n',
+    ],
+)
+def test_published_docstrings_are_read(source: str) -> None:
+    assert any(offending(text) for _line, text in python_strings(source))
+
+
+def test_plain_docstrings_stay_skipped() -> None:
+    source = 'class C:\n    """ITMS."""\ndef g() -> None:\n    """ITMS."""\n'
+    assert python_strings(source) == []
+
+
+def test_the_d17_allowance_is_exactly_one_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(f"{__name__}.REPO", tmp_path)
+
+    def hits(rel: str, line: str) -> list[str]:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# x\n\n{line}\n")
+        return list(offenders_in(path))
+
+    assert hits("deploy/README.md", WARNING_LINE + " Until that host is off.") == []
+    assert hits("deploy/OTHER.md", WARNING_LINE + " Until that host is off.")
+    assert hits("deploy/README.md", "Pull from `itms.toeshee.com` now.")
+    assert hits("deploy/README.md", WARNING_LINE + " Ask the ITMS team.")
