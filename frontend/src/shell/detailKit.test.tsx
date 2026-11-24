@@ -1,5 +1,6 @@
-import { act, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import { renderPage } from "../test/renderPage";
@@ -54,6 +55,21 @@ describe("UrlTabs and useUrlTab (design §2: tabs that change the URL)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Hardware" }));
     await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
     expect(router.state.location.search).toBe("");
+  });
+
+  it("writes nothing when the tab is already open, so Back is not spent on a duplicate (review fix round 1, item 6)", async () => {
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <p>start</p> },
+        { path: "/devices/:id", element: <Device /> },
+      ],
+      { initialEntries: ["/start", "/devices/dev-1?tab=hardware"], initialIndex: 1 },
+    );
+    render(<RouterProvider router={router} />);
+    await userEvent.click(screen.getByRole("tab", { name: "Hardware" }));
+    expect(router.state.location.search).toBe("?tab=hardware");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
   });
 
   it("falls back to the default for a tab it does not know", () => {

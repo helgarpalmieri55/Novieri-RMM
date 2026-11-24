@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { act, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState, type ReactElement } from "react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MeClient } from "../lib/api";
@@ -11,8 +13,7 @@ import {
   FilterChips,
   ListEmpty,
   ShowingCount,
-  useApiFor,
-  useNarrowing,
+  useNarrowedApi,
   useNewParam,
   useUrlFilters,
 } from "./listKit";
@@ -27,7 +28,7 @@ vi.mock("../lib/clientScope", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/clientScope")>()),
   useClientScope: () => ({ selected: scope.selected, clients: scope.clients, select: vi.fn(), ready: scope.ready }),
 }));
-const api = vi.hoisted(() => ({ forClient: vi.fn((id: string) => ({ narrowedTo: id })) }));
+const api = vi.hoisted(() => ({ forClient: vi.fn((id: string) => ({ narrowedTo: id })), listThings: vi.fn(async () => "rows") }));
 vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
 
 function client(id: string, name: string): MeClient {
@@ -39,6 +40,7 @@ beforeEach(() => {
   scope.ready = true;
   scope.clients = [client(ANDES, "Andes Logistics"), client(BOGOTA, "Bogotá Retail")];
   api.forClient.mockClear();
+  api.listThings.mockClear();
 });
 
 function Fleet() {
@@ -152,7 +154,8 @@ describe("ClientFilter (design §1.3: a Client chip while every client is shown)
   it("drops a client the person does not have from the URL, instead of drawing All clients over an empty list", () => {
     const onChange = vi.fn();
     renderPage("/x", <ClientFilter value={FOREIGN} onChange={onChange} />);
-    expect(onChange).toHaveBeenCalledWith("");
+    // In place (`replace`), so the stale link leaves no entry to come Back to.
+    expect(onChange).toHaveBeenCalledWith("", { replace: true });
   });
 
   it("is not drawn when the top bar has chosen a client, because that choice already decides", () => {
@@ -162,12 +165,17 @@ describe("ClientFilter (design §1.3: a Client chip while every client is shown)
   });
 });
 
+/**
+ * ONE HOOK FOR A LIST BEHIND THE CHIP (review fix round 1, item 4): the API, the
+ * client it narrows to (the query key) and whether that is decided, from one
+ * call, so a list cannot use one and forget the others.
+ */
 function Probe({ id }: { id: string }) {
-  const narrowed = useApiFor(id) as unknown as { narrowedTo?: string };
+  const narrowed = useNarrowedApi(id).api as unknown as { narrowedTo?: string };
   return <p>{narrowed.narrowedTo ?? "console"}</p>;
 }
 
-describe("useApiFor (decision D6)", () => {
+describe("useNarrowedApi: the API (decision D6)", () => {
   it("narrows to the chip's client with X-Client-Id", () => {
     renderPage("/x", <Probe id={ANDES} />);
     expect(screen.getByText(ANDES)).toBeInTheDocument();
@@ -195,29 +203,38 @@ describe("useApiFor (decision D6)", () => {
 });
 
 function Decided({ id }: { id: string }) {
-  const narrowing = useNarrowing(id);
+  const narrowing = useNarrowedApi(id);
   return <p>{narrowing.ready ? (narrowing.client ?? "console") : "waiting"}</p>;
 }
 
 /** A list behind the chip, keyed on the narrowed client the way Receta L keys one. */
 function ChipList() {
   const filters = useUrlFilters(["client"] as const);
-  const narrowing = useNarrowing(filters.values.client);
-  const narrowed = useApiFor(filters.values.client) as unknown as { narrowedTo?: string };
+  const { api: narrowed, client, ready } = useNarrowedApi(filters.values.client);
   const list = useQuery({
-    queryKey: ["probe", narrowing.client],
-    queryFn: async () => narrowed.narrowedTo ?? "console",
-    enabled: narrowing.ready,
+    queryKey: ["probe", client],
+    queryFn: async () => (narrowed as unknown as { narrowedTo?: string }).narrowedTo ?? "console",
+    enabled: ready,
   });
   return (
     <>
-      <ClientFilter value={filters.values.client} onChange={(value) => filters.set("client", value)} />
+      <ClientFilter value={filters.values.client} onChange={(value, options) => filters.set("client", value, options)} />
       <p>read as {list.data ?? "nothing yet"}</p>
     </>
   );
 }
 
-describe("useNarrowing (decision D17)", () => {
+/** A list that forgot `enabled: ready`: what the hook's API does before `/me` answers. */
+function Forgetful({ id }: { id: string }) {
+  const { api: narrowed } = useNarrowedApi(id);
+  const list = useQuery({
+    queryKey: ["forgetful", id],
+    queryFn: () => (narrowed as unknown as { listThings(): Promise<string> }).listThings(),
+  });
+  return <p>{list.isError ? "refused" : (list.data ?? "pending")}</p>;
+}
+
+describe("useNarrowedApi: when it is decided (decision D17)", () => {
   it("decides nothing before /me has listed the person's clients, so a list reads nothing", () => {
     scope.ready = false;
     renderPage("/x", <Decided id={ANDES} />);
@@ -232,6 +249,14 @@ describe("useNarrowing (decision D17)", () => {
     expect(screen.getAllByText("console")).toHaveLength(2);
   });
 
+  it("refuses every read before /me answers, so even a list without enabled: ready never reads through the console's API", async () => {
+    scope.ready = false;
+    renderPage("/x", <Forgetful id={ANDES} />);
+    expect(await screen.findByText("refused")).toBeInTheDocument();
+    expect(api.listThings).not.toHaveBeenCalled();
+    expect(api.forClient).not.toHaveBeenCalled();
+  });
+
   it("reads again under the new client when the chip changes, so no row of the last one stays", async () => {
     renderPage("/x", <ChipList />);
     expect(await screen.findByText("read as console")).toBeInTheDocument();
@@ -244,11 +269,105 @@ describe("useNarrowing (decision D17)", () => {
   });
 });
 
+/** Mounts `element` under a data router with an earlier entry to go Back to. */
+function withHistory(entries: string[], pattern: string, element: ReactElement) {
+  const router = createMemoryRouter(
+    [
+      { path: "/start", element: <p>start</p> },
+      { path: pattern, element },
+    ],
+    { initialEntries: entries, initialIndex: entries.length - 1 },
+  );
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return router;
+}
+
+function ChipPage() {
+  const filters = useUrlFilters(["client"] as const);
+  return <ClientFilter value={filters.values.client} onChange={(value, options) => filters.set("client", value, options)} />;
+}
+
+/** A page that draws the chip with a new `onChange` on every render, as an inline arrow does. */
+function Rerendering({ onChange }: { onChange: (value: string, options?: { replace?: boolean }) => void }) {
+  const [renders, setRenders] = useState(0);
+  return (
+    <>
+      <ClientFilter value={FOREIGN} onChange={(value, options) => onChange(value, options)} />
+      <button type="button" onClick={() => setRenders(renders + 1)}>
+        Again
+      </button>
+    </>
+  );
+}
+
+describe("ClientFilter and a stale link (review fix round 1, item 1)", () => {
+  it("drops a foreign client in place, so Back leaves the page instead of coming back to drop it again", async () => {
+    const router = withHistory(["/start", `/devices?client=${FOREIGN}`], "/devices", <ChipPage />);
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(router.state.location.pathname).toBe("/devices");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("drops it once, however often the page re-renders with a new onChange", async () => {
+    const onChange = vi.fn();
+    renderPage("/x", <Rerendering onChange={onChange} />);
+    await userEvent.click(screen.getByRole("button", { name: "Again" }));
+    await userEvent.click(screen.getByRole("button", { name: "Again" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("", { replace: true });
+  });
+});
+
+describe("history hygiene (review fix round 1, item 6)", () => {
+  it("writes nothing when a chip already says so, so Back is not spent on a duplicate", async () => {
+    const router = withHistory(["/start", "/devices?state=online"], "/devices", <Fleet />);
+    await userEvent.click(screen.getByRole("button", { name: /Online/ }));
+    expect(router.state.location.search).toBe("?state=online");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("closing a dialog opened here goes back, so the next Back leaves the list", async () => {
+    const router = withHistory(["/start", "/service-desk"], "/service-desk", <Creating />);
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    expect(router.state.location.search).toBe("?new=ticket");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.pathname + router.state.location.search).toBe("/service-desk");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("closing a dialog that arrived in a link replaces, and Back still leaves the list", async () => {
+    const router = withHistory(["/start", "/service-desk?new=ticket"], "/service-desk", <Creating />);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.pathname + router.state.location.search).toBe("/service-desk");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("closing after the query moved on replaces rather than going back to an older state", async () => {
+    const router = withHistory(["/start", "/service-desk"], "/service-desk", <Creating />);
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open only" }));
+    expect(router.state.location.search).toBe("?new=ticket&state=open");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("?state=open");
+  });
+});
+
+
 function Creating() {
   const created = useNewParam("ticket");
+  const filters = useUrlFilters(["state"] as const);
   return (
     <>
       <button type="button" onClick={created.start}>New ticket</button>
+      <button type="button" onClick={() => filters.set("state", "open")}>Open only</button>
       {created.open ? (
         <div role="dialog" aria-label="New ticket">
           <button type="button" onClick={created.close}>Close</button>

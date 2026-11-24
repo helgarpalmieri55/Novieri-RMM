@@ -10,6 +10,7 @@ import { Link, NavLink, useSearchParams } from "react-router-dom";
 
 import { useClientScope } from "../lib/clientScope";
 import { Tabs } from "./components";
+import { writeQuery } from "./listKit";
 import { Icon } from "./icons";
 import { Pill, type Kind } from "./viz";
 import "./kit.css";
@@ -52,21 +53,22 @@ export function DetailHead({
 /**
  * The tab a record shows, from `?tab=` (or `param`). The default tab writes
  * nothing; an unknown one falls back to it. A change is a NEW history entry,
- * so Back undoes a tab change instead of leaving the record.
+ * so Back undoes a tab change instead of leaving the record; the tab already
+ * open writes nothing.
  */
 export function useUrlTab<K extends string>(keys: readonly K[], fallback: K, param = "tab"): [K, (key: K) => void] {
   const [params, setParams] = useSearchParams();
   const requested = params.get(param) ?? "";
   const active = (keys as readonly string[]).includes(requested) ? (requested as K) : fallback;
   const select = useCallback(
-    (key: K) =>
-      setParams((current) => {
-        const next = new URLSearchParams(current);
-        if (key === fallback) next.delete(param);
-        else next.set(param, key);
-        return next;
-      }),
-    [setParams, fallback, param],
+    (key: K) => {
+      const next = new URLSearchParams(params);
+      if (key === fallback) next.delete(param);
+      else next.set(param, key);
+      // The open tab writes nothing: a duplicate entry would spend a Back.
+      writeQuery(params, next, setParams);
+    },
+    [params, setParams, fallback, param],
   );
   return [active, select];
 }

@@ -7,8 +7,8 @@
  * gives for competing on consistency): a filtered view is a link, a reload
  * keeps it, Back undoes a chip.
  */
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useLocation, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 
 import { useT } from "../i18n/context";
 import type { ApiClient } from "../lib/api";
@@ -24,6 +24,28 @@ const CURSOR = "offset";
 /** The search box's key: typing in it replaces the history entry instead of adding one per keystroke. */
 const SEARCH = "q";
 
+/**
+ * WRITES A QUERY ONLY WHEN IT CHANGES (review fix round 1, item 6). Clicking
+ * the chip that is already on, or the tab that is already open, used to push
+ * a copy of the current entry, and the next Back was spent undoing nothing.
+ * Compared from the render's own params, which is what `setSearchParams`'s
+ * function form reads too (react-router 7.18.1), so nothing is lost by it.
+ */
+export function writeQuery(
+  current: URLSearchParams,
+  next: URLSearchParams,
+  setParams: SetURLSearchParams,
+  options: { replace?: boolean; state?: unknown } = {},
+): void {
+  if (next.toString() === current.toString()) return;
+  setParams(next, options);
+}
+
+/** How a filter change is written: `replace` swaps the current history entry instead of adding one. */
+export interface WriteOptions {
+  readonly replace?: boolean;
+}
+
 export interface UrlFilters<K extends string> {
   /** Every key's value, `""` when the URL does not carry it. */
   readonly values: Readonly<Record<K, string>>;
@@ -32,8 +54,11 @@ export interface UrlFilters<K extends string> {
   /**
    * `""` removes the key. The search (`q`) replaces the history entry, so
    * typing is not twenty Backs; any other key adds one, so Back undoes a chip.
+   * `options.replace` overrides that: `ClientFilter` drops a stale client in
+   * place, so the stale link leaves nothing to come Back to. A value the URL
+   * already holds writes nothing.
    */
-  set(key: K, value: string): void;
+  set(key: K, value: string, options?: WriteOptions): void;
   /** Removes every key: a new history entry, so Back brings the filters back. */
   clear(): void;
 }
@@ -49,29 +74,21 @@ export function useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<
   );
   const active = keys.some((key) => (params.get(key) ?? "") !== "");
   const set = useCallback(
-    (key: K, value: string) =>
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          if (value === "") next.delete(key);
-          else next.set(key, value);
-          next.delete(CURSOR);
-          return next;
-        },
-        { replace: key === SEARCH },
-      ),
-    [setParams],
+    (key: K, value: string, options: WriteOptions = {}) => {
+      const next = new URLSearchParams(params);
+      if (value === "") next.delete(key);
+      else next.set(key, value);
+      next.delete(CURSOR);
+      writeQuery(params, next, setParams, { replace: options.replace ?? key === SEARCH });
+    },
+    [params, setParams],
   );
-  const clear = useCallback(
-    () =>
-      setParams((current) => {
-        const next = new URLSearchParams(current);
-        for (const key of signature.split("|")) next.delete(key);
-        next.delete(CURSOR);
-        return next;
-      }),
-    [setParams, signature],
-  );
+  const clear = useCallback(() => {
+    const next = new URLSearchParams(params);
+    for (const key of signature.split("|")) next.delete(key);
+    next.delete(CURSOR);
+    writeQuery(params, next, setParams);
+  }, [params, setParams, signature]);
   return { values, active, set, clear };
 }
 
@@ -176,16 +193,33 @@ export function ListEmpty({
  * client -- that choice already decides what this session sees -- nor for a
  * person with fewer than two clients, where it could change nothing.
  */
-export function ClientFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+export function ClientFilter({
+  value,
+  onChange,
+}: {
+  value: string;
+  /** Pass `options` on to `UrlFilters.set`: it is how a stale client is dropped in place. */
+  onChange: (value: string, options?: WriteOptions) => void;
+}) {
   const t = useT();
   const { selected, clients, ready } = useClientScope();
   // A CLIENT THE PERSON DOES NOT HAVE (a stale or edited link) leaves the URL
   // once /me has listed theirs, rather than being drawn as "All clients" over
   // the empty list the server answers for it (decision D17).
+  //
+  // IN PLACE, AND ONCE (review fix round 1, item 1). Dropped with a new
+  // history entry, the stale link stayed one Back away, and Back reopened it,
+  // which dropped it again: a page Back could never leave. So `replace`, and
+  // the effect runs on `foreign` alone; the latest `onChange` is read from a
+  // ref, so an inline arrow re-created on every render cannot fire it again.
+  const latest = useRef(onChange);
+  useLayoutEffect(() => {
+    latest.current = onChange;
+  });
   const foreign = ready && value !== "" && !clients.some((client) => client.id === value);
   useEffect(() => {
-    if (foreign) onChange("");
-  }, [foreign, onChange]);
+    if (foreign) latest.current("", { replace: true });
+  }, [foreign]);
   if (selected !== null || clients.length < 2) return null;
   return (
     <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
@@ -203,58 +237,115 @@ export function ClientFilter({ value, onChange }: { value: string; onChange: (va
 }
 
 /**
- * WHAT THE CHIP NARROWS TO, AND WHETHER THAT IS DECIDED (decisions D6, D17).
- * The top bar's choice wins when there is one, and an empty chip is the
- * console's own choice: both decided at once. Otherwise the chip's client,
- * only once `/me` has said it is one of the person's: until then `ready` is
- * false and a list reads nothing, so every client's rows never sit under one
- * client's chip. A value that is not one of theirs is never sent (the server
- * answers a malformed header with 400, and a foreign client with zero rows).
+ * THE API A LIST BEHIND THE CHIP READS THROUGH, AND HOW TO KEY IT (decisions
+ * D6, D17; review fix round 1, item 4). One hook, so a list cannot take the
+ * API and forget the rest:
+ *
+ *   const { api, client, ready } = useNarrowedApi(filters.values.client);
+ *   useQuery({ queryKey: ["devices", ..., client], queryFn: () => api.listDevices(...), enabled: ready });
+ *
+ * - `client`: the identifier actually sent as `X-Client-Id`, or `null` when the
+ *   list reads with the top bar's choice. It goes in the query key, so a change
+ *   of chip reads again and no row of the last client stays on screen.
+ * - `ready`: whether that is decided. The top bar's choice wins when there is
+ *   one, and an empty chip is the console's own choice: both decided at once.
+ *   Otherwise the chip's client, only once `/me` has said it is one of the
+ *   person's. A value that is not one of theirs is never sent (the server
+ *   answers a malformed header with 400, and a foreign client with zero rows).
+ * - `api`: the console's API, narrowed to `client`. UNTIL `ready` IT REFUSES
+ *   EVERY CALL (it rejects with `NarrowingPending`), so a list that forgot
+ *   `enabled: ready` shows an error in its own tests rather than every
+ *   client's rows under one client's chip.
+ *
+ * `X-Client-Id` narrows and never widens; the database enforces it (invariant
+ * 5a). For READS: a write keeps `useApi()`, so the chip never changes where a
+ * write goes.
  */
-export function useNarrowing(clientId: string): { client: string | null; ready: boolean } {
-  const { selected, clients, ready } = useClientScope();
-  if (clientId === "" || selected !== null) return { client: null, ready: true };
-  if (!ready) return { client: null, ready: false };
-  const mine = isClientId(clientId) && clients.some((client) => client.id === clientId);
-  return { client: mine ? clientId : null, ready: true };
+export interface NarrowedApi {
+  readonly api: ApiClient;
+  readonly client: string | null;
+  readonly ready: boolean;
+}
+
+/** What `useNarrowedApi`'s API rejects with until the chip's client is decided. */
+export class NarrowingPending extends Error {
+  constructor(method: string) {
+    super(
+      `${method} was called before /me said whether the Client chip's value is one of this person's clients; ` +
+        "read with `enabled: ready` from useNarrowedApi",
+    );
+    this.name = "NarrowingPending";
+  }
+}
+
+/** The API while nothing is decided: every method rejects, and nothing reaches the network. */
+const PENDING_API: ApiClient = new Proxy({} as ApiClient, {
+  get(_target, prop) {
+    if (typeof prop !== "string" || prop === "then") return undefined;
+    if (prop === "forClient") return () => PENDING_API;
+    return () => Promise.reject(new NarrowingPending(prop));
+  },
+});
+
+export function useNarrowedApi(clientId: string): NarrowedApi {
+  const consoleApi = useApi();
+  const { selected, clients, ready: known } = useClientScope();
+  const decided = clientId === "" || selected !== null;
+  const ready = decided || known;
+  const client =
+    !decided && known && isClientId(clientId) && clients.some((item) => item.id === clientId) ? clientId : null;
+  const api = useMemo(
+    () => (!ready ? PENDING_API : client === null ? consoleApi : consoleApi.forClient(client)),
+    [consoleApi, client, ready],
+  );
+  return { api, client, ready };
 }
 
 /**
- * THE API, NARROWED TO THE CHIP'S CLIENT (decision D6). `X-Client-Id` narrows
- * and never widens; the database enforces it (invariant 5a). For READS: a
- * write keeps `useApi()`, so the chip never changes where a write goes.
+ * Marks the history entry `start()` pushed, with this document's identity:
+ * the entry a `close()` may go Back from. A reload is another document, and a
+ * link that arrived with `?new=` carries no mark.
  */
-export function useApiFor(clientId: string): ApiClient {
-  const api = useApi();
-  const { client } = useNarrowing(clientId);
-  return useMemo(() => (client === null ? api : api.forClient(client)), [api, client]);
+const OPENED_IN = Math.random().toString(36).slice(2);
+interface OpenedMark {
+  readonly kitNewOpened?: { readonly kind: string; readonly document: string };
 }
 
-/** `?new=<kind>` opens the page's create dialog (decision D8), so the New menu can link to it. */
+/**
+ * `?new=<kind>` opens the page's create dialog (decision D8), so the New menu
+ * can link to it.
+ *
+ * CLOSING UNDOES OPENING (review fix round 1, item 6). `start()` adds a
+ * history entry, so Back closes the dialog. `close()` then goes Back too when
+ * the current entry is the one this document's `start()` added; replacing
+ * instead left two copies of the list behind, and the next Back stayed on it.
+ * A dialog that arrived in a link, or one whose query has moved on since
+ * (another filter written meanwhile), is closed in place.
+ *
+ * A FORM IN THE DIALOG passes `search={["new"]}` to its `UnsavedGuard`, so
+ * Back or Close with a change in it asks first (see `useUnsavedGuard`).
+ */
 export function useNewParam(kind: string): { open: boolean; start: () => void; close: () => void } {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const open = params.get("new") === kind;
-  const start = useCallback(
-    () =>
-      setParams((current) => {
-        const next = new URLSearchParams(current);
-        next.set("new", kind);
-        return next;
-      }),
-    [setParams, kind],
-  );
-  const close = useCallback(
-    () =>
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.delete("new");
-          return next;
-        },
-        { replace: true },
-      ),
-    [setParams],
-  );
+  const start = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.set("new", kind);
+    writeQuery(params, next, setParams, { state: { kitNewOpened: { kind, document: OPENED_IN } } satisfies OpenedMark });
+  }, [params, setParams, kind]);
+  const close = useCallback(() => {
+    if (!params.has("new")) return;
+    const mark = (location.state as OpenedMark | null)?.kitNewOpened;
+    if (mark?.kind === params.get("new") && mark.document === OPENED_IN) {
+      void navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    writeQuery(params, next, setParams, { replace: true });
+  }, [params, setParams, location.state, navigate]);
   return { open, start, close };
 }
 
