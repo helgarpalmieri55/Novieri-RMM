@@ -53,7 +53,7 @@ RUN git clone --branch "${MC_RELEASE}" --depth 1 https://github.com/minio/mc mc 
 FROM alpine:3.21
 
 ARG MINIO_RELEASE=RELEASE.2025-09-07T16-13-09Z
-LABEL org.opencontainers.image.title="minio (built from source for ITMS)" \
+LABEL org.opencontainers.image.title="minio (built from source for Novieri RMM)" \
       org.opencontainers.image.version="${MINIO_RELEASE}" \
       org.opencontainers.image.source="https://github.com/minio/minio" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
