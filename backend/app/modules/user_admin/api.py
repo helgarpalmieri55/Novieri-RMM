@@ -337,7 +337,7 @@ async def list_users(
     """Everyone in the calling user's organization, with their role assignments
     and, while an invitation is open, when it expires.
 
-    The ITMS rows, which are what every other surface in the platform joins
+    The platform's own user rows, which are what every other surface in the platform joins
     against.
     """
     async with org_session(
@@ -663,7 +663,7 @@ async def delete_user(
     ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
     """Mark the user deleted and end their sessions, remembered devices and any
-    open invitation. The ITMS row is RETAINED, marked `deleted`.
+    open invitation. The platform user row is RETAINED, marked `deleted`.
 
     Retained because 89 foreign-key columns across 21 tables reference
     `users.id`, audit `actor_id` among them: a hard delete either fails on the

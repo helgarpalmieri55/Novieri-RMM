@@ -776,7 +776,7 @@ async def preview_console_domain(
     The predicate is `app.core.identity.email_domain.domain_refusal` -- the
     same function the three admission doors call. The preflight script makes
     the point at length: a preview that re-expressed the rule as a SQL `LIKE`
-    would say `eviltoeshee.com` is fine while the gate says it is not, and the
+    would say `evilnovieri.com` is fine while the gate says it is not, and the
     operator would be told nobody is affected and lock somebody out anyway.
     """
     async with org_session(
