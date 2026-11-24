@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, TypeScript 7 en modo estricto, Vite 8, Tailwind v4 (CSS primero, sin `tailwind.config`), react-router-dom 7, TanStack Query 5, vitest 4 con Testing Library y jsdom, Playwright con Chromium (`scripts/harmony.mjs`, `scripts/a11y-browser.mjs`), skill impeccable 4.7.0 (CLI 0.1.16, `.claude/skills/impeccable/scripts/impeccable`).
 
-**Diseño (vinculante):** `docs/superpowers/specs/2026-11-23-rediseno-novieri-design.md`, aprobado por el operador el 2026-11-23. **Marca:** `docs/design/marca/` (`novieri-tokens.json`, `novieri-{wordmark,symbol,favicon,lockup}.svg`; la dirección A, «Cordillera»). **Decisiones del operador:** `.git/sdd/decisiones-p34.md` (A1 a A4; A4: las 86 páginas, una a una). **Referencia:** `docs/design/referencias-atera/` (25 capturas y `Atera_recorrido_menus_UI_UX.md`). Cada tarea cita la sección del diseño que implementa.
+**Diseño (vinculante):** `docs/superpowers/specs/2026-11-23-rediseno-novieri-design.md`, aprobado por el operador el 2026-11-23. **Marca:** `docs/design/marca/` (`novieri-tokens.json`, `novieri-{wordmark,symbol,favicon,lockup}.svg`; la dirección A, «Cordillera»). **Decisiones del operador:** `/home/user/Novieri-RMM/.git/sdd/decisiones-p34.md` (A1 a A4; A4: las 86 páginas, una a una; y las respuestas del operador y las resoluciones del coordinador del 2026-11-24, que este plan ya aplica). Ruta absoluta a propósito: dentro de una worktree enlazada `.git` es un archivo, no una carpeta, y `.git/sdd/…` no existe; desde cualquier checkout la misma carpeta es `"$(git rev-parse --git-common-dir)/sdd/"`. El coordinador copia en el encargo de cada oleada lo que esa oleada necesita de estos archivos. **Referencia:** `docs/design/referencias-atera/` (25 capturas y `Atera_recorrido_menus_UI_UX.md`). Cada tarea cita la sección del diseño que implementa.
 
 ---
 
@@ -29,8 +29,18 @@
 - **Verificación, desde `frontend/`:**
   - una prueba: `npx vitest run <ruta>`;
   - todo: `npx vitest run`, `npm run typecheck` y `npm run build` (los tres del job `frontend` de la CI);
-  - navegador: `node scripts/harmony.mjs --strict-fixtures --lang en --routes <lista>` y lo mismo con `--lang es`; `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` (mide `/__preview`, donde vive el kit).
-- **Worktrees** (oleadas en paralelo): `git worktree add ../rmm-w<N> -b p3/oleada-<N> <rama-base>`, y `ln -s /home/user/Novieri-RMM/frontend/node_modules ../rmm-w<N>/frontend/node_modules`. Cada worktree usa su propio puerto para harmony (`HARMONY_URL` no hace falta: el script elige un puerto libre).
+  - navegador: `node scripts/harmony.mjs --strict-fixtures --lang en --routes <lista>` y lo mismo con `--lang es`; `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` (mide `/__preview`, donde vive el kit). Desde la Task 1 (Step 12) harmony **falla** cuando una ruta de la consola no dibuja el armazón (sin `.topbar`) o cuando el servidor de desarrollo responde 5xx a un archivo de la propia página (`504 (Outdated Optimize Dep)` es lo que se ve cuando dos servidores Vite comparten la caché de dependencias): antes de ese paso, una página que no se dibujó salía como `ok` (revisión previa, C1, reproducido el 2026-11-24).
+- **Worktrees** (oleadas en paralelo). Cada worktree tiene **su propia carpeta `node_modules`**, hecha de enlaces a los paquetes de la del checkout principal, para que la caché de Vite (`node_modules/.vite`, `.vite-temp`) sea suya y no la de todas. **Nunca** se enlaza la carpeta entera (`ln -s …/frontend/node_modules`): con ella las ocho worktrees comparten `node_modules/.vite`, cada servidor la reescribe al arrancar (la raíz del proyecto entra en el hash de la caché) y los demás sirven `504 (Outdated Optimize Dep)` a mitad de una pasada. Las órdenes, desde la raíz del checkout principal:
+  ```bash
+  N=1                                   # el número de la oleada: 1 a 8
+  git worktree add "../rmm-w$N" -b "p3/oleada-$N" p3/base
+  mkdir "../rmm-w$N/frontend/node_modules"
+  for e in /home/user/Novieri-RMM/frontend/node_modules/* /home/user/Novieri-RMM/frontend/node_modules/.bin; do
+    ln -s "$e" "../rmm-w$N/frontend/node_modules/"
+  done
+  ls -A "../rmm-w$N/frontend/node_modules" | grep -c '^\.vite'   # 0: la caché aún no existe y será de esta worktree
+  ```
+  (`p3/base` es la rama donde quedan las Tasks 1 a 5; si el coordinador la llama de otra forma, la orden usa ese nombre.) Los paquetes siguen siendo los del checkout principal, que ninguna worktree escribe: `npm install` no se ejecuta en una worktree. Cada worktree usa su propio puerto para harmony y para `npx vite` (los dos scripts eligen uno libre; `npx vite` imprime el suyo). Comprobado el 2026-11-24 con dos pasadas de harmony simultáneas en copias de trabajo: con la carpeta compartida una de ellas sirvió 504 y aun así terminó en `ok`; con una carpeta por copia las dos terminaron limpias (informe de la revisión previa, `p3-fix-report.md`).
 - **Commits.** Uno por paso «Commit», con el formato de los anteriores (`feat(ui): …`, `test(ui): …`) y estas dos líneas al final del mensaje:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -40,21 +50,33 @@
 
 ## Archivos compartidos (dueño único)
 
-Las oleadas corren en paralelo y no comparten archivos. Estos son de la base (Tasks 1 a 5) y **ninguna oleada los edita**:
+Las oleadas corren en paralelo y **ningún archivo tiene dos dueños**. Cada archivo que dos oleadas a la vez tendrían que tocar está en una de estas tres clases, y no hay una cuarta.
+
+**1. De la base (Tasks 1 a 5): ninguna oleada los edita.**
 
 | Archivo | Dueño |
 |---|---|
 | `frontend/src/index.css`, `frontend/index.html`, `frontend/public/` | Tasks 1 y 2 |
-| `frontend/src/shell/**` (kit, armazón, CSS, `nav.ts`) | Tasks 2, 3 y 4 |
-| `frontend/src/components/**` | Task 3 |
-| `frontend/src/App.tsx`, `frontend/scripts/routes.mjs` | Tasks 3, 4 y 5 |
-| `frontend/src/lib/api.ts`, `frontend/src/fixtures/client.ts` | Task 3 |
-| `frontend/src/i18n/{en,es}/{shell,components,common}.ts` | Tasks 2 a 4 |
+| `frontend/src/shell/**` (kit, armazón, CSS, `nav.ts`, `viz.*`) | Tasks 1 a 4 |
+| `frontend/src/components/**` | Tasks 1 (`chart.tsx`) y 3 |
+| `frontend/src/App.tsx` y todos los `frontend/src/App*.test.tsx` salvo `App.portal.test.tsx` | Tasks 3, 4 y 5 |
+| `frontend/scripts/**` (`routes.mjs`, `routes.d.mts`, `harmony.mjs`, `harmony.d.mts`, `a11y-browser.mjs`) | Tasks 1 a 5. Las variantes de ruta que las oleadas necesitan ya las añade la Task 5 (Step 8) |
+| `frontend/src/lib/**` (`api.ts`, `clientScope.tsx`, `clientChoice.ts`, `useScrollToHash.ts`, `labels.ts`…) | Tasks 2 y 3 |
+| `frontend/src/fixtures/**` (`client.ts`, `core.ts` y el registro): `listDevices`, `getDevice`, `getDeviceInventory`, `getDashboardLayout`, `getHealthAlertSummary`, `me` viven aquí | Task 3 |
+| `frontend/src/i18n/{en,es}/{shell,components,common,enums,lib,time,validation,clients,index}.ts`, `frontend/src/i18n/test-utils.tsx`, `frontend/src/i18n/identical-ok.ts` (las entradas compartidas) | Tasks 2 a 5 |
 | `frontend/src/test/**` | Tasks 1 a 4 |
-| `frontend/src/preview/PreviewPage.tsx` | Task 3; la O2 solo **añade** una sección al final («Portal frame») |
+| `frontend/src/preview/PreviewPage.tsx` | Task 3, que deja hechas las secciones «Kit v4», «AuthCard embedded» y «Portal frame»: el marco de acceso (O8) y el del portal (O2) se repintan solos ahí. Ninguna oleada lo toca |
+| `frontend/src/modules/clients/**`, `frontend/src/modules/onboarding/journey.ts` (el parámetro del recorrido, Task 5 Step 3b) | Task 5; después, `onboarding/**` es de la O1 |
 | `DESIGN.md`, `PRODUCT.md`, `.impeccable/design.json`, `docs/product.md` | Task 1 (y Task 14 si la revisión final pide un cambio) |
+| `.impeccable/config.json` (las excepciones del detector, `impeccable ignores add-value … --shared`) y `.impeccable/critique/ignore.md` | **el coordinador**, en la rama base. Una oleada propone la entrada exacta en su informe |
 
-Si una oleada necesita algo de esta lista (una pieza del kit que falta, una ruta, una clave compartida), **no lo edita**: lo anota en su informe como «petición al kit» con el código exacto, el coordinador lo aplica en la rama base y la oleada lo trae con `git rebase`. Cada oleada sí es dueña de sus carpetas `src/modules/<m>/`, de `src/i18n/{en,es}/<m>.ts` y de `src/modules/<m>/fixtures.ts`.
+**2. Partidos por oleada (la Task 3 los parte, Step 3b):** `frontend/src/i18n/identical-ok.o1.ts` a `identical-ok.o8.ts`. Cada oleada pone y quita en el suyo, y solo en el suyo, las entradas de sus catálogos (la que deja idéntica una clave nueva en inglés y en español, y la que borra la entrada de una clave que renombra o borra). `catalogue.identical.test.ts` fija que cada archivo solo nombre las claves de su oleada.
+
+**3. De la oleada, y de nadie más:** sus carpetas `frontend/src/modules/<m>/**` (con `fixtures.ts` y sus pruebas), `frontend/src/i18n/{en,es}/<m>.ts`, su `identical-ok.o<N>.ts`, las críticas que escribe (`.impeccable/critique/<fecha>__<slug>.md`: un archivo nuevo por cada ejecución, que nadie más escribe) y, solo la O2, `frontend/src/App.portal.test.tsx`.
+
+**Lo que un módulo exporta a otro conserva su firma.** Antes de cambiar el nombre o las props de algo exportado, la oleada busca quién lo importa (`grep -rn "from \"\.\./<m>/" frontend/src/modules`); si lo importa un módulo de otra oleada (por ejemplo, `StartSessionDialog` de `remote` lo usa `service-desk`), la firma no cambia: se añade una prop opcional o se deja como está.
+
+**Petición al kit.** Si una oleada necesita algo de la clase 1 (una pieza del kit que falta, una ruta, una clave compartida, un dato de `fixtures/core.ts`), **no lo edita**: lo anota en su informe con el código exacto, el coordinador lo aplica en la rama base (`p3/base`) y la oleada lo trae con `git stash && git rebase p3/base && git stash pop` (sus archivos no son los del kit, así que el `pop` no choca).
 
 ## Oleadas y paralelismo
 
@@ -76,9 +98,9 @@ T1 ─ T2 ─ T3 ─ T4 ─ T5 ─┬─ T6  (O1) ─┐
                         └─ T13 (O8) ─┴─ T14
 ```
 
-El lote B puede empezar a la vez que el A si hay ocho implementadores; con cuatro, empieza cuando terminan los del A. Las oleadas son disjuntas por archivo, así que el orden de fusión no importa; el coordinador fusiona cada una cuando su revisión aprueba, y vuelve a pasar `npx vitest run` completo tras cada fusión.
+El lote B puede empezar a la vez que el A si hay ocho implementadores; con cuatro, empieza cuando terminan los del A. Cada worktree se prepara como dicen las Global Constraints («Worktrees»): su propia carpeta `node_modules`, nunca la compartida. Las oleadas son disjuntas por archivo («Archivos compartidos»), así que el orden de fusión no importa; el coordinador fusiona cada una cuando su revisión aprueba (`git merge --no-ff p3/oleada-<N>` en `p3/base`) y vuelve a pasar `npx vitest run` completo tras cada fusión.
 
-Choques que el coordinador resuelve al fusionar: ninguno esperado en código. `frontend/.harmony/` no se versiona. Las críticas persistidas de impeccable (`.impeccable/critique/*.md`) tienen un archivo por página, así que tampoco chocan.
+Choques al fusionar: **ninguno**, y no es una esperanza sino la consecuencia de la tabla de arriba. Si `git merge` informa un choque, la tabla tiene un archivo con dos dueños: el coordinador para, lo resuelve a mano en la rama base y lo anota en el informe como defecto del plan. `frontend/.harmony/` no se versiona. Las críticas de impeccable sí se versionan (resolución del coordinador del 2026-11-24): cada `critique-storage write` crea un archivo nuevo con su fecha (`2026-11-24T00-26-01Z__<slug>.md`, y `…~0001__<slug>.md` si se repite en el mismo segundo), uno por ejecución y no uno por página, así que dos oleadas nunca escriben el mismo.
 
 ## Mapa de archivos de la base
 
@@ -90,15 +112,19 @@ Choques que el coordinador resuelve al fusionar: ninguno esperado en código. `f
 | `frontend/src/index.css` | Tokens transcritos de `DESIGN.md` v4 | 1 |
 | `frontend/src/test/tokens.test.ts` | `index.css` = `DESIGN.md` = `novieri-tokens.json` | 1 |
 | `frontend/src/test/contrast.test.ts`, `radius.test.ts`, `base-styles.test.ts` | Puertas con la marca nueva | 1 |
+| `frontend/src/components/chart.tsx`, `frontend/src/shell/viz.css`, `frontend/src/shell/viz.tsx`, `frontend/src/test/second-carrier.test.tsx` (nuevo) | «En curso» y «información» comparten el cobalto (D2): el segundo portador donde no hay etiqueta con icono | 1 |
+| `frontend/scripts/harmony.mjs`, `frontend/scripts/routes.mjs` (`FRAMELESS`) | La puerta falla si una página no dibuja el armazón o el servidor de desarrollo responde 5xx | 1 |
 | `frontend/public/favicon.svg` (nuevo) | El favicon de la marca | 2 |
 | `frontend/src/shell/brand.tsx` (nuevo) | Nombre del producto, símbolo, logotipo y conjunto «Novieri RMM» | 2 |
 | `frontend/src/shell/title.tsx` (nuevo) | `documentTitle`, `useRecordTitle`, `useDocumentTitle` | 2 |
 | `frontend/src/test/no-itms.test.ts` (nuevo) | Guarda: «ITMS» fuera de `frontend/src` | 2 |
 | `frontend/src/shell/listKit.tsx`, `detailKit.tsx`, `formKit.tsx`, `kit.css` (nuevos) | El kit de patrones | 3 |
+| `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` (nuevos) | Una página bajo un router de datos, con el título de pestaña del armazón si se pide; un doble de la API que anota a qué cliente se estrechó cada lectura | 3 |
 | `frontend/src/lib/api.ts` (`forClient`), `frontend/src/fixtures/client.ts` | Lectura acotada a un cliente para el chip «Cliente» y la ficha 360 | 3 |
-| `frontend/src/App.tsx` | Router de datos (para avisar antes de salir) | 3 |
-| `frontend/src/shell/nav.ts`, `Sidebar.tsx`, `AdminPanel.tsx` (nuevo), `NewMenu.tsx` (nuevo), `newMenu.ts` (nuevo), `AppShell.tsx`, `AreaPage.tsx`, `shell.css` | El armazón | 4 |
-| `frontend/src/modules/clients/**` | Lista de clientes y ficha 360 | 5 |
+| `frontend/src/App.tsx`, `frontend/src/shell/RouteError.tsx` (nuevo) | Router de datos (para avisar antes de salir) y su pantalla de error traducida | 3 |
+| `frontend/src/i18n/identical-ok.o1.ts` a `identical-ok.o8.ts` (nuevos) | Las entradas de `identical-ok.ts` de cada oleada, en su propio archivo | 3 |
+| `frontend/src/shell/nav.ts`, `Sidebar.tsx`, `AdminPanel.tsx` (nuevo), `NewMenu.tsx` (nuevo), `newMenu.ts` (nuevo), `AppShell.tsx` (con el botón flotante del Asistente), `AreaPage.tsx`, `shell.css` | El armazón | 4 |
+| `frontend/src/modules/clients/**`, `frontend/src/modules/onboarding/journey.ts` | Lista de clientes y ficha 360; el recorrido de «Añadir un equipo» deja libre `?client=` | 5 |
 
 ---
 
@@ -115,15 +141,38 @@ Forma (diseño §2, «Lista»; Atera: `Atera_recorrido_menus_UI_UX.md`, «Custom
 3. El estado vacío es `ListEmpty`: «nada todavía» con la acción de crear, o «nada con estos filtros» con «Quitar filtros». Nunca las dos frases a la vez, nunca un vacío sin causa.
 4. Los filtros son `useUrlFilters`. Los conteos de los chips salen de la respuesta del servidor cuando la trae (`state_counts`, `by_state`, `total`); si no la trae, el chip va **sin** número (regla «Absent Zero»), nunca con uno calculado sobre la página visible.
 5. Una pestaña que filtraba la lista (`Tabs` con `?state=`) pasa a `FilterChips` con el mismo parámetro: la URL no cambia.
+6. **El chip «Cliente» estrecha la lectura de la lista, y solo la lectura** (decisión D6). La lista lee con `useApiFor(filters.values.client)`, no lee nada hasta que `useNarrowing(filters.values.client).ready` (hasta que `/me` dice si ese cliente es de la persona), y su clave de consulta lleva `narrowing.client`: cambiar el chip vuelve a leer y nunca deja en pantalla las filas del cliente anterior bajo el chip nuevo. Un identificador que no es de la persona no se manda: `ClientFilter` lo quita de la URL y la lista lee como si no estuviera. **Las escrituras siguen con `useApi()`**: una acción de fila o de lote manda la elección de la barra de arriba, como hoy; el chip no cambia a qué cliente va una escritura.
+7. **Una lista que lee por un hook de su módulo** (`useLicenses`, `useSubscriptions`, `useIpamSubnets`, `useHealthAlerts`, `useDeployments`, `useBackupPoints`, `usePlans`, `useChanges`, `useSiteServers`, `usePatchFleetReport`…: hoy llaman a `useApi()` dentro y usan una clave fija) cambia **el hook**, no la llamada: toma el valor del chip, lee con `useApiFor` y pone el cliente en su clave. Es la misma llamada a la API, con los mismos argumentos; cambia a quién estrecha y bajo qué clave se guarda, así que no choca con «Prohibido … cambiar una llamada a la API». Ejemplo exacto, `modules/licenses/api.ts`:
+   ```ts
+   // Antes:
+   export function useLicenses() {
+     const api = useApi();
+     return useQuery({ queryKey: ["licenses"], queryFn: () => api.listLicenses() });
+   }
+   // Después: `chip` es el valor de `?client=` ("" sin chip, como lo llaman los demás).
+   export function useLicenses(chip = "") {
+     const narrowing = useNarrowing(chip);
+     const api = useApiFor(chip);
+     return useQuery({
+       queryKey: ["licenses", narrowing.client],
+       queryFn: () => api.listLicenses(),
+       enabled: narrowing.ready,
+     });
+   }
+   ```
+   Las mutaciones siguen invalidando el prefijo (`invalidateQueries({ queryKey: ["licenses"] })` alcanza `["licenses", null]` y `["licenses", "<id>"]`). Antes de cambiar una clave, la oleada busca sus lecturas y escrituras exactas (`grep -rn 'QueryData(\["licenses"\]' frontend/src`) y las pasa a la clave nueva; hoy no hay ninguna para `licenses`.
+8. **Una lista que solo busca** (sin chips: `SoftwarePage`, `VendorsPage`, `ProductsPage`…): `ListToolbar` con la búsqueda en `?q=` y `ShowingCount`; su prueba es la variante de búsqueda de abajo. **Una lista sin ningún filtro** (`MyWorkPage`, `ConfirmationQueuePage`): `ShowingCount` y `ListEmpty filtered={false}`; su prueba es solo «says why the list is empty».
 
 ```tsx
 // Receta L, esqueleto. Las claves de filtro son las que la página ya usaba en
 // la URL (o, si las tenía en useState, las nuevas que nombra su oleada).
 const filters = useUrlFilters(["q", "state", "client"] as const);
-const api = useApiFor(filters.values.client);
+const narrowing = useNarrowing(filters.values.client);
+const api = useApiFor(filters.values.client); // solo para leer la lista
 const list = useQuery({
-  queryKey: ["<módulo>", "list", filters.values],
+  queryKey: ["<módulo>", "list", filters.values.q, filters.values.state, narrowing.client],
   queryFn: () => api.listX({ q: filters.values.q, state: filters.values.state }),
+  enabled: narrowing.ready,
 });
 const rows = list.data?.items ?? [];
 
@@ -153,7 +202,7 @@ return (
         }
         end={<ShowingCount shown={rows.length} total={list.data?.total ?? null} />}
       />
-      <QueryState loading={list.isLoading} error={list.error} empty={false} emptyLabel="">
+      <QueryState loading={list.isLoading || !narrowing.ready} error={list.error} empty={false} emptyLabel="">
         {rows.length === 0 ? (
           <ListEmpty
             filtered={filters.active}
@@ -170,12 +219,12 @@ return (
 );
 ```
 
-Prueba mínima que toda lista convertida añade (en el archivo de pruebas de su módulo):
+Pruebas mínimas que toda lista convertida añade (en el archivo de pruebas de su módulo). Las de chips:
 
 ```tsx
 it("keeps its filters in the URL, so a filtered view is a link", async () => {
   const { router } = renderPage("/<ruta>?state=<valor>", <Page />);
-  expect(screen.getByRole("button", { name: /<etiqueta del valor>/ })).toHaveAttribute("aria-pressed", "true");
+  expect(await screen.findByRole("button", { name: /<etiqueta del valor>/ })).toHaveAttribute("aria-pressed", "true");
   await userEvent.click(screen.getByRole("button", { name: /<otra etiqueta>/ }));
   expect(router.state.location.search).toContain("state=<otro valor>");
 });
@@ -184,6 +233,30 @@ it("says why the list is empty", async () => {
   renderPage("/<ruta>?state=<valor sin filas en la respuesta>", <Page />);
   expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+});
+```
+
+La variante de búsqueda, para una lista que solo busca (en lugar de la primera):
+
+```tsx
+it("keeps its search in the URL, so a reload finds the same rows", async () => {
+  const { router } = renderPage("/<ruta>", <Page />);
+  await userEvent.type(await screen.findByRole("searchbox", { name: "<etiqueta de la búsqueda>" }), "<texto>");
+  expect(router.state.location.search).toBe("?q=<texto>");
+  await act(() => router.navigate("/<ruta>?q=<texto>"));
+  expect(screen.getByRole("searchbox", { name: "<etiqueta de la búsqueda>" })).toHaveValue("<texto>");
+});
+```
+
+Y la del chip «Cliente», en **toda** lista que lo lleve (`recordingNarrowing` es la ayuda de la Task 3, `src/test/narrowing.ts`; `ANDES` es `5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57`, el cliente de `src/fixtures/core.ts`):
+
+```tsx
+it("reads the list narrowed to the Client chip's client (decision D6)", async () => {
+  const { api, narrowedTo } = recordingNarrowing(fixtureClient());
+  mockUseApi.mockReturnValue(api);
+  renderPage(`/<ruta>?client=${ANDES}`, <Page />);
+  expect(await screen.findByRole("table", { name: "<título de la lista>" })).toBeInTheDocument();
+  expect(narrowedTo).toContain(ANDES);
 });
 ```
 
@@ -197,7 +270,7 @@ beforeEach(() => mockUseApi.mockReturnValue(api));
 const { router } = renderPage("/<ruta>?state=<valor>", <Page />);
 ```
 
-`renderPage(path, element)` monta `element` en un `createMemoryRouter` (router de datos, para que `UnsavedGuard` pueda bloquear) dentro de un `QueryClientProvider` sin reintentos, y devuelve `{ router, queryClient }`. Una prueba existente que monta con `MemoryRouter` sigue valiendo; solo se cambia a `renderPage` la que necesita leer `router.state.location`.
+`renderPage(path, element, pattern?, options?)` monta `element` en un `createMemoryRouter` (router de datos, para que `UnsavedGuard` pueda bloquear) dentro de un `QueryClientProvider` sin reintentos, y devuelve `{ router, queryClient }`; con `options.page` (una clave del catálogo, la etiqueta del riel de la página: `"shell.nav.item.devices"`) envuelve además la página en el `RecordTitleProvider` del armazón, para que una ficha pueda probar su título de pestaña (Receta F). Una prueba existente que monta con `MemoryRouter` sigue valiendo; solo se cambia a `renderPage` la que necesita leer `router.state.location` o el título.
 
 ### Receta F: ficha
 
@@ -249,6 +322,16 @@ it("puts the tab in the URL, and an unknown tab opens the default", async () => 
 });
 ```
 
+Y la del título de pestaña, en toda ficha (la de una ficha sin pestañas es solo esta). `useRecordTitle` no hace nada fuera del armazón, así que la prueba pide el suyo con `options.page`, la clave de la etiqueta del riel de la página:
+
+```tsx
+it("names the record in the browser tab", async () => {
+  renderPage("/<ruta>/<id>", <Page />, "/<ruta>/:<param>", { page: "shell.nav.item.<entrada del riel>" });
+  await screen.findByRole("heading", { level: 1, name: "<nombre del registro>" });
+  expect(document.title).toBe("<nombre del registro> · <etiqueta del riel en inglés> · Novieri RMM");
+});
+```
+
 ### Receta FO: formulario
 
 Forma (diseño §2, «Formulario»; Atera: captura «atera 12»):
@@ -256,8 +339,10 @@ Forma (diseño §2, «Formulario»; Atera: captura «atera 12»):
 1. `FormPage` (volver y título) cuando la página **es** un formulario; si el formulario es una pestaña de una página (Configuración), la pestaña usa directamente las secciones y la barra.
 2. `FormSection` por grupo de campos, plegables, abiertas por defecto.
 3. Los campos con ayuda son `Field` con `help` (`components/ui.tsx`, diseño de ajustes de 2026-09-10).
-4. **Una sola** `SaveBar` por página, fija abajo: «Cambios sin guardar · Descartar · Guardar». Desaparecen los botones «Guardar» sueltos por panel. `useDraft` calcula `dirty`; `UnsavedGuard` avisa antes de salir.
-5. Una alta pequeña (un diálogo de dos o tres campos) **sigue siendo un diálogo** (`Dialog`); el diseño restiliza los diálogos, no los convierte en páginas.
+4. **Una sola** `SaveBar` por página, fija abajo: «Cambios sin guardar · Descartar · Guardar». Desaparecen los botones «Guardar» sueltos por panel. `useDraft` calcula `dirty`; `UnsavedGuard` avisa antes de salir. Lo que hacía el botón suelto lo hace la barra: «Guardado.» tras el 2xx (`saved`), los problemas del formulario (`problems`), la razón por la que no se puede guardar (`blockedReason`), y Intro en un campo sigue guardando si la barra va dentro del `<Form>` con `submit`.
+5. **Salir es cambiar de ruta.** `UnsavedGuard` pregunta cuando la ruta cambia; un cambio solo de la query (una pestaña, un filtro, `?new=`, el registro que un guardado acaba de seleccionar) no es salir. Una página cuya query **es** lo que edita (Configuración: cada pestaña es otro formulario) lo dice con `search`: `<UnsavedGuard dirty={dirty} search />`.
+6. **Una página que se va al guardar** (un alta que lleva al registro creado, el portal que abre el ticket enviado) usa `useUnsavedGuard`, que devuelve la guarda y `release()`, y llama a `release()` justo antes de navegar: `useBlocker` lee su condición de un efecto, así que un manejador que guarda y navega en el mismo paso sería juzgado con los cambios todavía puestos (revisión previa, I-1, reproducido con react-router 7.18.1).
+7. Una alta pequeña (un diálogo de dos o tres campos) **sigue siendo un diálogo** (`Dialog`); el diseño restiliza los diálogos, no los convierte en páginas.
 
 ```tsx
 const saved = settings.data;                  // lo que el servidor dice hoy
@@ -274,6 +359,7 @@ return (
       dirty={dirty}
       saving={save.isPending}
       error={save.error}
+      saved={save.isSuccess && !dirty}
       onDiscard={discard}
       onSave={() => draft && save.mutate(draft)}
     />
@@ -281,7 +367,26 @@ return (
 );
 ```
 
-Prueba mínima de todo formulario convertido:
+La forma de la página que se va al guardar (6):
+
+```tsx
+const { guard, release } = useUnsavedGuard(dirty);
+const create = useMutation({
+  mutationFn: (body: X) => api.createX(body),
+  onSuccess: (created) => {
+    release();
+    navigate(`/<lista>/${created.id}`);
+  },
+});
+return (
+  <FormPage back={{ to: "/<lista>", label: t("<m>.back") }} title={t("<m>.newTitle")}>
+    {guard}
+    {/* … */}
+  </FormPage>
+);
+```
+
+Pruebas mínimas de todo formulario convertido:
 
 ```tsx
 it("shows one save bar only while something changed, and Discard puts it back", async () => {
@@ -304,6 +409,18 @@ it("asks before leaving with unsaved changes", async () => {
 });
 ```
 
+Y en una página que se va al guardar (6), además:
+
+```tsx
+it("leaves for what it saved without asking", async () => {
+  const { router } = renderPage("/<ruta>", <Page />, "/<ruta>");
+  await userEvent.type(await screen.findByLabelText("<Etiqueta>"), "x");
+  await userEvent.click(screen.getByRole("button", { name: "<Guardar o Enviar>" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/<ruta del registro creado>"));
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+});
+```
+
 ### Receta O: otra
 
 Paneles de control (Inicio, informes, estado), visores (sesión remota, grabación, documento), asistentes de pasos y las pantallas de acceso. Usan `PageHead` (o su marco propio), `Panel`, `StatsGrid`, `Tile` y las piezas del kit que apliquen, y conservan su forma. La oleada dice qué cambia en cada una.
@@ -312,26 +429,29 @@ Paneles de control (Inicio, informes, estado), visores (sesión remota, grabaci�
 
 ## Cierre de cada oleada (vinculante)
 
-Cada oleada termina con estos pasos, **después** de que sus pruebas, `npm run typecheck` y `npm run build` estén en verde.
+Cada oleada termina con estos pasos, **después** de que sus pruebas, `npm run typecheck` y `npm run build` estén en verde. Todas las rutas de archivo de la crítica son **relativas a la raíz del checkout** (`frontend/src/modules/<m>/<Pagina>.tsx`), nunca absolutas: el nombre de cada crítica guardada sale de esa ruta (`critique-storage slug`), así que es el mismo en la worktree de la oleada y en la rama fusionada.
 
-1. **Contexto de impeccable, una vez por sesión** (`SKILL.md` §Setup): `.claude/skills/impeccable/scripts/impeccable context --target frontend/src/modules/<m>` desde la raíz del repo. Tras la Task 1 no debe decir `NO_PRODUCT_MD` ni `PRODUCT_INIT_REQUIRED`; si lo dice, la oleada para y lo informa. Luego se lee `.claude/skills/impeccable/reference/craft-floor.md` antes de la primera edición de UI del pulido.
+1. **Contexto de impeccable, una vez por sesión** (`SKILL.md` §Setup): `.claude/skills/impeccable/scripts/impeccable context --target frontend/src/modules/<m>` desde la raíz de la worktree. Tras la Task 1 no debe decir `NO_PRODUCT_MD` ni `PRODUCT_INIT_REQUIRED`; si lo dice, la oleada para y lo informa. Luego se lee `.claude/skills/impeccable/reference/craft-floor.md` antes de la primera edición de UI del pulido.
 2. **Capturas** para la crítica y para el revisor:
    ```bash
    cd frontend
+   test -d node_modules && test ! -L node_modules && echo "node_modules propio"   # Global Constraints, «Worktrees»
    node scripts/harmony.mjs --strict-fixtures --lang es --routes <rutas de la oleada>
    node scripts/harmony.mjs --strict-fixtures --lang en --routes <rutas de la oleada>
    ```
-   Salida esperada al final de cada una: `ok    every route on the tokens, no overflow, the top bar in bounds, no serious axe violation, no fixture miss`. Las capturas quedan en `frontend/.harmony/<lang>/<viewport>/<ruta>.png` (`/devices/dev-1` → `devices__dev-1.png`) a 1440x900, 390x844, 390x844-client y 641x900-client. La puerta ya corre axe (WCAG A/AA y buenas prácticas) en cada ruta y viewport: ese es el pase de accesibilidad de las rutas de la oleada.
+   La primera línea imprime `node_modules propio`; si no imprime nada, la worktree comparte la caché de Vite con las demás y se rehace como dicen las Global Constraints antes de seguir. Salida esperada al final de cada pasada: `ok    every route on the tokens, no overflow, the top bar in bounds, no serious axe violation, no fixture miss`. Desde la Task 1 (Step 12) la pasada **falla** si una ruta de la consola no dibuja el armazón (`drew no shell`) o si el servidor de desarrollo respondió 5xx a un archivo de la página (`the dev server answered 504 /node_modules/.vite/deps/…`): eso no es un defecto de la página sino del entorno, y se repite la pasada con la worktree arreglada; nunca se da por buena. Las capturas quedan en `frontend/.harmony/<lang>/<viewport>/<ruta>.png` (`/devices/dev-1` → `devices__dev-1.png`) a 1440x900, 390x844, 390x844-client y 641x900-client. La puerta ya corre axe (WCAG A/AA y buenas prácticas) en cada ruta y viewport: ese es el pase de accesibilidad de las rutas de la oleada.
 3. **Crítica de impeccable, página por página** (`reference/critique.md`), sobre el archivo de cada página:
    - `.claude/skills/impeccable/scripts/impeccable critique-storage slug "frontend/src/modules/<m>/<Pagina>.tsx"`;
-   - leer `.impeccable/critique/ignore.md` si existe;
-   - **dos subagentes aislados en paralelo** cuando la sesión tiene la herramienta de subagentes: A (revisión de diseño: lee el archivo de la página y sus capturas en los dos idiomas y en 1440 y 390, y puntúa las 10 heurísticas de Nielsen) y B (`.claude/skills/impeccable/scripts/impeccable detect --json frontend/src/modules/<m>` más la capa en el navegador: `impeccable live-server --background`, Chromium por Playwright en una pestaña nueva sobre `http://127.0.0.1:<puerto>/<ruta>?__fixtures`, inyectar `http://localhost:<puerto-del-live-server>/detect.js`, leer los mensajes `impeccable` de la consola y terminar con `impeccable live-server stop --keep-inject`). Si la sesión no tiene herramienta de subagentes, el informe empieza con `⚠️ DEGRADED: single-context (no sub-agent tool exposed)` y se hacen A y B en serie, como manda la referencia;
+   - leer `.impeccable/critique/ignore.md` si existe (es del coordinador: la oleada no lo edita);
+   - **dos subagentes aislados en paralelo** cuando la sesión tiene la herramienta de subagentes: A (revisión de diseño: lee el archivo de la página y sus capturas en los dos idiomas y en 1440 y 390, y puntúa las 10 heurísticas de Nielsen) y B (`.claude/skills/impeccable/scripts/impeccable detect --json frontend/src/modules/<m>` más la capa en el navegador: `npx vite` desde `frontend/` en esta worktree, que imprime su puerto propio (`Local: http://localhost:<puerto>/`); `impeccable live-server --background`, que imprime el suyo; Chromium por Playwright en una pestaña nueva sobre `http://localhost:<puerto de vite>/<ruta>?__fixtures`, inyectar `http://localhost:<puerto del live-server>/detect.js`, leer los mensajes `impeccable` de la consola y terminar con `impeccable live-server stop --keep-inject` y parando `npx vite`). Si la sesión no tiene herramienta de subagentes, el informe empieza con `⚠️ DEGRADED: single-context (no sub-agent tool exposed)` y se hacen A y B en serie, como manda la referencia;
+   - un hallazgo del detector que es un falso positivo no se «corrige»: el informe de la oleada da la orden exacta para el coordinador (`impeccable ignores add-value <regla> <valor> --file <ruta relativa> --reason "<por qué>" --shared`), que la aplica en la rama base porque `.impeccable/config.json` es suyo;
    - el informe completo va en el informe de la oleada; se persiste con `IMPECCABLE_CRITIQUE_META='{…}' .claude/skills/impeccable/scripts/impeccable critique-storage write "frontend/src/modules/<m>/<Pagina>.tsx" <archivo-temporal>` y se lee la tendencia con `critique-storage trend`;
-   - **las preguntas de la crítica**: en la primera crítica del programa (la del armazón, Task 4, Step 12) se hacen al operador a través del coordinador y sus respuestas se guardan en `.git/sdd/critica-respuestas.md`; las críticas siguientes (Task 5 y las oleadas) las reutilizan como respuestas vigentes y solo preguntan lo que esas respuestas no cubren. Si una crítica tiene menos de tres asuntos prioritarios, se escribe la línea literal `Questions skipped: <n> priority issues`.
-4. **Pulido de impeccable, página por página** (`reference/polish.md`): `critique-storage latest "<archivo>" --json`, corregir los P0 y P1 que la crítica dejó (en este orden: tareas rotas, estados que faltan, jerarquía y deriva del kit, detalles visuales, limpieza), sin rediseño escondido, y al terminar `critique-storage close "<archivo>" "<snapshot_file>"`. Lo que el pulido no corrige se anota como P2/P3 en el informe.
+   - **las preguntas de la crítica** (resolución del coordinador del 2026-11-24): no van al operador. Las contesta el coordinador con `DESIGN.md`, el diseño aprobado y las decisiones del operador, y las respuestas viven en **`.impeccable/critica-respuestas.md`**, versionado en la rama base (es del coordinador). La primera crítica del programa (la del armazón, Task 4, Step 12) lo inaugura; las siguientes (Task 5 y las oleadas) lo leen como respuestas vigentes, y solo la pregunta que esas fuentes no zanjan sube al operador, a través del coordinador. Si una crítica tiene menos de tres asuntos prioritarios, se escribe la línea literal `Questions skipped: <n> priority issues`.
+4. **Pulido de impeccable, página por página** (`reference/polish.md`): `critique-storage latest "frontend/src/modules/<m>/<Pagina>.tsx" --json`, corregir los P0 y P1 que la crítica dejó (en este orden: tareas rotas, estados que faltan, jerarquía y deriva del kit, detalles visuales, limpieza), sin rediseño escondido, y al terminar `critique-storage close "frontend/src/modules/<m>/<Pagina>.tsx" "<snapshot_file>"`, donde `<snapshot_file>` es el nombre (sin carpeta) que devolvió `latest --json`. Un `close` cerrado escribe `closed: true` en la cabecera de la crítica, que es lo que la Task 14 cuenta. Lo que el pulido no corrige se anota como P2/P3 en el informe.
 5. **Repetir el paso 2** tras el pulido y adjuntar al informe la lista de PNG de 1440x900 y 390x844 de cada ruta en los dos idiomas.
 6. `npx vitest run`, `npm run typecheck`, `npm run build` completos: verde.
-7. **Revisión de la oleada** (superpowers:requesting-code-review): el revisor lee el diff, las capturas y las críticas, y comprueba los criterios de aceptación de cada página.
+7. **Revisión de la oleada** (superpowers:requesting-code-review): el revisor lee el diff, las capturas y las críticas, y comprueba los criterios de aceptación de cada página («Acepta:» de cada bloque y los de la oleada).
+8. **El commit de la oleada incluye sus críticas**: `git add .impeccable/critique` junto a los archivos de la oleada (cada crítica es un archivo nuevo; ninguna oleada edita la de otra).
 
 ---
 
@@ -370,7 +490,9 @@ Diseño §3.1 y §3.2. Cambia la marca **sin tocar todavía ninguna forma**: des
 - Modify: `frontend/src/index.css:1-103` (comentario de cabecera y primer `:root`), `:123-169` (bloque de alias), `:180-289` (`@theme inline`)
 - Modify: `frontend/src/shell/shell.css:139-148` (`.sidebar .ct.hot`), `:350-366` (`.counter-dot`)
 - Modify: `frontend/src/shell/components.css:402` (`.pill`), `:649` (`.chip`)
-- Test: `frontend/src/test/tokens.test.ts` (reescrito), `frontend/src/test/contrast.test.ts`, `frontend/src/test/radius.test.ts`
+- Modify (el segundo portador de D2): `frontend/src/components/chart.tsx:112` (`SERIES_INK`), `frontend/src/shell/viz.css:110-115` (`.heat .h-info`), `frontend/src/shell/viz.tsx:253-293` (`Donut`)
+- Modify (la puerta de armonía, Step 12): `frontend/scripts/harmony.mjs`, `frontend/scripts/routes.mjs`, `frontend/scripts/routes.d.mts`, `frontend/scripts/harmony.d.mts`
+- Test: `frontend/src/test/tokens.test.ts` (reescrito), `frontend/src/test/contrast.test.ts`, `frontend/src/test/radius.test.ts`, `frontend/src/test/second-carrier.test.tsx` (nuevo), `frontend/src/test/harmony-client.test.ts`, `frontend/src/test/routes-covered.test.ts`
 
 **Interfaces:**
 - Consumes: `docs/design/marca/novieri-tokens.json` (no se edita).
@@ -378,14 +500,14 @@ Diseño §3.1 y §3.2. Cambia la marca **sin tocar todavía ninguna forma**: des
 
 **Decisiones de esta tarea** (Apéndice A, D1 a D5):
 - **D1.** La autoridad de los tokens pasa de `docs/design/itms-prototype-v3.html` a `DESIGN.md` v4, y la marca (`novieri-tokens.json`) fija su subconjunto. El prototipo v3 queda como historia (`harmony.mjs --proto` lo sigue fotografiando).
-- **D2.** La marca tiene dos tintas de texto, un borde y cinco severidades con «información» en el tono del acento. Por eso `--ink-2` pasa a ser `--ink`, `--line-2` pasa a ser `--line` y el estado «en curso» (`--sev-run`) toma el tono de información; la etiqueta «en curso» conserva su icono (`progress`), que es lo que la distingue de «información» (regla del segundo portador). Prueba: la maqueta de la dirección A (`propuestas-2026-11-23.html`, `.m-table td` en `--text`, `.sub` en `--text-2`, una sola `--border`).
+- **D2.** La marca tiene dos tintas de texto, un borde y cinco severidades con «información» en el tono del acento. Por eso `--ink-2` pasa a ser `--ink`, `--line-2` pasa a ser `--line` y el estado «en curso» (`--sev-run`) toma el tono de información (el operador lo confirmó el 2026-11-24: «en curso» se funde en el cobalto). La etiqueta «en curso» conserva su icono (`progress`), que es lo que la distingue de «información» (regla del segundo portador). **Donde no hay etiqueta con icono, el segundo portador se añade aquí**, y `second-carrier.test.tsx` lo fija (revisión previa, I-3): la serie 2 de los gráficos deja el cobalto por `--sev-mut` (6,15:1 sobre blanco) y conserva su rayado; la celda de calor de información (en IPAM, una dirección DHCP frente a una asignada) lleva un anillo interior; el anillo de un donut lleva el icono de su tipo junto a su etiqueta; las barras de la línea de tiempo ya lo tenían (cada fila lleva el icono de su tipo, `viz.tsx:345`). Prueba de la marca: la maqueta de la dirección A (`propuestas-2026-11-23.html`, `.m-table td` en `--text`, `.sub` en `--text-2`, una sola `--border`).
 - **D3.** El contador de alertas del riel deja de ser texto rosa (`--rail-hot`) y pasa a ser blanco sobre la etiqueta crítica (fila «Contador de alertas» de la tabla de contraste de la marca, 6,57:1). El ítem activo se marca con `--rail-mark` (icono y punto), no con un borde de acento: el acento sobre el riel mide 2,32:1.
 - **D4.** `--r-pill` se conserva solo para la pista del interruptor y la barra de progreso: la marca retira la píldora de chips y etiquetas, no de esas dos formas, que el usuario reconoce por su silueta.
 - **D5.** `--accent-2` cambia de valor (#1a4fae → #203cac, el hover de la marca) y nace `--accent-3` (#1a3190, presionado).
 
-- [ ] **Step 1: Escribir `PRODUCT.md` y confirmarlo con el operador**
+- [ ] **Step 1: Escribir `PRODUCT.md`, ya confirmado por el operador**
 
-`impeccable context` dice hoy `NO_PRODUCT_MD` y `PRODUCT_INIT_REQUIRED` (comprobado el 2026-11-23). `docs/product.md` ya lleva el marcador `impeccable:product-schema 1`, pero la herramienta busca `PRODUCT.md` en la raíz. `reference/init.md` exige una ronda de respuesta real antes de escribir uno nuevo: el coordinador enseña este borrador al operador (AskUserQuestion, una pregunta: «¿Es correcto el registro de producto?», opciones «Sí», «Sí, con cambios», «No») y aplica lo que diga. Cada línea sale de `docs/product.md` (§1, §4, §8, §9, §10, §11), `docs/00-vision.md` y las decisiones A1 a A4 y B2.
+`impeccable context` dice hoy `NO_PRODUCT_MD` y `PRODUCT_INIT_REQUIRED` (comprobado el 2026-11-23). `docs/product.md` ya lleva el marcador `impeccable:product-schema 1`, pero la herramienta busca `PRODUCT.md` en la raíz. `reference/init.md` exige una ronda de respuesta real antes de escribir uno nuevo, y esa ronda ya se hizo: **el operador confirmó este borrador tal cual el 2026-11-24 («Sí, tal cual»**, `decisiones-p34.md`, «Operator answers 2026-11-24»). Este paso escribe el archivo exactamente como está abajo y no vuelve a preguntar. Cada línea sale de `docs/product.md` (§1, §4, §8, §9, §10, §11), `docs/00-vision.md` y las decisiones A1 a A4 y B2.
 
 Crear `PRODUCT.md`:
 
@@ -597,6 +719,28 @@ function fontSizes(markdown: string): Map<string, string> {
   return out;
 }
 
+/** `typography.code.fontFamily`: the code stack, which `--mono` transcribes. */
+function codeFamily(markdown: string): string {
+  let inside = false;
+  let role: string | null = null;
+  for (const line of frontmatter(markdown)) {
+    if (/^\S/.test(line)) {
+      inside = line.trim() === "typography:";
+      role = null;
+      continue;
+    }
+    if (!inside) continue;
+    const head = /^ {2}([a-z0-9-]+):\s*$/.exec(line);
+    if (head) {
+      role = head[1] as string;
+      continue;
+    }
+    const family = /^ {4}fontFamily:\s*(.+?)\s*$/.exec(line);
+    if (family && role === "code") return family[1] as string;
+  }
+  throw new Error("DESIGN.md names no typography.code.fontFamily");
+}
+
 const same = (value: string) => value.toLowerCase().replace(/\s+/g, "");
 
 /** A dotted path into the brand JSON, as a string. */
@@ -720,6 +864,14 @@ describe("design tokens", () => {
 
   it.each(Object.entries(RAMP))("declares the %s rung DESIGN.md names (%s)", (role, token) => {
     expect(app.get(token)).toBe(sizes.get(role));
+  });
+
+  it("keeps the two type stacks: Inter first, and the code stack DESIGN.md names", () => {
+    // Kept from the v3 test, which asserted `--sans` starts with Inter: the
+    // brand changed no face, and `fonts.test.ts` checks the @font-face, not
+    // the stack a rule reads.
+    expect(app.get("--sans")?.startsWith("Inter,")).toBe(true);
+    expect(same(app.get("--mono") ?? "(missing)")).toBe(same(codeFamily(design)));
   });
 
   it.each(BRAND_MAP)("carries the brand's value in %s (%s)", (token, path) => {
