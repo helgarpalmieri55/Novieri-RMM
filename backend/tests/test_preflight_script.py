@@ -286,3 +286,19 @@ def test_an_ip_that_prints_nothing_gets_the_same_neutral_note(tmp_path: Path) ->
     run = _run(tmp_path, GOOD_ENV, {**GOOD_HOST, "FAKE_MINE": ""})
     assert "this host's addresses could not be read -- compare" in run.stdout, run.stdout
     assert "iproute2" not in run.stdout and "ip failed" not in run.stdout
+
+
+def test_an_s3_public_endpoint_on_another_host_is_noted_not_refused(tmp_path: Path) -> None:
+    """The bundled MinIO router carries Host(ITS_PUBLIC_HOST), so another host
+    gets 404 on every download. External S3 legitimately differs: a note."""
+    env = {**GOOD_ENV, "ITS_S3_PUBLIC_ENDPOINT": "https://files.example.org"}
+    run = _run(tmp_path, env, GOOD_HOST)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "note    ITS_S3_PUBLIC_ENDPOINT is on files.example.org" in run.stdout, run.stdout
+
+
+def test_an_s3_public_endpoint_on_the_public_host_has_no_note(tmp_path: Path) -> None:
+    env = {**GOOD_ENV, "ITS_S3_PUBLIC_ENDPOINT": "https://rmm.novieri.com"}
+    run = _run(tmp_path, env, GOOD_HOST)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "ITS_S3_PUBLIC_ENDPOINT" not in run.stdout, run.stdout

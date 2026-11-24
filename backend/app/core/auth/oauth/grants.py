@@ -39,8 +39,8 @@ reused refresh token, the app's own RFC 7009 request, a person no longer
 active -- as "system", the person as the target, the app whose grant ended
 in `metadata.app`. A used code presented by ANOTHER app also names that one
 (`metadata.presented_by`): the likeliest trace of a stolen code. A reuse
-that ends nothing, because the grant had already ended (revoked by the app,
-or idle past its limit), is audited too, with `metadata.grant =
+that ends nothing, because the grant had already ended (revoked, for whatever
+reason, or idle past its limit), is audited too, with `metadata.grant =
 "already_ended"`; a token never used is not a reuse. NOT a
 refresh, which continues a consent already audited
 (`mcp.app_authorized`, Task 8) every five to ten minutes while the app is in

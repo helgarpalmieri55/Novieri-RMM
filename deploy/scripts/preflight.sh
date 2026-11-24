@@ -102,6 +102,15 @@ else
   ok "ITS_PUBLIC_HOST=$public_host is the console's host"
 fi
 
+# The bundled MinIO's router carries Host(ITS_PUBLIC_HOST): an endpoint on
+# another host gets 404 on every download. External S3 differs legitimately,
+# so this is a note, not a refusal.
+s3_host="$(grep -E '^ITS_S3_PUBLIC_ENDPOINT=' .env | tail -1 \
+           | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
+if [ -n "$s3_host" ] && [ -n "$public_host" ] && [ "$s3_host" != "$public_host" ]; then
+  printf '  note    ITS_S3_PUBLIC_ENDPOINT is on %s, not ITS_PUBLIC_HOST (%s): the bundled MinIO answers only on ITS_PUBLIC_HOST, so every download would get 404 unless the bucket is external S3\n' "$s3_host" "$public_host"
+fi
+
 acme_email="$(grep -E '^ITS_ACME_EMAIL=' .env | tail -1 | cut -d= -f2- || true)"
 if [ -z "$acme_email" ]; then
   refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Set ITS_ACME_EMAIL in .env (replace the existing ITS_ACME_EMAIL line, do not add a second) to the Let's Encrypt account's contact address (scripts/new-env.sh asks for it, but only for a host with no .env yet)."
