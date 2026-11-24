@@ -50,6 +50,11 @@ for these substitutions:
 - **D8:** `sudo`, as root.
 - **D9:** the copy had no remote, and `deploy.sh --plan` pulls too; for it the
   copy was put on a local branch tracking a local upstream.
+- **The base images** `python:3.12-slim`, `node:22-slim` and
+  `golang:1.24-bookworm` carried the rehearsal container's HTTPS-proxy CA (in
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and the like, which reach the images
+  built from them): `itsuite/backend`, `itsuite/web` and the agent were built
+  FROM those. Nothing built here was kept.
 
 **Not rehearsed:** P1, P2 (ufw), P3, P5 and P6 (the account, the firewall, the
 updates, installing Docker, the deploy key and the clone are the VPS's); the
@@ -73,7 +78,7 @@ What each step printed, against what this runbook shows:
 | 4 | `0248`, the highest revision file; the number shown is updated |
 | 4b, 5, 6 | as shown |
 | 6b | both units written; the service's command issued a certificate with a new serial |
-| 7 | the gateway reports `(healthy)` (corrected), and **`worker` and `backup-replicator` restarted for ever** (row 15). Certificate, `acme.json`, `:8443` and limits as shown |
+| 7 | the gateway reports `(healthy)`, and so does the worker once it starts (both corrected), and **`worker` and `backup-replicator` restarted for ever** (row 15). Certificate, `acme.json`, `:8443` and limits as shown |
 | 8, 9, 10, 11a, 11b, 11d, 11e, 11f | as shown |
 | 11c | as shown; each log line starts with `time=…` (added) |
 | 12 | **the first backup failed** (row 16) |
@@ -81,14 +86,15 @@ What each step printed, against what this runbook shows:
 | Upgrade | `--plan` pulls (the text said it changes nothing; corrected); right after first boot it printed `Already deployed` |
 
 The three defects (rows 15 to 17) are fixed in this repository, and with the
-fixes the same stack was upgraded through this runbook's own upgrade on this
-VPS (`git -C .. pull --ff-only`, `./scripts/deploy.sh --plan`,
-`./scripts/deploy.sh`): `worker` and `backup-replicator` up and healthy,
-`Recent tags:` listing three tags, and step 12's backup succeeding, with the
-bucket and without it. As on any rehearsal without a public CA, `deploy.sh`
-ended `Deployed with warnings` (exit status 1): `API returned 000000`, the
-certificate refusal after `--wait 60`, and, with no systemd, `no scheduled
-platform backup`.
+fixes the same stack was upgraded through the runbook's upgrade for this VPS,
+in the rehearsal container (`git -C .. pull --ff-only`, `./scripts/deploy.sh
+--plan`, `./scripts/deploy.sh`): `worker` up and healthy, `backup-replicator`
+up, `Recent tags:` listing three tags, and step 12's backup succeeding, with
+the bucket and without it. As on any rehearsal without a public CA,
+`deploy.sh` ended `Deployed with warnings` (exit status 1): the API probe
+(`API returned 000000`, two codes run together, which deploy.sh now prints as
+`API returned 000`), the certificate refusal after `--wait 60`, and, with no
+systemd, `no scheduled platform backup`.
 
 Before 2026-11-23, every command of the First boot of the time was executed,
 top to bottom, from empty volumes, against Docker Engine 29.3.1 / Compose
@@ -441,7 +447,7 @@ browser trusts and whose limits are far higher:
 `./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
 On a staging rehearsal, step 7's check needs the staging roots, and a later
 `./scripts/deploy.sh` prints **two** warnings and ends `Deployed with
-warnings` (exit status 1): `API returned 000000 (expected 401)`, because its
+warnings` (exit status 1): `API returned 000 (expected 401)`, because its
 curl probe of `:443` has no staging CA, and the certificate refusal after its
 `--wait 60`, which has none either. Everything is up; those lines are the
 probes, not a failure.
@@ -999,7 +1005,7 @@ postgres-grants     Exited (0) …
 redis               Up …
 traefik             Up …
 web                 Up … (healthy)
-worker              Up …
+worker              Up … (healthy)
 ```
 
 The three `Exited (0)` services are the one-shot jobs; that is success.
@@ -1033,7 +1039,7 @@ of another machine). Fix the cause and `docker compose restart traefik`.
 On a **rehearsal against Let's Encrypt staging** the check refuses by design:
 staging's roots are in no trust store. `deploy.sh` has no such CA either, so a
 rehearsal's `deploy.sh` prints two warnings, the API probe (`API returned
-000000 (expected 401)`) and the certificate refusal after `--wait 60`, and
+000 (expected 401)`) and the certificate refusal after `--wait 60`, and
 ends `Deployed with warnings` with exit status 1 although everything is up.
 Give the check the roots (the four Let's Encrypt lists on its staging page):
 
