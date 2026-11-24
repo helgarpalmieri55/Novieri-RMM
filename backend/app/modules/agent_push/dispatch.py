@@ -265,7 +265,7 @@ def _enroll_base_url(public_console_url: str | None) -> str:
         raise PushValidationError(
             tr(
                 "ITS_PUBLIC_CONSOLE_URL={raw} is not the console's bare https address (for "
-                "example https://itms.example.com, with no path). {console_url_unset}",
+                "example https://rmm.example.com, with no path). {console_url_unset}",
                 raw=repr(raw),
                 console_url_unset=tr_marked(CONSOLE_URL_UNSET),
             )

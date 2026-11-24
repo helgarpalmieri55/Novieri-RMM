@@ -201,7 +201,7 @@ def new_certificate(*, app_client_id: UUID, now: datetime) -> NewCertificate:
     isn't possible, self-signed certificates are still preferred over
     passwords" [M8]."""
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"itms-sign-in-{app_client_id}")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"novieri-sign-in-{app_client_id}")])
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)

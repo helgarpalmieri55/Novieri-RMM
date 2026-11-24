@@ -377,7 +377,7 @@ def _ticket_line(payload: dict[str, Any]) -> str:
 def _render_ticket_assigned(event: DomainEvent) -> tuple[str, str]:
     line = _ticket_line(event.payload)
     return (
-        tr("[Toeshee] Ticket {line} assigned", line=line),
+        tr("[Novieri RMM] Ticket {line} assigned", line=line),
         tr("Ticket {line} has been assigned to a technician.", line=line) + "\n",
     )
 
@@ -389,7 +389,7 @@ def _render_ticket_status_changed(event: DomainEvent) -> tuple[str, str]:
     to_status = _word(_TICKET_STATUS_WORDS, payload.get("to_status", "?"))
     return (
         tr(
-            "[Toeshee] Ticket {line}: status changed to {to_status}",
+            "[Novieri RMM] Ticket {line}: status changed to {to_status}",
             line=line,
             to_status=to_status,
         ),
@@ -413,7 +413,7 @@ def _render_ticket_comment_added(event: DomainEvent) -> tuple[str, str]:
     else:
         body += "\n"
     return (
-        tr("[Toeshee] New comment on ticket #{ticket_number}", ticket_number=ticket_number),
+        tr("[Novieri RMM] New comment on ticket #{ticket_number}", ticket_number=ticket_number),
         body,
     )
 
@@ -426,10 +426,13 @@ def _render_ticket_internal_note_added(event: DomainEvent) -> tuple[str, str]:
     # (§6.4 mechanism 2), but this renderer does not rely on that at all.
     ticket_number = event.payload.get("ticket_number", "?")
     return (
-        tr("[Toeshee] Internal note added to ticket #{ticket_number}", ticket_number=ticket_number),
+        tr(
+            "[Novieri RMM] Internal note added to ticket #{ticket_number}",
+            ticket_number=ticket_number,
+        ),
         tr(
             "An internal note was added to ticket #{ticket_number}. "
-            "Sign in to Toeshee to view it.",
+            "Sign in to Novieri RMM to view it.",
             ticket_number=ticket_number,
         )
         + "\n",
@@ -439,7 +442,7 @@ def _render_ticket_internal_note_added(event: DomainEvent) -> tuple[str, str]:
 def _render_ticket_approval_requested(event: DomainEvent) -> tuple[str, str]:
     line = _ticket_line(event.payload)
     return (
-        tr("[Toeshee] Approval requested: ticket {line}", line=line),
+        tr("[Novieri RMM] Approval requested: ticket {line}", line=line),
         tr("Ticket {line} requires your approval.", line=line) + "\n",
     )
 
@@ -451,16 +454,18 @@ def _render_ticket_approval_decided(event: DomainEvent) -> tuple[str, str]:
     # "approval approved" is feminine in Spanish and "ticket was approved" is
     # masculine, so each known decision has its own subject and body template.
     if decision == "approved":
-        subject = tr("[Toeshee] Ticket {line}: approval approved", line=line)
+        subject = tr("[Novieri RMM] Ticket {line}: approval approved", line=line)
         body = tr("Ticket {line} was approved.", line=line)
     elif decision == "rejected":
-        subject = tr("[Toeshee] Ticket {line}: approval rejected", line=line)
+        subject = tr("[Novieri RMM] Ticket {line}: approval rejected", line=line)
         body = tr("Ticket {line} was rejected.", line=line)
     elif decision == "decided":
-        subject = tr("[Toeshee] Ticket {line}: approval decided", line=line)
+        subject = tr("[Novieri RMM] Ticket {line}: approval decided", line=line)
         body = tr("Ticket {line} was decided.", line=line)
     else:
-        subject = tr("[Toeshee] Ticket {line}: approval {decision}", line=line, decision=decision)
+        subject = tr(
+            "[Novieri RMM] Ticket {line}: approval {decision}", line=line, decision=decision
+        )
         body = tr("Ticket {line} was {decision}.", line=line, decision=decision)
     return (subject, body + "\n")
 
@@ -468,7 +473,7 @@ def _render_ticket_approval_decided(event: DomainEvent) -> tuple[str, str]:
 def _render_ticket_resolved(event: DomainEvent) -> tuple[str, str]:
     line = _ticket_line(event.payload)
     return (
-        tr("[Toeshee] Ticket {line} resolved", line=line),
+        tr("[Novieri RMM] Ticket {line} resolved", line=line),
         tr(
             "Your ticket {line} has been resolved. "
             "If you have further questions, sign in to the portal and add a comment to this "
@@ -498,7 +503,7 @@ def _render_ticket_sla_breached(event: DomainEvent) -> tuple[str, str]:
     target = _word(_SLA_TARGET_WORDS, payload.get("target", "?"))
     due_at = _field(payload, "due_at", tr("an unknown time"))
     return (
-        tr("[Toeshee] SLA breached: ticket {line}", line=line),
+        tr("[Novieri RMM] SLA breached: ticket {line}", line=line),
         tr(
             "The {target} SLA for ticket {line} was due at {due_at} and has been breached.",
             target=target,
@@ -506,7 +511,7 @@ def _render_ticket_sla_breached(event: DomainEvent) -> tuple[str, str]:
             due_at=due_at,
         )
         + "\n"
-        + tr("Sign in to Toeshee to review it.")
+        + tr("Sign in to Novieri RMM to review it.")
         + "\n",
     )
 
@@ -571,14 +576,14 @@ def _render_health_alert_raised(event: DomainEvent) -> tuple[str, str]:
     severity = _word(_SEVERITY_WORDS, payload.get("severity", "?"))
     flapping = (" " + tr("This check is currently flapping.")) if payload.get("flapping") else ""
     return (
-        tr("[Toeshee] Health alert ({severity}): {line}", severity=severity, line=line),
+        tr("[Novieri RMM] Health alert ({severity}): {line}", severity=severity, line=line),
         tr("A health alert opened for {line}.", line=line)
         + "\n\n"
         + _health_observation(payload)
         + tr("Opened: {opened_at}", opened_at=payload.get("opened_at", "?"))
         + "\n"
         + f"{flapping}\n"
-        + tr("Sign in to Toeshee to review it.")
+        + tr("Sign in to Novieri RMM to review it.")
         + "\n",
     )
 
@@ -587,7 +592,7 @@ def _render_health_alert_cleared(event: DomainEvent) -> tuple[str, str]:
     payload = event.payload
     line = _health_subject_line(payload)
     return (
-        tr("[Toeshee] Health alert cleared: {line}", line=line),
+        tr("[Novieri RMM] Health alert cleared: {line}", line=line),
         tr("The health alert for {line} has cleared.", line=line)
         + "\n\n"
         + _health_observation(payload)
@@ -611,13 +616,17 @@ def _render_health_alert_escalated(event: DomainEvent) -> tuple[str, str]:
     line = _health_subject_line(payload)
     severity = _word(_SEVERITY_WORDS, payload.get("severity", "?"))
     return (
-        tr("[Toeshee] Health alert ESCALATED ({severity}): {line}", severity=severity, line=line),
+        tr(
+            "[Novieri RMM] Health alert ESCALATED ({severity}): {line}",
+            severity=severity,
+            line=line,
+        ),
         tr("The health alert for {line} is still open and has been escalated.", line=line)
         + "\n\n"
         + _health_observation(payload)
         + tr("Opened: {opened_at}", opened_at=payload.get("opened_at", "?"))
         + "\n\n"
-        + tr("Nobody has acknowledged it. Sign in to Toeshee to review it.")
+        + tr("Nobody has acknowledged it. Sign in to Novieri RMM to review it.")
         + "\n",
     )
 
@@ -647,7 +656,7 @@ def _render_health_remediation_requires_approval(event: DomainEvent) -> tuple[st
         pinned = ""
     return (
         tr(
-            "[Toeshee] Remediation awaiting approval: {action_key} on {hostname}",
+            "[Novieri RMM] Remediation awaiting approval: {action_key} on {hostname}",
             action_key=action_key,
             hostname=payload.get("hostname") or tr("(unknown device)"),
         ),
@@ -661,7 +670,7 @@ def _render_health_remediation_requires_approval(event: DomainEvent) -> tuple[st
         + "\n\n"
         + tr(
             "It will NOT run until someone holding `health.remediate` approves it. "
-            "Sign in to Toeshee to approve or refuse it."
+            "Sign in to Novieri RMM to approve or refuse it."
         )
         + "\n",
     )
@@ -716,7 +725,7 @@ def _render_ipam_drift_detected(event: DomainEvent) -> tuple[str, str]:
     )
     return (
         tr(
-            "[Toeshee] IPAM drift ({severity}): {drift_class} at {address}",
+            "[Novieri RMM] IPAM drift ({severity}): {drift_class} at {address}",
             severity=severity,
             drift_class=drift_class,
             address=address,
@@ -736,7 +745,7 @@ def _render_ipam_drift_detected(event: DomainEvent) -> tuple[str, str]:
         + "\n"
         + f"{claimant}\n"
         + tr(
-            "Seen on two consecutive reconciliation passes. Sign in to Toeshee to "
+            "Seen on two consecutive reconciliation passes. Sign in to Novieri RMM to "
             "review, document, or acknowledge it."
         )
         + "\n",
@@ -762,7 +771,7 @@ def _render_ipam_sweep_rejected(event: DomainEvent) -> tuple[str, str]:
     offending = payload.get("offending_count", "?")
     return (
         tr(
-            "[Toeshee] IPAM sweep result REJECTED from device {device}",
+            "[Novieri RMM] IPAM sweep result REJECTED from device {device}",
             device=payload.get("device_id") or tr("(unknown device)"),
         ),
         tr(
@@ -784,7 +793,7 @@ def _render_ipam_sweep_rejected(event: DomainEvent) -> tuple[str, str]:
         + "\n"
         + tr(
             "An agent reporting outside the scope its job was signed for is either "
-            "faulty or controlled by someone else. Sign in to Toeshee to review it."
+            "faulty or controlled by someone else. Sign in to Novieri RMM to review it."
         )
         + "\n",
     )
@@ -819,7 +828,7 @@ def _render_platform_probe_unhealthy(event: DomainEvent) -> tuple[str, str]:
     reason = payload.get("reason") or tr("not recorded")
     reason_text = _word(_PROBE_REASON_TEXT, reason)
     return (
-        tr("[Toeshee] Platform problem: {name} is {status}", name=name, status=status),
+        tr("[Novieri RMM] Platform problem: {name} is {status}", name=name, status=status),
         tr(
             "The platform's own check '{name}' has reported {status} for "
             "{samples} consecutive samples.",
@@ -837,7 +846,7 @@ def _render_platform_probe_unhealthy(event: DomainEvent) -> tuple[str, str]:
         + tr("Since: {since}", since=payload.get("since") or tr("(unknown)"))
         + "\n\n"
         + tr(
-            "Sign in to Toeshee and open Platform status for detail. You will be "
+            "Sign in to Novieri RMM and open Platform status for detail. You will be "
             "told when it recovers."
         )
         + "\n",
@@ -849,7 +858,7 @@ def _render_platform_probe_recovered(event: DomainEvent) -> tuple[str, str]:
     probe = payload.get("probe") or tr("(unknown probe)")
     name = _probe_name(payload)
     return (
-        tr("[Toeshee] Platform recovered: {name} is ok", name=name),
+        tr("[Novieri RMM] Platform recovered: {name} is ok", name=name),
         tr("The platform's own check '{name}' is healthy again.", name=name)
         + "\n\n"
         + tr("Check: {name} ({probe})", name=name, probe=probe)
@@ -900,7 +909,7 @@ def _render_subscription_notice_deadline_approaching(event: DomainEvent) -> tupl
     name = payload.get("service_name") or tr("a subscription")
     return (
         tr(
-            "[Toeshee] Cancellation notice deadline for {name}: {deadline}",
+            "[Novieri RMM] Cancellation notice deadline for {name}: {deadline}",
             name=name,
             deadline=payload.get("notice_deadline") or tr("(unknown)"),
         ),
@@ -910,7 +919,7 @@ def _render_subscription_notice_deadline_approaching(event: DomainEvent) -> tupl
         + "\n"
         + tr(
             "After the notice deadline the renewal can no longer be cancelled or "
-            "renegotiated. Sign in to Toeshee to review it."
+            "renegotiated. Sign in to Novieri RMM to review it."
         )
         + "\n",
     )
@@ -921,7 +930,7 @@ def _render_subscription_renewal_approaching(event: DomainEvent) -> tuple[str, s
     name = payload.get("service_name") or tr("a subscription")
     return (
         tr(
-            "[Toeshee] Subscription renewal: {name} on {renews_at}",
+            "[Novieri RMM] Subscription renewal: {name} on {renews_at}",
             name=name,
             renews_at=payload.get("renews_at") or tr("(unknown)"),
         ),
@@ -929,7 +938,7 @@ def _render_subscription_renewal_approaching(event: DomainEvent) -> tuple[str, s
         + "\n\n"
         + _subscription_lines(payload)
         + "\n"
-        + tr("Sign in to Toeshee to review it or record the renewal.")
+        + tr("Sign in to Novieri RMM to review it or record the renewal.")
         + "\n",
     )
 
@@ -947,7 +956,7 @@ def _render_device_joined_via_link(event: DomainEvent) -> tuple[str, str]:
     # M3); the rest of C0/C1 would reach a mail client's terminal or pane.
     name = _strip_controls(str(payload.get("hostname") or "")) or tr("(unnamed computer)")
     return (
-        tr("[Toeshee] New computer waiting for review: {name}", name=name),
+        tr("[Novieri RMM] New computer waiting for review: {name}", name=name),
         tr("A computer joined through the install link and is waiting for review.")
         + "\n\n"
         + tr("Computer: {name}", name=name)
@@ -984,7 +993,7 @@ def _render_device_removal_incomplete(event: DomainEvent) -> tuple[str, str]:
         else tr("Its agent did not confirm it removed itself.")
     )
     return (
-        tr("[Toeshee] Rejected computer still has the agent: {name}", name=name),
+        tr("[Novieri RMM] Rejected computer still has the agent: {name}", name=name),
         tr("A computer that joined through the install link was rejected. {why}", why=why)
         + "\n\n"
         + tr("Computer: {name}", name=name)
@@ -1009,7 +1018,7 @@ def _render_push_run_completed(event: DomainEvent) -> tuple[str, str]:
     payload = event.payload
     prefix = _strip_controls(str(payload.get("prefix") or "")) or tr("(unknown subnet)")
     return (
-        tr("[Toeshee] Push install finished: {prefix}", prefix=prefix),
+        tr("[Novieri RMM] Push install finished: {prefix}", prefix=prefix),
         tr("A push install run someone confirmed has finished.")
         + "\n\n"
         + tr("Subnet: {subnet}", subnet=prefix)
@@ -1039,7 +1048,7 @@ def _render_push_run_stopped(event: DomainEvent) -> tuple[str, str]:
         "(unnamed credential)"
     )
     return (
-        tr("[Toeshee] Push install stopped: {prefix}", prefix=prefix),
+        tr("[Novieri RMM] Push install stopped: {prefix}", prefix=prefix),
         tr("A push install run was stopped to protect its credential from lockout.")
         + "\n\n"
         + tr(
@@ -1088,7 +1097,7 @@ def _render_generic(event: DomainEvent) -> tuple[str, str]:
     if "subject" in payload:
         lines.append(tr("Subject: {subject}", subject=payload["subject"]))
     lines.append(tr("Occurred: {occurred_at}", occurred_at=event.occurred_at.isoformat()))
-    return (f"[Toeshee] {event.event_type}", "\n".join(lines) + "\n")
+    return (f"[Novieri RMM] {event.event_type}", "\n".join(lines) + "\n")
 
 
 # THE SINGLE COPY of "which event type renders which subject/body" (spec
@@ -1190,8 +1199,9 @@ async def _send_webhook(
     url = str(channel.config.get("url", ""))
     # Spec §7: stable across every attempt of this delivery, so an at-least-
     # once consumer can dedupe -- `delivery.event_id` never changes between
-    # retries of the same row.
-    headers: dict[str, str] = {"X-Toeshee-Event-Id": str(delivery.event_id)}
+    # retries of the same row. Renamed with the product on 2026-11-24, while
+    # no consumer existed yet (the operator's decision; spec §7 names it).
+    headers: dict[str, str] = {"X-Novieri-Event-Id": str(delivery.event_id)}
 
     if channel.credential_id is not None:
         token = await vault.checkout(

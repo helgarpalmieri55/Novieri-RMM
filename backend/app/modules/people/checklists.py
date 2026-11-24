@@ -128,7 +128,7 @@ def _baseline(f: PersonFacts) -> tuple[bool | None, str]:
             tr("{count} install succeeded on their computers", count=f.installs),
             tr("{count} installs succeeded on their computers", count=f.installs),
         )
-    return None, tr("Nothing installed through ITMS yet")
+    return None, tr("Nothing installed through Novieri RMM yet")
 
 
 def _access_off(f: PersonFacts) -> tuple[bool | None, str]:

@@ -252,7 +252,7 @@ def test_the_alert_email_names_the_check_in_plain_words() -> None:
         occurred_at=NOW,
     )
     subject, body = _render_email(event)
-    assert subject == "[Toeshee] Platform problem: Restore drill is down"
+    assert subject == "[Novieri RMM] Platform problem: Restore drill is down"
     assert "Reason: the last run reported a failure" in body
 
 

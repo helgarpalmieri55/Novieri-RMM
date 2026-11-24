@@ -373,7 +373,8 @@ async def test_webhook_success_marks_sent_and_carries_the_event_id_header(
 
     assert len(captured) == 1
     request = captured[0]
-    assert request.headers["x-toeshee-event-id"] == str(event.id)
+    assert request.headers["x-novieri-event-id"] == str(event.id)
+    assert "x-toeshee-event-id" not in request.headers, "renamed, not duplicated"
     assert request.headers["authorization"] == "Bearer bearer-token-abc123"
 
 
@@ -636,7 +637,7 @@ async def test_webhook_event_id_header_is_stable_across_retries(
     monkeypatch.setattr("app.core.egress._resolve_all", lambda h, p: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen_ids.append(request.headers["x-toeshee-event-id"])
+        seen_ids.append(request.headers["x-novieri-event-id"])
         return httpx.Response(500)
 
     monkeypatch.setattr("app.core.egress._build_transport", lambda ip: httpx.MockTransport(handler))
@@ -1322,7 +1323,7 @@ async def test_resolution_email_reads_like_a_human_wrote_it(
     )
     # No longer the old unreadable machine notice -- the raw event type
     # string is not what the human-facing line leads with.
-    assert sent["subject"] != "[Toeshee] ticket.resolved"
+    assert sent["subject"] != "[Novieri RMM] ticket.resolved"
     assert "resolved" in sent["subject"].lower()
 
 
@@ -1388,7 +1389,7 @@ async def test_assignment_email_reads_like_a_human_wrote_it(
     assert "New laptop for finance hire" in sent["subject"] or (
         "New laptop for finance hire" in sent["body"]
     )
-    assert sent["subject"] != "[Toeshee] ticket.assigned"
+    assert sent["subject"] != "[Novieri RMM] ticket.assigned"
     assert "assigned" in sent["subject"].lower()
 
 
@@ -1426,7 +1427,7 @@ def test_the_removal_incomplete_email_strips_control_characters_from_the_hostnam
     subject, body = _render_device_removal_incomplete(event)
     assert _control_free(subject), repr(subject)
     assert subject == (
-        "[Toeshee] Rejected computer still has the agent: lab-pc-07Bcc: x@evil.test[31m-end"
+        "[Novieri RMM] Rejected computer still has the agent: lab-pc-07Bcc: x@evil.test[31m-end"
     )
     computer = next(line for line in body.split("\n") if line.startswith("Computer: "))
     assert computer == "Computer: lab-pc-07Bcc: x@evil.test[31m-end"
@@ -1457,7 +1458,9 @@ def test_the_joined_via_link_email_strips_control_characters_from_the_hostname()
     )
     subject, body = _render_device_joined_via_link(event)
     assert _control_free(subject), repr(subject)
-    assert subject == "[Toeshee] New computer waiting for review: lab-pc-07Bcc: x@evil.test[31m-end"
+    assert subject == (
+        "[Novieri RMM] New computer waiting for review: lab-pc-07Bcc: x@evil.test[31m-end"
+    )
     computer = next(line for line in body.split("\n") if line.startswith("Computer: "))
     assert computer == "Computer: lab-pc-07Bcc: x@evil.test[31m-end"
     assert all(_control_free(line) for line in body.split("\n")), repr(body)
@@ -1773,7 +1776,7 @@ def test_a_finished_push_run_says_what_happened_in_numbers() -> None:
         payload=_EVENT_TYPE_SAMPLE_PAYLOADS["push.run.completed"],
     )
     subject, body = _render_email(event)
-    assert subject == "[Toeshee] Push install finished: 10.20.4.0/24"
+    assert subject == "[Novieri RMM] Push install finished: 10.20.4.0/24"
     assert "Installed: 240" in body and "Failed: 5" in body
     assert "Refused before anything was sent: 4" in body
 
@@ -1789,6 +1792,6 @@ def test_a_stopped_push_run_says_why_and_what_to_do() -> None:
         payload=_EVENT_TYPE_SAMPLE_PAYLOADS["push.run.stopped"],
     )
     subject, body = _render_email(event)
-    assert subject == "[Toeshee] Push install stopped: 10.20.4.0/24"
+    assert subject == "[Novieri RMM] Push install stopped: 10.20.4.0/24"
     assert "refused by 3 machines" in body and "Domain push account" in body
     assert "Machines still waiting: 246" in body and "Resume" in body

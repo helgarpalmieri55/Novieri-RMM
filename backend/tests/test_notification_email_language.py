@@ -50,9 +50,9 @@ API = "/api/v1/notifications"
 
 # The two renderings of the ticket.status_changed email below, spelled out so a
 # catalogue edit that changes either is noticed here.
-EN_SUBJECT = "[Toeshee] Ticket #T-7 — Printer: status changed to resolved"
+EN_SUBJECT = "[Novieri RMM] Ticket #T-7 — Printer: status changed to resolved"
 EN_BODY = "Ticket #T-7 — Printer changed status from open to resolved.\n"
-ES_SUBJECT = "[Toeshee] Ticket #T-7 — Printer: el estado cambió a resuelto"
+ES_SUBJECT = "[Novieri RMM] Ticket #T-7 — Printer: el estado cambió a resuelto"
 ES_BODY = "El ticket #T-7 — Printer cambió de estado: de abierto a resuelto.\n"
 
 

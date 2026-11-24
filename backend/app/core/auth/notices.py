@@ -30,7 +30,7 @@ from app.models import User
 
 #: The product's name, as the mails, the authenticator app and the passkey
 #: prompt say it (design §2.1 names it among the context words).
-PRODUCT = "Novieri"
+PRODUCT = "Novieri RMM"
 
 Notice = Literal[
     "password_changed",
