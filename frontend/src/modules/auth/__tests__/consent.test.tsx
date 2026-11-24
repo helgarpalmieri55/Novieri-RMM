@@ -54,7 +54,7 @@ describe("approving an AI app", () => {
     expect(screen.getByText("You are signed in as dana@example.test.")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "If you approve, it can act as you in ITMS: everything your role allows, including running actions on managed computers.",
+        "If you approve, it can act as you in Novieri RMM: everything your role allows, including running actions on managed computers.",
       ),
     ).toBeInTheDocument();
     expect(

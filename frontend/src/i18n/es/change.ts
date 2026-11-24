@@ -38,7 +38,7 @@ export const change: Shape<typeof en> = {
     description: "Todo lo registrado sobre una solicitud de cambio.",
     exporting: "Exportando…",
     exportEvidence: "Exportar evidencias",
-    tabTitle: "{title} · Cambio · ITMS",
+    tabTitle: "{title} · Cambio · Novieri RMM",
     summary: "Resumen",
     type: "Tipo",
     window: "Ventana",

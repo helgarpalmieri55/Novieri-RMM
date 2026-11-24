@@ -184,13 +184,13 @@ export const auth: Shape<typeof en> = {
   consent: {
     loading: "Comprobando la solicitud…",
     title: "Conectar la aplicación de {host}",
-    intro: "Pide usar ITMS en tu nombre.",
+    intro: "Pide usar Novieri RMM en tu nombre.",
     calledItself: "Dice llamarse «{name}».",
     unnamed: "No ha dado ningún nombre.",
     selfRegistered:
       "Se registró ella misma aquí, y cualquier aplicación puede registrarse con cualquier nombre: fíate de la dirección, no del nombre.",
     grants:
-      "Si la apruebas, podrá actuar como tú en ITMS: todo lo que permite tu rol, incluido ejecutar acciones en equipos gestionados.",
+      "Si la apruebas, podrá actuar como tú en Novieri RMM: todo lo que permite tu rol, incluido ejecutar acciones en equipos gestionados.",
     lasts:
       "La conexión dura mientras la aplicación la use y termina tras 30 días sin uso. Puedes terminarla cuando quieras en Configuración → Conexiones de IA.",
     account: "Has iniciado sesión como {email}.",

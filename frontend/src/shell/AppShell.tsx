@@ -16,6 +16,7 @@ import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
 import { AccountMenu } from "./AccountMenu";
+import { BRAND_NAME } from "./brand";
 import {
   CommandPalette,
   type CommandPaletteItem,
@@ -34,6 +35,7 @@ import { Icon } from "./icons";
 import { ADD_COMPUTER_TO } from "./nav";
 import { selectorChangePending } from "./selectorChange";
 import { Sidebar } from "./Sidebar";
+import { documentTitle, RecordTitleProvider } from "./title";
 import "./shell.css";
 
 export interface AppShellProps {
@@ -252,6 +254,7 @@ export function AppShell({
   // a setting in it changed is a change of context (SC 3.2.2).
   const [navOpen, setNavOpen] = useState(() => handset && selectorChangePending());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [record, setRecord] = useState<string | undefined>();
   /**
    * WHAT `/` INTERRUPTED, so Escape can put the operator back on it.
    *
@@ -320,7 +323,7 @@ export function AppShell({
   }, []);
 
   /**
-   * THE TAB SAID "ITMS" ON ALL FOURTEEN ROUTES. WCAG 2.4.2 asks a page to
+   * THE TAB SAID THE SAME THING ON ALL FOURTEEN ROUTES. WCAG 2.4.2 asks a page to
    * identify itself, and a browser tab is the one place a person with a dozen
    * consoles open actually reads that. `title` is the nav item's own label, so
    * this cannot drift from what the sidebar and the page heading say.
@@ -330,11 +333,11 @@ export function AppShell({
    */
   useEffect(() => {
     const previous = document.title;
-    document.title = `${title} · ITMS`;
+    document.title = documentTitle(title, record);
     return () => {
       document.title = previous;
     };
-  }, [title]);
+  }, [title, record]);
 
   // A navigation is the drawer's whole purpose, so completing one closes it.
   // A navigation, not a mount: the drawer a change of client reopens stays open.
@@ -608,7 +611,7 @@ export function AppShell({
         <main className="content" id="main" tabIndex={-1}>
           {/* A BREADCRUMB THAT NAVIGATES, or does not look like one -- v3's
               `.crumb`, the first line of the content above the page's own
-              `PageHead`. The audit's complaint was both halves at once: "ITMS /
+              `PageHead`. The audit's complaint was both halves at once: "the root /
               Fleet is not navigable" and the accent-coloured segment still
               looked clickable. Three text nodes in a div are a picture of a
               breadcrumb.
@@ -622,11 +625,11 @@ export function AppShell({
           <nav className="crumb" aria-label={t("shell.app.breadcrumb")}>
             {section === undefined ? (
               <Link to="/" aria-current="page">
-                ITMS
+                {BRAND_NAME}
               </Link>
             ) : (
               <>
-                <Link to="/">ITMS</Link>
+                <Link to="/">{BRAND_NAME}</Link>
                 <Icon name="chevron-right" size={12} />
                 {sectionTo ? (
                   <Link to={sectionTo} aria-current="page">
@@ -638,7 +641,7 @@ export function AppShell({
               </>
             )}
           </nav>
-          {children}
+          <RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>
         </main>
       </div>
     </div>

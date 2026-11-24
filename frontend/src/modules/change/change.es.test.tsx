@@ -439,13 +439,13 @@ describe("ChangeDetail in Spanish", () => {
     expect(screen.getByRole("button", { name: "Exportar evidencias" })).toBeInTheDocument();
     expect(await screen.findByText("Aún no hay decisiones de aprobación.")).toBeInTheDocument();
     expect(await screen.findByText("No hay acciones vinculadas.")).toBeInTheDocument();
-    expect(document.title).toBe("Actualizar firmware del conmutador · Cambio · ITMS");
+    expect(document.title).toBe("Actualizar firmware del conmutador · Cambio · Novieri RMM");
     expectNoEnglish(container);
 
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("button", { name: "Submit for approval" })).toBeInTheDocument();
     expect(screen.getByText("Standard")).toBeInTheDocument();
-    expect(document.title).toBe("Actualizar firmware del conmutador · Change · ITMS");
+    expect(document.title).toBe("Actualizar firmware del conmutador · Change · Novieri RMM");
   });
 
   it("words the approval history, with the decision agreeing with its noun", async () => {

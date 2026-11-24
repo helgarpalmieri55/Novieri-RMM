@@ -172,7 +172,7 @@ export const people: Shape<typeof en> = {
     skip: "Omitir",
     skipTitle: "Omitir: {title}",
     markDoneTitle: "Marcar como hecho: {title}",
-    stillSees: "ITMS sigue detectando: {evidence}. Indica por qué se da por hecho de todos modos.",
+    stillSees: "Novieri RMM sigue detectando: {evidence}. Indica por qué se da por hecho de todos modos.",
     confirmDone: "Confirma que esto se ha hecho. Tu nombre queda registrado junto a la acción.",
     why: "Motivo",
     noteOptional: "Nota (opcional)",

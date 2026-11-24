@@ -180,7 +180,7 @@ export const EMAIL_SETTINGS_FIXTURE = {
   host: "smtp.internal",
   port: "587",
   from_address: "itms@toeshee.com",
-  from_display_name: "ITMS",
+  from_display_name: "Novieri RMM",
   reply_to: "support@toeshee.com",
   encryption: "starttls",
   username: "itms",

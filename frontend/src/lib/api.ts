@@ -895,7 +895,7 @@ export interface Me {
    */
   roles?: string[];
   /**
-   * The three profile fields ITMS owns (spec §7.3).
+   * The three profile fields the platform owns (spec §7.3).
    *
    * OPTIONAL, THOUGH `MeResponse` ALWAYS SENDS THEM, and the reason is worth
    * recording rather than being read as sloppiness. `?` here is a superset of
@@ -1469,7 +1469,7 @@ export interface InstallLinkUpdate {
  */
 export interface InstallLinkMsi {
   blob: Blob;
-  /** `ITMS-Agent-<host>[@<port>]-<arch>.msi`, from `Content-Disposition`. */
+  /** `NovieriRMM-Agent-<host>[@<port>]-<arch>.msi`, from `Content-Disposition`. */
   filename: string;
   /** Hex SHA-256 of these bytes, from `X-Content-SHA256`. */
   sha256: string;
@@ -4341,7 +4341,7 @@ export class ApiClient {
       throw new ApiError(response.status, await response.text());
     }
     const disposition = response.headers.get("Content-Disposition") ?? "";
-    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `ITMS-Agent-${body.arch}.msi`;
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `NovieriRMM-Agent-${body.arch}.msi`;
     return {
       blob: await response.blob(),
       filename,

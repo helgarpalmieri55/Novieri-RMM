@@ -319,7 +319,7 @@ describe("ORPHAN_SECTION", () => {
   });
 
   it("puts your security under your account, like your profile", () => {
-    expect(crumbFor("/profile/security")).toEqual({ section: "Your account", sectionTo: undefined, title: "ITMS" });
+    expect(crumbFor("/profile/security")).toEqual({ section: "Your account", sectionTo: undefined, title: "Novieri RMM" });
   });
 });
 
@@ -378,7 +378,7 @@ describe("crumbFor", () => {
     expect(crumbFor("/no-such-page")).toEqual({
       section: undefined,
       sectionTo: undefined,
-      title: "ITMS",
+      title: "Novieri RMM",
     });
   });
 

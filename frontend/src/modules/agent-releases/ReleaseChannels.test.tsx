@@ -210,7 +210,7 @@ describe("removing a version", () => {
         version: "1.4.0",
         removed: 1,
         history_cleared: 0,
-        files_not_removed: ["agent-releases/1.4.0/its-agent-linux-amd64"],
+        files_not_removed: ["agent-releases/1.4.0/novieri-agent-linux-amd64"],
       }),
     );
     setup([release()], undefined, leftover);
@@ -221,7 +221,7 @@ describe("removing a version", () => {
       }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /1 stored file could not be deleted.*its-agent-linux-amd64/,
+      /1 stored file could not be deleted.*novieri-agent-linux-amd64/,
     );
   });
 

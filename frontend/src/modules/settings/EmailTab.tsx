@@ -24,7 +24,7 @@
 // words when they are spent.
 //
 // THE TEST GOES WHERE THE OPERATOR SAYS, WITHIN THEIR OWN DOMAINS. The box is
-// pre-filled with the operator's own address tagged `+itms-test`, which lands
+// pre-filled with the operator's own address tagged `+novieri-test`, which lands
 // in the same inbox on Microsoft 365 and Gmail and is easy to find there. The
 // server refuses any address other than the sending address, the operator's
 // own mailbox, or the organization's sign-in domain (`app/core/mail.py`), so

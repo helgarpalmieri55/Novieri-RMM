@@ -20,6 +20,7 @@ import { Fragment, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
+import { NovieriSymbol, NovieriWordmark } from "./brand";
 import { Icon } from "./icons";
 import { activeNavTo, isArea, OPTIONAL_MODULES, visibleGroups } from "./nav";
 
@@ -56,11 +57,10 @@ export function Sidebar({
   return (
     <aside className="sidebar" id="sidebar">
       <div className="brand">
-        {/* v3 `.brand i`: the shield on the accent. */}
-        <span className="brand-mark" aria-hidden="true">
-          <Icon name="shield-check" size={16} />
-        </span>
-        <span className="brand-name">ITMS</span>
+        {/* The brand (DESIGN.md v4): the N on its cobalt tile and the white
+            wordmark. The wordmark folds away with the rail (`.brand-name`). */}
+        <NovieriSymbol tile size={28} />
+        <NovieriWordmark className="brand-name" height={14} />
         {/* Not in v3, which has no collapse. Kept: density is a standing
             preference and the shell persists it (`itms.sidebar.collapsed`). */}
         <button

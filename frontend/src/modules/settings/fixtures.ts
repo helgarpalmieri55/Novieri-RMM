@@ -51,8 +51,8 @@ let email: EmailSettingsOut = {
   configured: true,
   host: "smtp.toeshee.example",
   port: "587",
-  from_address: "itms@toeshee.example",
-  from_display_name: "ITMS",
+  from_address: "rmm@novieri.example",
+  from_display_name: "Novieri RMM",
   reply_to: "it@toeshee.example",
   encryption: "starttls",
   username: "itms",
@@ -339,12 +339,12 @@ const inviteUser: FixtureMap["inviteUser"] = (body) => {
       : [];
   });
   GRANTS.set(id, grants);
-  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite#fixture-${invited}` };
+  return { user_id: id, invite_link: email.configured ? null : `https://rmm.novieri.example/invite#fixture-${invited}` };
 };
 
 const resendInvite: FixtureMap["resendInvite"] = (userId) => {
   if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
-  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite#fixture-again" };
+  return { invite_link: email.configured ? null : "https://rmm.novieri.example/invite#fixture-again" };
 };
 
 const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
@@ -524,7 +524,7 @@ const MCP_APPS: McpAppOut[] = [
 
 const getMcpConnections: FixtureMap["getMcpConnections"] = () => ({
   enabled: false,
-  address: "https://itms.toeshee.example/mcp",
+  address: "https://rmm.novieri.example/mcp",
   apps: MCP_APPS.map((app) => ({ ...app })),
 });
 

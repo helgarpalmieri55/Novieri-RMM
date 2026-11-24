@@ -35,12 +35,12 @@ import { es } from "../../i18n/es";
 
 // Relative to THIS FILE (frontend/src/modules/audit -> the repository root; not written as
 // `new URL(.., import.meta.url)`, which Vite rewrites as an asset), not to
-// the directory vitest was started in. `ITMS_AUDIT_BACKEND_APP` points the guard
+// the directory vitest was started in. `ITS_AUDIT_BACKEND_APP` points the guard
 // at another copy of backend/app; it exists so the guard can be mutation-tested
 // against a scratch copy without touching the repository (see the fix-round
 // notes in the task report). Nothing else sets it.
-const BACKEND_APP = process.env.ITMS_AUDIT_BACKEND_APP
-  ? resolve(process.env.ITMS_AUDIT_BACKEND_APP)
+const BACKEND_APP = process.env.ITS_AUDIT_BACKEND_APP
+  ? resolve(process.env.ITS_AUDIT_BACKEND_APP)
   : resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "backend", "app");
 
 const CODE = "[a-z0-9_]+(?:\\.[a-z0-9_]+)+";

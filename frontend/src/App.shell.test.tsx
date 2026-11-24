@@ -189,7 +189,7 @@ describe("a requester's shell", () => {
 
   it("names the portal page in the crumb, with no operator section", async () => {
     renderShell(REQUESTER, "/portal/new");
-    await waitFor(() => expect(document.title).toBe("New ticket · ITMS"));
+    await waitFor(() => expect(document.title).toBe("New ticket · Novieri RMM"));
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumb).queryByRole("link", { name: "Service" })).toBeNull();
   });

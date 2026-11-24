@@ -1223,7 +1223,7 @@ describe("ChangeDetail lifecycle controls", () => {
 
 // ---------------------------------------------------------------- cycle 12
 //
-// B40 [LOW]: "Combined with the constant `document.title` of 'ITMS', a user
+// B40 [LOW] (2026-11-04): "Combined with the constant `document.title` of 'ITMS', a user
 // with several change tabs open cannot tell them apart."
 // B39/B64-adjacent: the wire's identifiers reaching the screen.
 describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
@@ -1252,15 +1252,15 @@ describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
   }
 
   it("names the browser tab after the change, so two open changes are distinguishable", async () => {
-    document.title = "ITMS";
+    document.title = "Novieri RMM";
     const view = renderDetail();
     await screen.findByRole("heading", { name: "Upgrade switch firmware" });
-    await waitFor(() => expect(document.title).toBe("Upgrade switch firmware · Change · ITMS"));
+    await waitFor(() => expect(document.title).toBe("Upgrade switch firmware · Change · Novieri RMM"));
 
     // And gives the name back on the way out, so the next page is not left
     // wearing this change's title.
     view.unmount();
-    expect(document.title).toBe("ITMS");
+    expect(document.title).toBe("Novieri RMM");
   });
 
   it("reads the state, type and risk as words rather than as wire values", async () => {

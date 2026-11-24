@@ -116,7 +116,7 @@ export const settings = {
       none: "None · plain connection",
     },
     fromAddress: "From address",
-    addressPlaceholder: "itms@example.com",
+    addressPlaceholder: "rmm@example.com",
     senderName: "Sender name",
     replyTo: "Reply-to address",
     signIn: "Sign-in",
@@ -306,7 +306,7 @@ export const settings = {
         title: "Delete user",
         question: "Delete {email}?",
         action: "Delete {email}",
-        body: "Their sign-in identity is removed. Their ITMS record is kept and marked deleted, so the audit log can still say who did what.",
+        body: "Their sign-in identity is removed. Their Novieri RMM record is kept and marked deleted, so the audit log can still say who did what.",
       },
       resetFactors: {
         title: "Reset second factors",

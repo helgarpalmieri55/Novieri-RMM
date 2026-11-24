@@ -137,13 +137,13 @@ describe("AppShell", () => {
   it("renders the page inside the chrome", () => {
     renderShell(["devices.read"]);
     expect(screen.getByText("page content")).toBeInTheDocument();
-    // The brand block, not the breadcrumb's "ITMS" prefix.
-    expect(screen.getByText("ITMS", { selector: ".brand-name" })).toBeInTheDocument();
+    // The brand block: the wordmark, which names itself to assistive technology.
+    expect(screen.getByRole("img", { name: "Novieri" })).toBeInTheDocument();
     // v3 draws no page title in the bar (the page's own `PageHead` carries
     // it); what the chrome says about where you are is the crumb, now the
     // first line of the content.
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Fleet");
-    expect(document.title).toBe("Devices & Inventory · ITMS");
+    expect(document.title).toBe("Devices & Inventory · Novieri RMM");
   });
 
   it("draws the client selector first in the top bar's cluster (phase 3 design §1.1)", () => {
@@ -724,12 +724,12 @@ describe("AppShell session notice", () => {
   });
   /* --- Breadcrumb and page title (cycle 12) ----------------------------- */
 
-  it("names the page in the browser tab, not just 'ITMS'", async () => {
-    // WCAG 2.4.2. The tab read the constant "ITMS" on all fourteen routes,
+  it("names the page in the browser tab, not just the product", async () => {
+    // WCAG 2.4.2. The tab read one constant, the old name (2026-11-04), on all fourteen routes,
     // which is the one place a person with a dozen consoles open actually
     // reads a page's identity.
     const view = renderShell(["devices.read"]);
-    expect(document.title).toBe("Devices & Inventory · ITMS");
+    expect(document.title).toBe("Devices & Inventory · Novieri RMM");
 
     // Restored on unmount, so the login screen does not inherit it.
     view.unmount();
@@ -739,7 +739,7 @@ describe("AppShell session notice", () => {
   it("makes the breadcrumb a breadcrumb, not a picture of one", () => {
     renderShell(["devices.read"]);
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(crumbs).getByRole("link", { name: "ITMS" })).toHaveAttribute("href", "/");
+    expect(within(crumbs).getByRole("link", { name: "Novieri" })).toHaveAttribute("href", "/");
   });
 
   it("marks the current segment as current", () => {

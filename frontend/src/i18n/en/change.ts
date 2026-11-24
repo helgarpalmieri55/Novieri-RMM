@@ -43,7 +43,7 @@ export const change = {
     description: "Everything recorded about one change request.",
     exporting: "Exporting…",
     exportEvidence: "Export evidence",
-    tabTitle: "{title} · Change · ITMS",
+    tabTitle: "{title} · Change · Novieri RMM",
     summary: "Summary",
     type: "Type",
     window: "Window",

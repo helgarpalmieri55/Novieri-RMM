@@ -212,7 +212,7 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
                     small
                     icon="download"
                     label={t("settings.microsoft.download")}
-                    onClick={() => saveBlob(new Blob([certificate], { type: PEM_TYPE }), "itms-sign-in.cer")}
+                    onClick={() => saveBlob(new Blob([certificate], { type: PEM_TYPE }), "novieri-sign-in.cer")}
                   />
                 </div>
               </>
@@ -241,7 +241,7 @@ export function MicrosoftTab({ canRead, canEdit }: { canRead: boolean; canEdit: 
                     small
                     icon="download"
                     label={t("settings.microsoft.downloadWaiting")}
-                    onClick={() => saveBlob(new Blob([waiting], { type: PEM_TYPE }), "itms-sign-in-new.cer")}
+                    onClick={() => saveBlob(new Blob([waiting], { type: PEM_TYPE }), "novieri-sign-in-new.cer")}
                   />
                   <Btn
                     small

@@ -187,12 +187,12 @@ export const auth = {
   consent: {
     loading: "Checking the request…",
     title: "Connect the app at {host}",
-    intro: "It asks to use ITMS as you.",
+    intro: "It asks to use Novieri RMM as you.",
     calledItself: "It calls itself “{name}”.",
     unnamed: "It gave no name.",
     selfRegistered: "It registered itself here, and any app can register with any name: trust the address, not the name.",
     grants:
-      "If you approve, it can act as you in ITMS: everything your role allows, including running actions on managed computers.",
+      "If you approve, it can act as you in Novieri RMM: everything your role allows, including running actions on managed computers.",
     lasts:
       "The connection lasts while the app uses it and ends after 30 days unused. You can end it at any time in Settings → AI connections.",
     account: "You are signed in as {email}.",

@@ -367,7 +367,7 @@ describe("the person page in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Marcar como hecho" }));
     let dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Marcar como hecho: Desactivar su acceso" })).toBeInTheDocument();
-    expect(within(dialog).getByText("ITMS sigue detectando: Su acceso sigue activo. Indica por qué se da por hecho de todos modos.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Novieri RMM sigue detectando: Su acceso sigue activo. Indica por qué se da por hecho de todos modos.")).toBeInTheDocument();
     expect(within(dialog).getByText("Motivo")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Atrás" })).toBeInTheDocument();
     expectNoEnglish(dialog, RECORDED);

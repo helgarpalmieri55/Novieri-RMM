@@ -284,12 +284,12 @@ describe("Settings — Email tab", () => {
     // same inbox. Whatever the operator leaves in the box is what the request names.
     calls.getEmailSettings.mockResolvedValue({
       ...EMAIL_SETTINGS_FIXTURE,
-      suggested_test_recipient: "helgar+itms-test@toeshee.com",
+      suggested_test_recipient: "helgar+novieri-test@toeshee.com",
     });
     const user = await openEmail();
 
     const box = await screen.findByLabelText("Send the test to");
-    await waitFor(() => expect(box).toHaveValue("helgar+itms-test@toeshee.com"));
+    await waitFor(() => expect(box).toHaveValue("helgar+novieri-test@toeshee.com"));
     await user.clear(box);
     await user.type(box, "it-team@toeshee.com");
     await user.click(screen.getByRole("button", { name: "Send a test message" }));

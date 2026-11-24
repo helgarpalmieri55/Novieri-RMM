@@ -89,25 +89,25 @@ describe("the shell's breadcrumb, at a route the rail lists", () => {
     const crumb = await crumbAt("/devices");
     const section = within(crumb).getByRole("link", { name: "Devices" });
     expect(section).toHaveAttribute("href", "/devices");
-    expect(document.title).toBe("Devices · ITMS");
+    expect(document.title).toBe("Devices · Novieri RMM");
   });
 
   it("names an area's page after the area, linked to its landing page", async () => {
     const crumb = await crumbAt("/jobs");
     expect(within(crumb).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(document.title).toBe("Job history · ITMS");
+    expect(document.title).toBe("Job history · Novieri RMM");
   });
 });
 
-/* THE PAGES NO ITEM NAMES, asserted at the DOM. Each once read "ITMS >
+/* THE PAGES NO ITEM NAMES, asserted at the DOM. Each once read "<root> >
    Overview" -- a section that does not contain the page -- as dead text. */
 describe("the shell's breadcrumb, at a route the rail does not list", () => {
   it.each([
-    ["/devices/onboard", "Devices", "/devices", "Add a computer · ITMS"],
-    ["/software", "Software", "/deploy", "Installed software · ITMS"],
-    ["/discovered", "Devices", "/devices", "Discovered · ITMS"],
-    ["/agent-push", "Admin", "/admin", "Push install · ITMS"],
-    ["/agent-push/credential-scopes", "Admin", "/admin", "Push install · ITMS"],
+    ["/devices/onboard", "Devices", "/devices", "Add a computer · Novieri RMM"],
+    ["/software", "Software", "/deploy", "Installed software · Novieri RMM"],
+    ["/discovered", "Devices", "/devices", "Discovered · Novieri RMM"],
+    ["/agent-push", "Admin", "/admin", "Push install · Novieri RMM"],
+    ["/agent-push/credential-scopes", "Admin", "/admin", "Push install · Novieri RMM"],
   ])("%s sits under %s, linked to %s", async (path, section, href, title) => {
     const crumb = await crumbAt(path);
     const link = within(crumb).getByRole("link", { name: section });
@@ -127,7 +127,7 @@ describe("the shell's breadcrumb, at a route in no section at all", () => {
     // ...and deliberately not a link: there is no page behind "Your account",
     // and a crumb that goes nowhere is the false affordance the audit filed.
     expect(within(crumb).queryByRole("link", { name: "Your account" })).toBeNull();
-    // ITMS is still the way home.
-    expect(within(crumb).getByRole("link", { name: "ITMS" })).toHaveAttribute("href", "/");
+    // The product's root crumb is still the way home.
+    expect(within(crumb).getByRole("link", { name: "Novieri" })).toHaveAttribute("href", "/");
   });
 });

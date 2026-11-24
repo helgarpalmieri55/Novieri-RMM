@@ -52,7 +52,7 @@ afterEach(() => {
 
 describe("adding the first second factor", () => {
   it("makes a passkey from the server's options, names it, and shows the recovery codes", async () => {
-    const options = { challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" }, excludeCredentials: [] };
+    const options = { challenge: "cmVnaXN0ZXI", rp: { name: "Novieri RMM" }, excludeCredentials: [] };
     calls.enrollPasskeyOptions.mockResolvedValue(options);
     const user = userEvent.setup();
     renderAuth("/sign-in/enroll?next=%2Fdevices");

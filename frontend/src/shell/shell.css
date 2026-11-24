@@ -51,21 +51,10 @@
   align-items: center;
   gap: 10px;
   padding: 6px 18px 18px;
-  color: #fff;
+  color: var(--accent-ink);
   font-weight: 600;
   font-size: var(--t-h2);
   flex: 0 0 auto;
-}
-/* v3 `.brand i`: 28px, `--accent`, white glyph. Radius is the ladder's. */
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-ctl);
-  color: #fff;
-  background: var(--accent);
 }
 .brand-name { white-space: nowrap; }
 /* Not in v3. The collapse control the audit asked to be persisted; 30px on a

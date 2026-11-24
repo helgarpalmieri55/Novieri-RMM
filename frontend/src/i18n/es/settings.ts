@@ -109,7 +109,7 @@ export const settings: Shape<typeof en> = {
       none: "Ninguno · conexión sin cifrar",
     },
     fromAddress: "Dirección del remitente",
-    addressPlaceholder: "itms@example.com",
+    addressPlaceholder: "rmm@example.com",
     senderName: "Nombre del remitente",
     replyTo: "Dirección de respuesta",
     signIn: "Inicio de sesión",
@@ -296,7 +296,7 @@ export const settings: Shape<typeof en> = {
         title: "Eliminar usuario",
         question: "¿Eliminar a {email}?",
         action: "Eliminar a {email}",
-        body: "Se elimina su identidad de inicio de sesión. Su registro de ITMS se conserva y se marca como eliminado, para que el registro de auditoría pueda seguir diciendo quién hizo qué.",
+        body: "Se elimina su identidad de inicio de sesión. Su registro de Novieri RMM se conserva y se marca como eliminado, para que el registro de auditoría pueda seguir diciendo quién hizo qué.",
       },
       resetFactors: {
         title: "Restablecer segundos factores",

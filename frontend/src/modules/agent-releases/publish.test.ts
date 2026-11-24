@@ -46,23 +46,28 @@ describe("isStrictSemver", () => {
 
 describe("inferPlatform", () => {
   it("reads the names build.sh gives the binaries", () => {
-    expect(inferPlatform("its-agent-linux-amd64")).toEqual({ os: "linux", arch: "amd64" });
-    expect(inferPlatform("its-agent-darwin-arm64")).toEqual({ os: "darwin", arch: "arm64" });
-    expect(inferPlatform("its-agent-windows-amd64.exe")).toEqual({ os: "windows", arch: "amd64" });
-    expect(inferPlatform("its-agent-windows-arm64.exe")).toEqual({ os: "windows", arch: "arm64" });
+    expect(inferPlatform("novieri-agent-linux-amd64")).toEqual({ os: "linux", arch: "amd64" });
+    expect(inferPlatform("novieri-agent-darwin-arm64")).toEqual({ os: "darwin", arch: "arm64" });
+    expect(inferPlatform("novieri-agent-windows-amd64.exe")).toEqual({ os: "windows", arch: "amd64" });
+    expect(inferPlatform("novieri-agent-windows-arm64.exe")).toEqual({ os: "windows", arch: "arm64" });
+  });
+
+  it("reads the agent's new name and only that (project 4 design §1.1: no fleet keeps the old one)", () => {
+    expect(inferPlatform("novieri-agent-windows-amd64.exe")).toEqual({ os: "windows", arch: "amd64" });
+    expect(inferPlatform("its-agent-windows-amd64.exe")).toBeNull();
   });
 
   it("does not guess at a name it does not recognise", () => {
     // A browser's "(1)" on a second download, an alias the server would
     // refuse, and the side files of the release are all left to the operator.
     for (const name of [
-      "its-agent-linux-amd64 (1)",
-      "its-agent-linux-x86_64",
-      "its-agent-freebsd-amd64",
+      "novieri-agent-linux-amd64 (1)",
+      "novieri-agent-linux-x86_64",
+      "novieri-agent-freebsd-amd64",
       "agent-linux-amd64",
       "SHA256SUMS",
       "release-signing-key.pub",
-      "its-agent-linux-amd64.sig",
+      "novieri-agent-linux-amd64.sig",
     ]) {
       expect(inferPlatform(name)).toBeNull();
     }
@@ -72,27 +77,27 @@ describe("inferPlatform", () => {
 describe("parseSignatures", () => {
   it("reads the lines release-sign writes", () => {
     const text =
-      `${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n` +
-      `${SHA_B}  its-agent-windows-amd64.exe  windows/amd64  ${SIG2}\n`;
+      `${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n` +
+      `${SHA_B}  novieri-agent-windows-amd64.exe  windows/amd64  ${SIG2}\n`;
     const parsed = parseSignatures(text);
     expect(parsed.problems).toEqual([]);
     expect(parsed.entries).toEqual([
-      { sha256: SHA_A, filename: "its-agent-linux-amd64", os: "linux", arch: "amd64", signature: SIG },
-      { sha256: SHA_B, filename: "its-agent-windows-amd64.exe", os: "windows", arch: "amd64", signature: SIG2 },
+      { sha256: SHA_A, filename: "novieri-agent-linux-amd64", os: "linux", arch: "amd64", signature: SIG },
+      { sha256: SHA_B, filename: "novieri-agent-windows-amd64.exe", os: "windows", arch: "amd64", signature: SIG2 },
     ]);
   });
 
   it("tolerates Windows line endings and blank lines", () => {
-    const parsed = parseSignatures(`\r\n${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\r\n\r\n`);
+    const parsed = parseSignatures(`\r\n${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\r\n\r\n`);
     expect(parsed.problems).toEqual([]);
     expect(parsed.entries).toHaveLength(1);
   });
 
   it("names the lines it cannot read rather than dropping them silently", () => {
     const text =
-      `${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n` +
+      `${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n` +
       `not a signature line\n` +
-      `${SHA_B}  its-agent-linux-arm64  linux/arm64  short==\n`;
+      `${SHA_B}  novieri-agent-linux-arm64  linux/arm64  short==\n`;
     const parsed = parseSignatures(text);
     expect(parsed.entries).toHaveLength(1);
     expect(parsed.problems).toEqual([
@@ -103,8 +108,8 @@ describe("parseSignatures", () => {
 
   it("refuses to choose between two lines for one platform", () => {
     const text =
-      `${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n` +
-      `${SHA_B}  its-agent-linux-amd64  linux/amd64  ${SIG2}\n`;
+      `${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n` +
+      `${SHA_B}  novieri-agent-linux-amd64  linux/amd64  ${SIG2}\n`;
     const parsed = parseSignatures(text);
     expect(parsed.entries).toHaveLength(0);
     expect(parsed.problems).toEqual([
@@ -114,7 +119,7 @@ describe("parseSignatures", () => {
 });
 
 describe("decideSignature", () => {
-  const entries = parseSignatures(`${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
+  const entries = parseSignatures(`${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
 
   it("signs when the platform matches and the uploaded digest is the signed one", () => {
     expect(decideSignature(entries, "linux", "amd64", SHA_A)).toEqual({ kind: "sign", signature: SIG });
@@ -158,7 +163,7 @@ describe("planProblems", () => {
 
   it("will not publish two files as the same platform", () => {
     const items: PublishItem[] = [
-      { file: file("its-agent-linux-amd64"), os: "linux", arch: "amd64" },
+      { file: file("novieri-agent-linux-amd64"), os: "linux", arch: "amd64" },
       { file: file("copy"), os: "linux", arch: "amd64" },
     ];
     expect(planProblems("1.4.0", items)).toEqual([
@@ -167,9 +172,9 @@ describe("planProblems", () => {
   });
 
   it("refuses a file larger than the server accepts before sending it", () => {
-    const big = { size: MAX_ARTIFACT_BYTES + 1, name: "its-agent-linux-amd64" } as File;
+    const big = { size: MAX_ARTIFACT_BYTES + 1, name: "novieri-agent-linux-amd64" } as File;
     expect(planProblems("1.4.0", [{ file: big, os: "linux", arch: "amd64" }])).toEqual([
-      "its-agent-linux-amd64 is larger than the 128 MiB the server accepts.",
+      "novieri-agent-linux-amd64 is larger than the 128 MiB the server accepts.",
     ]);
   });
 });
@@ -207,12 +212,12 @@ function client(overrides: Partial<PublishClient> = {}): PublishClient & {
 }
 
 describe("runPublish", () => {
-  const linux: PublishItem = { file: file("its-agent-linux-amd64"), os: "linux", arch: "amd64" };
-  const arm: PublishItem = { file: file("its-agent-linux-arm64"), os: "linux", arch: "arm64" };
+  const linux: PublishItem = { file: file("novieri-agent-linux-amd64"), os: "linux", arch: "amd64" };
+  const arm: PublishItem = { file: file("novieri-agent-linux-arm64"), os: "linux", arch: "arm64" };
 
   it("creates, uploads, then records the signature -- and claims no code signing", async () => {
     const api = client();
-    const signatures = parseSignatures(`${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
+    const signatures = parseSignatures(`${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
     const outcomes = await runPublish(api, "1.4.0", [linux], signatures, () => {});
 
     expect(api.createAgentRelease).toHaveBeenCalledWith({
@@ -229,7 +234,7 @@ describe("runPublish", () => {
 
   it("does not send a signature for bytes whose digest differs, and says so", async () => {
     const api = client();
-    const signatures = parseSignatures(`${SHA_B}  its-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
+    const signatures = parseSignatures(`${SHA_B}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
     const outcomes = await runPublish(api, "1.4.0", [linux], signatures, () => {});
 
     expect(api.setAgentReleaseSignature).not.toHaveBeenCalled();
@@ -243,7 +248,7 @@ describe("runPublish", () => {
 
   it("says so when a mismatched entry could not be removed", async () => {
     const api = client({ deleteAgentRelease: vi.fn(() => Promise.reject(new ApiError(503, ""))) });
-    const signatures = parseSignatures(`${SHA_B}  its-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
+    const signatures = parseSignatures(`${SHA_B}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
     const outcomes = await runPublish(api, "1.4.0", [linux], signatures, () => {});
 
     expect(outcomes[0]).toMatchObject({ step: "failed", created: true });
@@ -254,7 +259,7 @@ describe("runPublish", () => {
     const api = client({
       setAgentReleaseSignature: vi.fn(() => Promise.reject(new ApiError(503, ""))),
     });
-    const signatures = parseSignatures(`${SHA_A}  its-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
+    const signatures = parseSignatures(`${SHA_A}  novieri-agent-linux-amd64  linux/amd64  ${SIG}\n`).entries;
     const outcomes = await runPublish(api, "1.4.0", [linux], signatures, () => {});
 
     expect(api.deleteAgentRelease).toHaveBeenCalledWith("id-linux-amd64");

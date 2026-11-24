@@ -488,7 +488,7 @@ const XSS_IN_PAGE = () => {
   const pre = document.querySelector('[data-testid="document-source"]');
   const scope = pre ?? document.body;
   return {
-    executed: Boolean(window.__ITMS_XSS_EXECUTED),
+    executed: Boolean(window.__XSS_PROBE_EXECUTED),
     // The characters, as the console rendered them.
     text: pre ? (pre.textContent ?? "") : null,
     // ELEMENTS, in the real parsed DOM. A `<pre>` holding a text node has

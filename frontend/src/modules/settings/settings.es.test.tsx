@@ -312,7 +312,7 @@ describe("the email tab in Spanish", () => {
     expect(screen.getByText(/^Prueba la configuración guardada:/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enviar un mensaje de prueba" })).toBeInTheDocument();
     expect(container.textContent).not.toContain(PLANTED_SECRET);
-    expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "ITMS", "itms"]);
+    expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "Novieri RMM", "itms"]);
   });
 
   it("says email is not set up, and disables the test", async () => {
@@ -346,7 +346,7 @@ describe("the email tab in Spanish", () => {
     // gubernamental o nacional" -- there is no address but Microsoft's.
     expect(screen.getByText("Avanzado")).toBeInTheDocument();
     expect(screen.getByText(/^Antes de guardar, indica un servidor de correo, una dirección del remitente, un puerto válido, el nombre de usuario/)).toBeInTheDocument();
-    expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "ITMS", "itms", "smtp.office365.com"]);
+    expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "Novieri RMM", "itms", "smtp.office365.com"]);
   });
 
   it("refuses a bad port and a password with no username before the round trip", async () => {

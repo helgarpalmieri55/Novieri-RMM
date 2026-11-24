@@ -25,11 +25,11 @@ export const fixtures: FixtureMap = {
   factorPasskey: () => ({ state: "signed_in" }),
   factorRecovery: () => ({ state: "signed_in" }),
   enrollTotpStart: () => ({
-    otpauth_uri: "otpauth://totp/ITMS:helgar.palmieri%40toeshee.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=ITMS",
+    otpauth_uri: "otpauth://totp/Novieri%20RMM:helgar.palmieri%40toeshee.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Novieri%20RMM",
   }),
   enrollTotpConfirm: () => undefined,
   enrollPasskeyOptions: () => ({
-    rp: { id: "localhost", name: "ITMS" },
+    rp: { id: "localhost", name: "Novieri RMM" },
     user: { id: "dXNyLWhlbGdhcg", name: "helgar.palmieri@toeshee.example", displayName: "Helgar Palmieri" },
     challenge,
     pubKeyCredParams: [{ type: "public-key", alg: -7 }],
@@ -57,7 +57,7 @@ export const fixtures: FixtureMap = {
   // A contact's invitation (own-auth phase 2): its first passkey, as the
   // sign-in module's enrolment answers, and then signed in.
   invitePasskeyOptions: () => ({
-    rp: { id: "localhost", name: "ITMS" },
+    rp: { id: "localhost", name: "Novieri RMM" },
     user: { id: "dXNyLWNvbnRhY3Q", name: "ana.rojas@andeslogistics.example", displayName: "Ana Rojas" },
     challenge,
     pubKeyCredParams: [{ type: "public-key", alg: -7 }],

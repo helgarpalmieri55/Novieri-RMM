@@ -1,0 +1,10 @@
+/* The brand's paint (DESIGN.md v4, "Brand"). Tokens only: the harmony gate
+ * reads `fill` on every SVG. */
+.nv-symbol, .nv-wordmark, .nv-lockup { display: block; flex: 0 0 auto; fill: none; }
+.nv-symbol .nv-stroke { fill: var(--accent); }
+.nv-symbol.nv-on-tile .nv-tile { fill: var(--accent); }
+.nv-symbol.nv-on-tile .nv-stroke { fill: var(--accent-ink); }
+.nv-wordmark .nv-letter, .nv-lockup .nv-letter { fill: currentColor; }
+.nv-lockup .nv-rule, .nv-lockup .nv-descriptor path { fill: var(--muted); }
+/* `.nv-on-tile`, not `.tile`: `.tile` is the KPI card's class and would paint
+ * the symbol's svg as one. */

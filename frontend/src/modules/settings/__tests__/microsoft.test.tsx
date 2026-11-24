@@ -125,7 +125,7 @@ describe("Microsoft sign-in", () => {
     await user.click(await within(tab).findByRole("button", { name: "Download the certificate" }));
     await user.click(within(tab).getByRole("button", { name: "Download the new certificate" }));
     const saved = vi.mocked(saveBlob).mock.calls;
-    expect(saved.map(([, name]) => name)).toEqual(["itms-sign-in.cer", "itms-sign-in-new.cer"]);
+    expect(saved.map(([, name]) => name)).toEqual(["novieri-sign-in.cer", "novieri-sign-in-new.cer"]);
     expect(await blobText(saved[0]![0])).toBe(PEM);
     expect(await blobText(saved[1]![0])).toBe(NEXT_PEM);
   });

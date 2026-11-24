@@ -665,7 +665,7 @@ describe("what the detail page owes the operator", () => {
   });
 
   it("offers a way back to the device list", async () => {
-    // "[MEDIUM] Breadcrumb 'ITMS / Fleet' is not navigable — there is no link
+    // (2026-10-23) "[MEDIUM] Breadcrumb 'ITMS / Fleet' is not navigable — there is no link
     // back to the device list … a classic navigation dead end."
     renderPage();
     await screen.findByRole("heading", { name: "ws-alpha" });

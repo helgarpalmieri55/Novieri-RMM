@@ -176,7 +176,7 @@ export const people = {
     skip: "Skip",
     skipTitle: "Skip: {title}",
     markDoneTitle: "Mark done: {title}",
-    stillSees: "ITMS still sees: {evidence}. Say why this is done anyway.",
+    stillSees: "Novieri RMM still sees: {evidence}. Say why this is done anyway.",
     confirmDone: "Confirm this has been done. Your name is recorded against it.",
     why: "Why",
     noteOptional: "Note (optional)",

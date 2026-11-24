@@ -178,7 +178,7 @@ export function ChangeDetail() {
   const decidingOwn = isOwnChange && allowed.some((spec) => spec.action === "approve");
 
   // THE TAB HAD NO NAME (cycle 12, auditor B, LOW). `document.title` was the
-  // constant "ITMS" on all thirty screens, so "a user with several change tabs
+  // constant product name (2026-10-23) on all thirty screens, so "a user with several change tabs
   // open cannot tell them apart" -- and the change's own title is the only
   // stable identity this record has: `ChangeOut` (change_mgmt/schema.py) carries
   // no change NUMBER, so the auditor's suggested `CHG-1042` cannot be rendered

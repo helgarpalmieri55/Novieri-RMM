@@ -40,7 +40,7 @@ const EVERYTHING = [
 
 // Words the shell shows verbatim in both languages: product, brand and
 // operator-supplied names (the fixture's org, person and role).
-const ALLOW = ["ITMS", "Operations", "Alex Morgan", "Administrator"];
+const ALLOW = ["Novieri", "Operations", "Alex Morgan", "Administrator"];
 
 /** What `App.tsx`'s Shell does: the crumb and the page list are read from the
  *  nav model on every render, and `useT()` re-renders it on a language switch. */
@@ -100,7 +100,7 @@ describe("the shell in Spanish", () => {
     // its Spanish is held by `./SessionEnded.test.tsx`.
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Contraer la barra lateral" })).toBeInTheDocument();
-    expect(document.title).toBe("Historial de tareas · ITMS");
+    expect(document.title).toBe("Historial de tareas · Novieri RMM");
     expectNoEnglish(container, ALLOW);
   });
 
@@ -147,7 +147,7 @@ describe("the shell in Spanish", () => {
     expect(searchPrompt([], false).placeholder).toBe("Buscar páginas");
     expect(searchPrompt([], true).placeholder).toBe("Busca uno de tus tickets");
     expect(crumbFor("/devices/onboard")).toEqual({ section: "Dispositivos", sectionTo: "/devices", title: "Añadir un equipo" });
-    expect(crumbFor("/profile")).toEqual({ section: "Tu cuenta", sectionTo: undefined, title: "ITMS" });
+    expect(crumbFor("/profile")).toEqual({ section: "Tu cuenta", sectionTo: undefined, title: "Novieri RMM" });
     expect(portalCrumbFor("/portal/new").title).toBe("Nuevo ticket");
     expect(healthLabel({ openAlerts: 0, platform: null })).toBe("Estado de salud y alertas, sin alertas abiertas");
     expect(healthLabel({ openAlerts: 1, platform: "down" })).toBe(

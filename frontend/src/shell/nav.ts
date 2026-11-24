@@ -32,6 +32,7 @@
  */
 
 import { translate, type MessageKey } from "../i18n/core";
+import { PRODUCT_NAME } from "./brand";
 
 /**
  * LABELS ARE LOOKED UP WHEN READ, NOT WHEN THIS MODULE LOADS. The model below
@@ -287,7 +288,7 @@ export interface Crumb {
   readonly section?: string;
   /** Where that segment links; `undefined` renders a plain span. */
   readonly sectionTo?: string;
-  /** The page's own name, and what goes before "· ITMS" in the tab title. */
+  /** The page's own name, and what goes before "· Novieri RMM" in the tab title. */
   readonly title: string;
 }
 
@@ -327,13 +328,13 @@ function match(pathname: string, groups: readonly NavGroup[]): Destination | und
 
 /**
  * ONE ROUTE -> ONE CRUMB. The section is the rail entry the page lives under,
- * linked to that entry's route, so "ITMS > Admin" goes to the Admin landing
- * page and "ITMS > Devices" to the fleet list. The longest match wins, so
+ * linked to that entry's route, so "Novieri > Admin" goes to the Admin landing
+ * page and "Novieri > Devices" to the fleet list. The longest match wins, so
  * `/assistant/autonomy` is AI automation (Admin), not the Assistant.
  */
 export function crumbFor(pathname: string): Crumb {
   const found = match(pathname, NAV_GROUPS);
-  if (!found) return { section: ORPHAN_SECTION[pathname], title: "ITMS" };
+  if (!found) return { section: ORPHAN_SECTION[pathname], title: PRODUCT_NAME };
   return { section: found.owner.label, sectionTo: found.owner.to, title: found.label };
 }
 

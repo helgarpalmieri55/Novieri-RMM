@@ -313,7 +313,7 @@ describe("AgentReleasesPage", () => {
       release: release(),
       token: "tok_abc123",
       token_expires_at: "2026-08-18T13:00:00Z",
-      download_url: "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      download_url: "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4",
       command: "curl …",
@@ -325,7 +325,7 @@ describe("AgentReleasesPage", () => {
     const link = await screen.findByRole("link", { name: /download the agent binary/i });
     expect(link).toHaveAttribute(
       "href",
-      "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
     );
   });
 
@@ -334,10 +334,10 @@ describe("AgentReleasesPage", () => {
       release: release(),
       token: "tok_abc123",
       token_expires_at: "2026-08-18T13:00:00Z",
-      download_url: "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      download_url: "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
-      command: "curl -fsSL '…' -o /tmp/its-agent && …",
+      command: "curl -fsSL '…' -o /tmp/novieri-agent && …",
     });
     renderPage(() => Promise.resolve([release()]), generate);
     await screen.findByText("873d666");
@@ -472,7 +472,7 @@ describe("AgentReleasesPage", () => {
       download_url: "https://itms.example/x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4",
-      command: "curl -fsSL '…' -o /tmp/its-agent && /tmp/its-agent enroll --token tok_abc123",
+      command: "curl -fsSL '…' -o /tmp/novieri-agent && /tmp/novieri-agent enroll --token tok_abc123",
     });
     renderPage(() => Promise.resolve([release()]), generate);
     await screen.findByText("873d666");
@@ -481,7 +481,7 @@ describe("AgentReleasesPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Copy command/ }));
 
     expect(writeText).toHaveBeenCalledWith(
-      "curl -fsSL '…' -o /tmp/its-agent && /tmp/its-agent enroll --token tok_abc123",
+      "curl -fsSL '…' -o /tmp/novieri-agent && /tmp/novieri-agent enroll --token tok_abc123",
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/Copied/i);
   });

@@ -771,7 +771,7 @@ function patchPreviewClient(): QueryClient {
  * THE FIXTURE IS A LIVE XSS PAYLOAD ON PURPOSE. Three vectors that a browser
  * really runs: a `<script>` element, an `<img onerror>` and an `<svg onload>`,
  * each setting the SAME global. A browser pass can then assert one thing --
- * `window.__ITMS_XSS_EXECUTED` is undefined -- and have it mean "none of the
+ * `window.__XSS_PROBE_EXECUTED` is undefined -- and have it mean "none of the
  * three fired". Rendered as characters, it is inert; rendered as markup, all
  * three fire before the page finishes painting.
  *
@@ -789,9 +789,9 @@ function patchPreviewClient(): QueryClient {
 // the component that renders it did not. See the note above
 // `patchPreviewClient` for the same lesson one level up.
 const DOCS_XSS_PAYLOAD = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" onload="window.__ITMS_XSS_EXECUTED=true">
-  <script>window.__ITMS_XSS_EXECUTED = true;</script>
-  <image href="x" onerror="window.__ITMS_XSS_EXECUTED=true" />
+<svg xmlns="http://www.w3.org/2000/svg" onload="window.__XSS_PROBE_EXECUTED=true">
+  <script>window.__XSS_PROBE_EXECUTED = true;</script>
+  <image href="x" onerror="window.__XSS_PROBE_EXECUTED=true" />
   <text x="10" y="20">core switch — building 2</text>
 </svg>`;
 
@@ -1615,7 +1615,7 @@ export function PreviewPage() {
           it, and the document viewer is the one surface in this product where
           a rendering mistake is stored XSS across a whole tenant rather than a
           layout defect. The fixture's current version is a live three-vector
-          XSS payload; a browser pass asserts `window.__ITMS_XSS_EXECUTED` is
+          XSS payload; a browser pass asserts `window.__XSS_PROBE_EXECUTED` is
           still undefined after the page settles. */}
       <div style={{ marginTop: 24 }}>
         <QueryClientProvider client={docsClient}>
