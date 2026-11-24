@@ -86,6 +86,14 @@ def _vps_upgrade_blocks() -> list[str]:
     return _sh_blocks(text[text.index(marker) :])[:2]
 
 
+def _existing_host_blocks() -> list[str]:
+    """The two blocks that add the console's host and the ACME address to the
+    `.env` of an existing host, which sit above the VPS marker."""
+    text = _section(README.read_text(), "## Upgrading an existing deployment\n")
+    start = text.index("**Any other existing host**")
+    return _sh_blocks(text[start : text.index("**On the VPS this runbook builds**")])
+
+
 OFF_HOST = "### The off-host copy, step by step\n"
 
 
@@ -103,10 +111,12 @@ def test_the_first_boot_the_reboot_and_the_upgrade_have_no_placeholders() -> Non
         *_sh_blocks(_section(README.read_text(), PREREQUISITES)),
         *_sh_blocks(_first_boot()),
         *_sh_blocks(_after_reboot()),
+        *_existing_host_blocks(),
         *_vps_upgrade_blocks(),
         *_sh_blocks(_off_host()),
     ]
     assert len(blocks) >= 20, len(blocks)
+    assert len(_existing_host_blocks()) == 2
     found = [
         command for block in blocks for command in _commands(block) if PLACEHOLDER.search(command)
     ]

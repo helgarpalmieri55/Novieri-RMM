@@ -8,8 +8,10 @@ audit-chain key backup, database backups.
 
 **Rewritten on 2026-11-23 for a new VPS** (`rmm.novieri.com`, design
 `docs/superpowers/specs/2026-11-23-vps-y-marca-novieri-design.md`): the
-prerequisites, steps 1, 1b, 1c, 7, 10, 11 and 12 of First boot, [After a reboot
-or a restart](#after-a-reboot-or-a-restart), and the upgrade on that VPS. The
+prerequisites, steps 1, 1b, 1c, 6b (new: the gateway certificate's renewal
+timer), 7, 8 (the setup code is read from its file now), 10, 11 and 12 of First
+boot, [After a reboot or a restart](#after-a-reboot-or-a-restart), and the
+upgrade on that VPS. The
 certificate on `:443` is Let's Encrypt's, which Traefik asks for and renews
 (ACME, TLS-ALPN-01); nothing is copied into `deploy/certs/` any more. The
 commands that used a bearer token run inside the stack, or in the console.
@@ -371,8 +373,11 @@ machine — uses Let's Encrypt's staging directory instead, whose certificates n
 browser trusts and whose limits are far higher:
 `./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
 On a staging rehearsal, step 7's check needs the staging roots, and a later
-`./scripts/deploy.sh` ends with `Deployed with warnings` (exit status 1): its
-curl probe of `:443` has no staging CA. Everything is up; that line is the probe.
+`./scripts/deploy.sh` prints **two** warnings and ends `Deployed with
+warnings` (exit status 1): `API returned 000000 (expected 401)`, because its
+curl probe of `:443` has no staging CA, and the certificate refusal after its
+`--wait 60`, which has none either. Everything is up; those lines are the
+probes, not a failure.
 
 `ITS_PUBLIC_CONSOLE_URL` is the origin every sign-in write is checked against;
 it must stay exactly what the browser's address bar shows, `https://rmm.novieri.com`.
@@ -592,7 +597,7 @@ The 10-year TTL is a deliberate trade — nothing in the stack renews these toke
 `-orphan` matters: a child of the root token dies when the root token is
 revoked.
 
-Keep the `gateway-issuer` token where step 6 and the GO-LIVE.md §5 timer can
+Keep the `gateway-issuer` token where step 6 and the step 6b timer can
 read it, and nowhere else:
 
 ```sh
@@ -824,7 +829,7 @@ shell, and this runbook's own prerequisites put you in an unprivileged one.
 Do not "fix" it by running the whole line under `sudo`: `docker compose` would
 then run as root, resolving a different `$PWD` and a different Docker context
 than every other command here. Do not chown the token to the operator either —
-GO-LIVE.md §5's renewal timer reads it as root, which is the reason for the
+Step 6b's renewal timer reads it as root, which is the reason for the
 mode. Elevating only `cat` keeps the token off argv and out of shell history,
 which is what the whole step is for.
 
@@ -841,7 +846,7 @@ which expands the **root** token into the argv of `docker compose`, readable by
 any user on the host through `ps` for as long as the container runs, and left in
 shell history afterwards — in the runbook for a script whose whole reason to
 exist is that key material must not touch shell history. `BAO_TOKEN` is still
-honoured when it is *already* in the environment (that is what the GO-LIVE.md §5
+honoured when it is *already* in the environment (that is what the step 6b
 timer's `EnvironmentFile=` is for); nothing here constructs it.
 
 It runs through the `gateway` service because that is the only container
@@ -949,10 +954,11 @@ machine's yet, `:443` closed at the provider's firewall, or an `AAAA` record
 of another machine). Fix the cause and `docker compose restart traefik`.
 
 On a **rehearsal against Let's Encrypt staging** the check refuses by design:
-staging's roots are in no trust store (and `deploy.sh`, whose own probe of
-`:443` has no such CA, ends a rehearsal with `Deployed with warnings` and exit
-status 1 even though everything is up: that is this, not a failure). Give it those roots (the four Let's
-Encrypt lists on its staging page):
+staging's roots are in no trust store. `deploy.sh` has no such CA either, so a
+rehearsal's `deploy.sh` prints two warnings, the API probe (`API returned
+000000 (expected 401)`) and the certificate refusal after `--wait 60`, and
+ends `Deployed with warnings` with exit status 1 although everything is up.
+Give the check the roots (the four Let's Encrypt lists on its staging page):
 
 ```sh
 curl -fsS https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x2.pem https://letsencrypt.org/certs/staging/gen-y/root-ye.pem https://letsencrypt.org/certs/staging/gen-y/root-yr.pem > /tmp/le-staging-roots.pem
@@ -2682,6 +2688,30 @@ change actually needs — building `web` alone for a frontend release, running
 `migrate` only when a new revision file appeared, and so on. Run
 `./scripts/deploy.sh --plan` first to see the decision without acting on it.
 
+**Any other existing host** — one whose `.env` predates the console's host and
+ACME keys — needs both before the first `docker compose` command of any
+sequence, `docker compose exec openbao bao status` included: Compose
+interpolates the whole file for every subcommand and stops at `set in .env`
+when either is missing. (On the VPS this runbook builds, `new-env.sh` wrote
+them in step 1, so nothing here applies.) Add them by hand and **never run
+`new-env.sh`**, which would write a fresh random password into every database
+role and refuse to overwrite the file anyway. Each is its own block, and each
+deletes any earlier line first, since a second `KEY=` line in `.env` silently
+wins over the first. The host is computed from `ITS_PUBLIC_CONSOLE_URL`, which
+every host already has and which is exactly what the browser's address bar
+shows:
+
+```sh
+host="$(sed -n 's|^ITS_PUBLIC_CONSOLE_URL=https://\([^/:]*\).*|\1|p' .env | tail -1)"; if [ -n "$host" ]; then sed -i '/^ITS_PUBLIC_HOST=/d' .env && printf 'ITS_PUBLIC_HOST=%s\n' "$host" >> .env && grep '^ITS_PUBLIC_HOST=' .env; else echo "REFUSED: ITS_PUBLIC_CONSOLE_URL in .env is not an https:// address; set it first" >&2; fi; unset host
+```
+
+The contact address Let's Encrypt is given, at a prompt (a prompt ends its
+block):
+
+```sh
+read -rp 'Let'"'"'s Encrypt contact address: ' E && [ -n "$E" ] && sed -i '/^ITS_ACME_EMAIL=/d' .env && printf 'ITS_ACME_EMAIL=%s\n' "$E" >> .env; unset E
+```
+
 **On the VPS this runbook builds**, an upgrade is these commands, in this order
 (the operator always deploys from `main`). First, alone:
 
@@ -2706,31 +2736,8 @@ switched off, do not `git pull` or run `deploy.sh` there from this `main`: its
 refuses to start, and with them added by hand Traefik would stop serving the
 certificate copied there and ask Let's Encrypt for one.
 
-**Both keys must be in `.env` before the first `docker compose` command of
-any sequence on any host**, `docker compose exec openbao bao status` included:
-Compose interpolates the whole file for every subcommand and stops at
-`set in .env` when either is missing. On the VPS this runbook builds,
-`new-env.sh` wrote them in step 1, so nothing here applies. On an **existing
-host whose `.env` predates them**, add them by hand and **never run
-`new-env.sh`**, which would write a fresh random password into every database
-role and refuse to overwrite the file anyway. Each is its own block, because
-a prompt ends its block; each deletes any earlier line first, since a second
-`KEY=` line in `.env` silently wins over the first. The console's host, as the
-browser's address bar shows it without `https://`:
-
-```sh
-read -rp 'Console host (the name in ITS_PUBLIC_CONSOLE_URL): ' H && [ -n "$H" ] && sed -i '/^ITS_PUBLIC_HOST=/d' .env && printf 'ITS_PUBLIC_HOST=%s\n' "$H" >> .env; unset H
-```
-
-The contact address Let's Encrypt is given:
-
-```sh
-read -rp 'Let'"'"'s Encrypt contact address: ' E && [ -n "$E" ] && sed -i '/^ITS_ACME_EMAIL=/d' .env && printf 'ITS_ACME_EMAIL=%s\n' "$E" >> .env; unset E
-```
-
-`--plan` shows what the
-upgrade will run and changes nothing; `deploy.sh` then takes a backup, builds
-the images tagged with the new commit, migrates (`migrate` also runs on every
+`--plan` shows what the upgrade will run and changes nothing; `deploy.sh` then
+takes a backup, builds the images tagged with the new commit, migrates (`migrate` also runs on every
 `up -d`), restarts what changed, and verifies: the tag is HEAD, the API answers
 `401`, and the certificate on `:443` passes `check-public-tls.sh`. It ends by
 printing the way back from this upgrade.
@@ -3401,7 +3408,7 @@ docker compose restart gateway
 The token comes from the 0600 file on stdin, never from an argument — see step 6.
 Drop the `-T` and the pipe to be prompted for it instead.
 
-**Why this pipes and GO-LIVE.md §5's timer redirects.** They are not
+**Why this pipes and step 6b's timer redirects.** They are not
 inconsistent and should not be unified. A `<` redirect is opened by the shell,
 so it needs the *shell's* identity to be able to read a `600 root:root` file.
 The timer's `ExecStart` runs as root — systemd's default, and that unit declares
@@ -3417,7 +3424,7 @@ level=WARN msg="gateway disconnected; reconnecting" attempt=1 in=1.152916045s
 level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
 ```
 
-so renewal is not an outage. Install the systemd timer in GO-LIVE.md §5.
+so renewal is not an outage. The systemd timer is step 6b.
 
 ---
 

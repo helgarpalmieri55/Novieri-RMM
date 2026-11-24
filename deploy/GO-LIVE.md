@@ -225,37 +225,10 @@ scoped to the one bucket instead of an account root key.
 
 Issued by `deploy/scripts/issue-gateway-cert.py` for **365 days**, and **it
 does not renew itself**. Agent certificates rotate automatically at two-thirds
-of life; this one has no such machinery, so put it on a timer:
-
-```sh
-sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
-[Unit]
-Description=Renew the it-suite gateway server certificate
-[Service]
-Type=oneshot
-WorkingDirectory=/opt/it-suite/deploy
-# The token arrives on STDIN from a 0600 file, never as an argument. The old
-# form was  -e BAO_TOKEN="$(grep ^OPENBAO_TOKEN= .env ...)"  [removed],
-# which put the ROOT token into the argv of `docker compose` -- world-readable
-# via /proc/<pid>/cmdline, i.e. `ps`, for as long as the container ran. `-T` is
-# what keeps stdin available to redirect.
-ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \
-  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com \
-  < /etc/it-suite/gateway-issuer.token \
-  && docker compose restart gateway'
-EOF
-sudo tee /etc/systemd/system/its-gateway-cert.timer >/dev/null <<'EOF'
-[Unit]
-Description=Monthly it-suite gateway certificate renewal
-[Timer]
-OnCalendar=monthly
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-sudo systemctl enable --now its-gateway-cert.timer
-```
+of life; this one has no such machinery, so put it on a timer. The two systemd units and the command that enables
+them are in `deploy/README.md` step 6b, [Renew the gateway's certificate every
+month](README.md#step-6b--renew-the-gateways-certificate-every-month): that is
+the only copy, installed at first boot.
 
 This needs `/etc/it-suite/gateway-issuer.token` (mode 0600, root-owned) from
 first-boot step 3.4. It does **not** need `OPENBAO_TOKEN`, and that is the
