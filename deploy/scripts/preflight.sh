@@ -6,8 +6,9 @@
 # from defaults, and the failure mode of a checklist is a human reading it at
 # the end of a long day and being sure they did step 4. Every check below is
 # something the checklist already requires; this just refuses instead of
-# trusting. It reads `.env` and the filesystem only -- it starts nothing,
-# contacts nothing, and changes nothing.
+# trusting. It reads `.env`, the filesystem, DNS, this host's addresses and
+# listening sockets, and Docker's versions -- it starts nothing and changes
+# nothing.
 #
 # Exit 0 = nothing obviously wrong. Exit 1 = at least one refusal. It cannot
 # tell you the deployment is CORRECT; a checker never can. It tells you that a
@@ -20,7 +21,7 @@ fail=0
 refuse() { printf '  REFUSE  %s\n' "$1"; fail=1; }
 ok()     { printf '  ok      %s\n' "$1"; }
 
-echo "ITMS pre-flight"
+echo "Novieri RMM pre-flight"
 echo
 
 # --- .env exists and is not world-readable -------------------------------
@@ -48,7 +49,7 @@ while IFS='=' read -r key value; do
   if printf '%s\n' $first_boot_only | grep -qx "$key"; then
     printf '  note    %s is still change-me -- expected before first boot; §3.2/§3.4 issue it\n' "$key"
   else
-    refuse "$key is still change-me. openssl rand -base64 24"
+    refuse "$key is still change-me. openssl rand -hex 24 (or start over with scripts/new-env.sh)"
   fi
 done < .env
 
@@ -76,101 +77,137 @@ else
   refuse "ITMS_BIND_IP=$bind_ip is not an address on this host, so traefik cannot bind it. \`ip -brief address\` lists what is available."
 fi
 
-# --- TLS material ---------------------------------------------------------
-# Two entirely separate certificate systems; GO-LIVE §3 is emphatic that they
-# must not be mixed. This checks only that the public one is present, because
-# the gateway's internal-CA cert is issued during first boot.
-tls_present=1
-for f in certs/fullchain.pem certs/privkey.pem; do
-  if [ ! -s "$f" ]; then
-    refuse "$f is missing or empty. The public certificate for the operator hostname goes here (§3). It must NEVER be the gateway certificate -- agents pin the internal CA at enrollment."
-    tls_present=0
-  else
-    ok "$f present"
-  fi
-done
+# --- the public address, and the certificate Traefik will ask for ----------
+# Since 2026-11-23 there is no certificate file to check (design
+# 2026-11-23-vps-y-marca-novieri §2): Traefik asks Let's Encrypt for one for
+# ITS_PUBLIC_HOST at the first start. What can stop that is checked instead,
+# BEFORE it is asked, because every failed validation counts against Let's
+# Encrypt's limit of 5 per name and hour and a failed start leaves Traefik
+# serving its own self-signed default. scripts/check-public-tls.sh checks the
+# result after the start.
+public_host="$(grep -E '^ITS_PUBLIC_HOST=' .env | tail -1 | cut -d= -f2- || true)"
+# `sed -n ...p` so a blank value yields nothing rather than the whole line.
+host="$(grep -E '^ITS_PUBLIC_CONSOLE_URL=' .env | tail -1 \
+        | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
+if [ -z "$public_host" ] || [ "$public_host" = "your-host" ]; then
+  refuse "ITS_PUBLIC_HOST is '${public_host:-unset}': Traefik has no name to ask a certificate for. scripts/new-env.sh --host <the console's DNS name> writes it."
+elif [ "$host" != "$public_host" ]; then
+  refuse "ITS_PUBLIC_HOST=$public_host is not the host of ITS_PUBLIC_CONSOLE_URL ('${host:-unset}'). The certificate would be for one name and sign-in checked against another; they must be the same."
+else
+  ok "ITS_PUBLIC_HOST=$public_host is the console's host"
+fi
 
-# --- the certificate is USABLE, not merely present -----------------------
-# Presence was the old bar and it is the wrong one. TRAEFIK SILENTLY FALLS BACK
-# to a self-signed certificate on anything it cannot use: it logs no error, the
-# container reports healthy, and operators are served a certificate their
-# browsers reject while every check in this script passes. Worse, endpoints
-# reach object storage over the same :443, so a fallback breaks backups and
-# software deployment too -- and blames them.
+acme_email="$(grep -E '^ITS_ACME_EMAIL=' .env | tail -1 | cut -d= -f2- || true)"
+if [ -z "$acme_email" ]; then
+  refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Put the Let's Encrypt account's contact address there (scripts/new-env.sh asks for it)."
+else
+  ok "ITS_ACME_EMAIL is set"
+fi
+acme_ca="$(grep -E '^ITS_ACME_CA_SERVER=' .env | tail -1 | cut -d= -f2- || true)"
+case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
+  https://acme-v02.api.letsencrypt.org/directory) ok "ACME CA: Let's Encrypt production" ;;
+  https://*) printf '  note    ACME CA is %s, not Let'"'"'s Encrypt production: its certificates are for a rehearsal, and no browser trusts them\n' "$acme_ca" ;;
+  *) refuse "ITS_ACME_CA_SERVER=$acme_ca is not an https URL" ;;
+esac
+
+# The name must reach THIS machine, or Let's Encrypt's validation reaches
+# another. The A record is ASKED OF DNS ALONE, as Let's Encrypt asks it:
+# `getent -s dns` skips /etc/hosts, where cloud-init writes
+# `127.0.1.1 <this host's name>` and where a line written by hand would hide a
+# missing or wrong A record.
 #
-# Every check below is a state that produces exactly that fallback.
-if [ "$tls_present" -eq 1 ]; then
-  # 1. A passphrase-encrypted key. Traefik runs unattended; there is nowhere
-  #    for it to ask.
-  key_readable=1
-  if grep -q 'ENCRYPTED' certs/privkey.pem; then
-    refuse "certs/privkey.pem is passphrase-encrypted and traefik cannot decrypt it. Write a decrypted copy: openssl pkey -in certs/privkey.pem -out certs/privkey.new && mv certs/privkey.new certs/privkey.pem && chmod 600 certs/privkey.pem"
-    key_readable=0
+# IPv4 ONLY (decided 2026-11-24). This deployment is one IPv4 address: the
+# runbook, host-network.md and this script reason about it, and nothing
+# checks that :443 and :8443 answer on IPv6. So an AAAA record would send
+# browsers and agents, which try IPv6 first, where nobody has checked this
+# stack answers -- or, if it is another machine's, to that machine. (Not for
+# Let's Encrypt's sake: its TLS-ALPN-01 validator falls back to IPv4 after any
+# IPv6 error, Boulder va/tlsalpn.go.) The AAAA is asked through Python's
+# getaddrinfo, not `getent ahosts`: glibc's getent sets AI_ADDRCONFIG, which
+# hides every AAAA on a host with no IPv6 address of its own -- exactly the
+# VPS this runbook builds. getaddrinfo still reads /etc/hosts before DNS
+# (`hosts: files dns`): cloud-init puts this host's name on no IPv6 line
+# there (its `::1` line is localhost's), so only an IPv6 line added by hand
+# for the name is read as an AAAA, and refused like one. `|| true`: getent
+# exits 2 for a name with no address, which pipefail would turn into this
+# script dying silently here.
+if [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
+  if ! command -v getent >/dev/null 2>&1; then
+    printf '  note    %s could not be resolved -- getent is not installed\n' "$public_host"
   else
-    ok "certs/privkey.pem is not passphrase-encrypted"
-  fi
-
-  # 2. The key must actually belong to the certificate. Copying the two files
-  #    from different renewals is the ordinary way to get here, and nothing
-  #    reports it -- the pair is only tested when a client connects.
-  #
-  #    Skipped for an encrypted key: `openssl pkey` cannot read one without the
-  #    passphrase, so this would add a second, WRONG diagnosis ("could not be
-  #    parsed") on top of the correct one above, and send the reader looking for
-  #    a file-format problem that does not exist.
-  if [ "$key_readable" -eq 1 ]; then
-    cert_pub="$(openssl x509 -in certs/fullchain.pem -noout -pubkey 2>/dev/null || true)"
-    key_pub="$(openssl pkey -in certs/privkey.pem -pubout 2>/dev/null || true)"
-    if [ -z "$cert_pub" ] || [ -z "$key_pub" ]; then
-      refuse "certs/fullchain.pem or certs/privkey.pem could not be parsed as PEM by openssl. A DER file renamed to .pem lands here."
-    elif [ "$cert_pub" != "$key_pub" ]; then
-      refuse "certs/privkey.pem is not the private key for certs/fullchain.pem -- their public keys differ. The usual cause is two files taken from different renewals."
+    v4="$(getent -s dns ahostsv4 "$public_host" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
+    v6=""
+    if command -v python3 >/dev/null 2>&1; then
+      v6="$(python3 -I -c 'import socket, sys
+try:
+    found = socket.getaddrinfo(sys.argv[1], None, socket.AF_INET6, socket.SOCK_STREAM)
+except OSError:
+    found = []
+print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:")})))' "$public_host" 2>/dev/null || true)"
     else
-      ok "the certificate and key are a matching pair"
+      printf '  note    %s has no AAAA check -- python3 is not installed\n' "$public_host"
+    fi
+    if [ -z "$v4" ]; then
+      refuse "$public_host does not resolve to an IPv4 address. Create its A record, pointing at this server, and wait for it to answer before the first start."
+    else
+      if [ -n "$bind_ip" ] && [ "$bind_ip" != "0.0.0.0" ]; then
+        mine="$bind_ip"
+      elif command -v ip >/dev/null 2>&1; then
+        mine="$(ip -4 -o address show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ')"
+      else
+        mine=""
+      fi
+      match=""
+      for a in $v4; do
+        case " $mine " in *" $a "*) match="$a" ;; esac
+      done
+      if [ -n "$match" ]; then
+        ok "$public_host resolves to $match, an address of this host"
+      elif [ -z "$mine" ]; then
+        printf '  note    %s resolves to %s; this host'"'"'s addresses could not be read (iproute2 is not installed) -- compare them by hand\n' "$public_host" "${v4% }"
+      elif printf '%s\n' $mine | grep -qvE '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)'; then
+        refuse "$public_host resolves to ${v4% }, which is not an address of this host (${mine% }). Let's Encrypt would validate whatever answers there."
+      else
+        printf '  note    %s resolves to %s; every address of this host is private (%s): behind NAT the public address is not on an interface -- compare it by hand\n' "$public_host" "${v4% }" "${mine% }"
+      fi
+    fi
+    if [ -n "$v6" ]; then
+      refuse "$public_host has an AAAA record (${v6% }). This deployment is IPv4 only: browsers and agents try IPv6 first, and nothing has checked that this stack answers there (or the address is another machine's). Remove the AAAA record."
     fi
   fi
+fi
 
-  # 3. Validity window.
-  if ! openssl x509 -in certs/fullchain.pem -noout -checkend 0 >/dev/null 2>&1; then
-    refuse "certs/fullchain.pem has EXPIRED."
-  elif ! openssl x509 -in certs/fullchain.pem -noout -checkend 604800 >/dev/null 2>&1; then
-    printf '  note    certs/fullchain.pem expires within 7 days -- renew before go-live, and automate it (README §3)\n'
+# --- ports 443 and 8443 are free, unless this stack holds them -------------
+if ! command -v ss >/dev/null 2>&1; then
+  printf '  note    listeners on 443/8443 could not be checked -- iproute2 is not installed\n'
+elif [ -n "$(docker compose ps --status running -q traefik 2>/dev/null || true)" ]; then
+  ok "443 and 8443 are held by this stack's traefik"
+else
+  held="$(ss -Hltn '( sport = :443 or sport = :8443 )' 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
+  if [ -n "$held" ]; then
+    refuse "something already listens on ${held% } -- traefik needs 443 and 8443. scripts/host-check.sh section 2 names it."
   else
-    ok "certs/fullchain.pem is in date"
+    ok "443 and 8443 are free"
   fi
+fi
 
-  # 4. It must cover the hostname the REST of .env names, since that is the
-  #    name operators type and agents resolve.
-  #
-  #    `-checkhost` EXITS 0 WHETHER OR NOT THE NAME MATCHES -- it reports in
-  #    its output, not its status. So this greps the text. Testing the exit
-  #    code would make the check pass for every certificate ever presented,
-  #    which is worse than having no check at all: it would read as verified.
-  #    The console's own address since own authentication phase 4 (until
-  #    then the old identity provider's issuer, on the same host). `sed -n
-  #    ...p` so a blank value yields nothing rather than the whole line.
-  host="$(grep -E '^ITS_PUBLIC_CONSOLE_URL=' .env | tail -1 \
-          | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
-  if [ -z "$host" ] || [ "$host" = "your-host" ]; then
-    refuse "ITS_PUBLIC_CONSOLE_URL does not name a real host, so the certificate cannot be checked against it and nobody can sign in. Set it to the address people open the console at (README step 1)."
-  elif ! openssl x509 -in certs/fullchain.pem -noout -checkhost "$host" 2>/dev/null \
-        | grep -q 'does match'; then
-    refuse "certs/fullchain.pem does not cover '$host' (the host in ITS_PUBLIC_CONSOLE_URL). Traefik will serve it anyway and every browser and every agent will reject it."
-  else
-    ok "certs/fullchain.pem covers $host"
-  fi
-
-  # 5. Intermediates. Not a refusal: a certificate issued directly by a root
-  #    your fleet already trusts is legitimately one PEM block. But a
-  #    publicly-issued leaf sent without its chain validates in browsers that
-  #    cache intermediates and fails in Go clients that do not -- so it breaks
-  #    AGENTS while looking fine to you.
-  chain_len="$(grep -c 'BEGIN CERTIFICATE' certs/fullchain.pem || true)"
-  if [ "${chain_len:-0}" -le 1 ]; then
-    printf '  note    certs/fullchain.pem holds ONE certificate and no intermediates. Fine for a root-issued cert; if it came from a public CA, agents will fail chain validation where browsers succeed.\n'
-  else
-    ok "certs/fullchain.pem carries $chain_len certificates (leaf + chain)"
-  fi
+# --- Docker Engine 26+ and Compose 2.24+ (README, Prerequisites) -----------
+at_least() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+composev="$(docker compose version --short 2>/dev/null | sed 's/^v//' || true)"
+if [ -z "$engine" ]; then
+  refuse "Docker Engine does not answer (docker version). Install Docker CE from Docker's repository (README, Prerequisites)."
+elif ! at_least "$engine" 26; then
+  refuse "Docker Engine $engine is older than 26: traefik:v3.6's Docker provider is refused by it, and every route answers 404."
+else
+  ok "Docker Engine $engine"
+fi
+if [ -z "$composev" ]; then
+  refuse "Docker Compose does not answer (docker compose version)."
+elif ! at_least "$composev" 2.24; then
+  refuse "Docker Compose $composev is older than 2.24: .env's \${...} references inside env_file are not interpolated, and every database connection fails."
+else
+  ok "Docker Compose $composev"
 fi
 
 # --- .env must not be committable ----------------------------------------
