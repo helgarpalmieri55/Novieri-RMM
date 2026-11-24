@@ -218,7 +218,7 @@ def test_a_built_msi_whose_template_was_changed_is_refused(
 ) -> None:
     msi = _build(tmp_path, arch=arch)
     msi_build.verify_msi(msi, arch=arch)  # as built: accepted
-    _tamper(msi, "-s", "Novieri RMM Agent", "Toeshee", template)
+    _tamper(msi, "-s", "Novieri RMM Agent", "Novieri", template)
     assert _template(msi) == template
     with pytest.raises(MsiBuildError, match="is not marked"):
         msi_build.verify_msi(msi, arch=arch)

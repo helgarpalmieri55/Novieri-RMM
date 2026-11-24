@@ -265,7 +265,7 @@ func refuseForeignOwnedParent(t *testing.T, setup string, plat platform) {
 
 	out, exitErr := runInstaller(t, setup)
 	if exitErr == nil || !strings.Contains(out, "not to an administrator") || strings.Contains(out, "Installed") {
-		t.Fatalf("a fresh install under an NovieriRMM owned by %s: err=%v\n%s", user, exitErr, out)
+		t.Fatalf("a fresh install under a NovieriRMM owned by %s: err=%v\n%s", user, exitErr, out)
 	}
 	assertNoService(t)
 	if o := ownerOf(); !strings.HasSuffix(strings.ToLower(o), `\`+user) {
@@ -301,7 +301,7 @@ func runInstaller(t *testing.T, path string, env ...string) (string, error) {
 func assertNoService(t *testing.T) {
 	t.Helper()
 	if svc := strings.TrimSpace(ps(t, "(Get-Service -Name novieri-agent -ErrorAction SilentlyContinue).Name")); svc != "" {
-		t.Fatalf("an novieri-agent service exists: %q", svc)
+		t.Fatalf("a novieri-agent service exists: %q", svc)
 	}
 }
 

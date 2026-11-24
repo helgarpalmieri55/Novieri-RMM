@@ -118,4 +118,7 @@ def test_the_install_command_speaks_as_the_agent() -> None:
     )
     assert 'echo "novieri-agent: run this with sudo" >&2' in script
     assert "novieri-agent: installed. This computer appears in Novieri RMM" in script
-    assert "itms" not in script and "ITMS" not in script
+    # The base64 blobs of the embedded packaging could contain the letters by
+    # chance; every other line is strict.
+    prose = [ln for ln in script.splitlines() if not re.search(r"printf %s '[A-Za-z0-9+/=]+'", ln)]
+    assert not any("itms" in ln.lower() for ln in prose)

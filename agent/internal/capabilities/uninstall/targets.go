@@ -123,7 +123,7 @@ func checkTargets(t Targets) error {
 	}
 	base := strings.ToLower(filepath.Base(t.Binary))
 	if base != "novieri-agent" && base != "novieri-agent.exe" {
-		return fmt.Errorf("uninstall: %q is not an novieri-agent binary", t.Binary)
+		return fmt.Errorf("uninstall: %q is not a novieri-agent binary", t.Binary)
 	}
 	return nil
 }

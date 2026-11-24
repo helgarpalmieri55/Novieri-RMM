@@ -186,7 +186,7 @@ $DataParent = Split-Path -Parent $DataDir
 if ((Split-Path -Leaf $DataParent) -eq 'NovieriRMM') {
     Protect-ItsDirectory -Path $DataParent
 } else {
-    Write-Warning "$DataParent is not an NovieriRMM directory, so novieri-agent-enroll.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
+    Write-Warning "$DataParent is not a NovieriRMM directory, so novieri-agent-enroll.ps1 leaves its ACL alone. Anyone who can rename entries in it can replace $DataDir; make sure only Administrators can."
 }
 Assert-NotReparsePoint $DataDir
 

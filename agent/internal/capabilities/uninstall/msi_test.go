@@ -82,7 +82,7 @@ func TestMsiTargetsAreTheWindowsLayout(t *testing.T) {
 	}
 }
 
-// msiLayout is layout() under an NovieriRMM directory, as an MSI installs it:
+// msiLayout is layout() under a NovieriRMM directory, as an MSI installs it:
 // <root>/NovieriRMM/agent holding the data, <root>/NovieriRMM/msi.log the install's
 // line, and NovieriRMM in RemoveIfEmpty.
 func msiLayout(t *testing.T) (Targets, string) {
