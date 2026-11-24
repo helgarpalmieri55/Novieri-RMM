@@ -1393,7 +1393,7 @@ git commit -m "feat(deploy): Let's Encrypt over TLS-ALPN-01 on :443, the host in
 **Interfaces:**
 - Consumes: nada. **Se fusiona junto con las Tasks 3 y 7** (la 3 hace que compose exija las claves que esta añade).
 - Produces:
-  - `./scripts/new-env.sh --host <nombre DNS> [--acme-email <dirección>] [--acme-ca-server <URL https>]` desde `deploy/`: escribe `deploy/.env` (0600) o sale 1 sin escribir nada; sin `--acme-email` y con terminal, la pregunta («Let's Encrypt account address (the certificate's contact): »); sin terminal, se niega.
+  - `./scripts/new-env.sh --host <nombre DNS> [--acme-email <dirección>] [--acme-ca-server <URL https>]` desde `deploy/`: escribe `deploy/.env` (0600) o sale 1 sin escribir nada; sin `--acme-email` y con terminal, la pregunta («Let's Encrypt account contact (not kept on the account; passed to ISRG's mailing list): »); sin terminal, se niega.
   - `./scripts/check-public-tls.sh [--connect <IP>] [--cafile <PEM>] [--wait <s>] [--port <n>]`: sale 0 e imprime `ok      <ip>:<puerto> presents a trusted certificate for <host>` con emisor, SAN y `notAfter`, o sale 1 con una línea `REFUSE` en stderr; también cuando el certificado es bueno pero le quedan **menos de 28 días** (la renovación lleva días fallando). Lo usan `deploy.sh` (esta tarea), la CI (Tasks 7 y 10), el runbook (Task 9) y el ensayo (Task 12).
   - `preflight.sh`: líneas `ok`, `note` y `REFUSE` como hasta ahora; las nuevas están en la prueba.
   - `.env.example`: `ITS_PUBLIC_HOST=your-host`, `ITS_ACME_EMAIL=`, `ITS_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory`.
@@ -1402,7 +1402,7 @@ git commit -m "feat(deploy): Let's Encrypt over TLS-ALPN-01 on :443, the host in
 - **Los dos tokens de OpenBao siguen en `change-me`** (P4-B-04). El diseño dice «un secreto aleatorio nuevo en cada clave `change-me`»; su propósito es que no quede nada que sustituir a mano, y estos dos no se sustituyen a mano: los escribe el paso 3.5 con `read -rsp`, sin marcadores. Un valor aleatorio ahí convertiría «te saltaste el 3.5» en una API que falla con 403 de OpenBao, y `preflight.sh` dejaría de avisarlo.
 - **`openssl rand -hex 24`**: 48 caracteres hexadecimales, seguros dentro de las URLs de base de datos que los interpolan (`postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@…`); el `base64 | tr -d '=+/'` del runbook de antes da longitudes variables.
 - **El enlace duro** (`ln`) en lugar de `mv`: nunca reemplaza un `.env` que haya aparecido mientras corría.
-- **La comprobación del DNS pregunta al DNS, como Let's Encrypt, y no a `/etc/hosts`.** El registro `A`, con `getent -s dns ahostsv4` (sin `-s dns`, glibc lee antes `/etc/hosts`, donde cloud-init escribe `127.0.1.1 <nombre del host>`: una negativa falsa si el VPS se llama `rmm.novieri.com`, y una línea puesta a mano tapa un registro `A` que falta o es otro). El `AAAA`, con `getaddrinfo(AF_INET6)` de Python **sin** `AI_ADDRCONFIG`: `getent ahosts` lo pone, y en un host sin IPv6 propia —el VPS que construye el runbook— no enseña ningún `AAAA` (medido en la revisión previa con glibc 2.39, la de Ubuntu 24.04). Python viene con Ubuntu Server; sin él, se anota. Y `|| true` en las dos: con `set -o pipefail`, el `exit 2` de `getent` ante un nombre que no resuelve hacía morir el guion en la asignación, sin imprimir la negativa (el *stub* de la prueba sale ahora con `2`, como `getent`). Se niega si el nombre resuelve a una dirección que no es de este host y este tiene alguna pública; si todas las suyas son privadas (un VPS tras NAT) lo anota y no se niega.
+- **La comprobación del DNS pregunta al DNS, como Let's Encrypt, y no a `/etc/hosts`.** El registro `A`, con `getent -s dns ahostsv4` (sin `-s dns`, glibc lee antes `/etc/hosts`, donde cloud-init escribe `127.0.1.1 <nombre del host>`: una negativa falsa si el VPS se llama `rmm.novieri.com`, y una línea puesta a mano tapa un registro `A` que falta o es otro). El `AAAA`, con `getaddrinfo(AF_INET6)` de Python **sin** `AI_ADDRCONFIG`: `getent ahosts` lo pone, y en un host sin IPv6 propia —el VPS que construye el runbook— no enseña ningún `AAAA` (medido en la revisión previa con glibc 2.39, la de Ubuntu 24.04). `getaddrinfo` sí lee antes `/etc/hosts`; cloud-init no pone el nombre del host en ninguna línea IPv6 (su `::1` es de `localhost`), así que solo una línea IPv6 puesta a mano para el nombre cuenta como `AAAA` (verificación de la revisión previa, N5). Python viene con Ubuntu Server; sin él, se anota. Y `|| true` en las dos: con `set -o pipefail`, el `exit 2` de `getent` ante un nombre que no resuelve hacía morir el guion en la asignación, sin imprimir la negativa (el *stub* de la prueba sale ahora con `2`, como `getent`). Se niega si el nombre resuelve a una dirección que no es de este host y este tiene alguna pública; si todas las suyas son privadas (un VPS tras NAT) lo anota y no se niega.
 - **Ningún `AAAA`, por la razón verdadera** (resolución del coordinador del 2026-11-24): el despliegue es de una IPv4; nada comprueba que el 443 y el 8443 contesten por IPv6, y un `AAAA` manda a los navegadores y a los agentes, que prueban IPv6 primero, a una dirección que nadie ha comprobado, o a otra máquina. **No** porque Let's Encrypt no vuelva al IPv4: su validador de TLS-ALPN-01 vuelve ante cualquier error de IPv6 (Boulder, `va/tlsalpn.go:105-137` [E5]); el borrador decía lo contrario, citando una página de HTTP-01.
 - **Los puertos ocupados por el Traefik de este proyecto** no son una negativa: `preflight.sh` sirve también para volver a mirar un host en marcha.
 - **`check-public-tls.sh` confía en las raíces del sistema** salvo `--cafile`: un certificado de staging o de Pebble es, a propósito, no confiable, y lo dice.
@@ -1637,7 +1637,7 @@ and 8443 are free, and Docker is new enough. `getent`, `python3`, `ip`, `ss`
 and `docker` are stubs on PATH, each answering what the test sets; nothing
 here resolves a name or opens a socket.
 
-The name is asked of DNS alone, as Let's Encrypt asks it: the `getent` stub
+The A record is asked of DNS alone, as Let's Encrypt asks it: the `getent` stub
 answers `-s dns` from FAKE_V4 and, without it, lets /etc/hosts
 (FAKE_HOSTS_FILE) answer first, as `hosts: files dns` does; and, like glibc's
 `getent ahosts` (AI_ADDRCONFIG), it shows no AAAA on a host with no IPv6
@@ -2202,7 +2202,7 @@ printf '%s' "$host" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a
 
 if [ -z "$email" ]; then
   [ -t 0 ] || die "--acme-email is required when stdin is not a terminal"
-  read -r -p "Let's Encrypt account address (the certificate's contact): " email
+  read -r -p "Let's Encrypt account contact (not kept on the account; passed to ISRG's mailing list): " email
 fi
 printf '%s' "$email" | grep -Eq '^[^@[:space:]]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$' \
   || die "the ACME address must look like name@domain.tld, not '$email'"
@@ -2466,9 +2466,10 @@ case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
 esac
 
 # The name must reach THIS machine, or Let's Encrypt's validation reaches
-# another. ASKED OF DNS ALONE, as Let's Encrypt asks it: `getent -s dns` skips
-# /etc/hosts, where cloud-init writes `127.0.1.1 <this host's name>` and where
-# a line written by hand would hide a missing or wrong A record.
+# another. The A record is ASKED OF DNS ALONE, as Let's Encrypt asks it:
+# `getent -s dns` skips /etc/hosts, where cloud-init writes
+# `127.0.1.1 <this host's name>` and where a line written by hand would hide a
+# missing or wrong A record.
 #
 # IPv4 ONLY (decided 2026-11-24). This deployment is one IPv4 address: the
 # runbook, host-network.md and this script reason about it, and nothing
@@ -2479,8 +2480,12 @@ esac
 # IPv6 error, Boulder va/tlsalpn.go.) The AAAA is asked through Python's
 # getaddrinfo, not `getent ahosts`: glibc's getent sets AI_ADDRCONFIG, which
 # hides every AAAA on a host with no IPv6 address of its own -- exactly the
-# VPS this runbook builds. `|| true`: getent exits 2 for a name with no
-# address, which pipefail would turn into this script dying silently here.
+# VPS this runbook builds. getaddrinfo still reads /etc/hosts before DNS
+# (`hosts: files dns`): cloud-init puts this host's name on no IPv6 line
+# there (its `::1` line is localhost's), so only an IPv6 line added by hand
+# for the name is read as an AAAA, and refused like one. `|| true`: getent
+# exits 2 for a name with no address, which pipefail would turn into this
+# script dying silently here.
 if [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
   if ! command -v getent >/dev/null 2>&1; then
     printf '  note    %s could not be resolved -- getent is not installed\n' "$public_host"
@@ -4563,7 +4568,7 @@ y ninguna línea con `its-agent`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A agent backend/app/core/i18n/es.py backend/app/core/storage.py backend/app/modules/agent_distribution backend/app/services/msi_build.py backend/tests .github/workflows scripts/build_agent.sh deploy/WINDOWS-PUSH.md docs/kernel/wire-protocol/README.md docs/modules/agent-distribution docs/modules/agent/README.md docs/modules/agent/open-questions.md
+git add -A agent backend/app/core/i18n/es.py backend/app/core/storage.py backend/app/modules/agent_distribution backend/app/services/msi_build.py backend/tests .github/workflows scripts/build_agent.sh deploy/WINDOWS-PUSH.md docs/kernel/wire-protocol/README.md docs/modules/agent-distribution docs/modules/agent/README.md docs/modules/agent/open-questions.md docs/modules/backup/agent-engine.md docs/modules/backup/spec-server-backup.md
 git status --short | grep -v '^[MRAD] ' || true
 git commit -m "feat(agent): the agent is novieri-agent on both sides: service, paths, packages, MSI, installer prefix, artefacts"
 ```
@@ -5795,9 +5800,9 @@ name. Platform status's *Off-host backup copy* check turns healthy, and from
 now on alerts when a copy fails or is older than 26 hours.
 ````
 
-Y `/tmp/t9-runbook/readme.py`, que los pone en su sitio:
+Y `/tmp/t9-runbook/readme.py`, que los pone en su sitio (con cuatro comillas invertidas: el texto del paso 8 lleva dentro un cierre de bloque sangrado):
 
-```python
+````python
 """Task 9, Step 3: the runbook for a new VPS. Run from the repository root,
 with the parts written to $PARTS (the plan's Step 3 writes them)."""
 import os
@@ -5882,7 +5887,7 @@ replace(
 )
 readme.write_text(text)
 print("rewrote deploy/README.md")
-```
+````
 
 Run, desde la raíz de la worktree: `PARTS=/tmp/t9-runbook python3 /tmp/t9-runbook/readme.py`
 
@@ -7806,6 +7811,7 @@ Expected (el `ls`): `2`. El ensayo dejó en el host de la sesión, con los coman
 
 **Decisiones de la tarea.**
 - **Los comandos del informe salen del runbook, no se reescriben**: `report_sequence.py` (abajo) lee cada bloque `sh` de los requisitos, del primer arranque, de «After a reboot or a restart» y de la actualización en este VPS, en orden, con la salida que el runbook muestra detrás de cada uno. Así el informe y el runbook no pueden decir cosas distintas, y lo que la Task 12 corrigió llega al informe solo.
+- **Salvo lo que el runbook da como alternativa o solo para un ensayo** (`SKIP`; verificación de la revisión previa, N2, aprobada por el coordinador el 2026-11-24): la secuencia deja fuera la prosa del runbook, así que dos bloques seguidos se leerían como dos pasos. El paso 6 da dos formas de la misma emisión (la interactiva y la que lee el archivo 0600 del 3.4): en orden, se emitiría dos veces, y la primera pide un token sin decir cuál; la secuencia lleva solo la del archivo. El paso 7 da las raíces de *staging* para un ensayo contra Let's Encrypt *staging*: en producción, `check-public-tls.sh --cafile` con ellas se negaría a los tres minutos sobre un certificado bueno; la secuencia no lo lleva. Y «After a reboot» dice entre sus bloques qué hacer con `Sealed false` y con `Sealed true`, como la actualización.
 - **«Toda secuencia empieza por `bao status`» en un host nuevo.** En el primer arranque no hay OpenBao hasta el paso 3.1, que lo arranca y pregunta `bao status` a continuación; un `docker compose exec openbao bao status` antes de eso falla porque el contenedor no existe. El informe lo dice así, en lugar de abrir la secuencia con un comando que falla. Las secuencias de después de un reinicio y de una actualización sí empiezan por él, y la prueba de la Task 9 lo fija.
 - **Lo que solo hace el operador es un paso numerado propio** (`CLAUDE.md`: lo que hay que sustituir no puede confundirse con algo que se pega): el «Paso 0», antes de la secuencia, y en la secuencia cada paso de consola marcado como suyo.
 - **La copia fuera del host es una recomendación, no un paso del primer arranque** (decisión del operador del 2026-11-24): el primer arranque termina con `OFFSITE=none`, y el informe dice el riesgo sin rodeos y da los comandos de la subsección del runbook «The off-host copy, step by step» como pasos opcionales numerados, aparte de la secuencia.
@@ -7829,11 +7835,13 @@ cannot say different things. Not committed.
 
 Every `sh` block of "Prerequisites: a new VPS", "First boot", "After a reboot
 or a restart" and the VPS upgrade, in order, under its heading, each followed
-by the output the runbook shows right after it (the check). A heading with no
-`sh` block is a step done in the console or by hand: it is listed, with the
-runbook's first paragraph, as the operator's. Then, apart and marked as
-optional, the whole of "The off-host copy, step by step", as the runbook
-words it.
+by the output the runbook shows right after it (the check) -- except the
+blocks in SKIP, which the runbook offers as an alternative or for a rehearsal
+only. A heading with no `sh` block is a step done in the console or by hand:
+it is listed, with the runbook's first paragraph, as the operator's. The
+after-a-reboot and upgrade sequences say, between their blocks, what
+`Sealed true` and `Sealed false` mean. Then, apart and marked as optional, the
+whole of "The off-host copy, step by step", as the runbook words it.
 """
 
 import re
@@ -7866,6 +7874,21 @@ def steps(body: str) -> list[tuple[str, str]]:
 
 FENCE = re.compile(r"```(sh|text|json)?\n(.*?)```", re.DOTALL)
 
+#: Blocks the runbook offers as an ALTERNATIVE, or for a REHEARSAL only. The
+#: README's prose says so; this sequence drops the prose, so pasted in order
+#: they would run twice (step 6: the interactive form of the same issuance; the
+#: sequence keeps the one that reads step 3.4's 0600 file) or refuse after three
+#: minutes (step 7: Let's Encrypt staging's roots, which do not chain a
+#: production certificate, and --cafile replaces the system's roots).
+SKIP = (
+    'docker compose run --rm --no-deps \\\n  -v "$PWD/scripts/issue-gateway-cert.py',
+    "curl -fsS https://letsencrypt.org/certs/staging/",
+)
+#: The interactive form's prompt, the first line of the check step 6 shows:
+#: the form the sequence keeps reads the token from stdin and never prints it
+#: (issue-gateway-cert.py asks only when stdin is a terminal).
+PROMPT_ONLY = "OpenBao gateway-issuer token:\n"
+
 
 def render(title: str, body: str, out: list[str], n: list[int]) -> None:
     fences = list(FENCE.finditer(body))
@@ -7876,14 +7899,23 @@ def render(title: str, body: str, out: list[str], n: list[int]) -> None:
         first = next((p.strip() for p in body.strip().split("\n\n") if p.strip()), "")
         out.append("Lo hace el operador (consola o a mano): " + " ".join(first.split()) + "\n")
         return
+    carried = None
     for index, fence in enumerate(fences):
         if fence.group(1) != "sh":
             continue
-        out.append("```sh\n" + fence.group(2) + "```\n")
         following = fences[index + 1] if index + 1 < len(fences) else None
         between = body[fence.end() : following.start()] if following else ""
+        check = None
         if following is not None and following.group(1) in (None, "json") and not between.strip():
-            out.append("Comprobación — el runbook muestra:\n\n```\n" + following.group(2) + "```\n")
+            check = following.group(2)
+        if fence.group(2).startswith(SKIP):
+            # Its check, if any, is the next block's: the same act, done once.
+            carried = check.replace(PROMPT_ONLY, "", 1) if check else None
+            continue
+        out.append("```sh\n" + fence.group(2) + "```\n")
+        check, carried = check or carried, None
+        if check:
+            out.append("Comprobación — el runbook muestra:\n\n```\n" + check + "```\n")
 
 
 out: list[str] = []
@@ -7894,7 +7926,20 @@ for title, body in steps(section("## Prerequisites: a new VPS (Ubuntu Server 24.
 for title, body in steps(section("## First boot\n")):
     render(title, body, out, n)
 out.append("\n### Después de un reinicio\n")
-render("After a reboot or a restart", section("## After a reboot or a restart\n"), out, n)
+reboot = [
+    f.group(2)
+    for f in FENCE.finditer(section("## After a reboot or a restart\n"))
+    if f.group(1) == "sh"
+]
+assert len(reboot) == 3, f"After a reboot has {len(reboot)} sh blocks, not 3: read it again"
+n[0] += 1
+out.append(f"**{n[0]}. After a reboot or a restart**\n")
+out.append("```sh\n" + reboot[0] + "```\n")
+out.append("Si dice `Sealed false`, salta al último bloque. Si dice `Sealed true`, las tres "
+           "partes, cada una de un custodio distinto (GO-LIVE.md §4):\n")
+out.append("```sh\n" + reboot[1] + "```\n")
+out.append("Con `Sealed false`:\n")
+out.append("```sh\n" + reboot[2] + "```\n")
 upgrade = section("## Upgrading an existing deployment\n")
 marker = "**On the VPS this runbook builds**"
 first = FENCE.search(upgrade, upgrade.index(marker))
@@ -7909,9 +7954,9 @@ out.append(section("### The off-host copy, step by step\n", stop="\n## ").strip(
 print("\n".join(out))
 ```
 
-Run: `python3 "$S/report_sequence.py" deploy/README.md > "$S/sequence.md" && grep -c '^```sh' "$S/sequence.md"`
+Run: `python3 "$S/report_sequence.py" deploy/README.md > "$S/sequence.md" && grep -c '^```sh' "$S/sequence.md" && grep -c 'letsencrypt.org/certs/staging' "$S/sequence.md"; grep -c 'gateway-issuer.token | docker compose run' "$S/sequence.md"`
 
-Expected: `66` (medido el 2026-11-24 sobre el README de la Task 9 en una copia: 53 de los requisitos y el primer arranque —con el 6b—, 3 de «After a reboot», 2 de la actualización y 8 de la copia fuera del host; la Task 12 puede haber añadido o partido alguno). Cada bloque de `$S/sequence.md` es un bloque del README, sin cambiar un carácter.
+Expected: `64`, `0` y `1` (medido el 2026-11-24 sobre el README de la Task 9 en una copia: 51 de los requisitos y el primer arranque —con el 6b—, 3 de «After a reboot», 2 de la actualización y 8 de la copia fuera del host; la Task 12 puede haber añadido o partido alguno). Los dos bloques de `SKIP` no están: la forma interactiva del paso 6 (la secuencia lleva la que lee el archivo 0600 del 3.4, con la comprobación del runbook sin la línea de la pregunta) y las raíces de *staging* del paso 7, que en producción se negarían a los tres minutos (verificación de la revisión previa, N2). Cada bloque de `$S/sequence.md` es un bloque del README, sin cambiar un carácter.
 
 - [ ] **Step 3: El informe**
 
@@ -7930,7 +7975,7 @@ Al coordinador, en este orden:
    9. Después del primer arranque, si se quiere: la app de Entra (`deploy/README.md`, «Sign in with Microsoft»; el certificado que se sube a Entra se descarga como `novieri-sign-in.cer`) y el relé SMTP (**Settings → Email**; el correo de prueba va a `nombre+novieri-test@dominio`).
    10. En el calendario, tres fechas que nada recuerda solo: la renovación del certificado de Entra (360 días; la pestaña avisa 30 días antes), y la rotación del token `its-app` (`ITS_OPENBAO_TOKEN`) y del token `gateway-issuer`, los dos de 10 años (GO-LIVE §5: «nothing in the stack renews either»).
    11. Cuando el nuevo funcione: apagar `itms.toeshee.com` (B1). Nada se migra desde él (P7).
-3. **La secuencia completa del primer arranque**, el contenido de `$S/sequence.md` hasta «Después de un reinicio», copiable, en orden, sin marcadores, con la comprobación de cada paso; con la nota de la decisión de arriba sobre `bao status` en un host nuevo, y con lo que el CLAUDE.md pide que se diga aunque no haga nada: **este proyecto no añade ninguna migración**, y aun así `migrate` corre como dependencia de `api` en cada `up -d` (en un host nuevo, todas desde `0001`); **las claves de `.env` nuevas** (`ITS_PUBLIC_HOST`, `ITS_ACME_EMAIL`, `ITS_ACME_CA_SERVER`) las escribe `new-env.sh`, y en un host nuevo todas las claves son nuevas.
+3. **La secuencia completa del primer arranque**, el contenido de `$S/sequence.md` hasta «Después de un reinicio», copiable, en orden, sin marcadores, con la comprobación de cada paso; con la nota de la decisión de arriba sobre `bao status` en un host nuevo; con una línea que diga que el paso 6 va solo en su forma sin pregunta (lee el token del archivo 0600 del 3.4) y que las raíces de *staging* del paso 7 son de un ensayo y no están; y con lo que el CLAUDE.md pide que se diga aunque no haga nada: **este proyecto no añade ninguna migración**, y aun así `migrate` corre como dependencia de `api` en cada `up -d` (en un host nuevo, todas desde `0001`); **las claves de `.env` nuevas** (`ITS_PUBLIC_HOST`, `ITS_ACME_EMAIL`, `ITS_ACME_CA_SERVER`) las escribe `new-env.sh`, y en un host nuevo todas las claves son nuevas.
 4. **Después de un reinicio y una actualización**, las dos de `$S/sequence.md`, las dos empezando por `docker compose exec openbao bao status` en un bloque propio, con lo que significa `Sealed true` (las tres partes, de tres custodios) y que un OpenBao sellado hace que `up -d` se quede esperando (GO-LIVE §4).
 5. **La vuelta atrás, como es:** en este host no hay etiqueta anterior. `build-images.sh` lista una sola, la que corre; hasta la primera copia del paso 12 no hay vuelta atrás ninguna (empezar de nuevo es `docker compose down -v`, borrar `.env` y otro primer arranque, que pide otro certificado: 5 por semana). Desde el paso 12, la vuelta atrás es restaurar esa copia (`docs/07-backup-restore.md` §3). En cada actualización posterior, `deploy.sh` termina diciendo la suya: la etiqueta anterior si las migraciones lo permiten, o la copia que tomó. **Y esa copia está en el mismo VPS**: si se pierde la máquina o su disco, se pierden con ella (parte 7).
 6. **Lo verificado y lo no:**
@@ -7988,8 +8033,8 @@ Al coordinador, en este orden:
 | P4-B-12 | se quedan los prefijos del *bucket* de la copia fuera del host (`.itms-probe/`, `OFFSITE_S3_PREFIX=itms-platform`) y `scripts/itms_recover.py` con su `--help` («itms-recover: read the off-site backup copy without the ITMS server») | son ubicaciones guardadas en el *bucket* del operador (cambiarlas deja huérfanas las copias de un destino ya configurado) y su herramienta de recuperación, que GO-LIVE §8 manda correr por ese nombre; no las ve un cliente, y §1.1 limita «ITMS» a `backend/`, `agent/` y `deploy/`. Resolución del coordinador del 2026-11-24. (`scripts/smoke_site_server.py:24,69,70` nombra `/home/user/Toeshee-RMS/backend`: una ruta rota de antes, no un nombre de marca; fuera de alcance) | — |
 | P4-B-13 | la raíz de los montajes de instantáneas pasa a `/var/lib/novieri-agent-snap`, hermana del directorio de datos, no dentro | dentro, la desinstalación (`RemoveAll` del directorio de datos) bajaría a un montaje de solo lectura y `ReadWritePaths` cubriría lo que hoy no cubre: un cambio de conducta hecho por una regla de texto | Task 8 |
 | P4-B-14 | se renombran las minúsculas que ve un cliente o un tercero: `itms:` → `novieri-agent:` (comando de instalación), `@itms-<tag>` → `@novieri-snap-<tag>` (ZFS), `.itms-snap-` → `.novieri-snap-` (btrfs), `.itms-restore-*` → `.novieri-restore-*`, `itms-sign-in-<id>` → `novieri-sign-in-<id>` (Entra), `+itms-test` → `+novieri-test` | B4: «lo de los equipos»; resolución del coordinador del 2026-11-24, con los nombres de Entra y del correo comunes a los dos planes. El de ZFS es `novieri-snap-` y no `novieri-`: el barrido de huérfanos borra lo que empiece por el prefijo, y uno más estrecho es más seguro | Tasks 1 y 8 |
-| P4-B-15 | solo IPv4; `preflight.sh` niega cualquier `AAAA`, preguntando al DNS (no a `/etc/hosts`) y sin `AI_ADDRCONFIG` | el despliegue es de una IPv4 y nada comprueba el 443 ni el 8443 por IPv6; **no** porque Let's Encrypt no vuelva al IPv4, que vuelve ante cualquier error [E5] | Tasks 4 y 9 |
-| P4-B-16 | el correo de ACME sigue obligatorio, y lo exige compose (`${ITS_ACME_EMAIL:?…}`), no Traefik | resolución del coordinador; Traefik arranca sin él (medido); Let's Encrypt ya no guarda la dirección ni avisa [E7] | Tasks 3, 4 y 9 |
+| P4-B-15 | solo IPv4; `preflight.sh` niega cualquier `AAAA`: el `A` lo pregunta al DNS solo (no a `/etc/hosts`), y el `AAAA` por `getaddrinfo` sin `AI_ADDRCONFIG` (que lee antes `/etc/hosts`, donde cloud-init no pone el nombre en ninguna línea IPv6) | el despliegue es de una IPv4 y nada comprueba el 443 ni el 8443 por IPv6; **no** porque Let's Encrypt no vuelva al IPv4, que vuelve ante cualquier error [E5] | Tasks 4 y 9 |
+| P4-B-16 | el correo de ACME sigue obligatorio, y lo exige compose (`${ITS_ACME_EMAIL:?…}`), no Traefik; la pregunta de `new-env.sh` lo llama «account contact» y dice que no se guarda | resolución del coordinador; Traefik arranca sin él (medido); Let's Encrypt ya no guarda la dirección ni avisa [E7] | Tasks 3, 4 y 9 |
 | P4-B-17 | `check-public-tls.sh` se niega con menos de 28 días; el informe recomienda además un monitor externo | Traefik renueva a 30 días y mira cada 24 h [E16]: menos de 28 es una renovación que falla, y nada más lo diría [E7] | Tasks 4, 9 y 13 |
 | P4-B-18 | la copia fuera del host es una recomendación con sus comandos en el runbook y el informe, no un paso del primer arranque | decisión del operador del 2026-11-24: el destino y su clave solo los tiene él; el riesgo se dice sin rodeos | Tasks 9 y 13 |
 | P4-B-19 | el temporizador de renovación del certificado del gateway es un paso numerado del primer arranque (6b) | el certificado es de 365 días y todos los agentes lo marcan; en prosa, el informe no lo copiaba | Tasks 9 y 12 |
@@ -8300,7 +8345,7 @@ strings are the console redesign's (project 3).
 - **D, la verificación:** el ensayo del primer arranque entero aquí (Task 12); el job `deploy` contra Pebble (Task 7) y con el agente compilado, el token sin navegador, el 8443, el `hello` firmado y la cadena (Task 10), cada uno rojo antes que verde, y los dos **corridos de verdad en esta sesión** al escribir el plan.
 - **E, los pendientes de §6:** ocho de nueve (Tasks 2, 3, 5 y 6), cada uno con su prueba; el noveno (`app_session`) lo quitó el coordinador el 2026-11-24 y el informe lo dice (Task 13).
 - **F, el informe:** Task 13, con las secuencias leídas del runbook fusionado, el paso del operador numerado y aparte, la verdad sobre la vuelta atrás, el riesgo de la copia en el mismo VPS con la copia fuera del host como pasos opcionales, y el monitor externo del certificado.
-- **G, la revisión previa del 2026-11-24** (`.git/sdd/preflight/p4-review-{renames,deploy,ci}.md`, y las decisiones del operador y del coordinador de `.git/sdd/decisiones-p34.md`): cada arreglo está dentro de la tarea que lo necesita, no solo aquí; el detalle por hallazgo, en `.git/sdd/preflight/p4-fix-report.md`.
+- **G, la revisión previa del 2026-11-24** (`.git/sdd/preflight/p4-review-{renames,deploy,ci}.md`, y las decisiones del operador y del coordinador de `.git/sdd/decisiones-p34.md`): cada arreglo está dentro de la tarea que lo necesita, no solo aquí; el detalle por hallazgo, en `.git/sdd/preflight/p4-fix-report.md`. **Y su verificación** (`.git/sdd/preflight/p4-verify.md`, con lo que el coordinador aprobó el 2026-11-24): N1, los dos documentos de copias en el `git add` de la Task 8; N2, el `SKIP` de `report_sequence.py` (Task 13: 64 bloques, ninguno de *staging*, el paso 6 en su forma sin pregunta); N3, «After a reboot» con su condición en el informe; N4, el bloque de `readme.py` con cuatro comillas invertidas (Task 9); N5, el comentario de `preflight.sh` y la pregunta de `new-env.sh` (Task 4).
 
 **Marcadores.** El plan no tiene `TBD`, `TODO` ni «rellenar después»; los `…` que aparecen están dentro de salidas esperadas (un número de serie, una fecha), nunca en un comando. En los comandos que el operador pega no hay ningún `<…>`: `test_runbook_first_boot.py` lo comprueba sobre el runbook, y el informe sale de él.
 
@@ -8308,7 +8353,7 @@ strings are the console redesign's (project 3).
 
 **Lo comprobado al escribir el plan** (copias de `1bc0e5e` en el scratchpad, nunca el árbol del repositorio):
 - Tasks 1–8: cada una sola sobre la base, con los números de sus Steps. **Medidas de nuevo el 2026-11-24, con los arreglos de la revisión previa:** la 1 (`28 failed, 217 passed` → `488 passed`, 16 archivos), la 4 (`48 failed, 42 passed` → `172 passed`), la 5 (recontada: `132`), la 7 (`51 passed`, `mcp_flow.py` limpio con `ruff`), y la 8 sobre las 1, 3, 4 y 7 fusionadas (`7 failed` → `381 passed` con `wixl` y `msitools`, `147 files changed`, `go test` 38 `ok`, `gofmt` y `go vet` limpios); `git merge` de la 4 y la 3 une su `.gitignore` sin conflicto.
-- Task 9 sobre las oleadas 1 y 2 (medida de nuevo el 2026-11-24): rojo (`9 failed`), las cuatro piezas del guion aplicadas en orden con cada ancla una sola vez, `132 passed`, cero nombres viejos en los cuatro documentos, y los encabezados del primer arranque con el 6b; `report_sequence.py` (Task 13) saca 66 bloques de ese README.
+- Task 9 sobre las oleadas 1 y 2 (medida de nuevo el 2026-11-24): rojo (`9 failed`), las cuatro piezas del guion aplicadas en orden con cada ancla una sola vez, `132 passed`, cero nombres viejos en los cuatro documentos, y los encabezados del primer arranque con el 6b; `report_sequence.py` (Task 13) saca 64 bloques de ese README (66 menos los dos de `SKIP`: la forma interactiva del paso 6 y las raíces de *staging* del 7; verificación de la revisión previa, N2), ninguno de *staging*.
 - Task 10 sobre la oleada 1 y la 9: rojo y verde de las pruebas (`64 passed`), y el **job `deploy` entero** (salvo sus dos pasos de copia) corrido aquí con el guion de la Task 7: verde, rojo sin gateway y —en la revisión previa— rojo con la clave fijada cambiada (`refused`, `bad_signature`); el guion de ese rojo, comprobado el 2026-11-24, deja un `ci.yml` que YAML lee y un `python3 -c` que compila. La primera ejecución destapó el error de orden de la cadena (`ts` en segundos), corregido en la tarea con su prueba.
 - Task 11 sobre el árbol con las Tasks 1, 3, 4, 7, 8, 9 y 10: `31 passed`; 746 sobre la base (2026-11-24, sin la cabecera en `KEPT`); el nombre plantado, rojo; `115 passed` con las vecinas; el host viejo, solo en las dos pruebas que lo niegan.
 - **No se ha ejecutado entero el ensayo de la Task 12**: es la tarea. Lo que ese ensayo arriesga más (el certificado por ACME, la inscripción y el 8443, la firma del `hello`, el 503) ya corrió en el job de la CI de esta sesión; el script de verificación de la cadena del paso 11e es el de `docs/07-backup-restore.md`, carácter por carácter.
