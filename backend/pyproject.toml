@@ -18,7 +18,10 @@ dependencies = [
     "cryptography>=42",
     "httpx>=0.27",
     "redis>=5",
-    "celery>=5.4",
+    # The broker is Redis (app/worker.py), and kombu declares the `packaging`
+    # its Redis transport imports only under this extra: without it the
+    # worker dies at start (backend/tests/test_celery_broker_dependency.py).
+    "celery[redis]>=5.4",
     "pyjwt[crypto]>=2.8",
     "boto3>=1.34",
     "blake3>=0.4",

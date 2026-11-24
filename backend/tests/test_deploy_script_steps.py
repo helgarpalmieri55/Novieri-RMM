@@ -910,3 +910,28 @@ def test_the_verify_step_checks_the_public_host_and_its_certificate() -> None:
         branch,
         re.S | re.M,
     ), branch
+
+
+def _api_probe(tmp_path: Path, code: str, rc: int) -> str:
+    """deploy.sh's 401 probe, from `CODE=` to the line before its `if`, run
+    with a `curl` that prints CODE as `-w '%{http_code}'` does and exits RC."""
+    lines = _script().splitlines()
+    start = next(i for i, x in enumerate(lines) if x.startswith('CODE="$(curl '))
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith('if [ "$CODE"'))
+    fake = tmp_path / f"bin-{code or 'none'}-{rc}"
+    fake.mkdir()
+    (fake / "curl").write_text(f"#!/bin/sh\nprintf '%s' '{code}'\nexit {rc}\n")
+    (fake / "curl").chmod(0o755)
+    probe = "\n".join(lines[start:end])
+    run = _run_bash(f'PATH="{fake}:$PATH"\nPUBLIC_HOST=rmm.novieri.com\n{probe}\nprintf %s "$CODE"')
+    assert run.returncode == 0, run.stderr
+    return run.stdout
+
+
+def test_the_api_probe_reports_one_code(tmp_path: Path) -> None:
+    """The first-boot rehearsal of 2026-11-24 (plan 2026-11-23 Task 12, F11):
+    on a TLS failure curl prints `000` for `%{http_code}` AND exits non-zero,
+    so `|| echo 000` made the warning read `API returned 000000`."""
+    assert _api_probe(tmp_path, "000", 60) == "000"  # TLS: the certificate does not verify
+    assert _api_probe(tmp_path, "401", 0) == "401"
+    assert _api_probe(tmp_path, "", 127) == "000"  # nothing printed at all

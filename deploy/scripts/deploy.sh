@@ -705,7 +705,11 @@ fi
 # The host this deployment answers on, from .env (design 2026-11-23 §3):
 # until 2026-11-23 this line named one deployment's host for everybody.
 PUBLIC_HOST="$(sed -n 's/^ITS_PUBLIC_HOST=//p' .env | tail -1)"
-CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${PUBLIC_HOST:-localhost}/api/v1/devices" || echo 000)"
+# One code: on a refused connection or a certificate that does not verify,
+# curl prints `000` for %{http_code} AND exits non-zero, so `|| echo 000`
+# printed `000000` (the first-boot rehearsal of 2026-11-24, finding F11).
+CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${PUBLIC_HOST:-localhost}/api/v1/devices" || true)"
+CODE="${CODE:-000}"
 if [ "$CODE" = "401" ]; then
     note "API answers 401 unauthenticated — routing and auth are up."
 else

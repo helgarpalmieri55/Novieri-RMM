@@ -16,12 +16,85 @@ certificate on `:443` is Let's Encrypt's, which Traefik asks for and renews
 (ACME, TLS-ALPN-01); nothing is copied into `deploy/certs/` any more. The
 commands that used a bearer token run inside the stack, or in the console.
 
-⚠ **Rehearsed, not yet run on the VPS.** The plan of 2026-11-23 (Task 12)
-runs this whole First boot in a container, with Let's Encrypt replaced by
-Pebble, its own test CA, and records here what each step printed; until that
-task has run, the outputs shown are the ones measured by the tasks that wrote
-the scripts. Never run by this repository: a real VPS, the real DNS, Let's
-Encrypt itself, ufw, the Entra app and an SMTP relay.
+⚠ **Rehearsed on 2026-11-24, not yet run on the VPS.** The whole First boot
+below was run block by block on 2026-11-24 (plan of 2026-11-23, Task 12), from
+`/opt/it-suite/deploy` of a copy of this repository, in a container with Docker
+Engine 29.9.3 and Compose 5.7.1; then [After a reboot or a
+restart](#after-a-reboot-or-a-restart), with OpenBao restarted and sealed, and
+the upgrade's `./scripts/deploy.sh --plan`. Every block ran as written except
+for these substitutions:
+
+- **D1, Pebble for Let's Encrypt:** `COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml`
+  and `PEBBLE_MINICA` in every command's environment, and `--acme-ca-server
+  https://pebble:14000/dir` in step 1.
+- **D2, the `A` record:** `rmm.novieri.com` in `/etc/hosts`, at the container's
+  own address. Step 1c asks the public DNS, so its one refusal,
+  `rmm.novieri.com does not resolve to an IPv4 address`, was expected.
+- **D2b, the container's HTTPS proxy:** `rmm.novieri.com` added to `no_proxy`.
+- **D3:** `--acme-email` given to step 1, which had no terminal to ask on.
+- **D4, what you type or paste** reached the same commands on stdin: the three
+  shares through `bao write sys/unseal key=-`, the root token to `sh -c` with
+  3.4's commands in place of the interactive shell, and the tokens to 3.4's
+  `tee` and to the `read` prompts of 3.5 and 11c, each `read` ended by a
+  newline as an Enter ends it. What 3.2 and 8 print on screen (the shares, the
+  root token, the install code) went to `0600` files instead.
+- **D5, the trust root:** Pebble's root for `check-public-tls.sh --cafile` and
+  for the `curl`s, and in 11c's agent root store (the system's roots plus
+  Pebble's). Step 7's staging-roots block was not run.
+- **D6, the console** (steps 8, 9, 11b and 11d): a script sending the requests
+  the console's pages send, through Traefik on `:443`. Its 11b token was one
+  use, for the Principal site, valid one hour.
+- **D7, no systemd:** step 6b's and step 12's services ran their `ExecStart`
+  once by hand; `install-backup-timer.sh` ran with `ITS_NO_SYSTEMCTL=1`; no
+  `systemctl`, no `journalctl`.
+- **D8:** `sudo`, as root.
+- **D9:** the copy had no remote, and `deploy.sh --plan` pulls too; for it the
+  copy was put on a local branch tracking a local upstream.
+- **The base images** `python:3.12-slim`, `node:22-slim` and
+  `golang:1.24-bookworm` carried the rehearsal container's HTTPS-proxy CA (in
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and the like, which reach the images
+  built from them): `itsuite/backend`, `itsuite/web` and the agent were built
+  FROM those. Nothing built here was kept.
+
+**Not rehearsed:** P1, P2 (ufw), P3, P5 and P6 (the account, the firewall, the
+updates, installing Docker, the deploy key and the clone are the VPS's); the
+real DNS and Let's Encrypt itself; the systemd timers (the backup, the drill,
+the gateway certificate); step 7's check of `:8443` from another computer;
+the off-host copy (no destination); and the `git pull` of an upgrade from a
+real remote. Never run by this repository: a real VPS, the Entra app, an SMTP
+relay, and a Windows or macOS endpoint.
+
+What each step printed, against what this runbook shows:
+
+| Step | Printed |
+|---|---|
+| P4 | nothing to compare: a container has no systemd, so `timedatectl` cannot run |
+| 1 | as shown, with Pebble as the CA |
+| 1b | **`Recent tags:` said `(none yet)` beside two tags.** Fixed in `build-images.sh` (row 17 of [What was broken](#what-was-broken-and-how-you-would-recognise-it)) |
+| 1c | as shown, with D2's refusal; the closing lines it prints are added |
+| 2, 3.2, 3.3, 3.5, 3.6 | as shown |
+| 3.1 | as shown, but `bao status` exits 2 while sealed; the text is corrected |
+| 3.4 | as shown, but OpenBao prints the token fields as `["default" "its-app"]` and `87600h`; corrected |
+| 4 | `0248`, the highest revision file; the number shown is updated |
+| 4b, 5, 6 | as shown |
+| 6b | both units written; the service's command issued a certificate with a new serial |
+| 7 | the gateway reports `(healthy)`, and so does the worker once it starts (both corrected), and **`worker` and `backup-replicator` restarted for ever** (row 15). Certificate, `acme.json`, `:8443` and limits as shown |
+| 8, 9, 10, 11a, 11b, 11d, 11e, 11f | as shown |
+| 11c | as shown; each log line starts with `time=…` (added) |
+| 12 | **the first backup failed** (row 16) |
+| After a reboot | as shown: `Sealed true`, three shares, `Sealed false`, the table, the certificate, `401`; `503` while the api was stopped |
+| Upgrade | `--plan` pulls (the text said it changes nothing; corrected); right after first boot it printed `Already deployed` |
+
+The three defects (rows 15 to 17) are fixed in this repository, and with the
+fixes the same stack was upgraded through the runbook's upgrade for this VPS,
+in the rehearsal container (`git -C .. pull --ff-only`, `./scripts/deploy.sh
+--plan`, `./scripts/deploy.sh`): `worker` up and healthy, `backup-replicator`
+up, `Recent tags:` listing three tags, and step 12's backup succeeding, with
+the bucket and without it. As on any rehearsal without a public CA,
+`deploy.sh` ended `Deployed with warnings` (exit status 1): the API probe
+(`API returned 000000`, two codes run together, which deploy.sh now prints as
+`API returned 000`), the certificate refusal after `--wait 60`, and, with no
+systemd, `no scheduled platform backup`.
 
 Before 2026-11-23, every command of the First boot of the time was executed,
 top to bottom, from empty volumes, against Docker Engine 29.3.1 / Compose
@@ -374,7 +447,7 @@ browser trusts and whose limits are far higher:
 `./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
 On a staging rehearsal, step 7's check needs the staging roots, and a later
 `./scripts/deploy.sh` prints **two** warnings and ends `Deployed with
-warnings` (exit status 1): `API returned 000000 (expected 401)`, because its
+warnings` (exit status 1): `API returned 000 (expected 401)`, because its
 curl probe of `:443` has no staging CA, and the certificate refusal after its
 `--wait 60`, which has none either. Everything is up; those lines are the
 probes, not a failure.
@@ -402,6 +475,9 @@ it just built. **That list is the rollback target list, and there is no earlier
 entry:** until step 12 has taken the first backup, a new host has no way back
 but starting over (see [Rolling back a deployment](#rolling-back-a-deployment)).
 The second line writes the tag into `.env`, deleting any earlier line first.
+(Until 2026-11-24 this list read `(none yet)` whatever tags existed: row 17 of
+[What was broken](#what-was-broken-and-how-you-would-recognise-it). A
+`(none yet)` printed before then said nothing about a host's tags.)
 
 ### Step 1c — The pre-flight
 
@@ -426,6 +502,10 @@ ends:
   ok      Docker Engine …
   ok      Docker Compose …
   ok      .env is gitignored
+
+No known-bad state found. This does not mean the deployment is correct --
+work through GO-LIVE.md §2 (the first administrator), §4 (OpenBao seal), §5 (gateway cert)
+and §6 (back these up) before anything real touches it.
 ```
 
 Any `REFUSE` names its fix; correct it and run the pre-flight again before
@@ -482,7 +562,9 @@ Seal Type          shamir
 Initialized        false
 ```
 
-`Initialized false` and a clean exit is correct. (The `bao` CLI defaults to
+`Initialized false` (and, below these lines, `Sealed true`) is correct. Its
+exit status is 2, not 0: `bao status` exits 2 for any sealed vault, initialised
+or not. (The `bao` CLI defaults to
 `https://`, but the listener is plaintext inside the compose network only;
 `BAO_ADDR=http://127.0.0.1:8200` is set on the service so these commands work
 as written. Without it every one of them fails with `http: server gave HTTP
@@ -586,8 +668,8 @@ Success! Tuned the auth method at: token/
 ```
 
 and the two `token create` commands each print a token — the first with
-`token_policies [default its-app]`, the second with
-`token_policies [default gateway-issuer]` — both `token_duration 315360000s`.
+`token_policies ["default" "its-app"]`, the second with
+`token_policies ["default" "gateway-issuer"]` — both `token_duration 87600h`.
 
 The `auth tune` is required: without it the default 32-day system max TTL caps
 the tokens, and the entire platform stops signing jobs a month after go-live.
@@ -720,12 +802,13 @@ docker compose exec -T postgres \
 ```
 
 ```
-0079
+0248
 ```
 
 That must equal the highest file in `backend/migrations/versions/`, and it is
 the one number in this runbook that is stale the moment it is written. (The
-first-boot run reached `0048`; the chain is at `0079` as of 2026-08-26 —
+first-boot run reached `0048`; the chain was at `0079` on 2026-08-26, and at
+`0248` when this runbook was rehearsed on 2026-11-24 —
 **check the tree you pulled** rather than trusting either number. `ls
 backend/migrations/versions/ | sort | tail -1` is the authority.)
 
@@ -912,7 +995,7 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 SERVICE             STATUS
 api                 Up … (healthy)
 backup-replicator   Up …
-gateway             Up …
+gateway             Up … (healthy)
 migrate             Exited (0) …
 minio               Up … (healthy)
 openbao             Up … (healthy)
@@ -922,7 +1005,7 @@ postgres-grants     Exited (0) …
 redis               Up …
 traefik             Up …
 web                 Up … (healthy)
-worker              Up …
+worker              Up … (healthy)
 ```
 
 The three `Exited (0)` services are the one-shot jobs; that is success.
@@ -956,7 +1039,7 @@ of another machine). Fix the cause and `docker compose restart traefik`.
 On a **rehearsal against Let's Encrypt staging** the check refuses by design:
 staging's roots are in no trust store. `deploy.sh` has no such CA either, so a
 rehearsal's `deploy.sh` prints two warnings, the API probe (`API returned
-000000 (expected 401)`) and the certificate refusal after `--wait 60`, and
+000 (expected 401)`) and the certificate refusal after `--wait 60`, and
 ends `Deployed with warnings` with exit status 1 although everything is up.
 Give the check the roots (the four Let's Encrypt lists on its staging page):
 
@@ -1174,10 +1257,10 @@ docker logs smoke-agent 2>&1 | grep -E 'starting|enrolling|enrolled|gateway conn
 ```
 
 ```
-level=INFO msg="novieri-agent starting" version=dev data_dir=/var/lib/novieri-agent enrolled=false
-level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1 hostname=… os_family=linux
-level=INFO msg=enrolled device_id=… gateway_url=wss://rmm.novieri.com:8443/agent cert_not_after=…
-level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
+time=… level=INFO msg="novieri-agent starting" version=dev data_dir=/var/lib/novieri-agent enrolled=false
+time=… level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1 hostname=… os_family=linux via_install_link=false
+time=… level=INFO msg=enrolled device_id=… gateway_url=wss://rmm.novieri.com:8443/agent cert_not_after=…
+time=… level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
 ```
 
 `enrolled` then `gateway connected` is the whole handshake: the CSR signed by
@@ -1282,7 +1365,11 @@ journalctl -u its-platform-backup.service --no-pager -n 20
 sudo cat /var/lib/it-suite/backup/last-success
 ```
 
-The last line prints the time of the backup just taken. From now on one runs
+The last line prints the time of the backup just taken. Its objects line says
+how many files the bucket held; if nothing has stored an object yet (the
+backup replicator creates the bucket within a minute of step 7), it says `the
+bucket it-suite does not exist yet (nothing has been stored): nothing to
+mirror`, and the backup still succeeds. From now on one runs
 every night at 02:30 ([Platform
 backups](#platform-backups-nightly-off-host-and-a-monthly-drill)). **Until this
 step, a new host has no way back at all**: `build-images.sh` listed one tag
@@ -2686,7 +2773,8 @@ unseal lines are not needed.
 against what the *running image* was built from, and runs only the steps that
 change actually needs — building `web` alone for a frontend release, running
 `migrate` only when a new revision file appeared, and so on. Run
-`./scripts/deploy.sh --plan` first to see the decision without acting on it.
+`./scripts/deploy.sh --plan` first to see the decision before acting on it:
+it pulls too, and changes nothing else.
 
 **Any other existing host** — one whose `.env` predates the console's host and
 ACME keys — needs both before the first `docker compose` command of any
@@ -2736,7 +2824,8 @@ switched off, do not `git pull` or run `deploy.sh` there from this `main`: its
 refuses to start, and with them added by hand Traefik would stop serving the
 certificate copied there and ask Let's Encrypt for one.
 
-`--plan` shows what the upgrade will run and changes nothing; `deploy.sh` then
+`--plan` pulls as well (after the line above, a no-op) and shows what the
+upgrade will run, without running any of it; `deploy.sh` then
 takes a backup, builds the images tagged with the new commit, migrates (`migrate` also runs on every
 `up -d`), restarts what changed, and verifies: the tag is HEAD, the API answers
 `401`, and the certificate on `:443` passes `check-public-tls.sh`. It ends by
@@ -3437,7 +3526,9 @@ boot cannot surface, because it breaks on the *endpoint* rather than on this
 host. #13 and #14 came from the first deploy that reached a **browser**: both
 sit on the login path, both had been present since the beginning, and neither
 is visible to any server-side test — which is why step 8 carried a
-"no browser session, no login" marker for as long as it did. They are listed because the symptoms are unhelpful and you will meet them
+"no browser session, no login" marker for as long as it did. #15 to #17 came
+from the first-boot rehearsal of 2026-11-24, which ran this runbook against
+images built that day. They are listed because the symptoms are unhelpful and you will meet them
 again if you pin different versions.
 
 Rows 8, 9, 13 and 14 describe the identity provider this platform used until
@@ -3460,6 +3551,9 @@ went wrong, and none of them can happen on a release after it.
 | 12 | an `app.deploy` job dispatches, reaches the endpoint, and fails at the artifact download with a name-resolution error; nothing in the control plane looks wrong | MinIO had **no published port and no Traefik router**, and presigned URLs were signed against `ITS_S3_ENDPOINT` (`http://minio:9000`) — a Docker-internal name. Every grant was correctly scoped, correctly time-bounded and unreachable | a `minio` router on `:443` matching `/<bucket>/`, and a separate `ITS_S3_PUBLIC_ENDPOINT` used only for signing (required in production). See "Object storage on :443" |
 | 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server. (Since own authentication phase 1 the console has no OIDC client at all -- `lib/auth.ts` is gone -- and fetches no discovery document) |
 | 14 | Keycloak answers **`Invalid parameter: redirect_uri`** on a correctly-formed authorization request | the `it-suite-web` client shipped `redirectUris: ["https://*/auth/callback"]`. Keycloak honours a wildcard **only as a trailing `*`**; one in the host position is compared as a literal string and matches nothing. `rootUrl` was also `https://localhost`, so even a relative URI resolved to the wrong host | `rootUrl` emptied and the redirect made **relative** (`/auth/callback`), which resolves against the request and is therefore correct at any hostname. **A running realm is not re-imported** — an existing deployment must be patched through the admin API |
+| 15 | `worker` and `backup-replicator` restart for ever, each log ending `ModuleNotFoundError: No module named 'packaging'` under `kombu/transport/redis.py`; the api, the gateway and jobs work, so nothing else looks wrong | the backend asked for `celery>=5.4` without its `redis` extra, although Redis is its broker. kombu 5.7.0's Redis transport imports `packaging`, which kombu declares only under that extra, so an image built from a fresh `pip install` had none. CI's `deploy` job never starts `worker`, and the backend suite's environment has `packaging` through pytest | `celery[redis]>=5.4` in `backend/pyproject.toml` (`backend/tests/test_celery_broker_dependency.py`) |
+| 16 | the first backup of a new host fails: `mc: <ERROR> Unable to stat source 'src/it-suite'. Bucket 'it-suite' does not exist.`, and `last-success` is never written | `backup.conf` mirrors the MinIO bucket (`OBJECTS=all`), which `ObjectStore` creates on first use; on the rehearsal nothing had used it, because #15 had stopped the replicator whose checks create it | `backup.sh` lists the buckets first: no bucket is nothing to mirror, and a listing that fails still fails the backup (`backend/tests/test_platform_backup_scripts.py`) |
+| 17 | `build-images.sh` ends `Recent tags:` `(none yet)` and lists nothing under `built:`, with tags in the store | the docker CLI trims the spaces at both ends of a `--format` template, so the indented templates printed no indent and the greps for the indented form never matched | no indent in the templates; it is added after the match (`backend/tests/test_build_images_script.py`) |
 
 Two smaller things worth knowing:
 

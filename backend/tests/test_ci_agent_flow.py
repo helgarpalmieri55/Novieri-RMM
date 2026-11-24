@@ -303,3 +303,21 @@ def test_what_the_agent_held_goes_however_the_step_ends() -> None:
     assert line.endswith(
         "|| { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }"
     )
+
+
+def test_the_deploy_job_waits_for_a_healthy_worker() -> None:
+    """Finding F7 of the first-boot rehearsal of 2026-11-24 (plan 2026-11-23,
+    Task 12): an image built from backend/pyproject.toml without Celery's
+    `redis` extra had no `packaging`, and `worker` restart-looped while every
+    check of this job stayed green -- the job never started it. Now it waits
+    for the worker's own health check (its heartbeat in Redis) on the image
+    the job built, after the agent's checks, and shows its log if it fails."""
+    run = _run(OAUTH_STEP)
+    line = next((x.strip() for x in run.splitlines() if "--wait-timeout 180 worker" in x), "")
+    assert line, "the deploy job never waits for the worker"
+    assert line == (
+        "docker compose up -d --wait --wait-timeout 180 worker "
+        "|| { docker compose logs worker; exit 1; }"
+    )
+    assert run.index('test ! -e "$agent_data/enroll-token"') < run.index(line)
+    assert run.index(line) < run.index('if grep -qi keycloak <<<"$running"')

@@ -39,10 +39,16 @@ export IT_SUITE_VERSION
 echo "==> building itsuite/backend:$IT_SUITE_VERSION and itsuite/web:$IT_SUITE_VERSION"
 docker compose build api web
 
+# NO INDENT IN A --format TEMPLATE: the docker CLI trims the spaces at both
+# ends of one before rendering it, so '  {{.Repository}}' prints no indent and
+# a grep for the indented form never matches. Both lists below said nothing
+# for that reason until the first-boot rehearsal of 2026-11-24 (plan
+# 2026-11-23, Task 12) saw `(none yet)` beside two itsuite/backend tags. The
+# indent is added after the match (backend/tests/test_build_images_script.py).
 echo
 echo "built:"
-docker images --format '  {{.Repository}}:{{.Tag}}  {{.Size}}' \
-    | grep -E "^  itsuite/(backend|web):$IT_SUITE_VERSION\b" || true
+docker images --format '{{.Repository}}:{{.Tag}}  {{.Size}}' \
+    | grep -E "^itsuite/(backend|web):$IT_SUITE_VERSION\b" | sed 's/^/  /' || true
 
 cat <<EOF
 
@@ -52,5 +58,5 @@ cat <<EOF
 
 ==> To roll back later, set IT_SUITE_VERSION to a PREVIOUS short SHA and
     re-run \`docker compose up -d\`. Recent tags:
-$(docker images --format '      {{.Repository}}:{{.Tag}}' 2>/dev/null | grep '^      itsuite/backend:' | head -5 || echo "      (none yet)")
+$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk '/^itsuite\/backend:/ && n < 5 { print "      " $0; n++ } END { if (!n) print "      (none yet)" }')
 EOF
