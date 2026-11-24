@@ -99,8 +99,9 @@ describe("the shell's breadcrumb, at a route the rail lists", () => {
   });
 });
 
-/* THE PAGES NO ITEM NAMES, asserted at the DOM. Each once read "<root> >
-   Overview" -- a section that does not contain the page -- as dead text. */
+/* THE PAGES NO ITEM NAMES, asserted at the DOM.
+ * Each once read "ITMS > Overview" (on record by 2026-11-04) -- a section that
+ * does not contain the page -- as dead text. */
 describe("the shell's breadcrumb, at a route the rail does not list", () => {
   it.each([
     ["/devices/onboard", "Devices", "/devices", "Add a computer · Novieri RMM"],

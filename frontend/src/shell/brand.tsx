@@ -9,10 +9,9 @@
  */
 import "./brand.css";
 
-/** The product's name (decision A3): in the tab title, the sign-in frame, the portal. */
-export const PRODUCT_NAME = "Novieri RMM";
-/** What the console's own bar says (decision A3). */
-export const BRAND_NAME = "Novieri";
+import { BRAND_NAME, PRODUCT_NAME } from "./names";
+
+export { BRAND_NAME, PRODUCT_NAME };
 
 const SYMBOL_PATH = "M4.73 25L8.37 25L14.67 7L11.03 7ZM11.03 7L14.67 7L20.97 25L17.33 25ZM17.33 25L20.97 25L27.27 7L23.63 7Z";
 

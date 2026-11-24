@@ -13,9 +13,6 @@
  *   - `.ib` and every other control draw their border in `--line-control`,
  *     not v3's `--line` (1.49:1): SC 1.4.11 asks 3:1 of the boundary that
  *     identifies a control, and `contrast.test.ts` measures every one.
- *   - the brand mark is `--r-ctl` (6px), not v3's literal 8px: the ladder is
- *     6 / 10 / 999 plus 2px / 3px heat cells and 50% avatars, and the harmony
- *     gate fails any other radius.
  *   - the health pip is 10px, not v3's 7px: it carries a SILHOUETTE per state
  *     (SC 1.4.1, colour is never the only carrier) and 7px minus a 2px ring
  *     is 3px of fill, which is no shape at all.
@@ -52,8 +49,6 @@
   gap: 10px;
   padding: 6px 18px 18px;
   color: var(--accent-ink);
-  font-weight: 600;
-  font-size: var(--t-h2);
   flex: 0 0 auto;
 }
 .brand-name { white-space: nowrap; }

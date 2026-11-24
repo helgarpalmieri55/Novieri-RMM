@@ -55,7 +55,7 @@ let email: EmailSettingsOut = {
   from_display_name: "Novieri RMM",
   reply_to: "it@toeshee.example",
   encryption: "starttls",
-  username: "itms",
+  username: "rmm",
   authenticated: true,
   auth_type: "password",
   microsoft_client_id: "",
@@ -407,7 +407,7 @@ let microsoftSettings: MicrosoftSettingsOut = {
   next_certificate: null,
   next_certificate_thumbprint: null,
   next_certificate_expires_at: null,
-  redirect_uri: "https://itms.example.test/sign-in/microsoft",
+  redirect_uri: "https://rmm.novieri.example/sign-in/microsoft",
   updated_at: null,
   updated_by: null,
 };

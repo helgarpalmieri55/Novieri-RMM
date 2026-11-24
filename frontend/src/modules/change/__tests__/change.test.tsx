@@ -1223,7 +1223,7 @@ describe("ChangeDetail lifecycle controls", () => {
 
 // ---------------------------------------------------------------- cycle 12
 //
-// B40 [LOW] (2026-11-04): "Combined with the constant `document.title` of 'ITMS', a user
+// B40 [LOW] (on record by 2026-11-04): "Combined with the constant `document.title` of 'ITMS', a user
 // with several change tabs open cannot tell them apart."
 // B39/B64-adjacent: the wire's identifiers reaching the screen.
 describe("ChangeDetail identity and vocabulary (cycle 12)", () => {

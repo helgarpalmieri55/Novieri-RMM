@@ -611,9 +611,9 @@ export function AppShell({
         <main className="content" id="main" tabIndex={-1}>
           {/* A BREADCRUMB THAT NAVIGATES, or does not look like one -- v3's
               `.crumb`, the first line of the content above the page's own
-              `PageHead`. The audit's complaint was both halves at once: "the root /
-              Fleet is not navigable" and the accent-coloured segment still
-              looked clickable. Three text nodes in a div are a picture of a
+              `PageHead`.
+              * The audit's complaint was both halves at once, "ITMS / Fleet is not navigable" (on record by 2026-11-04), and the accent-coloured segment still looked clickable.
+              Three text nodes in a div are a picture of a
               breadcrumb.
 
               `sectionTo` is optional and the section is a plain <span> without

@@ -26,6 +26,7 @@ import { ClientScopeProvider } from "../lib/clientScope";
 import type { AlertSummary } from "../modules/health/types";
 import { AppShell } from "./AppShell";
 import { ClientSelector } from "./ClientSelector";
+import { useRecordTitle } from "./title";
 import {
   healthSignal,
   platformLabel,
@@ -725,7 +726,7 @@ describe("AppShell session notice", () => {
   /* --- Breadcrumb and page title (cycle 12) ----------------------------- */
 
   it("names the page in the browser tab, not just the product", async () => {
-    // WCAG 2.4.2. The tab read one constant, the old name (2026-11-04), on all fourteen routes,
+    // WCAG 2.4.2. The tab read one constant, the old name, on all fourteen routes,
     // which is the one place a person with a dozen consoles open actually
     // reads a page's identity.
     const view = renderShell(["devices.read"]);
@@ -1472,5 +1473,43 @@ describe("useHealthReading", () => {
 
     expect(reading.openAlerts).toBeNull();
     expect(healthSignal(reading)).toBe("unknown");
+  });
+});
+
+function RecordPage({ name }: { name: string | undefined }) {
+  useRecordTitle(name);
+  return <p>record page</p>;
+}
+
+describe("AppShell's tab title on a record (design §5; every wave's detail page depends on this provider)", () => {
+  function shellAt(title: string, name: string | undefined) {
+    return (
+      <MemoryRouter initialEntries={["/devices/dev-1"]}>
+        <AppShell
+          permissions={["devices.read"]}
+          orgName="Operations"
+          section="Fleet"
+          title={title}
+          user={{ name: "Alex Morgan", email: "alex@toeshee.com", role: "Administrator" }}
+          onSignOut={vi.fn()}
+        >
+          <RecordPage name={name} />
+        </AppShell>
+      </MemoryRouter>
+    );
+  }
+
+  it("puts the record first, follows it, and gives the title back when it leaves", () => {
+    document.title = "Novieri RMM";
+    const view = render(shellAt("Devices", "srv-app02"));
+    expect(document.title).toBe("srv-app02 · Devices · Novieri RMM");
+    view.rerender(shellAt("Devices", "srv-db01"));
+    expect(document.title).toBe("srv-db01 · Devices · Novieri RMM");
+    view.rerender(shellAt("Devices", undefined));
+    expect(document.title).toBe("Devices · Novieri RMM");
+    view.rerender(shellAt("Dispositivos", "srv-app02"));
+    expect(document.title).toBe("srv-app02 · Dispositivos · Novieri RMM");
+    view.unmount();
+    expect(document.title).toBe("Novieri RMM");
   });
 });

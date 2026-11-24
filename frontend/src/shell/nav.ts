@@ -32,7 +32,7 @@
  */
 
 import { translate, type MessageKey } from "../i18n/core";
-import { PRODUCT_NAME } from "./brand";
+import { PRODUCT_NAME } from "./names";
 
 /**
  * LABELS ARE LOOKED UP WHEN READ, NOT WHEN THIS MODULE LOADS. The model below

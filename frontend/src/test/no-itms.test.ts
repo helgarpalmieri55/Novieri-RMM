@@ -42,7 +42,8 @@ function files(path: string): string[] {
 export function offences(source: string): number[] {
   return source.split("\n").flatMap((line, at) => {
     const rest = line.replace(WIRE, "");
-    if (!rest.includes("ITMS")) return [];
+    // Any case but all lower: lower-case `itms.` identifiers stay (see the second check).
+    if (![...rest.matchAll(/itms/gi)].some((hit) => hit[0] !== "itms")) return [];
     if (COMMENT.test(line) && DATED.test(line)) return [];
     return [at + 1];
   });
@@ -60,6 +61,8 @@ describe("the old product name", () => {
     expect(offences(" * the ITMS tab title, as it read on 2026-09-08")).toEqual([]);
     expect(offences('title: "ITMS (2026-11-23)",')).toEqual([1]);
     expect(offences("ok\nstill ITMS\nok")).toEqual([2]);
+    expect(offences('<h1>Itms console</h1>')).toEqual([1]);
+    expect(offences('const KEY = "itms.client";')).toEqual([]);
   });
 
   it("reads a real tree", () => {
@@ -81,8 +84,13 @@ describe("the old product name", () => {
  * check above is case-sensitive on purpose: lower-case `itms` is how project 4
  * spells the identifiers it keeps. So it misses an example address or a
  * download's file name that a person reads in lower case. This one reads the
- * copy: the two catalogues (`src/i18n/en`, `src/i18n/es`) and the console's
- * JSX (every `.tsx` outside the tests), each line that is not a comment. The
+ * copy: the two catalogues (`src/i18n/en`, `src/i18n/es`), the console's JSX
+ * (every `.tsx` outside the tests), the fixtures the harmony gate photographs
+ * (every `fixtures.ts`) and `lib/api.ts` (the MSI fallback name), each line
+ * that is not a comment. KNOWN BLIND SPOT: a line is a comment if it starts
+ * with `//`, `*`, `/*`, `{/*` or `<!--`, so a line of JSX *text* that starts
+ * with `*` is skipped; whether a `*` line is a block comment's continuation or
+ * JSX text cannot be told line by line without parsing, so it is left. The
  * letters may stay only inside an identifier project 4 keeps, each named here
  * (its design §1.2 and the coordinator's resolution of 2026-11-24); anything
  * else is a name a person reads, and it says Novieri.
@@ -100,6 +108,8 @@ const KEPT_LOWER: readonly RegExp[] = [
 /** One file keeps a stored value: the off-site target's default bucket prefix. */
 const KEPT_IN_FILE: Readonly<Record<string, RegExp>> = {
   "src/modules/backup/OffsitePage.tsx": /prefix: target\?\.prefix \?\? "itms",/g,
+  // the server's MCP client-id format (`"itms_" + token`, core/auth/oauth/clients.py): a wire value
+  "src/modules/settings/fixtures.ts": /client_id: "itms_/g,
 };
 const CATALOGUES = [resolve(FRONTEND, "src/i18n/en"), resolve(FRONTEND, "src/i18n/es")];
 const IS_TEST = /(\.test\.tsx?$|\/__tests__\/|\/src\/test\/)/;
@@ -129,7 +139,13 @@ describe("the old product name in lower case, where a person reads it", () => {
   });
 
   it("reads the catalogues and the console's JSX", () => {
-    const copy = [...CATALOGUES.flatMap(files), ...files(resolve(FRONTEND, "src")).filter((path) => path.endsWith(".tsx") && !IS_TEST.test(path))];
+    const src = files(resolve(FRONTEND, "src"));
+    const copy = [
+      ...CATALOGUES.flatMap(files),
+      ...src.filter((path) => path.endsWith(".tsx") && !IS_TEST.test(path)),
+      ...src.filter((path) => /\/fixtures\.ts$/.test(path)),
+      resolve(FRONTEND, "src/lib/api.ts"),
+    ];
     expect(copy.length).toBeGreaterThan(300);
     expect(copy).toContain(resolve(FRONTEND, "src/i18n/en/settings.ts"));
     expect(copy).toContain(resolve(FRONTEND, "src/modules/settings/MicrosoftTab.tsx"));

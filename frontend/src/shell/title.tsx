@@ -11,7 +11,7 @@
  */
 import { createContext, useContext, useEffect } from "react";
 
-import { PRODUCT_NAME } from "./brand";
+import { PRODUCT_NAME } from "./names";
 
 export function documentTitle(page?: string, record?: string): string {
   const parts = [record, page]
