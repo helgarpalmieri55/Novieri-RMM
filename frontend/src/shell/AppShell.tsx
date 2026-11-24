@@ -609,12 +609,12 @@ export function AppShell({
             keyboard user lands visually at the content and keeps tabbing from
             inside the sidebar. */}
         <main className="content" id="main" tabIndex={-1}>
-          {/* A BREADCRUMB THAT NAVIGATES, or does not look like one -- v3's
+          {/* The audit's "ITMS / Fleet is not navigable" (on record by 2026-11-04):
+              A BREADCRUMB THAT NAVIGATES, or does not look like one -- v3's
               `.crumb`, the first line of the content above the page's own
-              `PageHead`.
-              * The audit's complaint was both halves at once, "ITMS / Fleet is not navigable" (on record by 2026-11-04), and the accent-coloured segment still looked clickable.
-              Three text nodes in a div are a picture of a
-              breadcrumb.
+              `PageHead`. The complaint was both halves at once, and the
+              accent-coloured segment still looked clickable. Three text nodes
+              in a div are a picture of a breadcrumb.
 
               `sectionTo` is optional and the section is a plain <span> without
               it, because a link that goes nowhere is the false affordance this

@@ -18,8 +18,8 @@
  *     then, and rewriting it would falsify the record. A date does not excuse
  *     a string a person can read.
  * Lower-case `itms.` storage keys are identifiers nobody sees and stay
- * (project 4's rule for internal identifiers), so this first check is
- * case-sensitive; the second, at the end of the file, reads lower case in
+ * (project 4's rule for internal identifiers), so this first check ignores
+ * only all-lower-case `itms` (`Itms` and `iTMS` are caught); the second, at the end of the file, reads lower case in
  * the copy a person reads.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -81,12 +81,12 @@ describe("the old product name", () => {
 
 /**
  * LOWER-CASE "itms" IN WHAT A PERSON READS (coordinator, 2026-11-24). The
- * check above is case-sensitive on purpose: lower-case `itms` is how project 4
+ * check above ignores only all-lower-case `itms`, on purpose: that is how project 4
  * spells the identifiers it keeps. So it misses an example address or a
  * download's file name that a person reads in lower case. This one reads the
  * copy: the two catalogues (`src/i18n/en`, `src/i18n/es`), the console's JSX
  * (every `.tsx` outside the tests), the fixtures the harmony gate photographs
- * (every `fixtures.ts`) and `lib/api.ts` (the MSI fallback name), each line
+ * (every `fixtures.ts` and the non-test `.ts` under `src/fixtures/`) and `lib/api.ts` (the MSI fallback name), each line
  * that is not a comment. KNOWN BLIND SPOT: a line is a comment if it starts
  * with `//`, `*`, `/*`, `{/*` or `<!--`, so a line of JSX *text* that starts
  * with `*` is skipped; whether a `*` line is a block comment's continuation or
@@ -136,6 +136,10 @@ describe("the old product name in lower case, where a person reads it", () => {
     expect(lowerOffences("// the itms.example.com host, as it read on 2026-09-08")).toEqual([]);
     expect(lowerOffences('prefix: target?.prefix ?? "itms",')).toEqual([1]);
     expect(lowerOffences('prefix: target?.prefix ?? "itms",', KEPT_IN_FILE["src/modules/backup/OffsitePage.tsx"])).toEqual([]);
+    // the settings fixtures keep the server's `client_id` format and nothing wider
+    const settings = KEPT_IN_FILE["src/modules/settings/fixtures.ts"];
+    expect(lowerOffences('app_id: "itms_x",', settings)).toEqual([1]);
+    expect(lowerOffences('client_id: "itms_x",', settings)).toEqual([]);
   });
 
   it("reads the catalogues and the console's JSX", () => {
@@ -143,7 +147,7 @@ describe("the old product name in lower case, where a person reads it", () => {
     const copy = [
       ...CATALOGUES.flatMap(files),
       ...src.filter((path) => path.endsWith(".tsx") && !IS_TEST.test(path)),
-      ...src.filter((path) => /\/fixtures\.ts$/.test(path)),
+      ...src.filter((path) => /\/fixtures\.ts$/.test(path) || (/\/src\/fixtures\/[^/]+\.ts$/.test(path) && !IS_TEST.test(path))),
       resolve(FRONTEND, "src/lib/api.ts"),
     ];
     expect(copy.length).toBeGreaterThan(300);

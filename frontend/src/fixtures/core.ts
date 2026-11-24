@@ -434,7 +434,7 @@ export const fixtures: FixtureMap = {
       { name: "database", status: "ok", duration_ms: 3, reason: null, detail: { rls: "enforced" } },
       { name: "redis", status: "ok", duration_ms: 1, reason: null, detail: null },
       { name: "vault", status: "ok", duration_ms: 11, reason: null, detail: { sealed: false } },
-      { name: "object_store", status: "ok", duration_ms: 24, reason: null, detail: { bucket: "itms-backups" } },
+      { name: "object_store", status: "ok", duration_ms: 24, reason: null, detail: { bucket: "it-suite-backups" } },
       { name: "identity", status: "ok", duration_ms: 42, reason: null, detail: null },
     ],
     processes: [
