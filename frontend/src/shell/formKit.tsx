@@ -176,9 +176,11 @@ export function SaveBar({
  * makes the draft differ from it, and wins. A failed save calls
  * `markSent(null)`, so a later refetch cannot replace the unsaved change.
  *
- *   const { draft, setDraft, dirty, discard, markSent } = useDraft(query.data);
- *   const save = useMutation({ mutationFn: api.updateThing, onError: () => markSent(null), ... });
- *   <SaveBar dirty={dirty} onSave={() => { markSent(draft); save.mutate(draft); }} ... />
+ * Wiring: take `markSent` from `useDraft(query.data)`; in the save bar's
+ * `onSave`, call `markSent(draft)` and then send the draft; in the save's
+ * error handler, call `markSent(null)`. (Prose, not code, on purpose:
+ * `test/secretMutations.test.ts` reads source text and would take a sample
+ * mutation here for a real one.)
  */
 export function useDraft<T>(saved: T | undefined): {
   draft: T | undefined;
