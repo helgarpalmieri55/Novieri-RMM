@@ -1,0 +1,6159 @@
+# Rediseño de la consola: la organización de Atera con la marca Novieri. Plan de implementación
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** La consola pasa a llamarse Novieri RMM, adopta la marca «Cordillera» y la organización de Atera (barra lateral en su orden, «Nuevo», ficha 360 del cliente, listas, fichas y formularios de un solo kit), y las 86 páginas `*Page.tsx` se rehacen una a una sobre ese kit sin cambiar rutas, permisos, llamadas a la API ni textos de error.
+
+**Architecture:** Primero, en serie, la base: el contexto de la skill impeccable, `DESIGN.md` v4 y los tokens de la marca (Task 1); el nombre, el logotipo, el favicon y el título de pestaña (Task 2); el kit de patrones lista / ficha / formulario (Task 3); el armazón (Task 4) y la ficha 360 del cliente (Task 5). Después, ocho oleadas de páginas por grupo de módulos (Tasks 6 a 13), sin archivos en común, que corren en paralelo de cuatro en cuatro en worktrees separadas. Cada oleada termina con la crítica y el pulido de impeccable sobre sus páginas, la puerta de armonía y axe en sus rutas en los dos idiomas y las capturas para el revisor. La Task 14 revisa la rama entera y deja el camino a `main`.
+
+**Tech Stack:** React 19, TypeScript 7 en modo estricto, Vite 8, Tailwind v4 (CSS primero, sin `tailwind.config`), react-router-dom 7, TanStack Query 5, vitest 4 con Testing Library y jsdom, Playwright con Chromium (`scripts/harmony.mjs`, `scripts/a11y-browser.mjs`), skill impeccable 4.7.0 (CLI 0.1.16, `.claude/skills/impeccable/scripts/impeccable`).
+
+**Diseño (vinculante):** `docs/superpowers/specs/2026-11-23-rediseno-novieri-design.md`, aprobado por el operador el 2026-11-23. **Marca:** `docs/design/marca/` (`novieri-tokens.json`, `novieri-{wordmark,symbol,favicon,lockup}.svg`; la dirección A, «Cordillera»). **Decisiones del operador:** `.git/sdd/decisiones-p34.md` (A1 a A4; A4: las 86 páginas, una a una). **Referencia:** `docs/design/referencias-atera/` (25 capturas y `Atera_recorrido_menus_UI_UX.md`). Cada tarea cita la sección del diseño que implementa.
+
+---
+
+## Global Constraints
+
+- **Seguridad.** Las invariantes 1, 1b, 1c, 2, 2a, 3, 4, 5, 5a y 6 de `CLAUDE.md` no se tocan. La consola no protege nada: ocultar un enlace es cortesía (invariante 6). Ningún código de permiso cambia; cada entrada de la barra y del menú «Nuevo» conserva el código que su ruta exige en el servidor.
+- **Territorio.** Este proyecto toca `frontend/`, `DESIGN.md`, `PRODUCT.md`, `.impeccable/` y `docs/product.md` §9 y §11. **No toca** `backend/`, `agent/`, `deploy/` ni `.github/` (son del proyecto 4). Lo que una pantalla necesitaría de ellos está en el Apéndice E.
+- **Nombre.** «Novieri» en la barra lateral; «`<Página>` · Novieri RMM» en el título de la pestaña (`<Registro> · <Página> · Novieri RMM` en una ficha); «Novieri RMM» en el `<title>` de `index.html`, en las pantallas de acceso, en el portal y en el consentimiento OAuth. «ITMS» no aparece en `frontend/src` salvo los literales de protocolo de la lista de `src/test/no-itms.test.ts` (Task 2).
+- **Marca, valores exactos** (`novieri-tokens.json`): riel `#101b30`, riel en hover y activo `#1b2945`, texto del riel `#a9b6cc`, atenuado `#8592ab`, marca del activo `#8fa6ff`; página `#f3f5f8`, superficie `#ffffff`, fila en hover `#f7f9fc`, borde `#e1e6ee`, borde de control `#7b8599`, texto `#111a2b`, texto secundario `#536077`; acento `#2747c9`, hover `#203cac`, presionado `#1a3190`, lavado `#e9edfc`, tinta sobre acento `#ffffff`; correcto `#17703f`/`#e5f4ea`, advertencia `#8d5a00`/`#fcf1dc`, crítico `#b8172c`/`#fcebed`, desconocido `#586274`/`#edf0f4`; información = acento. Sombra única `0 1px 2px rgba(16,27,48,.05),0 6px 20px rgba(16,27,48,.06)`.
+- **Radios:** 4 px etiquetas de estado (`--r-badge`), 6 px controles y chips (`--r-ctl`), 10 px paneles (`--r-panel`); `--r-pill` (999 px) solo para la pista del interruptor y la barra de progreso; 50 % avatares y pips; 2 y 3 px celdas de calor. Los chips y las etiquetas dejan de ser píldoras.
+- **Tipografía:** Inter autoalojada; la escala 22 / 15 / 13,5 / 12 / 10,5 y 26 (KPI), sin cambios; pesos 400, 500 y 600.
+- **Solo tema claro** (`no-dark-variants.test.ts`). **Un acento** y cinco severidades; el color nunca es el único portador (icono en cada etiqueta). **Ningún control muerto**: sin campana, y cada entrada de «Nuevo» es un destino real.
+- **Comportamiento.** Las rutas existentes no cambian. Este plan no mueve ninguna; si una oleada descubre que debe mover una, deja un `<Navigate replace>` en `App.tsx` a través del integrador (ver «Archivos compartidos»). Las llamadas a `ApiClient`, los códigos de permiso que una página comprueba y los textos de error no cambian salvo lo que este plan nombra.
+- **Un solo kit.** Ninguna página dibuja su propia lista, ficha, pestañas, barra de filtros, estado vacío o barra de guardado: usa las piezas de `src/shell/listKit.tsx`, `detailKit.tsx` y `formKit.tsx` (Task 3), reexportadas por `src/shell/components.tsx`.
+- **Todo con URL.** Filtros, pestañas y diálogos de alta (`?new=<tipo>`) viven en la query de la URL. La página por defecto no escribe parámetros.
+- **Textos.** Todo texto nuevo pasa por `t()` con su clave en `src/i18n/en/` y `src/i18n/es/` (lo exigen `i18n/coverage.test.ts` y `catalogue.identical.test.ts`). Glosario de `src/i18n/es/index.ts`. Sin raya («—») en la interfaz, sin mayúsculas tecleadas, frase en minúscula, la voz de `docs/superpowers/specs/2026-09-09-console-copy-voice.md`: decir lo que pasó y lo que sigue. Un estado vacío es una frase con su causa real y, si existe, una acción.
+- **Pruebas.** Ninguna prueba existente se borra, se salta ni se debilita. Las que fijan algo que el diseño cambia a propósito (navegación, armazón, nombre, tokens) se corrigen en la misma tarea, con un comentario que cite el diseño, y el informe de la tarea las lista. Línea base medida el 2026-11-23: `npx vitest run` → **365 archivos, 7200 pruebas, 0 fallos, ~5 min**.
+- **Verificación, desde `frontend/`:**
+  - una prueba: `npx vitest run <ruta>`;
+  - todo: `npx vitest run`, `npm run typecheck` y `npm run build` (los tres del job `frontend` de la CI);
+  - navegador: `node scripts/harmony.mjs --strict-fixtures --lang en --routes <lista>` y lo mismo con `--lang es`; `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` (mide `/__preview`, donde vive el kit).
+- **Worktrees** (oleadas en paralelo): `git worktree add ../rmm-w<N> -b p3/oleada-<N> <rama-base>`, y `ln -s /home/user/Novieri-RMM/frontend/node_modules ../rmm-w<N>/frontend/node_modules`. Cada worktree usa su propio puerto para harmony (`HARMONY_URL` no hace falta: el script elige un puerto libre).
+- **Commits.** Uno por paso «Commit», con el formato de los anteriores (`feat(ui): …`, `test(ui): …`) y estas dos líneas al final del mensaje:
+  ```
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+  Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr
+  ```
+  Nunca se commitea `frontend/.harmony/` (está en `.gitignore`).
+
+## Archivos compartidos (dueño único)
+
+Las oleadas corren en paralelo y no comparten archivos. Estos son de la base (Tasks 1 a 5) y **ninguna oleada los edita**:
+
+| Archivo | Dueño |
+|---|---|
+| `frontend/src/index.css`, `frontend/index.html`, `frontend/public/` | Tasks 1 y 2 |
+| `frontend/src/shell/**` (kit, armazón, CSS, `nav.ts`) | Tasks 2, 3 y 4 |
+| `frontend/src/components/**` | Task 3 |
+| `frontend/src/App.tsx`, `frontend/scripts/routes.mjs` | Tasks 3, 4 y 5 |
+| `frontend/src/lib/api.ts`, `frontend/src/fixtures/client.ts` | Task 3 |
+| `frontend/src/i18n/{en,es}/{shell,components,common}.ts` | Tasks 2 a 4 |
+| `frontend/src/test/**` | Tasks 1 a 4 |
+| `frontend/src/preview/PreviewPage.tsx` | Task 3; la O2 solo **añade** una sección al final («Portal frame») |
+| `DESIGN.md`, `PRODUCT.md`, `.impeccable/design.json`, `docs/product.md` | Task 1 (y Task 14 si la revisión final pide un cambio) |
+
+Si una oleada necesita algo de esta lista (una pieza del kit que falta, una ruta, una clave compartida), **no lo edita**: lo anota en su informe como «petición al kit» con el código exacto, el coordinador lo aplica en la rama base y la oleada lo trae con `git rebase`. Cada oleada sí es dueña de sus carpetas `src/modules/<m>/`, de `src/i18n/{en,es}/<m>.ts` y de `src/modules/<m>/fixtures.ts`.
+
+## Oleadas y paralelismo
+
+| Fase | Tareas | En paralelo | Depende de |
+|---|---|---|---|
+| Base | 1 → 2 → 3 → 4 → 5 | no, en serie (comparten `index.css`, `shell/`, `App.tsx`) | — |
+| Lote A | 6 (O1 Equipos), 7 (O2 Inicio, tickets y portal), 8 (O3 Alertas, parches, software y sesiones), 9 (O4 Copias, continuidad e imágenes) | sí, cuatro worktrees | 5 |
+| Lote B | 10 (O5 Activos), 11 (O6 Documentación, informes, cambios y presupuesto), 12 (O7 Administración y cuenta), 13 (O8 Acceso y consentimiento) | sí, cuatro worktrees | 5 (no depende del lote A) |
+| Cierre | 14 | no | 6 a 13 |
+
+```
+T1 ─ T2 ─ T3 ─ T4 ─ T5 ─┬─ T6  (O1) ─┐
+                        ├─ T7  (O2) ─┤
+                        ├─ T8  (O3) ─┤      lote A: 4 implementadores
+                        ├─ T9  (O4) ─┤
+                        ├─ T10 (O5) ─┤
+                        ├─ T11 (O6) ─┤      lote B: 4 implementadores
+                        ├─ T12 (O7) ─┤
+                        └─ T13 (O8) ─┴─ T14
+```
+
+El lote B puede empezar a la vez que el A si hay ocho implementadores; con cuatro, empieza cuando terminan los del A. Las oleadas son disjuntas por archivo, así que el orden de fusión no importa; el coordinador fusiona cada una cuando su revisión aprueba, y vuelve a pasar `npx vitest run` completo tras cada fusión.
+
+Choques que el coordinador resuelve al fusionar: ninguno esperado en código. `frontend/.harmony/` no se versiona. Las críticas persistidas de impeccable (`.impeccable/critique/*.md`) tienen un archivo por página, así que tampoco chocan.
+
+## Mapa de archivos de la base
+
+| Archivo | Responsabilidad | Tarea |
+|---|---|---|
+| `PRODUCT.md` (nuevo) | El registro de producto que impeccable lee | 1 |
+| `DESIGN.md` | v4 «Novieri»: tokens normativos y reglas | 1 |
+| `.impeccable/design.json` | Sidecar de `DESIGN.md` (metadatos, componentes, narrativa) | 1 |
+| `frontend/src/index.css` | Tokens transcritos de `DESIGN.md` v4 | 1 |
+| `frontend/src/test/tokens.test.ts` | `index.css` = `DESIGN.md` = `novieri-tokens.json` | 1 |
+| `frontend/src/test/contrast.test.ts`, `radius.test.ts`, `base-styles.test.ts` | Puertas con la marca nueva | 1 |
+| `frontend/public/favicon.svg` (nuevo) | El favicon de la marca | 2 |
+| `frontend/src/shell/brand.tsx` (nuevo) | Nombre del producto, símbolo, logotipo y conjunto «Novieri RMM» | 2 |
+| `frontend/src/shell/title.tsx` (nuevo) | `documentTitle`, `useRecordTitle`, `useDocumentTitle` | 2 |
+| `frontend/src/test/no-itms.test.ts` (nuevo) | Guarda: «ITMS» fuera de `frontend/src` | 2 |
+| `frontend/src/shell/listKit.tsx`, `detailKit.tsx`, `formKit.tsx`, `kit.css` (nuevos) | El kit de patrones | 3 |
+| `frontend/src/lib/api.ts` (`forClient`), `frontend/src/fixtures/client.ts` | Lectura acotada a un cliente para el chip «Cliente» y la ficha 360 | 3 |
+| `frontend/src/App.tsx` | Router de datos (para avisar antes de salir) | 3 |
+| `frontend/src/shell/nav.ts`, `Sidebar.tsx`, `AdminPanel.tsx` (nuevo), `NewMenu.tsx` (nuevo), `newMenu.ts` (nuevo), `AppShell.tsx`, `AreaPage.tsx`, `shell.css` | El armazón | 4 |
+| `frontend/src/modules/clients/**` | Lista de clientes y ficha 360 | 5 |
+
+---
+
+## Recetas de página (vinculantes para las oleadas)
+
+Las oleadas (Tasks 6 a 13) aplican una de estas cuatro recetas a cada página. Las piezas y sus firmas se definen, con su código completo, en la Task 3; aquí está cómo se usan. **Todo implementador de oleada lee esta sección antes que su tarea.**
+
+### Receta L: lista
+
+Forma (diseño §2, «Lista»; Atera: `Atera_recorrido_menus_UI_UX.md`, «Customers», «Devices», «Alerts»):
+
+1. `PageHead` con título, una frase de 40 a 70 caracteres que dice qué es la página y **una** acción principal a la derecha (`Btn variant="primary"`), si la página crea algo.
+2. Un `Panel bare` que contiene, en este orden: `ListToolbar` (búsqueda, `FilterChips` con su conteo, `ClientFilter` cuando la lista es de clientes, y `ShowingCount` al final); `BulkBar` **solo** si la página ya tenía acciones en lote; la tabla (`Table`, `Th`, `Td` de `components/ui.tsx`); el pie (`Pager`) si la página ya paginaba.
+3. El estado vacío es `ListEmpty`: «nada todavía» con la acción de crear, o «nada con estos filtros» con «Quitar filtros». Nunca las dos frases a la vez, nunca un vacío sin causa.
+4. Los filtros son `useUrlFilters`. Los conteos de los chips salen de la respuesta del servidor cuando la trae (`state_counts`, `by_state`, `total`); si no la trae, el chip va **sin** número (regla «Absent Zero»), nunca con uno calculado sobre la página visible.
+5. Una pestaña que filtraba la lista (`Tabs` con `?state=`) pasa a `FilterChips` con el mismo parámetro: la URL no cambia.
+
+```tsx
+// Receta L, esqueleto. Las claves de filtro son las que la página ya usaba en
+// la URL (o, si las tenía en useState, las nuevas que nombra su oleada).
+const filters = useUrlFilters(["q", "state", "client"] as const);
+const api = useApiFor(filters.values.client);
+const list = useQuery({
+  queryKey: ["<módulo>", "list", filters.values],
+  queryFn: () => api.listX({ q: filters.values.q, state: filters.values.state }),
+});
+const rows = list.data?.items ?? [];
+
+return (
+  <>
+    <PageHead title={t("<m>.list.title")} description={t("<m>.list.description")} actions={primary} />
+    <Panel bare>
+      <ListToolbar
+        search={
+          <SearchField
+            aria-label={t("<m>.list.search")}
+            placeholder={t("<m>.list.search")}
+            value={filters.values.q}
+            onChange={(event) => filters.set("q", event.target.value)}
+          />
+        }
+        chips={
+          <>
+            <FilterChips
+              label={t("<m>.list.stateLabel")}
+              options={STATES.map((state) => ({ value: state, label: t(STATE_LABEL[state]), count: list.data?.state_counts[state] }))}
+              value={filters.values.state}
+              onChange={(value) => filters.set("state", value)}
+            />
+            <ClientFilter value={filters.values.client} onChange={(value) => filters.set("client", value)} />
+          </>
+        }
+        end={<ShowingCount shown={rows.length} total={list.data?.total ?? null} />}
+      />
+      <QueryState loading={list.isLoading} error={list.error} empty={false} emptyLabel="">
+        {rows.length === 0 ? (
+          <ListEmpty
+            filtered={filters.active}
+            onClear={filters.clear}
+            nothingYet={t("<m>.list.empty")}
+            action={primary}
+          />
+        ) : (
+          <Table label={t("<m>.list.title")}>{/* thead + tbody */}</Table>
+        )}
+      </QueryState>
+    </Panel>
+  </>
+);
+```
+
+Prueba mínima que toda lista convertida añade (en el archivo de pruebas de su módulo):
+
+```tsx
+it("keeps its filters in the URL, so a filtered view is a link", async () => {
+  const { router } = renderPage("/<ruta>?state=<valor>", <Page />);
+  expect(screen.getByRole("button", { name: /<etiqueta del valor>/ })).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(screen.getByRole("button", { name: /<otra etiqueta>/ }));
+  expect(router.state.location.search).toContain("state=<otro valor>");
+});
+
+it("says why the list is empty", async () => {
+  renderPage("/<ruta>?state=<valor sin filas en la respuesta>", <Page />);
+  expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+});
+```
+
+`renderPage` es el harness de la Task 3, `src/test/renderPage.tsx`. La API se sigue inyectando como en todo el repositorio, con `vi.mock` del módulo `lib/ApiContext` (231 archivos de prueba lo hacen así):
+
+```tsx
+const mockUseApi = vi.fn();
+vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+// ...
+beforeEach(() => mockUseApi.mockReturnValue(api));
+const { router } = renderPage("/<ruta>?state=<valor>", <Page />);
+```
+
+`renderPage(path, element)` monta `element` en un `createMemoryRouter` (router de datos, para que `UnsavedGuard` pueda bloquear) dentro de un `QueryClientProvider` sin reintentos, y devuelve `{ router, queryClient }`. Una prueba existente que monta con `MemoryRouter` sigue valiendo; solo se cambia a `renderPage` la que necesita leer `router.state.location`.
+
+### Receta F: ficha
+
+Forma (diseño §2, «Ficha»; Atera: captura «atera 8»):
+
+1. `DetailHead`: volver a la lista, título (el nombre del registro), etiqueta de estado (`status`), contexto (cliente y sede, con enlace a la ficha 360) y las acciones a la derecha. La página llama a `useRecordTitle(nombre)` para que la pestaña diga `<Registro> · <Página> · Novieri RMM`.
+2. Una fila de tarjetas de resumen (`StatsGrid` + `StatCard`/`Tile` con `to`): cada número lleva a donde vive.
+3. `UrlTabs` con `useUrlTab`: una sola línea (`scroll`), la pestaña por defecto sin parámetro, una desconocida cae en la por defecto.
+4. Cuando la ficha tiene información y actividad, `DetailGrid` con `main` (información, a la izquierda) y `aside` (métricas y actividad, a la derecha).
+
+```tsx
+const TABS = ["overview", "hardware", "software"] as const;
+type Tab = (typeof TABS)[number];
+const [tab, setTab] = useUrlTab<Tab>(TABS, "overview");
+useRecordTitle(device.data?.hostname);
+
+return (
+  <>
+    <DetailHead
+      back={{ to: "/devices", label: t("<m>.detail.back") }}
+      title={device.data?.hostname ?? t("<m>.detail.title")}
+      status={{ kind: online ? "ok" : "mut", label: t(online ? "<m>.online" : "<m>.offline") }}
+      context={<ClientContext clientId={device.data?.client_id ?? null} siteName={device.data?.site_name ?? null} />}
+      actions={actions}
+    />
+    <StatsGrid columns={2}>{/* tarjetas */}</StatsGrid>
+    <UrlTabs
+      label={t("<m>.detail.tabs")}
+      items={TABS.map((key) => ({ key, label: t(TAB_LABEL[key]) }))}
+      active={tab}
+      onSelect={setTab}
+    >
+      {tab === "overview" ? <Overview /> : tab === "hardware" ? <Hardware /> : <Software />}
+    </UrlTabs>
+  </>
+);
+```
+
+Prueba mínima de toda ficha convertida:
+
+```tsx
+it("puts the tab in the URL, and an unknown tab opens the default", async () => {
+  const { router } = renderPage("/<ruta>/<id>?tab=<pestaña>", <Page />);
+  expect(await screen.findByRole("tab", { name: "<Etiqueta>" })).toHaveAttribute("aria-selected", "true");
+  await userEvent.click(screen.getByRole("tab", { name: "<Otra>" }));
+  expect(router.state.location.search).toBe("?tab=<otra>");
+  await act(() => router.navigate("/<ruta>/<id>?tab=nope"));
+  expect(await screen.findByRole("tab", { name: "<Por defecto>" })).toHaveAttribute("aria-selected", "true");
+});
+```
+
+### Receta FO: formulario
+
+Forma (diseño §2, «Formulario»; Atera: captura «atera 12»):
+
+1. `FormPage` (volver y título) cuando la página **es** un formulario; si el formulario es una pestaña de una página (Configuración), la pestaña usa directamente las secciones y la barra.
+2. `FormSection` por grupo de campos, plegables, abiertas por defecto.
+3. Los campos con ayuda son `Field` con `help` (`components/ui.tsx`, diseño de ajustes de 2026-09-10).
+4. **Una sola** `SaveBar` por página, fija abajo: «Cambios sin guardar · Descartar · Guardar». Desaparecen los botones «Guardar» sueltos por panel. `useDraft` calcula `dirty`; `UnsavedGuard` avisa antes de salir.
+5. Una alta pequeña (un diálogo de dos o tres campos) **sigue siendo un diálogo** (`Dialog`); el diseño restiliza los diálogos, no los convierte en páginas.
+
+```tsx
+const saved = settings.data;                  // lo que el servidor dice hoy
+const { draft, setDraft, dirty, discard } = useDraft(saved);
+const save = useMutation({ mutationFn: (body: X) => api.updateX(body), onSuccess: () => settings.refetch() });
+
+return (
+  <FormPage back={{ to: "/<lista>", label: t("<m>.back") }} title={t("<m>.title")}>
+    <UnsavedGuard dirty={dirty} />
+    <FormSection title={t("<m>.section.general")} icon="settings">
+      {/* Field ... value={draft?.x} onChange={(e) => setDraft({ ...draft!, x: e.target.value })} */}
+    </FormSection>
+    <SaveBar
+      dirty={dirty}
+      saving={save.isPending}
+      error={save.error}
+      onDiscard={discard}
+      onSave={() => draft && save.mutate(draft)}
+    />
+  </FormPage>
+);
+```
+
+Prueba mínima de todo formulario convertido:
+
+```tsx
+it("shows one save bar only while something changed, and Discard puts it back", async () => {
+  renderPage("/<ruta>", <Page />);
+  expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  await userEvent.type(await screen.findByLabelText("<Etiqueta>"), "x");
+  expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+  expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+});
+
+it("asks before leaving with unsaved changes", async () => {
+  const { router } = renderPage("/<ruta>", <Page />, "/<ruta>");
+  await userEvent.type(await screen.findByLabelText("<Etiqueta>"), "x");
+  // Leave as a person does: through a link (the page's back link). A bare
+  // router.navigate() held by the blocker leaves a pending transition.
+  await userEvent.click(screen.getByRole("link", { name: "<texto del enlace volver>" }));
+  expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/<ruta>");
+});
+```
+
+### Receta O: otra
+
+Paneles de control (Inicio, informes, estado), visores (sesión remota, grabación, documento), asistentes de pasos y las pantallas de acceso. Usan `PageHead` (o su marco propio), `Panel`, `StatsGrid`, `Tile` y las piezas del kit que apliquen, y conservan su forma. La oleada dice qué cambia en cada una.
+
+---
+
+## Cierre de cada oleada (vinculante)
+
+Cada oleada termina con estos pasos, **después** de que sus pruebas, `npm run typecheck` y `npm run build` estén en verde.
+
+1. **Contexto de impeccable, una vez por sesión** (`SKILL.md` §Setup): `.claude/skills/impeccable/scripts/impeccable context --target frontend/src/modules/<m>` desde la raíz del repo. Tras la Task 1 no debe decir `NO_PRODUCT_MD` ni `PRODUCT_INIT_REQUIRED`; si lo dice, la oleada para y lo informa. Luego se lee `.claude/skills/impeccable/reference/craft-floor.md` antes de la primera edición de UI del pulido.
+2. **Capturas** para la crítica y para el revisor:
+   ```bash
+   cd frontend
+   node scripts/harmony.mjs --strict-fixtures --lang es --routes <rutas de la oleada>
+   node scripts/harmony.mjs --strict-fixtures --lang en --routes <rutas de la oleada>
+   ```
+   Salida esperada al final de cada una: `ok    every route on the tokens, no overflow, the top bar in bounds, no serious axe violation, no fixture miss`. Las capturas quedan en `frontend/.harmony/<lang>/<viewport>/<ruta>.png` (`/devices/dev-1` → `devices__dev-1.png`) a 1440x900, 390x844, 390x844-client y 641x900-client. La puerta ya corre axe (WCAG A/AA y buenas prácticas) en cada ruta y viewport: ese es el pase de accesibilidad de las rutas de la oleada.
+3. **Crítica de impeccable, página por página** (`reference/critique.md`), sobre el archivo de cada página:
+   - `.claude/skills/impeccable/scripts/impeccable critique-storage slug "frontend/src/modules/<m>/<Pagina>.tsx"`;
+   - leer `.impeccable/critique/ignore.md` si existe;
+   - **dos subagentes aislados en paralelo** cuando la sesión tiene la herramienta de subagentes: A (revisión de diseño: lee el archivo de la página y sus capturas en los dos idiomas y en 1440 y 390, y puntúa las 10 heurísticas de Nielsen) y B (`.claude/skills/impeccable/scripts/impeccable detect --json frontend/src/modules/<m>` más la capa en el navegador: `impeccable live-server --background`, Chromium por Playwright en una pestaña nueva sobre `http://127.0.0.1:<puerto>/<ruta>?__fixtures`, inyectar `http://localhost:<puerto-del-live-server>/detect.js`, leer los mensajes `impeccable` de la consola y terminar con `impeccable live-server stop --keep-inject`). Si la sesión no tiene herramienta de subagentes, el informe empieza con `⚠️ DEGRADED: single-context (no sub-agent tool exposed)` y se hacen A y B en serie, como manda la referencia;
+   - el informe completo va en el informe de la oleada; se persiste con `IMPECCABLE_CRITIQUE_META='{…}' .claude/skills/impeccable/scripts/impeccable critique-storage write "frontend/src/modules/<m>/<Pagina>.tsx" <archivo-temporal>` y se lee la tendencia con `critique-storage trend`;
+   - **las preguntas de la crítica**: en la primera crítica del programa (la del armazón, Task 4, Step 12) se hacen al operador a través del coordinador y sus respuestas se guardan en `.git/sdd/critica-respuestas.md`; las críticas siguientes (Task 5 y las oleadas) las reutilizan como respuestas vigentes y solo preguntan lo que esas respuestas no cubren. Si una crítica tiene menos de tres asuntos prioritarios, se escribe la línea literal `Questions skipped: <n> priority issues`.
+4. **Pulido de impeccable, página por página** (`reference/polish.md`): `critique-storage latest "<archivo>" --json`, corregir los P0 y P1 que la crítica dejó (en este orden: tareas rotas, estados que faltan, jerarquía y deriva del kit, detalles visuales, limpieza), sin rediseño escondido, y al terminar `critique-storage close "<archivo>" "<snapshot_file>"`. Lo que el pulido no corrige se anota como P2/P3 en el informe.
+5. **Repetir el paso 2** tras el pulido y adjuntar al informe la lista de PNG de 1440x900 y 390x844 de cada ruta en los dos idiomas.
+6. `npx vitest run`, `npm run typecheck`, `npm run build` completos: verde.
+7. **Revisión de la oleada** (superpowers:requesting-code-review): el revisor lee el diff, las capturas y las críticas, y comprueba los criterios de aceptación de cada página.
+
+---
+
+## Tareas
+
+| Task | Qué | Diseño |
+|---|---|---|
+| 1 | Contexto de impeccable (`PRODUCT.md`, `design.json`), `DESIGN.md` v4 «Novieri», tokens de la marca y sus puertas | §3.1, §3.2 |
+| 2 | Nombre «Novieri RMM», logotipo, símbolo, favicon, título de pestaña y guarda de «ITMS» | §3.1, A3, §5 |
+| 3 | El kit: lista, ficha, formulario, lectura por cliente, router de datos y restilo de las piezas que ya existen | §2 |
+| 4 | El armazón: barra lateral en el orden de Atera, Administración en acordeón, «Nuevo», barra superior, Admin | §1.1, §1.2 |
+| 5 | Clientes: la lista y la ficha 360 con pestañas en la URL | §1.3 |
+| 6 | Oleada O1: Equipos (11 páginas) | §4 |
+| 7 | Oleada O2: Inicio, tickets y portal (11 páginas) | §4 |
+| 8 | Oleada O3: Alertas, parches, software y sesiones (11 páginas) | §4 |
+| 9 | Oleada O4: Copias, continuidad, imágenes y servidores de sitio (11 páginas) | §4 |
+| 10 | Oleada O5: Activos (11 páginas) | §4 |
+| 11 | Oleada O6: Documentación, informes, cambios y presupuesto (9 páginas) | §4 |
+| 12 | Oleada O7: Administración y cuenta (6 páginas) | §4 |
+| 13 | Oleada O8: Acceso, consentimiento y alta del dueño (12 páginas) | §4 |
+| 14 | Revisión de toda la rama y camino a `main` | §5 |
+
+Páginas: 4 en la base (Tasks 4 y 5: `AreaPage`, `ClientsPage`, `ClientDetailPage`; `PreviewPage` en la Task 3) + 82 en las oleadas = **86**. Además, 22 pantallas enrutadas que no se llaman `*Page.tsx` entran en la oleada de su módulo (Apéndice B).
+
+---
+
+### Task 1: Contexto de impeccable, `DESIGN.md` v4 «Novieri» y los tokens de la marca
+
+Diseño §3.1 y §3.2. Cambia la marca **sin tocar todavía ninguna forma**: después de esta tarea la consola es la de hoy con los colores, los radios de etiquetas y chips y la sombra de Novieri, y todas las puertas siguen en verde.
+
+**Files:**
+- Create: `PRODUCT.md`
+- Modify: `DESIGN.md` (archivo completo, v4)
+- Modify: `.impeccable/design.json` (archivo completo, regenerado)
+- Modify: `docs/product.md` (título, §1, §9 líneas 238-263 y la fila de `tokens.test.ts` en §11)
+- Modify: `frontend/src/index.css:1-103` (comentario de cabecera y primer `:root`), `:123-169` (bloque de alias), `:180-289` (`@theme inline`)
+- Modify: `frontend/src/shell/shell.css:139-148` (`.sidebar .ct.hot`), `:350-366` (`.counter-dot`)
+- Modify: `frontend/src/shell/components.css:402` (`.pill`), `:649` (`.chip`)
+- Test: `frontend/src/test/tokens.test.ts` (reescrito), `frontend/src/test/contrast.test.ts`, `frontend/src/test/radius.test.ts`
+
+**Interfaces:**
+- Consumes: `docs/design/marca/novieri-tokens.json` (no se edita).
+- Produces: los tokens nuevos `--r-badge` (4px), `--rail-mark` (#8fa6ff), `--accent-3` (#1a3190); `--accent-2` pasa a ser el hover de la marca (#203cac); `--ink-2`, `--line-2`, `--sev-run` y `--sev-run-s` pasan al bloque de alias (`var(--ink)`, `var(--line)`, `var(--accent)`, `var(--accent-s)`); `--rail-hot` desaparece. Utilidades Tailwind nuevas: `rounded-xs` (→ `--r-badge`), `text-rail-mark`/`bg-rail-mark`. `DESIGN.md` v4 es la autoridad: su frontmatter nombra cada token con el nombre de la propiedad CSS sin `--`.
+
+**Decisiones de esta tarea** (Apéndice A, D1 a D5):
+- **D1.** La autoridad de los tokens pasa de `docs/design/itms-prototype-v3.html` a `DESIGN.md` v4, y la marca (`novieri-tokens.json`) fija su subconjunto. El prototipo v3 queda como historia (`harmony.mjs --proto` lo sigue fotografiando).
+- **D2.** La marca tiene dos tintas de texto, un borde y cinco severidades con «información» en el tono del acento. Por eso `--ink-2` pasa a ser `--ink`, `--line-2` pasa a ser `--line` y el estado «en curso» (`--sev-run`) toma el tono de información; la etiqueta «en curso» conserva su icono (`progress`), que es lo que la distingue de «información» (regla del segundo portador). Prueba: la maqueta de la dirección A (`propuestas-2026-11-23.html`, `.m-table td` en `--text`, `.sub` en `--text-2`, una sola `--border`).
+- **D3.** El contador de alertas del riel deja de ser texto rosa (`--rail-hot`) y pasa a ser blanco sobre la etiqueta crítica (fila «Contador de alertas» de la tabla de contraste de la marca, 6,57:1). El ítem activo se marca con `--rail-mark` (icono y punto), no con un borde de acento: el acento sobre el riel mide 2,32:1.
+- **D4.** `--r-pill` se conserva solo para la pista del interruptor y la barra de progreso: la marca retira la píldora de chips y etiquetas, no de esas dos formas, que el usuario reconoce por su silueta.
+- **D5.** `--accent-2` cambia de valor (#1a4fae → #203cac, el hover de la marca) y nace `--accent-3` (#1a3190, presionado).
+
+- [ ] **Step 1: Escribir `PRODUCT.md` y confirmarlo con el operador**
+
+`impeccable context` dice hoy `NO_PRODUCT_MD` y `PRODUCT_INIT_REQUIRED` (comprobado el 2026-11-23). `docs/product.md` ya lleva el marcador `impeccable:product-schema 1`, pero la herramienta busca `PRODUCT.md` en la raíz. `reference/init.md` exige una ronda de respuesta real antes de escribir uno nuevo: el coordinador enseña este borrador al operador (AskUserQuestion, una pregunta: «¿Es correcto el registro de producto?», opciones «Sí», «Sí, con cambios», «No») y aplica lo que diga. Cada línea sale de `docs/product.md` (§1, §4, §8, §9, §10, §11), `docs/00-vision.md` y las decisiones A1 a A4 y B2.
+
+Crear `PRODUCT.md`:
+
+```markdown
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Users
+
+The primary user is a technician on an in-house IT team or at an MSP, with the
+console open all day on a desk beside a ticket queue: patching, onboarding and
+imaging machines, remote sessions, backup assurance, and the evidence an
+auditor asks for. They are generalists who touch every module. They also open
+the console from a phone during an incident.
+
+Two other audiences are confirmed: the auditor, who reads output (reports, the
+audit log) rather than operating the fleet, and the end users of an MSP's
+clients, who file and follow their own tickets in the support portal.
+
+## Product Purpose
+
+Novieri RMM is a self-hosted IT management platform by Novieri: one control
+plane, one lightweight agent on every computer and server, and optional site
+servers for work that must happen on a client's own network. From one web
+console a team inventories its fleet, patches it, deploys software, takes
+remote sessions, backs it up, documents it and runs the governance workflows
+an auditor asks for. Success is an operator who finds the right client,
+machine or ticket at once, acts through a signed job, and can prove what
+happened afterwards.
+
+## Positioning
+
+The organisation of the category's leader, with a security model it can show.
+Every job is signed by the server and verified on the endpoint before it runs;
+agents connect outbound only, over mutual TLS; credentials are decrypted only
+at the point of use; every privileged action is written to a hash-chained
+audit log; and an MSP's clients are kept apart by the database itself, down to
+each technician's scope. The platform does not phone home.
+
+## Operating Context
+
+- One console over many client organisations (MSP). A client selector in the
+  top bar narrows every request to one client; "All my clients" shows the
+  person's whole scope.
+- Spanish and English; the operator works in Spanish (Colombia).
+- Dense desk use first; a 390px phone is a supported viewport.
+- Deployed on the operator's own server (`rmm.novieri.com`); many deployments
+  have no internet egress, so nothing is fetched from a CDN.
+
+## Capabilities and Constraints
+
+- Modules: devices and inventory, alerts and health, patching, software
+  deployment, remote sessions, backup, imaging, IT documentation, changes,
+  continuity tests, reports, licenses, subscriptions, IT budget, IP address
+  management, tickets with a support portal, notifications, an AI assistant,
+  and the administration around them (enrollment, agent packages, push
+  install, credentials, audit and security logs, platform status, settings).
+- Authorization is server-side; the console never gates security. A hidden
+  link is a courtesy.
+- Light theme only. Inter is self-hosted.
+- Undecided: dark mode (out of scope), an in-app notification inbox (none
+  exists; notifications go by email and webhook), server-saved views.
+
+## Brand Commitments
+
+- Name: **Novieri RMM** (operator, 2026-11-23). "Novieri" in the console's
+  bar; "Page · Novieri RMM" in the browser tab; "Novieri RMM" in emails and on
+  managed computers.
+- Identity: direction A, "Cordillera", chosen by the operator on 2026-11-23
+  from three proposals: a night-blue rail, one cobalt accent, an uppercase
+  geometric wordmark and a zigzag N read as two peaks and a monitoring pulse.
+  The assets and the exact values are in `docs/design/marca/`.
+- Atera's organisation, never its look (operator, 2026-11-23): its menu, its
+  per-client pages, its filtered lists, its tabbed records and its "New" menu;
+  Novieri's colours and shapes.
+- Voice: say what happened and what follows from it; name what failed and
+  what was and was not changed; no reassurance in place of information.
+- No user-visible string names the identity vendor.
+
+## Evidence on Hand
+
+None for marketing: no customer names, testimonials, case studies,
+third-party benchmarks, press or published pricing (operator, 2026-08-21).
+The only quotable figures are the measured ones in `docs/product.md` and the
+test suite that produced them. Nothing may be invented.
+
+## Product Principles
+
+1. Copy the category's structure and compete on consistency: one way to save,
+   every view addressable by URL, a unique tab title, an empty state that says
+   its real cause.
+2. Every control leads somewhere real. Nothing measured is drawn as absent,
+   never as zero.
+3. Security is enforced by the server and the database, and the console says
+   so rather than pretending to guard it.
+4. Dense for the people who live in it, legible on a phone during an incident.
+5. Two languages, one product: every word exists in both.
+
+## Accessibility & Inclusion
+
+WCAG 2.2 Level AA is a product requirement (operator, 2026-08-21). It is
+measured, not asserted: `frontend/src/test/contrast.test.ts` computes every
+token pair, the harmony gate runs axe on every route in both languages at four
+viewports, and `frontend/scripts/a11y-browser.mjs` measures composited
+contrast on the component harness. Touch targets reach 44px on coarse
+pointers; nothing renders below 10.5px.
+```
+
+- [ ] **Step 2: Escribir la prueba de tokens nueva (falla)**
+
+Reemplazar el contenido completo de `frontend/src/test/tokens.test.ts`:
+
+```ts
+/**
+ * THE TOKENS ARE A TRANSCRIPTION, AND THREE FILES MUST AGREE.
+ *
+ * `DESIGN.md` v4 ("Novieri", 2026-11-23) is the design authority: its YAML
+ * frontmatter names every token by its custom-property name without the
+ * dashes. The FIRST `:root` of `src/index.css` is the transcription the
+ * console paints. `docs/design/marca/novieri-tokens.json` is the brand the
+ * operator chose (direction A, "Cordillera"): every value in it has to reach
+ * the console exactly, under the token that does its job.
+ *
+ * The v3 prototype (`docs/design/itms-prototype-v3.html`) was the authority
+ * from 2026-09-07 to 2026-11-23 and is history now; nothing here reads it.
+ *
+ * ONLY THE FIRST `:root` of index.css. The second is the legacy-alias block
+ * (`--red: var(--sev-crit)`), a compatibility surface: an alias is a
+ * reference, not a colour, and "invents no colour" below keeps it that way.
+ * Values are compared without whitespace and case, so a formatter cannot
+ * fail this; `.07` is still not `0.07`, because that is a change.
+ */
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const REPO = resolve(import.meta.dirname, "../../..");
+const DESIGN_MD = resolve(REPO, "DESIGN.md");
+const BRAND_JSON = resolve(REPO, "docs/design/marca/novieri-tokens.json");
+const APP_CSS = resolve(REPO, "frontend/src/index.css");
+
+/** Pull the FIRST `:root { ... }` block out of a stylesheet and parse its declarations. */
+function rootTokens(path: string): Map<string, string> {
+  const source = readFileSync(path, "utf8");
+  const start = source.indexOf(":root {");
+  if (start === -1) throw new Error(`no ':root {' block in ${path}`);
+  const end = source.indexOf("}", start);
+  if (end === -1) throw new Error(`unterminated ':root' block in ${path}`);
+  const tokens = new Map<string, string>();
+  for (const line of source.slice(start + ":root {".length, end).split("\n")) {
+    const declaration = line.trim().replace(/;$/, "");
+    if (!declaration.startsWith("--")) continue;
+    const colon = declaration.indexOf(":");
+    if (colon === -1) continue;
+    tokens.set(declaration.slice(0, colon).trim(), declaration.slice(colon + 1).trim().replace(/\s+/g, " "));
+  }
+  return tokens;
+}
+
+/** The YAML frontmatter of a markdown file, as lines. */
+function frontmatter(markdown: string): string[] {
+  const body = /^---\n([\s\S]*?)\n---/.exec(markdown)?.[1];
+  if (body === undefined) throw new Error("DESIGN.md has no frontmatter");
+  return body.split("\n");
+}
+
+/** One flat frontmatter block (`colors:`, `rounded:`): key -> value, quotes removed. */
+export function frontmatterBlock(markdown: string, block: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let inside = false;
+  for (const line of frontmatter(markdown)) {
+    if (/^\S/.test(line)) {
+      inside = line.trim() === `${block}:`;
+      continue;
+    }
+    if (!inside) continue;
+    const match = /^ {2}([a-z0-9-]+):\s*"?([^"]*?)"?\s*$/.exec(line);
+    if (match) out.set(match[1] as string, (match[2] as string).trim());
+  }
+  return out;
+}
+
+/** `typography.<role>.fontSize` for every role. */
+function fontSizes(markdown: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let inside = false;
+  let role: string | null = null;
+  for (const line of frontmatter(markdown)) {
+    if (/^\S/.test(line)) {
+      inside = line.trim() === "typography:";
+      role = null;
+      continue;
+    }
+    if (!inside) continue;
+    const head = /^ {2}([a-z0-9-]+):\s*$/.exec(line);
+    if (head) {
+      role = head[1] as string;
+      continue;
+    }
+    const size = /^ {4}fontSize:\s*(\S+)\s*$/.exec(line);
+    if (size && role) out.set(role, size[1] as string);
+  }
+  return out;
+}
+
+const same = (value: string) => value.toLowerCase().replace(/\s+/g, "");
+
+/** A dotted path into the brand JSON, as a string. */
+function brandValue(brand: unknown, path: string): string {
+  let at: unknown = brand;
+  for (const part of path.split(".")) {
+    if (typeof at !== "object" || at === null || !(part in at)) throw new Error(`novieri-tokens.json has no ${path}`);
+    at = (at as Record<string, unknown>)[part];
+  }
+  if (typeof at !== "string") throw new Error(`novieri-tokens.json ${path} is not a string`);
+  return at;
+}
+
+/** Every `#rrggbb` under the brand's `color` subtree. */
+function brandColours(node: unknown): string[] {
+  if (typeof node === "string") return /^#[0-9a-f]{6}$/i.test(node) ? [node] : [];
+  if (typeof node !== "object" || node === null) return [];
+  return Object.values(node).flatMap(brandColours);
+}
+
+/**
+ * WHERE EACH BRAND VALUE LANDS: the token that does the job the brand names.
+ * The brand's `rail.activeBackground` equals its `rail.hover` and lands on the
+ * same `--rail-2`; `severity.info` is the accent; `brand.*` are the logo's own
+ * colours, which are the accent, the ink, the muted ink and white.
+ */
+const BRAND_MAP: ReadonlyArray<readonly [string, string]> = [
+  ["--bg", "color.page.background"],
+  ["--surface", "color.page.surface"],
+  ["--surface-2", "color.page.surfaceHover"],
+  ["--line", "color.page.border"],
+  ["--line-control", "color.page.borderControl"],
+  ["--ink", "color.page.text"],
+  ["--muted", "color.page.textSecondary"],
+  ["--rail", "color.rail.background"],
+  ["--rail-2", "color.rail.hover"],
+  ["--rail-2", "color.rail.activeBackground"],
+  ["--rail-ink", "color.rail.text"],
+  ["--rail-dim", "color.rail.textDim"],
+  ["--rail-mark", "color.rail.activeMark"],
+  ["--accent", "color.accent.base"],
+  ["--accent", "color.accent.focusRing"],
+  ["--accent", "color.severity.info.ink"],
+  ["--accent-2", "color.accent.hover"],
+  ["--accent-3", "color.accent.pressed"],
+  ["--accent-s", "color.accent.wash"],
+  ["--accent-s", "color.severity.info.wash"],
+  ["--accent-ink", "color.accent.ink"],
+  ["--sev-ok", "color.severity.ok.ink"],
+  ["--sev-ok-s", "color.severity.ok.wash"],
+  ["--sev-warn", "color.severity.warning.ink"],
+  ["--sev-warn-s", "color.severity.warning.wash"],
+  ["--sev-crit", "color.severity.critical.ink"],
+  ["--sev-crit-s", "color.severity.critical.wash"],
+  ["--sev-mut", "color.severity.unknown.ink"],
+  ["--sev-mut-s", "color.severity.unknown.wash"],
+  ["--r-ctl", "radius.control"],
+  ["--r-ctl", "radius.chip"],
+  ["--r-panel", "radius.panel"],
+  ["--r-badge", "radius.badge"],
+  ["--shadow", "shadow.resting"],
+];
+
+/** The brand writes a size with its weight ("22px/600") or its case ("10.5px uppercase 0.1em"). */
+const BRAND_SIZES: ReadonlyArray<readonly [string, string]> = [
+  ["--t-h1", "type.h1"],
+  ["--t-h2", "type.h2"],
+  ["--t-body", "type.body"],
+  ["--t-sm", "type.small"],
+  ["--t-cap", "type.caption"],
+  ["--t-kpi", "type.kpi"],
+];
+
+/** The ramp's roles in DESIGN.md, and the token each one is. */
+const RAMP: Readonly<Record<string, string>> = {
+  h1: "--t-h1",
+  h2: "--t-h2",
+  body: "--t-body",
+  small: "--t-sm",
+  caption: "--t-cap",
+  kpi: "--t-kpi",
+};
+
+describe("design tokens", () => {
+  const design = readFileSync(DESIGN_MD, "utf8");
+  const colours = frontmatterBlock(design, "colors");
+  const radii = frontmatterBlock(design, "rounded");
+  const sizes = fontSizes(design);
+  const app = rootTokens(APP_CSS);
+  const brand: unknown = JSON.parse(readFileSync(BRAND_JSON, "utf8"));
+
+  it("parsed all three files, so the comparisons below mean something", () => {
+    // NON-VACUITY: an empty map equals an empty map.
+    expect(colours.size).toBeGreaterThan(25);
+    expect(colours.get("accent")).toBe("#2747c9");
+    expect(radii.get("r-badge")).toBe("4px");
+    expect(sizes.get("body")).toBe("13.5px");
+    expect(app.get("--accent")).toBe("#2747c9");
+    expect(brandValue(brand, "color.accent.base")).toBe("#2747c9");
+  });
+
+  it("paints every colour DESIGN.md names, with DESIGN.md's value", () => {
+    const drifted = [...colours]
+      .filter(([name, value]) => same(app.get(`--${name}`) ?? "(missing)") !== same(value))
+      .map(([name, value]) => `--${name}: DESIGN.md=${value} index.css=${app.get(`--${name}`) ?? "(missing)"}`);
+    expect(drifted, drifted.join(" | ")).toEqual([]);
+  });
+
+  it("invents no colour DESIGN.md does not name", () => {
+    const invented = [...app]
+      .filter(([, value]) => /^#|^rgb|^hsl/i.test(value))
+      .filter(([name]) => !colours.has(name.slice(2)))
+      .map(([name, value]) => `${name}: ${value}`);
+    expect(invented, `colours not in DESIGN.md: ${invented.join(", ")}`).toEqual([]);
+  });
+
+  it("declares the radius ladder DESIGN.md names", () => {
+    expect(radii.size).toBe(4);
+    for (const [name, value] of radii) expect(app.get(`--${name}`), `--${name}`).toBe(value);
+  });
+
+  it.each(Object.entries(RAMP))("declares the %s rung DESIGN.md names (%s)", (role, token) => {
+    expect(app.get(token)).toBe(sizes.get(role));
+  });
+
+  it.each(BRAND_MAP)("carries the brand's value in %s (%s)", (token, path) => {
+    expect(same(app.get(token) ?? "(missing)")).toBe(same(brandValue(brand, path)));
+  });
+
+  it.each(BRAND_SIZES)("carries the brand's size in %s (%s)", (token, path) => {
+    const size = brandValue(brand, path).split(/[/ ]/)[0];
+    expect(app.get(token)).toBe(size);
+  });
+
+  it("puts every colour of the brand somewhere in the palette", () => {
+    const values = new Set([...app.values()].map(same));
+    const missing = brandColours((brand as { color: unknown }).color).filter((colour) => !values.has(same(colour)));
+    expect(missing, `brand colours the console never paints: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("keeps the four retired tones as aliases of the brand's, never as colours (DESIGN.md v4, D2)", () => {
+    const css = readFileSync(APP_CSS, "utf8");
+    const retired: ReadonlyArray<readonly [string, string]> = [
+      ["--ink-2", "--ink"],
+      ["--line-2", "--line"],
+      ["--sev-run", "--accent"],
+      ["--sev-run-s", "--accent-s"],
+    ];
+    for (const [alias, target] of retired) {
+      expect(app.has(alias), `${alias} is back in the first :root`).toBe(false);
+      expect(css).toMatch(new RegExp(`${alias}: var\\(${target}\\);`));
+    }
+    // D3: the rail's alert count is white on the critical badge now.
+    expect(css).not.toContain("--rail-hot");
+  });
+
+  it("commits to the light colour scheme rather than claiming dark support", () => {
+    const css = readFileSync(APP_CSS, "utf8");
+    expect(css).toContain("color-scheme: light;");
+    expect(css).not.toContain("color-scheme: light dark");
+  });
+
+  it("fetches no font or stylesheet from a third party", () => {
+    const css = readFileSync(APP_CSS, "utf8");
+    const external = css.match(/@import\s+url\(|fonts\.googleapis|fonts\.gstatic|https?:\/\//g);
+    expect(external, `index.css reaches off-origin: ${external?.join(", ")}`).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Ejecutar la prueba y verla fallar**
+
+Run: `cd frontend && npx vitest run src/test/tokens.test.ts`
+Expected: FAIL. Entre otros: `parsed all three files…` (`colours.get("accent")` es `undefined`: el frontmatter de hoy usa otras claves) y `carries the brand's value in --bg` (`#f5f6f9` frente a `#f3f5f8`).
+
+- [ ] **Step 4: Escribir `DESIGN.md` v4**
+
+Reemplazar el contenido completo de `DESIGN.md`:
+
+```markdown
+---
+name: Novieri RMM
+description: One console for a managed fleet, a night-blue rail beside a cool, exact workspace.
+colors:
+  bg: "#f3f5f8"
+  surface: "#ffffff"
+  surface-2: "#f7f9fc"
+  ink: "#111a2b"
+  muted: "#536077"
+  line: "#e1e6ee"
+  line-control: "#7b8599"
+  rail: "#101b30"
+  rail-2: "#1b2945"
+  rail-ink: "#a9b6cc"
+  rail-dim: "#8592ab"
+  rail-mark: "#8fa6ff"
+  accent: "#2747c9"
+  accent-2: "#203cac"
+  accent-3: "#1a3190"
+  accent-s: "#e9edfc"
+  accent-ink: "#ffffff"
+  sev-crit: "#b8172c"
+  sev-crit-s: "#fcebed"
+  sev-warn: "#8d5a00"
+  sev-warn-s: "#fcf1dc"
+  sev-ok: "#17703f"
+  sev-ok-s: "#e5f4ea"
+  sev-mut: "#586274"
+  sev-mut-s: "#edf0f4"
+  av-1: "#5b3fb0"
+  av-2: "#0f5f95"
+  av-3: "#17703f"
+  av-4: "#9a6100"
+  av-5: "#b03a5b"
+  av-6: "#0f7a80"
+  scrim: "rgba(16,27,48,.38)"
+  hatch-ink: "rgba(255,255,255,.55)"
+typography:
+  h1:
+    fontFamily: Inter
+    fontSize: 22px
+    fontWeight: 600
+    letterSpacing: "-0.015em"
+  h2:
+    fontFamily: Inter
+    fontSize: 15px
+    fontWeight: 600
+  body:
+    fontFamily: Inter
+    fontSize: 13.5px
+    fontWeight: 400
+    lineHeight: "1.5"
+  small:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: 400
+  caption:
+    fontFamily: Inter
+    fontSize: 10.5px
+    fontWeight: 500
+    letterSpacing: "0.1em"
+  kpi:
+    fontFamily: Inter
+    fontSize: 26px
+    fontWeight: 600
+    letterSpacing: "-0.03em"
+  code:
+    fontFamily: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace
+    fontSize: 12px
+    fontWeight: 400
+rounded:
+  r-badge: 4px
+  r-ctl: 6px
+  r-panel: 10px
+  r-pill: 999px
+spacing:
+  rail: 232px
+  rail-collapsed: 64px
+  topbar: 60px
+  content: 22px 24px 40px
+  content-max: 1440px
+components:
+  button-primary:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
+  button-primary-hover:
+    backgroundColor: "{colors.accent-2}"
+  button-primary-pressed:
+    backgroundColor: "{colors.accent-3}"
+  button-secondary:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
+  input-field:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
+  chip:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 32px
+  chip-selected:
+    backgroundColor: "{colors.accent-s}"
+    textColor: "{colors.accent}"
+  badge:
+    rounded: "{rounded.r-badge}"
+    height: 24px
+  panel:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r-panel}"
+  nav-item-active:
+    backgroundColor: "{colors.rail-2}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.r-ctl}"
+  save-bar:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+---
+
+# Design System: Novieri RMM
+
+> **Version 4, "Novieri" (2026-11-23).** The tokens in the frontmatter are
+> normative and named after the CSS custom properties that carry them
+> (`accent` is `--accent`). `frontend/src/index.css`'s first `:root` is their
+> transcription and `frontend/src/test/tokens.test.ts` fails on any
+> difference, in either direction, and on any brand value from
+> `docs/design/marca/novieri-tokens.json` that does not reach the console
+> exactly. A rule the brand forces to change is changed here first, with its
+> reason, and then in the tokens and the tests. The v3 prototype
+> (`docs/design/itms-prototype-v3.html`, 2026-09-07) is history.
+
+## Overview
+
+**Creative North Star: "The Survey Plan"**
+
+The brand the operator chose is "Cordillera": the sobriety of a topographic
+plan. A night-blue rail runs down the left of every screen and carries the
+legend, the places you can go, in the order a technician walks them. Everything
+to its right is the plan itself: a cool white workspace, exact and dense, where
+lines are thin and colour appears only where it means something. The symbol
+is an N drawn as two peaks that also read as a monitoring pulse, and the
+wordmark is built from straight strokes and arcs, flat ends, no serifs.
+
+The organisation is borrowed on purpose. The rail, the per-client pages, the
+filtered lists, the tabbed records and the "New" menu follow Atera, the
+category's leader, so a technician who has used one console knows where things
+are in this one. What is not borrowed is the look, and what this system
+competes on is consistency, which is where the reference is weakest: one way to
+save, every view addressable by URL, a unique tab title on every page, and an
+empty state that says its real cause.
+
+Density is a feature. This is a console for people who manage hundreds of
+endpoints and keep it open all day; rows, chips and badges are packed onto the
+page, and what keeps that from becoming noise is that colour is rationed.
+
+**Key Characteristics:**
+- A night-blue rail (232px, 64px folded) against a cool white workspace.
+- One cobalt accent, which is the only colour that is not a severity or a grey.
+- Five severities, each with a wash and an icon; information shares the accent.
+- Badges at 4px, chips and controls at 6px, panels at 10px: nothing is a pill
+  except the switch and the progress bar.
+- Every ratio computed in CI and every page measured in a browser.
+
+## Colors
+
+Cool and exact: a night-blue rail, a white working surface on a pale blue-grey
+ground, and one cobalt accent.
+
+### Primary
+- **Cobalt** (`#2747c9`, `--accent`): the primary button, links, the focus ring,
+  the active tab's underline, the selected chip, the checked checkbox, the info
+  badge, the symbol. 7.42:1 on white, 6.79:1 on the page.
+- **Cobalt deep** (`#203cac`, `--accent-2`): a primary button on hover.
+  **Cobalt pressed** (`#1a3190`, `--accent-3`): pressed.
+- **Cobalt wash** (`#e9edfc`, `--accent-s`): the selected chip, the info badge.
+  The accent on it is 6.35:1.
+
+### Rail
+- **Night blue** (`#101b30`, `--rail`) and **Night blue lifted** (`#1b2945`,
+  `--rail-2`): the rail's ground, and the ground an item lifts to on hover and
+  when it is the current page.
+- **Rail text** (`#a9b6cc`, `--rail-ink`): items, 8.39:1 and 7.07:1 lifted.
+- **Rail dim** (`#8592ab`, `--rail-dim`): counts, 5.48:1 and 4.62:1 lifted.
+- **Rail mark** (`#8fa6ff`, `--rail-mark`): the current item's icon and dot,
+  6.25:1 on the lifted ground.
+
+### Neutral
+- **Ink** (`#111a2b`, `--ink`): primary text, 17.41:1 on white.
+- **Muted** (`#536077`, `--muted`): secondary text, captions, placeholders,
+  breadcrumbs; 6.35:1 on white, 5.81:1 on the page, at least 5.44:1 on every
+  wash.
+- **Page** (`#f3f5f8`, `--bg`), **Surface** (`#ffffff`, `--surface`),
+  **Surface hover** (`#f7f9fc`, `--surface-2`).
+- **Line** (`#e1e6ee`, `--line`): decorative separation only, 1.25:1.
+- **Control line** (`#7b8599`, `--line-control`): the boundary of anything you
+  can operate, 3.71:1 on white and 3.40:1 on the page.
+
+### Severities
+
+| Kind | Icon | Ink | Wash | Ink on wash | Ink on white |
+| --- | --- | --- | --- | --- | --- |
+| crit | circle-x | `#b8172c` | `#fcebed` | 5.71:1 | 6.57:1 |
+| warn | alert-triangle | `#8d5a00` | `#fcf1dc` | 5.22:1 | 5.84:1 |
+| ok | circle-check | `#17703f` | `#e5f4ea` | 5.39:1 | 6.13:1 |
+| mut (unknown) | minus | `#586274` | `#edf0f4` | 5.38:1 | 6.15:1 |
+| info | info-circle | the accent | the accent wash | 6.35:1 | 7.42:1 |
+| run | progress | the accent | the accent wash | 6.35:1 | 7.42:1 |
+
+"Running" is not a sixth colour: it is information's hue with its own icon,
+because the brand has one blue. `--sev-run` is an alias of `--accent` for the
+code that still names it.
+
+The avatar palette (`--av-1..6`) tells people apart; it is not a status, and
+white initials clear 5.10:1 on every fill.
+
+### Named Rules
+
+**The One Accent Rule.** Cobalt is the only colour on the page that does not
+mean a severity. A control that navigates, reveals or commits is cobalt;
+nothing else is.
+
+**The Rationed Hue Rule.** If a hue could be swapped for grey without losing
+meaning, it is grey.
+
+**The Second Carrier Rule.** Colour is never the only carrier: every badge
+carries its icon, the current rail item its lifted ground and white text.
+
+**The Two Grounds Rule.** Cobalt measures 2.32:1 on the rail and is never drawn
+there; the rail has its own mark, `--rail-mark`.
+
+**The Absent Zero Rule.** Unmeasured is drawn as absent: `n/a`, no bar, a
+hollow pip, a chip with no count. Never as `0`.
+
+## Typography
+
+**Inter, self-hosted, at 400, 500 and 600.** Nothing is fetched from a CDN:
+the platform does not phone home and many deployments have no egress.
+
+### Hierarchy
+- **H1** (`--t-h1`, 22px, 600, -0.015em): the page title, one per page.
+- **H2** (`--t-h2`, 15px, 600): a panel or section heading.
+- **Body** (`--t-body`, 13.5px, 400, 1.5): everything read, the rail's items,
+  buttons, fields, cells.
+- **Small** (`--t-sm`, 12px): sub-lines, badges, counts, breadcrumbs, code.
+- **Caption** (`--t-cap`, 10.5px, 500, uppercase by CSS, 0.1em): table headers,
+  tile labels, fact labels. The only uppercase text, never typed.
+- **KPI** (`--t-kpi`, 26px, 600, -0.03em): the figure on a tile.
+
+Tailwind's `text-xs..2xl` resolve to Small, Body, Body, H2, H1 and KPI.
+
+### Named Rules
+
+**The Floor Is The Ramp's Smallest Step.** Nothing renders below 10.5px.
+
+**The Label Leads Rule.** A tile's caption sits above its figure.
+
+## Layout
+
+A 232px rail (64px folded, icons only), a 60px top bar and a fluid workspace
+padded `22px 24px 40px`, capped at 1440px. Breakpoints: **1300px** (tile grids
+relax), **1024px** (the rail becomes a drawer, out of the tab order while
+shut), **640px** (the client selector moves into the drawer, tiles go full
+width). The breadcrumb is the first line of the content. Touch targets reach
+44px on coarse pointers.
+
+## Elevation & Depth
+
+Almost flat. Depth is a white surface on the page, a 1px line around it and one
+soft shadow, `0 1px 2px rgba(16,27,48,.05), 0 6px 20px rgba(16,27,48,.06)`,
+tinted by the rail's own blue. There is no elevation scale: a menu, a dialog
+and a panel wear the same shadow, and a dialog is set apart by the scrim.
+
+**The Flat-Until-Touched Rule.** A hover changes the ground or the border; a
+border-only hover steps at least 2:1.
+
+## Shapes
+
+The ladder shrinks toward the thing you read: **panels 10px** (`--r-panel`),
+**controls and chips 6px** (`--r-ctl`), **badges 4px** (`--r-badge`). The
+switch's track and the progress bar keep `--r-pill`, because their silhouette
+is how they are recognised; nothing else is round. Avatars and pips are 50%;
+heat cells 2px and 3px. Borders are always 1px, told apart by colour: a line
+closes a box, the control line says it can be operated.
+
+## Components
+
+### Buttons
+- 36px high, 6px radius, 13.5px/500, `0 13px`.
+- **Primary:** cobalt fill, white text; deep on hover, pressed on press.
+- **Secondary:** white, control line, ink text.
+- **Ghost:** no edge, cobalt text. **Danger:** critical edge and text.
+- **Focus:** 2px cobalt outline at a 2px offset, which is what keeps the ring
+  off the primary button's own fill.
+- **One primary per page body.** In the chrome, the "New" menu is the one
+  primary control (it replaced "Add a computer" on 2026-11-23).
+
+### Chips (filters)
+- 32px high, 6px radius, control line, ink text at 13.5px/500, an optional
+  count at 12px in the muted ink. **Selected:** cobalt wash, cobalt edge and
+  text, and the count in cobalt. A filter chip is a toggle (`aria-pressed`) and
+  its state lives in the URL.
+
+### Badges (status)
+- 24px high, 4px radius, 12px/500, the kind's wash and ink, the kind's icon
+  first. Six kinds: crit, warn, ok, mut, info, run.
+
+### Inputs / Fields
+- 36px, 6px radius, white, control line; focus moves the border to cobalt.
+  Help text sits outside the label (`aria-describedby`). Checkboxes and radios
+  are native, tinted by `accent-color`.
+- **Switch:** a pill track (control line off, cobalt on) and a white knob.
+
+### Panels
+- White, 1px line, 10px radius, the shadow. A head with an H2, a muted line
+  and actions; a body at `16px 18px`, or bare around a list.
+
+### Lists
+- Page head (title, one sentence, the primary action), then one bare panel:
+  search, filter chips with counts, the client chip when every client is
+  shown, "Showing x of y" at the end of the toolbar; the bulk bar only where
+  bulk actions exist; the table; the pager. An empty list says whether nothing
+  exists yet or nothing matches the filters.
+
+### Records (detail)
+- Back, the record's name, its status badge, its context (client and site),
+  actions on the right; summary tiles; one row of tabs that change the URL;
+  for a device, information on the left and metrics and activity on the right.
+
+### Forms
+- Full page, back and title; collapsible sections; one sticky bar, "Unsaved
+  changes · Discard · Save", for the whole console. Leaving with unsaved
+  changes asks first.
+
+### Dialogs and drawers
+- Centred, 10px radius, the shadow, the scrim; focus enters, is trapped and
+  returns; Escape closes.
+
+### Navigation
+- **Rail, in Atera's order, with no group captions:** Dashboard, Tickets,
+  Clients, Devices, Alerts, Patching, Software, Backup, Remote sessions, Assets
+  (Licenses, Subscriptions, IP addresses), IT documentation, Reports, More
+  (Changes, Continuity tests, IT budget, only when on for the chosen client).
+  Anchored at the bottom: Assistant, and Admin, which swaps the rail for an
+  accordion of its sections with a back button and a search.
+- Items at Body in rail text with an outline icon; **current**: lifted ground,
+  white text, the icon and a 7px dot in rail mark. Counts in rail dim; the
+  alert count is a critical badge with white text.
+- Folded: icons only. Below 1024px: a drawer.
+
+### Top bar
+- 60px, white, a line below: the "New" menu (only real destinations, each
+  shown with its permission), the search (`/`), the client selector, the alert
+  glyph, the platform glyph and the account. No bell: there is no inbox
+  behind one.
+
+### Brand
+- **Wordmark:** "NOVIERI", built from strokes and arcs (`docs/design/marca/
+  novieri-wordmark.svg`), white on the rail, ink on light grounds.
+- **Symbol:** the zigzag N; on the rail and as the favicon it sits on a 7px
+  cobalt tile with a white stroke (`novieri-favicon.svg`, read at 16 and 32px).
+- **Lockup:** wordmark, a hairline and "RMM" in the muted ink, for the sign-in
+  screens, the portal and emails (`novieri-lockup.svg`).
+- **Name:** "Novieri" in the console's bar; "Page · Novieri RMM" in the tab.
+
+### Icons
+Tabler, outline, stroke 1.75, from the sprite; never a hand-drawn path except
+the brand's own symbol and wordmark.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** change a token here first, then in `index.css`, then in the tests.
+- **Do** compute every new pair with `frontend/src/test/contrast.test.ts` and
+  add it to the table its floor belongs to (4.5:1 text, 3:1 boundary).
+- **Do** build every list, record and form from the kit
+  (`frontend/src/shell/listKit.tsx`, `detailKit.tsx`, `formKit.tsx`).
+- **Do** keep filters, tabs and create dialogs in the URL.
+- **Do** run `node scripts/harmony.mjs` on the routes you touched, in both
+  languages.
+
+### Don't:
+- **Don't** draw cobalt on the rail, or a second accent anywhere.
+- **Don't** make a chip or a badge a pill.
+- **Don't** write a font size, radius or colour as a literal.
+- **Don't** type uppercase copy or an em dash into UI text.
+- **Don't** ship a dead control: no bell, no "New" entry without a real
+  destination.
+- **Don't** draw a second save button where the save bar belongs.
+- **Don't** widen a guard to make a colour pass.
+```
+
+- [ ] **Step 5: Transcribir los tokens a `index.css`**
+
+En `frontend/src/index.css`, reemplazar el comentario de cabecera (líneas 4 a 51) por este y el primer `:root` (líneas 52 a 103) por el bloque siguiente:
+
+```css
+/* Novieri RMM design tokens.
+ *
+ * TRANSCRIBED, NOT CHOSEN. Every value in the FIRST `:root` below is copied
+ * from the frontmatter of `DESIGN.md` v4 ("Novieri", 2026-11-23), which names
+ * each token after this property, and the brand subset of it from
+ * `docs/design/marca/novieri-tokens.json` (direction A, "Cordillera", chosen
+ * by the operator on 2026-11-23). `src/test/tokens.test.ts` reads all three
+ * files and fails on any difference, so a deliberate change starts in
+ * DESIGN.md. The ratios live in DESIGN.md and are computed by
+ * `src/test/contrast.test.ts`; none is quoted here, because a quoted number
+ * rots.
+ *
+ * THE SHAPE. Five type sizes and the KPI figure; four radii (badge, control,
+ * panel, and the pill kept for the switch and the progress bar); one palette:
+ * a light page (`--bg`, `--surface`, `--surface-2`), two inks (`--ink`,
+ * `--muted`), one decorative line (`--line`) and one control boundary
+ * (`--line-control`), a night-blue rail with its two grounds, two text tones
+ * and its own mark, ONE accent with its hover, pressed and wash, and four
+ * severity pairs (information shares the accent). The harmony gate
+ * (`scripts/harmony.mjs`) reads this file at runtime as its allowlist.
+ *
+ * `--line-control` IS THE BOUNDARY THAT IDENTIFIES A CONTROL (WCAG 2.2 SC
+ * 1.4.11, 3:1 against every surface a control can land on); `--line` is
+ * decoration only, and `contrast.test.ts` asserts it never draws a control.
+ *
+ * LIGHT ONLY, DELIBERATELY: no `prefers-color-scheme`, no `[data-theme]`
+ * (2026-08-16 UI port spec §3.1; `no-dark-variants.test.ts`).
+ *
+ * INTER IS SELF-HOSTED (`./fonts.css`): nothing is fetched off-origin
+ * (`docs/product.md` §5).
+ */
+:root {
+  --t-h1: 22px;
+  --t-h2: 15px;
+  --t-body: 13.5px;
+  --t-sm: 12px;
+  --t-cap: 10.5px;
+  --t-kpi: 26px;
+  --r-badge: 4px;
+  --r-ctl: 6px;
+  --r-panel: 10px;
+  --r-pill: 999px;
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --surface-2: #f7f9fc;
+  --ink: #111a2b;
+  --muted: #536077;
+  --line: #e1e6ee;
+  --line-control: #7b8599;
+  --rail: #101b30;
+  --rail-2: #1b2945;
+  --rail-ink: #a9b6cc;
+  --rail-dim: #8592ab;
+  --rail-mark: #8fa6ff;
+  --accent: #2747c9;
+  --accent-2: #203cac;
+  --accent-3: #1a3190;
+  --accent-s: #e9edfc;
+  --accent-ink: #ffffff;
+  --sev-crit: #b8172c;
+  --sev-crit-s: #fcebed;
+  --sev-warn: #8d5a00;
+  --sev-warn-s: #fcf1dc;
+  --sev-ok: #17703f;
+  --sev-ok-s: #e5f4ea;
+  --sev-mut: #586274;
+  --sev-mut-s: #edf0f4;
+  --av-1: #5b3fb0;
+  --av-2: #0f5f95;
+  --av-3: #17703f;
+  --av-4: #9a6100;
+  --av-5: #b03a5b;
+  --av-6: #0f7a80;
+  --scrim: rgba(16,27,48,.38);
+  --hatch-ink: rgba(255,255,255,.55);
+  --shadow: 0 1px 2px rgba(16,27,48,.05),0 6px 20px rgba(16,27,48,.06);
+  --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans: Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  color-scheme: light;
+  font-family: var(--sans);
+}
+```
+
+En el bloque de alias (el segundo `:root`), añadir estas cuatro líneas al principio, con su comentario:
+
+```css
+  /* RETIRED BY THE BRAND (DESIGN.md v4, decision D2): Novieri has two text
+     tones, one line and information in the accent's hue. The four names stay
+     so the ~70 rules and modules that read them keep resolving. */
+  --ink-2: var(--ink);
+  --line-2: var(--line);
+  --sev-run: var(--accent);
+  --sev-run-s: var(--accent-s);
+```
+
+En `@theme inline`: borrar la línea `--color-rail-hot: var(--rail-hot);`; añadir después de `--color-rail-dim: var(--rail-dim);` la línea `--color-rail-mark: var(--rail-mark);`; y en el bloque de radios, antes de `--radius-sm`, la línea `--radius-xs: var(--r-badge);`.
+
+- [ ] **Step 6: Las tres reglas que leían lo que cambia**
+
+`frontend/src/shell/shell.css`, la regla `.sidebar .ct.hot` (línea 148) y su comentario (139-140):
+
+```css
+/* The rail's alert count (DESIGN.md v4, "Navigation"; decision D3): white on
+ * the critical badge. It was `--rail-hot` text on the bare rail. */
+.sidebar .ct.hot {
+  color: var(--accent-ink);
+  background: var(--sev-crit);
+  border-radius: var(--r-badge);
+  padding: 2px 6px;
+  font-family: var(--sans);
+  font-weight: 600;
+}
+```
+
+`frontend/src/shell/shell.css`, en `.counter-dot` (líneas 350-366): `background: var(--accent);` → `background: var(--sev-crit);` y `border-radius: var(--r-pill);` → `border-radius: var(--r-badge);`.
+
+`frontend/src/shell/components.css`: en `.pill` (línea 402) `border-radius: var(--r-pill);` → `border-radius: var(--r-badge);`; en `.chip` (línea 649) `border-radius: var(--r-pill);` → `border-radius: var(--r-ctl);`.
+
+- [ ] **Step 7: Las puertas de contraste y de radios**
+
+`frontend/src/test/contrast.test.ts`:
+
+1. En `TEXT_ON_BACKGROUND`, añadir al final:
+   ```ts
+     // DESIGN.md v4: the alert count, white on the critical badge (the rail's
+     // `.ct.hot` and the top bar's `.counter-dot`), and the primary button's
+     // label on its hover and pressed grounds.
+     ["--accent-ink", "--sev-crit", ".sidebar .ct.hot, .counter-dot"],
+     ["--accent-ink", "--accent-2", ".btn.primary:hover"],
+     ["--accent-ink", "--accent-3", ".btn.primary:active"],
+   ```
+   y cambiar los textos de las filas de `--ink-2` y `--sev-run` para que digan que son alias (`"…, now --ink (DESIGN.md v4, D2)"`, `"…, information's hue with the progress icon (D2)"`); los pares no cambian.
+2. En `TEXT_ON_RAIL`, sustituir las dos filas de `--rail-hot` por:
+   ```ts
+     ["--rail-mark", "--rail-2", ".nav-item.active svg and .nav-dot: the current item's mark"],
+     ["--rail-mark", "--rail", "the same mark on a folder heading that holds the current page"],
+   ```
+3. En «keeps the hairlines and the rail tones off the light-surface text list», después de `expect(contrast(colour("--accent"), colour("--rail-2"))).toBeLessThan(4.5);` añadir:
+   ```ts
+     // DESIGN.md v4, "The Two Grounds Rule": cobalt is not even a mark on the
+     // rail (2.32:1 on --rail, 1.95:1 lifted); --rail-mark is.
+     expect(contrast(colour("--accent"), colour("--rail"))).toBeLessThan(3);
+     expect(contrast(colour("--accent"), colour("--rail-2"))).toBeLessThan(3);
+   ```
+4. En `NON_TEXT`, después de la fila de `--accent-2`, añadir `["--accent-3", "a pressed primary button's ground and edge"],`, y después de la fila de `--ink-2`, añadir `["--ink", "the same edge: --ink-2 resolves to --ink since DESIGN.md v4 (D2)"],`. Sin esta segunda fila, «names every scanned boundary in the table above» falla con `components.css .btn:hover border-color -> --ink-2 #111a2b`: la tabla compara el token al que resuelve el alias (comprobado en una copia de trabajo el 2026-11-23).
+
+`frontend/src/test/radius.test.ts`: en `LADDER` añadir `"--r-badge": "4px",` como primera entrada; en `SCALE` añadir `"--radius-xs": "--r-badge",` como primera entrada; en el comentario de cabecera, sustituir «a radius ladder of exactly three rungs -- control 6px, panel 10px, pill 999px» por «a radius ladder of four rungs (DESIGN.md v4) -- badge 4px, control 6px, panel 10px, and the pill kept for the switch and the progress bar».
+
+- [ ] **Step 8: Ejecutar las puertas**
+
+Run: `cd frontend && npx vitest run src/test/tokens.test.ts src/test/contrast.test.ts src/test/radius.test.ts src/test/no-dark-variants.test.ts src/test/jsx-tokens.test.ts src/test/base-styles.test.ts src/test/kit-review-fixes.test.tsx`
+Expected: PASS en todas. Si `contrast.test.ts` informa un par por debajo del mínimo, **no** se baja el mínimo: se mira qué regla lo pinta y se corrige la regla (Global Constraints).
+
+- [ ] **Step 9: Regenerar el sidecar `.impeccable/design.json`**
+
+`reference/document.md` §4b: el sidecar se regenera siempre que se regenera `DESIGN.md`. Reemplazar el contenido completo de `.impeccable/design.json`:
+
+```json
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T12:00:00Z",
+  "title": "Design System: Novieri RMM",
+  "extensions": {
+    "colorMeta": {
+      "bg": { "role": "neutral", "displayName": "Page", "canonical": "#f3f5f8", "purpose": "The ground behind every panel." },
+      "surface": { "role": "neutral", "displayName": "Surface", "canonical": "#ffffff", "purpose": "Panels, rows, fields, the top bar." },
+      "surface-2": { "role": "neutral", "displayName": "Surface hover", "canonical": "#f7f9fc", "purpose": "A hovered row." },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#111a2b", "purpose": "Primary text, 17.41:1 on white." },
+      "muted": { "role": "neutral", "displayName": "Muted ink", "canonical": "#536077", "purpose": "Secondary text, captions, placeholders; 6.35:1 on white." },
+      "line": { "role": "neutral", "displayName": "Line", "canonical": "#e1e6ee", "purpose": "Decorative separation only." },
+      "line-control": { "role": "neutral", "displayName": "Control line", "canonical": "#7b8599", "purpose": "The boundary of anything operable, 3.71:1 on white." },
+      "rail": { "role": "tertiary", "displayName": "Night blue", "canonical": "#101b30", "purpose": "The rail's ground." },
+      "rail-2": { "role": "tertiary", "displayName": "Night blue lifted", "canonical": "#1b2945", "purpose": "A rail item on hover, and the current one." },
+      "rail-ink": { "role": "neutral", "displayName": "Rail text", "canonical": "#a9b6cc", "purpose": "Rail items, 8.39:1." },
+      "rail-dim": { "role": "neutral", "displayName": "Rail dim", "canonical": "#8592ab", "purpose": "Rail counts, 5.48:1." },
+      "rail-mark": { "role": "primary", "displayName": "Rail mark", "canonical": "#8fa6ff", "purpose": "The current item's icon and dot, 6.25:1 lifted." },
+      "accent": { "role": "primary", "displayName": "Cobalt", "canonical": "#2747c9", "purpose": "The one accent: primary action, links, focus, selected chip, info." },
+      "accent-2": { "role": "primary", "displayName": "Cobalt deep", "canonical": "#203cac", "purpose": "Primary button on hover." },
+      "accent-3": { "role": "primary", "displayName": "Cobalt pressed", "canonical": "#1a3190", "purpose": "Primary button pressed." },
+      "accent-s": { "role": "primary", "displayName": "Cobalt wash", "canonical": "#e9edfc", "purpose": "Selected chip, info badge." },
+      "accent-ink": { "role": "primary", "displayName": "On cobalt", "canonical": "#ffffff", "purpose": "Text on a cobalt or critical fill." },
+      "sev-crit": { "role": "status", "displayName": "Critical", "canonical": "#b8172c", "purpose": "Critical ink; the alert count's badge." },
+      "sev-crit-s": { "role": "status", "displayName": "Critical wash", "canonical": "#fcebed", "purpose": "Critical badge and notice ground." },
+      "sev-warn": { "role": "status", "displayName": "Warning", "canonical": "#8d5a00", "purpose": "Warning ink." },
+      "sev-warn-s": { "role": "status", "displayName": "Warning wash", "canonical": "#fcf1dc", "purpose": "Warning badge and notice ground." },
+      "sev-ok": { "role": "status", "displayName": "OK", "canonical": "#17703f", "purpose": "OK ink." },
+      "sev-ok-s": { "role": "status", "displayName": "OK wash", "canonical": "#e5f4ea", "purpose": "OK badge ground." },
+      "sev-mut": { "role": "status", "displayName": "Unknown", "canonical": "#586274", "purpose": "Unknown or not measured." },
+      "sev-mut-s": { "role": "status", "displayName": "Unknown wash", "canonical": "#edf0f4", "purpose": "Unknown badge ground." },
+      "av-1": { "role": "neutral", "displayName": "Avatar 1", "canonical": "#5b3fb0", "purpose": "Telling people apart; never a status." },
+      "av-2": { "role": "neutral", "displayName": "Avatar 2", "canonical": "#0f5f95", "purpose": "Telling people apart; never a status." },
+      "av-3": { "role": "neutral", "displayName": "Avatar 3", "canonical": "#17703f", "purpose": "Telling people apart; never a status." },
+      "av-4": { "role": "neutral", "displayName": "Avatar 4", "canonical": "#9a6100", "purpose": "Telling people apart; never a status." },
+      "av-5": { "role": "neutral", "displayName": "Avatar 5", "canonical": "#b03a5b", "purpose": "Telling people apart; never a status." },
+      "av-6": { "role": "neutral", "displayName": "Avatar 6", "canonical": "#0f7a80", "purpose": "Telling people apart; never a status." },
+      "scrim": { "role": "neutral", "displayName": "Scrim", "canonical": "rgba(16,27,48,.38)", "purpose": "Behind a dialog or the drawer." },
+      "hatch-ink": { "role": "neutral", "displayName": "Hatch", "canonical": "rgba(255,255,255,.55)", "purpose": "The hatch over a heat cell that was not measured." }
+    },
+    "typographyMeta": {
+      "h1": { "displayName": "Page title", "purpose": "One per page." },
+      "h2": { "displayName": "Panel title", "purpose": "A panel or section heading." },
+      "body": { "displayName": "Body", "purpose": "Everything read: rows, cells, fields, rail items." },
+      "small": { "displayName": "Small", "purpose": "Sub-lines, badges, counts, code." },
+      "caption": { "displayName": "Caption", "purpose": "Table headers and tile labels, uppercase by CSS." },
+      "kpi": { "displayName": "KPI", "purpose": "A tile's figure." }
+    },
+    "shadows": [
+      { "name": "resting", "value": "0 1px 2px rgba(16,27,48,.05), 0 6px 20px rgba(16,27,48,.06)", "purpose": "Every panel, tile, menu and dialog. The only shadow." }
+    ],
+    "motion": [
+      { "name": "press", "value": "transform: translateY(1px) on :active", "purpose": "Buttons. Nothing animates at rest." }
+    ],
+    "breakpoints": [
+      { "name": "tiles", "value": "1300px" },
+      { "name": "rail-drawer", "value": "1024px" },
+      { "name": "handset", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Cobalt fill, white label; deep on hover, pressed on press; the ring sits 2px outside the fill.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Guardar</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;font:500 13.5px/1 Inter,system-ui,sans-serif;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);color:var(--ink);cursor:pointer;white-space:nowrap}.ds-btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.ds-btn-primary:hover{background:var(--accent-2);border-color:var(--accent-2)}.ds-btn-primary:active{background:var(--accent-3);border-color:var(--accent-3);transform:translateY(1px)}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White, control line, ink label.",
+      "html": "<button class=\"ds-btn\">Exportar</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;font:500 13.5px/1 Inter,system-ui,sans-serif;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);color:var(--ink);cursor:pointer}.ds-btn:hover{background:var(--surface-2)}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "A toggle whose state lives in the URL; selected is the cobalt wash.",
+      "html": "<span class=\"ds-chips\"><button class=\"ds-chip\" aria-pressed=\"false\">Servidores<span class=\"ds-n\">12</span></button><button class=\"ds-chip on\" aria-pressed=\"true\">Todos<span class=\"ds-n\">248</span></button></span>",
+      "css": ".ds-chips{display:flex;gap:8px}.ds-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 11px;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);color:var(--ink);font:500 13.5px/1 Inter,system-ui,sans-serif}.ds-n{font:500 12px/1 Inter,system-ui,sans-serif;color:var(--muted);font-variant-numeric:tabular-nums}.ds-chip.on{background:var(--accent-s);border-color:var(--accent);color:var(--accent)}.ds-chip.on .ds-n{color:var(--accent)}.ds-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "custom",
+      "refersTo": "badge",
+      "description": "4px badge with the kind's icon first; colour is never the only carrier.",
+      "html": "<span class=\"ds-badge crit\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M10 10l4 4m0-4l-4 4\"/></svg>Crítico</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 7px;border-radius:var(--r-badge);font:500 12px/1 Inter,system-ui,sans-serif}.ds-badge.crit{background:var(--sev-crit-s);color:var(--sev-crit)}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "36px, control line, cobalt border on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Buscar equipos\">",
+      "css": ".ds-input{height:36px;padding:0 10px;border:1px solid var(--line-control);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink);font:400 13.5px/1.5 Inter,system-ui,sans-serif}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{outline:none;border-color:var(--accent)}"
+    },
+    {
+      "name": "Rail Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Rail text at rest; the current item lifts, turns white and wears the rail mark.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-item\">Tickets</a><a class=\"ds-item on\" aria-current=\"page\">Equipos<i class=\"ds-dot\"></i></a></nav>",
+      "css": ".ds-rail{background:var(--rail);padding:12px 0;width:232px}.ds-item{display:flex;align-items:center;gap:11px;height:38px;margin:0 10px;padding:0 12px;border-radius:var(--r-ctl);color:var(--rail-ink);font:400 13.5px/1 Inter,system-ui,sans-serif;text-decoration:none}.ds-item:hover{background:var(--rail-2);color:#fff}.ds-item.on{background:var(--rail-2);color:#fff;font-weight:500}.ds-dot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--rail-mark)}"
+    },
+    {
+      "name": "Save Bar",
+      "kind": "custom",
+      "refersTo": "save-bar",
+      "description": "The console's one way to save: sticky at the bottom while something changed.",
+      "html": "<div class=\"ds-save\" role=\"region\" aria-label=\"Cambios sin guardar\"><span>Cambios sin guardar</span><button class=\"ds-btn\">Descartar</button><button class=\"ds-btn ds-btn-primary\">Guardar</button></div>",
+      "css": ".ds-save{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--shadow);font:500 13.5px/1.5 Inter,system-ui,sans-serif;color:var(--ink)}.ds-save span{margin-right:auto}.ds-btn{height:36px;padding:0 13px;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);color:var(--ink)}.ds-btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Survey Plan",
+    "overview": "The sobriety of a topographic plan: a night-blue rail carries the legend in the order a technician walks it, and a cool white workspace carries the plan, exact and dense, with colour only where it means something. The organisation follows Atera so a technician knows where things are; the look is Novieri's, and the system competes on consistency: one way to save, every view addressable, a unique tab title, empty states that say their cause.",
+    "keyCharacteristics": [
+      "A night-blue rail (232px, 64px folded) against a cool white workspace.",
+      "One cobalt accent; five severities with washes and icons; information shares the accent.",
+      "Badges 4px, chips and controls 6px, panels 10px; only the switch and progress bar are pills.",
+      "Every ratio computed in CI, every page measured in a browser in two languages."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Cobalt is the only colour that does not mean a severity.", "section": "colors" },
+      { "name": "The Two Grounds Rule", "body": "Cobalt is never drawn on the rail; the rail has its own mark.", "section": "colors" },
+      { "name": "The Second Carrier Rule", "body": "Every badge carries its icon; colour is never the only carrier.", "section": "colors" },
+      { "name": "The Absent Zero Rule", "body": "Unmeasured is drawn as absent, never as 0.", "section": "colors" },
+      { "name": "The Floor Is The Ramp's Smallest Step", "body": "Nothing renders below 10.5px.", "section": "typography" },
+      { "name": "The Flat-Until-Touched Rule", "body": "Surfaces rest flat; a hover changes the ground or steps the border 2:1.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do change a token in DESIGN.md first, then index.css, then the tests.",
+      "Do build every list, record and form from the kit.",
+      "Do keep filters, tabs and create dialogs in the URL."
+    ],
+    "donts": [
+      "Don't draw cobalt on the rail or add a second accent.",
+      "Don't make a chip or a badge a pill.",
+      "Don't ship a dead control or a second save button."
+    ]
+  }
+}
+```
+
+- [ ] **Step 10: `docs/product.md` con el nombre elegido**
+
+En `docs/product.md`: el título pasa a `# Product — what Novieri RMM is, and what it does`; cada «ITMS» del cuerpo pasa a «Novieri RMM» (son 14 al 2026-11-23: `grep -c ITMS docs/product.md`); la sección §9 empieza así en lugar del párrafo «`ITMS` IS A PLACEHOLDER…»:
+
+```markdown
+**The product is Novieri RMM** (operator, 2026-11-23, decision A3 of the
+console redesign): "Novieri" in the console's bar, "Page · Novieri RMM" in the
+browser tab, "Novieri RMM" in emails and on managed computers. `ITMS` was a
+placeholder from 2026-08-21 until then; the identity is direction A,
+"Cordillera" (`docs/design/marca/`), and `DESIGN.md` v4 is its system.
+`frontend/src/test/no-itms.test.ts` keeps the old name out of the console.
+```
+
+y la fila de `tokens.test.ts` en la tabla de §11 dice: `| frontend/src/test/tokens.test.ts | A palette that has drifted from DESIGN.md v4 or from the brand (docs/design/marca/novieri-tokens.json). A deliberate change starts in DESIGN.md. |`.
+
+- [ ] **Step 11: Comprobar el contexto de impeccable**
+
+Run (desde la raíz): `.claude/skills/impeccable/scripts/impeccable context`
+Expected: la salida ya no contiene `NO_PRODUCT_MD` ni `PRODUCT_INIT_REQUIRED`, e incluye `# DESIGN.md` con `name: Novieri RMM`. Si añade `CONTEXT_STALE` por el sidecar, se informa y no se repara aparte (SKILL.md, «Never repair drift as a side effect»): este paso ya lo regeneró.
+
+- [ ] **Step 12: Suite completa y navegador**
+
+Run: `cd frontend && npx vitest run && npm run typecheck && npm run build`
+Expected: todo en verde (365 archivos de prueba o más).
+
+Run: `node scripts/harmony.mjs --strict-fixtures --lang en --routes /devices,/health,/settings,/clients` y lo mismo con `--lang es`
+Expected: `ok    every route on the tokens, …` en las dos. Las capturas de `/devices` a 1440x900 ya muestran el riel `#101b30` y el acento cobalto.
+
+Run: `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs`
+Expected: termina con código 0.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add PRODUCT.md DESIGN.md .impeccable/design.json docs/product.md frontend/src/index.css frontend/src/shell/shell.css frontend/src/shell/components.css frontend/src/test/tokens.test.ts frontend/src/test/contrast.test.ts frontend/src/test/radius.test.ts
+git commit -m "feat(ui): Novieri brand tokens, DESIGN.md v4 and impeccable product context
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación:** `tokens.test.ts` compara las tres fuentes y pasa; `impeccable context` carga `PRODUCT.md`; ninguna prueba se debilitó; harmony en verde en las cuatro rutas de muestra en los dos idiomas.
+
+---
+
+### Task 2: Nombre «Novieri RMM», logotipo, símbolo, favicon, título de pestaña y guarda de «ITMS»
+
+Diseño §3.1 (logotipo, símbolo, favicon), decisión A3 (nombre) y §5 (las pruebas del título y de «ITMS»).
+
+**Files:**
+- Create: `frontend/public/favicon.svg` (copia exacta de `docs/design/marca/novieri-favicon.svg`)
+- Create: `frontend/src/shell/brand.tsx`, `frontend/src/shell/brand.css`
+- Create: `frontend/src/shell/title.tsx`
+- Create: `frontend/src/test/no-itms.test.ts`, `frontend/src/shell/title.test.tsx`, `frontend/src/shell/brand.test.tsx`
+- Modify: `frontend/index.html:6-10`
+- Modify: `frontend/src/shell/Sidebar.tsx:56-63` (la marca), `frontend/src/shell/AppShell.tsx:323-337` (título) y `:619-631` (raíz de la miga)
+- Modify: `frontend/src/shell/nav.ts:290,336` (título de reserva)
+- Modify: `frontend/src/i18n/{en,es}/{people,settings,auth,change,agentReleases}.ts` (las cadenas visibles con «ITMS»), `frontend/src/i18n/test-utils.tsx:16`
+- Modify: `frontend/src/modules/auth/fixtures.ts:28,32,60`, `frontend/src/modules/settings/fixtures.ts:55`, `frontend/src/modules/agent-releases/fixtures.ts:207`, `frontend/src/lib/api.ts:1472,4344`
+- Modify: `frontend/src/preview/PreviewPage.tsx:792-794,1618` y `frontend/scripts/a11y-browser.mjs:491` (la sonda XSS)
+- Modify: cada archivo que la guarda nombre (Step 6), comentarios y pruebas incluidos
+
+**Interfaces:**
+- Produces (`shell/brand.tsx`): `PRODUCT_NAME = "Novieri RMM"`, `BRAND_NAME = "Novieri"`, `NovieriSymbol({ size?: number; tile?: boolean; label?: string })`, `NovieriWordmark({ height?: number; label?: string; className?: string })`, `NovieriLockup({ height?: number })`.
+- Produces (`shell/title.tsx`): `documentTitle(page?: string, record?: string): string`, `RecordTitleProvider` (un `Context.Provider` de `(name: string | undefined) => void`), `useRecordTitle(name: string | undefined): void`, `useDocumentTitle(page: string | undefined): void`.
+- Las oleadas usan `useRecordTitle` en cada ficha, y la O2 y la O8 usan `useDocumentTitle` y `NovieriLockup` en el portal y en las pantallas de acceso.
+
+- [ ] **Step 1: Escribir las pruebas (fallan)**
+
+`frontend/src/shell/title.test.tsx`:
+
+```tsx
+import { render } from "@testing-library/react";
+import { useState } from "react";
+import { describe, expect, it } from "vitest";
+
+import { documentTitle, RecordTitleProvider, useDocumentTitle, useRecordTitle } from "./title";
+
+describe("documentTitle (design §5: 'Página · Novieri RMM')", () => {
+  it("names the page, then the product", () => {
+    expect(documentTitle("Devices")).toBe("Devices · Novieri RMM");
+  });
+
+  it("names a record before its page", () => {
+    expect(documentTitle("Devices", "srv-app02")).toBe("srv-app02 · Devices · Novieri RMM");
+  });
+
+  it("is the product alone when there is nothing else to say, and never says it twice", () => {
+    expect(documentTitle()).toBe("Novieri RMM");
+    expect(documentTitle("  ")).toBe("Novieri RMM");
+    expect(documentTitle("Novieri RMM")).toBe("Novieri RMM");
+  });
+});
+
+function Shell({ page, children }: { page: string; children: React.ReactNode }) {
+  const [record, setRecord] = useState<string | undefined>();
+  document.title = documentTitle(page, record);
+  return <RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>;
+}
+
+function Record({ name }: { name: string }) {
+  useRecordTitle(name);
+  return null;
+}
+
+describe("useRecordTitle", () => {
+  it("puts the record's name in front while the record is open, and takes it away after", () => {
+    const view = render(
+      <Shell page="Devices">
+        <Record name="srv-app02" />
+      </Shell>,
+    );
+    expect(document.title).toBe("srv-app02 · Devices · Novieri RMM");
+    view.rerender(<Shell page="Devices">{null}</Shell>);
+    expect(document.title).toBe("Devices · Novieri RMM");
+  });
+
+  it("does nothing outside the shell", () => {
+    document.title = "before";
+    render(<Record name="srv-app02" />);
+    expect(document.title).toBe("before");
+  });
+});
+
+describe("useDocumentTitle", () => {
+  function Frame({ page }: { page: string }) {
+    useDocumentTitle(page);
+    return null;
+  }
+
+  it("names a page that has no shell, and gives the old title back", () => {
+    document.title = "before";
+    const view = render(<Frame page="Sign in" />);
+    expect(document.title).toBe("Sign in · Novieri RMM");
+    view.unmount();
+    expect(document.title).toBe("before");
+  });
+});
+```
+
+`frontend/src/shell/brand.test.tsx`:
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { BRAND_NAME, NovieriLockup, NovieriSymbol, NovieriWordmark, PRODUCT_NAME } from "./brand";
+
+const MARCA = resolve(import.meta.dirname, "../../../docs/design/marca");
+
+describe("the brand", () => {
+  it("is called what the operator named it (decision A3)", () => {
+    expect(PRODUCT_NAME).toBe("Novieri RMM");
+    expect(BRAND_NAME).toBe("Novieri");
+  });
+
+  it("draws the operator's own symbol, path for path", () => {
+    const source = readFileSync(resolve(MARCA, "novieri-symbol.svg"), "utf8");
+    const { container } = render(<NovieriSymbol />);
+    const drawn = container.querySelector("path")?.getAttribute("d");
+    expect(source).toContain(`d="${drawn}"`);
+  });
+
+  it("draws the operator's own wordmark, path for path", () => {
+    const source = readFileSync(resolve(MARCA, "novieri-wordmark.svg"), "utf8");
+    const { container } = render(<NovieriWordmark />);
+    const paths = [...container.querySelectorAll("path")].map((path) => path.getAttribute("d"));
+    expect(paths).toHaveLength(7);
+    for (const d of paths) expect(source).toContain(`d="${d}"`);
+  });
+
+  it("names itself to assistive technology once, and the symbol is decorative unless labelled", () => {
+    render(<NovieriWordmark />);
+    expect(screen.getByRole("img", { name: "Novieri" })).toBeInTheDocument();
+    const { container } = render(<NovieriSymbol tile />);
+    expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("puts the product's full name on the lockup", () => {
+    render(<NovieriLockup />);
+    expect(screen.getByRole("img", { name: "Novieri RMM" })).toBeInTheDocument();
+  });
+
+  it("ships the favicon the operator approved, and the page links it", () => {
+    const approved = readFileSync(resolve(MARCA, "novieri-favicon.svg"), "utf8");
+    const shipped = readFileSync(resolve(import.meta.dirname, "../../public/favicon.svg"), "utf8");
+    expect(shipped).toBe(approved);
+    const html = readFileSync(resolve(import.meta.dirname, "../../index.html"), "utf8");
+    expect(html).toContain('<link rel="icon" type="image/svg+xml" href="/favicon.svg" />');
+    expect(html).toContain("<title>Novieri RMM</title>");
+  });
+});
+```
+
+`frontend/src/test/no-itms.test.ts`:
+
+```ts
+/**
+ * "ITMS" WAS A PLACEHOLDER; THE PRODUCT IS NOVIERI RMM (operator, 2026-11-23,
+ * decision A3 of the console redesign). This keeps the old name out of the
+ * console by reading its source, the technique of
+ * `backend/tests/test_no_vendor_names_backend.py` and `lib/noVendorNames.test.ts`.
+ *
+ * WIDER THAN THOSE TWO, ON PURPOSE. They read only what a user can see,
+ * because the vendor they ban is a real dependency whose name is accurate in
+ * code. "ITMS" names nothing real any more, so every line of `src/`,
+ * `scripts/` and `index.html` is read, comments and tests included. A line
+ * may still carry the letters for one of two reasons, and only these:
+ *   - a wire contract with the server, which project 4 keeps (its design
+ *     §1.2): the request headers `X-ITMS-Request` and `X-ITMS-Background`,
+ *     and the recording format's magic `ITMSRSP1`;
+ *   - dated history: the line carries a `YYYY-MM-DD` date, so it says what
+ *     was true then, and rewriting it would falsify the record.
+ * Lower-case `itms.` storage keys are identifiers nobody sees and stay
+ * (project 4's rule for internal identifiers); this guard is case-sensitive.
+ */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const FRONTEND = resolve(import.meta.dirname, "../..");
+const ROOTS = [resolve(FRONTEND, "src"), resolve(FRONTEND, "scripts"), resolve(FRONTEND, "index.html")];
+const SELF = resolve(import.meta.dirname, "no-itms.test.ts");
+const WIRE = ["X-ITMS-Request", "X-ITMS-Background", "ITMSRSP1"];
+const DATED = /\b20\d\d-\d\d-\d\d\b/;
+
+function files(path: string): string[] {
+  if (statSync(path).isDirectory()) return readdirSync(path).flatMap((name) => files(join(path, name)));
+  return /\.(tsx?|css|html|mjs|json)$/.test(path) ? [path] : [];
+}
+
+/** The 1-based numbers of the lines that name ITMS for a reason this guard refuses. */
+export function offences(source: string): number[] {
+  return source.split("\n").flatMap((line, at) => {
+    const rest = WIRE.reduce((text, wire) => text.split(wire).join(""), line);
+    if (!rest.includes("ITMS")) return [];
+    if (DATED.test(line)) return [];
+    return [at + 1];
+  });
+}
+
+describe("the old product name", () => {
+  it("is caught where it appears, so a clean result means something", () => {
+    expect(offences('<span className="brand-name">ITMS</span>')).toEqual([1]);
+    expect(offences("document.title = `${title} · ITMS`;")).toEqual([1]);
+    expect(offences('export const CSRF_HEADER = "X-ITMS-Request";')).toEqual([]);
+    expect(offences('const MAGIC = "ITMSRSP1";')).toEqual([]);
+    expect(offences("// ITMS was the placeholder name until 2026-11-23")).toEqual([]);
+    expect(offences('headers.set("X-ITMS-Request", "1"); // the ITMS header')).toEqual([1]);
+    expect(offences("ok\nstill ITMS\nok")).toEqual([2]);
+  });
+
+  it("reads a real tree", () => {
+    const all = ROOTS.flatMap(files);
+    expect(all.length).toBeGreaterThan(500);
+    expect(all).toContain(resolve(FRONTEND, "index.html"));
+  });
+
+  it("appears nowhere in the console's source, tests, scripts or page", () => {
+    const found = ROOTS.flatMap(files)
+      .filter((path) => path !== SELF)
+      .flatMap((path) => offences(readFileSync(path, "utf8")).map((line) => `${relative(FRONTEND, path)}:${line}`));
+    expect(found, found.join("\n")).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Ejecutarlas y verlas fallar**
+
+Run: `cd frontend && npx vitest run src/shell/title.test.tsx src/shell/brand.test.tsx src/test/no-itms.test.ts`
+Expected: FAIL. `title.test.tsx` y `brand.test.tsx` no compilan (`./title` y `./brand` no existen); `no-itms.test.ts` lista unas 90 líneas (`grep -rn ITMS frontend/src | grep -v "X-ITMS\|ITMSRSP1" | wc -l` daba 92 el 2026-11-23).
+
+- [ ] **Step 3: `brand.tsx`, `brand.css`, `title.tsx` y el favicon**
+
+Run: `cp docs/design/marca/novieri-favicon.svg frontend/public/favicon.svg` (crea `frontend/public/`; Vite copia `public/` a la raíz de `dist/`, y `deploy/nginx.conf` ya sirve cualquier archivo de la raíz con `try_files $uri`).
+
+`frontend/src/shell/brand.tsx`:
+
+```tsx
+/**
+ * THE BRAND (DESIGN.md v4, "Brand"), drawn from the operator's own SVGs in
+ * `docs/design/marca/` (direction A, "Cordillera", 2026-11-23).
+ *
+ * INLINE, NOT `<img>`: the wordmark takes its colour from the ground it sits
+ * on (`currentColor`: white on the rail, ink on a light frame), and an inline
+ * SVG is measured by the harmony gate and the a11y pass like any other paint.
+ * The paths are the files' own, and `brand.test.tsx` compares them.
+ */
+import "./brand.css";
+
+/** The product's name (decision A3): in the tab title, the sign-in frame, the portal. */
+export const PRODUCT_NAME = "Novieri RMM";
+/** What the console's own bar says (decision A3). */
+export const BRAND_NAME = "Novieri";
+
+const SYMBOL_PATH = "M4.73 25L8.37 25L14.67 7L11.03 7ZM11.03 7L14.67 7L20.97 25L17.33 25ZM17.33 25L20.97 25L27.27 7L23.63 7Z";
+
+/** The wordmark's seven letters, each at its offset in the 112.9-wide view box. */
+const WORDMARK: readonly { x: number; d: string; evenOdd?: boolean }[] = [
+  { x: 0, d: "M0 0h2.7v20h-2.7ZM13.7 0h2.7v20h-2.7ZM0 0L3.233 0L16.4 20L13.167 20Z" },
+  {
+    x: 20.4,
+    d: "M0 10a10.35 10.35 0 1 0 20.7 0a10.35 10.35 0 1 0 -20.7 0ZM2.889 10a7.461 7.461 0 1 1 14.922 0a7.461 7.461 0 1 1 -14.922 0Z",
+    evenOdd: true,
+  },
+  { x: 44.5, d: "M0 0L2.818 0L10.209 20L7.391 20ZM14.782 0L17.6 0L10.209 20L7.391 20Z" },
+  { x: 66.6, d: "M0 0h2.7v20h-2.7Z" },
+  { x: 74.2, d: "M0 0h2.7v20h-2.7ZM0 0h12.4v2.7h-12.4ZM0 8.65h11.1v2.7h-11.1ZM0 17.3h12.4v2.7h-12.4Z" },
+  { x: 91, d: "M0 0h2.7v20h-2.7ZM0 0H7.5A5.6 5.6 0 0 1 7.5 11.2H0V8.5H7.5A2.9 2.9 0 0 0 7.5 2.7H0ZM5.1 8.5L8.122 8.5L13.9 20L10.878 20Z" },
+  { x: 110, d: "M0 0h2.7v20h-2.7Z" },
+];
+
+const R_PATH = WORDMARK[5]?.d ?? "";
+const M_PATH = "M0 0h2.7v20h-2.7ZM16.9 0h2.7v20h-2.7ZM0 0L2.952 0L11.276 15.5L8.324 15.5ZM16.648 0L19.6 0L11.276 15.5L8.324 15.5Z";
+
+function Letters() {
+  return (
+    <>
+      {WORDMARK.map((letter) => (
+        <path
+          key={letter.x}
+          className="nv-letter"
+          transform={`translate(${letter.x} 0)`}
+          d={letter.d}
+          fillRule={letter.evenOdd ? "evenodd" : undefined}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * The zigzag N. `tile`: on its cobalt tile with a white stroke, as the favicon
+ * and the rail draw it. Decorative unless `label` is given, because it always
+ * sits beside the wordmark that already names the product.
+ */
+export function NovieriSymbol({ size = 28, tile = false, label }: { size?: number; tile?: boolean; label?: string }) {
+  return (
+    <svg
+      className={tile ? "nv-symbol tile" : "nv-symbol"}
+      viewBox="0 0 32 32"
+      width={size}
+      height={size}
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      focusable="false"
+    >
+      {tile ? <rect className="nv-tile" width="32" height="32" rx="7" /> : null}
+      <path className="nv-stroke" d={SYMBOL_PATH} />
+    </svg>
+  );
+}
+
+/** "NOVIERI", in the colour of the text around it. */
+export function NovieriWordmark({ height = 16, label = BRAND_NAME, className }: { height?: number; label?: string; className?: string }) {
+  return (
+    <svg
+      className={className ? `nv-wordmark ${className}` : "nv-wordmark"}
+      viewBox="-0.1 -0.6 112.9 21.2"
+      width={(height * 112.9) / 21.2}
+      height={height}
+      role="img"
+      aria-label={label}
+      focusable="false"
+    >
+      <Letters />
+    </svg>
+  );
+}
+
+/** "NOVIERI | RMM": the sign-in frame, the portal, and wherever the full name is the subject. */
+export function NovieriLockup({ height = 22 }: { height?: number }) {
+  return (
+    <svg
+      className="nv-lockup"
+      viewBox="-0.1 -0.6 156.18 21.2"
+      width={(height * 156.18) / 21.2}
+      height={height}
+      role="img"
+      aria-label={PRODUCT_NAME}
+      focusable="false"
+    >
+      <Letters />
+      <rect className="nv-rule" x="117.9" y="0" width="0.9" height="20" />
+      <g className="nv-descriptor" transform="translate(124 9.6) scale(0.52)">
+        <path d={R_PATH} />
+        <path transform="translate(18.1 0)" d={M_PATH} />
+        <path transform="translate(41.9 0)" d={M_PATH} />
+      </g>
+    </svg>
+  );
+}
+```
+
+`frontend/src/shell/brand.css`:
+
+```css
+/* The brand's paint (DESIGN.md v4, "Brand"). Tokens only: the harmony gate
+ * reads `fill` on every SVG. */
+.nv-symbol, .nv-wordmark, .nv-lockup { display: block; flex: 0 0 auto; }
+.nv-symbol .nv-stroke { fill: var(--accent); }
+.nv-symbol.tile .nv-tile { fill: var(--accent); }
+.nv-symbol.tile .nv-stroke { fill: var(--accent-ink); }
+.nv-wordmark .nv-letter, .nv-lockup .nv-letter { fill: currentColor; }
+.nv-lockup .nv-rule, .nv-lockup .nv-descriptor path { fill: var(--muted); }
+```
+
+`frontend/src/shell/title.tsx`:
+
+```tsx
+/**
+ * THE BROWSER TAB SAYS WHERE YOU ARE (design §5; WCAG 2.4.2): "<Page> ·
+ * Novieri RMM", and on a record "<Record> · <Page> · Novieri RMM". Atera's own
+ * walkthrough files "the same title on every page" as a defect, and a person
+ * with a dozen consoles open reads the tab before anything else.
+ *
+ * The shell owns the page half (its title is the rail entry's own label, so
+ * it cannot drift from the rail and the crumb); a record page adds its name
+ * through `useRecordTitle`. A frame with no shell -- sign-in, the portal, the
+ * consent page -- names itself with `useDocumentTitle`.
+ */
+import { createContext, useContext, useEffect } from "react";
+
+import { PRODUCT_NAME } from "./brand";
+
+export function documentTitle(page?: string, record?: string): string {
+  const parts = [record, page]
+    .map((part) => part?.trim() ?? "")
+    .filter((part) => part !== "" && part !== PRODUCT_NAME);
+  return [...parts, PRODUCT_NAME].join(" · ");
+}
+
+const RecordTitle = createContext<((name: string | undefined) => void) | null>(null);
+
+/** Given by `AppShell`, which holds the record's name beside the page's title. */
+export const RecordTitleProvider = RecordTitle.Provider;
+
+/** A record page names itself in the tab while it is open. Outside the shell, nothing. */
+export function useRecordTitle(name: string | undefined): void {
+  const set = useContext(RecordTitle);
+  useEffect(() => {
+    if (!set) return undefined;
+    set(name);
+    return () => set(undefined);
+  }, [set, name]);
+}
+
+/** A frame with no shell names its page, and gives the previous title back when it goes. */
+export function useDocumentTitle(page: string | undefined): void {
+  useEffect(() => {
+    const previous = document.title;
+    document.title = documentTitle(page);
+    return () => {
+      document.title = previous;
+    };
+  }, [page]);
+}
+```
+
+- [ ] **Step 4: `index.html`, la barra lateral, el armazón y la miga**
+
+`frontend/index.html`, líneas 6 a 10:
+
+```html
+    <title>Novieri RMM</title>
+    <!-- The brand's favicon (docs/design/marca/novieri-favicon.svg), read at 16
+       ~ and 32px. It also ends the browser's automatic /favicon.ico request,
+       ~ which is what the old `data:,` link was there for. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+```
+
+`frontend/src/shell/Sidebar.tsx`, el bloque `.brand` (líneas 56 a 63) pasa a:
+
+```tsx
+      <div className="brand">
+        {/* The brand (DESIGN.md v4): the N on its cobalt tile and the white
+            wordmark. The wordmark folds away with the rail (`.brand-name`). */}
+        <NovieriSymbol tile size={28} />
+        <NovieriWordmark className="brand-name" height={14} />
+```
+
+con `import { NovieriSymbol, NovieriWordmark } from "./brand";`. En `shell.css`, `.brand-mark` deja de usarse: borrar esa regla (la que pinta `background: var(--accent)` sobre un cuadro de 28 px), y en la regla `.brand` cambiar `color: #fff;` por `color: var(--accent-ink);` (el logotipo toma ese color por `currentColor`).
+
+`frontend/src/shell/AppShell.tsx`:
+- importar `{ BRAND_NAME }` de `./brand` y `{ documentTitle, RecordTitleProvider }` de `./title`;
+- en el cuerpo, junto a los demás estados: `const [record, setRecord] = useState<string | undefined>();`
+- el efecto del título (líneas 330-336) pasa a:
+  ```tsx
+  useEffect(() => {
+    const previous = document.title;
+    document.title = documentTitle(title, record);
+    return () => {
+      document.title = previous;
+    };
+  }, [title, record]);
+  ```
+  y el comentario que lo precede dice «THE TAB SAID THE SAME THING ON EVERY ROUTE …» en lugar de «THE TAB SAID "ITMS" …»;
+- en la miga (líneas 619 a 631), las dos apariciones de `ITMS` como texto del enlace raíz pasan a `{BRAND_NAME}`;
+- `{children}` dentro de `<main>` pasa a `<RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>`.
+
+`frontend/src/shell/nav.ts`: línea 290, el comentario dice `what goes before "· Novieri RMM" in the tab title`; línea 336, `title: "ITMS"` pasa a `title: PRODUCT_NAME`, con `import { PRODUCT_NAME } from "./brand";` (`documentTitle` no lo repite).
+
+- [ ] **Step 5: Los textos visibles, los datos de prueba y la sonda**
+
+Exactamente estos cambios de texto (inglés y español, en los dos catálogos):
+
+| Archivo | Clave | Cambio |
+|---|---|---|
+| `i18n/en/people.ts:179` / `es/people.ts:175` | `stillSees` | «ITMS still sees…» → «Novieri RMM still sees…» / «Novieri RMM sigue detectando…» |
+| `i18n/en/settings.ts:309` / `es/settings.ts:299` | el `body` de borrar usuario | «Their ITMS record…» → «Their Novieri RMM record…» / «Su registro de Novieri RMM…» |
+| `i18n/en/auth.ts:190,195` / `es/auth.ts:187,193` | `intro`, el cuerpo del consentimiento | «use ITMS as you», «act as you in ITMS» → «use Novieri RMM as you», «act as you in Novieri RMM» / «Pide usar Novieri RMM en tu nombre», «actuar como tú en Novieri RMM» |
+| `i18n/en/change.ts:46` / `es/change.ts:41` | `tabTitle` | «{title} · Change · ITMS» → «{title} · Change · Novieri RMM» / «{title} · Cambio · Novieri RMM» (la O6 lo cambia a `useRecordTitle`) |
+| `i18n/en/agentReleases.ts:197` / `es/agentReleases.ts:198` | `linkHelp` | «ITMS keeps only a fingerprint» → «Novieri RMM keeps only a fingerprint» / «Novieri RMM solo guarda una huella» |
+| `i18n/test-utils.tsx:16` | `SAME_IN_BOTH` | `"ITMS"` → `"Novieri RMM"`, y añadir `"Novieri"` |
+
+Datos que imitan al servidor (el proyecto 4 cambia el servidor a `Novieri RMM`, su diseño §1.1):
+- `modules/auth/fixtures.ts:28`: `otpauth://totp/Novieri%20RMM:helgar.palmieri%40toeshee.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Novieri%20RMM`; `:32` y `:60`: `rp: { id: "localhost", name: "Novieri RMM" }`.
+- `modules/settings/fixtures.ts:55`: `from_display_name: "Novieri RMM"`.
+- `modules/agent-releases/fixtures.ts:207`: `` filename: `NovieriRMM-Agent-console.toeshee.example-${body.arch}.msi` ``.
+- `lib/api.ts:1472` (comentario): `` `NovieriRMM-Agent-<host>[@<port>]-<arch>.msi` ``; `:4344`: `` ?? `NovieriRMM-Agent-${body.arch}.msi` ``. (El nombre que manda el servidor es del proyecto 4; Apéndice E, X2.)
+
+El comentario de `lib/clientChoice.ts:11-12` («project 4's rename of the brand renames it with `itms.sidebar.collapsed`») deja de ser cierto: el diseño del proyecto 4 (§1.2) no renombra identificadores internos y este plan conserva las claves `itms.*` (decisión D15). Pasa a: «Kept in `localStorage["itms.client"]` as the id or `all`. The key keeps its old prefix on purpose: it is an identifier nobody sees (project 4's rule, its design §1.2), and the harmony gate and the a11y pass write it by that name.»
+
+La sonda XSS de `/__preview` y su lectura en el script del navegador: `window.__ITMS_XSS_EXECUTED` → `window.__XSS_PROBE_EXECUTED` en `preview/PreviewPage.tsx:792,793,794,1618` y `scripts/a11y-browser.mjs:491`.
+
+- [ ] **Step 6: Barrer lo que la guarda señale**
+
+Run: `cd frontend && npx vitest run src/test/no-itms.test.ts`
+La prueba imprime cada `archivo:línea`. Para cada una:
+- un comentario que usa «ITMS» como nombre del producto: «Novieri RMM» (o «the console» si se habla de la interfaz);
+- un comentario que cuenta historia: se deja y se añade la fecha del hecho si no la tiene (`(2026-09-23)`), nunca una fecha inventada: se toma de `git log -S ITMS -- <archivo>` o del comentario vecino;
+- una prueba que esperaba «ITMS» en lo que pinta la consola: espera el texto nuevo (`"Devices & Inventory · Novieri RMM"` en `AppShell.test.tsx:732`, el título de esa prueba pasa a `"names the page in the browser tab, not just the product"`; la miga en `App.crumb.test.tsx` y `App.shell.test.tsx` espera `"Novieri"`; `nav.test.ts` espera `title: "Novieri RMM"` en «draws a bare crumb for a route in no model at all»);
+- una prueba que fijaba un dato del servidor (`rp.name`, emisor TOTP, nombre del MSI): el dato nuevo del Step 5.
+
+Expected al final: PASS.
+
+- [ ] **Step 7: Ejecutar las pruebas del paso 1 y la suite**
+
+Run: `cd frontend && npx vitest run src/shell/title.test.tsx src/shell/brand.test.tsx src/test/no-itms.test.ts src/shell src/App.crumb.test.tsx src/App.shell.test.tsx src/i18n`
+Expected: PASS.
+
+Run: `npx vitest run && npm run typecheck && npm run build`
+Expected: todo en verde. `ls dist/favicon.svg` existe.
+
+Run: `node scripts/harmony.mjs --strict-fixtures --lang es --routes /devices,/devices/dev-1,/sign-in` y con `--lang en`
+Expected: `ok …`. La captura `es/1440x900/devices.png` muestra la N sobre su placa cobalto y «NOVIERI» en blanco en el riel.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add frontend/public/favicon.svg frontend/index.html frontend/src frontend/scripts/a11y-browser.mjs
+git commit -m "feat(ui): Novieri RMM name, logo, favicon and tab titles; guard against ITMS
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación:** el riel muestra el símbolo y «NOVIERI»; la pestaña dice `Dispositivos · Novieri RMM` en español en `/devices` (`Equipos · Novieri RMM` desde la Task 4, que cambia la etiqueta); el favicon es la N cobalto; `no-itms.test.ts` está en verde y sus únicas excepciones son las tres cadenas de protocolo y líneas fechadas.
+
+---
+
+### Task 3: El kit de patrones (lista, ficha, formulario) y lo que necesita debajo
+
+Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview` (`src/preview/PreviewPage.tsx`, una de las 86), donde se enseñan las piezas nuevas para que `a11y-browser.mjs` las mida en píxeles.
+
+**Files:**
+- Create: `frontend/src/shell/listKit.tsx`, `frontend/src/shell/detailKit.tsx`, `frontend/src/shell/formKit.tsx`, `frontend/src/shell/kit.css`
+- Create: `frontend/src/test/renderPage.tsx`
+- Create: `frontend/src/shell/listKit.test.tsx`, `frontend/src/shell/detailKit.test.tsx`, `frontend/src/shell/formKit.test.tsx`, `frontend/src/lib/api.forClient.test.ts`, `frontend/src/App.router.test.tsx`
+- Modify: `frontend/src/shell/components.tsx` (reexportar el kit; `Tabs` acepta `label`), `frontend/src/shell/components.css` (`.btn`, `.chip`, `.pill`: la geometría de la marca)
+- Modify: `frontend/src/lib/api.ts` (`ApiClient.forClient`, junto al constructor, línea ~1822)
+- Modify: `frontend/src/fixtures/client.ts:121-129` (el proxy responde `forClient`)
+- Modify: `frontend/src/App.tsx:723-1631` (router de datos)
+- Modify: `frontend/src/i18n/en/shell.ts`, `frontend/src/i18n/es/shell.ts` (bloque `kit`)
+- Modify: `frontend/src/preview/PreviewPage.tsx` (una sección «Kit v4» al final)
+
+**Interfaces:**
+- Consumes: `useApi` (`lib/ApiContext`), `useClientScope` (`lib/clientScope`), `isClientId` (`lib/clientChoice`), `Btn`, `FilterBar`, `ResultCount`, `Tabs`, `Panel` (`shell/components`), `Pill`, `type Kind` (`shell/viz`), `ConfirmDialog` (`components/confirm`), `describeSubmitError` (`components/form`).
+- Produces (`shell/listKit.tsx`):
+  - `useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K>` con `values: Record<K, string>` (`""` si falta), `active: boolean`, `set(key: K, value: string): void` (`""` borra; siempre borra `offset`), `clear(): void`;
+  - `FilterChips({ label, options, value, onChange })`, `options: readonly { value: string; label: string; count?: number }[]` (el valor `""` es «todos»);
+  - `ShowingCount({ shown: number; total: number | null })`;
+  - `BulkBar({ count: number; onClear(): void; children })` (nada si `count === 0`);
+  - `ListEmpty({ filtered: boolean; onClear(): void; nothingYet: string; action?: ReactNode; icon?: string })`;
+  - `ClientFilter({ value: string; onChange(value: string): void })` (nada si arriba hay un cliente elegido o la persona tiene menos de dos);
+  - `useApiFor(clientId: string): ApiClient`;
+  - `useNewParam(kind: string): { open: boolean; start(): void; close(): void }`;
+  - `ListToolbar({ search?, chips?, end? })`.
+- Produces (`shell/detailKit.tsx`): `SectionNav({ label: string; items: readonly { to: string; label: string; end?: boolean }[] })` (las páginas de un módulo como una fila de enlaces: sustituye a los ocho `*Nav.tsx` de módulo que hoy dibujan cada uno la suya), `DetailHead({ back: { to: string; label: string }; title: string; status?: { kind: Kind; label: string }; context?: ReactNode; actions?: ReactNode })`, `useUrlTab<K extends string>(keys: readonly K[], fallback: K, param?: string): [K, (key: K) => void]`, `UrlTabs<K extends string>({ items: readonly { key: K; label: string; count?: number }[]; active: K; onSelect(key: K): void; label: string; children })`, `DetailGrid({ main: ReactNode; aside: ReactNode })`, `ClientContext({ clientId: string | null; siteName?: string | null })`.
+- Produces (`shell/formKit.tsx`): `FormPage({ back; title; description?; children })`, `FormSection({ title: string; icon?: string; defaultOpen?: boolean; children })`, `SaveBar({ dirty: boolean; saving: boolean; error?: unknown; onDiscard(): void; onSave(): void })`, `UnsavedGuard({ dirty: boolean })`, `useDraft<T>(saved: T | undefined): { draft: T | undefined; setDraft(next: T): void; dirty: boolean; discard(): void }`.
+- Produces (`lib/api.ts`): `ApiClient.forClient(clientId: string): ApiClient`.
+- Produces (`App.tsx`): `appRoutes(): RouteObject[]` (exportada) y `App` sobre `createBrowserRouter` + `RouterProvider`.
+- Produces (`test/renderPage.tsx`): `renderPage(path: string, element: ReactElement, pattern?: string): RenderResult & { router; queryClient }`.
+- Todo lo de `listKit`, `detailKit` y `formKit` se reexporta desde `shell/components.tsx`: las páginas importan de un solo sitio.
+
+**Decisiones de esta tarea** (Apéndice A):
+- **D6. El chip «Cliente» y la ficha 360 leen con `X-Client-Id`, no con un `?client_id=` nuevo en el servidor.** `ApiClient.forClient(id)` devuelve un cliente de la API que manda ese cliente en cada petición. El servidor ya responde con la intersección del alcance de la sesión y ese cliente, y la base de datos lo impone (invariante 5a). Así ninguna lista necesita un parámetro nuevo en el backend del proyecto 4, y el filtro es exactamente tan estricto como el selector. Cuando el selector de arriba ya eligió un cliente, `useApiFor` lo respeta y el chip no se dibuja: la elección de arriba manda.
+- **D7. El router pasa a ser de datos** (`createBrowserRouter`). `useBlocker`, lo único que permite «avisar antes de salir» dentro de la consola, solo funciona con un router de datos. Las rutas son las mismas `<Route>` de hoy dentro de una ruta de diseño que dibuja `SetupGate`; `routes-covered.test.ts` las sigue leyendo igual. Fuera de un router de datos (las pruebas que montan con `MemoryRouter`), `UnsavedGuard` solo protege la recarga y el cierre (`beforeunload`).
+- **D8. `?new=<tipo>` abre el diálogo de alta de una lista.** Así cada entrada del menú «Nuevo» es una URL real y un alta se puede enlazar. Cerrar el diálogo quita el parámetro.
+
+- [ ] **Step 1: Escribir las pruebas del kit (fallan)**
+
+`frontend/src/test/renderPage.tsx`:
+
+```tsx
+/**
+ * A page under a DATA router (design §2, "Formulario": `UnsavedGuard` needs
+ * one to block a navigation), with a query client that does not retry, so a
+ * test can read `router.state.location` after a click. The API is injected the
+ * way the rest of the suite does it: `vi.mock` of `lib/ApiContext`.
+ */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, type RenderResult } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+
+export function renderPage(
+  path: string,
+  element: ReactElement,
+  pattern = "*",
+): RenderResult & { router: ReturnType<typeof createMemoryRouter>; queryClient: QueryClient } {
+  const routes = pattern === "*" ? [{ path: "*", element }] : [{ path: pattern, element }, { path: "*", element: <p>elsewhere</p> }];
+  const router = createMemoryRouter(routes, { initialEntries: [path] });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return { ...view, router, queryClient };
+}
+```
+
+`frontend/src/shell/listKit.test.tsx`:
+
+```tsx
+import { act, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { MeClient } from "../lib/api";
+import { renderPage } from "../test/renderPage";
+import { BulkBar, ClientFilter, FilterChips, ListEmpty, ShowingCount, useApiFor, useNewParam, useUrlFilters } from "./listKit";
+
+const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
+
+const scope = vi.hoisted(() => ({ selected: null as string | null, clients: [] as unknown[] }));
+vi.mock("../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/clientScope")>()),
+  useClientScope: () => ({ selected: scope.selected, clients: scope.clients, select: vi.fn(), ready: true }),
+}));
+const api = vi.hoisted(() => ({ forClient: vi.fn((id: string) => ({ narrowedTo: id })) }));
+vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
+
+function client(id: string, name: string): MeClient {
+  return { id, name, kind: "customer", enabled_modules: [], permissions: [] } as unknown as MeClient;
+}
+
+beforeEach(() => {
+  scope.selected = null;
+  scope.clients = [client(ANDES, "Andes Logistics"), client(BOGOTA, "Bogotá Retail")];
+  api.forClient.mockClear();
+});
+
+function Fleet() {
+  const filters = useUrlFilters(["state", "q"] as const);
+  const online = filters.values.state === "online";
+  return (
+    <>
+      <FilterChips
+        label="State"
+        options={[
+          { value: "", label: "All", count: 12 },
+          { value: "online", label: "Online", count: 9 },
+          { value: "offline", label: "Offline" },
+        ]}
+        value={filters.values.state}
+        onChange={(value) => filters.set("state", value)}
+      />
+      <ShowingCount shown={online ? 9 : 12} total={12} />
+      {filters.values.state === "offline" ? (
+        <ListEmpty filtered={filters.active} onClear={filters.clear} nothingYet="No computers yet." />
+      ) : null}
+    </>
+  );
+}
+
+describe("useUrlFilters and FilterChips (design §2: filters live in the URL)", () => {
+  it("reads the filter from the URL, so a filtered view is a link", () => {
+    renderPage("/devices?state=online", <Fleet />);
+    expect(screen.getByRole("button", { name: /Online/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /All/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Showing 9 of 12")).toBeInTheDocument();
+  });
+
+  it("writes a chip into the URL, goes back to the first page, and drops the default", async () => {
+    const { router } = renderPage("/devices?offset=50", <Fleet />);
+    await userEvent.click(screen.getByRole("button", { name: /Online/ }));
+    expect(router.state.location.search).toBe("?state=online");
+    await userEvent.click(screen.getByRole("button", { name: /All/ }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("draws a count only where the caller has one, never a made-up zero", () => {
+    renderPage("/devices", <Fleet />);
+    expect(screen.getByRole("button", { name: /All\s*12/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Offline" })).toBeInTheDocument();
+  });
+});
+
+describe("ShowingCount", () => {
+  it("never claims a total the server did not give", () => {
+    renderPage("/x", <ShowingCount shown={50} total={null} />);
+    expect(screen.getByText("Showing 50")).toBeInTheDocument();
+  });
+});
+
+describe("ListEmpty (design §2: the empty state says the real cause)", () => {
+  it("says nothing matches the filters, and clearing them goes back to the whole list", async () => {
+    const { router } = renderPage("/devices?state=offline&q=srv", <Fleet />);
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("says nothing exists yet, and offers the page's own action", () => {
+    renderPage("/x", <ListEmpty filtered={false} onClear={vi.fn()} nothingYet="No computers yet." action={<a href="/devices/onboard">Add a computer</a>} />);
+    expect(screen.getByText("No computers yet.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add a computer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+});
+
+describe("BulkBar (design §2: only where bulk actions exist, and only with a selection)", () => {
+  it("is not drawn until something is selected", () => {
+    renderPage("/x", <BulkBar count={0} onClear={vi.fn()}><button type="button">Approve</button></BulkBar>);
+    expect(screen.queryByRole("region", { name: "Bulk actions" })).toBeNull();
+  });
+
+  it("counts the selection and clears it", async () => {
+    const clear = vi.fn();
+    renderPage("/x", <BulkBar count={3} onClear={clear}><button type="button">Approve</button></BulkBar>);
+    expect(screen.getByRole("region", { name: "Bulk actions" })).toHaveTextContent("3 selected");
+    await userEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ClientFilter (design §1.3: a Client chip while every client is shown)", () => {
+  it("offers every client of the person", () => {
+    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
+    const select = screen.getByRole("combobox", { name: "Client" });
+    expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual([
+      "All clients",
+      "Andes Logistics",
+      "Bogotá Retail",
+    ]);
+  });
+
+  it("is not drawn when the top bar has chosen a client, because that choice already decides", () => {
+    scope.selected = ANDES;
+    renderPage("/x", <ClientFilter value="" onChange={vi.fn()} />);
+    expect(screen.queryByRole("combobox", { name: "Client" })).toBeNull();
+  });
+});
+
+function Probe({ id }: { id: string }) {
+  const narrowed = useApiFor(id) as unknown as { narrowedTo?: string };
+  return <p>{narrowed.narrowedTo ?? "console"}</p>;
+}
+
+describe("useApiFor (decision D6)", () => {
+  it("narrows to the chip's client with X-Client-Id", () => {
+    renderPage("/x", <Probe id={ANDES} />);
+    expect(screen.getByText(ANDES)).toBeInTheDocument();
+  });
+
+  it("leaves the console's own client alone when the chip is empty, or the top bar has chosen", () => {
+    renderPage("/x", <Probe id="" />);
+    expect(screen.getByText("console")).toBeInTheDocument();
+    scope.selected = BOGOTA;
+    renderPage("/y", <Probe id={ANDES} />);
+    expect(screen.getAllByText("console")).toHaveLength(2);
+  });
+
+  it("never sends a value that is not a client id", () => {
+    renderPage("/x", <Probe id="not-a-uuid" />);
+    expect(screen.getByText("console")).toBeInTheDocument();
+    expect(api.forClient).not.toHaveBeenCalled();
+  });
+});
+
+function Creating() {
+  const created = useNewParam("ticket");
+  return (
+    <>
+      <button type="button" onClick={created.start}>New ticket</button>
+      {created.open ? (
+        <div role="dialog" aria-label="New ticket">
+          <button type="button" onClick={created.close}>Close</button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+describe("useNewParam (decision D8)", () => {
+  it("opens a create dialog from ?new=, which is what the New menu links to", () => {
+    renderPage("/service-desk?new=ticket", <Creating />);
+    expect(screen.getByRole("dialog", { name: "New ticket" })).toBeInTheDocument();
+  });
+
+  it("puts the dialog in the URL when opened here, and takes it out when closed", async () => {
+    const { router } = renderPage("/service-desk?state=open", <Creating />);
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    expect(router.state.location.search).toBe("?state=open&new=ticket");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("?state=open");
+    await act(() => router.navigate("/service-desk?new=other"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+```
+
+`frontend/src/shell/detailKit.test.tsx`:
+
+```tsx
+import { act, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { renderPage } from "../test/renderPage";
+import { DetailHead, SectionNav, UrlTabs, useUrlTab } from "./detailKit";
+
+const TABS = ["overview", "hardware", "software"] as const;
+type Tab = (typeof TABS)[number];
+const LABEL: Record<Tab, string> = { overview: "Overview", hardware: "Hardware", software: "Software" };
+
+function Device() {
+  const [tab, setTab] = useUrlTab<Tab>(TABS, "overview");
+  return (
+    <>
+      <DetailHead
+        back={{ to: "/devices", label: "All computers" }}
+        title="srv-app02"
+        status={{ kind: "ok", label: "Online" }}
+        context={<span>Andes Logistics · Bogotá</span>}
+        actions={<button type="button" className="btn">Connect</button>}
+      />
+      <UrlTabs label="Computer" items={TABS.map((key) => ({ key, label: LABEL[key] }))} active={tab} onSelect={setTab}>
+        <p>{tab} panel</p>
+      </UrlTabs>
+    </>
+  );
+}
+
+describe("DetailHead (design §2, Ficha)", () => {
+  it("leads back to the list, names the record, its status and its context", () => {
+    renderPage("/devices/dev-1", <Device />);
+    expect(screen.getByRole("link", { name: "All computers" })).toHaveAttribute("href", "/devices");
+    expect(screen.getByRole("heading", { level: 1, name: "srv-app02" })).toBeInTheDocument();
+    expect(screen.getByText("Online")).toBeInTheDocument();
+    expect(screen.getByText("Andes Logistics · Bogotá")).toBeInTheDocument();
+  });
+});
+
+describe("UrlTabs and useUrlTab (design §2: tabs that change the URL)", () => {
+  it("opens the tab the URL names", () => {
+    renderPage("/devices/dev-1?tab=hardware", <Device />);
+    expect(screen.getByRole("tab", { name: "Hardware" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Hardware" })).toHaveTextContent("hardware panel");
+    expect(screen.getByRole("tablist", { name: "Computer" })).toBeInTheDocument();
+  });
+
+  it("writes a tab into the URL as a new history entry, and the default tab writes nothing", async () => {
+    const { router } = renderPage("/devices/dev-1", <Device />);
+    await userEvent.click(screen.getByRole("tab", { name: "Software" }));
+    expect(router.state.location.search).toBe("?tab=software");
+    await act(() => router.navigate(-1));
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: "Hardware" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("falls back to the default for a tab it does not know", () => {
+    renderPage("/devices/dev-1?tab=nope", <Device />);
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps the strip on one line, as one scrolling row (design §1.3)", () => {
+    renderPage("/devices/dev-1", <Device />);
+    expect(screen.getByRole("tablist")).toHaveClass("scroll");
+  });
+});
+
+describe("SectionNav", () => {
+  it("is a navigation of links that marks the current page, not a tablist", () => {
+    renderPage(
+      "/deploy/packages",
+      <SectionNav
+        label="Software"
+        items={[
+          { to: "/deploy", label: "Deployments", end: true },
+          { to: "/deploy/packages", label: "Packages" },
+        ]}
+      />,
+    );
+    const nav = screen.getByRole("navigation", { name: "Software" });
+    expect(nav).not.toHaveAttribute("role", "tablist");
+    expect(screen.getByRole("link", { name: "Packages" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Deployments" })).not.toHaveAttribute("aria-current");
+  });
+});
+```
+
+`frontend/src/shell/formKit.test.tsx`:
+
+```tsx
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+
+import { renderPage } from "../test/renderPage";
+import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft } from "./formKit";
+
+interface Org {
+  name: string;
+}
+
+function Settings({ initial, onSave }: { initial: Org; onSave: (org: Org) => void }) {
+  const [saved, setSaved] = useState<Org>(initial);
+  const { draft, setDraft, dirty, discard } = useDraft(saved);
+  return (
+    <FormPage back={{ to: "/admin", label: "Admin" }} title="Settings">
+      <UnsavedGuard dirty={dirty} />
+      <FormSection title="Organization" icon="settings">
+        <label>
+          Name
+          <input value={draft?.name ?? ""} onChange={(event) => setDraft({ name: event.target.value })} />
+        </label>
+      </FormSection>
+      <SaveBar
+        dirty={dirty}
+        saving={false}
+        onDiscard={discard}
+        onSave={() => {
+          if (draft) {
+            onSave(draft);
+            setSaved(draft);
+          }
+        }}
+      />
+    </FormPage>
+  );
+}
+
+describe("SaveBar and useDraft (design §2: one save bar for the whole console)", () => {
+  it("is not drawn until something changed, and Discard puts the page back", async () => {
+    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Novieri");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+
+  it("saves through the page, and goes away once the server has the change", async () => {
+    const save = vi.fn();
+    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={save} />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(save).toHaveBeenCalledWith({ name: "Novieri SAS" });
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+
+  it("says the save failed in the bar, and keeps the change", () => {
+    renderPage(
+      "/x",
+      <SaveBar dirty saving={false} error={new Error("The server refused it.")} onDiscard={vi.fn()} onSave={vi.fn()} />,
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+});
+
+// LEAVING IS A CLICK ON A LINK, as a person leaves: the form's own back link.
+// (A bare `router.navigate()` that the blocker holds leaves a pending
+// transition behind, and React reports it as an un-awaited suspension.)
+describe("UnsavedGuard (design §5: a page with changes warns before it is left)", () => {
+  it("asks before leaving, and staying keeps the page and the change", async () => {
+    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(router.state.location.pathname).toBe("/settings");
+    expect(screen.getByLabelText("Name")).toHaveValue("Novieri SAS");
+  });
+
+  it("leaves when the person says so", async () => {
+    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    expect(router.state.location.pathname).toBe("/admin");
+  });
+
+  it("lets a clean page go without asking", async () => {
+    const { router } = renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
+    await userEvent.click(screen.getByRole("link", { name: "Admin" }));
+    expect(router.state.location.pathname).toBe("/admin");
+  });
+
+  it("asks the browser too, for a reload or a closed tab", async () => {
+    renderPage("/settings", <Settings initial={{ name: "Novieri" }} onSave={vi.fn()} />, "/settings");
+    await userEvent.type(screen.getByLabelText("Name"), " SAS");
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe("FormSection", () => {
+  it("folds and unfolds, and says which it is", async () => {
+    renderPage("/x", <FormSection title="Mail">x</FormSection>);
+    const toggle = screen.getByRole("button", { name: "Mail" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("x")).not.toBeVisible();
+  });
+});
+```
+
+`frontend/src/lib/api.forClient.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ApiClient } from "./api";
+
+const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+
+afterEach(() => vi.unstubAllGlobals());
+
+function stubFetch() {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("[]", { status: 200 })));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+const headersOf = (fetchMock: ReturnType<typeof vi.fn>, call: number) =>
+  new Headers((fetchMock.mock.calls[call] as [string, RequestInit])[1].headers);
+
+describe("ApiClient.forClient (decision D6)", () => {
+  it("narrows every request to the one client it was made for, whatever the top bar says", async () => {
+    const fetchMock = stubFetch();
+    const console = new ApiClient(vi.fn(), "/api/v1", () => null);
+    await console.forClient(ANDES).listLicenses();
+    expect(headersOf(fetchMock, 0).get("X-Client-Id")).toBe(ANDES);
+    await console.listLicenses();
+    expect(headersOf(fetchMock, 1).get("X-Client-Id")).toBeNull();
+  });
+
+  it("keeps the session's own handling of a 401", async () => {
+    const onUnauthorized = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
+    await expect(new ApiClient(onUnauthorized).forClient(ANDES).listLicenses()).rejects.toThrow();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+`frontend/src/App.router.test.tsx`:
+
+```tsx
+import { describe, expect, it } from "vitest";
+
+import { appRoutes } from "./App";
+
+describe("the console's router (decision D7)", () => {
+  it("is a data router over the same routes, under the setup gate", () => {
+    const routes = appRoutes();
+    expect(routes).toHaveLength(1);
+    const paths = (routes[0]?.children ?? []).map((route) => route.path);
+    expect(paths).toContain("/devices");
+    expect(paths).toContain("/devices/:deviceId");
+    expect(paths).toContain("/clients/:clientId");
+    expect(paths).toContain("*");
+  });
+});
+```
+
+- [ ] **Step 2: Ejecutarlas y verlas fallar**
+
+Run: `cd frontend && npx vitest run src/shell/listKit.test.tsx src/shell/detailKit.test.tsx src/shell/formKit.test.tsx src/lib/api.forClient.test.ts src/App.router.test.tsx`
+Expected: FAIL: no existen `./listKit`, `./detailKit`, `./formKit`, `forClient` ni `appRoutes`.
+
+- [ ] **Step 3: Los textos del kit**
+
+`frontend/src/i18n/en/shell.ts`, después del bloque `ui`:
+
+```ts
+  // The pattern kit (shell/listKit.tsx, detailKit.tsx, formKit.tsx; design §2).
+  kit: {
+    showing: "Showing {shown} of {total}",
+    showingSome: "Showing {shown}",
+    nothingMatches: "Nothing matches these filters.",
+    clearFilters: "Clear filters",
+    client: "Client",
+    allClients: "All clients",
+    bulkActions: "Bulk actions",
+    selected: { one: "{count} selected", other: "{count} selected" },
+    clearSelection: "Clear selection",
+    unsaved: "Unsaved changes",
+    saving: "Saving…",
+    discard: "Discard",
+    save: "Save",
+    leaveTitle: "Leave without saving?",
+    leaveBody: "The changes on this page have not been saved. If you leave, they are lost.",
+    leave: "Leave without saving",
+  },
+```
+
+`frontend/src/i18n/es/shell.ts`, en el mismo sitio:
+
+```ts
+  kit: {
+    showing: "Mostrando {shown} de {total}",
+    showingSome: "Mostrando {shown}",
+    nothingMatches: "Nada coincide con estos filtros.",
+    clearFilters: "Quitar filtros",
+    client: "Cliente",
+    allClients: "Todos los clientes",
+    bulkActions: "Acciones en lote",
+    selected: { one: "{count} seleccionado", other: "{count} seleccionados" },
+    clearSelection: "Quitar selección",
+    unsaved: "Cambios sin guardar",
+    saving: "Guardando…",
+    discard: "Descartar",
+    save: "Guardar",
+    leaveTitle: "¿Salir sin guardar?",
+    leaveBody: "Los cambios de esta página no se han guardado. Si sales, se pierden.",
+    leave: "Salir sin guardar",
+  },
+```
+
+- [ ] **Step 4: `listKit.tsx`**
+
+```tsx
+/**
+ * THE LIST PATTERN (design §2, "Lista"; DESIGN.md v4, "Lists"). One way every
+ * list in the console filters, counts, narrows to a client, selects and says
+ * why it is empty. A page composes these pieces; no page draws its own.
+ *
+ * EVERYTHING IS IN THE URL (design §2, and the reason Atera's walkthrough
+ * gives for competing on consistency): a filtered view is a link, a reload
+ * keeps it, Back undoes it.
+ */
+import { useCallback, useMemo, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import type { ApiClient } from "../lib/api";
+import { useApi } from "../lib/ApiContext";
+import { isClientId } from "../lib/clientChoice";
+import { useClientScope } from "../lib/clientScope";
+import { Btn, FilterBar, ResultCount } from "./components";
+import { Icon } from "./icons";
+import "./kit.css";
+
+/** The page cursor of the lists that page; any filter change starts again from the first page. */
+const CURSOR = "offset";
+
+export interface UrlFilters<K extends string> {
+  /** Every key's value, `""` when the URL does not carry it. */
+  readonly values: Readonly<Record<K, string>>;
+  /** Whether any of the keys holds a value: what tells "nothing yet" from "nothing matches". */
+  readonly active: boolean;
+  /** `""` removes the key. Replaces the history entry: typing in a search is not twenty Backs. */
+  set(key: K, value: string): void;
+  clear(): void;
+}
+
+export function useUrlFilters<K extends string>(keys: readonly K[]): UrlFilters<K> {
+  const [params, setParams] = useSearchParams();
+  const signature = keys.join("|");
+  const values = useMemo(
+    // `keys` is usually a literal re-created on every render; its contents
+    // (`signature`) are what decide whether the values changed.
+    () => Object.fromEntries(signature.split("|").map((key) => [key, params.get(key) ?? ""])) as Record<K, string>,
+    [params, signature],
+  );
+  const active = keys.some((key) => (params.get(key) ?? "") !== "");
+  const set = useCallback(
+    (key: K, value: string) =>
+      setParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          if (value === "") next.delete(key);
+          else next.set(key, value);
+          next.delete(CURSOR);
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
+  const clear = useCallback(
+    () =>
+      setParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          for (const key of signature.split("|")) next.delete(key);
+          next.delete(CURSOR);
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams, signature],
+  );
+  return { values, active, set, clear };
+}
+
+export interface FilterChipOption {
+  /** `""` is "every value": the default, which writes nothing to the URL. */
+  readonly value: string;
+  readonly label: string;
+  /** From the server. Absent is drawn as no number at all, never as 0 (The Absent Zero Rule). */
+  readonly count?: number;
+}
+
+/** One filter as a row of toggles, each with its count (DESIGN.md v4, "Chips"). */
+export function FilterChips({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly FilterChipOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="chips" role="group" aria-label={label}>
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value === "" ? "(all)" : option.value}
+            type="button"
+            className={on ? "chip on" : "chip"}
+            aria-pressed={on}
+            onClick={() => onChange(option.value)}
+          >
+            {/* The second carrier: the selected chip says so by shape too. */}
+            {on ? <Icon name="circle-check" size={13} /> : null}
+            {option.label}
+            {option.count === undefined ? null : <span className="n">{option.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** "Showing 9 of 12" -- or "Showing 50" when the server gave no total, which is never guessed. */
+export function ShowingCount({ shown, total }: { shown: number; total: number | null }) {
+  const t = useT();
+  return (
+    <ResultCount>{total === null ? t("shell.kit.showingSome", { shown }) : t("shell.kit.showing", { shown, total })}</ResultCount>
+  );
+}
+
+/** The bulk bar: only with a selection, so it is never a row of dead buttons (Atera's flaw). */
+export function BulkBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
+  const t = useT();
+  if (count === 0) return null;
+  return (
+    <div className="bulkbar" role="region" aria-label={t("shell.kit.bulkActions")}>
+      <span className="bulkbar-count">{t("shell.kit.selected", { count })}</span>
+      {children}
+      <span className="filter-spacer" />
+      <Btn label={t("shell.kit.clearSelection")} variant="ghost" small onClick={onClear} />
+    </div>
+  );
+}
+
+/**
+ * THE EMPTY LIST SAYS ITS REAL CAUSE (design §2): nothing exists yet, with the
+ * page's action; or nothing matches these filters, with the way out. Atera
+ * says "try adjusting the filters" on an account with no devices at all.
+ */
+export function ListEmpty({
+  filtered,
+  onClear,
+  nothingYet,
+  action,
+  icon = "list",
+}: {
+  filtered: boolean;
+  onClear: () => void;
+  nothingYet: string;
+  action?: ReactNode;
+  icon?: string;
+}) {
+  const t = useT();
+  return (
+    <div className="empty">
+      <span className="empty-icon">
+        <Icon name={filtered ? "filter" : icon} size={26} />
+      </span>
+      <b>{filtered ? t("shell.kit.nothingMatches") : nothingYet}</b>
+      {filtered ? <Btn label={t("shell.kit.clearFilters")} small onClick={onClear} /> : (action ?? null)}
+    </div>
+  );
+}
+
+/**
+ * THE CLIENT CHIP (design §1.3): a list of one client's things shown with
+ * every client gets a "Client" filter. Not drawn when the top bar has chosen a
+ * client -- that choice already decides what this session sees -- nor for a
+ * person with fewer than two clients, where it could change nothing.
+ */
+export function ClientFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const t = useT();
+  const { selected, clients } = useClientScope();
+  if (selected !== null || clients.length < 2) return null;
+  return (
+    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
+      <span aria-hidden="true">{t("shell.kit.client")}</span>
+      <select aria-label={t("shell.kit.client")} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{t("shell.kit.allClients")}</option>
+        {clients.map((client) => (
+          <option key={client.id} value={client.id}>
+            {client.name}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/**
+ * THE API, NARROWED TO THE CHIP'S CLIENT (decision D6). `X-Client-Id` narrows
+ * and never widens; the database enforces it (invariant 5a). The top bar's
+ * choice wins when there is one, and a value that is not a client id is
+ * ignored rather than sent (the server answers a malformed header with 400).
+ */
+export function useApiFor(clientId: string): ApiClient {
+  const api = useApi();
+  const { selected } = useClientScope();
+  return useMemo(
+    () => (clientId === "" || selected !== null || !isClientId(clientId) ? api : api.forClient(clientId)),
+    [api, clientId, selected],
+  );
+}
+
+/** `?new=<kind>` opens the page's create dialog (decision D8), so the New menu can link to it. */
+export function useNewParam(kind: string): { open: boolean; start: () => void; close: () => void } {
+  const [params, setParams] = useSearchParams();
+  const open = params.get("new") === kind;
+  const start = useCallback(
+    () =>
+      setParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set("new", kind);
+        return next;
+      }),
+    [setParams, kind],
+  );
+  const close = useCallback(
+    () =>
+      setParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.delete("new");
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
+  return { open, start, close };
+}
+
+/** The head of a list, flush inside its bare panel: search, chips, then the count at the end. */
+export function ListToolbar({ search, chips, end }: { search?: ReactNode; chips?: ReactNode; end?: ReactNode }) {
+  return (
+    <FilterBar>
+      {search}
+      {chips ? <div className="list-chips">{chips}</div> : null}
+      <span className="filter-spacer" />
+      {end}
+    </FilterBar>
+  );
+}
+```
+
+- [ ] **Step 5: `detailKit.tsx`**
+
+```tsx
+/**
+ * THE RECORD PATTERN (design §2, "Ficha"; Atera's device page, capture "atera
+ * 8"): a head with the record's status, context and actions; summary tiles;
+ * one row of tabs that change the URL, so a tab reloads and links -- which
+ * Atera's do not; and, where a record has both, information on the left and
+ * metrics and activity on the right.
+ */
+import { useCallback, useId, type ReactNode } from "react";
+import { Link, NavLink, useSearchParams } from "react-router-dom";
+
+import { useClientScope } from "../lib/clientScope";
+import { Tabs } from "./components";
+import { Icon } from "./icons";
+import { Pill, type Kind } from "./viz";
+import "./kit.css";
+
+export function DetailHead({
+  back,
+  title,
+  status,
+  context,
+  actions,
+}: {
+  back: { to: string; label: string };
+  title: string;
+  status?: { kind: Kind; label: string };
+  context?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <section className="ph detail-head">
+      <Link className="back-link" to={back.to}>
+        <Icon name="chevron-left" size={14} />
+        {back.label}
+      </Link>
+      <div className="ph-row">
+        <div>
+          <h1>{title}</h1>
+          {status || context ? (
+            <div className="detail-meta">
+              {status ? <Pill kind={status.kind}>{status.label}</Pill> : null}
+              {context ? <span className="detail-context">{context}</span> : null}
+            </div>
+          ) : null}
+        </div>
+        {actions ? <div className="ph-act">{actions}</div> : null}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The tab a record shows, from `?tab=` (or `param`). The default tab writes
+ * nothing; an unknown one falls back to it. A change is a NEW history entry,
+ * so Back undoes a tab change instead of leaving the record.
+ */
+export function useUrlTab<K extends string>(keys: readonly K[], fallback: K, param = "tab"): [K, (key: K) => void] {
+  const [params, setParams] = useSearchParams();
+  const requested = params.get(param) ?? "";
+  const active = (keys as readonly string[]).includes(requested) ? (requested as K) : fallback;
+  const select = useCallback(
+    (key: K) =>
+      setParams((current) => {
+        const next = new URLSearchParams(current);
+        if (key === fallback) next.delete(param);
+        else next.set(param, key);
+        return next;
+      }),
+    [setParams, fallback, param],
+  );
+  return [active, select];
+}
+
+/** One row of tabs (it scrolls; it never wraps into two, Atera's flaw) and the panel they switch. */
+export function UrlTabs<K extends string>({
+  items,
+  active,
+  onSelect,
+  label,
+  children,
+}: {
+  items: readonly { key: K; label: string; count?: number }[];
+  active: K;
+  onSelect: (key: K) => void;
+  label: string;
+  children: ReactNode;
+}) {
+  const panelId = useId();
+  const current = items.find((item) => item.key === active);
+  return (
+    <>
+      <Tabs items={items} active={active} onSelect={(key) => onSelect(key as K)} panelId={panelId} label={label} scroll />
+      <div id={panelId} role="tabpanel" aria-label={current?.label} tabIndex={-1} className="tab-panel">
+        {children}
+      </div>
+    </>
+  );
+}
+
+/** Information on the left, metrics and activity on the right; one column below 1024px. */
+export function DetailGrid({ main, aside }: { main: ReactNode; aside: ReactNode }) {
+  return (
+    <div className="detail-grid">
+      <div className="detail-main">{main}</div>
+      <div className="detail-aside">{aside}</div>
+    </div>
+  );
+}
+
+/**
+ * A MODULE'S OWN PAGES AS ONE ROW OF LINKS (deploy, backup, IPAM, licenses,
+ * provisioning, push install, the service desk, the portal). Eight modules
+ * drew their own copy of this strip, each a `role="tablist"` of links -- a
+ * tablist promises arrow keys and panels that links do not have. This is a
+ * plain navigation: `NavLink` marks the current page with `aria-current`.
+ */
+export function SectionNav({
+  label,
+  items,
+}: {
+  label: string;
+  items: readonly { to: string; label: string; end?: boolean }[];
+}) {
+  return (
+    <nav aria-label={label} className="tabs scroll section-nav">
+      {items.map((item) => (
+        <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? "tab active" : "tab")}>
+          {item.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+/** A record's client (linked to its 360 page) and site, for `DetailHead`'s context. */
+export function ClientContext({ clientId, siteName }: { clientId: string | null; siteName?: string | null }) {
+  const { clients } = useClientScope();
+  const client = clientId === null ? undefined : clients.find((item) => item.id === clientId);
+  if (!client && !siteName) return null;
+  return (
+    <>
+      {client ? <Link to={`/clients/${client.id}`}>{client.name}</Link> : null}
+      {client && siteName ? " · " : null}
+      {siteName ?? null}
+    </>
+  );
+}
+```
+
+En `shell/components.tsx`, `Tabs` gana la prop opcional `label?: string`, que pasa a `aria-label` del `div role="tablist"` (una línea: `aria-label={label}`), y al final del archivo:
+
+```tsx
+export * from "./listKit";
+export * from "./detailKit";
+export * from "./formKit";
+```
+
+(Las importaciones son circulares en apariencia: `listKit` importa `Btn` de `components`, y `components` reexporta `listKit`. Es seguro porque ninguna de las dos usa la otra al evaluarse, solo dentro de funciones; `npm run build` lo comprueba.)
+
+- [ ] **Step 6: `formKit.tsx`**
+
+```tsx
+/**
+ * THE FORM PATTERN (design §2, "Formulario"): a full page with back and title,
+ * collapsible sections, and ONE sticky bar -- "Unsaved changes · Discard ·
+ * Save" -- for the whole console. Atera's walkthrough counts six ways to save;
+ * this console has one. A page with changes asks before it is left.
+ */
+import { useCallback, useContext, useId, useState, type ReactNode } from "react";
+import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker } from "react-router-dom";
+
+import { ConfirmDialog } from "../components/confirm";
+import { describeSubmitError } from "../components/form";
+import { useT } from "../i18n/context";
+import { Btn } from "./components";
+import { Icon } from "./icons";
+import "./kit.css";
+
+export function FormPage({
+  back,
+  title,
+  description,
+  children,
+}: {
+  back: { to: string; label: string };
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="form-page">
+      <section className="ph">
+        <Link className="back-link" to={back.to}>
+          <Icon name="chevron-left" size={14} />
+          {back.label}
+        </Link>
+        <div className="ph-row">
+          <div>
+            <h1>{title}</h1>
+            {description ? <p className="sub">{description}</p> : null}
+          </div>
+        </div>
+      </section>
+      {children}
+    </div>
+  );
+}
+
+export function FormSection({
+  title,
+  icon,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const bodyId = useId();
+  return (
+    <section className="panel form-section">
+      <h2 className="form-section-h">
+        <button
+          type="button"
+          className="form-section-toggle"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {icon ? <Icon name={icon} size={16} /> : null}
+          <span>{title}</span>
+          <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
+        </button>
+      </h2>
+      <div id={bodyId} className="panel-b" hidden={!open}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** The one save bar. Drawn only while there is something to say: a change, a save, a failure. */
+export function SaveBar({
+  dirty,
+  saving,
+  error,
+  onDiscard,
+  onSave,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  error?: unknown;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  const t = useT();
+  if (!dirty && !saving && !error) return null;
+  return (
+    <div className="savebar" role="region" aria-label={t("shell.kit.unsaved")}>
+      <span className="savebar-what">{saving ? t("shell.kit.saving") : t("shell.kit.unsaved")}</span>
+      {error ? (
+        <span className="savebar-error" role="alert">
+          {describeSubmitError(error)}
+        </span>
+      ) : null}
+      <Btn label={t("shell.kit.discard")} onClick={onDiscard} disabled={saving} />
+      <Btn
+        label={saving ? t("shell.kit.saving") : t("shell.kit.save")}
+        variant="primary"
+        onClick={onSave}
+        disabled={saving || !dirty}
+      />
+    </div>
+  );
+}
+
+/**
+ * What the form shows, against what the server has. A new answer from the
+ * server replaces the draft only while nothing was being edited: a refetch
+ * must not wipe what someone is typing. Compared by value, so a refetch that
+ * returns the same record is not a change.
+ */
+export function useDraft<T>(saved: T | undefined): {
+  draft: T | undefined;
+  setDraft: (next: T) => void;
+  dirty: boolean;
+  discard: () => void;
+} {
+  const savedKey = JSON.stringify(saved ?? null);
+  const [draft, setDraftState] = useState<T | undefined>(saved);
+  const [baseKey, setBaseKey] = useState(savedKey);
+  const draftKey = JSON.stringify(draft ?? null);
+  if (savedKey !== baseKey) {
+    setBaseKey(savedKey);
+    if (draftKey === baseKey) setDraftState(saved);
+  }
+  const setDraft = useCallback((next: T) => setDraftState(next), []);
+  const discard = useCallback(() => setDraftState(saved), [saved]);
+  return { draft, setDraft, dirty: saved !== undefined && draftKey !== savedKey, discard };
+}
+
+/**
+ * A PAGE WITH CHANGES ASKS BEFORE IT IS LEFT (design §5). Inside the console's
+ * data router (decision D7) a navigation is blocked and the person chooses;
+ * a reload or a closed tab gets the browser's own question. Under a router
+ * that cannot block -- a test mounted with `MemoryRouter` -- only the browser
+ * half applies.
+ */
+export function UnsavedGuard({ dirty }: { dirty: boolean }) {
+  useBeforeUnload(
+    useCallback(
+      (event: BeforeUnloadEvent) => {
+        if (!dirty) return;
+        event.preventDefault();
+        event.returnValue = "";
+      },
+      [dirty],
+    ),
+  );
+  const dataRouter = useContext(UNSAFE_DataRouterContext);
+  return dataRouter ? <LeaveQuestion dirty={dirty} /> : null;
+}
+
+function LeaveQuestion({ dirty }: { dirty: boolean }) {
+  const t = useT();
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty &&
+      (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+  );
+  return (
+    <ConfirmDialog
+      open={blocker.state === "blocked"}
+      title={t("shell.kit.leaveTitle")}
+      subject=""
+      body={t("shell.kit.leaveBody")}
+      confirmLabel={t("shell.kit.leave")}
+      destructive
+      onCancel={() => blocker.reset?.()}
+      onConfirm={() => blocker.proceed?.()}
+    />
+  );
+}
+```
+
+(`ConfirmDialog` nombra su botón de cancelar «Cancel» / «Cancelar»; la prueba lo busca por ese nombre.)
+
+- [ ] **Step 7: `kit.css` y la geometría de la marca en las piezas que ya existen**
+
+`frontend/src/shell/kit.css`:
+
+```css
+/* The pattern kit (DESIGN.md v4: "Lists", "Records (detail)", "Forms").
+ * Tokens only: the harmony gate reads every value here at runtime. */
+.list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chip-select { padding: 0 4px 0 11px; gap: 6px; }
+.chip-select select { min-height: 30px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.chip-select:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; background: var(--accent-s); border-bottom: 1px solid var(--line); }
+.bulkbar-count { font-weight: 600; color: var(--accent); }
+
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; font-size: var(--t-sm); color: var(--muted); text-decoration: none; }
+.back-link:hover { color: var(--accent); }
+.back-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+
+.detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.detail-context { font-size: var(--t-sm); color: var(--muted); }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; gap: 16px; }
+.detail-main, .detail-aside { display: grid; gap: 16px; min-width: 0; }
+.tab-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1024px) { .detail-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.form-page { max-width: 1100px; }
+.form-section { margin-bottom: 16px; }
+.form-section-h { margin: 0; }
+.form-section-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 18px; border: 0; background: transparent; color: var(--ink); font: 600 var(--t-h2)/1.3 var(--sans); text-align: left; cursor: pointer; }
+.form-section-toggle .chev { margin-left: auto; transition: transform .15s ease; }
+.form-section-toggle .chev.open { transform: rotate(180deg); }
+.form-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.savebar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
+.savebar-what { margin-right: auto; font-weight: 500; color: var(--ink); }
+.savebar-error { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--sev-crit); }
+
+@media (prefers-reduced-motion: reduce) { .form-section-toggle .chev { transition: none; } }
+```
+
+`frontend/src/shell/components.css` (DESIGN.md v4, «Buttons», «Chips», «Badges»; la maqueta de la dirección A mide 36 / 30 / 32 / 24 px):
+- en `.btn` añadir `min-height: 36px;`; en `.btn.small` añadir `min-height: 30px;`;
+- añadir, después de `.btn.primary:hover, .btn.pri:hover`, la regla `.btn.primary:active, .btn.pri:active { background: var(--accent-3); border-color: var(--accent-3); }`;
+- en `.chip`: `font-size: var(--t-body); font-weight: 500; color: var(--ink); min-height: 32px; padding: 0 11px; gap: 7px;` (sustituye `font-size: var(--t-sm)`, `color: var(--ink-2)` y `padding: 6px 11px`) y añadir `.chip .n { font-size: var(--t-sm); color: var(--muted); font-variant-numeric: tabular-nums; }` y `.chip.on .n { color: var(--accent); }`;
+- en `.pill`: `min-height: 24px; padding: 0 9px 0 7px;` (sustituye `padding: 3px 9px 3px 7px`).
+
+Si `base-styles.test.ts` informa que una regla que transcribía de v3 cambió (`it.each([".btn:hover", ".btn.primary", …])`), se añade al principio del archivo:
+
+```ts
+/**
+ * RULES DESIGN.md v4 CHANGED ON PURPOSE (2026-11-23, the Novieri brand). The
+ * transcription tests below compare against v3 unless a selector is listed
+ * here, in which case they compare against these declarations, which are the
+ * brand's. Each entry names the reason.
+ */
+const V4_OVERRIDES: Readonly<Record<string, readonly string[]>> = {};
+const expectedFor = (design: string, selector: string): string[] =>
+  [...(V4_OVERRIDES[selector] ?? declarations(design, selector))];
+```
+
+y cada `expect(ported).toEqual(declarations(design, selector))` del archivo pasa a `expect(ported).toEqual(expectedFor(design, selector))`. La regla nueva va en `V4_OVERRIDES` con sus declaraciones exactas, como `declarations()` las devuelve. Con los cambios de arriba no hace falta ninguna (ninguno toca un selector transcrito); el mapa queda vacío y listo para la Task 4.
+
+- [ ] **Step 8: `forClient`, el proxy de fixtures y el router de datos**
+
+`frontend/src/lib/api.ts`, justo después del constructor de `ApiClient`:
+
+```ts
+  /**
+   * THIS CLIENT, NARROWED TO ONE CLIENT for every request it makes
+   * (`X-Client-Id`), whatever the top bar says: a list's "Client" chip and the
+   * client 360 page (redesign design §1.3, §2; decision D6). It narrows and
+   * never widens -- the server answers with the session's scope intersected
+   * with this id, and RLS enforces it (invariant 5a). Global routes still go
+   * without the header (`requestHeaders`).
+   */
+  forClient(clientId: string): ApiClient {
+    return new ApiClient(this.onUnauthorized, this.base, () => clientId);
+  }
+```
+
+`frontend/src/fixtures/client.ts`, en el `get` del `Proxy` (líneas 121-125):
+
+```ts
+    get(_target, prop) {
+      if (typeof prop !== "string" || prop === "then") return undefined;
+      // A narrowed client answers from the same fixtures: they are not
+      // per-client, and the harmony gate measures the page, not the scope.
+      if (prop === "forClient") return () => proxy;
+      return methodFor(prop);
+    },
+```
+
+con `const proxy: ApiClient = new Proxy({} as ApiClient, { … });` y `return proxy;` en lugar de `return new Proxy(…)` (el tipo explícito es lo que deja al `get` devolverse a sí mismo; comprobado con `npm run typecheck` en una copia de trabajo).
+
+`frontend/src/App.tsx`:
+- importar `createBrowserRouter`, `createRoutesFromElements`, `Outlet`, `RouterProvider` y `type RouteObject` de `react-router-dom`, y quitar `BrowserRouter` y `Routes` de la importación;
+- antes de `export default function App()`, crear la función de rutas con esta forma:
+  ```tsx
+  /**
+   * THE CONSOLE'S ROUTES, AS A DATA ROUTER (redesign decision D7): the same
+   * `<Route>` elements as before, under one layout route that draws the setup
+   * gate. A data router is what lets a page with unsaved changes block a
+   * navigation (`shell/formKit.tsx`, `useBlocker`). `routes-covered.test.ts`
+   * still reads every `path=` below.
+   */
+  export function appRoutes(): RouteObject[] {
+    return createRoutesFromElements(
+      <Route
+        element={
+          <SetupGate>
+            <Outlet />
+          </SetupGate>
+        }
+      >
+      </Route>,
+    );
+  }
+  ```
+  y **mover**, sin editarlas, las líneas que hoy están entre `<Routes>` y `</Routes>` en `App` (de `{/* DEV ONLY. Vite substitutes…` en la 735 a la `/>` de la ruta `path="*"` en la 1622: el bloque `import.meta.env.DEV`, las 115 `<Route>` y sus comentarios) a dentro de esa `<Route element={…}>`, entre su `>` y su `</Route>`. Comprobación: `grep -c "<Route" frontend/src/App.tsx` da el mismo número antes y después más uno (la ruta de diseño).
+- `App` pasa a:
+  ```tsx
+  export default function App() {
+    // Built once per mount, from the URL the page was opened at.
+    const [router] = useState(() => createBrowserRouter(appRoutes()));
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider>
+          <LanguageBridge>
+            <RouterProvider router={router} />
+          </LanguageBridge>
+        </ApiProvider>
+      </QueryClientProvider>
+    );
+  }
+  ```
+
+- [ ] **Step 9: Ejecutar las pruebas del kit**
+
+Run: `cd frontend && npx vitest run src/shell/listKit.test.tsx src/shell/detailKit.test.tsx src/shell/formKit.test.tsx src/lib/api.forClient.test.ts src/App.router.test.tsx src/test/routes-covered.test.ts src/App.routing.test.tsx src/App.shell.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 10: El kit en `/__preview`**
+
+`frontend/src/preview/PreviewPage.tsx`: una sección nueva al final, `<Panel title="Kit v4" …>`, que dibuja, con datos fijos y sin API: `ListToolbar` con `SearchField`, `FilterChips` de tres opciones (dos con conteo) y `ShowingCount shown={9} total={12}`; `BulkBar count={2}` con un `Btn`; `ListEmpty` en sus dos formas; `DetailHead` con `status={{ kind: "ok", label: "Online" }}` y un contexto; `UrlTabs` de tres pestañas sobre un `useUrlTab(["a", "b", "c"], "a", "kit")` (parámetro propio, para no chocar con el `tab` de la página); `DetailGrid` con dos `Panel`; `FormSection` con un `Field`; y `SaveBar dirty saving={false}`. `ClientFilter` no se dibuja aquí: necesita `/me`, y lo mide la puerta de armonía en las listas.
+
+Run: `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs`
+Expected: código 0; las piezas nuevas aparecen entre los «text runs measured» sin pares por debajo del mínimo.
+
+- [ ] **Step 11: Suite completa y navegador**
+
+Run: `npx vitest run && npm run typecheck && npm run build`
+Expected: verde.
+
+Run: `node scripts/harmony.mjs --strict-fixtures --lang en` y `--lang es` (todas las rutas: el router cambió)
+Expected: `ok …` en las dos.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add frontend/src
+git commit -m "feat(ui): pattern kit for lists, records and forms; data router; client-narrowed reads
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación:** las cinco pruebas nuevas en verde; las 115 rutas se recorren igual en harmony; `/__preview` muestra y mide cada pieza; ninguna página de módulo cambió.
+
+---
+
+### Task 4: El armazón: la barra lateral de Atera, Administración en acordeón, «Nuevo» y la barra superior
+
+Diseño §1.1 y §1.2. Es la tarea que cambia la navegación a propósito: `nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx` y `responsive.test.ts` se corrigen aquí, cada cambio con un comentario que cita el diseño, y ninguna prueba se borra.
+
+**Files:**
+- Modify: `frontend/src/shell/nav.ts:68-70` (la `group()` vieja se borra), `:131-213` (tipos y `NAV_GROUPS`), `:215-222` (`navItems`), `:296-321` (`destinations`), `:346-405` (`visibleGroups`, `searchDestinations`), `:411-416` (`PORTAL_GROUPS`)
+- Modify: `frontend/src/shell/Sidebar.tsx` (archivo completo)
+- Create: `frontend/src/shell/AdminPanel.tsx`, `frontend/src/shell/newMenu.ts`, `frontend/src/shell/NewMenu.tsx`
+- Modify: `frontend/src/shell/AppShell.tsx` (prop `newMenu`; fuera «Añadir un equipo» y el icono del Asistente de la barra)
+- Modify: `frontend/src/shell/AreaPage.tsx` (la portada de Administración)
+- Modify: `frontend/src/shell/shell.css` (riel, panel de Administración, «Nuevo»)
+- Modify: `frontend/src/App.tsx` (`Shell` calcula `newMenu`)
+- Modify: `frontend/src/i18n/{en,es}/shell.ts`, `frontend/src/i18n/identical-ok.ts`
+- Modify (destinos de «Nuevo», decisión D8): `frontend/src/modules/service-desk/TicketListPage.tsx:96,258,460`, `frontend/src/modules/docs/DocsPage.tsx:379-387`, `frontend/src/modules/change/ChangesPage.tsx:64,145,275`, `frontend/src/modules/clients/ClientsPage.tsx:30,110`, `frontend/src/modules/clients/ContactsTab.tsx:63`
+- Test: `frontend/src/shell/nav.test.ts`, `Sidebar.test.tsx`, `AppShell.test.tsx`, `AreaPage.test.tsx`, `shell.es.test.tsx`, `frontend/src/test/responsive.test.ts`; nuevos `frontend/src/shell/newMenu.test.ts`, `frontend/src/shell/NewMenu.test.tsx`, `frontend/src/shell/AdminPanel.test.tsx`, `frontend/src/shell/newDestinations.test.tsx`
+
+**Interfaces:**
+- Consumes: `NovieriSymbol`, `NovieriWordmark` (Task 2); `SearchField` (kit); `useNewParam` (Task 3).
+- Produces (`nav.ts`): `interface NavFolder { kind: "folder"; key: "assets" | "more"; label: string; icon: string; items: readonly NavItem[] }`; `type RailEntry = NavItem | NavArea | NavFolder`; `isFolder(entry): entry is NavFolder`; `interface NavGroup { key: "main" | "anchored" | "help"; label: string; items: readonly RailEntry[] }`. `visibleGroups`, `navItems`, `crumbFor`, `activeNavTo` y `searchDestinations` conservan su firma.
+- Produces (`newMenu.ts`): `type NewMenuKind = "ticket" | "client" | "contact" | "device" | "document" | "change"`, `interface NewMenuEntry { kind; to: string; icon: string }`, `newMenuEntries(input: NewMenuInput): NewMenuEntry[]` con `NewMenuInput = { permissions; everywhere; clients: readonly MeClient[]; selected: string | null; modules: ReadonlySet<string> }`.
+- Produces (`AppShell`): prop `newMenu?: readonly NewMenuEntry[]`.
+
+**Decisiones de esta tarea** (Apéndice A):
+- **D9.** «Activos» y «Más» son carpetas del riel: un botón con `aria-expanded` que despliega sus páginas en el sitio. La carpeta que contiene la página actual se abre sola. Plegado el riel, sus páginas se ven como iconos debajo del icono de la carpeta, así que nada queda a un clic de más. «Más» no se dibuja si ningún módulo opcional está activo para la elección de arriba (`visibleGroups` ya quita un grupo vacío).
+- **D10.** «Administración» es un botón anclado abajo que cambia el riel por su panel (volver, búsqueda y acordeón) **sin navegar**. El panel se abre solo cuando la página actual es de Administración; «Volver al menú» lo cierra sin salir de la página. El título del panel enlaza a `/admin`, que sigue siendo la portada (la miga apunta allí).
+- **D11.** «Añadir un equipo» sale de la barra superior y pasa a «Nuevo → Equipo» y a la cabecera de Equipos (diseño §1.2). «Nuevo» es ahora el único primario de la barra (DESIGN.md v4, «Buttons»).
+- **D12.** El icono del Asistente sale de la barra superior: el diseño §1.2 enumera la barra y no lo incluye, y §1.1 ancla el Asistente al pie del riel, visible en toda pantalla de escritorio. La fila «Preguntar al Asistente» de la búsqueda sigue en todas las anchuras. Esto deshace la decisión del operador del 2026-09-08 («AI Analyst needs to be there») en la barra y la cumple en el riel: queda como **pregunta abierta** para el operador (Apéndice A).
+- **D13.** En español, el riel dice «Inicio», «Equipos» y «Documentación», como pide el diseño §1.1 (hoy «Panel», «Dispositivos» y «Documentación de TI»). El inglés no cambia. «Equipos» para la lista de máquinas sigue el glosario («computer → equipo, a machine on the list»); la entrada `device → dispositivo` del glosario de `src/i18n/es/index.ts` gana una nota: «la lista de máquinas (`/devices`) se llama Equipos en el riel y en su página (rediseño 2026-11-23)». La O1 cambia el título de la página a juego.
+
+- [ ] **Step 1: Las pruebas del modelo (fallan)**
+
+En `frontend/src/shell/nav.test.ts`:
+
+1. Sustituir el `describe("two layers", …)` entero (líneas 40 a 140) por:
+
+```ts
+/** Every code the model names: an operator holding all of them sees every page. */
+const EVERYTHING = navItems()
+  .map((item) => item.permission)
+  .filter((code): code is string => code !== null);
+
+/** A rail entry as a short string: an item's route, or a folder's key and its routes. */
+function shape(entry: RailEntry): string {
+  if (isFolder(entry)) return `${entry.key}:[${entry.items.map((item) => item.to).join(",")}]`;
+  return entry.to;
+}
+
+describe("the Atera order (redesign design §1.1, 2026-11-23)", () => {
+  // REPLACES "two layers" (2026-09-23): daily work, governance and assets
+  // under captions, and Admin folded. The redesign takes Atera's rail: no
+  // captions, Clients third, two folders, and the Assistant and Admin
+  // anchored at the bottom.
+  const groups = visibleGroups(EVERYTHING, OPTIONAL_MODULES);
+  const main = groups.find((group) => group.key === "main")?.items ?? [];
+  const anchored = groups.find((group) => group.key === "anchored")?.items ?? [];
+
+  it("lists the main rail in Atera's order, with Assets and More as folders", () => {
+    expect(main.map(shape)).toEqual([
+      "/dashboard",
+      "/service-desk",
+      "/clients",
+      "/devices",
+      "/health",
+      "/patch",
+      "/deploy",
+      "/backup",
+      "/remote",
+      "assets:[/licenses,/subscriptions,/ipam]",
+      "/docs",
+      "/reports",
+      "more:[/changes,/bcp,/budget]",
+    ]);
+  });
+
+  it("anchors the Assistant and Admin at the bottom", () => {
+    expect(anchored.map(shape)).toEqual(["/assistant", "/admin"]);
+  });
+
+  it("keeps Admin the only area, with today's sections in order and Clients out of it", () => {
+    expect(navAreas().map((area) => area.to)).toEqual(["/admin"]);
+    expect(navAreas()[0]?.sections.map((section) => section.items.map((item) => item.to))).toEqual([
+      ["/notifications", "/email-intake", "/sla", "/portal"],
+      ["/enrollment", "/agent-packages", "/agent-push/authorizations", "/device-groups", "/site-servers"],
+      ["/assistant/autonomy", "/jobs"],
+      ["/credentials", "/audit", "/security"],
+      ["/platform-status", "/error-monitor", "/settings"],
+    ]);
+  });
+
+  it("puts in More exactly the three optional modules, and drops More when none is on", () => {
+    const more = main.find((entry) => isFolder(entry) && entry.key === "more");
+    expect(more && isFolder(more) ? more.items.map((item) => item.module) : []).toEqual(["change", "bcp", "budget"]);
+    const none = visibleGroups(EVERYTHING, new Set());
+    expect(none.flatMap((group) => group.items).some((entry) => isFolder(entry) && entry.key === "more")).toBe(false);
+  });
+
+  it("keeps every code the rail had before the redesign (the permissions do not change, §1.1)", () => {
+    expect(new Set(EVERYTHING)).toEqual(
+      new Set([
+        "devices.read", "health.read", "ticket.read", "patch.read", "deploy.read", "backup.read",
+        "remote.control", "ai.use", "docs.read", "change.read", "bcp.read", "reporting.read",
+        "licenses.read", "subscriptions.read", "budget.read", "ipam.read", "clients.read",
+        "notification.read", "email_intake.read", "sla.read", "portal.ticket.read",
+        "agent.release.read", "agent.push.scope.manage", "site.read", "ai.admin", "jobs.read",
+        "credentials.read", "audit.read", "platform.status.read", "platform.errors.read", "orgs.manage",
+      ]),
+    );
+  });
+});
+```
+
+2. En `describe("the Clients page (MSP clients phase 3, design §4.1)")`, el caso «sits in Admin, gated on clients.read» pasa a:
+
+```ts
+  it("sits third in the main rail, gated on clients.read (redesign design §1.1: it leaves Admin)", () => {
+    const main = NAV_GROUPS.find((group) => group.key === "main")?.items ?? [];
+    expect(main.map((entry) => ("to" in entry ? entry.to : null))[2]).toBe("/clients");
+    expect(navItems().find((item) => item.to === "/clients")?.permission).toBe("clients.read");
+  });
+```
+
+3. En `describe("crumbFor")`: «gives every page a section that links to a rail entry» sigue igual; añadir:
+
+```ts
+  it("names a folder's page after itself, linked to itself: a folder is not a page", () => {
+    expect(crumbFor("/licenses")).toEqual({ section: "Licenses", sectionTo: "/licenses", title: "Licenses" });
+    expect(crumbFor("/licenses/lic-1")).toEqual({ section: "Licenses", sectionTo: "/licenses", title: "Licenses" });
+  });
+
+  it("names Clients as a main page now, not as an Admin page", () => {
+    expect(crumbFor("/clients/c-1").sectionTo).toBe("/clients");
+  });
+```
+
+y `isFolder, type RailEntry` en la importación de `./nav`.
+
+4. Tres ajustes de tipo, porque un `RailEntry` puede ser ahora una carpeta, que no tiene `to` (`npm run typecheck` los señala; comprobado en una copia de trabajo el 2026-11-23):
+   - línea 30: `const RAIL = NAV_GROUPS.flatMap((group) => group.items);` pasa a `const RAIL = NAV_GROUPS.flatMap((group) => group.items).flatMap((entry) => (isFolder(entry) ? [...entry.items] : [entry]));` (las páginas de una carpeta son entradas del riel a efectos de `NAV_UNLISTED` y de la miga);
+   - las dos búsquedas `.find((entry) => entry.to === "/admin")` (líneas 200 y 509) pasan a `.find((entry) => "to" in entry && entry.to === "/admin")`.
+
+5. «is offered to a person holding only clients.read» (línea 506) fijaba que Clientes estaba en la sección Organización de Administración. Pasa a:
+
+```ts
+  it("is offered to a person holding only clients.read, in the main rail (redesign design §1.1)", () => {
+    const main = visibleGroups(["clients.read"], new Set()).find((group) => group.key === "main");
+    expect(main?.items.map((entry) => ("to" in entry ? entry.to : entry.key))).toEqual(["/dashboard", "/clients"]);
+  });
+```
+
+Las demás pruebas de `nav.test.ts` (códigos, iconos, duplicados, `visibleGroups`, búsqueda, `NAV_UNLISTED`, portal, módulos opcionales, Imaging) pasan sin cambios: en la copia de trabajo, con lo de arriba y el título de la Task 2, el archivo queda en verde.
+
+`frontend/src/shell/newMenu.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+
+import type { MeClient } from "../lib/api";
+import { newMenuEntries, type NewMenuInput } from "./newMenu";
+
+const A = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+const B = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
+const ALL = ["ticket.write", "clients.manage", "devices.read", "docs.manage", "change.request"];
+
+function client(id: string, permissions: string[], kind: MeClient["kind"] = "customer"): MeClient {
+  return { id, name: id, kind, enabled_modules: [], permissions };
+}
+
+function input(over: Partial<NewMenuInput> = {}): NewMenuInput {
+  return {
+    permissions: ALL,
+    everywhere: ALL,
+    clients: [client(A, ALL), client(B, ALL)],
+    selected: null,
+    modules: new Set(["change"]),
+    ...over,
+  };
+}
+
+describe("the New menu (redesign design §1.2: only real destinations, each with its permission)", () => {
+  it("offers every destination, in the design's order, to someone who may create all of it", () => {
+    expect(newMenuEntries(input()).map((entry) => [entry.kind, entry.to])).toEqual([
+      ["ticket", "/service-desk?new=ticket"],
+      ["client", "/clients?new=client"],
+      ["contact", "/clients?new=contact"],
+      ["device", "/devices/onboard"],
+      ["document", "/docs?new=article"],
+      ["change", "/changes?new=change"],
+    ]);
+  });
+
+  it("offers nothing to someone who may create nothing, so there is no menu at all", () => {
+    expect(newMenuEntries(input({ permissions: [], everywhere: [], clients: [client(A, [])] }))).toEqual([]);
+  });
+
+  it("offers a client only to someone who may manage clients everywhere, as the Clients page does", () => {
+    const kinds = newMenuEntries(input({ everywhere: ["ticket.write"] })).map((entry) => entry.kind);
+    expect(kinds).not.toContain("client");
+  });
+
+  it("takes a contact straight to the chosen client's contacts", () => {
+    const contact = newMenuEntries(input({ selected: A })).find((entry) => entry.kind === "contact");
+    expect(contact?.to).toBe(`/clients/${A}?tab=contacts&new=contact`);
+  });
+
+  it("offers no contact for a chosen client the person cannot manage, nor for Unassigned", () => {
+    expect(newMenuEntries(input({ selected: A, clients: [client(A, ["clients.read"])] })).some((entry) => entry.kind === "contact")).toBe(false);
+    expect(newMenuEntries(input({ clients: [client(A, ALL, "unassigned")] })).some((entry) => entry.kind === "contact")).toBe(false);
+  });
+
+  it("offers a change only where the change module is on", () => {
+    expect(newMenuEntries(input({ modules: new Set() })).some((entry) => entry.kind === "change")).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Las pruebas de los componentes (fallan)**
+
+`frontend/src/shell/NewMenu.test.tsx`:
+
+```tsx
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { renderPage } from "../test/renderPage";
+import { NewMenu } from "./NewMenu";
+import type { NewMenuEntry } from "./newMenu";
+
+const ENTRIES: NewMenuEntry[] = [
+  { kind: "ticket", to: "/service-desk?new=ticket", icon: "ticket" },
+  { kind: "device", to: "/devices/onboard", icon: "devices" },
+];
+
+describe("NewMenu", () => {
+  it("is a menu button in the primary voice, and draws nothing when there is nothing to create", () => {
+    renderPage("/x", <NewMenu entries={ENTRIES} />);
+    const button = screen.getByRole("button", { name: "New" });
+    expect(button).toHaveAttribute("aria-haspopup", "menu");
+    expect(button).toHaveClass("primary");
+    const empty = renderPage("/y", <NewMenu entries={[]} />);
+    expect(empty.container.querySelector("button")).toBeNull();
+  });
+
+  it("opens on the first entry, and each entry goes to its destination", async () => {
+    const { router } = renderPage("/x", <NewMenu entries={ENTRIES} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.getByRole("menuitem", { name: "Ticket" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Computer" })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(router.state.location.pathname).toBe("/devices/onboard");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("closes on Escape and gives focus back to the button", async () => {
+    renderPage("/x", <NewMenu entries={ENTRIES} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("button", { name: "New" })).toHaveFocus();
+  });
+});
+```
+
+`frontend/src/shell/AdminPanel.test.tsx`:
+
+```tsx
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
+import { setActiveLanguage } from "../i18n/core";
+import { renderPage } from "../test/renderPage";
+import { Sidebar } from "./Sidebar";
+import { navItems } from "./nav";
+
+const EVERYTHING = navItems()
+  .map((item) => item.permission)
+  .filter((code): code is string => code !== null);
+
+function rail(path: string) {
+  return renderPage(path, <Sidebar permissions={EVERYTHING} collapsed={false} onToggleCollapsed={() => {}} orgName="Novieri" />);
+}
+
+describe("Admin, as Atera draws it (redesign design §1.1)", () => {
+  it("is a button at the foot of the rail that swaps the rail for its panel, without navigating", async () => {
+    const { router } = rail("/devices");
+    await userEvent.click(screen.getByRole("button", { name: "Admin" }));
+    expect(router.state.location.pathname).toBe("/devices");
+    const panel = screen.getByRole("navigation", { name: "Admin" });
+    expect(within(panel).getByRole("button", { name: "Back to the menu" })).toBeInTheDocument();
+    expect(within(panel).getByRole("searchbox", { name: "Search Admin" })).toBeInTheDocument();
+  });
+
+  it("opens by itself on an Admin page, with that page's section open and the page current", () => {
+    rail("/audit");
+    const panel = screen.getByRole("navigation", { name: "Admin" });
+    expect(within(panel).getByRole("button", { name: /Security/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(panel).getByRole("button", { name: /Service desk/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(panel).getByRole("link", { name: "Audit log" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("goes back to the main rail and stays on the page", async () => {
+    const { router } = rail("/audit");
+    await userEvent.click(screen.getByRole("button", { name: "Back to the menu" }));
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/audit");
+  });
+
+  it("finds a page by any part of its name, accents ignored", async () => {
+    setActiveLanguage("es");
+    try {
+      rail("/settings");
+      await userEvent.type(screen.getByRole("searchbox", { name: "Buscar en Administración" }), "auditoria");
+      const panel = screen.getByRole("navigation", { name: "Administración" });
+      expect(within(panel).getByRole("link", { name: "Registro de auditoría" })).toBeVisible();
+      expect(within(panel).queryByRole("link", { name: "Configuración" })).toBeNull();
+    } finally {
+      setActiveLanguage("en");
+    }
+  });
+});
+```
+
+En `frontend/src/shell/Sidebar.test.tsx`, conservar el `describe("Sidebar current item")` (sus seis casos siguen valiendo: el ítem actual es el mismo) y sustituir `describe("the second layer")` por:
+
+```tsx
+describe("the rail's folders and anchored entries (redesign design §1.1)", () => {
+  it("opens the folder that holds the current page, and only that one", () => {
+    renderRail("/subscriptions");
+    expect(screen.getByRole("button", { name: "Assets" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "Subscriptions" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens and closes a folder in place", async () => {
+    renderRail("/devices");
+    const more = screen.getByRole("button", { name: "More" });
+    await userEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "Changes" })).toBeVisible();
+  });
+
+  it("anchors the Assistant and Admin below the main rail, in their own navigation", () => {
+    renderRail("/devices");
+    const anchored = screen.getByRole("navigation", { name: "Assistant and Admin" });
+    expect(within(anchored).getByRole("link", { name: "Assistant" })).toHaveAttribute("href", "/assistant");
+    expect(within(anchored).getByRole("button", { name: "Admin" })).toBeInTheDocument();
+  });
+
+  it("marks the current page with its dot, which is decoration only", () => {
+    renderRail("/devices");
+    const current = screen.getByRole("link", { name: "Devices" });
+    expect(current.querySelector(".nav-dot")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows the brand: the symbol on its tile and the wordmark", () => {
+    renderRail("/devices");
+    expect(screen.getByRole("img", { name: "Novieri" })).toBeInTheDocument();
+  });
+});
+```
+
+donde `renderRail(path)` es el helper que el archivo ya tiene para montar `Sidebar` (si su nombre es otro, se usa ese) con todos los códigos de `navItems()`.
+
+`frontend/src/shell/newDestinations.test.tsx` (cada entrada de «Nuevo» abre de verdad lo que promete):
+
+```tsx
+import { screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { fixtureClient } from "../fixtures/client";
+import { ChangesPage } from "../modules/change/ChangesPage";
+import { ClientDetailPage } from "../modules/clients/ClientDetailPage";
+import { ClientsPage } from "../modules/clients/ClientsPage";
+import { DocsPage } from "../modules/docs/DocsPage";
+import { TicketListPage } from "../modules/service-desk/TicketListPage";
+import { renderPage } from "../test/renderPage";
+
+const mockUseApi = vi.fn();
+vi.mock("../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+// The fixture person holds every code in every client (`src/fixtures/core.ts`).
+beforeEach(() => mockUseApi.mockReturnValue(fixtureClient()));
+
+describe("every New entry is a real destination (redesign design §1.2, decision D8)", () => {
+  it("Ticket opens New ticket on the ticket list", async () => {
+    renderPage("/service-desk?new=ticket", <TicketListPage />);
+    expect(await screen.findByRole("dialog", { name: "New ticket" })).toBeInTheDocument();
+  });
+
+  it("Client opens New client on the client list", async () => {
+    renderPage("/clients?new=client", <ClientsPage />);
+    expect(await screen.findByRole("dialog", { name: "New client" })).toBeInTheDocument();
+  });
+
+  it("Contact, with every client shown, first asks which client", async () => {
+    renderPage("/clients?new=contact", <ClientsPage />);
+    expect(await screen.findByRole("dialog", { name: "New contact" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Client" })).toBeInTheDocument();
+  });
+
+  it("Contact, for a chosen client, opens Add contact on its contacts tab", async () => {
+    renderPage(
+      "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=contacts&new=contact",
+      <ClientDetailPage />,
+      "/clients/:clientId",
+    );
+    expect(await screen.findByRole("dialog", { name: "Add a contact" })).toBeInTheDocument();
+  });
+
+  it("Document opens the article editor", async () => {
+    renderPage("/docs?new=article", <DocsPage />);
+    expect(await screen.findByRole("textbox", { name: "Title" })).toBeInTheDocument();
+  });
+
+  it("Change opens New change", async () => {
+    renderPage("/changes?new=change", <ChangesPage />);
+    expect(await screen.findByRole("dialog", { name: "New change request" })).toBeInTheDocument();
+  });
+});
+```
+
+(Los nombres de los diálogos son los títulos de hoy en el catálogo inglés: `serviceDesk.newTicket.title`, `clients.form.newTitle`, `clients.contacts.formAddTitle`, `docs.editor.title`, `change.form.newTitle`. Antes de ejecutar, comprobar cada uno con `grep -n` en `src/i18n/en/<módulo>.ts` y poner el texto exacto que el catálogo tenga; «New contact» es la clave nueva `clients.list.newContactTitle` de este paso.)
+
+- [ ] **Step 3: Ejecutarlas y verlas fallar**
+
+Run: `cd frontend && npx vitest run src/shell/nav.test.ts src/shell/newMenu.test.ts src/shell/NewMenu.test.tsx src/shell/AdminPanel.test.tsx src/shell/Sidebar.test.tsx src/shell/newDestinations.test.tsx`
+Expected: FAIL (no existen `isFolder`, `newMenu`, `NewMenu`, el panel, las carpetas ni los parámetros `?new=`).
+
+- [ ] **Step 4: El modelo de navegación**
+
+En `frontend/src/shell/nav.ts`, borrar la `function group(label: MessageKey, …)` de la línea 68 y sustituir todo lo que va desde `export type RailEntry = NavItem | NavArea;` (línea 131) hasta el `];` que cierra `NAV_GROUPS` (línea 213) por:
+
+```ts
+/**
+ * A FOLDER IN THE RAIL (redesign design §1.1, decision D9): Assets and More.
+ * A heading that opens in place, not a page; each of its pages is a rail
+ * destination of its own. No permission of its own: it shows when one of its
+ * pages does.
+ */
+export interface NavFolder {
+  readonly kind: "folder";
+  readonly key: "assets" | "more";
+  readonly label: string;
+  readonly icon: string;
+  readonly items: readonly NavItem[];
+}
+
+export type RailEntry = NavItem | NavArea | NavFolder;
+
+/** `main` is the rail; `anchored` is its foot (the Assistant, Admin); `help` is the requester's. */
+export interface NavGroup {
+  readonly key: "main" | "anchored" | "help";
+  readonly label: string;
+  readonly items: readonly RailEntry[];
+}
+
+export function isArea(entry: RailEntry): entry is NavArea {
+  return "sections" in entry;
+}
+
+export function isFolder(entry: RailEntry): entry is NavFolder {
+  return "kind" in entry && entry.kind === "folder";
+}
+
+function group(key: NavGroup["key"], label: MessageKey, items: readonly RailEntry[]): NavGroup {
+  return named({ key, items }, { label });
+}
+
+function folder(key: NavFolder["key"], label: MessageKey, icon: string, items: readonly NavItem[]): NavFolder {
+  return named({ kind: "folder" as const, key, icon, items }, { label });
+}
+
+/**
+ * THE RAIL IN ATERA'S ORDER (redesign design §1.1, approved 2026-11-23): no
+ * group captions; Clients third, out of Admin; Assets and More as folders, More
+ * holding only the optional modules on for the choice; the Assistant and Admin
+ * anchored at the foot. Every item keeps the permission code its route
+ * enforces server-side -- the codes did not change, only the order.
+ */
+export const NAV_GROUPS: readonly NavGroup[] = [
+  group("main", "shell.nav.group.main", [
+    page("/dashboard", "shell.nav.item.dashboard", "dashboard", null),
+    page("/service-desk", "shell.nav.item.tickets", "ticket", "ticket.read"),
+    page("/clients", "shell.nav.item.clients", "building", "clients.read", { hint: "shell.nav.hint.clients" }),
+    page("/devices", "shell.nav.item.devices", "devices", "devices.read"),
+    page("/health", "shell.nav.item.alerts", "health", "health.read", { badgeTone: "gold" }),
+    page("/patch", "shell.nav.item.patching", "patch", "patch.read"),
+    page("/deploy", "shell.nav.item.software", "package", "deploy.read"),
+    page("/backup", "shell.nav.item.backup", "backup", "backup.read"),
+    page("/remote", "shell.nav.item.remoteSessions", "remote", "remote.control"),
+    folder("assets", "shell.nav.item.assets", "archive", [
+      page("/licenses", "shell.nav.item.licenses", "license", "licenses.read", { hint: "shell.nav.hint.licenses" }),
+      page("/subscriptions", "shell.nav.item.subscriptions", "subscription", "subscriptions.read", { hint: "shell.nav.hint.subscriptions" }),
+      page("/ipam", "shell.nav.item.ipAddresses", "network", "ipam.read", { hint: "shell.nav.hint.ipam" }),
+    ]),
+    page("/docs", "shell.nav.item.itDocumentation", "book", "docs.read", { hint: "shell.nav.hint.docs" }),
+    page("/reports", "shell.nav.item.reports", "chart", "reporting.read", { hint: "shell.nav.hint.reports" }),
+    folder("more", "shell.nav.item.more", "dots", [
+      page("/changes", "shell.nav.item.changes", "changes", "change.read", { hint: "shell.nav.hint.changes", module: "change" }),
+      page("/bcp", "shell.nav.item.continuityTests", "bcp", "bcp.read", { hint: "shell.nav.hint.bcp", module: "bcp" }),
+      page("/budget", "shell.nav.item.itBudget", "budget", "budget.read", { hint: "shell.nav.hint.budget", module: "budget" }),
+    ]),
+  ]),
+  group("anchored", "shell.nav.group.main", [
+    page("/assistant", "shell.nav.item.assistant", "sparkles", "ai.use"),
+    named(
+      {
+        to: "/admin",
+        icon: "adjustments",
+        sections: [
+          section("shell.nav.section.serviceDesk", [
+            page("/notifications", "shell.nav.item.notifications", "bell", "notification.read", { hint: "shell.nav.hint.notifications" }),
+            page("/email-intake", "shell.nav.item.emailIntake", "mail", "email_intake.read", { hint: "shell.nav.hint.emailIntake" }),
+            page("/sla", "shell.nav.item.serviceLevels", "clock", "sla.read", { hint: "shell.nav.hint.sla" }),
+            page("/portal", "shell.nav.item.endUserPortal", "portal", "portal.ticket.read", { hint: "shell.nav.hint.portal" }),
+          ]),
+          section("shell.nav.section.computers", [
+            page("/enrollment", "shell.nav.item.enrollment", "certificate", "devices.read", { hint: "shell.nav.hint.enrollment" }),
+            page("/agent-packages", "shell.nav.item.agentPackages", "package", "agent.release.read", { hint: "shell.nav.hint.agentPackages" }),
+            // The scope code, not `agent.push.run`: both screens behind this
+            // entry require it server-side.
+            page("/agent-push/authorizations", "shell.nav.item.pushInstall", "shield", "agent.push.scope.manage", { hint: "shell.nav.hint.pushInstall" }),
+            page("/device-groups", "shell.nav.item.deviceGroups", "building", "devices.read", { hint: "shell.nav.hint.deviceGroups" }),
+            page("/site-servers", "shell.nav.item.siteServers", "server", "site.read", { hint: "shell.nav.hint.siteServers" }),
+          ]),
+          section("shell.nav.section.automation", [
+            page("/assistant/autonomy", "shell.nav.item.aiAutomation", "automation", "ai.admin", { hint: "shell.nav.hint.aiAutomation" }),
+            page("/jobs", "shell.nav.item.jobHistory", "jobs", "jobs.read", { hint: "shell.nav.hint.jobHistory" }),
+          ]),
+          section("shell.nav.section.security", [
+            page("/credentials", "shell.nav.item.credentials", "lock", "credentials.read", { hint: "shell.nav.hint.credentials" }),
+            page("/audit", "shell.nav.item.auditLog", "audit", "audit.read", { hint: "shell.nav.hint.auditLog" }),
+            page("/security", "shell.nav.item.securityLogs", "logs", "audit.read", { hint: "shell.nav.hint.securityLogs" }),
+          ]),
+          section("shell.nav.section.platform", [
+            // Not `null`: the page calls `GET /platform/status` on mount,
+            // which requires this code.
+            page("/platform-status", "shell.nav.item.platformStatus", "status", "platform.status.read", { hint: "shell.nav.hint.platformStatus" }),
+            page("/error-monitor", "shell.nav.item.errorMonitor", "warning", "platform.errors.read", { hint: "shell.nav.hint.errorMonitor" }),
+            page("/settings", "shell.nav.item.settings", "settings", "orgs.manage", { hint: "shell.nav.hint.settings" }),
+          ]),
+        ],
+      },
+      { label: "shell.nav.item.admin", description: "shell.nav.adminDescription" },
+    ),
+  ]),
+];
+```
+
+(Borrar la `isArea` vieja, que se mueve arriba. El comentario de cabecera del archivo cambia su primer párrafo a: «THE RAIL IN ATERA'S ORDER (redesign 2026-11-23): fourteen destinations with no captions, two folders, and the Assistant and Admin anchored at the foot; Admin swaps the rail for its own panel.»; el resto del comentario, sobre nombres de tareas y autorización cosmética, se conserva.)
+
+`navItems` y una función nueva `ownersOf`:
+
+```ts
+/** Every page in these groups: rail items, folder pages, and every area's pages. */
+export function navItems(groups: readonly NavGroup[] = NAV_GROUPS): NavItem[] {
+  return groups.flatMap((group) =>
+    group.items.flatMap((entry) =>
+      isFolder(entry) ? [...entry.items] : isArea(entry) ? entry.sections.flatMap((section) => section.items) : [entry],
+    ),
+  );
+}
+
+/** What can own a destination: an item, a folder's page (it owns itself) or an area. */
+function ownersOf(groups: readonly NavGroup[]): (NavItem | NavArea)[] {
+  return groups.flatMap((group) => group.items.flatMap((entry) => (isFolder(entry) ? [...entry.items] : [entry])));
+}
+```
+
+`destinations` usa `ownersOf(groups)` donde hoy usa `groups.flatMap((group) => group.items)`, tanto para las propias como para `NAV_UNLISTED` (así un `under` podría ser una página de carpeta). `RailEntry` en la firma de `Destination.owner` pasa a `NavItem | NavArea`.
+
+`visibleGroups`, la rama del `flatMap`:
+
+```ts
+      items: group.items.flatMap((entry): RailEntry[] => {
+        if (isFolder(entry)) {
+          const items = entry.items.filter(allowed);
+          return items.length > 0 ? [{ ...entry, items }] : [];
+        }
+        if (!isArea(entry)) return allowed(entry) ? [entry] : [];
+        const sections = entry.sections
+          .map((section) => ({ label: section.label, items: section.items.filter(allowed) }))
+          .filter((section) => section.items.length > 0);
+        return sections.length > 0 ? [{ ...entry, sections }] : [];
+      }),
+```
+
+y el objeto que devuelve cada grupo lleva `key: group.key` además de `label`.
+
+`searchDestinations`: una página de carpeta lleva `within: folder.label`. Su `flatMap` empieza ahora así (las ramas de área y de ítem siguen como hoy):
+
+```ts
+    group.items.flatMap((entry): SearchDestination[] =>
+      isFolder(entry)
+        ? entry.items.map((item) => ({ to: item.to, label: item.label, icon: item.icon, within: entry.label }))
+        : isArea(entry)
+```
+
+`PORTAL_GROUPS`: `group("help", "shell.nav.group.help", [...])`.
+
+- [ ] **Step 5: `newMenu.ts` y `NewMenu.tsx`**
+
+`frontend/src/shell/newMenu.ts`:
+
+```ts
+/**
+ * THE "NEW" MENU'S ENTRIES (redesign design §1.2): Ticket, Client, Contact,
+ * Computer, Document and Change, each a real destination (decision D8:
+ * `?new=` opens the page's own create dialog) and each shown only with the
+ * code that page's own create button checks. Cosmetic, like the rail
+ * (invariant 6): the server refuses the write either way.
+ */
+import type { MeClient } from "../lib/api";
+import { ADD_COMPUTER_TO } from "./nav";
+
+export type NewMenuKind = "ticket" | "client" | "contact" | "device" | "document" | "change";
+
+export interface NewMenuEntry {
+  readonly kind: NewMenuKind;
+  readonly to: string;
+  readonly icon: string;
+}
+
+export interface NewMenuInput {
+  /** `/me.permissions`: codes held in at least one client of the current choice. */
+  readonly permissions: readonly string[];
+  /** `/me.permissions_everywhere`: codes held in every client. */
+  readonly everywhere: readonly string[];
+  /** `/me.clients`, each with the codes the person holds there. */
+  readonly clients: readonly MeClient[];
+  /** The client chosen in the top bar; `null` is every client. */
+  readonly selected: string | null;
+  /** The optional modules on for the current choice. */
+  readonly modules: ReadonlySet<string>;
+}
+
+export function newMenuEntries(input: NewMenuInput): NewMenuEntry[] {
+  const held = new Set(input.permissions);
+  const entries: NewMenuEntry[] = [];
+  // TicketListPage's New ticket: `ticket.write`.
+  if (held.has("ticket.write")) entries.push({ kind: "ticket", to: "/service-desk?new=ticket", icon: "ticket" });
+  // ClientsPage's New client: `clients.manage` in every client (a global route).
+  if (input.everywhere.includes("clients.manage")) entries.push({ kind: "client", to: "/clients?new=client", icon: "building" });
+  // ContactsTab's Add: `clients.manage` in THAT client, never Unassigned.
+  const contactable = input.clients.filter(
+    (client) => client.kind !== "unassigned" && client.permissions.includes("clients.manage"),
+  );
+  if (input.selected !== null) {
+    const chosen = contactable.find((client) => client.id === input.selected);
+    if (chosen) entries.push({ kind: "contact", to: `/clients/${chosen.id}?tab=contacts&new=contact`, icon: "user" });
+  } else if (contactable.length > 0) {
+    entries.push({ kind: "contact", to: "/clients?new=contact", icon: "user" });
+  }
+  // The single "Add a computer" entry (nav.ts): `devices.read`, as the top bar had it.
+  if (held.has("devices.read")) entries.push({ kind: "device", to: ADD_COMPUTER_TO, icon: "devices" });
+  // DocsPage's New article: `docs.manage`.
+  if (held.has("docs.manage")) entries.push({ kind: "document", to: "/docs?new=article", icon: "book" });
+  // ChangesPage's New change: `change.request`, and the module on for the choice.
+  if (input.modules.has("change") && held.has("change.request")) {
+    entries.push({ kind: "change", to: "/changes?new=change", icon: "changes" });
+  }
+  return entries;
+}
+```
+
+`frontend/src/shell/NewMenu.tsx`:
+
+```tsx
+/**
+ * THE "NEW" MENU (redesign design §1.2; Atera's "New ▾"): every way to create
+ * something, from every page. The chrome's one primary control (DESIGN.md v4,
+ * "Buttons"). Nothing at all when the person may create nothing: no dead
+ * control. A WAI-ARIA menu button: opens on its first item, arrows move,
+ * Escape closes and gives focus back.
+ */
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Link } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import type { MessageKey } from "../i18n/core";
+import { Icon } from "./icons";
+import type { NewMenuEntry, NewMenuKind } from "./newMenu";
+
+const LABEL: Record<NewMenuKind, MessageKey> = {
+  ticket: "shell.newMenu.ticket",
+  client: "shell.newMenu.client",
+  contact: "shell.newMenu.contact",
+  device: "shell.newMenu.device",
+  document: "shell.newMenu.document",
+  change: "shell.newMenu.change",
+};
+
+export function NewMenu({ entries }: { entries: readonly NewMenuEntry[] }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+
+  const close = (returnFocus: boolean) => {
+    setOpen(false);
+    if (returnFocus) button.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        close(true);
+      }
+    };
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!menu.current?.contains(target) && !button.current?.contains(target)) close(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onPointer);
+    };
+  }, [open]);
+
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const items = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
+
+  if (entries.length === 0) return null;
+  return (
+    <div className="new-menu-anchor">
+      <button
+        type="button"
+        ref={button}
+        className="btn primary new-menu-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name="plus" size={14} />
+        <span className="new-menu-label">{t("shell.newMenu.label")}</span>
+        <Icon name="chevron-down" size={14} className="chev" />
+      </button>
+      {open ? (
+        <div className="top-menu" role="menu" aria-label={t("shell.newMenu.label")} ref={menu} onKeyDown={move}>
+          {entries.map((entry) => (
+            <Link key={entry.kind} className="menu-item" role="menuitem" to={entry.to} onClick={() => close(false)}>
+              <Icon name={entry.icon} size={15} />
+              {t(LABEL[entry.kind])}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: `Sidebar.tsx` y `AdminPanel.tsx`**
+
+`frontend/src/shell/Sidebar.tsx`, archivo completo:
+
+```tsx
+/**
+ * The rail (redesign design §1.1; DESIGN.md v4, "Navigation"): Atera's order
+ * with no captions, the Assets and More folders (decision D9), and the
+ * Assistant and Admin anchored at the foot; Admin swaps the rail for its own
+ * panel (decision D10, `AdminPanel`).
+ *
+ * THE HIDING IS COSMETIC, AND SAYING SO MATTERS. Invariant 6 -- the frontend
+ * never gates security. Every route behind these links is enforced
+ * server-side by `require_permission`; if this component rendered every link
+ * to everyone, the platform would be exactly as secure and merely ruder.
+ */
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import { AdminPanel } from "./AdminPanel";
+import { NovieriSymbol, NovieriWordmark } from "./brand";
+import { Icon } from "./icons";
+import { activeNavTo, isArea, isFolder, OPTIONAL_MODULES, visibleGroups, type NavFolder, type NavItem } from "./nav";
+
+export interface SidebarProps {
+  permissions: readonly string[];
+  /** Optional modules on for the current choice (phase 3 design §2). Absent: every one. */
+  modules?: ReadonlySet<string>;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  /** Live counts, keyed by route. Absent = no badge, which is not the same as zero. */
+  badges?: Readonly<Record<string, number>>;
+  orgName: string;
+  /** The client selector, on a handset only: it heads the drawer there (`./handset`). */
+  clientSelector?: ReactNode;
+}
+
+/** One destination in the rail. The current one carries `aria-current` and its dot. */
+export function RailLink({
+  item,
+  lit,
+  count,
+  sub = false,
+}: {
+  item: NavItem;
+  lit: boolean;
+  count?: number;
+  sub?: boolean;
+}) {
+  // `.hot` is the alert count, drawn as a critical badge (DESIGN.md v4, D3).
+  const hot = item.badgeTone !== undefined;
+  return (
+    <Link
+      className={`nav-item${sub ? " sub" : ""}${lit ? " active" : ""}`}
+      aria-current={lit ? "page" : undefined}
+      to={item.to}
+      title={item.label}
+    >
+      <Icon name={item.icon} size={sub ? 16 : 17} />
+      <span className="lbl">{item.label}</span>
+      {/* A zero renders nothing: "nothing to deal with" is not a 0 beside the label. */}
+      {count ? <span className={hot ? "ct hot" : "ct"}>{count}</span> : null}
+      {lit ? <span className="nav-dot" aria-hidden="true" /> : null}
+    </Link>
+  );
+}
+
+/** Assets or More: a heading that opens its pages in place, open by itself when it holds the current page. */
+function Folder({
+  folder,
+  activeTo,
+  badges,
+}: {
+  folder: NavFolder;
+  activeTo: string | undefined;
+  badges: Readonly<Record<string, number>>;
+}) {
+  const holds = folder.items.some((item) => item.to === activeTo);
+  const [open, setOpen] = useState(holds);
+  useEffect(() => {
+    if (holds) setOpen(true);
+  }, [holds]);
+  const id = `nav-folder-${folder.key}`;
+  return (
+    <div className="nav-folder">
+      <button
+        type="button"
+        className={holds && !open ? "nav-item nav-folder-h active" : "nav-item nav-folder-h"}
+        aria-expanded={open}
+        aria-controls={id}
+        title={folder.label}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name={folder.icon} size={17} />
+        <span className="lbl">{folder.label}</span>
+        <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
+      </button>
+      <div id={id} hidden={!open}>
+        {folder.items.map((item) => (
+          <RailLink key={item.to} item={item} lit={item.to === activeTo} count={badges[item.to]} sub />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function Sidebar({
+  permissions,
+  modules,
+  collapsed,
+  onToggleCollapsed,
+  badges = {},
+  orgName,
+  clientSelector,
+}: SidebarProps) {
+  const t = useT();
+  const groups = visibleGroups(permissions, modules ?? OPTIONAL_MODULES);
+  const pathname = useLocation().pathname;
+  const activeTo = activeNavTo(pathname, groups);
+  const main = groups.find((group) => group.key === "main")?.items ?? [];
+  const anchored = groups.find((group) => group.key === "anchored")?.items ?? [];
+  const admin = anchored.find(isArea);
+  const inAdmin = admin !== undefined && activeTo === admin.to;
+  const [view, setView] = useState<"main" | "admin">(inAdmin ? "admin" : "main");
+  // Arriving on an Admin page opens its panel; leaving Admin puts the rail back.
+  useEffect(() => setView(inAdmin ? "admin" : "main"), [inAdmin]);
+
+  return (
+    <aside className="sidebar" id="sidebar">
+      <div className="brand">
+        <NovieriSymbol tile size={28} />
+        <NovieriWordmark className="brand-name" height={14} />
+        {/* Density is a standing preference and the shell persists it. */}
+        <button
+          className="collapse-btn"
+          onClick={onToggleCollapsed}
+          title={collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse")}
+          aria-label={collapsed ? t("shell.sidebar.expand") : t("shell.sidebar.collapse")}
+          aria-expanded={!collapsed}
+        >
+          <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={15} />
+        </button>
+      </div>
+
+      {clientSelector ? <div className="sidebar-client">{clientSelector}</div> : null}
+
+      {view === "admin" && admin ? (
+        <AdminPanel area={admin} pathname={pathname} collapsed={collapsed} onBack={() => setView("main")} />
+      ) : (
+        <nav className="nav-scroll" id="nav" aria-label={t("shell.sidebar.main")}>
+          {main.map((entry) =>
+            isFolder(entry) ? (
+              <Folder key={entry.key} folder={entry} activeTo={activeTo} badges={badges} />
+            ) : isArea(entry) ? null : (
+              <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
+            ),
+          )}
+        </nav>
+      )}
+
+      <nav className="nav-anchored" aria-label={t("shell.sidebar.anchored")}>
+        {anchored.map((entry) =>
+          isArea(entry) ? (
+            <button
+              key={entry.to}
+              type="button"
+              className={inAdmin ? "nav-item active" : "nav-item"}
+              aria-expanded={view === "admin"}
+              aria-controls="nav"
+              title={entry.label}
+              onClick={() => setView(view === "admin" ? "main" : "admin")}
+            >
+              <Icon name={entry.icon} size={17} />
+              <span className="lbl">{entry.label}</span>
+              {inAdmin ? <span className="nav-dot" aria-hidden="true" /> : null}
+            </button>
+          ) : isFolder(entry) ? null : (
+            <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
+          ),
+        )}
+      </nav>
+
+      {/* IDENTITY, NOT A CONTROL: the one place the tenant is named. */}
+      <div className="sidebar-footer">
+        <div className="tenant-card" data-testid="tenant-identity">
+          <div className="tenant-avatar">{orgName.slice(0, 2).toUpperCase()}</div>
+          <div className="tenant-meta">
+            <div className="tenant-name">{orgName}</div>
+            <div className="tenant-plan">{t("shell.sidebar.plan")}</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+```
+
+`frontend/src/shell/AdminPanel.tsx`:
+
+```tsx
+/**
+ * ADMIN, AS ATERA DRAWS IT (redesign design §1.1, decision D10): the rail gives
+ * way to a panel with a way back, a search and an accordion of the area's
+ * sections, the one holding the current page open. The same pages and codes
+ * as before; only Clients left, for the main rail. Folded, the panel is its
+ * pages' icons.
+ */
+import { useId, useState } from "react";
+import { Link } from "react-router-dom";
+
+import { useT } from "../i18n/context";
+import { SearchField } from "./components";
+import { Icon } from "./icons";
+import { activeNavTo, type NavArea } from "./nav";
+import { RailLink } from "./Sidebar";
+
+/** For matching a search: case and accents do not count ("auditoria" finds "auditoría"). */
+export function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
+export function AdminPanel({
+  area,
+  pathname,
+  collapsed,
+  onBack,
+}: {
+  area: NavArea;
+  pathname: string;
+  collapsed: boolean;
+  onBack: () => void;
+}) {
+  const t = useT();
+  const base = useId();
+  const [query, setQuery] = useState("");
+  const pages = area.sections.flatMap((section) => section.items);
+  const current = activeNavTo(pathname, [{ key: "main", label: "", items: pages }]);
+  const holding = area.sections.find((section) => section.items.some((item) => item.to === current))?.label;
+  const [openSection, setOpenSection] = useState<string | undefined>(holding ?? area.sections[0]?.label);
+  const wanted = fold(query);
+  const sections = area.sections
+    .map((section) => ({
+      label: section.label,
+      items: wanted === "" ? section.items : section.items.filter((item) => fold(item.label).includes(wanted)),
+    }))
+    .filter((section) => section.items.length > 0);
+
+  return (
+    <nav className="nav-scroll admin-panel" id="nav" aria-label={area.label}>
+      <div className="admin-head">
+        <button type="button" className="nav-item admin-back" onClick={onBack} title={t("shell.sidebar.backToMenu")}>
+          <Icon name="chevron-left" size={16} />
+          <span className="lbl">{t("shell.sidebar.backToMenu")}</span>
+        </button>
+        <Link
+          className={pathname === area.to ? "admin-title active" : "admin-title"}
+          to={area.to}
+          aria-current={pathname === area.to ? "page" : undefined}
+        >
+          {area.label}
+        </Link>
+      </div>
+      {collapsed ? null : (
+        <div className="admin-search">
+          <SearchField
+            type="search"
+            aria-label={t("shell.sidebar.adminSearch")}
+            placeholder={t("shell.sidebar.adminSearch")}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      )}
+      {sections.length === 0 ? <p className="admin-none">{t("shell.sidebar.adminNoMatch")}</p> : null}
+      {sections.map((section, index) => {
+        const open = collapsed || wanted !== "" || section.label === openSection;
+        const id = `${base}-${index}`;
+        return (
+          <div key={section.label} className="admin-section">
+            {collapsed ? null : (
+              <button
+                type="button"
+                className="nav-item admin-acc"
+                aria-expanded={open}
+                aria-controls={id}
+                onClick={() => setOpenSection(open && wanted === "" ? undefined : section.label)}
+              >
+                <span className="lbl">{section.label}</span>
+                <span className="ct">{section.items.length}</span>
+                <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
+              </button>
+            )}
+            <div id={id} hidden={!open}>
+              {section.items.map((item) => (
+                <RailLink key={item.to} item={item} lit={item.to === current} sub />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+```
+
+(`AdminPanel` importa `RailLink` de `Sidebar` y `Sidebar` importa `AdminPanel`: la referencia circular es segura por el mismo motivo que la del kit, se usan solo al renderizar.)
+
+- [ ] **Step 7: La barra superior, `Shell` y la portada de Administración**
+
+`frontend/src/shell/AppShell.tsx`:
+- prop nueva en `AppShellProps`: `/** The New menu's entries (newMenu.ts), computed by the app from /me. Absent: no menu. */ newMenu?: readonly NewMenuEntry[];`, desestructurada en `AppShell`;
+- dentro de `<header className="topbar">`, justo después del botón `.nav-toggle`: `<NewMenu entries={newMenu ?? []} />`;
+- borrar el bloque `{permissions.includes("devices.read") ? (<Link className="top-enrol primary" …>…</Link>) : null}` y su comentario, y el bloque `{permissions.includes("ai.use") ? (<Link className="ib top-icon-btn" to="/assistant" …>…</Link>) : null}` y su comentario; en su lugar un comentario: «ADD A COMPUTER AND THE ASSISTANT LEFT THE BAR (redesign design §1.2, decisions D11 and D12): the first is New → Computer and the Devices page's own head; the second is anchored at the rail's foot and is still the search panel's Ask row.»;
+- quitar `ADD_COMPUTER_TO` de las importaciones; importar `NewMenu` de `./NewMenu` y `type NewMenuEntry` de `./newMenu`.
+
+`frontend/src/App.tsx`, en `Shell`, después de `const modules = useEnabledModules();`:
+
+```tsx
+  const { selected } = useClientScope();
+  // The New menu (redesign design §1.2): every entry a real destination, each
+  // gated on the code its page's own create button checks (`shell/newMenu.ts`).
+  const newMenu = useMemo(
+    () =>
+      newMenuEntries({
+        permissions,
+        everywhere: me.data?.permissions_everywhere ?? permissions,
+        clients: me.data?.clients ?? [],
+        selected,
+        modules,
+      }),
+    [permissions, me.data, selected, modules],
+  );
+```
+
+y `newMenu={newMenu}` en el `<AppShell …>`; importar `useClientScope` de `./lib/clientScope` (si no está) y `newMenuEntries` de `./shell/newMenu`.
+
+`frontend/src/shell/AreaPage.tsx` (portada de `/admin`, una de las 86): cambia la tabla de cada sección por una tarjeta con sus enlaces, en una rejilla de dos columnas, y una búsqueda arriba con el mismo `fold` del panel. Reemplazar el `return` por:
+
+```tsx
+  const [query, setQuery] = useState("");
+  const wanted = fold(query);
+  const shown = sections
+    .map((section) => ({ ...section, items: section.items.filter((item) => wanted === "" || fold(item.label).includes(wanted)) }))
+    .filter((section) => section.items.length > 0);
+
+  if (!area) return null;
+  return (
+    <>
+      <PageHead title={area.label} description={area.description} />
+      <QueryState loading={me.isLoading} error={me.error} empty={sections.length === 0} emptyLabel={t("shell.areaPage.empty")} emptyIcon="lock">
+        <Panel bare>
+          <ListToolbar
+            search={
+              <SearchField
+                type="search"
+                aria-label={t("shell.sidebar.adminSearch")}
+                placeholder={t("shell.sidebar.adminSearch")}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            }
+          />
+        </Panel>
+        {shown.length === 0 ? (
+          <ListEmpty filtered onClear={() => setQuery("")} nothingYet={t("shell.areaPage.empty")} />
+        ) : (
+          <div className="admin-index">
+            {shown.map((section) => (
+              <Panel key={section.label} title={section.label}>
+                <ul className="admin-index-list">
+                  {section.items.map((item) => (
+                    <li key={item.to}>
+                      <Icon name={item.icon} size={18} />
+                      <div>
+                        <Link to={item.to}>{item.label}</Link>
+                        {item.hint ? <div className="cell-sub">{item.hint}</div> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            ))}
+          </div>
+        )}
+      </QueryState>
+    </>
+  );
+```
+
+con `import { useState } from "react";`, `import { fold } from "./AdminPanel";` y `ListEmpty`, `ListToolbar`, `SearchField` de `./components`; se quitan `Table`, `Td`, `Th`. Además, la línea 30 (`.find((entry) => entry.to === to)` sobre `group.items`) pasa a `.find((entry) => "to" in entry && entry.to === to)`: una carpeta no tiene `to` y TypeScript lo exige. `ListEmpty` aquí sirve al buscador: «nada coincide» y «Quitar filtros» vacían la búsqueda.
+
+`frontend/src/shell/AreaPage.test.tsx`: los casos que buscaban filas de tabla (`getAllByRole("row")`) buscan ahora enlaces dentro de cada `region`/panel por su título de sección; se añade:
+
+```tsx
+  it("finds an Admin page by part of its name", async () => {
+    renderArea(["audit.read", "orgs.manage"]);
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Search Admin" }), "audit");
+    expect(screen.getByRole("link", { name: "Audit log" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+  });
+```
+
+(`renderArea` es el helper que el archivo ya usa para montar `AreaPage` con unos permisos.)
+
+- [ ] **Step 8: Los destinos de «Nuevo» (decisión D8)**
+
+- `service-desk/TicketListPage.tsx`: `const [creating, setCreating] = useState(false);` (línea 96) pasa a `const created = useNewParam("ticket");`; el botón de la cabecera llama a `created.start`; `<NewTicketDialog open={created.open} onClose={created.close} …>`. Si la persona no tiene `ticket.write`, el diálogo no se abre aunque la URL lo pida: `open={canWrite && created.open}`.
+- `docs/DocsPage.tsx`: `const newArticle = useNewParam("article");` y
+  ```tsx
+  // New → Document (redesign decision D8): the editor is inline, not a
+  // dialog, so the parameter is consumed: it starts a new article once.
+  useEffect(() => {
+    if (!newArticle.open) return;
+    if (canManage) startNew();
+    newArticle.close();
+  }, [newArticle.open, canManage]);
+  ```
+  (después de la definición de `startNew`).
+- `change/ChangesPage.tsx`: `useNewParam("change")`; `editing === "new"` pasa a derivarse de `created.open && canRequest` para el formulario nuevo (el estado `editing` sigue para editar uno existente); el botón «New change» llama a `created.start` y `onClose` del formulario nuevo a `created.close`.
+- `clients/ClientsPage.tsx`: `const [creating, setCreating] = useState(false);` pasa a `const created = useNewParam("client");` (`open={created.open && everywhere.has("clients.manage")}`); y un diálogo nuevo para `useNewParam("contact")`:
+  ```tsx
+  /**
+   * New → Contact with every client shown (redesign design §1.2): a contact
+   * belongs to a client, so the first question is which one. Only clients
+   * where the person may manage contacts, never Unassigned -- the same rule
+   * ContactsTab applies -- and the answer goes to that client's contacts tab,
+   * where the form opens.
+   */
+  function ContactClientDialog({ onClose }: { onClose: () => void }) {
+    const t = useT();
+    const navigate = useNavigate();
+    const { clients } = useClientScope();
+    const choices = clients.filter((client) => client.kind !== "unassigned" && client.permissions.includes("clients.manage"));
+    const [picked, setPicked] = useState(choices[0]?.id ?? "");
+    return (
+      <Dialog open onClose={onClose} title={t("clients.list.newContactTitle")}>
+        <Form onSubmit={() => picked && navigate(`/clients/${picked}?tab=contacts&new=contact`)}>
+          <Field label={t("shell.kit.client")}>
+            <select className="select-field" value={picked} onChange={(event) => setPicked(event.target.value)}>
+              {choices.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              {t("common.actions.cancel")}
+            </Button>
+            <Button type="submit" disabled={!picked}>
+              {t("clients.list.newContactContinue")}
+            </Button>
+          </div>
+        </Form>
+      </Dialog>
+    );
+  }
+  ```
+  dibujado como `{contact.open ? <ContactClientDialog onClose={contact.close} /> : null}`. Claves nuevas: `clients.list.newContactTitle` («New contact» / «Nuevo contacto»), `clients.list.newContactContinue` («Continue» / «Continuar»).
+- `clients/ContactsTab.tsx`: `const newContact = useNewParam("contact");` y el diálogo de alta se abre con `editing === "new" || (canManage && newContact.open)`; al cerrarse llama también a `newContact.close()`.
+
+- [ ] **Step 9: Textos y estilos**
+
+`frontend/src/i18n/en/shell.ts`:
+- en `nav.group`: borrar `daily`, `governance`, `assetsSpend` y `configure`; añadir `main: "Main menu",`;
+- en `nav.item`: añadir `assets: "Assets",` y `more: "More",`;
+- en `nav.section`: borrar `organization`;
+- en `sidebar`: añadir `anchored: "Assistant and Admin",`, `backToMenu: "Back to the menu",`, `adminSearch: "Search Admin",`, `adminNoMatch: "No Admin page matches that.",`;
+- bloque nuevo `newMenu: { label: "New", ticket: "Ticket", client: "Client", contact: "Contact", device: "Computer", document: "Document", change: "Change" },`.
+
+`frontend/src/i18n/es/shell.ts`, lo mismo en español: `main: "Menú principal"`, `assets: "Activos"`, `more: "Más"`, `anchored: "Asistente y Administración"`, `backToMenu: "Volver al menú"`, `adminSearch: "Buscar en Administración"`, `adminNoMatch: "Ninguna página de Administración coincide."`, `newMenu: { label: "Nuevo", ticket: "Ticket", client: "Cliente", contact: "Contacto", device: "Equipo", document: "Documento", change: "Cambio" }`; y **D13**: `nav.item.dashboard: "Inicio"`, `nav.item.devices: "Equipos"`, `nav.item.itDocumentation: "Documentación"`.
+
+`frontend/src/i18n/identical-ok.ts`: añadir `"shell.newMenu.ticket": "\"Ticket\" is the glossary term for a ticket in Spanish too (a loanword).",`.
+
+`frontend/src/i18n/es/index.ts`: en la línea del glosario `computer → equipo (…)`, añadir al final del paréntesis `; the machine list, /devices, is "Equipos" in the rail and on its page (redesign 2026-11-23)`.
+
+`frontend/src/shell/shell.css`, en la sección del riel (sustituye las reglas de `.nav-item`, `.nav-item.active`, `.nav-item svg`, `.nav-item.sub*` y `.sidebar .grp*`, que dejan de tener elementos salvo `.nav-item.sub`):
+
+```css
+/* The rail's items (DESIGN.md v4, "Navigation"; direction A's mock: 38px,
+ * inset 10px, 6px radius). Current: the lifted ground, white text, and the
+ * icon and a dot in the rail mark -- no accent edge: cobalt measures 2.32:1
+ * on the rail (The Two Grounds Rule). */
+.nav-item { display: flex; align-items: center; gap: 11px; min-height: 38px; margin: 1px 10px; padding: 0 12px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--rail-ink); font: 400 var(--t-body)/1.2 var(--sans); white-space: nowrap; text-decoration: none; text-align: left; cursor: pointer; width: calc(100% - 20px); }
+.nav-item:hover { color: var(--accent-ink); background: var(--rail-2); }
+.nav-item.active { color: var(--accent-ink); background: var(--rail-2); font-weight: 500; }
+.nav-item svg { flex: 0 0 auto; opacity: .9; }
+.nav-item.active svg { color: var(--rail-mark); opacity: 1; }
+.nav-item .lbl { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nav-item:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.nav-item.sub { padding-left: 40px; }
+.nav-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--rail-mark); }
+.nav-item .chev { margin-left: auto; transition: transform .15s ease; }
+.nav-item .chev.open { transform: rotate(180deg); }
+.nav-scroll { padding: 8px 0 16px; }
+.nav-anchored { flex: 0 0 auto; padding: 8px 0; border-top: 1px solid var(--rail-2); }
+.sidebar .admin-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+.sidebar .admin-title { margin: 6px 22px 2px; color: var(--accent-ink); font-weight: 600; font-size: var(--t-h2); text-decoration: none; }
+.sidebar .admin-title:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: var(--r-ctl); }
+.admin-search { padding: 4px 10px 8px; }
+.sidebar .admin-none { margin: 8px 22px; color: var(--rail-ink); font-size: var(--t-sm); }
+.nav-item.admin-acc { font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .nav-item .chev { transition: none; } }
+```
+
+y en el bloque `body.sidebar-collapsed` (líneas 479 a 499): sustituir `.sidebar .grp` por `.nav-item .chev, .admin-search, .sidebar .admin-title, .nav-dot` en la lista de `display: none`, y añadir `body.sidebar-collapsed .nav-item, body.sidebar-collapsed .nav-item.sub { justify-content: center; padding: 0; }` en lugar de la regla `.nav-item { justify-content: center; padding: 7px 0; }`. El ancho plegado pasa de 76 a 64 px (`body.sidebar-collapsed { --sidebar-w: 64px; }`, DESIGN.md v4 «Layout»).
+
+Para «Nuevo» y la portada de Administración (fuera del riel):
+
+```css
+/* The New menu (redesign design §1.2): the chrome's one primary, and its list. */
+.new-menu-anchor { position: relative; flex: 0 0 auto; }
+.new-menu-btn .chev { margin-right: -3px; }
+.top-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
+.top-menu .menu-item { display: flex; align-items: center; gap: 9px; }
+@media (max-width: 640px) {
+  .new-menu-btn .new-menu-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .new-menu-btn .chev { display: none; }
+}
+
+/* The Admin index (/admin): its sections as cards. */
+.admin-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.admin-index-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.admin-index-list li { display: flex; align-items: flex-start; gap: 10px; }
+@media (max-width: 1024px) { .admin-index { grid-template-columns: minmax(0, 1fr); } }
+```
+
+Y borrar las reglas `.top-enrol*` (el elemento ya no existe).
+
+`base-styles.test.ts`: `.nav-item.sub` y `.nav-item.sub.active` dejan de ser la transcripción de v3. Añadir a `V4_OVERRIDES` (Task 3, Step 7):
+
+```ts
+  // DESIGN.md v4 "Navigation" (redesign §1.1): a folder or Admin page is
+  // indented by its padding, and its current state is the rail's own (no
+  // second rule for it).
+  ".nav-item.sub": ["padding-left: 40px"],
+  ".nav-item.sub.active": [],
+```
+
+y el caso `it.each([".nav-item.sub", ".nav-item.sub.active"])` pasa a comprobar `expectedFor(design, selector)`; para `.nav-item.sub.active` (sin regla propia ahora) el caso comprueba que `declarations(shell, ".nav-item.sub.active")` es `[]`.
+
+- [ ] **Step 10: Las pruebas del armazón que fijaban la barra de antes**
+
+`frontend/src/shell/AppShell.test.tsx`, cambios deliberados (cada uno con un comentario «redesign design §1.2, decision D11/D12»):
+- el helper `sidebar()` busca `{ name: "Main" }` como hoy; las pruebas que buscaban el enlace «Admin» en él lo buscan ahora como **botón** en `screen.getByRole("navigation", { name: "Assistant and Admin" })`;
+- `describe("the top bar's enrol affordance")` (líneas 1318 a 1390) pasa a `describe("Add a computer, in New (decision D11)")`: «puts getting an agent onto a machine on every page» monta el armazón con `newMenu={[{ kind: "device", to: "/devices/onboard", icon: "devices" }]}`, abre «New» y espera `menuitem` «Computer» con `href` `/devices/onboard`; «carries a visible label» y «keeps its name where the layout drops the label» pasan al botón «New» (la clase `.new-menu-label` se oculta visualmente bajo 640 px, nunca con `display: none`: se comprueba en `shell.css` igual que hoy se comprobaba `.top-enrol-label`); «is gated on the technician permission» comprueba que sin entradas no hay botón «New»; «is drawn in the primary voice» comprueba la clase `primary` en «New»; «does not push the chrome off the side of a phone» sigue igual sobre `.new-menu-btn`;
+- «carries the assistant in the chrome and no documentation link at all» pasa a «carries the Assistant at the rail's foot, and no documentation link at all (decision D12)»: el enlace «Assistant» está en la navegación «Assistant and Admin» y no hay ningún enlace a `/assistant` en `banner`; «never offers the assistant to an operator who cannot reach it» sigue igual (sin `ai.use`, no hay enlace en ninguna parte).
+
+`frontend/src/test/responsive.test.ts:183-203`: el caso termina hoy con `expect(shellTsx, "the assistant shortcut itself must survive").toContain("shell.app.askAssistant")`. Pasa a:
+
+```ts
+    // The Assistant left the top bar for the rail's foot (redesign design
+    // §1.1-1.2, decision D12): it survives as an anchored rail entry, and as
+    // the search panel's Ask row at every width.
+    const navTs = read("frontend/src/shell/nav.ts");
+    expect(navTs, "the Assistant must stay in the rail").toContain('page("/assistant", "shell.nav.item.assistant"');
+    expect(shellTsx).not.toContain("shell.app.askAssistant");
+    expect(read("frontend/src/shell/CommandPalette.tsx")).toContain("ask");
+```
+
+La clave `shell.app.askAssistant` se queda en el catálogo (la usa `responsive.test.ts` como texto); si `coverage.test.ts` exige que toda clave se use, se borra de los dos catálogos y la última línea del caso se quita.
+
+`frontend/src/shell/shell.es.test.tsx`: las etiquetas españolas del riel que espera pasan a «Inicio», «Equipos», «Documentación»; añadir que «Activos», «Más», «Nuevo» y «Volver al menú» se pintan en español.
+
+- [ ] **Step 11: Ejecutar todo**
+
+Run: `cd frontend && npx vitest run src/shell src/test src/App.shell.test.tsx src/App.crumb.test.tsx src/App.routing.test.tsx src/modules/clients src/modules/service-desk src/modules/docs src/modules/change`
+Expected: PASS.
+
+Run: `npx vitest run && npm run typecheck && npm run build`
+Expected: verde.
+
+Run: `node scripts/harmony.mjs --strict-fixtures --lang es` y `--lang en` (todas las rutas: el armazón está en todas)
+Expected: `ok …`. Mirar en las capturas: `/dashboard` (riel en el orden nuevo, «Nuevo» a la izquierda de la búsqueda), `/licenses` (la carpeta «Activos» abierta), `/audit` (el panel de Administración con «Seguridad» abierta), `/admin` (las tarjetas), y las de 390x844 (el botón «+» sin texto visible).
+
+- [ ] **Step 12: Crítica y pulido de impeccable sobre el armazón**
+
+Aplicar «Cierre de cada oleada», pasos 1 a 5, a `frontend/src/shell/Sidebar.tsx`, `frontend/src/shell/AppShell.tsx` y `frontend/src/shell/AreaPage.tsx`, con las rutas `/dashboard`, `/licenses`, `/audit`, `/admin`. Las preguntas de la crítica van al operador (es la primera crítica del programa; sus respuestas inauguran `.git/sdd/critica-respuestas.md`).
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add frontend/src
+git commit -m "feat(ui): Atera-order rail with folders, Admin panel, New menu and the restyled top bar
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación:** el riel está en el orden del diseño §1.1 sin títulos de grupo; «Más» desaparece sin módulos opcionales; Administración se abre como panel con volver, búsqueda y acordeón; «Nuevo» solo enseña destinos con permiso y cada uno abre lo que promete; el selector de cliente se comporta igual (sus pruebas, sin cambios, en verde); harmony en verde en las 115 rutas en los dos idiomas.
+
+---
+
+### Task 5: Clientes: la lista y la ficha 360 con pestañas en la URL
+
+Diseño §1.3 («La ficha 360 de un cliente reúne sus datos en pestañas con URL propia: Resumen, Sedes, Contactos, Equipos, Tickets, Alertas, Activos y Módulos»; «Las pestañas son de una línea»). Es la primera página construida con el kit, y sirve de modelo a las oleadas.
+
+**Files:**
+- Modify: `frontend/src/modules/clients/ClientsPage.tsx` (receta L)
+- Modify: `frontend/src/modules/clients/ClientDetailPage.tsx` (receta F, archivo completo)
+- Modify: `frontend/src/modules/clients/SummaryTab.tsx` (las acciones suben a la cabecera)
+- Create: `frontend/src/modules/clients/ClientActions.tsx`, `DevicesTab.tsx`, `TicketsTab.tsx`, `AlertsTab.tsx`, `AssetsTab.tsx`
+- Modify: `frontend/src/i18n/en/clients.ts`, `frontend/src/i18n/es/clients.ts`
+- Modify: `frontend/scripts/routes.mjs` (variantes de pestaña que la puerta de armonía debe recorrer)
+- Test: `frontend/src/modules/clients/__tests__/clients.test.tsx` (casos que cambian), `frontend/src/modules/clients/__tests__/client360.test.tsx` (nuevo), `frontend/src/modules/clients/clients.es.test.tsx`
+
+**Interfaces:**
+- Consumes: `DetailHead`, `useUrlTab`, `UrlTabs`, `useApiFor`, `useUrlFilters`, `FilterChips`, `ListToolbar`, `ShowingCount`, `ListEmpty`, `useNewParam` (Task 3); `useRecordTitle` (Task 2); `StatsGrid`, `StatCard` (`shell/components`); `api.listDevices({ clientId, limit })`, `api.listTickets({ client_id, scope, limit })`, `api.getHealthAlertSummary()`, `api.listHealthAlerts({ state })`, `api.listLicenses()`, `api.listSubscriptions()`, `api.listIpamSubnets()` (todas existen hoy).
+- Produces: las rutas de la ficha no cambian (`/clients/:clientId`); sus pestañas son `?tab=summary|sites|contacts|devices|tickets|alerts|assets|modules` (`summary`, `sites`, `contacts` y `modules` ya existían con esos nombres). Las oleadas enlazan a una lista filtrada por cliente con `?client=<id>`.
+
+**Decisión de esta tarea:**
+- **D14.** La pestaña Activos de la ficha enseña tres tarjetas, licencias, suscripciones y redes (los activos del riel, diseño §1.1), con su número para este cliente y un enlace a la lista con el chip «Cliente» puesto. No es el inventario de activos de Atera (ese no existe aquí); y una tabla de licencias necesitaría resolver productos y proveedores que la página de licencias ya resuelve.
+
+- [ ] **Step 1: Las pruebas de la ficha 360 (fallan)**
+
+`frontend/src/modules/clients/__tests__/client360.test.tsx`:
+
+```tsx
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { fixtureClient } from "../../../fixtures/client";
+import { renderPage } from "../../../test/renderPage";
+import { ClientDetailPage } from "../ClientDetailPage";
+
+const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
+
+const mockUseApi = vi.fn();
+vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+function page(query = "") {
+  return renderPage(`/clients/${ANDES}${query}`, <ClientDetailPage />, "/clients/:clientId");
+}
+
+beforeEach(() => mockUseApi.mockReturnValue(fixtureClient()));
+
+describe("the client 360 (redesign design §1.3)", () => {
+  it("names the client, its status and its kind, and leads back to the list", async () => {
+    page();
+    expect(await screen.findByRole("heading", { level: 1, name: "Andes Logistics" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All clients" })).toHaveAttribute("href", "/clients");
+    // The tab title ("Andes Logistics · Clients · Novieri RMM") is AppShell's
+    // to write (`useRecordTitle` needs its provider); App.shell.test covers it.
+  });
+
+  it("has the eight tabs of the design, in one row, for someone who may read all of it", async () => {
+    page();
+    const tabs = await screen.findByRole("tablist", { name: "Client" });
+    expect(within(tabs).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Summary",
+      "Sites",
+      "Contacts",
+      "Computers",
+      "Tickets",
+      "Alerts",
+      "Assets",
+      "Modules",
+    ]);
+    expect(tabs).toHaveClass("scroll");
+  });
+
+  it("puts the tab in the URL, so a tab reloads and links", async () => {
+    const { router } = page("?tab=alerts");
+    expect(await screen.findByRole("tab", { name: "Alerts" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: "Computers" }));
+    expect(router.state.location.search).toBe("?tab=devices");
+  });
+
+  it("lists the client's computers and leads to the fleet list narrowed to it", async () => {
+    page("?tab=devices");
+    const link = await screen.findByRole("link", { name: /See every computer of this client/ });
+    expect(link).toHaveAttribute("href", `/devices?client=${ANDES}`);
+  });
+
+  it("counts what is open for the client in the summary tiles, each leading to its tab", async () => {
+    page();
+    expect(await screen.findByRole("link", { name: /Open tickets/ })).toHaveAttribute("href", `/clients/${ANDES}?tab=tickets`);
+    expect(screen.getByRole("link", { name: /Open alerts/ })).toHaveAttribute("href", `/clients/${ANDES}?tab=alerts`);
+  });
+});
+```
+
+En `frontend/src/modules/clients/__tests__/clients.test.tsx`, los casos que buscaban los botones «Edit» y «Archive client» dentro del panel «Details» los buscan en la cabecera de la página (`screen.getByRole("button", { name: "Edit" })` sin `within(panel)`); los que miraban la tira de cuatro pestañas esperan ahora las que la persona puede ver (con los permisos de su `scope.clients`, que en ese archivo no incluyen `ticket.read` ni `health.read`: Summary, Sites, Contacts, Modules, y Computers si el `MeClient` de la prueba tiene `devices.read`). El caso nuevo de lista:
+
+```tsx
+  it("keeps the archived filter in the URL as a chip, and says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(apiWith({ listClients: async () => [] }));
+    const { router } = renderPage("/clients?archived=1", <ClientsPage />);
+    expect(await screen.findByRole("button", { name: /Including archived/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("");
+  });
+```
+
+(`apiWith` es el ayudante que el archivo ya usa para construir la API falsa; si se llama de otra forma, se usa ese.)
+
+- [ ] **Step 2: Ejecutarlas y verlas fallar**
+
+Run: `cd frontend && npx vitest run src/modules/clients`
+Expected: FAIL (no hay pestañas Computers, Tickets, Alerts ni Assets; la tira no tiene nombre; no hay chips).
+
+- [ ] **Step 3: Las acciones del cliente, en la cabecera**
+
+`frontend/src/modules/clients/ClientActions.tsx`: mover desde `SummaryTab.tsx` las líneas que deciden `canEdit` y `canArchive`, la mutación `useArchiveClientMutation`, los dos estados (`editing`, `confirming`), los dos botones, `ClientFormDialog`, `ConfirmDialog` y el párrafo de error del archivado, a un componente `export function ClientActions({ client }: { client: ClientOut })` que devuelve los botones seguidos de los dos diálogos y del error (`role="alert"`). `SummaryTab` se queda con el panel «Details» sin `actions` y con `HealthDefault`. No cambia ninguna condición ni ninguna llamada.
+
+- [ ] **Step 4: Las cuatro pestañas nuevas**
+
+`frontend/src/modules/clients/DevicesTab.tsx`:
+
+```tsx
+/**
+ * The client's computers (design §1.3), the first 25 by the fleet list's own
+ * order, and the way to all of them: the fleet list with its Client chip set.
+ */
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+
+import { NoValue } from "../../components/emptystate";
+import { RelTime } from "../../components/reltime";
+import { Table, Td, Th } from "../../components/ui";
+import { useT } from "../../i18n/context";
+import type { ClientOut } from "../../lib/api";
+import { ListEmpty, Panel, QueryState, StatusPill, useApiFor } from "../../shell/components";
+import { OsIcon } from "../../shell/viz";
+
+export function DevicesTab({ client }: { client: ClientOut }) {
+  const t = useT();
+  const api = useApiFor(client.id);
+  const devices = useQuery({
+    queryKey: ["client360", client.id, "devices"],
+    queryFn: () => api.listDevices({ clientId: client.id, limit: 25 }),
+  });
+  const rows = devices.data?.items ?? [];
+  return (
+    <Panel
+      title={t("clients.devices.title")}
+      bare
+      actions={
+        <Link className="btn small" to={`/devices?client=${client.id}`}>
+          {t("clients.devices.seeAll", { count: devices.data?.total ?? 0 })}
+        </Link>
+      }
+    >
+      <QueryState loading={devices.isLoading} error={devices.error} empty={false} emptyLabel="">
+        {rows.length === 0 ? (
+          <ListEmpty
+            filtered={false}
+            onClear={() => {}}
+            nothingYet={t("clients.devices.empty")}
+            icon="devices"
+            action={
+              <Link className="btn small" to="/devices/onboard">
+                {t("clients.devices.add")}
+              </Link>
+            }
+          />
+        ) : (
+          <Table label={t("clients.devices.title")}>
+            <thead>
+              <tr>
+                <Th>{t("clients.devices.colComputer")}</Th>
+                <Th>{t("clients.devices.colAgent")}</Th>
+                <Th>{t("clients.devices.colLastSeen")}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((device) => (
+                <tr key={device.id}>
+                  <Td lead={<OsIcon os={device.os_family ?? ""} />}>
+                    <div className="cell-title">
+                      <Link to={`/devices/${device.id}`}>{device.hostname ?? device.fqdn ?? device.id}</Link>
+                    </div>
+                    <div className="cell-sub">{device.os_version}</div>
+                  </Td>
+                  <Td>{device.agent_status ? <StatusPill value={device.agent_status} /> : <NoValue label={t("clients.devices.noAgent")} />}</Td>
+                  <Td>{device.last_seen_at ? <RelTime iso={device.last_seen_at} /> : <NoValue label={t("clients.devices.never")} />}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </QueryState>
+    </Panel>
+  );
+}
+```
+
+`frontend/src/modules/clients/TicketsTab.tsx`: la misma forma, con `api.listTickets({ client_id: client.id, scope: "open", limit: 25 })` (clave `["client360", client.id, "tickets"]`), columnas número y asunto (enlace a `/service-desk/tickets/<id>`), prioridad (`StatusPill value={ticket.priority}`) y estado (`StatusPill value={ticket.status}`); acción `/service-desk?client=<id>` con `clients.tickets.seeAll`; vacío `clients.tickets.empty` con la acción `/service-desk?new=ticket` (`clients.tickets.add`) solo si la persona tiene `ticket.write` en el cliente.
+
+`frontend/src/modules/clients/AlertsTab.tsx`: la misma forma, con `api.listHealthAlerts({ state: "open" })` sobre `useApiFor(client.id)` (clave `["client360", client.id, "alerts"]`; el estrechamiento por `X-Client-Id` hace que sean solo las de este cliente, decisión D6), columnas equipo (`alert.device_hostname`, enlace a `/devices/<device_id>?tab=health`), comprobación (`alert.check_type` con `alert.observed_value` debajo), gravedad (`StatusPill value={alert.severity}`) y abierta (`RelTime` de `alert.opened_at`); acción `/health?client=<id>` con `clients.alerts.seeAll`; vacío `clients.alerts.empty`, sin acción.
+
+`frontend/src/modules/clients/AssetsTab.tsx` (decisión D14):
+
+```tsx
+/** The client's assets, as the rail names them (design §1.1): licenses, subscriptions, networks. */
+import { useQuery } from "@tanstack/react-query";
+
+import { useT } from "../../i18n/context";
+import type { ClientOut } from "../../lib/api";
+import { StatCard, StatsGrid, useApiFor } from "../../shell/components";
+
+export function AssetsTab({ client, codes }: { client: ClientOut; codes: ReadonlySet<string> }) {
+  const t = useT();
+  const api = useApiFor(client.id);
+  const licenses = useQuery({
+    queryKey: ["client360", client.id, "licenses"],
+    queryFn: () => api.listLicenses(),
+    enabled: codes.has("licenses.read"),
+  });
+  const subscriptions = useQuery({
+    queryKey: ["client360", client.id, "subscriptions"],
+    queryFn: () => api.listSubscriptions(),
+    enabled: codes.has("subscriptions.read"),
+  });
+  const subnets = useQuery({
+    queryKey: ["client360", client.id, "subnets"],
+    queryFn: () => api.listIpamSubnets(),
+    enabled: codes.has("ipam.read"),
+  });
+  return (
+    <StatsGrid columns={3}>
+      {codes.has("licenses.read") ? (
+        <StatCard label={t("clients.assets.licenses")} value={String(licenses.data?.length ?? 0)} pending={licenses.data === undefined} to={`/licenses?client=${client.id}`} icon="license" />
+      ) : null}
+      {codes.has("subscriptions.read") ? (
+        <StatCard label={t("clients.assets.subscriptions")} value={String(subscriptions.data?.length ?? 0)} pending={subscriptions.data === undefined} to={`/subscriptions?client=${client.id}`} icon="subscription" />
+      ) : null}
+      {codes.has("ipam.read") ? (
+        <StatCard label={t("clients.assets.networks")} value={String(subnets.data?.length ?? 0)} pending={subnets.data === undefined} to={`/ipam?client=${client.id}`} icon="network" />
+      ) : null}
+    </StatsGrid>
+  );
+}
+```
+
+(`StatCard` toma `value: string` y `pending`: con `pending` dibuja `n/a`, nunca un `0` inventado mientras carga o si la lectura falla; `shell/components.tsx:256-296`.)
+
+- [ ] **Step 5: La ficha 360**
+
+`frontend/src/modules/clients/ClientDetailPage.tsx`, archivo completo:
+
+```tsx
+/**
+ * THE CLIENT 360 (redesign design §1.3; Atera's customer page): everything
+ * about one client, in eight tabs that change the URL and fit one row --
+ * Atera's eleven wrap into two, a flaw its own walkthrough files.
+ *
+ * EVERY READ IS THIS CLIENT'S (decision D6): `useApiFor` narrows each request
+ * to it while every client is shown above; with this client chosen above,
+ * the console's own client already is.
+ *
+ * ANOTHER CLIENT CHOSEN ABOVE: with another client's id in `X-Client-Id`
+ * this client does not exist for the request -- a 404 on every tab -- so the
+ * page reads nothing and says which client the console is working on, with
+ * the one act that fixes it. NOT BEFORE `/me` HAS ANSWERED (phase 3 final
+ * review C): until then the page decides nothing.
+ *
+ * A TAB SHOWS ONLY WITH ITS CODE IN THIS CLIENT. Cosmetic (invariant 6): the
+ * server refuses the read either way.
+ */
+import { useParams } from "react-router-dom";
+
+import { useT } from "../../i18n/context";
+import type { MessageKey } from "../../i18n/core";
+import { useClientScope } from "../../lib/clientScope";
+import { Btn, DetailHead, QueryState, StatCard, StatsGrid, UrlTabs, useApiFor, useUrlTab } from "../../shell/components";
+import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
+import { KIND_ICON } from "../../shell/viz";
+import { useQuery } from "@tanstack/react-query";
+import { AlertsTab } from "./AlertsTab";
+import { useClientRecord } from "./api";
+import { AssetsTab } from "./AssetsTab";
+import { ClientActions } from "./ClientActions";
+import { ContactsTab } from "./ContactsTab";
+import { DevicesTab } from "./DevicesTab";
+import { clientKindLabel, clientStatusKind, clientStatusLabel } from "./labels";
+import { ModulesTab } from "./ModulesTab";
+import { SitesTab } from "./SitesTab";
+import { SummaryTab } from "./SummaryTab";
+import { TicketsTab } from "./TicketsTab";
+
+const TABS = ["summary", "sites", "contacts", "devices", "tickets", "alerts", "assets", "modules"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_LABEL: Record<Tab, MessageKey> = {
+  summary: "clients.detail.tabs.summary",
+  sites: "clients.detail.tabs.sites",
+  contacts: "clients.detail.tabs.contacts",
+  devices: "clients.detail.tabs.devices",
+  tickets: "clients.detail.tabs.tickets",
+  alerts: "clients.detail.tabs.alerts",
+  assets: "clients.detail.tabs.assets",
+  modules: "clients.detail.tabs.modules",
+};
+
+/** The codes a tab needs IN THIS CLIENT (any one of them); `null`: whoever can open the client. */
+const TAB_CODES: Record<Tab, readonly string[] | null> = {
+  summary: null,
+  sites: null,
+  contacts: null,
+  devices: ["devices.read"],
+  tickets: ["ticket.read"],
+  alerts: ["health.read"],
+  assets: ["licenses.read", "subscriptions.read", "ipam.read"],
+  modules: null,
+};
+
+export function ClientDetailPage() {
+  const t = useT();
+  const { clientId = "" } = useParams();
+  const { selected, select, clients, ready } = useClientScope();
+  const elsewhere = selected !== null && selected !== clientId;
+  const client = useClientRecord(clientId, !elsewhere);
+  const codes = new Set(clients.find((item) => item.id === clientId)?.permissions ?? []);
+  const visible = TABS.filter((key) => TAB_CODES[key]?.some((code) => codes.has(code)) ?? true);
+  const [tab, setTab] = useUrlTab<Tab>(visible, "summary");
+  const api = useApiFor(clientId);
+  const reads = !elsewhere && client.data !== undefined;
+  const openTickets = useQuery({
+    queryKey: ["client360", clientId, "openTickets"],
+    queryFn: () => api.listTickets({ client_id: clientId, scope: "open", limit: 1 }),
+    enabled: reads && codes.has("ticket.read"),
+  });
+  const alerts = useQuery({
+    queryKey: ["client360", clientId, "alertSummary"],
+    queryFn: () => api.getHealthAlertSummary(),
+    enabled: reads && codes.has("health.read"),
+  });
+  useRecordTitle(client.data?.name);
+  const back = { to: "/clients", label: t("clients.detail.allClients") };
+
+  if (elsewhere && !ready) {
+    return (
+      <>
+        <DetailHead back={back} title={t("clients.detail.title")} />
+        <QueryState loading error={null} empty={false} emptyLabel="">
+          {null}
+        </QueryState>
+      </>
+    );
+  }
+
+  if (elsewhere) {
+    const reachable = clients.some((item) => item.id === clientId);
+    return (
+      <>
+        <DetailHead back={back} title={t("clients.detail.title")} />
+        <div role="status" className="notice mb-4">
+          <Icon name={KIND_ICON.info} size={17} />
+          <div>
+            {t("clients.detail.otherSelected", {
+              selected: clients.find((item) => item.id === selected)?.name ?? selected,
+            })}{" "}
+            <Btn
+              small
+              label={reachable ? t("clients.detail.workOnThis") : t("clients.detail.workOnAll")}
+              onClick={() => select(reachable ? clientId : null)}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const data = client.data;
+  const here = (key: Tab) => `/clients/${clientId}${key === "summary" ? "" : `?tab=${key}`}`;
+  return (
+    <>
+      <DetailHead
+        back={back}
+        title={data?.name ?? t("clients.detail.title")}
+        status={data ? { kind: clientStatusKind(data.status), label: clientStatusLabel(data.status) } : undefined}
+        context={data ? clientKindLabel(data.kind) : undefined}
+        actions={data ? <ClientActions client={data} /> : undefined}
+      />
+      <QueryState loading={client.isLoading} error={client.error} empty={false} emptyLabel="">
+        {data ? (
+          <>
+            {data.status === "archived" ? (
+              <div role="status" className="notice mb-4">
+                <Icon name={KIND_ICON.info} size={17} />
+                <div>{t("clients.detail.archived")}</div>
+              </div>
+            ) : null}
+            <StatsGrid columns={4}>
+              {visible.includes("devices") ? (
+                <StatCard label={t("clients.detail.tiles.devices")} value={String(data.device_count)} to={here("devices")} icon="devices" />
+              ) : null}
+              <StatCard label={t("clients.detail.tiles.sites")} value={String(data.site_count)} to={here("sites")} icon="map-pin" />
+              {visible.includes("tickets") ? (
+                <StatCard label={t("clients.detail.tiles.openTickets")} value={String(openTickets.data?.total ?? 0)} pending={openTickets.data === undefined} to={here("tickets")} icon="ticket" />
+              ) : null}
+              {visible.includes("alerts") ? (
+                <StatCard label={t("clients.detail.tiles.openAlerts")} value={String(alerts.data?.open ?? 0)} pending={alerts.data === undefined} to={here("alerts")} icon="health" />
+              ) : null}
+            </StatsGrid>
+            <UrlTabs
+              label={t("clients.detail.title")}
+              items={visible.map((key) => ({ key, label: t(TAB_LABEL[key]) }))}
+              active={tab}
+              onSelect={setTab}
+            >
+              {tab === "summary" ? (
+                <SummaryTab client={data} />
+              ) : tab === "sites" ? (
+                <SitesTab client={data} />
+              ) : tab === "contacts" ? (
+                <ContactsTab client={data} />
+              ) : tab === "devices" ? (
+                <DevicesTab client={data} />
+              ) : tab === "tickets" ? (
+                <TicketsTab client={data} />
+              ) : tab === "alerts" ? (
+                <AlertsTab client={data} />
+              ) : tab === "assets" ? (
+                <AssetsTab client={data} codes={codes} />
+              ) : (
+                <ModulesTab client={data} />
+              )}
+            </UrlTabs>
+          </>
+        ) : null}
+      </QueryState>
+    </>
+  );
+}
+```
+
+(Ordenar las importaciones como el resto del módulo: la de `@tanstack/react-query` primero.)
+
+- [ ] **Step 6: La lista de clientes**
+
+`frontend/src/modules/clients/ClientsPage.tsx` aplica la receta L:
+- `useUrlFilters(["q", "archived"] as const)`; `archived` sigue siendo `"1"` o nada (la URL de hoy, `?archived=1`, sigue valiendo);
+- `ListToolbar` con `SearchField` (`clients.list.search`, filtra en el navegador por nombre y por dominio de correo: `listClients` ya trae todos) y `FilterChips` `[{ value: "", label: t("clients.list.chipActive") }, { value: "1", label: t("clients.list.chipArchived") }]` (sin conteo: el servidor no lo da), y `ShowingCount shown={rows.length} total={null}` cuando hay búsqueda, `total={rows.length}` cuando no;
+- el `Toggle` de «Show archived clients» desaparece (lo sustituye el chip);
+- `ListEmpty` con `filtered={filters.active}` y `nothingYet={t("clients.list.emptyYet")}`, acción «New client» si la persona puede crear;
+- la tabla gana una columna «Contacts» no: la ficha ya los muestra; se queda como está (Client, Kind, Devices, Sites, Status), con «Devices» en español «Equipos»;
+- `useNewParam("client")` y `useNewParam("contact")` como dejó la Task 4.
+
+- [ ] **Step 7: Textos**
+
+`frontend/src/i18n/en/clients.ts`:
+- `detail.tabs`: añadir `devices: "Computers"`, `tickets: "Tickets"`, `alerts: "Alerts"`, `assets: "Assets"`;
+- `detail.tiles`: `{ devices: "Computers", sites: "Sites", openTickets: "Open tickets", openAlerts: "Open alerts" }`;
+- `list`: `search: "Search clients"`, `chipActive: "Active"`, `chipArchived: "Including archived"`, `emptyYet: "No clients yet. Add the first one to give its machines, sites and contacts a home."`; borrar `showArchived` (ya no se usa) y `empty`;
+- `devices`: `{ title: "Computers", seeAll: { one: "See every computer of this client ({count})", other: "See every computer of this client ({count})" }, empty: "This client has no computers yet.", add: "Add a computer", colComputer: "Computer", colAgent: "Agent", colLastSeen: "Last seen", noAgent: "No agent", never: "Never" }`;
+- `tickets`: `{ title: "Open tickets", seeAll: "See this client's tickets", empty: "This client has no open tickets.", add: "New ticket", colTicket: "Ticket", colPriority: "Priority", colStatus: "Status" }`;
+- `alerts`: `{ title: "Open alerts", seeAll: "See this client's alerts", empty: "No alert is open for this client.", colComputer: "Computer", colCheck: "Check", colSeverity: "Severity", colOpened: "Opened" }`;
+- `assets`: `{ licenses: "Licenses", subscriptions: "Subscriptions", networks: "Networks" }`.
+
+`frontend/src/i18n/es/clients.ts`, lo mismo: `devices: "Equipos"`, `tickets: "Tickets"` (en `identical-ok.ts`: `"clients.detail.tabs.tickets"` con la razón del glosario), `alerts: "Alertas"`, `assets: "Activos"`; `tiles`: «Equipos», «Sedes», «Tickets abiertos», «Alertas abiertas»; `list`: «Buscar clientes», «Activos», «Con archivados», «Aún no hay clientes. Añade el primero para dar un sitio a sus equipos, sedes y contactos.»; `devices`: «Equipos», «Ver todos los equipos de este cliente ({count})», «Este cliente aún no tiene equipos.», «Añadir un equipo», «Equipo», «Agente», «Visto por última vez», «Sin agente», «Nunca»; `tickets`: «Tickets abiertos», «Ver los tickets de este cliente», «Este cliente no tiene tickets abiertos.», «Nuevo ticket», «Ticket», «Prioridad», «Estado»; `alerts`: «Alertas abiertas», «Ver las alertas de este cliente», «Este cliente no tiene alertas abiertas.», «Equipo», «Comprobación», «Gravedad», «Abierta»; `assets`: «Licencias», «Suscripciones», «Redes».
+
+- [ ] **Step 8: Verde, crítica y pulido**
+
+Run: `cd frontend && npx vitest run src/modules/clients src/shell/newDestinations.test.tsx && npx vitest run && npm run typecheck && npm run build`
+Expected: verde.
+
+`harmony.mjs --routes` solo acepta rutas de `ROUTES`, así que las pestañas que importan se añaden como variantes (lo permite `routes-covered.test.ts`: «a query variant only of a route it also walks plainly»). En `frontend/scripts/routes.mjs`, justo después de `"/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",`:
+
+```js
+  // The client 360's tabs that read other modules (redesign design §1.3).
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=devices",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=tickets",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=alerts",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=assets",
+```
+
+y, después de `"/devices/dev-1",`, para la O1: `"/devices/dev-1?tab=hardware",` y `"/devices/dev-1?tab=health",`. Una oleada que necesite otra variante la pide como «petición al kit» (Archivos compartidos).
+
+Aplicar «Cierre de cada oleada» (pasos 1 a 6) a `ClientsPage.tsx` y `ClientDetailPage.tsx` con las rutas `/clients,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=devices,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=tickets,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=alerts,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=assets`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add frontend/src frontend/scripts/routes.mjs
+git commit -m "feat(ui): client 360 with URL tabs, and the client list on the list kit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación:** las ocho pestañas en una sola fila, con URL; una pestaña sin su código no se dibuja; los datos de Equipos, Tickets, Alertas y Activos son solo del cliente (estrechados por `X-Client-Id` o por `client_id`); la cabecera lleva estado, tipo y acciones; la pestaña dice `Andes Logistics · Clientes · Novieri RMM`.
+
+---
+
+## Las oleadas (Tasks 6 a 13)
+
+Lo común a todas, para no repetirlo en cada página:
+
+- **Antes de tocar una página:** leer las recetas y el «Cierre de cada oleada»; leer la sección de Atera que la oleada cita; abrir la página en el navegador con `npx vite` y `http://localhost:5173/<ruta>?__fixtures` en los dos idiomas (el idioma se cambia en el menú de la cuenta).
+- **Los menús de sección** de un módulo (`deployNav.tsx`, `backupNav.tsx`, `IpamNav.tsx`, `licenseNav.tsx`, `provisioningNav.tsx`, `PushNav.tsx`, `ServiceDeskNav.tsx`, `PortalNav.tsx`) pasan a dibujarse con `SectionNav` del kit, conservando su nombre exportado, su comprobación de permiso y sus etiquetas. Sus pruebas que buscaban `role="tablist"` o `role="tab"` buscan ahora `navigation` y `link` con `aria-current="page"`.
+- **Pestañas que filtran** una lista (`?state=`, con `Tabs`) pasan a `FilterChips` con el mismo parámetro.
+- **Filtros en `useState`** pasan a `useUrlFilters` con las claves que nombra cada página.
+- **Un diálogo de alta** se abre con `useNewParam("<tipo>")` (decisión D8) para que su URL sea enlazable; el botón de la cabecera llama a `start`.
+- **Una ficha** llama a `useRecordTitle(<nombre del registro>)`.
+- **El chip «Cliente»** (`ClientFilter` + `useApiFor`, decisión D6) va en las listas de cosas de un cliente: equipos, tickets, alertas, parches, despliegues, copias, sesiones remotas, trabajos, licencias, suscripciones, redes, documentación, credenciales, cambios, continuidad y presupuesto. La oleada lo pone en las que nombra.
+- **Pruebas por página:** las de la receta (L: filtros en la URL y vacío con causa; F: pestañas en la URL; FO: barra de guardado y aviso al salir) más lo que la página nombre. Las pruebas existentes de la página se conservan; se cambia la consulta, nunca la aserción, salvo donde el diseño cambia lo que se ve, y entonces el comentario cita el diseño.
+- **Textos:** las claves nuevas van en el catálogo del módulo (`src/i18n/{en,es}/<módulo>.ts`), en los dos idiomas.
+- **Prohibido en una oleada:** editar un archivo de «Archivos compartidos»; cambiar una llamada a la API, un código de permiso o un texto de error; borrar o saltar una prueba.
+- **Interfaces de toda oleada.** *Consume:* del kit (Task 3) `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useApiFor`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useDraft`, todos desde `../../shell/components`; `useRecordTitle` y `useDocumentTitle` de `../../shell/title`; `NovieriLockup` y `PRODUCT_NAME` de `../../shell/brand` (O2 y O8); `renderPage` de `../../test/renderPage` en las pruebas; las firmas exactas están en el bloque **Interfaces** de las Tasks 2 y 3. *Produce:* nada que otra oleada consuma; las URL que enlaza la ficha 360 (`/devices?client=`, `/service-desk?client=`, `/health?client=`, `/licenses?client=`, `/subscriptions?client=`, `/ipam?client=`) deben estrechar su lista al cliente, y eso lo cumplen O1, O2, O3 y O5.
+
+### Task 6: Oleada O1, Equipos (11 páginas)
+
+Atera: `Atera_recorrido_menus_UI_UX.md`, «Devices» (líneas 164-182) y captura «atera 8» (ficha del equipo). Módulos: `devices`, `inventory`, `onboarding`, `agent-push`, `agent-releases`.
+
+**Files:**
+- Modify: `frontend/src/modules/devices/**`, `frontend/src/modules/inventory/**`, `frontend/src/modules/onboarding/**`, `frontend/src/modules/agent-push/**`, `frontend/src/modules/agent-releases/**`
+- Modify: `frontend/src/i18n/{en,es}/{devices,inventory,onboarding,agentPush,agentReleases}.ts`
+
+**Rutas de la oleada** (para `--routes`): `/devices,/devices/dev-1,/devices/dev-1?tab=hardware,/devices/dev-1?tab=health,/software,/discovered,/device-groups,/devices/onboard,/devices/push-runs,/devices/push-runs/run-1,/agent-push/authorizations,/agent-push/credential-scopes,/agent-packages`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 1.1 | `devices/DevicesPage.tsx` | `/devices` | L |
+| 1.2 | `inventory/DeviceDetailPage.tsx` | `/devices/:deviceId` | F |
+| 1.3 | `inventory/SoftwarePage.tsx` | `/software` | L |
+| 1.4 | `devices/CandidatesPage.tsx` | `/discovered` | L |
+| 1.5 | `devices/GroupsPage.tsx` | `/device-groups` | L |
+| 1.6 | `onboarding/OnboardPage.tsx` | `/devices/onboard` | O |
+| 1.7 | `agent-push/PushRunsPage.tsx` | `/devices/push-runs` | L |
+| 1.8 | `agent-push/PushRunPage.tsx` | `/devices/push-runs/:runId` | F |
+| 1.9 | `agent-push/PushAuthorizationsPage.tsx` | `/agent-push/authorizations` | L |
+| 1.10 | `agent-push/PushCredentialScopesPage.tsx` | `/agent-push/credential-scopes` | L |
+| 1.11 | `agent-releases/AgentReleasesPage.tsx` | `/agent-packages` | O |
+
+**1.1 `DevicesPage.tsx` (`/devices`, L).** Hoy: una tira `Tabs` para `?state=` con los conteos de `state_counts`, tres `FilterBar`, `SearchField` para `?q=`, selects de origen (`?provenance=`) y sede (`?site=`), cinco tiles de la flota, paginación por `?offset=`, selección con «Push», «Approve all» y «Dispatch job».
+- Cabecera: título «Equipos» en español (decisión D13: `devices.page.title` y su descripción; el inglés sigue «Devices»); acción principal **«Añadir un equipo»** (enlace `Link className="btn primary"` a `ADD_COMPUTER_TO`, solo con `devices.read`; diseño §1.2); «Exportar inventario» secundaria.
+- Los tiles de la flota se quedan encima del panel.
+- El panel: `ListToolbar` con la búsqueda; `FilterChips` «Estado» con `all/online/offline/assets/certs/review` y sus conteos de `state_counts` (`review` solo si el servidor lo da); `FilterChips` «Origen» con `agent/operator/promoted/sweep` sin conteo; `ClientFilter` (clave `client`) y, solo con un cliente elegido arriba o en el chip, el select de sede tal como es hoy dentro de un `.chip-select`; `ShowingCount` con el total de la respuesta.
+- La selección existente pasa a `BulkBar` con sus tres acciones de hoy (mismas condiciones y diálogos).
+- El vacío: `ListEmpty` con «Aún no hay equipos. Instala el agente en el primero.» y la acción «Añadir un equipo».
+- La columna «Cliente» se queda (con «Todos mis clientes» es lo que dice de quién es cada equipo).
+- Pruebas: `DevicesPage.test.tsx`, `DevicesPushSelection.test.tsx`, `DevicesApproveAll.test.tsx`, `DevicesReview.test.tsx` cambian `getByRole("tab", …)` por `getByRole("button", { name: /…/ })` con `aria-pressed`; nuevas: las dos de la receta L, y «narrows to the Client chip's client» (con `?client=<uuid>` la API usada es la de `forClient`), y «puts Add a computer at the head of the page».
+- Acepta: la URL `/devices?state=offline&client=<id>` abre la vista filtrada; sin selección no hay barra de lote; el vacío dice su causa.
+
+**1.2 `DeviceDetailPage.tsx` (`/devices/:deviceId`, F, captura «atera 8»).** Hoy: `PageHead`, `Tabs` en `?tab=` (11: overview, hardware, software, changes, jobs, docs, patch, deploy, backup, provisioning, health), acciones del equipo (`DeviceActions`), dos `FilterBar`, cuatro tablas.
+- `DetailHead`: volver «Todos los equipos» → `/devices`; título el hostname; estado en línea / sin conexión (`agent_status`, `kind` ok / mut); contexto `ClientContext` con el cliente y la sede; acciones: las de `DeviceActions` de hoy, con «Conectar» (sesión remota) primero.
+- Debajo, dos tarjetas de resumen como las de Atera: **Estado de alertas** (las `open_alerts` de `getDeviceHealth` contadas por gravedad, cada una con su etiqueta y su icono, enlazando a `?tab=health`) y **Estado de parches** (lo que hoy da la pestaña de parches: pendientes por gravedad y reinicio pendiente, enlazando a `?tab=patch`). Cada tarjeta se dibuja solo con su permiso (`devices.read` y `patch.read`, como hoy las pestañas).
+- `UrlTabs` con las mismas 11 claves (las URL de hoy siguen valiendo), en una sola fila.
+- La pestaña Resumen pasa a `DetailGrid`: a la izquierda «Información del equipo» (los `Facts` de hoy: SO, arquitectura, número de serie, CPU, memoria, IP, último visto, versión del agente, origen) y «Relaciones» (cliente, sede, grupo, persona asignada); a la derecha **«Comprobaciones»** (las comprobaciones de salud del equipo con su último valor, `checks[].last_value` y `reported_at`, de `getDeviceHealth`) y **«Actividad»** (los últimos trabajos, `listJobs` del equipo, y los últimos cambios de inventario, `getDeviceChanges`). Las métricas de CPU y memoria en el tiempo de la captura no existen en el servidor: Apéndice E, B1; no se dibuja un gráfico vacío.
+- `useRecordTitle(hostname)`.
+- Pruebas: `DeviceDetailPage.test.tsx`, `.hub.test.tsx`, `.assets.test.tsx`, `.resync.test.tsx` cambian solo consultas; nuevas: receta F, «draws the alert and patch summaries and each leads to its tab», «names the computer in the browser tab».
+- Acepta: `?tab=hardware` recarga en Hardware; la ficha a 390 px apila la rejilla en una columna sin desbordar.
+
+**1.3 `SoftwarePage.tsx` (`/software`, L).** Hoy: `?q=` y `?title=` (el título elegido), dos tablas (títulos; equipos con el elegido) y exportar. Cabecera con «Exportar»; `ListToolbar` con la búsqueda y `ShowingCount`; el título elegido abre su lista de equipos en un `Panel` debajo con un enlace «Quitar» que borra `?title=`. Pruebas: receta L sobre `q`. Acepta: `?title=` enlazable.
+
+**1.4 `CandidatesPage.tsx` (`/discovered`, L).** Hoy: tres tiles, una tabla de máquinas encontradas por barrido con selección y «Avalar», y `ScanSubnetDialog`. `ListToolbar` con `ClientFilter` y la búsqueda (clave `q`, filtro en el navegador sobre dirección y nombre); `BulkBar` con «Avalar» (la acción de hoy); «Escanear una red» como acción principal (`useNewParam("scan")`); vacío con la causa («Ningún barrido ha encontrado máquinas todavía» o «nada con estos filtros»). Pruebas: `CandidatesPage.test.tsx` adaptadas; receta L. Acepta: avalar varias sigue mandando una petición por cliente.
+
+**1.5 `GroupsPage.tsx` (`/device-groups`, L).** Hoy: lista de grupos, «mostrar archivados», editor (crear y editar con reglas y vista previa) y grupo abierto con sus miembros. Lista con `ListToolbar` (búsqueda `q`, chip «Archivados» con la clave `archived`, `ClientFilter`); el grupo abierto pasa a `?group=<id>` (enlazable) en un `Panel` a la derecha con `DetailGrid` en escritorio y debajo en móvil; el editor se abre con `?new=group` o `?edit=<id>` y sigue siendo un diálogo grande. Pruebas: `GroupsPage.test.tsx` adaptadas; nuevas: receta L y «opens a group from the URL». Acepta: ningún cambio en las llamadas de reglas, miembros o archivado.
+
+**1.6 `OnboardPage.tsx` (`/devices/onboard`, O).** «Añadir un equipo», el destino de «Nuevo → Equipo». `FormPage` con volver «Equipos» y su título; las secciones de hoy (instalar en una máquina: instaladores y comando; muchas a la vez: barrido) como `FormSection`, sin barra de guardado (no guarda nada); el paso a paso (`Steps`) se conserva. Pruebas: `OnboardPage.test.tsx` adaptadas; nueva: «leads back to the computers». Acepta: el atajo de Atera «Install agent» queda aquí y en «Nuevo».
+
+**1.7 `PushRunsPage.tsx` (`/devices/push-runs`, L).** Lista de ejecuciones con `FilterChips` de estado (los estados que `runState.ts` ya conoce, sin conteo si el servidor no lo da), `ShowingCount` y vacío con causa; volver a «Equipos» con un `back-link`. Pruebas: receta L en `pushRuns.test.tsx`.
+
+**1.8 `PushRunPage.tsx` (`/devices/push-runs/:runId`, F).** `DetailHead` con el estado de la ejecución, contexto (cliente) y las acciones de hoy (pausar, reanudar y cancelar con su `ConfirmDialog`: decisión del operador 2a(e), una persona); tiles de destinos (totales, en curso, correctos, fallidos); la tabla paginada de destinos debajo. `useRecordTitle` con el nombre de la ejecución. Pruebas: `pushRuns.test.tsx` adaptadas; receta F no aplica (sin pestañas): se prueba «names the run in the browser tab». Acepta: las acciones siguen pidiendo confirmación.
+
+**1.9 `PushAuthorizationsPage.tsx` (`/agent-push/authorizations`, L).** Hoy: `PushNav`, `PushReadiness`, un formulario en línea para crear (prefijo, nota, caduca) y «incluir inactivas». `PushNav` → `SectionNav`; la alta pasa a un diálogo con `useNewParam("authorization")` y botón principal «Nueva autorización»; «incluir inactivas» → chip con la clave `inactive`; `ShowingCount`; vacío con causa. Pruebas: `pushPages.test.tsx` adaptadas (la alta se abre por el botón o por `?new=authorization`). Acepta: el texto de seguridad del formulario (invariante 2a) se queda en el diálogo.
+
+**1.10 `PushCredentialScopesPage.tsx` (`/agent-push/credential-scopes`, L).** Igual que 1.9: `SectionNav`; alta en diálogo con `useNewParam("scope")`; «incluir desvinculados» → chip `unbound`; `ShowingCount`; vacío con causa. Pruebas: `pushPages.test.tsx`.
+
+**1.11 `AgentReleasesPage.tsx` (`/agent-packages`, O).** Hoy: cuatro tiles, lista de versiones, canales, enlace de instalación, despliegue gestionado y «publicar versión». Cabecera con «Publicar versión» como principal (`useNewParam("release")`); los tiles; las secciones de hoy (`ReleaseChannels`, `InstallLinkPanel`, `AgentUpdatesSection`) como `Panel` en este orden: versiones (lista con `ShowingCount` y «ver anteriores» como chip `older`), canales, enlace de instalación, actualizaciones. Pruebas: `AgentReleasesPage.test.tsx`, `MsiDownload.test.tsx` (el nombre del MSI es el de la Task 2), `PublishReleaseDialog.test.tsx` adaptadas. Acepta: nada de lo firmado cambia (invariante 1).
+
+- [ ] **Step 1:** escribir, página por página, las pruebas nuevas que piden los bloques de arriba en los archivos de prueba que nombran; ejecutar `cd frontend && npx vitest run src/modules/devices src/modules/inventory src/modules/onboarding src/modules/agent-push src/modules/agent-releases` y verlas fallar.
+- [ ] **Step 2:** aplicar cada bloque; tras cada página, `npx vitest run <su carpeta de módulo>` en verde antes de pasar a la siguiente.
+- [ ] **Step 3:** textos nuevos en los cinco catálogos, en los dos idiomas; `npx vitest run src/i18n src/modules/devices/devices.es.test.tsx src/modules/inventory/inventory.es.test.tsx src/modules/onboarding/onboarding.es.test.tsx src/modules/agent-push/agent-push.es.test.tsx src/modules/agent-releases/agent-releases.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7, con las rutas de arriba.
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/modules/devices frontend/src/modules/inventory frontend/src/modules/onboarding frontend/src/modules/agent-push frontend/src/modules/agent-releases frontend/src/i18n
+git commit -m "feat(ui): wave 1, computers: list, record, software, discovery, groups, onboarding, push install, agent packages
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
+```
+
+**Criterios de aceptación de la oleada:** las 11 páginas usan el kit; harmony en verde en sus 13 rutas en los dos idiomas; cada página tiene su crítica persistida y su pulido cerrado; el informe lista las capturas de 1440 y 390 de cada ruta en los dos idiomas.
+
+---
+
+### Task 7: Oleada O2, Inicio, tickets y portal (11 páginas)
+
+Atera: «Dashboard» (líneas 98-111), «Tickets» (112-135), «Admin › Support › Email settings» (550-567), «Admin › Business administration › SLAs» (721-732), «Admin › Customer service › Customer Portal» (641-650). Módulos: `dashboard`, `service-desk`, `sla`, `email-intake`, `notification`, `portal`.
+
+**Files:**
+- Modify: `frontend/src/modules/{dashboard,service-desk,sla,email-intake,notification,portal}/**`
+- Modify: `frontend/src/i18n/{en,es}/{dashboard,serviceDesk,sla,emailIntake,notification,portal}.ts`
+- Modify (excepción acotada): `frontend/src/preview/PreviewPage.tsx`, solo para **añadir al final** una sección «Portal frame» que dibuja `PortalShell` con un hijo fijo, para que `a11y-browser.mjs` mida el marco del portal (la puerta de armonía no lo ve: su persona de fixtures no es solo de portal). Ninguna otra oleada toca este archivo.
+
+**Rutas de la oleada:** `/dashboard,/service-desk,/service-desk/my-work,/service-desk/admin,/service-desk/tickets/tkt-1,/sla,/email-intake,/notifications,/portal,/portal/new,/portal/tickets/tkt-1`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 2.1 | `dashboard/DashboardPage.tsx` | `/dashboard` | O |
+| 2.2 | `service-desk/TicketListPage.tsx` | `/service-desk` | L |
+| 2.3 | `service-desk/TicketDetailPage.tsx` | `/service-desk/tickets/:ticketId` | F |
+| 2.4 | `service-desk/MyWorkPage.tsx` | `/service-desk/my-work` | L |
+| 2.5 | `service-desk/ServiceDeskAdminPage.tsx` | `/service-desk/admin` | FO |
+| 2.6 | `sla/SlaAdminPage.tsx` | `/sla` | FO |
+| 2.7 | `email-intake/EmailIntakeAdminPage.tsx` | `/email-intake` | FO |
+| 2.8 | `notification/NotificationAdminPage.tsx` | `/notifications` | FO |
+| 2.9 | `portal/MyTicketsPage.tsx` | `/portal` | L |
+| 2.10 | `portal/NewTicketPage.tsx` | `/portal/new` | FO |
+| 2.11 | `portal/PortalTicketDetailPage.tsx` | `/portal/tickets/:ticketId` | F |
+| + | `email-intake/OAuthCallback.tsx` | `/settings/email-intake/oauth/callback` | O |
+| + | `portal/PortalShell.tsx`, `portal/PortalNav.tsx` | marco del portal | — |
+
+**2.1 `DashboardPage.tsx` (`/dashboard`, O).** El tablero personalizable (diseño 2026-09-01: rejilla de seis columnas, tamaños con nombre, disposición guardada por persona en el servidor) **no cambia de modelo**. Cambia la forma: `PageHead` «Inicio» en español (D13) con «Editar» como acción secundaria; cada mosaico es un `Panel` del kit con su título, su número y un destino (regla «Do give every tile a destination»); un mosaico sin datos dice por qué en una frase (Atera los deja en blanco: «Los widgets vacíos quedan en blanco, sin mensaje ni paso siguiente»); quitar un mosaico en modo edición se puede deshacer (Atera no deja: «Quitar un widget es un clic sin confirmación ni deshacer»): el modo edición tiene «Descartar» y «Guardar» en la `SaveBar` del kit, con `useDraft` sobre la disposición. Pruebas: `DashboardPage.test.tsx` y `__tests__/layout.test.ts` adaptadas; nuevas: «discards an edit of the layout», «a tile with nothing measured says so».
+
+**2.2 `TicketListPage.tsx` (`/service-desk`, L).** Hoy: ocho selects (`?assignee`, `?origin`, `?priority`, `?queue`, `?scope`, `?sort`, `?status`, `?type`), `?q`, chips, cinco tiles, `NewTicketDialog`, `ServiceDeskNav`. `ServiceDeskNav` → `SectionNav`. `ListToolbar`: búsqueda; `FilterChips` «Alcance» (`scope`: mine, unassigned, open, all; los conteos que el pie ya calcula, si los hay); `FilterChips` «Estado» (`status`); `ClientFilter`; y en una segunda fila del mismo panel los demás filtros como `.chip-select` (cola, prioridad, tipo, origen, responsable) con su etiqueta visible; el orden (`sort`) a la derecha. Las claves de la URL no cambian. `ShowingCount` con `total` (la respuesta trae `{items, total}`). Vacío con causa. «Nuevo ticket» ya va por `useNewParam` (Task 4). Pruebas: `__tests__/ticketQueue.test.tsx`, `serviceDesk.test.tsx` adaptadas; receta L.
+
+**2.3 `TicketDetailPage.tsx` (`/service-desk/tickets/:ticketId`, F, dos paneles de Atera).** `DetailHead`: volver «Tickets»; título `#<número> <asunto>`; estado (`StatusPill` del estado) y prioridad; contexto con el cliente (`ClientContext`) y el solicitante; acciones de hoy (asignar, cambiar estado, sesión remota con `StartSessionDialog`). Debajo, `DetailGrid`: a la izquierda la conversación y el editor de respuesta (pública / nota interna, respuestas guardadas), a la derecha las propiedades (cola, categoría, prioridad, responsable, equipo) **como un formulario con `SaveBar` y `useDraft`**, que sustituye a sus botones «Guardar» sueltos; el equipo enlazado muestra su estado de parches como hoy. `useRecordTitle("#<número>")`. Pruebas: `__tests__/ticketWorkbench.test.tsx` adaptadas; nuevas: receta FO sobre las propiedades («asks before leaving with an unsaved property»), «names the ticket in the browser tab».
+
+**2.4 `MyWorkPage.tsx` (`/service-desk/my-work`, L).** Tres tiles y la lista de lo asignado a la persona; `SectionNav`; `ShowingCount`; vacío «No tienes tickets asignados.» con enlace a la cola.
+
+**2.5 `ServiceDeskAdminPage.tsx` (`/service-desk/admin`, FO).** Hoy: colas y categorías con altas y ediciones en línea (once campos, cuatro primarios). Dos `FormSection` (Colas, Categorías), cada una una tabla con su alta en diálogo (`useNewParam("queue")`, `useNewParam("category")`) y la edición de una fila en diálogo: así desaparecen los cuatro primarios de la página. No hay `SaveBar`: cada cambio es una alta o edición de una fila que se guarda al confirmar su diálogo. Pruebas: `serviceDesk.test.tsx` adaptadas.
+
+**2.6 `SlaAdminPage.tsx` (`/sla`, FO).** Políticas y calendarios: dos `FormSection`; las políticas como lista con alta en diálogo (`useNewParam("policy")`) y chip «Cliente» para las de un cliente (el servidor ya distingue `client_id` nulo de uno); los calendarios igual. Pruebas: `__tests__/sla.test.tsx`, `policiesClient.test.tsx` adaptadas.
+
+**2.7 `EmailIntakeAdminPage.tsx` (`/email-intake`, FO).** Los buzones y su conexión con Microsoft: `FormSection` por buzón; los ajustes editables con `SaveBar` y `UnsavedGuard`; la conexión OAuth sin cambios. `OAuthCallback.tsx`: el mismo panel de hoy dentro del armazón, con `PageHead` y un enlace de vuelta a «Entrada de correo». Pruebas: `__tests__/emailIntake.test.tsx`, `oauth.test.tsx` adaptadas; receta FO.
+
+**2.8 `NotificationAdminPage.tsx` (`/notifications`, FO).** Las reglas y los canales (correo, webhooks): `FormSection` por grupo; las reglas como lista con alta en diálogo; los ajustes con `SaveBar`. Pruebas: `__tests__/notification.test.tsx` adaptadas; receta FO.
+
+**2.9 `MyTicketsPage.tsx` (`/portal`, L, marco del portal).** Lista de los tickets del solicitante con `FilterChips` de estado (abiertos / todos), `ShowingCount` y vacío «Aún no has abierto ningún ticket.» con «Nuevo ticket». Pruebas: `__tests__/portal.test.tsx` adaptadas.
+
+**2.10 `NewTicketPage.tsx` (`/portal/new`, FO).** `FormPage` con volver «Mis tickets»; una `FormSection`; sugerencias de ayuda (`HelpSuggestions`) a la derecha en escritorio; un formulario de alta se envía una vez, así que su botón es el «Enviar» de hoy y no hay `SaveBar`, pero sí `UnsavedGuard` mientras hay texto escrito (perder una descripción larga es lo que la guarda evita). Pruebas: nueva «asks before leaving a half-written ticket».
+
+**2.11 `PortalTicketDetailPage.tsx` (`/portal/tickets/:ticketId`, F).** `DetailHead` con estado y volver; la conversación y la respuesta; adjuntos. `useDocumentTitle` con el número del ticket (el portal no tiene `AppShell`).
+
+**El marco del portal (`PortalShell.tsx`, `PortalNav.tsx`).** Diseño §4: «El portal del usuario final … recibe la misma marca dentro de su propio marco». La cabecera de hoy (un texto «Support portal» en negrita) pasa a: `NovieriLockup height={20}` enlazado a `/portal`, el nombre de la sección («Portal de soporte», `portal.shell.brand`) a su lado en la tinta secundaria, la persona y «Cerrar sesión» a la derecha; fondo `--surface` con la línea inferior, contenido en `--bg` con el ancho máximo de la consola. `PortalNav` → `SectionNav`. `useDocumentTitle` con el título de cada página del portal. Pruebas: `App.portal.test.tsx` y `modules/portal/__tests__/portalPrimitives.test.tsx` adaptadas; nueva: «draws the Novieri RMM lockup and names the page in the tab».
+
+- [ ] **Step 1:** pruebas nuevas de los bloques; `npx vitest run src/modules/dashboard src/modules/service-desk src/modules/sla src/modules/email-intake src/modules/notification src/modules/portal src/App.portal.test.tsx` falla en ellas.
+- [ ] **Step 2:** aplicar página por página, con la carpeta del módulo en verde tras cada una.
+- [ ] **Step 3:** textos en los seis catálogos, en los dos idiomas; las pruebas `*.es.test.tsx` de los seis módulos en verde.
+- [ ] **Step 4:** la sección «Portal frame» al final de `PreviewPage.tsx`; `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` en verde.
+- [ ] **Step 5:** «Cierre de cada oleada», pasos 1 a 7, con las rutas de arriba.
+- [ ] **Step 6: Commit** (`git add frontend/src/modules/{dashboard,service-desk,sla,email-intake,notification,portal} frontend/src/i18n frontend/src/preview/PreviewPage.tsx`; mensaje `feat(ui): wave 2, dashboard, tickets, service desk admin and the portal frame` con las dos líneas de atribución).
+
+**Criterios de aceptación:** una sola forma de guardar en las páginas de configuración de la oleada; el ticket guarda sus propiedades con la barra; el marco del portal lleva la marca; harmony en verde en las 11 rutas en los dos idiomas.
+
+---
+
+### Task 8: Oleada O3, Alertas, parches, software, sesiones, trabajos y registros (11 páginas)
+
+Atera: «Alerts» (184-198), «Patch Management» (199-215), «Admin › Monitoring › Scripts» (466-476), «Admin › Monitoring › Software management» (516-524), «Admin › Users and security › Audit log» (436-444). Módulos: `health`, `patch`, `deploy`, `remote`, `jobs`, `error-monitor`, `platform-status`, `security`, `audit`.
+
+**Files:**
+- Modify: `frontend/src/modules/{health,patch,deploy,remote,jobs,error-monitor,platform-status,security,audit}/**`
+- Modify: `frontend/src/i18n/{en,es}/{health,patch,deploy,remote,jobs,errorMonitor,platformStatus,security,audit}.ts`
+
+**Rutas de la oleada:** `/health,/patch,/patch/policies,/deploy,/deploy/packages,/deploy/scripts,/remote,/remote/sess-1,/remote/sess-1/recording,/jobs,/error-monitor,/platform-status,/security,/audit`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 3.1 | `health/HealthPage.tsx` | `/health` | L |
+| 3.2 | `patch/FleetPatchPage.tsx` | `/patch` | L |
+| 3.3 | `deploy/DeployPage.tsx` | `/deploy` | L |
+| 3.4 | `deploy/PackagesPage.tsx` | `/deploy/packages` | L |
+| 3.5 | `deploy/ScriptsPage.tsx` | `/deploy/scripts` | L |
+| 3.6 | `remote/SessionsPage.tsx` | `/remote` | L |
+| 3.7 | `jobs/JobsPage.tsx` | `/jobs` | L |
+| 3.8 | `error-monitor/ErrorMonitorPage.tsx` | `/error-monitor` | L |
+| 3.9 | `platform-status/PlatformStatusPage.tsx` | `/platform-status` | O |
+| 3.10 | `security/SecurityPage.tsx` | `/security` | L |
+| 3.11 | `audit/AuditPage.tsx` | `/audit` | L |
+| + | `patch/PatchPolicyEditor.tsx` | `/patch/policies` | FO |
+| + | `remote/ScreenViewer.tsx` | `/remote/:sessionId` | O |
+| + | `remote/RecordingPlayer.tsx` | `/remote/:sessionId/recording` | O |
+
+**3.1 `HealthPage.tsx` (`/health`, L).** «Alertas» en el riel. Hoy: cuatro tiles, la consola de alertas (`AlertConsole`) con `?alert=<id>` para el detalle, y debajo perfiles, asignaciones, ajustes, acciones aprobadas e informe. La página es la lista de alertas: `ListToolbar` con `FilterChips` «Estado» (abiertas, reconocidas, silenciadas: las de `AlertState` menos `cleared`) y «Gravedad» (crítica, advertencia, información), **con los conteos de `getHealthAlertSummary`** (`by_state`, `by_severity`), `ClientFilter` y `ShowingCount`; la alerta elegida (`?alert=`) se abre en el `Drawer` de hoy. Los paneles de configuración (perfiles, asignaciones, ajustes, acciones aprobadas) pasan a `UrlTabs` con `useUrlTab(["alerts", "profiles", "settings"], "alerts", "view")` (la misma ruta; por defecto `alerts`, sin parámetro): una página de alertas que es una cola, y la configuración a un clic sin mezclarla con la cola. No es `SectionNav`: sus enlaces comparan la ruta, no la query, y los tres se marcarían a la vez. El vacío dice la causa real: sin equipos, «Ningún equipo envía todavía su estado.» con «Añadir un equipo» (el defecto que el recorrido de Atera señala); con filtros, «nada con estos filtros». Pruebas: `__tests__/health.test.tsx`, `alertTriage.test.tsx`, `assignments.test.tsx` adaptadas; receta L; nueva «says no computer reports yet when there are none».
+
+**3.2 `FleetPatchPage.tsx` (`/patch`, L) y `PatchPolicyEditor.tsx` (`/patch/policies`, FO).** Hoy: `Tabs` por familia de SO en `?os=`, `?q`, `?severity`, `?offset`, `?devices`, exportar y selección. La familia sigue en `UrlTabs` con `param="os"` (cambia el contenido, no filtra una lista); dentro, `ListToolbar` con búsqueda, `FilterChips` «Gravedad» (las de hoy, multi: un chip por gravedad con `aria-pressed`, la URL conserva su formato de lista), `ClientFilter`, `ShowingCount`; la selección pasa a `BulkBar` con sus acciones. «Políticas» como acción secundaria de la cabecera. `PatchPolicyEditor` es receta FO: `FormPage` con volver «Parches», `FormSection` por grupo (anillos, ventana con `WeekPainter`, aprobación), `SaveBar`. Pruebas: `__tests__/patch.test.tsx`, `selection.test.ts`, `apps.test.tsx` adaptadas; receta L; receta FO en el editor.
+
+**3.3 `DeployPage.tsx` (`/deploy`, L).** `deployNav` → `SectionNav`. `?q`, `?state` → búsqueda y `FilterChips` de estado; seis selects del diálogo de alta se quedan en el diálogo; `ClientFilter`; «Nuevo despliegue» principal con `useNewParam("deployment")`; ejecutar sigue con `ConfirmDialog`. Pruebas: `__tests__/deploy.test.tsx` adaptadas; receta L.
+
+**3.4 `PackagesPage.tsx` (`/deploy/packages`, L).** `SectionNav`; búsqueda `q` en el navegador; chip de familia de SO (`os`); «Nuevo paquete» con `useNewParam("package")`; borrar con `ConfirmDialog` como hoy. Receta L.
+
+**3.5 `ScriptsPage.tsx` (`/deploy/scripts`, L).** `SectionNav`; búsqueda y chips de intérprete / SO; «Nuevo script» (`useNewParam("script")`, `AuthorScriptDialog`); editar y ejecutar siguen en sus diálogos (ejecutar firma un trabajo: invariante 1, no cambia). Receta L.
+
+**3.6 `SessionsPage.tsx` (`/remote`, L), `ScreenViewer.tsx`, `RecordingPlayer.tsx` (O).** La tira `Tabs` de `?state=` pasa a `FilterChips` con el mismo parámetro; `?q`; `ClientFilter`; «Iniciar sesión remota» principal (`useNewParam("session")`, `StartSessionDialog`). El visor y el reproductor conservan su lienzo; su cabecera pasa a `DetailHead` (volver «Sesiones remotas», el equipo, el estado de la sesión, «Finalizar» como acción) y `useRecordTitle` con el equipo. Pruebas: `SessionsPage.test.tsx`, `RecordingPlayer.test.tsx` adaptadas (`ITMSRSP1` se queda: es formato). Receta L.
+
+**3.7 `JobsPage.tsx` (`/jobs`, L).** `?q`, `?status`, `?job` (el trabajo abierto). `FilterChips` de estado con los conteos de la respuesta si los trae (si no, sin número); `ClientFilter`; el trabajo abierto en su `Drawer` con `?job=`; cancelar y reintentar con su confirmación. Receta L.
+
+**3.8 `ErrorMonitorPage.tsx` (`/error-monitor`, L).** `?q`, `?since`, `?sort`, `?state`, `?where`: `FilterChips` de estado y de origen (`where`), el periodo (`since`) como chips (24 h, 7 días, 30 días), el orden como `.chip-select`; el grupo elegido en su panel; resolver con confirmación. Receta L.
+
+**3.9 `PlatformStatusPage.tsx` (`/platform-status`, O).** Panel de estado: tiles por dependencia con su estado (`StatusPill` con icono), una tabla de sondas y otra de módulos; el estado global en `PageHead` como etiqueta. Sin cambios de datos. Pruebas: `PlatformStatusPage.test.tsx` adaptadas.
+
+**3.10 `SecurityPage.tsx` (`/security`, L).** Eventos de seguridad: búsqueda, chips de tipo y gravedad, `ClientFilter`, el evento elegido en su `Drawer`, «Exportar evidencia» secundaria. Receta L.
+
+**3.11 `AuditPage.tsx` (`/audit`, L).** Ya tiene `?tab=` (eventos / integridad) con `TAB_PARAM`: pasa a `UrlTabs` con el mismo parámetro; en Eventos, `search` y `action` (hoy en `useState`) pasan a `useUrlFilters(["q", "action"])`; el registro es de todos los clientes y solo se lee con el permiso en todos (invariante 5a), así que **no** lleva `ClientFilter`. Pruebas: `AuditPage.test.tsx` adaptadas; receta L sobre `q` y `action`.
+
+- [ ] **Step 1:** pruebas nuevas; `npx vitest run src/modules/health src/modules/patch src/modules/deploy src/modules/remote src/modules/jobs src/modules/error-monitor src/modules/platform-status src/modules/security src/modules/audit` falla en ellas.
+- [ ] **Step 2:** aplicar página por página, con su carpeta en verde tras cada una.
+- [ ] **Step 3:** textos en los nueve catálogos; sus `*.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7.
+- [ ] **Step 5: Commit** (`feat(ui): wave 3, alerts, patching, software, remote sessions, jobs and logs`, con las dos líneas de atribución).
+
+**Criterios de aceptación:** los conteos de los chips de Alertas salen del resumen del servidor; ninguna lista de la oleada tiene una tira de pestañas para filtrar; ningún trabajo firmado cambia de parámetros; harmony en verde en las 14 rutas.
+
+---
+
+### Task 9: Oleada O4, Copias, continuidad, imágenes, servidores de sitio e inscripción (11 páginas)
+
+Atera: no tiene copias ni continuidad; se aplican los patrones de «Patrones UI/UX transversales» (773-796). Módulos: `backup`, `bcp`, `provisioning`, `site-servers`, `enrollment`.
+
+**Files:**
+- Modify: `frontend/src/modules/{backup,bcp,provisioning,site-servers,enrollment}/**`
+- Modify: `frontend/src/i18n/{en,es}/{backup,bcp,provisioning,siteServers,enrollment}.ts`
+
+**Rutas de la oleada:** `/backup,/backup/repositories,/backup/policies,/backup/coverage,/backup/offsite,/bcp,/bcp/plans/plan-1,/bcp/report,/bcp/tests/test-1,/bcp/tests/test-1/report,/provisioning,/provisioning/images,/provisioning/profiles,/site-servers,/site-servers/ss-1,/enrollment`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 4.1 | `backup/BackupPointsPage.tsx` | `/backup` | L |
+| 4.2 | `backup/RepositoriesPage.tsx` | `/backup/repositories` | L |
+| 4.3 | `backup/CoveragePage.tsx` | `/backup/coverage` | L |
+| 4.4 | `backup/OffsitePage.tsx` | `/backup/offsite` | FO |
+| 4.5 | `bcp/PlansPage.tsx` | `/bcp` | L |
+| 4.6 | `provisioning/ProvisioningRunsPage.tsx` | `/provisioning` | L |
+| 4.7 | `provisioning/ImagesPage.tsx` | `/provisioning/images` | L |
+| 4.8 | `provisioning/ProfilesPage.tsx` | `/provisioning/profiles` | L |
+| 4.9 | `site-servers/SiteServersPage.tsx` | `/site-servers` | L |
+| 4.10 | `site-servers/SiteServerDetailPage.tsx` | `/site-servers/:siteServerId` | F |
+| 4.11 | `enrollment/EnrollmentPage.tsx` | `/enrollment` | L |
+| + | `backup/BackupPolicyEditor.tsx` | `/backup/policies` | FO |
+| + | `bcp/PlanDetail.tsx` | `/bcp/plans/:planId` | F |
+| + | `bcp/TestRecorder.tsx` | `/bcp/tests/:testId` | FO |
+| + | `bcp/BcpReport.tsx` | `/bcp/report`, `/bcp/tests/:testId/report` | O |
+
+**4.1 `BackupPointsPage.tsx` (`/backup`, L).** `backupNav` → `SectionNav`. Cinco tiles; `?verify` se conserva; `deviceId` (hoy `useState`) pasa a `useUrlFilters(["device", "client"])`; `ClientFilter`; «Hacer una copia» principal (`useNewParam("run")`, `RunBackupDialog`); restaurar en `RestoreDialog` como hoy. Pruebas: `__tests__/backup.test.tsx` adaptadas; receta L.
+
+**4.2 `RepositoriesPage.tsx` (`/backup/repositories`, L).** `?state` → `FilterChips` (activos / retirados); «Nuevo repositorio» (`useNewParam("repository")`); retirar con confirmación (fase 3). Pruebas: `__tests__/retire.test.tsx` adaptadas; receta L.
+
+**4.3 `CoveragePage.tsx` (`/backup/coverage`, L).** `?coverage` → `FilterChips` (cubiertos, sin cubrir, todos) con los conteos que la página ya calcula del informe; `ClientFilter`. Pruebas: `coverage.fixture.test.tsx` adaptadas.
+
+**4.4 `OffsitePage.tsx` (`/backup/offsite`, FO).** El asistente de destino externo (clave pública, prueba, guardado): `FormPage`-like dentro de `PageHead` con `SectionNav`; cada destino como `FormSection`; su edición con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy, «editing/values» en estado y dos primarios); `TargetDialog` para el alta (`useNewParam("target")`). Pruebas: `__tests__/offsite.test.tsx` adaptadas; receta FO.
+
+**4.5 `PlansPage.tsx` (`/bcp`, L), `PlanDetail.tsx` (F), `TestRecorder.tsx` (FO), `BcpReport.tsx` (O).** Lista de planes con cuatro tiles, búsqueda, `ClientFilter` y alta (`useNewParam("plan")`, el `editing` de hoy). `PlanDetail`: `DetailHead` con el estado del plan, acciones (editar, programar prueba), `UrlTabs` si el plan tiene más de una sección (pasos, pruebas, evidencias). `TestRecorder`: el registro de una prueba es un formulario largo (16 campos): `FormSection` por paso y `SaveBar` con `UnsavedGuard` (perder un ejercicio a medio registrar es lo que la guarda evita). `BcpReport`: informe imprimible, `PageHead` con «Imprimir» y volver. Pruebas: `__tests__/bcp.test.tsx` adaptadas; recetas L, F y FO en sus páginas.
+
+**4.6 `ProvisioningRunsPage.tsx` (`/provisioning`, L).** `provisioningNav` → `SectionNav`; `?state` → `FilterChips`; «Construir un equipo» (`useNewParam("run")`, `ProvisionDialog`). Imaging no está en el riel ni en la búsqueda (decisión P3 del proyecto de clientes); la miga la pone bajo Administración y eso no cambia. Receta L.
+
+**4.7 `ImagesPage.tsx` (`/provisioning/images`, L).** `?state` → chips; «Nueva imagen» (`useNewParam("image")`). Receta L.
+
+**4.8 `ProfilesPage.tsx` (`/provisioning/profiles`, L).** `?enabled` → chips (activos / todos); alta y edición con `useNewParam("profile")` y `?edit=<id>`. Receta L.
+
+**4.9 `SiteServersPage.tsx` (`/site-servers`, L).** `?state` → chips; `ClientFilter`; «Promover un equipo» (`useNewParam("promote")`, `PromoteDialog`). Receta L.
+
+**4.10 `SiteServerDetailPage.tsx` (`/site-servers/:siteServerId`, F).** `DetailHead` con el equipo, su estado y su cliente y sede; «Encender» (Wake-on-LAN, el `wakeJobId` de hoy) como acción; `useRecordTitle`. Prueba: «names the site server in the browser tab».
+
+**4.11 `EnrollmentPage.tsx` (`/enrollment`, L con pestañas).** Ya tiene `?tab=`: pasa a `UrlTabs` (tokens, certificados) con el mismo parámetro; «mostrar revocados» de cada pestaña → chip `revoked`; «solo ilimitados» → chip `unlimited`; la búsqueda → `q`; el alta de un token (`formOpen`) → `useNewParam("token")`; el token recién creado se muestra una vez como hoy. Pruebas: `EnrollmentPage.test.tsx` adaptadas; receta L sobre `revoked`.
+
+- [ ] **Step 1:** pruebas nuevas; `npx vitest run src/modules/backup src/modules/bcp src/modules/provisioning src/modules/site-servers src/modules/enrollment` falla en ellas.
+- [ ] **Step 2:** aplicar página por página.
+- [ ] **Step 3:** textos en los cinco catálogos; sus `*.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7 (las críticas incluyen `BackupPolicyEditor.tsx`, `PlanDetail.tsx`, `TestRecorder.tsx` y `BcpReport.tsx`).
+- [ ] **Step 5: Commit** (`feat(ui): wave 4, backup, continuity, imaging, site servers and enrollment`).
+
+**Criterios de aceptación:** el registro de una prueba de continuidad avisa antes de salir; ningún diálogo de alta queda sin URL; harmony en verde en las 16 rutas.
+
+---
+
+### Task 10: Oleada O5, Activos: licencias, suscripciones y direcciones IP (11 páginas)
+
+Atera: «Asset Inventory» (216-229), «Network Discovery» (230-241), «Admin › Business administration › Contracts» (708-720) y «Contract expiration» (756-759) como referencia de renovaciones. Módulos: `licenses`, `subscriptions`, `ipam`. Es la oleada con más pantallas extra (siete); el coordinador puede darle dos implementadores, uno para `licenses` + `subscriptions` y otro para `ipam`, porque no comparten archivos.
+
+**Files:**
+- Modify: `frontend/src/modules/{licenses,subscriptions,ipam}/**`
+- Modify: `frontend/src/i18n/{en,es}/{licenses,subscriptions,ipam}.ts`
+
+**Rutas de la oleada:** `/licenses,/licenses/lic-1,/licenses/vendors,/licenses/products,/licenses/compliance,/licenses/review-queue,/licenses/renewals,/subscriptions,/subscriptions/sub-1,/subscriptions/spend,/subscriptions/renewals,/ipam,/ipam/subnets/subnet-1,/ipam/drift,/ipam/search,/ipam/registry,/ipam/scan-authorizations,/ipam/import`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 5.1 | `licenses/LicensesPage.tsx` | `/licenses` | L |
+| 5.2 | `licenses/ProductsPage.tsx` | `/licenses/products` | L |
+| 5.3 | `licenses/VendorsPage.tsx` | `/licenses/vendors` | L |
+| 5.4 | `subscriptions/SubscriptionsPage.tsx` | `/subscriptions` | L |
+| 5.5 | `ipam/SubnetTreePage.tsx` | `/ipam` | L |
+| 5.6 | `ipam/SubnetDetailPage.tsx` | `/ipam/subnets/:subnetId` | F |
+| 5.7 | `ipam/DriftPage.tsx` | `/ipam/drift` | L |
+| 5.8 | `ipam/SearchPage.tsx` | `/ipam/search` | L |
+| 5.9 | `ipam/RegistryPage.tsx` | `/ipam/registry` | FO |
+| 5.10 | `ipam/ScanAuthorizationsPage.tsx` | `/ipam/scan-authorizations` | L |
+| 5.11 | `ipam/ImportPage.tsx` | `/ipam/import` | O |
+| + | `licenses/LicenseDetail.tsx` | `/licenses/:licenseId` | F |
+| + | `licenses/ComplianceDashboard.tsx` | `/licenses/compliance` | O |
+| + | `licenses/ReviewQueue.tsx` | `/licenses/review-queue` | L |
+| + | `licenses/RenewalCalendar.tsx` | `/licenses/renewals` | O |
+| + | `subscriptions/SubscriptionDetail.tsx` | `/subscriptions/:subscriptionId` | F |
+| + | `subscriptions/SpendDashboard.tsx` | `/subscriptions/spend` | O |
+| + | `subscriptions/RenewalCalendar.tsx` | `/subscriptions/renewals` | O |
+
+**5.1 `LicensesPage.tsx` (`/licenses`, L) y sus pantallas.** `licenseNav` → `SectionNav` (licencias, productos, proveedores, cumplimiento, revisión, renovaciones). `search` (hoy `useState`) → `useUrlFilters(["q", "type", "client"])`; chip de tipo de licencia; `ClientFilter` (la ficha 360 enlaza aquí con `?client=`); cinco tiles; «Nueva licencia» con `useNewParam("license")` (`NewLicenseDialog`; la clave se ve una vez como hoy). `LicenseDetail`: `DetailHead` (producto, tipo como etiqueta, cliente), tiles de asientos (con derecho, en uso, libres), asignaciones debajo, `useRecordTitle`. `ComplianceDashboard` y `RenewalCalendar`: `PageHead` + `SectionNav` + sus paneles. `ReviewQueue`: receta L con `BulkBar` donde hoy aprueba en lote. Pruebas: `__tests__/licenses.test.tsx` adaptadas; recetas L y F.
+
+**5.2 `ProductsPage.tsx` (`/licenses/products`, L).** `SectionNav`; búsqueda; alta y edición en diálogo (`useNewParam("product")`, `?edit=<id>`), con las reglas de coincidencia como hoy. Receta L.
+
+**5.3 `VendorsPage.tsx` (`/licenses/vendors`, L).** `SectionNav`; búsqueda; «Nuevo proveedor» (`useNewParam("vendor")`). Receta L.
+
+**5.4 `SubscriptionsPage.tsx` (`/subscriptions`, L) y sus pantallas.** Seis tiles; `search` → `useUrlFilters(["q", "cycle", "client"])`; chip de ciclo de facturación; `ClientFilter`; «Nueva suscripción» (`useNewParam("subscription")`). Un menú de sección nuevo con `SectionNav` (suscripciones, gasto, renovaciones), que hoy no existe y deja `SpendDashboard` y `RenewalCalendar` alcanzables solo por enlaces sueltos. `SubscriptionDetail`: `DetailHead` (servicio, ciclo, cliente), tiles (coste, asientos, renovación), `useRecordTitle`; la edición de la ficha (ocho campos) con `useDraft` + `SaveBar` en lugar de su botón propio. Pruebas: `__tests__/subscriptions.test.tsx` adaptadas; recetas L, F y FO.
+
+**5.5 `SubnetTreePage.tsx` (`/ipam`, L).** `IpamNav` → `SectionNav`. Hoy: `filters` en `useState` (VRF, sede, tipo…), `?register=1` abre el alta, `?state` la vista, once selects. Los filtros pasan a `useUrlFilters(["q", "vrf", "site", "kind", "state", "client"])` con chips donde los valores son pocos (tipo, estado) y `.chip-select` donde son muchos (VRF, sede); `?register=1` pasa a `?new=subnet` con `useNewParam("subnet")`, y `?register=1` se sigue leyendo una vez para no romper un enlace guardado (redirige a `?new=subnet` con `replace`). El árbol de subredes se conserva. Pruebas: `__tests__/ipam.test.tsx`, `subnet-actions.test.tsx` adaptadas; nueva: «still opens the register dialog from an old ?register=1 link».
+
+**5.6 `SubnetDetailPage.tsx` (`/ipam/subnets/:subnetId`, F).** La única página con pestañas en `useState` de toda la consola (`const [tab, setTab] = useState<string>("addresses")`). Pasan a `useUrlTab(["addresses", "ranges", "sweeps", "drift"], "addresses")` y `UrlTabs`. `DetailHead` (prefijo, tipo, VRF y sede como contexto, acciones de hoy: barrer, registrar dirección). `useRecordTitle(prefijo)`. Pruebas: receta F (era la que faltaba: «puts the tab in the URL»). La variante `/ipam/subnets/subnet-1?tab=sweeps` se pide al kit para `routes.mjs`.
+
+**5.7 `DriftPage.tsx` (`/ipam/drift`, L).** `?class`, `?subnet` → chips de clase de hallazgo con su conteo (la página ya los tiene: cuatro tiles) y `.chip-select` de subred; el hallazgo abierto (`openId`) en su panel con `?finding=<id>`; nota y «hasta» en el formulario de exención. Receta L.
+
+**5.8 `SearchPage.tsx` (`/ipam/search`, L).** `query` (hoy `useState` con un borrador) pasa a `?q=` al enviar (el borrador sigue local hasta pulsar «Buscar», porque la búsqueda va al servidor); resultados con `ShowingCount`. Pruebas: `search-page.test.tsx` adaptadas.
+
+**5.9 `RegistryPage.tsx` (`/ipam/registry`, FO).** VRF, sedes y VLAN: tres `FormSection`, cada una una tabla con su alta en diálogo (`useNewParam("vrf")`, `"vlan"`). Sin `SaveBar` (cada fila se guarda al confirmar). Receta L en cada tabla.
+
+**5.10 `ScanAuthorizationsPage.tsx` (`/ipam/scan-authorizations`, L).** «incluir revocadas» → chip `revoked`; «Conceder» (`useNewParam("grant")`) con prefijo, VRF, nota y caducidad; revocar con confirmación. Pruebas: `scan-authorizations-picker.test.tsx` adaptadas.
+
+**5.11 `ImportPage.tsx` (`/ipam/import`, O).** El asistente de importación (archivo, columnas, mapeo, vista previa, destino): `Steps` del kit arriba, una `FormSection` por paso, «Simulación» y «Importar» como hoy; las exportaciones como acciones secundarias de la cabecera. `UnsavedGuard` mientras hay un archivo cargado sin importar.
+
+- [ ] **Step 1:** pruebas nuevas; `npx vitest run src/modules/licenses src/modules/subscriptions src/modules/ipam` falla en ellas.
+- [ ] **Step 2:** aplicar página por página (`licenses` y `subscriptions` por un implementador, `ipam` por otro si el coordinador lo reparte).
+- [ ] **Step 3:** textos en los tres catálogos; sus `*.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7 (las críticas incluyen las siete pantallas extra).
+- [ ] **Step 5: Commit** (`feat(ui): wave 5, assets: licenses, subscriptions and IP addresses`).
+
+**Criterios de aceptación:** `/licenses?client=<id>`, `/subscriptions?client=<id>` e `/ipam?client=<id>` (los enlaces de la ficha 360) abren la lista estrechada a ese cliente; ninguna pestaña de la oleada vive en `useState`; harmony en verde en las 18 rutas.
+
+---
+
+### Task 11: Oleada O6, Documentación, informes, cambios, presupuesto, personas y credenciales (9 páginas)
+
+Atera: «More › Knowledge Base» (283-295), «Reports › Classic Reports» (242-266), «Advanced Reports» (267-278), «Admin › Users and security › Technicians» (384-393) como referencia de personas. Módulos: `docs`, `change`, `budget`, `people`, `credentials`, `reporting` (este último sin `*Page.tsx`: dos pantallas extra).
+
+**Files:**
+- Modify: `frontend/src/modules/{docs,change,budget,people,credentials,reporting}/**`
+- Modify: `frontend/src/i18n/{en,es}/{docs,change,budget,people,credentials,reporting}.ts`
+
+**Rutas de la oleada:** `/docs,/changes,/changes/approvals,/changes/calendar,/changes/chg-1,/budget,/budget/planner,/budget/expenses,/budget/confirm,/budget/admin,/people,/people/unmatched,/people/person-maria,/credentials,/reports,/reports/patch-compliance`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 6.1 | `docs/DocsPage.tsx` | `/docs` | L + O |
+| 6.2 | `change/ChangesPage.tsx` | `/changes` | L |
+| 6.3 | `budget/BudgetPlannerPage.tsx` | `/budget/planner` | FO |
+| 6.4 | `budget/ExpensesPage.tsx` | `/budget/expenses` | L |
+| 6.5 | `budget/ConfirmationQueuePage.tsx` | `/budget/confirm` | L |
+| 6.6 | `budget/BudgetAdminPage.tsx` | `/budget/admin` | FO |
+| 6.7 | `people/PersonPage.tsx` | `/people/:personId` | F |
+| 6.8 | `people/UnmatchedPage.tsx` | `/people/unmatched` | L |
+| 6.9 | `credentials/CredentialsPage.tsx` | `/credentials` | L |
+| + | `budget/BudgetDashboard.tsx` | `/budget` | O |
+| + | `change/ApprovalQueue.tsx` | `/changes/approvals` | L |
+| + | `change/ChangeCalendar.tsx` | `/changes/calendar` | O |
+| + | `change/ChangeDetail.tsx` | `/changes/:changeId` | F |
+| + | `reporting/ReportCatalogue.tsx` | `/reports` | L |
+| + | `reporting/ReportView.tsx` | `/reports/:reportKey` | O |
+
+**6.1 `DocsPage.tsx` (`/docs`).** Hoy: `?article`, `?document`, búsqueda y categoría en `useState`, cinco tiles, editor en línea, registros y documentos subidos, versiones. La lista de artículos es receta L: `search` y `category` → `useUrlFilters(["q", "category", "client"])` con chips de categoría y `ClientFilter`; el artículo abierto (`?article=`) en `DetailGrid` (lista a la izquierda, lector a la derecha en escritorio; el lector solo, con volver, en móvil); el editor de un artículo con `useDraft` + `SaveBar` + `UnsavedGuard` (hoy pierde el texto si se navega fuera); «Nuevo artículo» ya llega por `?new=article` (Task 4). Pruebas: `DocsPage.test.tsx`, `docsClient.test.tsx` adaptadas; recetas L y FO sobre el editor.
+
+**6.2 `ChangesPage.tsx` (`/changes`, L) y sus pantallas.** Cuatro tiles; filtros de estado como chips (hoy los da `?state` implícito en la tabla); `ClientFilter`; «Nuevo cambio» por `useNewParam("change")` (Task 4); «Calendario» y «Aprobaciones» en un `SectionNav` nuevo. `ChangeDetail`: `DetailHead` (título, estado, riesgo, cliente; acciones de aprobación según el permiso de hoy), `UrlTabs` si tiene más de una sección; **su `document.title` propio** (`ChangeDetail.tsx:180-197` y la clave `change.detail.tabTitle`) **se sustituye por `useRecordTitle(change.title)`** y la clave se borra de los dos catálogos (el título lo compone `documentTitle`). `ApprovalQueue`: receta L. `ChangeCalendar`: `PageHead` + `SectionNav`. Pruebas: `__tests__/change.test.tsx`, `change.es.test.tsx` (la prueba del título espera `"<título> · Changes · Novieri RMM"`); recetas L y F.
+
+**6.3 `BudgetPlannerPage.tsx` (`/budget/planner`, FO).** La rejilla de planificación (celdas por línea y mes, `cells` y `lineIds` en estado): `PageHead` con el presupuesto elegido como `.chip-select` (`?budget=<id>`), la rejilla dentro de un `Panel bare`, y `useDraft` sobre las celdas + `SaveBar` + `UnsavedGuard`; «Cerrar presupuesto» con su confirmación como hoy; «Nuevo presupuesto» con `useNewParam("budget")`. Presupuesto trabaja con un cliente cada vez (decisión de la fase 3): con «Todos mis clientes» la página pide elegir uno arriba, como hoy. Pruebas: `__tests__/budget.test.tsx` adaptadas; receta FO.
+
+**6.4 `ExpensesPage.tsx` (`/budget/expenses`, L).** `statusFilter`, `categoryFilter`, `fromDate`, `toDate` (hoy `useState`) → `useUrlFilters(["status", "category", "from", "to"])`; chips de estado; `.chip-select` de categoría; fechas en dos campos `date` dentro de la barra; «Nuevo gasto» (`useNewParam("expense")`); editar en diálogo. Receta L.
+
+**6.5 `ConfirmationQueuePage.tsx` (`/budget/confirm`, L).** Cola de gastos por confirmar: `ShowingCount`, confirmar y anular con su diálogo; vacío «No hay gastos por confirmar.». Receta L.
+
+**6.6 `BudgetAdminPage.tsx` (`/budget/admin`, FO).** Moneda base, mes de inicio, centros de coste, categorías y tipos de cambio (16 campos, cuatro diálogos). `FormSection` «General» (moneda y mes) con `useDraft` + `SaveBar`; tres `FormSection` con su tabla y su alta en diálogo (`useNewParam("costCenter")`, `"category"`, `"rate"`); la edición en línea de una fila (`editingId`) pasa a su diálogo. Pruebas: receta FO sobre «General».
+
+**`BudgetDashboard.tsx` (`/budget`, O).** `PageHead` con el cliente elegido; tiles; el gráfico de previsto contra real (`components/chart.tsx`) en un `Panel`; `SectionNav` del presupuesto (resumen, planificación, gastos, confirmar, administración) que sustituye a la tira de `budgetState.tsx`.
+
+**6.7 `PersonPage.tsx` (`/people/:personId`, F).** `DetailHead` (nombre, cargo y departamento como contexto, «Editar» como acción); tiles de lo que tiene (equipos, licencias, asientos); siete paneles de hoy agrupados en `UrlTabs` (`equipment`, `licenses`, `tickets`, `history`); `useRecordTitle`. Pruebas: `__tests__/people.test.tsx` adaptadas; receta F.
+
+**6.8 `UnmatchedPage.tsx` (`/people/unmatched`, L).** Tres tablas de lo que no tiene persona: chips por tipo (equipos, licencias, asientos) con su conteo en lugar de tres tablas seguidas; asignar en `PersonPickerDialog` como hoy. Receta L.
+
+**6.9 `CredentialsPage.tsx` (`/credentials`, L).** Hoy: `Tabs` en `?state` y `?new`. La tira → `FilterChips` con `state`; `?new` ya existe (se mantiene, con `useNewParam("credential")`); cuatro tiles; `ClientFilter` (las globales llevan su chip «Para todos los clientes» como hoy); retirar una credencial pide el motivo como hoy (invariante 3: el secreto se ve una vez, nunca en una lista). Pruebas: `CredentialsPage.test.tsx` adaptadas; receta L.
+
+**`ReportCatalogue.tsx` (`/reports`, L) y `ReportView.tsx` (`/reports/:reportKey`, O).** El catálogo: tarjetas por informe con búsqueda y chips de familia; `?access` se conserva. El informe: `PageHead` con volver «Informes», sus parámetros en una `FormSection` («Ejecutar» y «Exportar» como hoy), el resultado debajo; `useRecordTitle(nombre del informe)`. Pruebas: `__tests__/reporting.test.tsx` adaptadas.
+
+- [ ] **Step 1:** pruebas nuevas; `npx vitest run src/modules/docs src/modules/change src/modules/budget src/modules/people src/modules/credentials src/modules/reporting` falla en ellas.
+- [ ] **Step 2:** aplicar página por página.
+- [ ] **Step 3:** textos en los seis catálogos; sus `*.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7 (con las seis pantallas extra).
+- [ ] **Step 5: Commit** (`feat(ui): wave 6, documentation, reports, changes, budget, people and credentials`).
+
+**Criterios de aceptación:** el editor de artículos y la planificación del presupuesto avisan antes de salir; `ChangeDetail` ya no escribe `document.title` por su cuenta; harmony en verde en las 16 rutas.
+
+---
+
+### Task 12: Oleada O7, Administración y cuenta (6 páginas)
+
+Atera: «Admin › My account › Account settings» (345-359), «My profile» (360-368), «Admin › Users and security › Access roles» (403-423), «Security and authentication» (424-435), «AI Center» (308-327). Módulos: `settings`, `profile`, `ai-admin`, `ai-automation`. Pocas páginas, pero Configuración tiene nueve pestañas con sus formularios: es la oleada de la barra de guardado.
+
+**Files:**
+- Modify: `frontend/src/modules/{settings,profile,ai-admin,ai-automation}/**`
+- Modify: `frontend/src/i18n/{en,es}/{settings,profile,aiAdmin,aiAutomation}.ts`
+
+**Rutas de la oleada:** `/settings,/settings?tab=users,/settings?tab=roles,/settings?tab=email,/settings?tab=microsoft,/settings?tab=sessions,/settings?tab=ai-connections,/profile,/profile/security,/portal/security,/assistant,/assistant/settings,/assistant/autonomy,/assistant/actions,/assistant/actions/act-1`
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 7.1 | `settings/SettingsPage.tsx` (y sus pestañas `*Tab.tsx`) | `/settings` | FO |
+| 7.2 | `profile/ProfilePage.tsx` | `/profile` | FO |
+| 7.3 | `profile/SecurityPage.tsx` | `/profile/security`, `/portal/security` | FO |
+| 7.4 | `ai-admin/AiSettingsPage.tsx` | `/assistant/settings` | FO |
+| 7.5 | `ai-automation/AutonomyDialPage.tsx` | `/assistant/autonomy` | FO |
+| 7.6 | `ai-automation/ActionsPage.tsx` | `/assistant/actions`, `/assistant/actions/:actionId` | L, F |
+| + | `ai-admin/ChatPanel.tsx` | `/assistant` | O |
+
+**7.1 `SettingsPage.tsx` (`/settings`, FO).** Ya tiene `?tab=` y una botonera de chips (diseño de ajustes de 2026-09-10). La botonera pasa a `UrlTabs` (una fila que se desplaza) con las mismas claves. Cada pestaña que edita algo (organización, correo, Microsoft, sesiones, conexiones de IA, roles, niveles de servicio, notificaciones) usa `useDraft` + **una** `SaveBar` + `UnsavedGuard`, y pierde sus botones «Guardar» propios; las que piden un segundo factor reciente para guardar (correo, roles: own-auth fase 2) lo siguen pidiendo desde `onSave` (`useStepUp`). Usuarios es una lista (receta L: búsqueda, chips de estado, `BulkBar` donde hoy hay acciones en lote, `?new=user` para invitar). Los campos conservan su `help` fuera de la etiqueta (prueba que ya existe). Pruebas: los diecinueve archivos de `modules/settings/__tests__/` adaptados: donde una prueba pulsa el «Save» de un panel, pulsa el «Save» de la barra; nuevas: receta FO en organización y correo («asks before leaving with an unsaved organization name», «switching tab with an unsaved change asks first»).
+
+**7.2 `ProfilePage.tsx` (`/profile`, FO).** Nombre, idioma y datos de contacto: `FormPage` sin volver (se llega del menú de la cuenta; la miga dice «Tu cuenta»), una `FormSection`, `SaveBar`. El idioma se aplica al guardar, como hoy (`languagePicked`). Pruebas: `ProfilePage.test.tsx`, `ProfilePage.language.test.tsx` adaptadas; receta FO.
+
+**7.3 `SecurityPage.tsx` (`/profile/security` y, en el portal, `/portal/security`, FO).** Contraseña, llaves de acceso, segundo factor, códigos de recuperación, sesiones (diez paneles, siete diálogos, cuatro primarios). `FormSection` por tema, en este orden: cómo inicias sesión (contraseña, llaves), segundo factor, recuperación, sesiones abiertas; cada acción conserva su diálogo y su confirmación, y los primarios bajan a uno por sección. En el portal la página va en `PortalShell` como hoy. Pruebas: `SecurityPage.test.tsx`, `.contact.test.tsx`, `.microsoft.test.tsx`, `.passkeyGesture.test.tsx` adaptadas (solo consultas).
+
+**7.4 `AiSettingsPage.tsx` (`/assistant/settings`, FO) y `ChatPanel.tsx` (`/assistant`, O).** Proveedor, salida a internet y marcas de inyección: `FormSection` por grupo con `useDraft` + `SaveBar`. El chat conserva su panel; `PageHead` «Asistente» con «Ajustes» como acción secundaria para quien tiene `ai.admin`; si el asistente está apagado, el estado vacío dice la causa y a quién pedirlo (spec §10.6). Pruebas: `__tests__/aiAdmin.test.tsx` adaptadas; receta FO.
+
+**7.5 `AutonomyDialPage.tsx` (`/assistant/autonomy`, FO).** El dial de autonomía ya tiene borrador, confirmación y «guardado»: pasa a `useDraft` + `SaveBar`; «Guardar» abre la `ConfirmDialog` de hoy (subir la autonomía es un acto que se confirma). Pruebas: `__tests__/aiAutomationPrimitives.test.tsx` adaptadas.
+
+**7.6 `ActionsPage.tsx` (`/assistant/actions`, L; `/assistant/actions/:actionId`, F).** La lista de acciones del asistente: chips de estado (propuestas, aprobadas, ejecutadas, rechazadas), `ShowingCount`. La acción: `DetailHead` con su estado, la vista previa (`ActionPreview`) y aprobar / rechazar con confirmación como hoy; `useRecordTitle`. Pruebas: `__tests__/actionsPage.test.tsx` adaptadas; recetas L y F.
+
+- [ ] **Step 1:** pruebas nuevas; `npx vitest run src/modules/settings src/modules/profile src/modules/ai-admin src/modules/ai-automation` falla en ellas.
+- [ ] **Step 2:** aplicar página por página, Configuración pestaña por pestaña.
+- [ ] **Step 3:** textos en los cuatro catálogos; sus `*.es.test.tsx` en verde.
+- [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 7.
+- [ ] **Step 5: Commit** (`feat(ui): wave 7, settings, your account and the assistant on one save bar`).
+
+**Criterios de aceptación:** ninguna pantalla de la oleada tiene más de una forma de guardar; cambiar de pestaña en Configuración con cambios pide confirmación; harmony en verde en las 15 rutas.
+
+---
+
+### Task 13: Oleada O8, Acceso, consentimiento y alta del dueño (12 páginas)
+
+Diseño §4: «las pantallas de acceso y el consentimiento OAuth reciben la misma marca dentro de su propio marco». Atera no sirve aquí (sus pantallas de acceso no son parte del recorrido). Módulos: `auth`, `setup`. Las doce páginas comparten un marco, `AuthCard.tsx`: casi todo el cambio está en él.
+
+**Files:**
+- Modify: `frontend/src/modules/auth/**`, `frontend/src/modules/setup/**`
+- Modify: `frontend/src/i18n/{en,es}/{auth,setup}.ts`
+- `frontend/src/preview/PreviewPage.tsx` **no** se toca: su sección `AuthCard embedded` ya dibuja el marco, y lo dibujará nuevo en cuanto cambie `AuthCard.tsx`.
+
+**Rutas de la oleada:** `/sign-in,/sign-in/factor,/sign-in/enroll,/sign-in/recovery-codes,/sign-in/microsoft,/forgot-password,/reset-password,/invite,/recover,/portal/sign-in` (y `/oauth/authorize`, que la puerta no recorre: `EXCLUDED`, porque necesita la petición de una aplicación de IA; se prueba en jsdom y se fotografía a mano con el servidor de desarrollo)
+
+| # | Archivo | Ruta | Receta |
+|---|---|---|---|
+| 8.1 | `auth/SignInPage.tsx` | `/sign-in` | O (marco) |
+| 8.2 | `auth/FactorPage.tsx` | `/sign-in/factor` | O |
+| 8.3 | `auth/EnrollPage.tsx` | `/sign-in/enroll` | O |
+| 8.4 | `auth/RecoveryCodesPage.tsx` | `/sign-in/recovery-codes` | O |
+| 8.5 | `auth/MicrosoftCallbackPage.tsx` | `/sign-in/microsoft` | O |
+| 8.6 | `auth/ForgotPasswordPage.tsx` | `/forgot-password` | O |
+| 8.7 | `auth/ResetPasswordPage.tsx` | `/reset-password` | O |
+| 8.8 | `auth/InvitePage.tsx` | `/invite` | O |
+| 8.9 | `auth/RecoverPage.tsx` | `/recover` | O |
+| 8.10 | `auth/PortalSignInPage.tsx` | `/portal/sign-in` | O |
+| 8.11 | `auth/ConsentPage.tsx` | `/oauth/authorize` | O |
+| 8.12 | `setup/SetupPage.tsx` | (sin ruta: `SetupGate` la dibuja en cualquier dirección mientras la instalación no tiene dueño) | O |
+
+**El marco (`AuthCard.tsx`).** Hoy: una tarjeta de 480 px sobre el fondo, el titular, la introducción, el contenido y los dos botones de idioma; sin marca. Pasa a:
+- arriba de la tarjeta, fuera de ella, `NovieriLockup height={24}` centrado (el conjunto «NOVIERI | RMM» en tinta y su descriptor en la tinta secundaria);
+- la tarjeta igual (10 px, la sombra, 32 px de relleno), su titular en el escalón H1;
+- el título de la pestaña: cada pantalla de acceso se llama «`<titular>` · Novieri RMM» (hoy todas se llaman igual que `index.html`). Un componente interno `function TabTitle({ page }: { page: string }) { useDocumentTitle(page); return null; }` se dibuja dentro de `AuthCard` solo cuando no es `embedded` (en `/__preview` la tarjeta no es la página y no debe renombrar la pestaña);
+- abajo, el selector de idioma de hoy y una línea en la tinta secundaria con el nombre del producto (`PRODUCT_NAME`), nada más (Evidence on Hand: sin lemas ni afirmaciones);
+- los estilos en línea de hoy (`GROUND`, `CARD`, `HEADLINE`, `SECTION_HEADING`) pasan a clases en `modules/auth/auth.css` (nuevo) con tokens, para que la puerta de armonía y `contrast.test.ts` (que lee `src/shell/*.css`, no este archivo) no dependan de un estilo en JSX; `jsx-tokens.test.ts` deja de verlos.
+
+Cada página conserva sus textos, sus llamadas y sus errores; solo usa el marco. Detalles por página:
+- **8.1 `SignInPage`**: correo y contraseña en un `Field` cada uno; «Iniciar sesión» primario a lo ancho; «Iniciar sesión con Microsoft» secundario debajo con su separador «o»; «¿Olvidaste la contraseña?» como enlace.
+- **8.2 `FactorPage`**: el código de seis cifras con `inputMode="numeric"` como hoy; «recordar este equipo» y «usar un código de recuperación» como enlaces de texto, no botones.
+- **8.3 `EnrollPage`**: los dos caminos (llave de acceso, app de autenticación) como dos `AuthSection` con su titular H2; el QR y la clave como hoy.
+- **8.4 `RecoveryCodesPage`**: los códigos en una rejilla monoespaciada; «Copiar» y «Ya los guardé» (dos primarios hoy: «Ya los guardé» queda como único primario).
+- **8.5 `MicrosoftCallbackPage`**: el estado de espera y el error con `AuthAlert`.
+- **8.6 a 8.9**: formularios cortos en el marco; `NewPasswordFields` sin cambios.
+- **8.10 `PortalSignInPage`**: igual que 8.1, con el titular del portal.
+- **8.11 `ConsentPage`** (`RequireAuth bare`): la aplicación que pide acceso, lo que podrá hacer («todo lo que permite tu rol», texto de la Task 2 con «Novieri RMM»), «Aprobar» primario y «Rechazar» secundario; el aviso de seguridad (invariante 1c) en un `notice` de advertencia, en la tarjeta, junto al control (copy voice: la afirmación de seguridad va en el control, no recortada).
+- **8.12 `SetupPage`**: el alta del primer dueño en el marco, con el conjunto arriba; `useDocumentTitle`.
+
+- [ ] **Step 1:** pruebas nuevas en `modules/auth/__tests__/authCard.test.tsx` (nuevo):
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { AuthCard } from "../AuthCard";
+
+describe("the sign-in frame (redesign design §4)", () => {
+  it("carries the Novieri RMM lockup above the card", () => {
+    render(<AuthCard title="Sign in">x</AuthCard>);
+    expect(screen.getByRole("img", { name: "Novieri RMM" })).toBeInTheDocument();
+  });
+
+  it("names the screen in the browser tab", () => {
+    render(<AuthCard title="Sign in">x</AuthCard>);
+    expect(document.title).toBe("Sign in · Novieri RMM");
+  });
+
+  it("keeps one headline, at the page-title rung", () => {
+    render(<AuthCard title="Sign in">x</AuthCard>);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+});
+```
+
+y en `modules/setup/__tests__/setup.test.tsx`, «draws the lockup and names the page in the tab». Ejecutar `npx vitest run src/modules/auth src/modules/setup`: fallan las nuevas.
+- [ ] **Step 2:** el marco (`AuthCard.tsx`, `auth.css`), y después las doce páginas una a una; `npx vitest run src/modules/auth src/modules/setup src/App.routing.test.tsx` en verde tras cada una.
+- [ ] **Step 3:** textos (si alguno cambia) en `auth` y `setup`, en los dos idiomas; `auth.es.test.tsx`, `setup.es.test.tsx` en verde.
+- [ ] **Step 4:** `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` en verde (mide el marco nuevo en la sección `AuthCard embedded` de `/__preview`).
+- [ ] **Step 5:** «Cierre de cada oleada», pasos 1 a 7, con las diez rutas de arriba; `/oauth/authorize` se fotografía con `npx vite` y una petición de prueba (`/oauth/authorize?client_id=…` con los valores de `modules/auth/__tests__/consent.test.tsx`) y se adjunta al informe.
+- [ ] **Step 6: Commit** (`feat(ui): wave 8, sign-in, consent and owner setup in the Novieri frame`).
+
+**Criterios de aceptación:** las doce pantallas llevan el conjunto «Novieri RMM» y su título de pestaña; ninguna cambia una llamada ni un texto de error; harmony en verde en las diez rutas en los dos idiomas.
+
+---
+
+### Task 14: Revisión de toda la rama y camino a `main`
+
+Diseño §5 («al final hay una revisión de toda la rama») y la decisión del operador «Las dos líneas en paralelo… llegan a `main` en una sola PR».
+
+**Files:**
+- Ninguno nuevo. Esta tarea solo corrige lo que la revisión encuentre, en el archivo que lo tenga, con su prueba.
+
+- [ ] **Step 1: Las puertas, enteras, sobre la rama con las ocho oleadas fusionadas**
+
+```bash
+cd frontend
+npx vitest run
+npm run typecheck
+npm run build
+node scripts/harmony.mjs --strict-fixtures --lang en
+node scripts/harmony.mjs --strict-fixtures --lang es
+node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs
+```
+
+Expected: vitest con **más de 365 archivos y más de 7200 pruebas** y 0 fallos (la línea base del 2026-11-23 más las de este plan); las dos pasadas de armonía terminan en `ok …` sobre todas las rutas de `routes.mjs` (123: las 117 de hoy y las seis variantes de la Task 5, más las que una oleada haya pedido); `a11y-browser` con código 0.
+
+- [ ] **Step 2: Las guardas de alcance**
+
+```bash
+git diff --stat origin/main...HEAD -- backend agent deploy .github
+cd frontend && npx vitest run src/test/no-itms.test.ts src/lib/noVendorNames.test.ts
+for d in src/modules/*/; do ../.claude/skills/impeccable/scripts/impeccable detect --json "$d" > /dev/null || echo "findings: $d"; done
+```
+
+Expected: el primer comando no imprime nada (este proyecto no tocó el territorio del proyecto 4); las dos guardas en verde; el detector de impeccable sin hallazgos o con hallazgos ya revisados en la crítica de su oleada (cada uno, justificado en `.impeccable/critique/ignore.md` o corregido).
+
+- [ ] **Step 3: El censo de páginas**
+
+```bash
+cd frontend && find src -name "*Page.tsx" -not -name "*.test.tsx" | wc -l
+ls ../.impeccable/critique/ | wc -l
+```
+
+Expected: `86` páginas; una crítica persistida por cada página del Apéndice B y por cada pantalla extra (108 en total, más las del armazón), todas cerradas por su pulido (`critique-storage latest <archivo> --json` sale con código 2 en cada una: su lista de prioridades está cerrada). Una página sin crítica cerrada es un defecto de su oleada.
+
+- [ ] **Step 4: Revisión de la rama** (superpowers:requesting-code-review), contra el diseño, punto por punto:
+  - §1.1 el orden del riel, las carpetas, los anclados, Administración en acordeón con volver y búsqueda, los permisos iguales (`nav.test.ts` «keeps every code the rail had»);
+  - §1.2 «Nuevo» con destinos reales, la búsqueda, el selector sin cambio de comportamiento (`ClientSelector.test.tsx` sin cambios y en verde), el indicador de alertas, la cuenta;
+  - §1.3 la ficha 360, las pestañas de una línea, el chip «Cliente»;
+  - §2 que ninguna página dibuja su propia lista, ficha, pestañas o barra de guardado (`grep -rn "className=\"tabs\"" frontend/src/modules` vacío; `grep -rln "<Tabs" frontend/src/modules` solo donde la pestaña es de contenido);
+  - §3 los tokens (`tokens.test.ts`), el logotipo, el favicon, el título;
+  - §4 las 86 páginas y las 22 pantallas extra (Apéndice B), el portal, el acceso y el consentimiento;
+  - §5 las pruebas nuevas del Apéndice C, y que ninguna prueba se borró: `git log --diff-filter=D --name-only --format= origin/main..HEAD -- frontend/src | grep '\.test\.'` no imprime nada, y el revisor lee el diff de cada archivo de prueba cambiado buscando un `it(` quitado o un `.skip`.
+
+- [ ] **Step 5: Camino a `main`** (el operador despliega siempre desde `main`, CLAUDE.md 2026-09-11)
+  1. `git fetch origin && git rebase origin/main` en la rama del proyecto 3; resolver los choques (no debería haber en código: el proyecto 4 no toca `frontend/` salvo lo que lista el Apéndice E).
+  2. El coordinador une la rama del proyecto 4 y la de este en una sola rama de PR (decisión del operador); `npx vitest run`, `npm run typecheck`, `npm run build` y las puertas del proyecto 4 en verde sobre la unión.
+  3. Abrir **una** PR hacia `main` con las dos líneas, con el cuerpo que termina en la línea de atribución de PR de esta sesión. La CI completa (`frontend`, `a11y`, `harmony` en y es, `harmony-gate`, y los trabajos del proyecto 4) en verde.
+  4. El operador revisa las capturas de `harmony-en` y `harmony-es` (artefactos de la CI) y fusiona.
+
+- [ ] **Step 6: Lo que el informe de despliegue debe decir de este proyecto**
+
+Este proyecto **no añade** migraciones, claves de `.env`, cambios de OpenBao ni servicios: cambia la imagen `web` (la consola) y nada más. El informe de despliegue de la PR conjunta lo escribe el coordinador, con la secuencia completa del proyecto 4 (el VPS nuevo, `rmm.novieri.com`) en su orden. Si la consola se desplegara antes en el servidor de hoy, la secuencia completa es esta, desde `main` ya fusionado (la ruta es la de `deploy/README.md`):
+
+```sh
+cd /opt/it-suite/deploy
+docker compose exec openbao bao status
+# Si la línea "Sealed" dice "true", desellar con tres claves distintas (cada orden pide una):
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao status          # "Sealed false"
+git -C .. pull --ff-only
+./scripts/deploy.sh --plan                      # debe decir que reconstruye web; migrate no encuentra nada nuevo de este proyecto
+./scripts/deploy.sh
+```
+
+Qué comprobar después: `./scripts/deploy.sh` termina diciendo que la etiqueta desplegada es `HEAD`; en el navegador, la pestaña de `/dashboard` dice «Inicio · Novieri RMM» en español, el favicon es la N cobalto, el riel está en el orden del diseño y «Nuevo» abre sus entradas. **Vuelta atrás:** `./scripts/build-images.sh` imprime `Recent tags:`; si esa lista dice `(none yet)`, no hay etiqueta anterior a la que volver y la única vuelta atrás es restaurar desde copia (`deploy/README.md`, «Rollback»); si hay etiquetas, el informe del coordinador nombra la anterior con la orden que la calcula, nunca con un marcador para rellenar.
+
+**Criterios de aceptación:** todas las puertas en verde sobre la unión; ninguna línea fuera de `frontend/`, `DESIGN.md`, `PRODUCT.md`, `.impeccable/` y `docs/product.md`; el revisor de la rama aprueba punto por punto.
+
+---
+
+## Apéndice A: decisiones del plan
+
+| # | Decisión | Por qué | Dónde |
+|---|---|---|---|
+| D1 | La autoridad de los tokens pasa del prototipo v3 a `DESIGN.md` v4 (frontmatter con los nombres de las propiedades CSS), y `novieri-tokens.json` fija la marca | El diseño §3.2: «Una regla que la marca obligue a cambiar se cambia primero en `DESIGN.md`»; el prototipo v3 no tiene la marca | Task 1 |
+| D2 | `--ink-2` → `--ink`, `--line-2` → `--line`, `--sev-run` → el acento (con su icono propio) | La marca tiene dos tintas, un borde y la información en el tono del acento; la maqueta A lo pinta así | Task 1 |
+| D3 | El contador de alertas del riel es una etiqueta crítica con texto blanco; el activo lleva `--rail-mark` y un punto, no un borde de acento | Tabla de contraste de la marca; el acento mide 2,32:1 sobre el riel | Task 1 |
+| D4 | `--r-pill` solo para el interruptor y la barra de progreso | La marca retira la píldora de chips y etiquetas; esas dos formas se reconocen por su silueta | Task 1 |
+| D5 | `--accent-2` = hover de la marca; nuevo `--accent-3` = presionado | Valores de la marca | Task 1 |
+| D6 | El chip «Cliente» y la ficha 360 leen con `X-Client-Id` (`ApiClient.forClient`), sin parámetros nuevos en el servidor | Estrechar es lo que la base de datos ya impone (5a); evita once cambios de backend del proyecto 4 | Task 3 |
+| D7 | Router de datos (`createBrowserRouter`) | `useBlocker`, necesario para avisar antes de salir, solo existe ahí | Task 3 |
+| D8 | `?new=<tipo>` abre el diálogo de alta de una lista | Cada entrada de «Nuevo» es una URL real; un alta se enlaza | Task 3 |
+| D9 | «Activos» y «Más» son carpetas que se abren en el sitio; plegado el riel, sus páginas son iconos | Diseño §1.1; ningún destino a más de un clic | Task 4 |
+| D10 | «Administración» cambia el riel por su panel sin navegar; `/admin` sigue siendo la portada | Diseño §1.1 y Atera; la miga sigue teniendo destino | Task 4 |
+| D11 | «Añadir un equipo» sale de la barra y entra en «Nuevo → Equipo» y en la cabecera de Equipos; «Nuevo» es el único primario de la barra | Diseño §1.2 | Task 4 |
+| D12 | El icono del Asistente sale de la barra superior; el Asistente queda anclado al pie del riel y en la fila «Preguntar» de la búsqueda | Diseño §1.2 enumera la barra sin él; §1.1 lo ancla en el riel | Task 4 (**pregunta abierta 1**) |
+| D13 | En español, «Inicio», «Equipos» y «Documentación» en el riel y en sus páginas; el glosario lo anota | Diseño §1.1 | Task 4 y O1 |
+| D14 | La pestaña Activos de la ficha 360 son tres tarjetas (licencias, suscripciones, redes) con su número y su enlace | No existe un inventario de activos como el de Atera; los activos del riel son esos tres | Task 5 |
+| D15 | Las claves `itms.*` de `localStorage` y las cabeceras `X-ITMS-*` se quedan; «ITMS» desaparece de todo lo demás | La regla del proyecto 4 para identificadores internos y contratos (su diseño §1.2) | Task 2 |
+
+**Preguntas abiertas** (el coordinador las lleva al operador; el plan sigue con la respuesta por defecto indicada):
+
+1. **El Asistente en la barra superior** (D12). El 2026-09-08 el operador dijo «AI Analyst needs to be there»; el diseño del 2026-11-23 lo ancla al riel y no lo pone en la barra. Por defecto, el plan sigue el diseño, que es posterior y aprobado «tal cual». Si el operador lo quiere también en la barra, se devuelve el enlace a `AppShell.tsx` y la prueba de `responsive.test.ts` vuelve a exigirlo.
+2. **Métricas de CPU y memoria en la ficha del equipo.** La captura «atera 8» tiene un gráfico de 24 h; el servidor no guarda series (Apéndice E, B1). Por defecto, la ficha enseña las últimas lecturas de cada comprobación. ¿Quiere el operador que el proyecto 4, u otro, añada las series?
+3. **La pantalla de Alertas dividida en Alertas / Perfiles / Ajustes** (`?view=`, O3). Es una reorganización dentro de la misma ruta, a la manera de Atera (la configuración de alertas está en Administración). Por defecto, el plan la hace; si el operador prefiere que los perfiles vayan a Administración como página propia, eso es una ruta nueva y un cambio de `nav.ts` que se pediría al kit.
+4. **Las respuestas de la crítica de impeccable.** La skill pide preguntar al usuario tras cada crítica con tres o más asuntos. El plan las hace una vez (O1 o la Task 4) y las reutiliza (`.git/sdd/critica-respuestas.md`). ¿Le basta al operador, o quiere ver las preguntas de cada oleada?
+
+---
+
+## Apéndice B: las 86 páginas y su oleada
+
+Censo: `cd frontend && find src -name "*Page.tsx" -not -name "*.test.tsx" | sort` (86 el 2026-11-23). Recetas: L lista, F ficha, FO formulario, O otra.
+
+| # | Archivo (`frontend/…`) | Ruta(s) | Receta | Tarea |
+|---|---|---|---|---|
+| 1 | `src/preview/PreviewPage.tsx` | `/__preview` | O | T3 |
+| 2 | `src/shell/AreaPage.tsx` | `/admin` | O | T4 |
+| 3 | `src/modules/clients/ClientsPage.tsx` | `/clients` | L | T5 |
+| 4 | `src/modules/clients/ClientDetailPage.tsx` | `/clients/:clientId` | F | T5 |
+| 5 | `src/modules/devices/DevicesPage.tsx` | `/devices` | L | T6 · O1 |
+| 6 | `src/modules/inventory/DeviceDetailPage.tsx` | `/devices/:deviceId` | F | T6 · O1 |
+| 7 | `src/modules/inventory/SoftwarePage.tsx` | `/software` | L | T6 · O1 |
+| 8 | `src/modules/devices/CandidatesPage.tsx` | `/discovered` | L | T6 · O1 |
+| 9 | `src/modules/devices/GroupsPage.tsx` | `/device-groups` | L | T6 · O1 |
+| 10 | `src/modules/onboarding/OnboardPage.tsx` | `/devices/onboard` | O | T6 · O1 |
+| 11 | `src/modules/agent-push/PushRunsPage.tsx` | `/devices/push-runs` | L | T6 · O1 |
+| 12 | `src/modules/agent-push/PushRunPage.tsx` | `/devices/push-runs/:runId` | F | T6 · O1 |
+| 13 | `src/modules/agent-push/PushAuthorizationsPage.tsx` | `/agent-push/authorizations` | L | T6 · O1 |
+| 14 | `src/modules/agent-push/PushCredentialScopesPage.tsx` | `/agent-push/credential-scopes` | L | T6 · O1 |
+| 15 | `src/modules/agent-releases/AgentReleasesPage.tsx` | `/agent-packages` | O | T6 · O1 |
+| 16 | `src/modules/dashboard/DashboardPage.tsx` | `/dashboard` | O | T7 · O2 |
+| 17 | `src/modules/service-desk/TicketListPage.tsx` | `/service-desk` | L | T7 · O2 |
+| 18 | `src/modules/service-desk/TicketDetailPage.tsx` | `/service-desk/tickets/:ticketId` | F | T7 · O2 |
+| 19 | `src/modules/service-desk/MyWorkPage.tsx` | `/service-desk/my-work` | L | T7 · O2 |
+| 20 | `src/modules/service-desk/ServiceDeskAdminPage.tsx` | `/service-desk/admin` | FO | T7 · O2 |
+| 21 | `src/modules/sla/SlaAdminPage.tsx` | `/sla` | FO | T7 · O2 |
+| 22 | `src/modules/email-intake/EmailIntakeAdminPage.tsx` | `/email-intake` | FO | T7 · O2 |
+| 23 | `src/modules/notification/NotificationAdminPage.tsx` | `/notifications` | FO | T7 · O2 |
+| 24 | `src/modules/portal/MyTicketsPage.tsx` | `/portal` | L | T7 · O2 |
+| 25 | `src/modules/portal/NewTicketPage.tsx` | `/portal/new` | FO | T7 · O2 |
+| 26 | `src/modules/portal/PortalTicketDetailPage.tsx` | `/portal/tickets/:ticketId` | F | T7 · O2 |
+| 27 | `src/modules/health/HealthPage.tsx` | `/health` | L | T8 · O3 |
+| 28 | `src/modules/patch/FleetPatchPage.tsx` | `/patch` | L | T8 · O3 |
+| 29 | `src/modules/deploy/DeployPage.tsx` | `/deploy` | L | T8 · O3 |
+| 30 | `src/modules/deploy/PackagesPage.tsx` | `/deploy/packages` | L | T8 · O3 |
+| 31 | `src/modules/deploy/ScriptsPage.tsx` | `/deploy/scripts` | L | T8 · O3 |
+| 32 | `src/modules/remote/SessionsPage.tsx` | `/remote` | L | T8 · O3 |
+| 33 | `src/modules/jobs/JobsPage.tsx` | `/jobs` | L | T8 · O3 |
+| 34 | `src/modules/error-monitor/ErrorMonitorPage.tsx` | `/error-monitor` | L | T8 · O3 |
+| 35 | `src/modules/platform-status/PlatformStatusPage.tsx` | `/platform-status` | O | T8 · O3 |
+| 36 | `src/modules/security/SecurityPage.tsx` | `/security` | L | T8 · O3 |
+| 37 | `src/modules/audit/AuditPage.tsx` | `/audit` | L | T8 · O3 |
+| 38 | `src/modules/backup/BackupPointsPage.tsx` | `/backup` | L | T9 · O4 |
+| 39 | `src/modules/backup/RepositoriesPage.tsx` | `/backup/repositories` | L | T9 · O4 |
+| 40 | `src/modules/backup/CoveragePage.tsx` | `/backup/coverage` | L | T9 · O4 |
+| 41 | `src/modules/backup/OffsitePage.tsx` | `/backup/offsite` | FO | T9 · O4 |
+| 42 | `src/modules/bcp/PlansPage.tsx` | `/bcp` | L | T9 · O4 |
+| 43 | `src/modules/provisioning/ProvisioningRunsPage.tsx` | `/provisioning` | L | T9 · O4 |
+| 44 | `src/modules/provisioning/ImagesPage.tsx` | `/provisioning/images` | L | T9 · O4 |
+| 45 | `src/modules/provisioning/ProfilesPage.tsx` | `/provisioning/profiles` | L | T9 · O4 |
+| 46 | `src/modules/site-servers/SiteServersPage.tsx` | `/site-servers` | L | T9 · O4 |
+| 47 | `src/modules/site-servers/SiteServerDetailPage.tsx` | `/site-servers/:siteServerId` | F | T9 · O4 |
+| 48 | `src/modules/enrollment/EnrollmentPage.tsx` | `/enrollment` | L | T9 · O4 |
+| 49 | `src/modules/licenses/LicensesPage.tsx` | `/licenses` | L | T10 · O5 |
+| 50 | `src/modules/licenses/ProductsPage.tsx` | `/licenses/products` | L | T10 · O5 |
+| 51 | `src/modules/licenses/VendorsPage.tsx` | `/licenses/vendors` | L | T10 · O5 |
+| 52 | `src/modules/subscriptions/SubscriptionsPage.tsx` | `/subscriptions` | L | T10 · O5 |
+| 53 | `src/modules/ipam/SubnetTreePage.tsx` | `/ipam` | L | T10 · O5 |
+| 54 | `src/modules/ipam/SubnetDetailPage.tsx` | `/ipam/subnets/:subnetId` | F | T10 · O5 |
+| 55 | `src/modules/ipam/DriftPage.tsx` | `/ipam/drift` | L | T10 · O5 |
+| 56 | `src/modules/ipam/SearchPage.tsx` | `/ipam/search` | L | T10 · O5 |
+| 57 | `src/modules/ipam/RegistryPage.tsx` | `/ipam/registry` | FO | T10 · O5 |
+| 58 | `src/modules/ipam/ScanAuthorizationsPage.tsx` | `/ipam/scan-authorizations` | L | T10 · O5 |
+| 59 | `src/modules/ipam/ImportPage.tsx` | `/ipam/import` | O | T10 · O5 |
+| 60 | `src/modules/docs/DocsPage.tsx` | `/docs` | L + O | T11 · O6 |
+| 61 | `src/modules/change/ChangesPage.tsx` | `/changes` | L | T11 · O6 |
+| 62 | `src/modules/budget/BudgetPlannerPage.tsx` | `/budget/planner` | FO | T11 · O6 |
+| 63 | `src/modules/budget/ExpensesPage.tsx` | `/budget/expenses` | L | T11 · O6 |
+| 64 | `src/modules/budget/ConfirmationQueuePage.tsx` | `/budget/confirm` | L | T11 · O6 |
+| 65 | `src/modules/budget/BudgetAdminPage.tsx` | `/budget/admin` | FO | T11 · O6 |
+| 66 | `src/modules/people/PersonPage.tsx` | `/people/:personId` | F | T11 · O6 |
+| 67 | `src/modules/people/UnmatchedPage.tsx` | `/people/unmatched` | L | T11 · O6 |
+| 68 | `src/modules/credentials/CredentialsPage.tsx` | `/credentials` | L | T11 · O6 |
+| 69 | `src/modules/settings/SettingsPage.tsx` | `/settings` | FO | T12 · O7 |
+| 70 | `src/modules/profile/ProfilePage.tsx` | `/profile` | FO | T12 · O7 |
+| 71 | `src/modules/profile/SecurityPage.tsx` | `/portal/security`, `/profile/security` | FO | T12 · O7 |
+| 72 | `src/modules/ai-admin/AiSettingsPage.tsx` | `/assistant/settings` | FO | T12 · O7 |
+| 73 | `src/modules/ai-automation/AutonomyDialPage.tsx` | `/assistant/autonomy` | FO | T12 · O7 |
+| 74 | `src/modules/ai-automation/ActionsPage.tsx` | `/assistant/actions`, `/assistant/actions/:actionId` | L, F | T12 · O7 |
+| 75 | `src/modules/auth/SignInPage.tsx` | `/sign-in` | O | T13 · O8 |
+| 76 | `src/modules/auth/FactorPage.tsx` | `/sign-in/factor` | O | T13 · O8 |
+| 77 | `src/modules/auth/EnrollPage.tsx` | `/sign-in/enroll` | O | T13 · O8 |
+| 78 | `src/modules/auth/RecoveryCodesPage.tsx` | `/sign-in/recovery-codes` | O | T13 · O8 |
+| 79 | `src/modules/auth/MicrosoftCallbackPage.tsx` | `/sign-in/microsoft` | O | T13 · O8 |
+| 80 | `src/modules/auth/ForgotPasswordPage.tsx` | `/forgot-password` | O | T13 · O8 |
+| 81 | `src/modules/auth/ResetPasswordPage.tsx` | `/reset-password` | O | T13 · O8 |
+| 82 | `src/modules/auth/InvitePage.tsx` | `/invite` | O | T13 · O8 |
+| 83 | `src/modules/auth/RecoverPage.tsx` | `/recover` | O | T13 · O8 |
+| 84 | `src/modules/auth/PortalSignInPage.tsx` | `/portal/sign-in` | O | T13 · O8 |
+| 85 | `src/modules/auth/ConsentPage.tsx` | `/oauth/authorize` | O | T13 · O8 |
+| 86 | `src/modules/setup/SetupPage.tsx` | `(SetupGate, sin ruta)` | O | T13 · O8 |
+
+**Las 22 pantallas enrutadas que no se llaman `*Page.tsx`** (entran en la oleada de su módulo; el diseño cuenta 86 porque cuenta archivos, pero estas también son páginas que una persona abre):
+
+| # | Archivo (`frontend/src/modules/…`) | Ruta(s) | Receta | Tarea |
+|---|---|---|---|---|
+| E1 | `email-intake/OAuthCallback.tsx` | `/settings/email-intake/oauth/callback` | O | T7 · O2 |
+| E2 | `patch/PatchPolicyEditor.tsx` | `/patch/policies` | FO | T8 · O3 |
+| E3 | `remote/ScreenViewer.tsx` | `/remote/:sessionId` | O | T8 · O3 |
+| E4 | `remote/RecordingPlayer.tsx` | `/remote/:sessionId/recording` | O | T8 · O3 |
+| E5 | `backup/BackupPolicyEditor.tsx` | `/backup/policies` | FO | T9 · O4 |
+| E6 | `bcp/PlanDetail.tsx` | `/bcp/plans/:planId` | F | T9 · O4 |
+| E7 | `bcp/TestRecorder.tsx` | `/bcp/tests/:testId` | FO | T9 · O4 |
+| E8 | `bcp/BcpReport.tsx` | `/bcp/report`, `/bcp/tests/:testId/report` | O | T9 · O4 |
+| E9 | `licenses/LicenseDetail.tsx` | `/licenses/:licenseId` | F | T10 · O5 |
+| E10 | `licenses/ComplianceDashboard.tsx` | `/licenses/compliance` | O | T10 · O5 |
+| E11 | `licenses/ReviewQueue.tsx` | `/licenses/review-queue` | L | T10 · O5 |
+| E12 | `licenses/RenewalCalendar.tsx` | `/licenses/renewals` | O | T10 · O5 |
+| E13 | `subscriptions/SubscriptionDetail.tsx` | `/subscriptions/:subscriptionId` | F | T10 · O5 |
+| E14 | `subscriptions/SpendDashboard.tsx` | `/subscriptions/spend` | O | T10 · O5 |
+| E15 | `subscriptions/RenewalCalendar.tsx` | `/subscriptions/renewals` | O | T10 · O5 |
+| E16 | `budget/BudgetDashboard.tsx` | `/budget` | O | T11 · O6 |
+| E17 | `change/ApprovalQueue.tsx` | `/changes/approvals` | L | T11 · O6 |
+| E18 | `change/ChangeCalendar.tsx` | `/changes/calendar` | O | T11 · O6 |
+| E19 | `change/ChangeDetail.tsx` | `/changes/:changeId` | F | T11 · O6 |
+| E20 | `reporting/ReportCatalogue.tsx` | `/reports` | L | T11 · O6 |
+| E21 | `reporting/ReportView.tsx` | `/reports/:reportKey` | O | T11 · O6 |
+| E22 | `ai-admin/ChatPanel.tsx` | `/assistant` | O | T12 · O7 |
+
+Fuera de las dos listas, a propósito: `Landing` (la ruta `*`, en `App.tsx`, redirige y no dibuja nada), las redirecciones `/people`, `/agent-push`, `/governance` y `/assets`, y los marcos `PortalShell` (O2) y `AuthCard` (O8), que no son páginas pero sí reciben la marca.
+
+**Reparto por tarea:** base 4 (T3: 1, T4: 1, T5: 2) + O1 11 + O2 11 + O3 11 + O4 11 + O5 11 + O6 9 + O7 6 + O8 12 = **86**; pantallas extra 22.
+
+---
+
+## Apéndice C: pruebas añadidas y cambiadas
+
+**Nuevas:**
+
+| Archivo | Qué fija | Tarea |
+|---|---|---|
+| `frontend/src/test/tokens.test.ts` (reescrita) | `index.css` = `DESIGN.md` v4 = `novieri-tokens.json`; los cuatro alias retirados; sin `--rail-hot` | 1 |
+| `frontend/src/shell/title.test.tsx` | «Página · Novieri RMM», el registro delante, el producto solo | 2 |
+| `frontend/src/shell/brand.test.tsx` | El símbolo y el logotipo son los del operador, trazo a trazo; el favicon y el `<title>` | 2 |
+| `frontend/src/test/no-itms.test.ts` | «ITMS» fuera de `frontend/src`, `scripts` e `index.html`, salvo protocolo e historia fechada | 2 |
+| `frontend/src/test/renderPage.tsx` (ayuda) | Una página bajo un router de datos | 3 |
+| `frontend/src/shell/listKit.test.tsx` | Filtros en la URL, conteos sin ceros inventados, «Mostrando x de y», vacío con causa, barra de lote, chip «Cliente», `useApiFor`, `?new=` | 3 |
+| `frontend/src/shell/detailKit.test.tsx` | Cabecera de ficha, pestañas en la URL (una fila, historial, por defecto sin parámetro), `SectionNav` | 3 |
+| `frontend/src/shell/formKit.test.tsx` | Una barra de guardado, descartar, error, aviso al salir (navegación y `beforeunload`), secciones plegables | 3 |
+| `frontend/src/lib/api.forClient.test.ts` | `X-Client-Id` del cliente pedido; el 401 de siempre | 3 |
+| `frontend/src/App.router.test.tsx` | Router de datos sobre las mismas rutas | 3 |
+| `frontend/src/shell/newMenu.test.ts` | Las entradas de «Nuevo», cada una con su permiso | 4 |
+| `frontend/src/shell/NewMenu.test.tsx` | Botón de menú primario, foco, flechas, Escape | 4 |
+| `frontend/src/shell/AdminPanel.test.tsx` | Administración: botón, volver, búsqueda sin acentos, sección abierta | 4 |
+| `frontend/src/shell/newDestinations.test.tsx` | Cada entrada de «Nuevo» abre lo que promete | 4 |
+| `frontend/src/modules/clients/__tests__/client360.test.tsx` | Las ocho pestañas, la URL, los datos del cliente, los tiles | 5 |
+| `frontend/src/modules/auth/__tests__/authCard.test.tsx` | El marco de acceso con la marca y su título | 13 |
+| En cada módulo de las oleadas | Las pruebas mínimas de su receta (L, F, FO) por página, y las que nombra cada bloque | 6 a 13 |
+
+**Cambiadas a propósito** (ninguna se borra; cada cambio con un comentario que cita el diseño):
+
+| Archivo | Cambio | Tarea |
+|---|---|---|
+| `frontend/src/test/contrast.test.ts` | Filas nuevas (blanco sobre crítico, hover y presionado del primario, marca del riel); sin `--rail-hot`; `--ink` en `NON_TEXT`; el acento por debajo de 3:1 en el riel | 1 |
+| `frontend/src/test/radius.test.ts` | `--r-badge` en la escalera y `--radius-xs` | 1 |
+| `frontend/src/test/base-styles.test.ts` | `V4_OVERRIDES` y `.nav-item.sub` | 3, 4 |
+| `frontend/src/shell/nav.test.ts` | «two layers» → «the Atera order»; Clientes en el riel; migas de carpeta | 4 |
+| `frontend/src/shell/Sidebar.test.tsx` | «the second layer» → carpetas, anclados, punto, marca | 4 |
+| `frontend/src/shell/AppShell.test.tsx` | El título con «Novieri RMM»; «Añadir un equipo» → «Nuevo»; el Asistente en el riel | 2, 4 |
+| `frontend/src/test/responsive.test.ts` | El Asistente sobrevive en el riel, no en la barra | 4 |
+| `frontend/src/shell/AreaPage.test.tsx` | Tarjetas en lugar de tablas; búsqueda | 4 |
+| `frontend/src/shell/shell.es.test.tsx` | «Inicio», «Equipos», «Documentación», «Activos», «Más», «Nuevo» | 4 |
+| `frontend/src/App.crumb.test.tsx`, `App.shell.test.tsx` | La raíz de la miga es «Novieri» | 2 |
+| Las ~25 que esperaban «ITMS» | El texto o el dato nuevo | 2 |
+| `frontend/src/modules/clients/__tests__/clients.test.tsx` | Acciones en la cabecera; las pestañas visibles por permiso | 5 |
+| Las de cada módulo de las oleadas | Consultas (`tab` → `button` con `aria-pressed`, el «Save» de la barra, `link` con `aria-current`) | 6 a 13 |
+| `frontend/src/modules/change/change.es.test.tsx` y `__tests__/change.test.tsx` | El título de la ficha lo compone `documentTitle` | 11 |
+
+---
+
+## Apéndice D: reglas de `DESIGN.md` que cambian, y por qué
+
+| Regla en v3 | En v4 | Por qué |
+|---|---|---|
+| Autoridad: `docs/design/itms-prototype-v3.html` | `DESIGN.md` v4 (frontmatter con los nombres de las propiedades CSS) y la marca en `docs/design/marca/` | Diseño §3.1-3.2; el prototipo v3 no tiene la marca elegida |
+| North Star «The Instrument Rail» | «The Survey Plan» | La dirección elegida es «Cordillera: la sobriedad de un plano topográfico» |
+| Riel `#0f1a20`, acento `#1f5fd1`, página `#f5f6f9`… | Los valores de `novieri-tokens.json` | La marca (A2, dirección A) |
+| Tres tintas (ink, ink-2, muted), dos líneas (line, line-2) | Dos tintas, una línea; `--ink-2` y `--line-2` son alias | La marca tiene dos tonos de texto y un borde (D2) |
+| Cinco severidades: crit, warn, ok, run, mut (+ info = acento) | crit, warn, ok, mut (desconocido) e información = acento; «en curso» comparte el tono de información con su icono | La marca nombra ok, info, warning, critical, unknown (D2) |
+| Contador de alertas del riel en `--rail-hot` | Etiqueta crítica con texto blanco | Tabla de contraste de la marca (D3) |
+| Activo del riel: borde izquierdo de 2 px en el acento | Fondo elevado, texto blanco, icono y punto en `--rail-mark` | «Gesto propio» de la dirección A; el acento mide 2,32:1 sobre el riel (D3) |
+| Radios 6 / 10 / 999 (píldora para chips, etiquetas, barras e interruptor) | 4 etiquetas / 6 controles y chips / 10 paneles; 999 solo interruptor y barra | La marca retira la píldora de chips y etiquetas (D4) |
+| Riel con títulos de grupo (Daily, Governance, Assets & Spend, Configure) | Sin títulos, orden de Atera, carpetas Activos y Más, Asistente y Administración anclados | Diseño §1.1 |
+| «Don't ship a dead control in the chrome. No bell, no "+ New".» | «No bell; no New entry without a real destination» | El diseño §1.2 añade «Nuevo» con destinos reales; la campana sigue fuera (§6) |
+| «One primary per page body; the chrome's "Install agent" is the standing exception» | «Nuevo» es el único primario de la barra | Diseño §1.2: «Instalar agente» pasa a «Nuevo» y a Equipos (D11) |
+| La barra: búsqueda, «Install agent», glifos de salud y plataforma, IA, cuenta | «Nuevo», búsqueda, selector, glifos, cuenta | Diseño §1.2 (D12, pregunta abierta 1) |
+| Riel plegado de 76 px | 64 px | La maqueta de la marca y `DESIGN.md` v4 «Layout» |
+| Sin patrones de página escritos | Listas, fichas y formularios del kit; una barra de guardado; todo en la URL | Diseño §2 |
+| Marca: un escudo dibujado sobre el acento, sin favicon | Logotipo, símbolo, favicon y conjunto «Novieri RMM» | Diseño §3.1 |
+
+Lo que **no** cambia: un acento; el contraste AA medido por `contrast.test.ts`; la escala de tipos 22/15/13,5/12/10,5/26 e Inter autoalojada; los tokens como única fuente (`tokens.test`, `radius.test`, `jsx-tokens.test`); solo tema claro; ningún control muerto; la puerta de armonía en los dos idiomas (diseño §3.2).
+
+---
+
+## Apéndice E: backend que una pantalla necesitaría, y ediciones cruzadas con el proyecto 4
+
+**Cambios de backend que una pantalla necesitaría y no existen** (diseño §6: «se nombran en el plan»). Ninguno es necesario para cumplir el diseño; ninguno se hace en este proyecto.
+
+| # | Qué | Pantalla | Qué hace el plan sin él |
+|---|---|---|---|
+| B1 | Series de CPU y memoria de un equipo (24 h), como el gráfico de la captura «atera 8» | Ficha del equipo (O1) | Enseña la última lectura de cada comprobación (`getDeviceHealth().checks[].last_value`) y la actividad; nada de gráficos vacíos. Pregunta abierta 2 |
+| B2 | Conteos por estado en las respuestas de las listas que hoy no los traen (trabajos, sesiones, despliegues, imágenes…) | Chips de las listas de O3, O4 | Chips sin número donde el servidor no lo da (regla «Absent Zero»); con número donde ya lo da (equipos, alertas, tickets) |
+| B3 | Un filtro `?client_id=` en las listas que no lo tienen (alertas, licencias, suscripciones, trabajos…) | Chip «Cliente» | No hace falta: `X-Client-Id` estrecha igual, y lo impone la base de datos (D6) |
+
+**Ediciones cruzadas con el proyecto 4** (los dos llegan a `main` en la misma PR):
+
+| # | Qué | Quién | Nota |
+|---|---|---|---|
+| X1 | Nombre del MSI de descarga: el servidor lo manda (`backend/app/modules/agent_distribution/msi.py:292`, hoy `ITMS-Agent-<host>-<arch>.msi`); la consola lo usa de reserva (`lib/api.ts:4344`) y en su fixture | P4 cambia el servidor; P3 la reserva y el fixture a `NovieriRMM-Agent-<host>-<arch>.msi` | **Acordar el nombre exacto** con el proyecto 4 antes de la Task 2, para que coincidan; P4 ya usa `NovieriRMM-Agent-Setup_` para el enlace de instalación |
+| X2 | Emisor TOTP y `rp_name` de WebAuthn «Novieri RMM» (`app/core/auth/notices.py`) | P4 | P3 refleja el valor en `modules/auth/fixtures.ts` y en el harness de pruebas de `auth` |
+| X3 | Cabeceras `X-ITMS-Request`, `X-ITMS-Background` y la marca `ITMSRSP1` | Nadie las cambia | Contrato (diseño de P4 §1.2); la guarda de P3 las permite por nombre |
+| X4 | `docs/product.md` (nombre del producto, §9, §11) | P3 | El proyecto 4 no debe editarlo en paralelo; si necesita, lo pide al coordinador |
+| X5 | `DESIGN.md`, `PRODUCT.md`, `.impeccable/` | P3 | Archivos de la raíz que solo toca este proyecto |
+| X6 | La CI | P4 es su dueño; P3 **no necesita cambiarla** | Los trabajos `frontend`, `a11y` y `harmony` corren igual; las seis variantes nuevas de `routes.mjs` alargan cada pasada de armonía unos 90 s (24 capturas más por idioma) |
+| X7 | Los correos «[Novieri RMM] …» | P4 (backend) | La consola no los dibuja |
+| X8 | `frontend/` | P4 no lo toca (su diseño, «El proyecto 3 toca `frontend/`») | Si P4 necesitara un cambio en la consola, lo pide al coordinador y entra por la base de este plan |
+
+---
+
+## Apéndice F: comandos
+
+Desde `frontend/` salvo que se diga:
+
+| Para | Comando | Esperado |
+|---|---|---|
+| Una prueba | `npx vitest run <ruta>` | `Test Files … passed` |
+| La suite | `npx vitest run` | 0 fallos (365 archivos y 7200 pruebas o más; ~5 min) |
+| Tipos | `npm run typecheck` | sin salida, código 0 |
+| Build | `npm run build` | `dist/` con `favicon.svg` |
+| Armonía | `node scripts/harmony.mjs --strict-fixtures --lang es --routes <lista>` (y `--lang en`) | `ok    every route on the tokens, no overflow, the top bar in bounds, no serious axe violation, no fixture miss` |
+| Navegador sobre el kit | `node scripts/a11y-browser.mjs --falsify && node scripts/a11y-browser.mjs` | código 0 |
+| Contexto de impeccable (raíz) | `.claude/skills/impeccable/scripts/impeccable context --target <archivo>` | sin `NO_PRODUCT_MD` |
+| Detector (raíz) | `.claude/skills/impeccable/scripts/impeccable detect --json frontend/src/modules/<m>` | `[]` o hallazgos revisados |
+| Crítica persistida (raíz) | `.claude/skills/impeccable/scripts/impeccable critique-storage write "<archivo>" <cuerpo>` | la ruta escrita |
+| Cerrar una crítica (raíz) | `.claude/skills/impeccable/scripts/impeccable critique-storage close "<archivo>" "<snapshot_file>"` | código 0 |
+| Censo de páginas | `find src -name "*Page.tsx" -not -name "*.test.tsx" \| wc -l` | `86` |
+
+---
+
+## Autorrevisión del plan (2026-11-23)
+
+Contra el diseño, sección por sección:
+
+- **§1.1** riel en orden de Atera sin títulos, Clientes fuera de Administración, Activos y Más (este solo con módulos activos), Asistente y Administración anclados, Administración en acordeón con volver y búsqueda, permisos sin cambios, plegado con iconos y cajón bajo 1024 px: Task 4 (Steps 1, 4, 6, 9), con la prueba de que los códigos son los mismos.
+- **§1.2** «Nuevo» con seis destinos reales por permiso (Task 4, Steps 1, 5, 8 y la prueba de destinos), búsqueda ensanchada (la paleta no cambia de comportamiento; el ancho lo toma el CSS de la barra), selector sin cambio de comportamiento (sus pruebas no se tocan), indicador de alertas y de plataforma, cuenta; «Instalar agente» en «Nuevo» y en Equipos (Task 4 y O1).
+- **§1.3** ficha 360 con ocho pestañas en una línea y URL propia; chip «Cliente» en las listas de un cliente con «Todos mis clientes»: Tasks 3 y 5, y cada oleada.
+- **§2** lista, ficha y formulario con su código completo (Task 3), recetas para las oleadas; ficha de equipo según «atera 8» (O1); una sola barra de guardado; piezas existentes restiladas (Task 3, Step 7; oleadas).
+- **§3** marca, tokens, contraste, radios, sombra, tipografía (Task 1); logotipo, símbolo, favicon (Task 2); `DESIGN.md` v4 (Task 1) con sus cambios en el Apéndice D.
+- **§4** las 86 páginas una a una (Apéndice B) y las 22 pantallas extra; cada oleada con crítica y pulido de impeccable y capturas en los dos idiomas; portal (O2), acceso y consentimiento (O8); rutas sin mover.
+- **§5** pruebas nuevas pedidas por el diseño: «Nuevo» (Task 4), pestañas con URL (Task 3), barra de guardado con aviso (Task 3), filtros en la URL (Task 3), título de pestaña (Task 2), «ITMS» fuera (Task 2); `nav.test`, `routes-covered`, armazón y selector actualizados sin borrar; revisión por oleada y de la rama (Task 14).
+- **§6** sin tema oscuro, sin campana, sin vistas guardadas en el servidor; los cambios de backend que una pantalla querría, nombrados (Apéndice E).
+
+Marcadores: el plan no deja «TBD» ni «implementar después». Donde una oleada debe leer un nombre exacto del catálogo antes de escribir una prueba (los títulos de diálogo de la prueba de destinos de la Task 4), el paso dice qué clave leer y con qué orden. Firmas: `useUrlFilters`, `FilterChips`, `ShowingCount`, `BulkBar`, `ListEmpty`, `ClientFilter`, `useApiFor`, `useNewParam`, `ListToolbar`, `SectionNav`, `DetailHead`, `useUrlTab`, `UrlTabs`, `DetailGrid`, `ClientContext`, `FormPage`, `FormSection`, `SaveBar`, `UnsavedGuard`, `useDraft`, `documentTitle`, `useRecordTitle`, `useDocumentTitle`, `newMenuEntries` y `ApiClient.forClient` se usan en las tareas posteriores con los nombres y tipos con que se definen.
