@@ -1,4 +1,4 @@
-# Deploying it-suite (on-prem, single node)
+# Deploying Novieri RMM (on-prem, single node)
 
 **Read [`GO-LIVE.md`](GO-LIVE.md) before this faces anything real.** It lists
 every default that must be changed — secrets, TLS, the OpenBao seal, the
@@ -6,20 +6,30 @@ audit-chain key backup, database backups.
 
 ## Status of this runbook
 
-Every command in the "First boot" section below **was executed**, top to
-bottom, from completely empty volumes (`docker compose down -v`), against
-Docker Engine 29.3.1 / Compose v5.1.1, and the output shown is real output.
-The run finished with a device enrolled and a signed `hello` job round-tripped:
-dispatch → mTLS delivery → verified execution on the endpoint → result →
-hash-chained audit entry, with `GET /api/v1/audit/verify` reporting
-`{"ok":true}`.
+**Rewritten on 2026-11-23 for a new VPS** (`rmm.novieri.com`, design
+`docs/superpowers/specs/2026-11-23-vps-y-marca-novieri-design.md`): the
+prerequisites, steps 1, 1b, 1c, 7, 10, 11 and 12 of First boot, [After a reboot
+or a restart](#after-a-reboot-or-a-restart), and the upgrade on that VPS. The
+certificate on `:443` is Let's Encrypt's, which Traefik asks for and renews
+(ACME, TLS-ALPN-01); nothing is copied into `deploy/certs/` any more. The
+commands that used a bearer token run inside the stack, or in the console.
 
-**Not yet run live are the commands own authentication phase 4 (2026-11-15)
-rewrote or added**: step 3.5's two token writes, step 8's password field,
-step 9's sign-in and steps 11c and 11d of First boot, and step 1's
-`ITS_BACKUP_OLD_IDENTITY_DB=1` and step 6b of [Upgrading an existing
-deployment](#upgrading-an-existing-deployment) -- no first boot or upgrade
-on a live host has run them since they changed.
+⚠ **Rehearsed, not yet run on the VPS.** The plan of 2026-11-23 (Task 12)
+runs this whole First boot in a container, with Let's Encrypt replaced by
+Pebble, its own test CA, and records here what each step printed; until that
+task has run, the outputs shown are the ones measured by the tasks that wrote
+the scripts. Never run by this repository: a real VPS, the real DNS, Let's
+Encrypt itself, ufw, the Entra app and an SMTP relay.
+
+Before 2026-11-23, every command of the First boot of the time was executed,
+top to bottom, from empty volumes, against Docker Engine 29.3.1 / Compose
+v5.1.1, ending with a device enrolled and a signed `hello` job round-tripped
+and the audit chain reporting `{"ok":true}`; step 3.5's two token writes,
+step 8's password field, step 9's sign-in and steps 11c and 11d, as own
+authentication phase 4 (2026-11-15) left them, were the ones no live host had
+run since they changed, and step 1's `ITS_BACKUP_OLD_IDENTITY_DB=1` and step
+6b of [Upgrading an existing deployment](#upgrading-an-existing-deployment)
+are still not run live.
 
 The previous version of this runbook had never been run. Executing it found
 eleven defects that made it impossible to follow as written — OpenBao could not
@@ -113,128 +123,196 @@ upgraded from a release before phase 1 crosses all four at once:
 
 ---
 
-## Prerequisites (Ubuntu Server 24.04 / 26.04)
+## Prerequisites: a new VPS (Ubuntu Server 24.04 LTS)
 
-The deployment model is: clone this repository onto the host, run the stack
-from `deploy/`, and `git pull` to upgrade.
+This runbook builds one deployment: **`rmm.novieri.com`**, on a VPS that starts
+empty (operator decisions B1 and B2, 2026-11-23). The deployment model is:
+clone this repository onto the host, run the stack from `deploy/`, and
+`git pull` to upgrade. Every command below is meant to be pasted as it is; the
+values that only you can supply (the Let's Encrypt contact address, the
+OpenBao shares, your passwords) are asked for by a prompt, never written into a
+command.
 
-### Docker Engine
+### The machine, and its name
 
-⚠ **UNVERIFIED — these five commands were not run on a fresh Ubuntu host**
-(this runbook was executed in a container that already had Docker 29.3.1).
-They are Docker's own documented Ubuntu install, reproduced here because the
-version requirement below is not optional.
+- **Ubuntu Server 24.04 LTS**, 4 vCPU, 8 GB of RAM, 100 GB of SSD, and one
+  public IPv4 address **on its network interface**.
+- **An `A` record `rmm.novieri.com` → that address, created before the first
+  boot.** Traefik asks Let's Encrypt for the certificate the moment it starts,
+  and a validation that reaches another machine counts against Let's Encrypt's
+  limit of 5 failed authorizations per name and hour.
+- **No `AAAA` record for `rmm.novieri.com`.** This deployment is one IPv4
+  address: this runbook, `host-network.md` and `scripts/preflight.sh` reason
+  about it, and nothing checks that `:443` and `:8443` answer on IPv6. An
+  `AAAA` record would send browsers and agents, which try IPv6 first, to an
+  address nobody has checked serves this stack — or, if it is another
+  machine's, to that machine. (Not for Let's Encrypt's sake: its TLS-ALPN-01
+  validation falls back to IPv4 after any IPv6 error.) `scripts/preflight.sh`
+  asks the public DNS, not `/etc/hosts`, and refuses either mistake.
+- **Inbound 22 (SSH), 443 (console, API, object storage) and 8443 (agents),
+  and nothing else.** Both 443 and 8443 must be reachable **from every managed
+  endpoint**, not only from operators: `8443` is the agent gateway, and `443`
+  carries object storage under presigned grants, which is how backup chunks and
+  `app.deploy` artifacts travel. `:80` stays shut: the certificate's challenge
+  (TLS-ALPN-01) is answered on `:443`.
+- **On a shared or multi-homed host, read `host-network.md` first** (the bind
+  address, the reply path, and the fact that ufw does not filter
+  Docker-published ports). A dedicated VPS needs none of it.
 
-**Do not use Ubuntu's `docker.io` apt package.** It ships an Engine old enough
-that `traefik:v3.6`'s Docker provider is refused by it, or — the other
-direction, which is what actually bit here — an Engine new enough to refuse
-old Traefik. Either way, **Traefik silently discovers no containers and every
-single route answers a bare 404** while every container looks healthy. Install
-Docker's own repository:
+### P1 — An operator account (as root, once)
+
+If your provider gave you a sudo account instead of `root`, use that account as
+the operator and skip this step. Otherwise, logged in as `root`:
+
+```sh
+adduser --gecos "" rmmadmin
+usermod -aG sudo rmmadmin
+install -d -m 700 -o rmmadmin -g rmmadmin /home/rmmadmin/.ssh
+install -m 600 -o rmmadmin -g rmmadmin /root/.ssh/authorized_keys /home/rmmadmin/.ssh/authorized_keys
+```
+
+`adduser` asks for the new account's password twice; `sudo` will ask for it.
+Then log out, log in again as `rmmadmin` with the same key, and check:
+
+```sh
+id -nG
+```
+
+The list contains `sudo`. Every command from here on runs as this account.
+
+### P2 — The firewall
+
+```sh
+sudo ufw allow 22/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 8443/tcp
+sudo ufw --force enable
+sudo ufw status verbose
+```
+
+Check that the output says `Status: active`, `Default: deny (incoming)`, and
+`ALLOW IN` for `22/tcp`, `443/tcp` and `8443/tcp`. ⚠ **UNVERIFIED** in this
+repository's rehearsal (Task 12 of the plan of 2026-11-23 ran in a container,
+without ufw). Docker's own documentation warns that ports Docker publishes
+bypass ufw ("when you expose container ports using Docker, these ports bypass
+your firewall rules"): this stack publishes 443 and 8443 and nothing else, so
+the firewall's job here is everything that is not Docker.
+
+### P3 — Security updates
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl
+sudo apt-get install -y unattended-upgrades
+printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades
+systemctl is-active unattended-upgrades
+```
+
+The `tee` prints the two lines it wrote, and the last command prints `active`.
+Ubuntu installs `unattended-upgrades` by default and these are its default two
+lines; writing them makes the state explicit rather than assumed.
+
+### P4 — The clock
+
+```sh
+timedatectl status | grep -E 'System clock synchronized|NTP service'
+```
+
+```
+System clock synchronized: yes
+              NTP service: active
+```
+
+If either says otherwise: `sudo timedatectl set-ntp true`, and check again.
+Certificates, second-factor codes and the audit log's times all depend on it.
+
+### P5 — Docker CE, from Docker's repository
+
+**Do not use Ubuntu's `docker.io` package.** An Engine too old refuses
+`traefik:v3.6`'s Docker provider, and Traefik then discovers no containers and
+every route answers a bare 404 while everything looks healthy. These are
+Docker's own Ubuntu instructions (docs.docker.com/engine/install/ubuntu),
+starting with its first: remove the distribution's packages that conflict
+with Docker's (some VPS images ship one; none installed is fine):
+
+```sh
+sudo apt-get remove -y $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc 2>/dev/null | cut -f1)
+sudo apt-get install -y ca-certificates curl git openssl iproute2
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
 ```
 
-Then check the two versions that matter:
+Log out and in again, so the new group applies, then check the two versions
+that matter:
 
 ```sh
-docker version --format '{{.Server.Version}}'   # need >= 26; verified on 29.3.1
-docker compose version                          # need v2; verified on v5.1.1
+docker version --format '{{.Server.Version}}'
+docker compose version --short
 ```
 
-Compose **v2.24 or newer** is required for a second reason: `.env` is used both
-as Compose's project env file *and* as the services' `env_file`, and entries
-like
+The Engine must be **26 or newer** and Compose **2.24 or newer**
+(`scripts/preflight.sh` refuses older ones). Compose 2.24 is needed because
+`.env` is both Compose's project env file and the services' `env_file`, and
+entries like
+`ITS_DATABASE_URL=postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@postgres:5432/itsuite`
+rely on Compose interpolating `${APP_DB_PASSWORD}` inside the env file.
 
+The `docker` group "grants root-level privileges to the user" (Docker's
+post-installation notes): that is why only the operator account is in it.
+
+### P6 — The checkout
+
+Over SSH with a **deploy key** — a read-only key scoped to this repository:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/novieri_deploy -C "novieri-deploy@$(hostname)"
+cat ~/.ssh/novieri_deploy.pub
 ```
-ITS_DATABASE_URL=postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@postgres:5432/itsuite
+
+Paste that whole line (`ssh-ed25519 AAAA…`, one line) into the repository's
+**Settings → Deploy keys → Add deploy key**, with "Allow write access" left
+**unchecked**. A terminal soft-wraps that line, and copying the wrapped display
+inserts newlines GitHub rejects as "not in OpenSSH public key format";
+`ssh-keygen -l -f ~/.ssh/novieri_deploy.pub` prints a fingerprint if the file
+itself is sound. Then:
+
+```sh
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/novieri_deploy
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
+ssh -T git@github.com
 ```
 
-rely on Compose interpolating `${APP_DB_PASSWORD}` **inside** the env file.
-Verified working on v5.1.1. On an older Compose the literal string
-`${APP_DB_PASSWORD}` is passed to the container and every database connection
-fails authentication.
+The `printf` line is GitHub's published Ed25519 host key
+(docs.github.com, "GitHub's SSH key fingerprints": `SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU`),
+so the first connection asks nothing: trust on first use is not how this host
+meets the repository it will run. "Hi …! You've successfully authenticated, but
+GitHub does not provide shell access." is success. Then:
 
-### DNS, firewall, clone
+```sh
+sudo mkdir -p /opt/it-suite && sudo chown "$USER" /opt/it-suite
+git clone git@github.com:helgarpalmieri55/Novieri-RMM.git /opt/it-suite
+cd /opt/it-suite/deploy
+git -C .. rev-parse --abbrev-ref HEAD
+```
 
-- An `A` record for the host — this runbook uses **`itms.toeshee.com`**
-  throughout. Substitute yours everywhere, including in `.env`
-  (`ITS_PUBLIC_CONSOLE_URL`, `ITS_GATEWAY_URL`, `ITS_GATEWAY_RELAY_URL`) and in
-  the gateway certificate (step 6).
-- Inbound **443** and **8443**. Nothing else — every other service is internal
-  to the compose network with no published port. Both ports must be reachable
-  **from every managed endpoint**, not only from operators: `8443` is the agent
-  gateway, and `443` carries object storage under presigned grants, which is how
-  backup chunks and `app.deploy` artifacts travel. Assuming agents only need the
-  gateway is failure #12 in the table at the end of this file.
-- **On a shared or multi-homed host, read `host-network.md` before going
-  further.** It covers the three things no container can fix: the bind address
-  (a wildcard bind *fails* on a host where something else already holds 443),
-  the reply path when ITMS is not on the default route's NIC (which presents as
-  flaky agents, not as an outage), and the fact that ufw does not filter
-  Docker-published ports at all.
-- **If this host already runs another platform, read the bind address before
-  anything else.** Run `scripts/host-check.sh` (it changes nothing) and look at
-  section 2. A listener shown as `0.0.0.0:443` holds the port on every
-  interface, so a second IP does not free it and one of the two platforms must
-  move; a listener shown as `1.2.3.4:443` holds one address only, and ITMS can
-  take another by setting `ITMS_BIND_IP` in `.env`. Linux refuses a wildcard
-  bind for a port any specific address already holds, so leaving `ITMS_BIND_IP`
-  at `0.0.0.0` on such a host makes traefik fail to start with "address already
-  in use" — the whole stack, not just the shared port. Whatever address you
-  pick must be the one your DNS name resolves to and the one your certificate
-  is issued for.
-- Clone. Over HTTPS this is one command; over SSH with a **deploy key** — a
-  read-only key scoped to this repository, which is what a puller should have —
-  it is:
-
-  ```sh
-  # On the server, as the user that will own the checkout.
-  ssh-keygen -t ed25519 -f ~/.ssh/itms_deploy -C "itms-deploy@$(hostname)"
-  cat ~/.ssh/itms_deploy.pub     # ONE line, starts `ssh-ed25519 AAAAC3Nza…`
-  ```
-
-  Paste that whole line into the repository's **Settings → Deploy keys → Add
-  deploy key**, with "Allow write access" left **unchecked**. Two notes, both
-  of which have cost real time: a terminal soft-wraps that ~100-character line,
-  and copying the wrapped display inserts real newlines that GitHub rejects as
-  "not in OpenSSH public key format" — as does pasting `~/.ssh/itms_deploy`,
-  the private half, which begins `-----BEGIN`. `ssh-keygen -l -f
-  ~/.ssh/itms_deploy.pub` prints a fingerprint if the file itself is sound,
-  which distinguishes a bad file from a bad paste.
-
-  Then pin the key to `github.com` so ssh does not offer every other identity
-  it can find:
-
-  ```sh
-  cat >> ~/.ssh/config <<'EOF'
-  Host github.com
-    IdentityFile ~/.ssh/itms_deploy
-    IdentitiesOnly yes
-  EOF
-  chmod 600 ~/.ssh/config
-  ssh -T git@github.com      # "Hi …! You've successfully authenticated,
-                             # but GitHub does not provide shell access."
-                             # is SUCCESS, not an error.
-  ```
-
-  ```sh
-  sudo mkdir -p /opt/it-suite && sudo chown "$USER" /opt/it-suite
-  git clone git@github.com:Toeshee-Lab/Toeshee-RMS.git /opt/it-suite
-  cd /opt/it-suite/deploy
-  ```
-
-  All commands below are run from `/opt/it-suite/deploy`.
+The last line prints `main`: a deployment is always made from `main`. All
+commands below are run from `/opt/it-suite/deploy`.
 
 ---
 
@@ -242,98 +320,111 @@ fails authentication.
 
 Start from genuinely empty state. If you are re-running after a failed attempt,
 `docker compose down -v` first — a half-initialised Postgres data directory or
-OpenBao barrier will hide the step that actually broke.
+OpenBao barrier will hide the step that actually broke — and `rm .env`, because
+step 1 refuses to overwrite one. **A first boot after `down -v` asks Let's
+Encrypt for a new certificate**: more than 5 in a week for `rmm.novieri.com`
+and production refuses, so a rehearsal uses staging (step 1).
 
 ### Step 1 — `.env`
 
 ```sh
-cp .env.example .env
-chmod 600 .env
+./scripts/new-env.sh --host rmm.novieri.com
 ```
 
-Set every `change-me`. Four you generate now; **two you cannot know yet** —
-`ITS_OPENBAO_TOKEN` and `OPENBAO_TOKEN` come out of step 3 and are filled in at
-step 3.5. Leave them as `change-me` for now: Compose only requires them to be
-non-empty, so the literal `change-me` gets you through steps 2 and 3.
+It asks for one thing: the contact address Traefik gives Let's Encrypt when it
+registers its account. Let's Encrypt stopped mailing expiry warnings on
+2025-06-04 and no longer keeps the address on the account (it passes it to
+ISRG's mailing list), so nothing about renewal depends on it. Then it
+writes `.env` from `.env.example`, mode 600: a fresh random value in every
+`change-me` except the two OpenBao tokens, `rmm.novieri.com` in every URL, and
+the ACME keys. It prints no secret, and it refuses to overwrite an existing
+`.env`.
+
+```
+wrote .env (mode 600)
+  host            rmm.novieri.com
+  ITS_ACME_EMAIL=…
+  ITS_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory
+  ITS_S3_PUBLIC_ENDPOINT=https://rmm.novieri.com
+  ITS_GATEWAY_URL=wss://rmm.novieri.com:8443/agent
+  ITS_GATEWAY_RELAY_URL=wss://rmm.novieri.com:8443/relay
+  ITS_PUBLIC_CONSOLE_URL=https://rmm.novieri.com
+  new secrets     POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD MINIO_ROOT_PASSWORD
+  still change-me ITS_OPENBAO_TOKEN OPENBAO_TOKEN (README step 3.5 fills them)
+```
 
 ```sh
-for v in POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD MINIO_ROOT_PASSWORD; do
-  sed -i "s|^$v=change-me$|$v=$(openssl rand -base64 24 | tr -d '=+/')|" .env
-done
-sed -i 's/your-host/itms.toeshee.com/g' .env
-```
-
-Then confirm what remains:
-
-```sh
-grep -c 'change-me' .env
+stat -c %a .env
+grep -c '=change-me$' .env
 ```
 
 ```
+600
 2
 ```
 
-Exactly two — the OpenBao pair. Real secrets never enter git; `.env` is
-gitignored.
+Exactly two `change-me` — the OpenBao pair, which step 3.5 fills. Real secrets
+never enter git; `.env` is gitignored.
 
-The `your-host` rewrite above also sets `ITS_S3_PUBLIC_ENDPOINT`, which is
-where **endpoints** reach object storage and the only endpoint presigned URLs
-are signed against. With the bundled MinIO that is this server's `:443`
-hostname and there is nothing further to do; confirm it took:
+**A rehearsal** — a second first boot, a test of this runbook on another
+machine — uses Let's Encrypt's staging directory instead, whose certificates no
+browser trusts and whose limits are far higher:
+`./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
+On a staging rehearsal, step 7's check needs the staging roots, and a later
+`./scripts/deploy.sh` ends with `Deployed with warnings` (exit status 1): its
+curl probe of `:443` has no staging CA. Everything is up; that line is the probe.
 
-```sh
-grep '^ITS_S3_PUBLIC_ENDPOINT=' .env
-```
-
-```
-ITS_S3_PUBLIC_ENDPOINT=https://itms.toeshee.com
-```
-
-If you are using object storage that is not the bundled MinIO, this is a
-different host from `ITS_S3_ENDPOINT` and the rewrite has not given you the
-right value — see the external-storage block in `.env.example`. Either way it
-must not stay unset: with `ITS_ENVIRONMENT=production` the api and worker
-refuse to touch object storage without it, rather than mint artifact URLs
-naming `minio` that no endpoint can resolve.
-
-**Set `ITS_PUBLIC_CONSOLE_URL` now: nobody can sign in to the console without
-it** (own authentication, phase 1). It must be exactly the origin the browser's
-address bar will show — `https://itms.toeshee.com` here, or
-`https://host:port` if the console is not on 443 — with no path and no
-trailing slash. Every sign-in write is checked against it, and a different
-host, port or scheme is refused as `csrf`. The line deletes any earlier value
-first, because a second `ITS_PUBLIC_CONSOLE_URL=` further down silently wins:
-
-```sh
-sed -i '/^ITS_PUBLIC_CONSOLE_URL=/d' .env && echo 'ITS_PUBLIC_CONSOLE_URL=https://itms.toeshee.com' >> .env
-grep '^ITS_PUBLIC_CONSOLE_URL=' .env
-```
-
-```
-ITS_PUBLIC_CONSOLE_URL=https://itms.toeshee.com
-```
+`ITS_PUBLIC_CONSOLE_URL` is the origin every sign-in write is checked against;
+it must stay exactly what the browser's address bar shows, `https://rmm.novieri.com`.
 
 **The per-address sign-in limits are optional** (`ITS_AUTH_LOGIN_IP_LIMIT` and
 `ITS_AUTH_FACTOR_IP_LIMIT`). Unset, one address may send 30 requests in 10
-minutes to the password step, and 30 to the second-factor steps: the code or
-passkey at sign-in, setting one up, and confirming it again inside the console.
-Every request counts, successes included, and the next one answers 429 until
-the 10 minutes are up. On the second-factor budget a typed code is 1 request
-and a passkey 2; setting up the first factor at first sign-in is 3, so ten
-technicians doing that on the first day spend all 30 (`.env.example` gives the
-rest, including adding a factor later). The address is the
-one Traefik saw, so technicians behind one office NAT address share one budget.
-Raise them for that, within 5-1000, and only as far as the office needs. They
-protect against guessing from one address, and the password limit also bounds
-how often one address can time whether an email has an account (a difference
-of about 10-15 ms the sign-in design accepted because this limit exists). The
-per-account wait and the stop after 100 failures in a row are separate and do
-not change. A value outside 5-1000 stops the api, the gateway and the workers
-at startup, since each reads `.env`. A change takes effect on the next
-`docker compose up -d`, which recreates every service that reads `.env`, the
-gateway included, so the agents reconnect even for a valid value. A misspelled
-name is ignored and the limit stays 30. Step 7 shows how to see the values the
-api started with, once it is running.
+minutes to the password step, and 30 to the second-factor steps; technicians
+behind one office NAT address share one budget. Raise them for that, within
+5-1000 (`.env.example` gives the costs); step 7 shows the values the api
+started with.
+
+### Step 1b — Tagged images
+
+```sh
+./scripts/build-images.sh
+v="$(git -C .. rev-parse --short HEAD)" && sed -i '/^IT_SUITE_VERSION=/d' .env && echo "IT_SUITE_VERSION=$v" >> .env && grep '^IT_SUITE_VERSION=' .env
+```
+
+`build-images.sh` builds `itsuite/backend` and `itsuite/web` tagged with the
+checkout's commit, and ends with `Recent tags:` — on this new host, the one tag
+it just built. **That list is the rollback target list, and there is no earlier
+entry:** until step 12 has taken the first backup, a new host has no way back
+but starting over (see [Rolling back a deployment](#rolling-back-a-deployment)).
+The second line writes the tag into `.env`, deleting any earlier line first.
+
+### Step 1c — The pre-flight
+
+```sh
+./scripts/preflight.sh
+```
+
+It checks `.env` (mode, secrets, tag), that `ITS_PUBLIC_HOST` is the console's
+host, that `rmm.novieri.com` resolves to this machine and has no `AAAA`
+record, that 443 and 8443 are free, and the Docker versions. A good first boot
+ends:
+
+```
+  note    ITS_OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
+  note    OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
+  ...
+  ok      ITS_PUBLIC_HOST=rmm.novieri.com is the console's host
+  ok      ITS_ACME_EMAIL is set
+  ok      ACME CA: Let's Encrypt production
+  ok      rmm.novieri.com resolves to …, an address of this host
+  ok      443 and 8443 are free
+  ok      Docker Engine …
+  ok      Docker Compose …
+  ok      .env is gitignored
+```
+
+Any `REFUSE` names its fix; correct it and run the pre-flight again before
+going on.
 
 ### Step 2 — Postgres
 
@@ -703,12 +794,12 @@ token from step 3.4, with echo off:
 ```sh
 docker compose run --rm --no-deps \
   -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py itms.toeshee.com
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
 ```
 
 ```
 OpenBao gateway-issuer token:
-gateway.crt  /var/lib/its/tls/gateway.crt  (CN=itms.toeshee.com, 365d)
+gateway.crt  /var/lib/its/tls/gateway.crt  (CN=rmm.novieri.com, 365d)
 gateway.key  /var/lib/its/tls/gateway.key  (mode 0600)
 root.crt     /var/lib/its/ca/root.crt  (agent client CA)
 serial       57:d6:c9:f1:0a:85:72:29:6d:b0:3f:66:8a:1e:40:89:28:ee:a4:46
@@ -720,7 +811,7 @@ what leaves stdin available:
 ```sh
 sudo cat /etc/it-suite/gateway-issuer.token | docker compose run --rm --no-deps -T \
   -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py itms.toeshee.com
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
 ```
 
 **A pipe, not a `< redirect`, and the `sudo` covers `cat` alone.** This step ran
@@ -759,22 +850,53 @@ straight to the volume the gateway reads and never touches your shell history
 or the host filesystem. `root.crt` is the CA the gateway admits agent client
 certificates against (`ITS_GATEWAY_CLIENT_CA`).
 
-**This certificate is 365 days and does not renew itself.** Install the timer
-from GO-LIVE.md §5 now, while you are thinking about it.
+**This certificate is 365 days and does not renew itself.** Step 6b, next,
+installs the timer that renews it every month.
 
-### Step 7 — Your TLS certificate for `:443`, then start everything
+### Step 6b — Renew the gateway's certificate every month
+
+The certificate step 6 issued is valid for 365 days and **does not renew
+itself**, and it is the only server certificate every agent dials: the day it
+expires, the whole fleet disconnects at once. This timer re-issues it on the
+first of every month, as root, from the `0600` token of step 3.4 (GO-LIVE.md
+§5 says why a redirect is right here and a pipe in step 6):
 
 ```sh
-cp /etc/letsencrypt/live/itms.toeshee.com/fullchain.pem certs/fullchain.pem
-cp /etc/letsencrypt/live/itms.toeshee.com/privkey.pem   certs/privkey.pem
-chmod 600 certs/privkey.pem
+sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
+[Unit]
+Description=Renew the it-suite gateway server certificate
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/it-suite/deploy
+# The token arrives on STDIN from a 0600 file, never as an argument. `-T` is
+# what keeps stdin available to redirect.
+ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \
+  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com \
+  < /etc/it-suite/gateway-issuer.token \
+  && docker compose restart gateway'
+EOF
+sudo tee /etc/systemd/system/its-gateway-cert.timer >/dev/null <<'EOF'
+[Unit]
+Description=Monthly it-suite gateway certificate renewal
+[Timer]
+OnCalendar=monthly
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+sudo systemctl enable --now its-gateway-cert.timer
+sudo systemctl list-timers its-gateway-cert.timer --no-pager
 ```
 
-⚠ **UNVERIFIED with a publicly-trusted certificate.** This run used a locally
-issued stand-in for `itms.toeshee.com`, so the *wiring* is proven — Traefik
-loads the two files from the `certs/` bind mount and serves them — but no
-Let's Encrypt chain was exercised. `certs/` is gitignored (`.gitkeep` keeps the
-directory), so a `git pull` never touches your key.
+The last line lists `its-gateway-cert.timer` with `its-gateway-cert.service`
+under ACTIVATES and the first of next month under NEXT. Connected agents
+reconnect on their own within seconds of each renewal ([Renewing the gateway
+certificate](#renewing-the-gateway-certificate)). ⚠ **UNVERIFIED**: the
+rehearsal (plan of 2026-11-23, Task 12) ran in a container without systemd;
+it wrote both units and ran the service's command once by hand.
+
+### Step 7 — Start everything; Traefik obtains the certificate for `:443`
 
 ```sh
 docker compose up -d
@@ -782,63 +904,103 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 ```
 
 ```
-SERVICE           STATUS
-api               Up 15 seconds
-backup-replicator Up 15 seconds
-gateway           Up 22 seconds
-migrate           Exited (0) 23 seconds ago
-minio             Up 26 seconds (healthy)
-openbao           Up About a minute (healthy)
-openbao-init      Exited (0) 25 seconds ago
-postgres          Up 2 minutes (healthy)
-postgres-grants   Exited (0) 23 seconds ago
-redis             Up 26 seconds
-traefik           Up 15 seconds
-web               Up 26 seconds
-worker            Up 15 seconds
+SERVICE             STATUS
+api                 Up … (healthy)
+backup-replicator   Up …
+gateway             Up …
+migrate             Exited (0) …
+minio               Up … (healthy)
+openbao             Up … (healthy)
+openbao-init        Exited (0) …
+postgres            Up … (healthy)
+postgres-grants     Exited (0) …
+redis               Up …
+traefik             Up …
+web                 Up … (healthy)
+worker              Up …
 ```
 
 The three `Exited (0)` services are the one-shot jobs; that is success.
-(`backup-replicator` came after the run recorded here, and its line is
-added by hand: it has no healthcheck, so it reads `Up` like `worker`.)
 
-**Verify Traefik actually picked up your certificate.** The fallback to a
-self-signed certificate is silent:
-
-```sh
-echo | openssl s_client -connect itms.toeshee.com:443 -servername itms.toeshee.com 2>/dev/null \
-  | openssl x509 -noout -issuer -subject
-```
-
-```
-issuer=CN = sandbox test CA
-subject=CN = itms.toeshee.com
-```
-
-Your issuer will be your CA. **`issuer=CN = TRAEFIK DEFAULT CERT` means it fell
-back** and your certificate is not in use — check the filenames and that the
-key is readable by the container.
-
-And the agent-facing side, which must be the *internal* CA:
+**The certificate.** Traefik asks Let's Encrypt for `rmm.novieri.com` as soon as
+it sees the routers (TLS-ALPN-01, answered on `:443`), stores it in the
+`traefik-acme` volume, and renews it by itself 30 days before it expires. Until
+it has one — and for good if it cannot get one — it serves its own self-signed
+"TRAEFIK DEFAULT CERT" **without failing**. So check, rather than trust:
 
 ```sh
-echo | openssl s_client -connect itms.toeshee.com:8443 2>/dev/null \
-  | openssl x509 -noout -issuer -subject
+./scripts/check-public-tls.sh
 ```
 
 ```
-issuer=CN = it-suite internal CA
-subject=CN = itms.toeshee.com
+ok      127.0.0.1:443 presents a trusted certificate for rmm.novieri.com
+        issuer=C = US, O = Let's Encrypt, CN = …
+        X509v3 Subject Alternative Name:
+            DNS:rmm.novieri.com
+        notAfter=…
 ```
 
-Two different issuers on the two ports is the correct picture. If `:8443` shows
-your public CA, an agent will never connect.
+It waits up to three minutes for the first issuance, and it also refuses a
+trusted certificate with **fewer than 28 days left**: Traefik renews at 30, so
+that is a renewal that has been failing (Let's Encrypt no longer mails expiry
+warnings). A `REFUSE` says what a browser would refuse; `docker compose logs traefik | grep -i acme` says why
+Let's Encrypt did not issue (the usual causes: the `A` record is not this
+machine's yet, `:443` closed at the provider's firewall, or an `AAAA` record
+of another machine). Fix the cause and `docker compose restart traefik`.
 
-**The per-address sign-in limits the api started with** (`ITS_AUTH_LOGIN_IP_LIMIT`
-and `ITS_AUTH_FACTOR_IP_LIMIT`, step 1). Unset, both are 30. This works from
-here on, once the api is running, and again after any change to them followed by
-`docker compose up -d` (⚠ **UNVERIFIED** on a deployed host: the Python part was
-run against this release's settings, not inside the container):
+On a **rehearsal against Let's Encrypt staging** the check refuses by design:
+staging's roots are in no trust store (and `deploy.sh`, whose own probe of
+`:443` has no such CA, ends a rehearsal with `Deployed with warnings` and exit
+status 1 even though everything is up: that is this, not a failure). Give it those roots (the four Let's
+Encrypt lists on its staging page):
+
+```sh
+curl -fsS https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x2.pem https://letsencrypt.org/certs/staging/gen-y/root-ye.pem https://letsencrypt.org/certs/staging/gen-y/root-yr.pem > /tmp/le-staging-roots.pem
+./scripts/check-public-tls.sh --cafile /tmp/le-staging-roots.pem
+```
+
+The certificate store Traefik writes must be readable by Traefik alone —
+Traefik refuses a looser `acme.json` itself, and the named volume is what
+creates its directory:
+
+```sh
+docker compose exec traefik stat -c %a /etc/traefik/acme/acme.json
+```
+
+```
+600
+```
+
+⚠ **UNVERIFIED with Let's
+Encrypt itself**: the rehearsal (plan of 2026-11-23, Task 12) and every CI run
+obtain it from Pebble, Let's Encrypt's own test CA, by the same path; the
+issuer line above is the one production's will be.
+
+**The agent-facing side must be the internal CA**, not Let's Encrypt:
+
+```sh
+echo | openssl s_client -connect 127.0.0.1:8443 -servername rmm.novieri.com 2>/dev/null \
+  | openssl x509 -noout -issuer -ext subjectAltName
+```
+
+```
+issuer=CN = Novieri RMM internal CA
+X509v3 Subject Alternative Name:
+    DNS:rmm.novieri.com
+```
+
+Two different issuers on the two ports is the correct picture. If `:8443`
+shows a Let's Encrypt issuer, an agent will never connect.
+
+**From a computer outside this VPS**, once: the check above dials this
+machine from itself and never crosses your provider's firewall, and Let's
+Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
+Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
+prints `issuer=CN = Novieri RMM internal CA`; on Windows,
+`Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
+Anything else: open `8443/tcp` at the provider's firewall.
+
+**The per-address sign-in limits the api started with** (step 1):
 
 ```sh
 docker compose exec api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)"
@@ -857,21 +1019,21 @@ transaction behind one screen, through the same service code the Users tab uses.
 
 The setup screen sets the administrator's password itself and sends **no
 mail**; the first sign-in enrols the second factor (step 9). Account mail
-(invitations, password resets) is configured afterwards in ITMS at
+(invitations, password resets) is configured afterwards in Novieri RMM at
 **Settings → Email**.
 
 Then:
 
-1. **Open `https://itms.toeshee.com/`.** On an installation with no users it
+1. **Open `https://rmm.novieri.com/`.** On an installation with no users it
    shows the setup screen rather than redirecting to sign-in. That first request
    is also what **generates** the install code — nothing runs earlier, so do this
    before going to look for it.
 
-2. **Read the code.** The api logs it exactly once, when it is created, and
-   writes it to `/var/lib/its/secrets/setup-code` mode 600:
+2. **Read the code.** The api writes it to `/var/lib/its/secrets/setup-code`,
+   mode 600, when the first request asks for it (and logs it once):
 
    ```sh
-   docker compose logs api | grep -i "install code"
+   docker compose exec api cat /var/lib/its/secrets/setup-code
    ```
 
 3. **Enter it**, with your name, email, organization name and the password you
@@ -881,7 +1043,7 @@ That creates the organization, the administrator account and its `org-admin`
 grant **in one transaction** — either all three or none — and writes every part
 of it to the hash-chained audit log.
 
-**The organization's slug is `ITS_DEFAULT_ORG_SLUG` from `.env`** — `toeshee`
+**The organization's slug is `ITS_DEFAULT_ORG_SLUG` from `.env`** — `novieri`
 in the shipped example — not something you type, and not derived from the name
 you enter unless that setting is blank. That is deliberate: the sign-in, the
 OAuth server for AI apps and the recovery command all look people up in that
@@ -896,7 +1058,7 @@ treat the code as a password until you have.
 
 ### Step 9 — Sign in, and enrol your second factor
 
-Setup does not sign you in. Open `https://itms.toeshee.com/sign-in` and sign
+Setup does not sign you in. Open `https://rmm.novieri.com/sign-in` and sign
 in with the address and the password you gave the setup screen. The first
 sign-in asks for a second factor before anything else -- an authenticator
 app (TOTP) or a passkey -- and then shows ten recovery codes, once. Keep them
@@ -918,17 +1080,17 @@ is quick — but "the code grants it" and "this deployment granted it" are
 different claims, and only one of them is about your box.
 
 In the console: **Settings → Users** lists your account with the **org-admin**
-role. Or against the API, with a token from your signed-in session:
+role. Or from inside the stack, with no token at all (the console's API reads a
+session cookie, not a bearer token, since own authentication phase 1, so a
+`curl` with `Authorization: Bearer` is not a way to ask it):
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" https://itms.toeshee.com/api/v1/devices
+docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'"
 ```
 
-```
-GET /api/v1/devices -> 200
-```
+One line: the address you gave the setup screen, then `|org-admin`.
 
-A `403 {"detail":"requires devices.read"}` means the role is not there. Seeded
+No line, or a role other than `org-admin`, means the role is not there. Seeded
 roles are `super-admin`, `org-admin`, `technician`, `auditor`, `read-only` and
 `requester`; a missing grant means the claim did not complete, and the fix is to
 look at the api log for that request rather than to insert a row by hand.
@@ -944,7 +1106,7 @@ Unauthenticated, through the real front door:
 
 ```sh
 for p in /api/v1/devices /api/v1/jobs /api/v1/audit/verify /api/v1/enrollment-tokens; do
-  printf "  %-28s " "$p"; curl -s -o /dev/null -w "%{http_code}\n" https://itms.toeshee.com$p
+  printf "  %-28s " "$p"; curl -s -o /dev/null -w "%{http_code}\n" https://rmm.novieri.com$p
 done
 ```
 
@@ -960,117 +1122,181 @@ All four must be `401`. A `404` on all of them means **Traefik is not routing**
 
 #### 11b — Create an enrollment token
 
-```sh
-curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"first endpoint","expires_in_hours":24,"max_uses":1}' \
-  https://itms.toeshee.com/api/v1/enrollment-tokens
-```
+In the console, at `https://rmm.novieri.com/enrollment`: a new token named
+`first endpoint`, valid for 24 hours, **one** use, for the site **Principal**
+of your own organization's client. The console shows the token **once**; keep
+it for the next step and nowhere else. (Since own authentication phase 1 the
+console's API takes a session cookie, so the `curl -H "Authorization: Bearer …"`
+this step used to show cannot mint one; the console is the way, audited as
+`enrollment.token_created`.)
 
-```
-  id 06a73b24-6786-7796-8000-5ef58999de3c name first endpoint max_uses 1
-```
+#### 11c — A throwaway agent on this VPS
 
-#### 11c — Install and start the agent on an endpoint
-
-```sh
-cd /opt/it-suite/agent && go build -o /usr/local/bin/its-agent ./cmd/agent
-
-read -rsp 'Enrollment token from 11b: ' ITS_AGENT_ENROLL_TOKEN && echo && \
-ITS_AGENT_ENROLL_URL=https://itms.toeshee.com \
-ITS_AGENT_ENROLL_TOKEN="${ITS_AGENT_ENROLL_TOKEN:?nothing was pasted}" \
-ITS_AGENT_DATA_DIR=/var/lib/its-agent \
-  /usr/local/bin/its-agent
-```
-
-```
-level=INFO msg="its-agent starting" version=dev data_dir=/var/lib/its-agent enrolled=false
-level=INFO msg=enrolling url=https://itms.toeshee.com/enroll/v1 hostname=vm os_family=linux
-level=INFO msg=enrolled device_id=06a73b24-69ff-7320-8000-988575c84d1b gateway_url=wss://itms.toeshee.com:8443/agent cert_not_after=2027-08-05T21:59:34Z
-level=INFO msg="gateway connected" url=wss://itms.toeshee.com:8443/agent
-```
-
-`enrolled` then `gateway connected` is the whole handshake: CSR signed by the
-internal CA, certificate and CA pinned to `ITS_AGENT_DATA_DIR`, outbound mTLS
-WebSocket established. The device appears immediately:
+The first endpoint is this server itself, for a few minutes: the agent built
+from this checkout (Go in a container, as your user: the VPS needs no
+toolchain, and the binary in `agent/dist/` is yours, not root's), run in a
+container that shares the host's network and trusts the host's certificate
+roots. It reaches `https://rmm.novieri.com` through the same name, ports and
+TLS as an endpoint — the internal CA, mutual TLS on `:8443` — but its packets
+never leave this machine, so it does not cross your provider's firewall: step
+7's check from outside is what proves that.
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" https://itms.toeshee.com/api/v1/devices
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/../agent:/src" -w /src -e CGO_ENABLED=0 -e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod golang:1.24-bookworm go build -trimpath -o dist/novieri-agent ./cmd/agent
+install -d -m 700 /tmp/smoke-agent
+```
+
+The token from 11b, at a prompt that does not echo it. This block is one
+command on purpose: a prompt ends its block, so nothing pasted after it can be
+read as the token.
+
+```sh
+read -rsp 'Enrollment token (11b): ' T && echo && [ -n "$T" ] && (umask 077 && printf '%s' "$T" > /tmp/smoke-agent/enroll-token); unset T
+```
+
+Then the agent itself:
+
+```sh
+docker run -d --name smoke-agent --network host --user "$(id -u):$(id -g)" \
+  -v "$PWD/../agent/dist/novieri-agent:/usr/local/bin/novieri-agent:ro" \
+  -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro \
+  -v /tmp/smoke-agent:/var/lib/novieri-agent \
+  -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
+  busybox:1.36.1 /usr/local/bin/novieri-agent
+for _ in $(seq 1 30); do docker logs smoke-agent 2>&1 | grep -q 'gateway connected' && break; sleep 2; done
+docker logs smoke-agent 2>&1 | grep -E 'starting|enrolling|enrolled|gateway connected'
 ```
 
 ```
-   vm 06a73b24-69ff-7320-8000-988575c84d1b agent_status= online cert_state= ok
+level=INFO msg="novieri-agent starting" version=dev data_dir=/var/lib/novieri-agent enrolled=false
+level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1 hostname=… os_family=linux
+level=INFO msg=enrolled device_id=… gateway_url=wss://rmm.novieri.com:8443/agent cert_not_after=…
+level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
 ```
 
-⚠ **UNVERIFIED**: only Linux. The agent cross-compiles to Windows and macOS and
-`agent/packaging/` carries service installers, but no Windows or macOS endpoint
-was enrolled in this run — and none has been since, by anybody on this project.
-[`docs/modules/agent-distribution/first-run-verification.md`](../docs/modules/agent-distribution/first-run-verification.md)
-is the procedure for changing that: what to run on one real machine of each
-kind, what to observe at each step, and what each observation would falsify.
+`enrolled` then `gateway connected` is the whole handshake: the CSR signed by
+the internal CA, the certificate and the CA pinned in the data directory, the
+outbound mutual-TLS WebSocket up. The token file is gone (`ls /tmp/smoke-agent`
+no longer lists `enroll-token`): the agent deletes it the moment it has a
+certificate. The device appears in the console's **Devices**, online.
 
-**If enrollment fails with `certificate and key do not form a pair: tls:
-failed to find any PEM data in certificate input`,** you are running a build
-from before the fix described in defect 11.
+The packaged installers for real endpoints — the `.deb`, the macOS script, the
+Windows installer and the Group Policy MSI — are in
+[Publishing the agent to the console](#publishing-the-agent-to-the-console).
+⚠ **UNVERIFIED**: no Windows or macOS endpoint has been enrolled by anybody on
+this project; `docs/modules/agent-distribution/first-run-verification.md` is
+the procedure for that.
 
 #### 11d — Round-trip a signed job
 
-```sh
-read -rp 'Device id (the devices list in 11c): ' DEVICE_ID && \
-JOB_ID="$(curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"device_id\":\"${DEVICE_ID:?no device id}\",\"type\":\"hello\",\"params\":{}}" \
-  https://itms.toeshee.com/api/v1/jobs | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')" && \
-echo "JOB_ID=$JOB_ID"
-```
-
-Then poll it:
+In the console, on the device from 11c: **Run job → Collect inventory**. Its
+row in **Job history** reaches **Succeeded** within a minute. From inside the
+stack, the same fact for the job a person asked for (the platform also
+schedules an inventory of its own when a device first connects, so the query
+leaves that one out):
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" "https://itms.toeshee.com/api/v1/jobs/${JOB_ID:?no job id}"
+docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select type, status, signature is not null from jobs where requested_by is not null order by issued_at desc limit 1"
 ```
 
-```json
-{
-    "id": "06a73b25-dd24-7c95-8000-84ffd7bfca81",
-    "type": "hello",
-    "device_id": "06a73b24-69ff-7320-8000-988575c84d1b",
-    "status": "succeeded",
-    "attempts": 1,
-    "params": { "message": "ping" },
-    "result": { "greeting": "ping" },
-    "issued_at": "2026-08-05T21:59:57Z",
-    "started_at": "2026-08-05T21:59:57.920432Z",
-    "finished_at": "2026-08-05T21:59:57.931670Z"
-}
+```
+inventory.collect|succeeded|t
 ```
 
-`"status": "succeeded"` with a `result` is the platform working: the server
-signed the job envelope with the Ed25519 key that never leaves OpenBao, the
-agent verified that signature before executing anything (there is no unsigned
-command path), and the result came back up the same mTLS connection.
+That is the platform working: the server signed the job envelope with the
+Ed25519 key that never leaves OpenBao, the agent verified the signature before
+executing anything (there is no unsigned command path), and the result came
+back up the same mTLS connection.
 
 #### 11e — The audit chain
 
+From inside the stack, with no token (the same check `docs/07-backup-restore.md`
+runs after a restore):
+
 ```sh
-curl -H "Authorization: Bearer $TOKEN" https://itms.toeshee.com/api/v1/audit/verify
-curl -H "Authorization: Bearer $TOKEN" "https://itms.toeshee.com/api/v1/audit?limit=20"
+docker compose exec -T api python - <<'EOF'
+import asyncio
+import json
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.core.audit import audit_service, load_audit_hmac_key
+from app.core.config import get_settings
+from app.models import Organization
+
+
+async def main() -> None:
+    settings = get_settings()
+    audit_service.set_hmac_key(load_audit_hmac_key(settings))
+    engine = create_async_engine(settings.database_admin_url)
+    try:
+        async with AsyncSession(engine) as session:
+            orgs = (await session.execute(select(Organization.id, Organization.slug))).all()
+            for org_id, slug in orgs:
+                r = await audit_service.verify(session, org_id)
+                broken = str(r.broken_at) if r.broken_at else None
+                print(slug, json.dumps({"ok": r.ok, "count": r.count, "broken_at": broken}))
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+EOF
 ```
 
 ```
-{"ok":true,"count":6,"broken_at":null}
-
-  2026-08-05T21:59:26  user   auth.login                   user
-  2026-08-05T21:59:34  user   enrollment.token_created     enrollment_token
-  2026-08-05T21:59:34  agent  enrollment.device_enrolled   device
-  2026-08-05T21:59:35  agent  gateway.connected            device
-  2026-08-05T21:59:57  system jobs.dispatched              job
-  2026-08-05T21:59:57  agent  jobs.succeeded               job
+novieri {"ok": true, "count": …, "broken_at": null}
 ```
 
-`ok: true` over a chain that includes the dispatch and the result is the
-end-to-end proof. **First boot is complete.**
+The console shows the same check for the signed-in person's organization:
+**Audit log → Verify chain**. `ok: true` over a chain that includes the
+enrollment, the dispatch and the result is the end-to-end proof.
+
+#### 11f — Retire the throwaway agent
+
+```sh
+docker rm -f smoke-agent
+rm -rf /tmp/smoke-agent
+```
+
+The second line removes the device's private key and certificate. The device
+stays in the console as a record, offline; remove it there if you do not want
+it listed.
 
 The MinIO bucket (`ITS_S3_BUCKET`) needs no provisioning step — `ObjectStore`
 creates it on first use.
+
+### Step 12 — The first backup, so that there is a way back
+
+```sh
+sudo ./scripts/install-backup-timer.sh
+sudo systemctl start its-platform-backup.service
+journalctl -u its-platform-backup.service --no-pager -n 20
+sudo cat /var/lib/it-suite/backup/last-success
+```
+
+The last line prints the time of the backup just taken. From now on one runs
+every night at 02:30 ([Platform
+backups](#platform-backups-nightly-off-host-and-a-monthly-drill)). **Until this
+step, a new host has no way back at all**: `build-images.sh` listed one tag
+(step 1b), the one running. After it, the way back is restoring this backup
+([Rolling back a deployment](#rolling-back-a-deployment)).
+
+**That backup is on this VPS, and goes with it.** Losing the machine or its
+disk loses every backup with it, and on a new host restoring a backup is the
+only way back. Sending each night's backup somewhere else, encrypted, is
+**recommended before anything real is enrolled** — it is not part of First
+boot, because the destination and its key are things only you have: [The
+off-host copy, step by step](#the-off-host-copy-step-by-step).
+
+**The key material is not in that backup and goes off this host by hand, now**
+— the OpenBao shares and root token (step 3.2), the `openbao-data`,
+`its-secrets` and `its-ca` volumes, and `.env` — to a different place than the
+database backups: GO-LIVE.md §6 and `docs/07-backup-restore.md` §1-2. The
+`traefik-acme` volume is not key material: losing it costs one new certificate.
+
+**First boot is complete.**
 
 ---
 
@@ -1103,7 +1329,7 @@ the refusal.
   as `user.recovery_link_issued` (never the link itself).
 
 First, by hand, set `RECOVER` to the address the person signs in with — for
-example `RECOVER=ana@toeshee.com` — then, from the directory holding
+example `RECOVER=ana@novieri.com` — then, from the directory holding
 `docker-compose.yml`:
 
 ```sh
@@ -1158,7 +1384,7 @@ Then, in the console, **Settings -> Microsoft sign-in** (`orgs.manage` on
 every client): the application (client) ID and Novieri's tenant ID -- the
 only tenant technicians may sign in from --, then **Make a new certificate
 when I save**, save, and upload the certificate the tab shows (or its
-download, `itms-sign-in.cer`) to the application: *Certificates & secrets*
+download, `novieri-sign-in.cer`) to the application: *Certificates & secrets*
 -> *Certificates* -> *Upload certificate*. Then switch sign-in with Microsoft
 on. Each client's tenants are on that client's **Edit** form.
 
@@ -1170,7 +1396,7 @@ is two steps and leaves no gap:**
 1. Tick *Make a new certificate when I save* and save. The new certificate
    **waits** beside the one in use, which keeps signing people in; the tab
    shows both, each with its expiry.
-2. Upload the new one (or its download, `itms-sign-in-new.cer`) to the same
+2. Upload the new one (or its download, `novieri-sign-in-new.cer`) to the same
    application, next to the old one -- Entra keeps several at once -- and
    then press *I uploaded it: switch to the new certificate*. From that
    moment the platform signs with the new key and destroys the old one;
@@ -1255,16 +1481,16 @@ everywhere.
 ## Sending account mail through Microsoft 365 (Settings → Email)
 
 Microsoft is retiring password sign-in (basic auth) for SMTP. **Settings →
-Email → Sign-in: Microsoft 365** makes ITMS sign in to `smtp.office365.com`
+Email → Sign-in: Microsoft 365** makes Novieri RMM sign in to `smtp.office365.com`
 with an Azure application instead. **Since own authentication (phase 1)** the
-client secret is stored in ITMS's vault (Settings → Email), encrypted and
-decrypted only to send; ITMS fetches the Microsoft token itself
+client secret is stored in Novieri RMM's vault (Settings → Email), encrypted and
+decrypted only to send; Novieri RMM fetches the Microsoft token itself
 (client-credentials grant) and sends the mail. The secret is never shown back.
 
 > ⚠ **UNVERIFIED against a live Microsoft tenant.** The permission, the scope
 > and the Exchange commands below follow Microsoft's documentation
 > (*Authenticate an IMAP, POP or SMTP connection using OAuth*, revision of
-> 2025-10-17). Everything ITMS sends is tested against a fake. Until steps 9
+> 2025-10-17). Everything Novieri RMM sends is tested against a fake. Until steps 9
 > and 10 have been run, this is "shipped, not verified".
 
 **Use a separate Azure application for this**, not the one Email Intake uses:
@@ -1273,7 +1499,7 @@ mail.
 
 Azure portal (Microsoft Entra admin center):
 
-1. **App registrations → New registration.** Name it `ITMS outgoing mail`,
+1. **App registrations → New registration.** Name it `Novieri RMM outgoing mail`,
    choose *Accounts in this organizational directory only*, leave *Redirect
    URI* empty, and press **Register**.
 2. On its **Overview** page, note the **Application (client) ID** and the
@@ -1287,7 +1513,7 @@ Azure portal (Microsoft Entra admin center):
    **Add**, and copy the **Value** column now (it is shown once). Put a
    reminder in your calendar a week before it expires: when it expires,
    invitations and password resets stop sending.
-6. **Enterprise applications** (not App registrations) → open `ITMS outgoing
+6. **Enterprise applications** (not App registrations) → open `Novieri RMM outgoing
    mail` → note its **Object ID**. It is a different value from the Object ID
    on the App registrations page, and using the wrong one makes sign-in fail.
 
@@ -1300,8 +1526,8 @@ Import-Module ExchangeOnlineManagement
 Connect-ExchangeOnline
 $AppId    = Read-Host "Application (client) ID from step 2"
 $ObjectId = Read-Host "Enterprise application Object ID from step 6"
-$Mailbox  = Read-Host "The mailbox ITMS sends as (the From address)"
-$Sp = New-ServicePrincipal -AppId $AppId -ObjectId $ObjectId -DisplayName "ITMS outgoing mail"
+$Mailbox  = Read-Host "The mailbox Novieri RMM sends as (the From address)"
+$Sp = New-ServicePrincipal -AppId $AppId -ObjectId $ObjectId -DisplayName "Novieri RMM outgoing mail"
 Add-MailboxPermission -Identity $Mailbox -User $Sp.Identity -AccessRights FullAccess
 Add-RecipientPermission -Identity $Mailbox -Trustee $Sp.Identity -AccessRights SendAs -Confirm:$false
 Get-CASMailbox -Identity $Mailbox | Format-List SmtpClientAuthenticationDisabled
@@ -1317,7 +1543,7 @@ principal with `Add-MailboxPermission` above: one mailbox, by construction.
 `New-ApplicationAccessPolicy` scopes Microsoft Graph and EWS access and does
 not govern SMTP or IMAP.
 
-In ITMS:
+In Novieri RMM:
 
 7. **Settings → Email.** Mail server `smtp.office365.com`, port `587`,
    Encryption **StartTLS · port 587**, From address = the mailbox above.
@@ -1335,21 +1561,21 @@ AUTH enabled for the mailbox, and the client secret not expired.
 
 **Going back to a password:** choose **Sign-in: Password**, type the password,
 Save. The Microsoft application details are cleared in the same save, and its
-client secret is deleted from ITMS's vault.
+client secret is deleted from Novieri RMM's vault.
 
 ---
 
 ## Notification email channels over Microsoft 365
 
-Ticket and platform notifications are sent by ITMS itself, per organisation,
+Ticket and platform notifications are sent by Novieri RMM itself, per organisation,
 through **Notifications → Channels**. An email channel offers the same
 **Sign-in: Microsoft 365**: the directory (tenant) ID, application (client) ID
-and client secret go to ITMS's vault (never shown again), each send fetches a
+and client secret go to Novieri RMM's vault (never shown again), each send fetches a
 token and signs in to `smtp.office365.com:587` with StartTLS, and every use is
 in the audit log as `notification.credential_used`. Password sign-in stays for
 any other mail server.
 
-The Azure side is steps 1-6 of the section above. The `ITMS outgoing mail`
+The Azure side is steps 1-6 of the section above. The `Novieri RMM outgoing mail`
 application can be reused; to send from another mailbox, run the
 `Add-MailboxPermission` and `Add-RecipientPermission` lines again with that
 mailbox. The channel's **From address** is the mailbox it sends as. Press
@@ -1362,17 +1588,17 @@ Unverified against a live tenant, as above.
 
 Exchange Online refuses IMAP with a password, so a Microsoft 365 support
 mailbox signs in with **Connect with Microsoft**: a person signs in once as the
-mailbox, and ITMS keeps the resulting refresh token in the vault and turns it
+mailbox, and Novieri RMM keeps the resulting refresh token in the vault and turns it
 into a short-lived access token for each poll. Password IMAP keeps working
 for every other mail server.
 
-> ⚠ **UNVERIFIED against a live Microsoft tenant.** Everything ITMS sends is
+> ⚠ **UNVERIFIED against a live Microsoft tenant.** Everything Novieri RMM sends is
 > tested against a fake token endpoint and a scripted IMAP server. Until steps
 > 12 to 15 below have been run, this is "shipped, not verified".
 
 **Before anything else**, `ITS_PUBLIC_CONSOLE_URL` must be set in `.env` to
 the https address people open the console at (for this deployment,
-`https://itms.toeshee.com`). It is the address Microsoft returns the browser
+`https://rmm.novieri.com`). It is the address Microsoft returns the browser
 to. Without it the console says Connect with Microsoft is switched off.
 
 **Use a separate Azure application from the outgoing-mail one** ([Sending
@@ -1382,12 +1608,12 @@ the secret that sends mail cannot also read it.
 
 Azure portal (Microsoft Entra admin center):
 
-1. **App registrations → New registration.** Name it `ITMS email intake`,
+1. **App registrations → New registration.** Name it `Novieri RMM email intake`,
    choose *Accounts in this organizational directory only*.
 2. Under *Redirect URI* choose **Web** and enter the address the console shows
    under Email intake → **Microsoft 365 connection → Return address to
    register in Azure**. For this deployment that is
-   `https://itms.toeshee.com/settings/email-intake/oauth/callback`. Press
+   `https://rmm.novieri.com/settings/email-intake/oauth/callback`. Press
    **Register**.
 3. On its **Overview** page, note the **Application (client) ID** and the
    **Directory (tenant) ID**.
@@ -1437,7 +1663,7 @@ In the console:
     a ticket.
 13. Press **Test** on the row; it must say it connected and listed the folder.
 14. **Revoke it on purpose:** sign in to https://myaccount.microsoft.com as the
-    support mailbox, open **Apps**, and remove *ITMS email intake*. Within one
+    support mailbox, open **Apps**, and remove *Novieri RMM email intake*. Within one
     poll interval the row must show **Microsoft sign-in expired** with a
     **Reconnect** button, and the logs must show no retry loop.
 15. Press **Reconnect**, sign in again, and confirm polling resumes.
@@ -1450,7 +1676,7 @@ address in step 2 does not exactly match what the console shows in step 8.
 account that signed in. If that account is disabled or deleted, an
 administrator revokes its sessions, or (depending on tenant policy) its
 password changes, the mailbox moves to **Microsoft sign-in expired** and needs
-Reconnect. ITMS uses the token every poll, so it does not lapse from disuse
+Reconnect. Novieri RMM uses the token every poll, so it does not lapse from disuse
 while the mailbox is switched on.
 
 ---
@@ -1461,8 +1687,8 @@ Refuses any token whose `email` claim is not at your domain. Unset — which is
 the shipped default — means **no restriction**, exactly today's behaviour.
 
 Allowed iff the domain equals the configured base or ends with `.` + the base,
-both lowercased. `you@toeshee.com` and `you@mail.toeshee.com` pass;
-`you@eviltoeshee.com` fails (no dot) and `you@toeshee.com.evil.com` fails
+both lowercased. `you@novieri.com` and `you@mail.novieri.com` pass;
+`you@evilnovieri.com` fails (no dot) and `you@novieri.com.evil.com` fails
 (wrong suffix). An address with more than one `@` is refused outright rather
 than parsed. A token with no `email` claim fails closed.
 
@@ -1494,7 +1720,7 @@ the one you mean to set:
 ```sh
 docker compose run --rm --no-deps --label traefik.enable=false \
   -v "$PWD/../scripts/preflight_email_domain.py:/srv/app/preflight_email_domain.py:ro" \
-  --entrypoint python api preflight_email_domain.py toeshee.com
+  --entrypoint python api preflight_email_domain.py novieri.com
 ```
 
 | Exit code | Meaning |
@@ -1527,7 +1753,7 @@ already fixed, that is the divergence in §4 below, not a failed fix.
 ### 2. Then set it, and restart
 
 ```
-ITS_CONSOLE_EMAIL_DOMAIN=toeshee.com
+ITS_CONSOLE_EMAIL_DOMAIN=novieri.com
 ```
 
 ```sh
@@ -1551,15 +1777,14 @@ sed -i 's/^ITS_CONSOLE_EMAIL_DOMAIN=.*/ITS_CONSOLE_EMAIL_DOMAIN=/' .env
 docker compose up -d api gateway worker
 ```
 
-Confirm you are back in before doing anything else:
+Confirm the api no longer holds the rule, before doing anything else:
 
 ```sh
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
-  https://itms.toeshee.com/api/v1/devices
+docker compose exec api python -c "from app.core.config import get_settings; print(repr(get_settings().console_email_domain))"
 ```
 
-`200` is recovered; a further `403` means something other than the allowlist is
-refusing you.
+`''` is recovered: sign in at `https://rmm.novieri.com/` and the console opens.
+A refusal after that means something other than the allowlist is refusing you.
 
 Blank, not deleted: leaving the key present and empty keeps it visible in
 `.env` next to this section. That is safe, but **not** because Pydantic reads a
@@ -1592,14 +1817,14 @@ lock out the entire deployment; unrestricted is the recoverable direction.
   admit. Treat exit `0` as evidence about the rows as of each user's last
   sign-in, not a proof about the tokens they will present next.
 - **It is not a replacement for disabling an account.** The same gate refuses
-  any user whose ITMS `status` is not `active`, and that is the control for
+  any user whose Novieri RMM `status` is not `active`, and that is the control for
   "this person has left" — a domain rule that happens to exclude them is a
   coincidence, not a policy.
 
 ## AI connections (MCP)
 
 An AI app — Claude, or any client that speaks the Model Context Protocol —
-can use ITMS **as the person who connected it**: it sees what that person
+can use Novieri RMM **as the person who connected it**: it sees what that person
 sees and can do what their role allows, every call is in the audit log
 (`mcp.tool_called`), and the app's own settings decide which tools need the
 person's approval. Approving an app is audited too (`mcp.app_authorized`); a
@@ -1640,7 +1865,7 @@ until it goes unused for 30 days, when the daily sweep removes it.
 
 1. **`ITS_PUBLIC_CONSOLE_URL` must be set in `.env`** to the https address
    people open the console at, with no path (for this deployment,
-   `https://itms.toeshee.com`). It may already be: the console's sign-in,
+   `https://rmm.novieri.com`). It may already be: the console's sign-in,
    Email intake and the install link use the same setting. Check with:
 
    ```sh
@@ -1841,7 +2066,7 @@ metadata document needs no opt-in. Risks 5, 6, 7 and 10 hold always.
    disguise (its document's, or the one its answer goes back to; ASCII only,
    so no look-alike letters), shows the app's chosen name only as its own
    claim, says what approving hands over — "If you approve, it can act as you
-   in ITMS: everything your role allows, including running actions on managed
+   in Novieri RMM: everything your role allows, including running actions on managed
    computers" — needs the person's second factor confirmed in the last ten
    minutes, and mails them "You connected <host>" afterwards when account
    mail is configured in Settings → Email (without it the approval still
@@ -1954,8 +2179,9 @@ since 2026-08-26 a **Managed deployment…** dialog for a GPO or Intune rollout.
 **The path, in one line:** run the `release-agent` workflow → download its
 draft release → **Agent Packages → Publish a release…** → **Mark as stable…**
 → **Update rollouts**. Steps 1–4 below. Until 2026-09-23 publishing was only
-possible with `curl` and a hand-copied bearer token; that path is kept, short,
-as the fallback in step 2.
+possible with `curl` and a hand-copied bearer token; since own authentication
+phase 1 the API takes the console's session and no bearer token, so the
+console is the only path (step 2).
 
 ⚠ **UNVERIFIED as a whole.** Unlike "First boot" above, no artefact has been
 published to a running install and no endpoint has been enrolled from a
@@ -1979,11 +2205,11 @@ keep it either.
 
 `super-admin` is not grantable from any console screen, deliberately. If your
 everyday account does not hold it, Agent Packages shows it no **Publish a
-release…** button and the `curl` fallback fails with `403 requires
+release…** button, and the API refuses the publication with `403 requires
 agent.release.manage`. The fix is a direct grant on the database host, from
 the directory holding `docker-compose.yml` and `.env`. First, by hand, set
 `PUBLISHER` to the email that account signs in with — for example
-`PUBLISHER=you@toeshee.com` — then:
+`PUBLISHER=you@novieri.com` — then:
 
 ```sh
 : "${PUBLISHER:?set PUBLISHER to the email the account signs in with first}"
@@ -2082,18 +2308,18 @@ the version in the box. Pushing a tag `agent-v1.4.0` does the same.) If the
 them to approve it.
 
 The result is a **draft** GitHub release, `agent-v$VERSION`, with nine assets:
-six binaries (`its-agent-{linux,darwin}-{amd64,arm64}`,
-`its-agent-windows-{amd64,arm64}.exe`), `SIGNATURES`, `SHA256SUMS` and
+six binaries (`novieri-agent-{linux,darwin}-{amd64,arm64}`,
+`novieri-agent-windows-{amd64,arm64}.exe`), `SIGNATURES`, `SHA256SUMS` and
 `release-signing-key.pub`. Download them to the machine you run the console
 from:
 
 ```sh
 : "${VERSION:?set VERSION to the version you are releasing first, e.g. VERSION=1.4.0}"
-gh release download "agent-v$VERSION" --dir "its-agent-$VERSION"
-ls "its-agent-$VERSION"
+gh release download "agent-v$VERSION" --dir "novieri-agent-$VERSION"
+ls "novieri-agent-$VERSION"
 ```
 
-(Or in GitHub: **Releases → the draft "its-agent 1.4.0" → Assets**, one click
+(Or in GitHub: **Releases → the draft "novieri-agent 1.4.0" → Assets**, one click
 each.) `SIGNATURES` is the file that matters besides the binaries: one line per
 binary, `<sha256>  <file>  <os>/<arch>  <signature>`, each signature covering
 the version, the platform and the digest together, so a signed binary cannot
@@ -2114,7 +2340,7 @@ server refuses them regardless.
    signatures cover the version number, so publishing `1.4.0`'s binaries as
    `1.4.1` produces packages every agent refuses to update to — and the
    console cannot tell, because it does not hold the key that would check.
-2. **Choose binaries…**: select every file in `its-agent-$VERSION` at once.
+2. **Choose binaries…**: select every file in `novieri-agent-$VERSION` at once.
    The platform is read from each file name. `SIGNATURES` is recognised and
    read; `SHA256SUMS` and `release-signing-key.pub` are left out and the dialog
    says so. A file whose name it does not recognise (a browser's `(1)` suffix
@@ -2144,8 +2370,9 @@ Each file ends in one of these:
 
 If an upload fails outright, the checksums differ, or the signature cannot be
 recorded, the dialog removes the entry it had just created, so trying that file
-again is not a 409. If the removal itself fails the result says so, and the
-`DELETE` in the fallback below clears it.
+again is not a 409. If the removal itself fails the result says so, and
+**Release channels → Remove…** on the same page clears it — with every other
+package of that version, so publish those again afterwards.
 
 Every release is registered as **not code-signed** (`signed: false`): that
 field is an Authenticode / Developer ID claim, and the workflow makes none.
@@ -2154,47 +2381,16 @@ screen of the operator deciding whether to trust the download.
 
 A new release starts on the **pilot** channel.
 
-#### Fallback: the same thing with `curl`
+#### No command-line fallback
 
-For a host with no browser, or for a binary you built yourself. `$TOKEN` must
-be a bearer token from a session holding `super-admin` (see above) — **not**
-the Step 11 admin token unless that account has been granted the role — and
-the commands run from the directory holding the downloaded assets, with
-`VERSION` still set. This publishes `linux/amd64`; repeat both blocks for each
-platform, changing the three names on the `OS=` line.
-
-```sh
-: "${VERSION:?set VERSION to the version you are releasing first, e.g. VERSION=1.4.0}"
-OS=linux ARCH=amd64 FILE=its-agent-linux-amd64
-REL=$(curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"version\":\"$VERSION\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"signed\":false,\"notes\":\"\"}" \
-  https://itms.toeshee.com/api/v1/agent/releases | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/octet-stream' \
-  --data-binary @"$FILE" "https://itms.toeshee.com/api/v1/agent/releases/$REL/artifact"
-grep "  $FILE  " SIGNATURES
-```
-
-**Compare the `sha256` in the upload's answer with the first field of the
-`SIGNATURES` line by eye before going on** — that comparison is the whole of
-what the console's dialog adds. Only if they are equal:
-
-```sh
-SIG=$(grep "  $FILE  " SIGNATURES | awk '{print $4}')
-curl -sS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"release_signature\":\"$SIG\"}" \
-  "https://itms.toeshee.com/api/v1/agent/releases/$REL/release-signature"
-```
-
-To remove an entry (a wrong upload, or a 409 you need to clear), set `REL` to
-its `id` — `curl -sS -H "Authorization: Bearer $TOKEN" https://itms.toeshee.com/api/v1/agent/releases`
-lists them — and:
-
-```sh
-: "${REL:?set REL to the id of the entry to remove}"
-curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" "https://itms.toeshee.com/api/v1/agent/releases/$REL"
-```
-
-It answers 409 while an active update rollout still uses the release.
+The `curl` commands this section used to show sent `Authorization: Bearer
+$TOKEN`, and since own authentication phase 1 the API reads the console's
+session cookie and no bearer token (`backend/app/api/deps.py`, `admit`): they
+answered `401`. Publish from the console, from any machine with a browser; the
+VPS itself needs none. To remove a version (a wrong upload, or one you need to
+clear): **Agent Packages → Release channels → Remove…**, which removes every
+package of that version in one request. It is refused while an active update
+rollout still uses the version.
 
 A binary you built yourself with `./packaging/build.sh` has no release
 signature to record. It installs, and it reports `signature: not_required`;
@@ -2216,7 +2412,7 @@ own list as well:
 
 ```sh
 : "${VERSION:?set VERSION to the version you are releasing first, e.g. VERSION=1.4.0}"
-cat "its-agent-$VERSION/SHA256SUMS"
+cat "novieri-agent-$VERSION/SHA256SUMS"
 ```
 
 Each row also says, in two separate columns, **Code signing** (Authenticode /
@@ -2273,14 +2469,12 @@ console serves the two halves a managed deployment actually consumes, under
 bookkeeping — see `docs/modules/agent-distribution/spec-managed-distribution.md`.
 
 In the console: **Platform → Agent Packages → Managed deployment…**, then pick
-`GPO`, `Intune` or `Manual`. Against the API, the same two calls:
+`GPO`, `Intune` or `Manual`. The dialog makes two calls, described below; they take
+the console's session, so neither has a `curl` form:
 
 **a. The package — artefact, digest, staging steps. Carries no credential.**
 
-```sh
-curl -sS -H "Authorization: Bearer $TOKEN" \
-  "https://itms.toeshee.com/api/v1/agent/releases/$REL/deployment-package?channel=gpo"
-```
+`GET /api/v1/agent/releases/{id}/deployment-package?channel=gpo`.
 
 Gated **`agent.release.read`** — the same code that lists the catalogue,
 because this response is inert. It returns the release metadata, the SHA-256,
@@ -2293,8 +2487,8 @@ carrying a token *is* a permanent fleet-wide enrolment secret sitting on a
 share. Audited as `agent.deployment_package_generated`.
 
 A **409 `this release has no artifact yet; upload one before building a
-deployment package`** means a release row exists with no bytes: the `curl`
-fallback's first call in step 2 ran and its second did not. (The console's
+deployment package`** means a release row exists with no bytes: an upload
+that stopped between its two requests. (The console's
 dialog removes such a row itself when an upload fails.) Staging an object that does not
 exist fails at the far end of a copy, on somebody's file share, which is the
 most expensive place to diagnose it — so it is refused here instead. A **422**
@@ -2306,11 +2500,8 @@ is false.
 
 **b. The credential — on its own, with mandatory bounds.**
 
-```sh
-curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"max_uses":260,"expires_in_hours":72,"channel":"gpo","note":"HQ rollout"}' \
-  "https://itms.toeshee.com/api/v1/agent/releases/$REL/deployment-token"
-```
+`POST /api/v1/agent/releases/{id}/deployment-token`, with for example
+`{"max_uses":260,"expires_in_hours":72,"channel":"gpo","note":"HQ rollout"}`.
 
 Gated **`enrollment.manage`**. `max_uses` (1…1000) and `expires_in_hours`
 (1…336, i.e. fourteen days) are **both required and neither is defaulted** —
@@ -2341,17 +2532,17 @@ path: the package installs, your own secret mechanism enrols.
 # Staged on your DFS share or SYSVOL folder, run by a computer startup
 # script as SYSTEM.
 # 1. Install the service, and do not start it:
-.\install.ps1 -Binary .\its-agent-windows-amd64.exe -NoStart
+.\install.ps1 -Binary .\novieri-agent-windows-amd64.exe -NoStart
 # 2. Your own secret mechanism sets $env:ITS_AGENT_ENROLL_TOKEN here, from a
 #    location only machine accounts can read. Which one is yours to choose;
 #    this runbook names none.
 # 3. Enrol:
-.\its-agent-enroll.ps1 -Url https://itms.toeshee.com
+.\novieri-agent-enroll.ps1 -Url https://rmm.novieri.com
 ```
 
 `install.ps1` registers the service and does **not** start it when there is
-nothing to enrol with; `its-agent-enroll.ps1` (new on 2026-08-26 — Windows had
-no counterpart to the Unix `its-agent-enroll`) takes the token from the
+nothing to enrol with; `novieri-agent-enroll.ps1` (new on 2026-08-26 — Windows had
+no counterpart to the Unix `novieri-agent-enroll`) takes the token from the
 environment or stdin, **refuses `-Token`**, and is a no-op on an endpoint that
 already has an identity, which matters because a startup script runs at every
 boot.
@@ -2436,6 +2627,53 @@ platform and it is what turns "structurally tested" into "executed".
 
 ---
 
+## After a reboot or a restart
+
+OpenBao comes back **sealed** after every host reboot and every `docker compose
+up -d` that recreates it, and a sealed OpenBao makes `docker compose up -d`
+**block**: `openbao-init` waits on a health check that passes only when it is
+unsealed. So this sequence always starts by asking, whatever else happened
+(`.env` must already hold `ITS_PUBLIC_HOST` and `ITS_ACME_EMAIL`, as it does
+on this VPS from step 1: Compose interpolates the whole file for every
+subcommand, `bao status` included):
+
+```sh
+cd /opt/it-suite/deploy
+docker compose exec openbao bao status
+```
+
+`Sealed false`: skip to `docker compose up -d` below. `Sealed true`: three of the
+five shares, each at the prompt, from three custodians (GO-LIVE.md §4):
+
+```sh
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao operator unseal
+docker compose exec openbao bao status
+```
+
+`Sealed false`. Then:
+
+```sh
+docker compose up -d
+docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
+./scripts/check-public-tls.sh
+curl -s -o /dev/null -w '%{http_code}\n' https://rmm.novieri.com/api/v1/devices
+```
+
+`up -d` runs `migrate` first, as `api`'s dependency, every time; after a reboot
+it finds nothing to migrate and exits 0. The table is step 7's; the certificate
+check prints `ok`; and the last line prints `401` (the API answering, no one
+signed in). A `503` there means the api is not healthy yet (Traefik answers 503
+for the api's paths while it is not): wait, and look at `docker compose logs
+api` if it lasts.
+
+If the optional static-key auto-unseal is on (`./scripts/openbao-seal.sh
+status`, GO-LIVE.md §4), `bao status` already says `Sealed false` and the three
+unseal lines are not needed.
+
+---
+
 ## Upgrading an existing deployment
 
 **The short version: `./scripts/deploy.sh`.** It pulls, diffs what arrived
@@ -2443,6 +2681,59 @@ against what the *running image* was built from, and runs only the steps that
 change actually needs — building `web` alone for a frontend release, running
 `migrate` only when a new revision file appeared, and so on. Run
 `./scripts/deploy.sh --plan` first to see the decision without acting on it.
+
+**On the VPS this runbook builds**, an upgrade is these commands, in this order
+(the operator always deploys from `main`). First, alone:
+
+```sh
+cd /opt/it-suite/deploy
+docker compose exec openbao bao status
+```
+
+`Sealed true` means unsealing as in [After a reboot or a
+restart](#after-a-reboot-or-a-restart) before anything else, since `deploy.sh`
+refuses to start on a sealed OpenBao. `Sealed false`:
+
+```sh
+git -C .. pull --ff-only
+./scripts/deploy.sh --plan
+./scripts/deploy.sh
+```
+
+**Not on `itms.toeshee.com`, the host this VPS replaces.** Until that host is
+switched off, do not `git pull` or run `deploy.sh` there from this `main`: its
+`.env` has no `ITS_PUBLIC_HOST` or `ITS_ACME_EMAIL`, so `docker compose`
+refuses to start, and with them added by hand Traefik would stop serving the
+certificate copied there and ask Let's Encrypt for one.
+
+**Both keys must be in `.env` before the first `docker compose` command of
+any sequence on any host**, `docker compose exec openbao bao status` included:
+Compose interpolates the whole file for every subcommand and stops at
+`set in .env` when either is missing. On the VPS this runbook builds,
+`new-env.sh` wrote them in step 1, so nothing here applies. On an **existing
+host whose `.env` predates them**, add them by hand and **never run
+`new-env.sh`**, which would write a fresh random password into every database
+role and refuse to overwrite the file anyway. Each is its own block, because
+a prompt ends its block; each deletes any earlier line first, since a second
+`KEY=` line in `.env` silently wins over the first. The console's host, as the
+browser's address bar shows it without `https://`:
+
+```sh
+read -rp 'Console host (the name in ITS_PUBLIC_CONSOLE_URL): ' H && [ -n "$H" ] && sed -i '/^ITS_PUBLIC_HOST=/d' .env && printf 'ITS_PUBLIC_HOST=%s\n' "$H" >> .env; unset H
+```
+
+The contact address Let's Encrypt is given:
+
+```sh
+read -rp 'Let'"'"'s Encrypt contact address: ' E && [ -n "$E" ] && sed -i '/^ITS_ACME_EMAIL=/d' .env && printf 'ITS_ACME_EMAIL=%s\n' "$E" >> .env; unset E
+```
+
+`--plan` shows what the
+upgrade will run and changes nothing; `deploy.sh` then takes a backup, builds
+the images tagged with the new commit, migrates (`migrate` also runs on every
+`up -d`), restarts what changed, and verifies: the tag is HEAD, the API answers
+`401`, and the certificate on `:443` passes `check-public-tls.sh`. It ends by
+printing the way back from this upgrade.
 
 **The first upgrade past own authentication phase 4 (2026-11-15) starts with
 the pull**, from `deploy/`:
@@ -2526,7 +2817,7 @@ cd deploy && ITS_BACKUP_OLD_IDENTITY_DB=1 ./scripts/backup.sh ~/backups/pre-upgr
 #    still a secret-bearing directory: encrypt it before it leaves the host
 #    (docs/07-backup-restore.md §2.1 and §2.4) and do not park it on a share.
 
-# 2. Pull. `.env` and `certs/` are gitignored, so neither is touched.
+# 2. Pull. `.env` is gitignored, so it is not touched.
 git pull
 
 # 3. Build the application images from the new source, TAGGED with the new
@@ -2581,7 +2872,7 @@ done | xargs -r docker rm -f
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 docker compose exec -T postgres \
   psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
-curl -o /dev/null -w '%{http_code}\n' https://itms.toeshee.com/api/v1/devices   # 401
+curl -o /dev/null -w '%{http_code}\n' https://rmm.novieri.com/api/v1/devices   # 401
 #    And that the running worker really holds the new beat schedule -- this
 #    reads it out of the container that is actually running, not out of the
 #    source tree you pulled.
@@ -2678,7 +2969,7 @@ journalctl -u its-platform-backup.service --no-pager -n 50
 | `its-restore-drill.timer` (1st of the month) | `scripts/restore-drill.sh`: restores `latest` into the throwaway project `itms-restore-drill` and checks it |
 | `/etc/it-suite/backup.conf` | the one settings file (`deploy/backup/backup.conf.example`); root, mode 600 |
 | `/var/lib/it-suite/backup/` | `last-success`, `last-offsite`, `last-drill` |
-| `/var/lib/it-suite/backup-status/` | `backup.json`, `offsite.json`, `drill.json`: the results ITMS reads (mounted read-only into `api` and `worker`) |
+| `/var/lib/it-suite/backup-status/` | `backup.json`, `offsite.json`, `drill.json`: the results Novieri RMM reads (mounted read-only into `api` and `worker`) |
 
 **Alerts.** Platform status shows three checks: *Nightly platform backup*
 (down when the last success is older than 26 hours), *Off-host backup copy*
@@ -2716,12 +3007,89 @@ tables. It does not prove the way back past phase 4: the nightly backups it
 drills leave that database out, and that way back is only the backup taken
 before the phase-4 upgrade ([Rolling back a
 deployment](#rolling-back-a-deployment)). It does **not** cover key material: `openbao-data`,
-`its-secrets`, `its-ca`, the OpenBao shares or unseal key file, `.env` and
-`certs/` are still backed up by hand, **to a different place than the
+`its-secrets`, `its-ca`, the OpenBao shares or unseal key file and `.env`
+are still backed up by hand, **to a different place than the
 database backups** (`docs/07-backup-restore.md` §1-2).
 
 Run a drill by hand at any time: `sudo ./scripts/restore-drill.sh`
 (`--keep` leaves it up to inspect).
+
+### The off-host copy, step by step
+
+**Recommended before anything real is enrolled; not part of First boot.**
+Until it is set, every backup is on this VPS (`OFFSITE=none`), and a backup
+on the VPS goes with the VPS: lose the machine or its disk and there is
+nothing to restore — and on a new host, restoring a backup is the only way
+back ([Rolling back a deployment](#rolling-back-a-deployment)). These steps
+send each night's backup to a machine or a bucket you choose, the database
+part encrypted. ⚠ **UNVERIFIED** in this repository's rehearsal, which had
+no off-host target; they set the keys `scripts/scheduled-backup.sh` reads.
+
+**1. The encryption key, on your own computer — never on the VPS.** The
+database backup holds role password hashes, so it leaves the host encrypted
+to an `age` key whose private half the VPS never holds. On your computer,
+with `age` installed, run `age-keygen -o novieri-rmm-offsite.agekey`: it
+prints `Public key: age1…`. Keep that file with the OpenBao shares (GO-LIVE.md
+§6): without it, the off-host copy cannot be read.
+
+**2. On the VPS, `age` and the public key** (paste the `age1…` line at the
+prompt):
+
+```sh
+sudo apt-get install -y age
+```
+
+```sh
+read -rp 'age public key of the off-host copy (age1...): ' R && sudo sed -i "s|^OFFSITE_AGE_RECIPIENT=.*|OFFSITE_AGE_RECIPIENT=$R|" /etc/it-suite/backup.conf; unset R
+```
+
+**3a. To a machine you reach over SSH (rsync).** A key for the copy alone,
+whose public half you authorise on the destination, for that one directory:
+
+```sh
+sudo ssh-keygen -t ed25519 -N '' -f /etc/it-suite/backup-offsite.key -C "rmm-backup@$(hostname)"
+sudo cat /etc/it-suite/backup-offsite.key.pub
+```
+
+Then the destination, as `user@host:/path`:
+
+```sh
+read -rp 'rsync destination (user@host:/path): ' T && sudo sed -i -e 's|^OFFSITE=.*|OFFSITE=rsync|' -e "s|^OFFSITE_RSYNC_TARGET=.*|OFFSITE_RSYNC_TARGET=$T|" /etc/it-suite/backup.conf; unset T
+```
+
+And its host key, once: the copy runs with `StrictHostKeyChecking=yes`, so
+an unknown host is refused. This connects as root, shows the destination's
+fingerprint and asks: compare it with the one the destination's owner gives
+you before you answer `yes`.
+
+```sh
+uh="$(sudo sed -n 's/^OFFSITE_RSYNC_TARGET=\([^:]*\):.*/\1/p' /etc/it-suite/backup.conf)" && sudo ssh -i /etc/it-suite/backup-offsite.key -o StrictHostKeyChecking=ask "$uh" true
+```
+
+**3b. Or to an S3 bucket** (any S3-compatible endpoint; a key that can only
+write this bucket, and retention set on the bucket itself):
+
+```sh
+read -rp 'S3 endpoint (https://...): ' E && read -rp 'S3 bucket: ' B && read -rp 'S3 access key: ' A && sudo sed -i -e 's|^OFFSITE=.*|OFFSITE=s3|' -e "s|^OFFSITE_S3_ENDPOINT=.*|OFFSITE_S3_ENDPOINT=$E|" -e "s|^OFFSITE_S3_BUCKET=.*|OFFSITE_S3_BUCKET=$B|" -e "s|^OFFSITE_S3_ACCESS_KEY=.*|OFFSITE_S3_ACCESS_KEY=$A|" /etc/it-suite/backup.conf; unset E B A
+```
+
+The secret key at a prompt that does not echo it; it reaches `backup.conf`
+on stdin, never in a command's arguments:
+
+```sh
+read -rsp 'S3 secret key: ' K && echo && printf 'OFFSITE_S3_SECRET_KEY=%s\n' "$K" | sudo sh -c 'grep -v "^OFFSITE_S3_SECRET_KEY=" /etc/it-suite/backup.conf > /etc/it-suite/backup.conf.new && cat >> /etc/it-suite/backup.conf.new && chmod 600 /etc/it-suite/backup.conf.new && mv /etc/it-suite/backup.conf.new /etc/it-suite/backup.conf'; unset K
+```
+
+**4. Check.** A backup now, and its off-host copy:
+
+```sh
+sudo systemctl start its-platform-backup.service
+sudo cat /var/lib/it-suite/backup/last-offsite
+```
+
+The last line prints the time, the mode (`rsync` or `s3`) and the backup's
+name. Platform status's *Off-host backup copy* check turns healthy, and from
+now on alerts when a copy fails or is older than 26 hours.
 
 ## Rolling back a deployment
 
@@ -2785,7 +3153,7 @@ docker compose up -d
 
 # 6. Verify.
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
-curl -o /dev/null -w '%{http_code}\n' https://itms.toeshee.com/api/v1/devices   # 401
+curl -o /dev/null -w '%{http_code}\n' https://rmm.novieri.com/api/v1/devices   # 401
 ```
 
 **If step 3 ran, finish with `docs/07-backup-restore.md` §6's post-restore
@@ -3026,7 +3394,7 @@ else here has run.
 cd /opt/it-suite/deploy
 sudo cat /etc/it-suite/gateway-issuer.token | docker compose run --rm --no-deps -T \
   -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py itms.toeshee.com
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
 docker compose restart gateway
 ```
 
@@ -3046,7 +3414,7 @@ agents reconnect on their own within seconds —
 ```
 level=WARN msg="gateway disconnected; reconnecting" attempt=0 in=1.315847481s
 level=WARN msg="gateway disconnected; reconnecting" attempt=1 in=1.152916045s
-level=INFO msg="gateway connected" url=wss://itms.toeshee.com:8443/agent
+level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
 ```
 
 so renewal is not an outage. Install the systemd timer in GO-LIVE.md §5.
@@ -3079,7 +3447,7 @@ went wrong, and none of them can happen on a release after it.
 | 6 | certificate rotation fails a year later, silently until then | Vault's `use_csr_common_name=true` default took the CN from the agent's deliberately-empty CSR subject; `rotate.go` requires CN == device UUID | `use_csr_common_name=false`, `use_csr_sans=false`, `allowed_uri_sans`, `max_ttl=8760h` |
 | 7 | **every** route answers a bare `404`; all containers healthy | `traefik:v3.1` speaks Docker API 1.24; Engine 26+ refuses it, so Traefik discovered no containers at all | bumped to `traefik:v3.6` |
 | 8 | the `org` claim never appears in a token | Keycloak 26 **silently discards** user attributes not declared in the realm's user profile — 201 Created, attribute gone | `org` declared in `realm-it-suite.json` under `components` |
-| 9 | no way to federate AD/Entra or manage users | the Keycloak admin console (`/admin`) was not routed by Traefik at all | `/admin` and `/js` added to the router rule. **`/admin` has since been removed again** — a console that can reset every password in the fleet does not belong on the product's public hostname, and the answer to the original defect is ITMS's own user management plus vendor break-glass over an SSH tunnel. `/js` stayed: sign-in needs it |
+| 9 | no way to federate AD/Entra or manage users | the Keycloak admin console (`/admin`) was not routed by Traefik at all | `/admin` and `/js` added to the router rule. **`/admin` has since been removed again** — a console that can reset every password in the fleet does not belong on the product's public hostname, and the answer to the original defect is Novieri RMM's own user management plus vendor break-glass over an SSH tunnel. `/js` stayed: sign-in needs it |
 | 10 | first administrator authenticates but gets `403 requires ...` on everything | JIT user provisioning assigns **no role**, and nothing granted one | step 10 added to this runbook |
 | 11 | `enroll: certificate and key do not form a pair: tls: failed to find any PEM data in certificate input` | OpenBao returns PEM **without a trailing newline**; the agent concatenates `cert_pem + chain_pem`, producing `-----END CERTIFICATE----------BEGIN CERTIFICATE-----`. **No device could enroll against the production CA backend.** Tests were green because they use `LocalCA`, whose PEM is newline-terminated | one-line normalisation in `backend/app/core/ca.py` (server-side, so it repairs agents already in the field) |
 | 12 | an `app.deploy` job dispatches, reaches the endpoint, and fails at the artifact download with a name-resolution error; nothing in the control plane looks wrong | MinIO had **no published port and no Traefik router**, and presigned URLs were signed against `ITS_S3_ENDPOINT` (`http://minio:9000`) — a Docker-internal name. Every grant was correctly scoped, correctly time-bounded and unreachable | a `minio` router on `:443` matching `/<bucket>/`, and a separate `ITS_S3_PUBLIC_ENDPOINT` used only for signing (required in production). See "Object storage on :443" |
@@ -3241,7 +3609,7 @@ Two things make that work, and they are separate:
 router on the existing `:443` entrypoint, matching object reads under
 `/<bucket>/` and the bucket-level `POST` an upload grant targets. There is no
 new hostname, no second certificate, and **no `stripPrefix`** — the prefix is
-the bucket name, so `https://itms.toeshee.com/it-suite/<key>` is already
+the bucket name, so `https://rmm.novieri.com/it-suite/<key>` is already
 exactly what a path-style S3 URL looks like and nothing is rewritten. That is
 not a stylistic choice: SigV4 signs the host and the full path, so a stripped
 prefix makes MinIO recompute the signature over a different path and refuse
