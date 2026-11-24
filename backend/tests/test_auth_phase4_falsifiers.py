@@ -315,7 +315,7 @@ def test_falsifier_11_nothing_of_it_is_deployed() -> None:
     # the bytecode the old test of `ci_mcp_flow.py` left there is not shipped).
     left = (REPO / "deploy").glob("keycloak/**/*")
     assert sorted(p for p in left if "__pycache__" not in p.parts) == []
-    assert {name for _p, name, _r in routers()} == {"api", "minio", "web"}
+    assert {name for _p, name, _r in routers()} == {"api", "api-unavailable", "minio", "web"}
 
 
 #: The worker's half of the old provider until phase 4 of own authentication
