@@ -318,8 +318,11 @@ def test_no_secret_of_the_vault_travels_in_an_argv() -> None:
             and not line.strip().startswith(SHELL_BUILTINS)
         ]
         assert argv == [], argv
+    # Since plan 2026-11-23, Task 10, the same trap removes the agent's data
+    # directory and its container (test_ci_agent_flow.py).
     assert (
-        """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"' EXIT"""
+        """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; """
+        """rm -rf "$RUNNER_TEMP/agent-data"; docker rm -f ci-agent >/dev/null 2>&1 || true' EXIT"""
         in run
     )
 
