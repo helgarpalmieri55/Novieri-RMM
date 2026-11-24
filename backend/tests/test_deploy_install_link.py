@@ -53,13 +53,13 @@ def test_the_setting_is_documented_where_the_operator_edits() -> None:
 def test_the_setting_promises_only_the_one_hop_the_code_peels() -> None:
     """Final review M5. `client_address` takes the RIGHTMOST X-Forwarded-For
     entry from a trusted peer -- one hop, Traefik's. The comment used to invite
-    an operator with a further proxy in front of ITMS to trust it; with such a
+    an operator with a further proxy in front of Novieri RMM to trust it; with such a
     proxy the rightmost entry is that proxy, not the machine, so the network
     check would compare the wrong address."""
     section = ENV_EXAMPLE.read_text().split("--- Trusted proxy (install link) ---", 1)[1]
     section = " ".join(section.split("# ---", 1)[0].replace("#", " ").split())
     assert "only the bundled Traefik hop is supported" in section
-    assert "not supported" in section and "in front of ITMS" in section
+    assert "not supported" in section and "in front of Novieri RMM" in section
     assert "forwards to Traefik from somewhere else" not in section
 
 

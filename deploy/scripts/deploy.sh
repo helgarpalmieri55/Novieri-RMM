@@ -702,11 +702,25 @@ else
     warn "no scheduled platform backup. Install it once: sudo ./scripts/install-backup-timer.sh"
 fi
 
-CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://itms.toeshee.com/api/v1/devices || echo 000)"
+# The host this deployment answers on, from .env (design 2026-11-23 §3):
+# until 2026-11-23 this line named one deployment's host for everybody.
+PUBLIC_HOST="$(sed -n 's/^ITS_PUBLIC_HOST=//p' .env | tail -1)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${PUBLIC_HOST:-localhost}/api/v1/devices" || echo 000)"
 if [ "$CODE" = "401" ]; then
     note "API answers 401 unauthenticated — routing and auth are up."
 else
-    warn "API returned $CODE (expected 401). 404 usually means api is still starting."
+    warn "API returned $CODE (expected 401). 503 means the api is not healthy yet (Traefik's api-unavailable router); 404 means Traefik has no router for this host."
+    FAIL=1
+fi
+
+# The certificate on :443, which Traefik asks Let's Encrypt for and renews by
+# itself. A failure there does not fail a request above -- Traefik serves its
+# own self-signed default instead -- so it is checked on its own (design
+# 2026-11-23 §2).
+if ./scripts/check-public-tls.sh --wait 60; then
+    note "the certificate on :443 is trusted and names $PUBLIC_HOST."
+else
+    warn "the certificate on :443 is not one a browser accepts (above)."
     FAIL=1
 fi
 

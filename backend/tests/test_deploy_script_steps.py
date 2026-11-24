@@ -546,14 +546,16 @@ def test_no_other_deploy_file_names_an_obsolete_key() -> None:
     assert [key for key in ROLLBACK_KEYS if key not in comments] == [], "name the four"
 
 
-def test_the_preflight_checks_the_certificate_against_the_console_address(tmp_path: Path) -> None:
+def test_the_preflight_takes_the_console_host_from_its_address(tmp_path: Path) -> None:
     """Its host comes from `ITS_PUBLIC_CONSOLE_URL` (until own authentication
     phase 4, `ITS_OIDC_ISSUER`, which a fresh `.env` no longer has), and a
     blank value gives no host -- not the whole line, which `sed` without
-    `-n ...p` printed."""
+    `-n ...p` printed. Until 2026-11-23 it was checked against the certificate
+    file; since then, against ITS_PUBLIC_HOST, the name Traefik asks Let's
+    Encrypt for (`test_preflight_script.py`)."""
     text = (REPO / "deploy/scripts/preflight.sh").read_text()
     found = re.search(
-        r"^  host=\"\$\(grep -E '\^ITS_PUBLIC_CONSOLE_URL=' \.env.*?\|\| true\)\"$",
+        r"^host=\"\$\(grep -E '\^ITS_PUBLIC_CONSOLE_URL=' \.env.*?\|\| true\)\"$",
         text,
         re.MULTILINE | re.DOTALL,
     )
@@ -888,3 +890,23 @@ def test_the_seal_is_checked_before_the_pull_and_before_the_tag_moves() -> None:
     assert text.index("\npreflight_openbao\n") < text.index('say "Pulling"')
     ensure = text.index("\nensure_openbao_unsealed\n")
     assert text.index('say "Building images"') < ensure < text.index('say "Selecting the tag"')
+
+
+def test_the_verify_step_checks_the_public_host_and_its_certificate() -> None:
+    """Design 2026-11-23 §2 and §3: the 401 probe asks the host this .env
+    names (it named one deployment's host, for every deployment, until
+    2026-11-23), and a certificate a browser would refuse fails the deploy
+    rather than passing it: Traefik's self-signed fallback is silent."""
+    steps = _SH_COMMENT.sub("", _script())
+    assert "itms.toeshee.com" not in steps
+    assert "PUBLIC_HOST=\"$(sed -n 's/^ITS_PUBLIC_HOST=//p' .env | tail -1)\"" in steps
+    assert '"https://${PUBLIC_HOST:-localhost}/api/v1/devices"' in steps
+    check = steps.index("./scripts/check-public-tls.sh --wait 60")
+    assert steps.index("FAIL=1", check) < steps.index("DEPLOY_FINISHED=1", check)
+    # ... and FAIL=1 is the else branch of the check itself, not a stray line.
+    branch = steps[check : steps.index("DEPLOY_FINISHED=1", check)]
+    assert re.search(
+        r"\./scripts/check-public-tls\.sh --wait 60; then\n.*?\nelse\n.*?FAIL=1\nfi\n",
+        branch,
+        re.S | re.M,
+    ), branch

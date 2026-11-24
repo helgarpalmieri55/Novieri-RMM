@@ -10,6 +10,9 @@ frontend/node_modules
 .mypy_cache/
 .ruff_cache/
 .env
+# What deploy/scripts/new-env.sh writes before it links it to deploy/.env:
+# four fresh secrets, left behind only by a SIGKILL or a power cut.
+deploy/.env.new.*
 node_modules/
 dist/
 frontend/dist/
