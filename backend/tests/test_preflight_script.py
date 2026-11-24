@@ -242,3 +242,40 @@ def test_an_aaaa_record_is_seen_on_a_host_with_no_ipv6_of_its_own(tmp_path: Path
     run = _run(tmp_path, GOOD_ENV, host)
     assert run.returncode == 1, run.stdout
     assert "has an AAAA record (2001:db8::7)" in run.stdout, run.stdout
+
+
+def test_the_host_refusal_names_the_exact_line_to_add(tmp_path: Path) -> None:
+    """No placeholder, and no `new-env.sh` (which refuses an existing .env)."""
+    env = {k: v for k, v in GOOD_ENV.items() if k != "ITS_PUBLIC_HOST"}
+    run = _run(tmp_path, env, GOOD_HOST)
+    assert run.returncode == 1
+    assert "add the line ITS_PUBLIC_HOST=rmm.novieri.com to .env" in run.stdout, run.stdout
+    assert "<" not in run.stdout and "new-env.sh --host" not in run.stdout
+
+
+def test_the_email_refusal_has_no_placeholder(tmp_path: Path) -> None:
+    run = _run(tmp_path, {**GOOD_ENV, "ITS_ACME_EMAIL": ""}, GOOD_HOST)
+    assert "Set ITS_ACME_EMAIL in .env" in run.stdout and "<" not in run.stdout
+
+
+def _failing(tmp_path: Path, name: str, host: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run with one stub replaced by one that exits 1; STUBS is restored."""
+    original = STUBS[name]
+    STUBS[name] = "#!/bin/sh\nexit 1\n"
+    try:
+        return _run(tmp_path, GOOD_ENV, host)
+    finally:
+        STUBS[name] = original
+
+
+def test_a_failing_ss_is_refused_not_a_silent_exit(tmp_path: Path) -> None:
+    run = _failing(tmp_path, "ss", GOOD_HOST)
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert "could not be checked: ss failed" in run.stdout
+    assert "Refused." in run.stdout, "it reaches the end instead of dying under set -e"
+
+
+def test_a_failing_ip_is_noted_not_a_silent_exit(tmp_path: Path) -> None:
+    run = _failing(tmp_path, "ip", GOOD_HOST)
+    assert "ip failed" in run.stdout, run.stdout + run.stderr
+    assert "ok      Docker Engine" in run.stdout, "the script went on past it"

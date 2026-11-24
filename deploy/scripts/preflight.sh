@@ -90,7 +90,12 @@ public_host="$(grep -E '^ITS_PUBLIC_HOST=' .env | tail -1 | cut -d= -f2- || true
 host="$(grep -E '^ITS_PUBLIC_CONSOLE_URL=' .env | tail -1 \
         | sed -nE 's|^[^=]+=https?://([^/:]+).*|\1|p' || true)"
 if [ -z "$public_host" ] || [ "$public_host" = "your-host" ]; then
-  refuse "ITS_PUBLIC_HOST is '${public_host:-unset}': Traefik has no name to ask a certificate for. scripts/new-env.sh --host <the console's DNS name> writes it."
+  if [ -n "$host" ] && [ "$host" != "your-host" ]; then
+    fix="add the line ITS_PUBLIC_HOST=$host to .env (the host of ITS_PUBLIC_CONSOLE_URL)."
+  else
+    fix="set ITS_PUBLIC_HOST and ITS_PUBLIC_CONSOLE_URL in .env to the console's DNS name (scripts/new-env.sh writes both, but only for a host with no .env yet)."
+  fi
+  refuse "ITS_PUBLIC_HOST is '${public_host:-unset}': Traefik has no name to ask a certificate for; $fix"
 elif [ "$host" != "$public_host" ]; then
   refuse "ITS_PUBLIC_HOST=$public_host is not the host of ITS_PUBLIC_CONSOLE_URL ('${host:-unset}'). The certificate would be for one name and sign-in checked against another; they must be the same."
 else
@@ -99,7 +104,7 @@ fi
 
 acme_email="$(grep -E '^ITS_ACME_EMAIL=' .env | tail -1 | cut -d= -f2- || true)"
 if [ -z "$acme_email" ]; then
-  refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Put the Let's Encrypt account's contact address there (scripts/new-env.sh asks for it)."
+  refuse "ITS_ACME_EMAIL is empty, and compose will not start Traefik without it. Set ITS_ACME_EMAIL in .env to the Let's Encrypt account's contact address (scripts/new-env.sh asks for it, but only for a host with no .env yet)."
 else
   ok "ITS_ACME_EMAIL is set"
 fi
@@ -153,7 +158,8 @@ print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:
       if [ -n "$bind_ip" ] && [ "$bind_ip" != "0.0.0.0" ]; then
         mine="$bind_ip"
       elif command -v ip >/dev/null 2>&1; then
-        mine="$(ip -4 -o address show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ')"
+        mine="$(ip -4 -o address show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ' || true)"
+        [ -n "$mine" ] || printf '  note    this host'"'"'s addresses could not be read (ip failed); compare them by hand\n'
       else
         mine=""
       fi
@@ -183,8 +189,11 @@ if ! command -v ss >/dev/null 2>&1; then
 elif [ -n "$(docker compose ps --status running -q traefik 2>/dev/null || true)" ]; then
   ok "443 and 8443 are held by this stack's traefik"
 else
-  held="$(ss -Hltn '( sport = :443 or sport = :8443 )' 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
-  if [ -n "$held" ]; then
+  ss_ok=1
+  held="$(ss -Hltn '( sport = :443 or sport = :8443 )' 2>/dev/null | awk '{print $4}' | tr '\n' ' ')" || ss_ok=0
+  if [ "$ss_ok" = 0 ]; then
+    refuse "listeners on 443/8443 could not be checked: ss failed. Run scripts/host-check.sh section 2 by hand."
+  elif [ -n "$held" ]; then
     refuse "something already listens on ${held% } -- traefik needs 443 and 8443. scripts/host-check.sh section 2 names it."
   else
     ok "443 and 8443 are free"

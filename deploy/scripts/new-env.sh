@@ -28,7 +28,8 @@
 # it generated. The file is created 0600, before anything is written to it.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."   # deploy/
+self="$(readlink -f "$0")"
+cd "$(dirname "$self")/.."   # deploy/
 
 die() { printf 'new-env.sh: %s\n' "$*" >&2; exit 1; }
 
@@ -40,7 +41,7 @@ while [ $# -gt 0 ]; do
     --host) [ $# -ge 2 ] || die "--host needs a value"; host="$2"; shift 2 ;;
     --acme-email) [ $# -ge 2 ] || die "--acme-email needs a value"; email="$2"; shift 2 ;;
     --acme-ca-server) [ $# -ge 2 ] || die "--acme-ca-server needs a value"; ca="$2"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR==1{next} /^#/{print; next} {exit}' "$self"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -50,17 +51,19 @@ done
 [ -n "$host" ] || die "--host is required, e.g. --host rmm.novieri.com"
 # A DNS name: lower-case labels of letters, digits and inner hyphens, at least
 # two of them. Four all-digit labels are an IPv4 address, and refused.
-printf '%s' "$host" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$' \
+# bash's own anchored match: grep works line by line, so a value with a newline
+# in it would pass on its first line and inject the rest into .env.
+[[ $host =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
   || die "--host must be a lower-case DNS name such as rmm.novieri.com, not '$host'"
 
 if [ -z "$email" ]; then
   [ -t 0 ] || die "--acme-email is required when stdin is not a terminal"
   read -r -p "Let's Encrypt account contact (not kept on the account; passed to ISRG's mailing list): " email
 fi
-printf '%s' "$email" | grep -Eq '^[^@[:space:]]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$' \
+[[ $email =~ ^[^@[:space:]]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$ ]] \
   || die "the ACME address must look like name@domain.tld, not '$email'"
 if [ -n "$ca" ]; then
-  printf '%s' "$ca" | grep -Eq '^https://[^[:space:]]+$' || die "--acme-ca-server must be an https URL"
+  [[ $ca =~ ^https://[^[:space:]]+$ ]] || die "--acme-ca-server must be an https URL"
 fi
 command -v openssl >/dev/null 2>&1 || die "openssl is required (apt-get install -y openssl)"
 
@@ -94,7 +97,10 @@ done
 ! grep -v '^#' "$tmp" | grep -q 'your-host' || die "a setting still names your-host; nothing was written"
 # A hard link never replaces an existing file, so a .env that appeared while
 # this ran is not overwritten either. mktemp made the file 0600.
-ln "$tmp" .env 2>/dev/null || die ".env appeared while this ran; nothing was written"
+if ! err="$(ln "$tmp" .env 2>&1)"; then
+  [ -e .env ] && die ".env appeared while this ran; nothing was written"
+  die "could not create .env: $err"
+fi
 rm -f "$tmp"
 trap - EXIT
 

@@ -77,6 +77,7 @@ def test_a_new_env_has_fresh_secrets_the_host_and_mode_600(tmp_path: Path) -> No
     assert run.returncode == 0, run.stderr
     env = deploy / ".env"
     assert oct(env.stat().st_mode & 0o777) == "0o600"
+    assert [p.name for p in deploy.iterdir() if p.name.startswith(".env.new")] == []
     settings = _settings(env)
     for key in _placeholders() - OPENBAO_TOKENS:
         assert re.fullmatch(r"[0-9a-f]{48}", settings[key]), key
@@ -126,7 +127,6 @@ def test_an_existing_env_is_never_overwritten(tmp_path: Path) -> None:
     assert run.returncode == 1
     assert ".env already exists" in run.stderr
     assert (deploy / ".env").read_text() == "POSTGRES_ADMIN_PASSWORD=the-live-one\n"
-    assert [p.name for p in deploy.iterdir() if p.name.startswith(".env.new")] == []
 
 
 @pytest.mark.parametrize(
@@ -190,3 +190,68 @@ def test_the_temporary_file_a_crash_leaves_is_never_committable() -> None:
             ["git", "-C", str(REPO), "check-ignore", "-q", name], capture_output=True
         )
         assert run.returncode == 0, f"{name} is not gitignored"
+
+
+def test_a_host_with_a_newline_cannot_inject_settings(tmp_path: Path) -> None:
+    for index, args in enumerate(
+        (
+            ("--host", "rmm.novieri.com\nINJECTED=1", "--acme-email", "ops@novieri.example"),
+            ("--host", "rmm.novieri.com", "--acme-email", "ops@novieri.example\nINJECTED=1"),
+            (*ARGS, "--acme-ca-server", "https://x.example/dir\nINJECTED=1"),
+        )
+    ):
+        deploy = _deploy(tmp_path / str(index))
+        run = _run(deploy, *args)
+        assert run.returncode == 1, run.stdout
+        assert not (deploy / ".env").exists()
+
+
+def test_help_works_from_anywhere_and_prints_only_the_header(tmp_path: Path) -> None:
+    deploy = _deploy(tmp_path)
+    run = subprocess.run(
+        ["bash", str(deploy / "scripts" / SCRIPT.name), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.startswith("#\n# Write deploy/.env for a NEW host")
+    assert "set -euo" not in run.stdout and "cd " not in run.stdout
+    assert not (deploy / ".env").exists()
+
+
+def test_an_example_without_the_acme_key_leaves_no_temporary_file(tmp_path: Path) -> None:
+    deploy = _deploy(tmp_path)
+    example = deploy / ".env.example"
+    example.write_text(
+        "".join(
+            line + "\n"
+            for line in example.read_text().splitlines()
+            if not line.startswith("ITS_ACME_EMAIL=")
+        )
+    )
+    run = _run(deploy, *ARGS)
+    assert run.returncode == 1 and "has no ITS_ACME_EMAIL line" in run.stderr
+    assert sorted(p.name for p in deploy.iterdir()) == [".env.example", "scripts"]
+
+
+def test_a_link_failure_that_is_not_an_existing_env_reports_the_real_error(
+    tmp_path: Path,
+) -> None:
+    """No hard link available (here: the stub `ln` fails): not 'appeared'."""
+    deploy = _deploy(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ln = bin_dir / "ln"
+    ln.write_text("#!/bin/sh\necho 'ln: boom' >&2\nexit 1\n")
+    ln.chmod(0o755)
+    run = subprocess.run(
+        ["bash", str(deploy / "scripts" / SCRIPT.name), *ARGS],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+    assert run.returncode == 1
+    assert "could not create .env: ln: boom" in run.stderr
+    assert "appeared" not in run.stderr
