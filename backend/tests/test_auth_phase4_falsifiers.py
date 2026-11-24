@@ -64,6 +64,7 @@ from app.core.config import Settings, override_settings
 from tests.auth_support import console_ready
 from tests.foreign_tokens import ISSUER, ForeignIssuer
 from tests.outbound_support import route_outbound
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_auth_phase2_falsifiers import _filled, _routes
 from tests.test_config import KEYCLOAK_ERA_ENV
 from tests.test_docs_without_keycloak import LIVING as TASK_10_LIVING
@@ -361,7 +362,7 @@ def test_falsifier_11_the_worker_schedules_and_registers_nothing_of_it(tmp_path:
         database_admin_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
+        redis_url=TEST_REDIS_URL,
     )
     from app import worker
 

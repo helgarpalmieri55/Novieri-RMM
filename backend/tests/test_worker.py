@@ -15,8 +15,9 @@ from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
 from app.models import Device, Job, JobStatus, Organization
 from app.worker import sweep_org
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:

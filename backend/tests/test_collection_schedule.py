@@ -22,8 +22,9 @@ from app.jobs.engine import JobEngine
 from app.models import Agent, AuditEvent, Device, Job, JobStatus, Organization, Policy
 from app.modules.inventory import schedule as inventory_schedule
 from app.modules.security_logs import schedule as logs_schedule
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 async def _org(admin_engine: AsyncEngine) -> UUID:

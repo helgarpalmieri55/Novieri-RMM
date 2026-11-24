@@ -25,8 +25,9 @@ from tests.backup_offsite_fixtures import (
     moto_client_factory,
     seed_org,
 )
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _settings(pg_cluster: Any, tmp_path: Path) -> Settings:

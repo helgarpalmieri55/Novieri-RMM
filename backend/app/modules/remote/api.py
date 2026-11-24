@@ -222,7 +222,7 @@ async def start_session(
     service = state.remote_service
     if body.protocol != SCREEN:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             tr("{protocol} is retired; start a screen session instead", protocol=body.protocol),
         )
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -243,7 +243,7 @@ async def start_session(
                 reason=body.reason,
             )
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         except ScreenUnavailable as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
         out = SessionCreateResponse(

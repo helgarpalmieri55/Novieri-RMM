@@ -8,8 +8,9 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Device
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 async def _add_device(api_env, org_id, hostname="api-dev-1"):

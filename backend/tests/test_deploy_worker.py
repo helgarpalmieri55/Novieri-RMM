@@ -28,8 +28,9 @@ from app.jobs.registry import UnknownJobType, get_job_type
 from app.jobs.registry import _registry as _job_registry
 from app.models import Deployment, DeploymentResult, Device, Organization, Package
 from app.modules.deploy.handler import register_job_types
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 # The job-type registry is populated at app-startup time (app.modules.deploy.
 # register(app)), not merely on import. Register directly so this file's own

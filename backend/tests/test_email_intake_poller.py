@@ -51,6 +51,7 @@ from app.modules.email_intake.poller import (
     poll_mailbox,
 )
 from app.modules.service_desk.models import Ticket
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_email_intake_migration import _seed_category, _seed_user
 
 _PASSWORD = "hunter2"
@@ -941,7 +942,7 @@ def test_create_celery_registers_the_email_intake_poll(pg_cluster, tmp_path: Pat
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
     with override_settings(settings):
         celery = worker.create_celery()

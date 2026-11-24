@@ -47,6 +47,7 @@ from tests.health_fixtures import (
     seed_profile,
     seed_settings,
 )
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_health_clear_predicate import _open_one, _state_of
 from tests.test_health_ingest import _armed_org, _count, _device_row, _line, _msg
 
@@ -66,7 +67,7 @@ def _settings(pg_cluster, tmp_path) -> Settings:
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
         vault_root_key_path=tmp_path / "vault-root.key",
     )
 

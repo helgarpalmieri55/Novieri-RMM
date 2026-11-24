@@ -34,7 +34,6 @@ NO IDENTITY PROVIDER IS CALLED. `test_user_admin_api.install_outbound` stays
 on `httpx` so that a call would be seen; `outbound.seen == []` holds it.
 """
 
-import os
 import secrets as _secrets
 from pathlib import Path
 from typing import Any, Literal
@@ -54,6 +53,7 @@ from app.models import AuditEvent, Organization, Role, User, UserRole
 from app.models.auth import AuthPassword
 from tests.auth_support import CONSOLE, browser
 from tests.conftest import PgCluster, _psql, _run_migrations
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_user_admin_api import _REAL_CLIENT, OutboundRecorder, install_outbound
 
 REPO = Path(__file__).resolve().parents[2]
@@ -173,7 +173,7 @@ async def setup_env(
         default_org_slug="toeshee",
         # The sign-in test below reaches the per-IP limiter: the suite's Redis
         # database, as `tests/conftest.py::api_env` uses, never the default.
-        redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
+        redis_url=TEST_REDIS_URL,
     )
     app = create_app(settings)
     _include_setup_router(app)

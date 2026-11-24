@@ -1,10 +1,13 @@
 [project]
 name = "it-suite-backend"
 version = "0.1.0"
-description = "Toeshee IT suite control plane"
+description = "Novieri RMM control plane"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    # `status.HTTP_422_UNPROCESSABLE_CONTENT` (RFC 9110) arrived in 0.48; the
+    # name before it is deprecated (design 2026-11-23 §6).
+    "starlette>=0.48",
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0,<2.1",
     "asyncpg>=0.29",
@@ -55,7 +58,8 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-timeout>=2",
-    "pytest-asyncio>=0.23",
+    # 0.24 is the first that reads `asyncio_default_fixture_loop_scope`.
+    "pytest-asyncio>=0.24",
     "mypy>=1.10",
     "ruff>=0.5",
     "moto[s3]>=5",
@@ -79,6 +83,9 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# What every async fixture here already gets (none asks for a wider loop),
+# set before pytest-asyncio's default changes under the suite.
+asyncio_default_fixture_loop_scope = "function"
 timeout = 120
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning:botocore.*"]

@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from tests.redis_support import TEST_REDIS_URL
+
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 APP_ROLE = "app_user"
@@ -336,7 +338,7 @@ async def api_env(pg_cluster: PgCluster, tmp_path, admin_engine, app_engine):
         database_portal_url=pg_cluster.portal_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url=os.environ.get("ITS_TEST_REDIS_URL", "redis://localhost:6379/9"),
+        redis_url=TEST_REDIS_URL,
         # The console the session cookie's CSRF rule compares `Origin` with
         # (own authentication Task 6): a deployment the console signs in to
         # has one. `use_console` (tests/session_support.py) sets the same value.

@@ -32,8 +32,9 @@ from app.api.probes import _ALL_PROBES, WORKER_SAMPLED_PROBES
 from app.core.config import Settings, override_settings
 from app.models import PlatformHealthSample
 from app.worker import RETENTION_HOURS, prune_health_samples, sample_health_once
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 def _settings(pg_cluster, tmp_path: Path) -> Settings:

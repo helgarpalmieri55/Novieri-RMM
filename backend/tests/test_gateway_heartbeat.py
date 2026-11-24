@@ -42,10 +42,11 @@ from tests.health_fixtures import (
     seed_profile,
     seed_settings,
 )
+from tests.redis_support import TEST_REDIS_URL
 
 pytestmark = pytest.mark.usefixtures("admin_engine")
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 @pytest.fixture(autouse=True)

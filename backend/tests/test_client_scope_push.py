@@ -58,6 +58,7 @@ from tests.push_run_fixtures import (
     run_world,
     start_run,
 )
+from tests.redis_support import TEST_REDIS_URL
 
 P = "/api/v1/agent-push"
 CREDENTIALS = "/api/v1/credentials"
@@ -1258,7 +1259,7 @@ def _settings(pg_cluster: PgCluster, tmp_path: Path) -> Any:
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
         public_console_url=CONSOLE,
     )
 

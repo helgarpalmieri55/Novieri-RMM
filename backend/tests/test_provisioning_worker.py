@@ -37,8 +37,9 @@ from app.jobs.registry import _registry as _job_registry
 from app.models import Device, Job, Organization, ProvisionRun, User
 from app.modules.provisioning.handler import register_job_types as register_provisioning_job_types
 from app.modules.provisioning.repository import create_image, upsert_profile
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 # The provisioning job-type registry is populated at app-startup time, not
 # merely on import. Register directly so this file's own fixtures/assertions

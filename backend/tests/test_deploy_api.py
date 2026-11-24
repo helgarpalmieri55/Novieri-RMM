@@ -24,8 +24,9 @@ from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, Package, User
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 async def _device(api_env, org_id: UUID, hostname: str = "wks-deploy") -> UUID:

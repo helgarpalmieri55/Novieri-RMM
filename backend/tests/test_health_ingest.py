@@ -38,6 +38,7 @@ from tests.health_fixtures import (
     seed_profile,
     seed_settings,
 )
+from tests.redis_support import TEST_REDIS_URL
 
 pytestmark = pytest.mark.usefixtures("admin_engine")
 
@@ -810,7 +811,7 @@ async def test_the_gateway_branch_ingests_and_publishes_after_commit(
     from app.models import HealthAlert
 
     fixture = await _armed_org(admin_engine)
-    redis = aioredis.from_url("redis://localhost:6379/9", decode_responses=True)
+    redis = aioredis.from_url(TEST_REDIS_URL, decode_responses=True)
     await redis.flushdb()
     pubsub = redis.pubsub()
     # The device is on the org's internal client, whose id is the org's.
@@ -870,7 +871,7 @@ async def test_a_report_on_the_wrong_org_binding_is_audited_as_an_identity_misma
 
     a = await _armed_org(admin_engine)
     b = await _armed_org(admin_engine)
-    redis = aioredis.from_url("redis://localhost:6379/9", decode_responses=True)
+    redis = aioredis.from_url(TEST_REDIS_URL, decode_responses=True)
 
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
     await handle_agent_message(

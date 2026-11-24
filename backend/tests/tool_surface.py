@@ -30,6 +30,7 @@ from app.core.config import Settings
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
 from app.main import create_app
+from tests.redis_support import TEST_REDIS_URL
 
 # `flatten` now lives in `app/core/router_inspect.py` -- `app.core.
 # module_registry` needs it at application startup to build the platform
@@ -168,7 +169,7 @@ def build_router_only_app() -> FastAPI:
             database_portal_url=unreachable,
             ca_dir=tmp / "ca",
             signing_key_path=tmp / "job-signing.key",
-            redis_url="redis://127.0.0.1:6379/9",
+            redis_url=TEST_REDIS_URL,
         )
     )
 
