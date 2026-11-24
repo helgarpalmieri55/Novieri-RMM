@@ -18,6 +18,15 @@
 #
 # Addresses are pinned in the compose network (ITMS_NETWORK_SUBNET, default
 # 172.19.240.0/24) at the top of the range, which Docker hands out last.
+# LIMIT: .250-.252 are literals here and in ci.yml (`--resolve pebble:15000:`),
+# so they hold only for the default subnet, which is what the CI uses; a
+# different ITMS_NETWORK_SUBNET needs all of them changed together (a test
+# keeps the ci.yml address equal to pebble's here).
+#
+# EXPIRY: the pebble:2.10.1 image serves :14000 and :15000 with a built-in
+# certificate that expires 2027-10-03 23:40:05 GMT. After that date this job
+# fails at Traefik's ACME handshake. A test goes red three weeks before:
+# move to a newer Pebble tag then.
 services:
   traefik:
     environment:
