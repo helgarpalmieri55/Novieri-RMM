@@ -13,6 +13,14 @@
  * console's top bar stored on this computer (decision 7).
  *
  * NOTHING HERE GATES ANYTHING (invariant 6).
+ *
+ * `embedded` (redesign plan, Task 3, pre-flight N1) draws the frame inside a
+ * page that already has its own `<main>` -- `/__preview`, where the browser
+ * pass measures it -- as a region named by the portal's name instead of a
+ * second `<main>`, which axe refuses (`landmark-no-duplicate-main`). Embedded,
+ * it is a picture of the frame and nobody's session: it forgets no stored
+ * client and records no person, as `AuthCard`'s `embedded` leaves the tab's
+ * title alone.
  */
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -26,7 +34,7 @@ import { Btn, KIND_ICON } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ContactFrameContext, usePortalMe } from "./usePortalMe";
 
-export function PortalShell({ children }: { children: ReactNode }) {
+export function PortalShell({ children, embedded = false }: { children: ReactNode; embedded?: boolean }) {
   const t = useT();
   const api = useApi();
   // Decision 7 (A2-66): the client the console's top bar stored on this
@@ -35,18 +43,19 @@ export function PortalShell({ children }: { children: ReactNode }) {
   // first render, before `usePortalMe` fetches: a lazy initial state runs
   // during render, the query's fetch after it. Nothing here sets it again.
   useState(() => {
-    setSelectedClient(null);
+    if (!embedded) setSelectedClient(null);
     return null;
   });
   const me = usePortalMe();
   const [signOutFailed, setSignOutFailed] = useState(false);
   const userId = me.data?.user_id;
   useLayoutEffect(() => {
-    if (userId !== undefined) sessionPerson(userId);
-  }, [userId]);
+    if (!embedded && userId !== undefined) sessionPerson(userId);
+  }, [embedded, userId]);
+  const Body = embedded ? "section" : "main";
 
   return (
-    <div data-testid="portal-shell" className="min-h-screen">
+    <div data-testid="portal-shell" className={embedded ? undefined : "min-h-screen"}>
       <header className="flex flex-wrap items-center gap-4 border-b border-[var(--line)] px-6 py-3">
         <Link to="/portal" className="font-semibold">
           {t("portal.shell.brand")}
@@ -80,9 +89,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
           <Btn small label={t("common.actions.retry")} onClick={() => void me.refetch()} />
         </div>
       ) : null}
-      <main className="px-6 py-6">
+      <Body className="px-6 py-6" aria-label={embedded ? t("portal.shell.brand") : undefined}>
         <ContactFrameContext.Provider value={true}>{children}</ContactFrameContext.Provider>
-      </main>
+      </Body>
     </div>
   );
 }

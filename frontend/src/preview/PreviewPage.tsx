@@ -26,7 +26,7 @@ import { BarChart, LineChart } from "../components/chart";
 import { ConfirmDialog } from "../components/confirm";
 import { EmptyState, NoValue } from "../components/emptystate";
 import { EntityPicker } from "../components/picker";
-import { Badge, Table, Td, Th } from "../components/ui";
+import { Badge, Field, inputClass, Table, Td, Th } from "../components/ui";
 import { WeekPainter } from "../components/weekpainter";
 import { AppShell, HealthGlyph } from "../shell/AppShell";
 import { SessionEnded } from "../shell/SessionEnded";
@@ -52,22 +52,36 @@ import { Icon } from "../shell/icons";
 import type { HealthReading } from "../shell/healthSignal";
 import {
   Btn,
+  BulkBar,
   CellMain,
+  DetailGrid,
+  DetailHead,
   FilterBar,
+  FilterChips,
+  FormSection,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Pager,
   Panel,
   Progress,
   QueryState,
+  SaveBar,
   SearchField,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
   TableWrap,
   Tabs,
   Toggle,
+  UrlTabs,
+  useUrlTab,
 } from "../shell/components";
-import type { DocDocument, DocDocumentVersion, Me } from "../lib/api";
+import type { DocDocument, DocDocumentVersion, Me, PortalMe } from "../lib/api";
+import { AuthCard } from "../modules/auth/AuthCard";
+import { PortalShell } from "../modules/portal/PortalShell";
+import { PORTAL_ME_KEY } from "../modules/portal/usePortalMe";
 import { DocumentViewer } from "../modules/docs/DocumentViewer";
 import { DocumentView, DocumentsSection } from "../modules/docs/documents";
 import {
@@ -979,12 +993,143 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
   "open-tickets": "Open tickets",
 };
 
+/**
+ * THE PATTERN KIT (redesign plan, Task 3; DESIGN.md v4, "Lists", "Records",
+ * "Forms"): every piece a list, a record or a form is built from, on the one
+ * page the browser pass measures, each in the state that paints something the
+ * others do not -- a selected chip with its count, a selection, both empty
+ * states, a status beside a record's context, a tab strip, an open section, a
+ * save bar with a change in it and one that has just saved. Fixed data, no
+ * API. `ClientFilter` is not here: it needs `/me`, and the harmony walk
+ * measures it on the lists themselves.
+ *
+ * THE TABS USE THEIR OWN PARAMETER (`?kit=`), so they never fight this page's
+ * other strip for `?tab=`.
+ */
+const KIT_TABS = ["a", "b", "c"] as const;
+const KIT_TAB_LABEL: Record<(typeof KIT_TABS)[number], string> = {
+  a: "Overview",
+  b: "Hardware",
+  c: "Software",
+};
+
+function KitPreview() {
+  const [state, setState] = useState("online");
+  const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
+  return (
+    <Panel title="Kit v4" subtitle="The list, record and form patterns every page is built from">
+      <ListToolbar
+        search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
+        chips={
+          <FilterChips
+            label="State"
+            options={[
+              { value: "", label: "All", count: 12 },
+              { value: "online", label: "Online", count: 9 },
+              { value: "offline", label: "Offline" },
+            ]}
+            value={state}
+            onChange={setState}
+          />
+        }
+        end={<ShowingCount shown={9} total={12} />}
+      />
+      <BulkBar count={2} onClear={() => undefined}>
+        <Btn label="Approve" small variant="primary" />
+      </BulkBar>
+      <div className="g2">
+        <ListEmpty filtered onClear={() => undefined} nothingYet="No computers yet." />
+        <ListEmpty
+          filtered={false}
+          onClear={() => undefined}
+          nothingYet="No computers yet."
+          icon="devices"
+          action={<Btn label="Add a computer" icon="plus" small variant="primary" />}
+        />
+      </div>
+      <div style={{ padding: 18 }}>
+        <DetailHead
+          back={{ to: "/devices", label: "All computers" }}
+          title="srv-app02"
+          status={{ kind: "ok", label: "Online" }}
+          context={<span>Andes Logistics · Bogotá</span>}
+          actions={<Btn label="Connect" icon="remote" variant="primary" />}
+        />
+        <UrlTabs
+          label="Computer"
+          items={KIT_TABS.map((key) => ({ key, label: KIT_TAB_LABEL[key], count: key === "c" ? 214 : undefined }))}
+          active={kitTab}
+          onSelect={setKitTab}
+        >
+          <DetailGrid
+            main={
+              <Panel title="Details" subtitle={`${KIT_TAB_LABEL[kitTab]} of this computer`}>
+                <div style={{ padding: 14 }}>Windows Server 2022, 16 GB of memory, last seen 2 minutes ago.</div>
+              </Panel>
+            }
+            aside={
+              <Panel title="Activity">
+                <div style={{ padding: 14 }}>Patched on Saturday at 02:10. No open alerts.</div>
+              </Panel>
+            }
+          />
+        </UrlTabs>
+        <div style={{ marginTop: 16 }}>
+          <FormSection title="Organization" icon="settings">
+            <div className="form-grid">
+              <Field label="Name">
+                <input className={inputClass} defaultValue="Andes Logistics" />
+              </Field>
+            </div>
+          </FormSection>
+          {/* Their own block, so the sticky bar has no room to ride over the
+              rest of the kit while the browser pass measures it. */}
+          <div>
+            <SaveBar dirty saving={false} onDiscard={() => undefined} onSave={() => undefined} />
+            <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * The portal's `/portal/me`, answered, and nothing that can reach the
+ * network: `PortalShell` reads it, and this pass runs with no backend.
+ */
+function portalPreviewClient(): QueryClient {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: Infinity,
+        gcTime: Infinity,
+        retry: false,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+      },
+    },
+  });
+  const contact: PortalMe = {
+    user_id: "contact-preview",
+    kind: "contact",
+    email: "ana.gomez@andes.example",
+    display_name: "Ana Gómez",
+    timezone: "America/Bogota",
+    permissions: ["portal.ticket.read", "portal.ticket.write"],
+  };
+  client.setQueryData([PORTAL_ME_KEY], contact);
+  return client;
+}
+
 export function PreviewPage() {
   const [tab, setTab] = useState("all");
   // See the note above `patchPreviewClient`: at module scope these two calls
   // kept every fixture they reference in the production bundle.
   const patchClient = useMemo(() => patchPreviewClient(), []);
   const docsClient = useMemo(() => docsPreviewClient(), []);
+  const portalClient = useMemo(() => portalPreviewClient(), []);
   const [picked, setPicked] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [chip, setChip] = useState(0);
@@ -1634,6 +1779,38 @@ export function PreviewPage() {
           onSignIn={() => {}}
           embedded
         />
+      </div>
+
+      {/* THE PATTERN KIT (redesign plan, Task 3): the pieces every list,
+          record and form is built from, measured here before any page uses
+          them. */}
+      <div style={{ marginTop: 24 }}>
+        <KitPreview />
+      </div>
+
+      {/* THE SIGN-IN FRAME (redesign plan, pre-flight W-I4): the card every
+          screen without a session draws. Here so the browser pass measures
+          it, and measures it again when wave 8 repaints `AuthCard`.
+          `embedded`: a region named by its headline, not a second <main>,
+          and it leaves the tab's title alone. */}
+      <div style={{ marginTop: 24 }}>
+        <AuthCard title="Sign in" intro="Use the email address and password your administrator gave you." embedded>
+          <p>The sign-in form goes here.</p>
+        </AuthCard>
+      </div>
+
+      {/* THE PORTAL'S FRAME (pre-flight W-I4), around one fixed line: what
+          a client's contact sees around every portal page, measured here
+          because the harmony walk's fixture person is not a contact. Its
+          `/portal/me` is seeded (`portalPreviewClient`). `embedded`: a
+          region named by the portal, not a second <main>, and nobody's
+          session (it forgets no stored client and records no person). */}
+      <div style={{ marginTop: 24 }}>
+        <QueryClientProvider client={portalClient}>
+          <PortalShell embedded>
+            <p>A portal page draws here.</p>
+          </PortalShell>
+        </QueryClientProvider>
       </div>
 
       <ConfirmDialog
