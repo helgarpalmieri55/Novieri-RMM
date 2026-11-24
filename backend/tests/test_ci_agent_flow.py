@@ -257,7 +257,7 @@ def test_the_agent_enrols_after_the_claim_and_before_the_last_checks() -> None:
         run.index("flow --phase open"),
         run.index("docker compose stop api"),
         run.index('/tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"'),
-        run.index("docker compose up -d --wait gateway"),
+        run.index("docker compose up -d --wait --wait-timeout 180 gateway"),
         run.index("agents --phase token"),
         run.index("docker run -d --name ci-agent"),
         run.index("agents --phase job --hostname ci-agent"),

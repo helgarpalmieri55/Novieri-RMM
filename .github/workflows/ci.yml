@@ -836,7 +836,7 @@ jobs:
             --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"
           # --wait: healthy before the agent dials, so a slow start cannot push
           # its reconnect backoff past agent_flow's window.
-          docker compose up -d --wait gateway
+          docker compose up -d --wait --wait-timeout 180 gateway
           agent_data="$RUNNER_TEMP/agent-data"
           mkdir -m 700 "$agent_data"
           agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
