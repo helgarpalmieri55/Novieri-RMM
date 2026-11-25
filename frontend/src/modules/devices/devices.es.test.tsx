@@ -432,7 +432,8 @@ describe("the discovered page in Spanish", () => {
     expect(screen.getByText("Notificado por un agente")).toBeInTheDocument();
     expect(screen.getByText("Solo ping")).toBeInTheDocument();
     await user.click(screen.getByLabelText("172.22.104.55"));
-    expect(screen.getByRole("button", { name: "Promover 1" })).toBeInTheDocument();
+    // «Avalar», the glossary's word for vouching for an asset (fix round 1 of wave O1).
+    expect(screen.getByRole("button", { name: "Avalar 1" })).toBeInTheDocument();
     // The suggestions panel mounted under the page.
     expect(await screen.findByText(/2 registros|1 registro/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Son equipos distintos/ })).toBeInTheDocument();
