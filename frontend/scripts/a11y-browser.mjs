@@ -624,8 +624,12 @@ const VIEWPORTS = [
   { width: 320, height: 568, coarse: true },
 ];
 
-/** States the default render never reaches, and where the interesting bugs live. */
-const STATES = {
+/**
+ * States the default render never reaches, and where the interesting bugs
+ * live. Exported, with the run guarded below, so a vitest guard can drive a
+ * state with a stand-in page (`src/test/a11yStates.test.ts`).
+ */
+export const STATES = {
   default: async () => {},
   dialog: async (page) => {
     await page.getByRole("button", { name: /Delete device/ }).first().click();
@@ -642,6 +646,12 @@ const STATES = {
     await page.waitForTimeout(400);
     await page.locator("section.modal.open .confirm-typing input").fill("ws-alpha.corp.local");
     await page.waitForTimeout(200);
+    // ARMED, OR SAY SO (batch 2 review, H4): if the bench's subject or the
+    // typing changed, the confirm would stay disabled and this state would
+    // grade the disabled button again, the blind spot it exists to close.
+    if (await page.locator("section.modal.open.confirm .confirm-actions button").nth(1).isDisabled()) {
+      throw new Error("armed: the destructive confirm is still disabled after typing its subject");
+    }
   },
   palette: async (page) => {
     await page.keyboard.press("/");
@@ -1126,4 +1136,8 @@ async function main() {
   process.exit(failures.length ? 1 : 0);
 }
 
-await main();
+// RUN ONLY WHEN EXECUTED (`node scripts/a11y-browser.mjs`), as harmony.mjs:
+// imported by a test, the module starts no server and no browser.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}
