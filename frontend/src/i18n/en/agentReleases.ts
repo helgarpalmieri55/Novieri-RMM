@@ -11,8 +11,8 @@ export const agentReleases = {
     platformsZero: "No platform is covered",
     catalogue: "Published releases",
     newestSubtitle: {
-      one: "Version {version}, {count} package. The filter above shows the older versions too.",
-      other: "Version {version}, {count} packages. The filter above shows the older versions too.",
+      one: "Version {version}, {count} package. The older versions show with their filter.",
+      other: "Version {version}, {count} packages. The older versions show with their filter.",
     },
     allSubtitle: {
       one: "{count} package across {platforms}",

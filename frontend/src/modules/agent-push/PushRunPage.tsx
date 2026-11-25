@@ -151,12 +151,13 @@ export function PushRunPage() {
             </StatsGrid>
             <Panel
               title={t("agentPush.run.progressTitle")}
-              subtitle={t("agentPush.run.progressSubtitle", {
+              // The page's sentence follows the confirmed list's (the wave's
+              // critique: on top of the bar it crowded the bar and its counts).
+              subtitle={`${t("agentPush.run.progressSubtitle", {
                 count: data.target_count,
                 name: data.credential_name || t("agentPush.run.noCredential"),
-              })}
+              })} ${t("agentPush.run.description", { count: data.concurrency })}`}
             >
-              <p className="note mb-2">{t("agentPush.run.description", { count: data.concurrency })}</p>
               <Progress value={runProgress(data.counts, data.target_count)} label={t("agentPush.run.progressLabel")} />
               <p className="note mt-2">
                 {t("agentPush.run.installingNow", { counts: countsSentence(data.counts), count: data.counts.in_flight })}

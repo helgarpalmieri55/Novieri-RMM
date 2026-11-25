@@ -56,15 +56,14 @@ import {
   ListEmpty,
   ListToolbar,
   PageHead,
+  Pager,
   Panel,
   QueryState,
-  ResultCount,
   SearchField,
   ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
-  TableFoot,
   TableWrap,
   useNarrowedApi,
   useNewParam,
@@ -950,31 +949,23 @@ export function DevicesPage() {
           )}
         </QueryState>
 
-        {/* WHERE THIS PAGE SITS INSIDE THE WHOLE SET, and the way through it.
-            `total` is the server's count of the rows this chip and this search
-            select, so the sentence is the honest number and the buttons move
-            through it. Rendered whenever there are rows, even on one page: the
-            range is what the buttons move. `TableFoot`, NOT `Pager`: the kit's
-            pager hides itself on a single-page list. */}
+        {/* WHERE THIS PAGE SITS INSIDE THE WHOLE SET, and the way through it:
+            the kit's `Pager`, with the range in words. `total` is the server's
+            count of the rows this chip and this search select. On a single page
+            the pager draws nothing (the wave's critique, P1): two disabled
+            buttons there are dead controls, and "Showing x of y" in the toolbar
+            already says the list is complete. */}
         {items.length > 0 && (
-          <TableFoot>
-            <span className="filter-spacer" />
-            <ResultCount>
-              {t("devices.foot.showing", { from: offset + 1, to: offset + items.length, total, count: total })}
-            </ResultCount>
-            <Btn
-              label={t("devices.foot.previous")}
-              small
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - DEVICES_PAGE_SIZE))}
-            />
-            <Btn
-              label={t("devices.foot.next")}
-              small
-              disabled={offset >= lastOffset}
-              onClick={() => setOffset(offset + DEVICES_PAGE_SIZE)}
-            />
-          </TableFoot>
+          <Pager
+            page={Math.floor(offset / DEVICES_PAGE_SIZE)}
+            pageCount={lastOffset / DEVICES_PAGE_SIZE + 1}
+            onPrevious={() => setOffset(Math.max(0, offset - DEVICES_PAGE_SIZE))}
+            onNext={() => setOffset(Math.min(lastOffset, offset + DEVICES_PAGE_SIZE))}
+            previousLabel={t("devices.foot.previous")}
+            nextLabel={t("devices.foot.next")}
+          >
+            {t("devices.foot.showing", { from: offset + 1, to: offset + items.length, total, count: total })}
+          </Pager>
         )}
       </Panel>
 

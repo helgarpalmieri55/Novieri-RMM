@@ -27,7 +27,8 @@ import {
 import { Icon } from "../../shell/icons";
 import { usePushPermissions, usePushRuns } from "./api";
 import { RUN_STATE_KIND, RUN_STATE_LABELS, countsSentence, runProgress } from "./runState";
-import { intlLocale } from "../../lib/datetime";
+import { formatDateTime } from "../../lib/datetime";
+import { useOrgZone } from "../../lib/zone";
 import type { PushRunState } from "./types";
 
 /** The run states, in the order a run lives them. */
@@ -38,6 +39,8 @@ export function PushRunsPage() {
   const runs = usePushRuns();
   const permissions = usePushPermissions();
   const filters = useUrlFilters(["state"] as const);
+  // Dates as the console writes them, in the organisation's zone (the wave's critique).
+  const zone = useOrgZone();
   const all = runs.data ?? [];
   const items = filters.values.state === "" ? all : all.filter((run) => run.state === filters.values.state);
   // A push names machines a person ticked or a subnet's list they confirm:
@@ -99,7 +102,7 @@ export function PushRunsPage() {
                           <code>{run.prefix}</code>
                         </Link>
                       </Td>
-                      <Td>{new Date(run.created_at).toLocaleString(intlLocale())}</Td>
+                      <Td className="whitespace-nowrap">{formatDateTime(run.created_at, zone)}</Td>
                       <Td>
                         <StatusPill value={run.state} label={RUN_STATE_LABELS[run.state]} kind={RUN_STATE_KIND[run.state]} />
                       </Td>

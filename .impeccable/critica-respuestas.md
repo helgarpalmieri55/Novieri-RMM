@@ -191,3 +191,41 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
   computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
 - **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
   desplazar la página) y antes de pintar.
+
+---
+
+## Equipos (wave O1, Task 6): `/devices` and the ten pages around it
+
+Críticas `.impeccable/critique/2026-11-25T04-19-0*Z__…` (once, una por página, todas cerradas). Las preguntas que
+zanjan `DESIGN.md`, el diseño y las decisiones se contestan aquí y se aplicaron en el pulido de la O1; las que no
+zanjan van al coordinador en el informe de la Task 6.
+
+### 1. `/devices`: el pie de una lista de una sola página
+
+- **Respuesta: (a).** El pie es el `Pager` del kit, con el rango en palabras: en una sola página no dibuja nada y
+  la cuenta es «Mostrando x de y» de la barra; con varias páginas aparece con el rango y sus dos botones.
+- **Por qué.** En una sola página dibujaba «Dispositivos anteriores» y «Dispositivos siguientes» desactivados junto
+  a un rango que repetía la cuenta de la barra, y a 390 px el rango se cortaba por la izquierda.
+- **Regla.** `DESIGN.md`, «Don't ship a dead control»; Receta L, 2 («el pie (Pager) si la página ya paginaba»).
+
+### 2. `/devices`: cinco acciones en la cabecera
+
+- **Sin respuesta en las fuentes.** `DESIGN.md` fija una sola principal, no cuántas secundarias. Opciones: (a)
+  dejar las cinco (Añadir activo, Exportar inventario, Instalar el agente de forma remota…, Ejecuciones de
+  instalación remota, Añadir un equipo); (b) «Ejecuciones…» como enlace fantasma; (c) un menú «Más», que el kit no
+  tiene. La O1 deja (a), lo más cercano a la página de hoy, y lo sube al coordinador.
+
+### 3. `/devices`: la búsqueda ocupa toda la primera fila de la barra
+
+- **Sin respuesta en las fuentes; es del kit.** `ListToolbar` da a la búsqueda todo el ancho y los chips bajan a
+  tres filas más. Cambiarlo en una página la separaría de las demás listas: la O1 lo pide al coordinador como
+  cambio del kit (la base de flex de la búsqueda) y no lo toca.
+
+### 4. `/devices/onboard` y `/agent-packages`: dos frases
+
+- **Respuesta: (a) en las dos.** «Aparece en Equipos» (no «Dispositivos», D13) y la nota de «Muchos equipos en
+  una red» empieza ya por «Esta plataforma nunca se conecta…», sin repetir el título de su sección. En
+  `/agent-packages` la línea de las versiones dice «las versiones anteriores se ven con su filtro», sin «arriba»:
+  el filtro está debajo de esa línea.
+- **Regla.** El glosario de `src/i18n/es/index.ts` (D13); `PRODUCT.md`, la voz: decir lo que hay, sin señalar a
+  donde no está.

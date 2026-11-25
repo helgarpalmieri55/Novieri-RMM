@@ -132,7 +132,8 @@ describe("the add-a-computer page in Spanish", () => {
     expect(await screen.findByText(/No hay ninguna red registrada\./)).toBeInTheDocument();
     expect(screen.getByText("Aún no hay ninguna red registrada. Es el paso 1, arriba.")).toBeInTheDocument();
     expect(screen.getByText("Estás aquí")).toBeInTheDocument();
-    expect(screen.getByText(/Muchos equipos en una red: esta plataforma nunca se conecta/)).toBeInTheDocument();
+    // The note sits in its section now, under the title it used to repeat (the wave's critique).
+    expect(screen.getByText(/Esta plataforma nunca se conecta a un equipo/)).toBeInTheDocument();
     expect(screen.getAllByText("Bloqueado").length).toBeGreaterThan(0);
     // A step the caller may not perform names the permission, in Spanish.
     expect(

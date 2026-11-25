@@ -190,7 +190,8 @@ describe("the devices page in Spanish", () => {
     expect(screen.getByLabelText("Seleccionar lab-pc para la instalación remota")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar dispositivos")).toBeInTheDocument();
     expect(screen.getByLabelText("Filtrar por cómo se creó el registro")).toBeInTheDocument();
-    expect(screen.getByText(/Mostrando 1–4 de 4 dispositivos\./)).toBeInTheDocument();
+    // One page: the toolbar's count, no pager (the wave's critique: no dead controls).
+    expect(screen.getByText("Mostrando 4 de 4")).toBeInTheDocument();
     expectNoEnglish(container, [...STORED, "boxed laptop", "ws-alpha", "srv-beta", "lab-pc"]);
   });
 
@@ -685,11 +686,11 @@ describe("a live language switch on the devices pages", () => {
     expect(await screen.findByRole("heading", { name: "Equipos" })).toBeInTheDocument();
     await screen.findByText("ws-alpha");
     expect(screen.getByRole("button", { name: /Sin conexión/ })).toBeInTheDocument();
-    expect(screen.getByText(/Mostrando 1–4 de 4 dispositivos\./)).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 4 de 4")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Offline/ })).toBeInTheDocument();
-    expect(screen.getByText("Showing 1–4 of 4 devices.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 4 of 4")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run job on ws-alpha" })).toBeInTheDocument();
     // The provenance words are catalogue lookups, not stored text.
     expect(within(screen.getByRole("table")).getAllByText("Entered by hand").length).toBeGreaterThan(0);

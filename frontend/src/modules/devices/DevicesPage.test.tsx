@@ -1214,8 +1214,11 @@ describe("paging a fleet that does not fit on one page", () => {
     // Ten matches -- host-100 through host-109 -- and all of them fit on page
     // one, which the old offset of 50 would have skipped clean past.
     expect(await screen.findByText("host-100")).toBeInTheDocument();
-    expect(screen.getByText("Showing 1–10 of 10 devices.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Previous devices" })).toBeDisabled();
+    // One page now: the toolbar's count says it, and the pager draws nothing
+    // rather than two dead buttons (the wave's critique; DESIGN.md "Don't ship
+    // a dead control").
+    expect(screen.getByText("Showing 10 of 10")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Previous devices" })).toBeNull();
   });
 });
 

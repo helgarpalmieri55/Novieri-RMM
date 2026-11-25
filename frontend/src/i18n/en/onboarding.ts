@@ -12,7 +12,7 @@ export const onboarding = {
       note: "Either way, the computer makes its own key, which never leaves it, and gets its own certificate. It appears under Devices as soon as it checks in.",
     },
     manyNote:
-      "Many computers on a network: this platform never connects to a machine, so the first machine on a new segment is always a manual install. It becomes the sweeper that finds the rest.",
+      "This platform never connects to a machine, so the first machine on a new segment is always a manual install. It becomes the sweeper that finds the rest.",
     manyTitle: "Many computers on a network",
     needsAdmin: "An administrator must do this. It needs {permissions}, which your account does not have.",
     youAreHere: "You are here",

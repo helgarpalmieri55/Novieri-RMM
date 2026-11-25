@@ -14,8 +14,8 @@ export const agentReleases: Shape<typeof en> = {
     platformsZero: "No se cubre ninguna plataforma",
     catalogue: "Versiones publicadas",
     newestSubtitle: {
-      one: "Versión {version}, {count} paquete. El filtro de arriba muestra también las versiones anteriores.",
-      other: "Versión {version}, {count} paquetes. El filtro de arriba muestra también las versiones anteriores.",
+      one: "Versión {version}, {count} paquete. Las versiones anteriores se ven con su filtro.",
+      other: "Versión {version}, {count} paquetes. Las versiones anteriores se ven con su filtro.",
     },
     allSubtitle: {
       one: "{count} paquete en {platforms}",

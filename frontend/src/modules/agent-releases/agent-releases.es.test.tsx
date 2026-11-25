@@ -282,8 +282,8 @@ describe("agent packages in Spanish", () => {
     stubApi();
     const { container } = renderPage();
     expect(await screen.findByRole("heading", { name: "Paquetes del agente" })).toBeInTheDocument();
-    // The older versions are a chip above the list now (redesign Task 6, 1.11), and the subtitle says so.
-    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. El filtro de arriba muestra también las versiones anteriores.")).toBeInTheDocument();
+    // The older versions are a chip on the list's toolbar now (redesign Task 6, 1.11), and the subtitle says so.
+    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. Las versiones anteriores se ven con su filtro.")).toBeInTheDocument();
     expect(screen.getAllByText(/Aún sin probar en un equipo Windows real/).length).toBeGreaterThan(0);
     expect(screen.getByText("No se ha subido ningún archivo")).toBeInTheDocument();
     await screen.findByText("3 agentes · última estable 1.8.2 · 2 pueden actualizarse");
