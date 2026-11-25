@@ -16,6 +16,8 @@
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -170,5 +172,44 @@ describe("Tabs that scroll", () => {
     unmount();
     render(<Tabs items={WIDE} active="alerts" onSelect={() => {}} label="Client" />);
     expect(screen.getByRole("tablist", { name: "Client" }).scrollLeft).toBe(0);
+  });
+});
+
+/**
+ * A TAB'S STATE BESIDE ITS NAME (kit requests batch 3, B3-1; O7's K1):
+ * Settings' "Set up" / "Not set up" was folded into the label ("Email · Set
+ * up"), because a tab had no third slot.
+ */
+describe("a tab's note", () => {
+  const SETTINGS = [
+    { key: "organization", label: "Organization" },
+    { key: "email", label: "Email", note: "Set up" },
+  ];
+
+  it("is drawn after the label, apart from it, in its own quieter span", () => {
+    render(<Tabs items={SETTINGS} active="organization" onSelect={() => {}} label="Settings" />);
+    const email = screen.getByRole("tab", { name: "Email Set up" });
+    const note = email.querySelector(".tab-note");
+    expect(note).toHaveTextContent("Set up");
+    // The label is still the tab's own first text, not "Email · Set up".
+    expect(email.firstChild?.textContent).toBe("Email");
+  });
+
+  it("draws nothing for a tab without one", () => {
+    render(<Tabs items={SETTINGS} active="organization" onSelect={() => {}} label="Settings" />);
+    expect(screen.getByRole("tab", { name: "Organization" }).querySelector(".tab-note")).toBeNull();
+  });
+
+  it("is quieter than the label: muted, the small step, regular weight (components.css)", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "./components.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = /(?:^|[},])\s*\.tab-note\s*\{([^}]*)\}/m.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/color:\s*var\(--muted\)/);
+    expect(rule).toMatch(/font-size:\s*var\(--t-sm\)/);
+    expect(rule).toMatch(/font-weight:\s*400/);
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/note:\s*key === "b"/);
   });
 });

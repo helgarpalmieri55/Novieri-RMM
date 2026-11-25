@@ -345,6 +345,13 @@ export interface TabItem {
   key: string;
   label: string;
   count?: number;
+  /**
+   * A STATE BESIDE THE TAB'S NAME (kit requests batch 3, B3-1; O7's K1):
+   * Settings' "Set up" / "Not set up". Drawn after the label (and its count)
+   * in `.tab-note`, muted and regular weight, so the state is not folded into
+   * the label ("Email · Set up"). It is part of the tab's accessible name.
+   */
+  note?: string;
 }
 
 /**
@@ -424,6 +431,14 @@ export function Tabs({
         >
           {item.label}
           {item.count === undefined ? null : <span className="tab-count"> {item.count}</span>}
+          {/* The space OUTSIDE the span, so the tab's name reads "Email Set
+              up": a space inside it is trimmed when its name is computed. */}
+          {item.note ? (
+            <>
+              {" "}
+              <span className="tab-note">{item.note}</span>
+            </>
+          ) : null}
         </button>
       ))}
     </div>

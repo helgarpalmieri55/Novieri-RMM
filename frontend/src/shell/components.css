@@ -163,6 +163,10 @@
 }
 .tab-count { color: var(--muted); font-size: var(--t-sm);
 }
+/* Kit addition (batch 3, B3-1): a tab's state beside its name (`TabItem.note`),
+ * quieter than the label: muted, the small step, regular weight. */
+.tab-note { color: var(--muted); font-size: var(--t-sm); font-weight: 400;
+}
 /* A strip that scrolls instead of folding (design file, console additions
  * wave 10). The hairline is an inset shadow, because `overflow` clips the
  * tabs' -1px overlap onto a border. */

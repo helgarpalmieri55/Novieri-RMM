@@ -1121,7 +1121,13 @@ function KitPreview() {
         />
         <UrlTabs
           label="Computer"
-          items={KIT_TABS.map((key) => ({ key, label: KIT_TAB_LABEL[key], count: key === "c" ? 214 : undefined }))}
+          items={KIT_TABS.map((key) => ({
+            key,
+            label: KIT_TAB_LABEL[key],
+            count: key === "c" ? 214 : undefined,
+            // A tab's state beside its name (kit requests batch 3, B3-1).
+            note: key === "b" ? "Not collected" : undefined,
+          }))}
           active={kitTab}
           onSelect={setKitTab}
         >
