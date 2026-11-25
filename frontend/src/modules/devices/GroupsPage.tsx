@@ -112,6 +112,7 @@ import {
   ShowingCount,
   StatusPill,
   TableWrap,
+  useEditParam,
   useNarrowedApi,
   useNewParam,
   useUnsavedGuard,
@@ -535,7 +536,9 @@ export function GroupsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const creating = useNewParam("group");
-  const editId = params.get("edit");
+  // `?edit=<id>`: the kit's editor key (`""` when none is open).
+  const editing = useEditParam("group");
+  const editId = editing.id;
   const groupId = params.get("group");
   const [editor, setEditor] = useState<EditorState | null>(null);
   // The editor as it opened: a change is a difference from this, not an open form.
@@ -706,30 +709,34 @@ export function GroupsPage() {
   });
 
   /**
-   * A QUERY KEY OPENED BY THIS PAGE CLOSES WITH BACK, as `useNewParam` does
-   * for `?new=` (kit review fix round 1, item 6): opening adds a history
-   * entry, marked; closing goes Back from that entry, so Back after a close
-   * never reopens it. A link that arrived with the key is closed in place.
+   * THE OPEN GROUP, `?group=<id>`, CLOSES WITH BACK, as the kit's
+   * `useEditParam` does for `?edit=` (kit review fix round 1, item 6):
+   * opening adds a history entry, marked; closing goes Back from that entry,
+   * so Back after a close never reopens it. A link that arrived with the key
+   * is closed in place. Local because the kit drives only `new` and `edit`;
+   * its verbs are the kit's (`start(id)`, `close()`).
    */
-  function openParam(key: "group" | "edit", value: string) {
-    const next = new URLSearchParams(params);
-    next.set(key, value);
-    if (next.toString() === params.toString()) return;
-    setParams(next, { state: { groupsOpened: key } });
-  }
-  function closeParam(key: "group" | "edit") {
-    if (!params.has(key)) return;
-    if ((location.state as { groupsOpened?: string } | null)?.groupsOpened === key) {
-      void navigate(-1);
-      return;
-    }
-    const next = new URLSearchParams(params);
-    next.delete(key);
-    setParams(next, { replace: true });
-  }
+  const openedGroup = {
+    start(id: string) {
+      const next = new URLSearchParams(params);
+      next.set("group", id);
+      if (next.toString() === params.toString()) return;
+      setParams(next, { state: { groupsOpened: "group" } });
+    },
+    close() {
+      if (!params.has("group")) return;
+      if ((location.state as { groupsOpened?: string } | null)?.groupsOpened === "group") {
+        void navigate(-1);
+        return;
+      }
+      const next = new URLSearchParams(params);
+      next.delete("group");
+      setParams(next, { replace: true });
+    },
+  };
   function closeEditor() {
     if (creating.open) creating.close();
-    else closeParam("edit");
+    else editing.close();
   }
 
   function openCreate() {
@@ -776,7 +783,7 @@ export function GroupsPage() {
   // holder of `devices.manage`, whatever the URL asks), `?edit=<id>` that
   // active group's, with its rules read first; neither, none.
   const editTarget =
-    editId === null ? null : (items.find((group) => group.id === editId && group.archived_at === null) ?? null);
+    editId === "" ? null : (items.find((group) => group.id === editId && group.archived_at === null) ?? null);
   useEffect(() => {
     if (creating.open && canManage && (editor === null || editor.group !== null)) openCreate();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- opened by the URL, not by the editor's own edits
@@ -786,7 +793,7 @@ export function GroupsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- opened by the URL, not by the editor's own edits
   }, [creating.open, editTarget?.id, canManage]);
   useEffect(() => {
-    if (!creating.open && editId === null && editor !== null) setEditor(null);
+    if (!creating.open && editId === "" && editor !== null) setEditor(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- closed by the URL (Back, a link)
   }, [creating.open, editId]);
   // A new open group starts with an empty picker and no answer from the last one.
@@ -1102,7 +1109,7 @@ export function GroupsPage() {
                         {group.archived_at === null ? (
                           <Button
                             variant="ghost"
-                            onClick={() => openParam("group", group.id)}
+                            onClick={() => openedGroup.start(group.id)}
                           >
                             {t("devices.groups.members")}
                           </Button>
@@ -1112,7 +1119,7 @@ export function GroupsPage() {
                             <Button
                               variant="ghost"
                               disabled={loadingRules}
-                              onClick={() => openParam("edit", group.id)}
+                              onClick={() => editing.start(group.id)}
                             >
                               {t("devices.groups.edit")}
                             </Button>
@@ -1164,7 +1171,7 @@ export function GroupsPage() {
   const membersPanel = openGroup ? (
     <Panel
       title={t("devices.groups.memberDialog.title", { name: openGroup.name })}
-      actions={<Btn label={t("devices.groups.closeMembers")} variant="ghost" small onClick={() => closeParam("group")} />}
+      actions={<Btn label={t("devices.groups.closeMembers")} variant="ghost" small onClick={() => openedGroup.close()} />}
     >
       {openGroup.dynamic ? (
         <p>
