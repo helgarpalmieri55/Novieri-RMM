@@ -18,8 +18,8 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useCallback, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -28,12 +28,28 @@ import { humaniseEnum } from "../../lib/labels";
 import type { Me, RemoteSession } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { Icon } from "../../shell/icons";
-import { OsIcon, type Kind } from "../../shell/viz";
-import { variantKind } from "../jobs/jobState";
-import { consentModeLabel, formatDuration, remoteStateVariant } from "./sessionState";
+import { OsIcon } from "../../shell/viz";
+import { consentModeLabel, formatDuration, sessionKind } from "./sessionState";
 import { RemoteReadiness } from "./RemoteReadiness";
 import { StartSessionDialog } from "./StartSessionDialog";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill, Tabs } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 
 /**
  * THE FILTER LIVES IN THE URL, and it lives there because the tiles link to it.
@@ -54,39 +70,21 @@ const TABS = [
   { key: "recorded", label: "remote.sessions.tabRecorded" },
 ] as const satisfies readonly { key: string; label: MessageKey }[];
 
-/** The row's edge: a session somebody is on right now is the running blue. */
-function sessionKind(session: RemoteSession): Kind {
-  // A session that is still coming up is work in flight, which v3 draws as
-  // `run` (the progress glyph), not as `info`; the variant table has no word
-  // for that, so it is said here, as `jobStatusKind` says it for jobs.
-  if (session.state === "connecting") return "run";
-  return variantKind(remoteStateVariant(session.state));
-}
 
 export function SessionsPage() {
   const t = useT();
   const api = useApi();
-  const [startOpen, setStartOpen] = useState(false);
+  // New → Remote session (decision D8): `?new=session` opens the dialog.
+  const started = useNewParam("session");
 
-  const [params, setParams] = useSearchParams();
-  const tab = params.get("state") ?? "all";
-  const search = params.get("q") ?? "";
-
-  function update(patch: Record<string, string>, replace = false) {
-    const next = new URLSearchParams(params);
-    for (const [key, value] of Object.entries(patch)) {
-      // An empty value is ABSENT, not `?q=` — a URL carrying an empty filter
-      // reads as a filter set to nothing (DevicesPage's note, same rule).
-      if (value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    setParams(next, { replace });
-  }
-
-  const setTab = (key: string) => update({ state: key === "all" ? "" : key });
-  // Replaces rather than pushes: one history entry per keystroke would make
-  // Back useless for the person trying to undo the filter.
-  const setSearch = (value: string) => update({ q: value }, true);
+  // THE LIST KIT (redesign plan, O3 3.6): `state` is the strip that filtered
+  // the list, now chips on the same parameter; the search replaces its
+  // history entry (the kit's `q`); `client` is the Client chip's.
+  const filters = useUrlFilters(["q", "state", "client"] as const);
+  const tab = filters.values.state === "" ? "all" : filters.values.state;
+  const search = filters.values.q;
+  const setTab = (key: string) => filters.set("state", key === "all" ? "" : key);
+  const setSearch = (value: string) => filters.set("q", value);
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -97,12 +95,23 @@ export function SessionsPage() {
   // fetched fresh on mount and refreshed by invalidating ["remote-sessions"]
   // after the start/stop mutations succeed (see StartSessionDialog and
   // ScreenViewer).
+  //
+  // UNDER THE CLIENT CHIP (decisions D6, D20) the sessions and the devices
+  // that name them are that client's: the same calls, read through
+  // `useNarrowedApi` and kept under the client's key (today's key without a
+  // chip). `["remote-sessions"]` still reaches every copy.
+  const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
   const sessions = useQuery({
-    queryKey: ["remote-sessions"],
-    queryFn: () => api.listRemoteSessions(),
+    queryKey: client === null ? ["remote-sessions"] : ["remote-sessions", client],
+    queryFn: () => readApi.listRemoteSessions(),
+    enabled: ready,
   });
 
-  const devices = useQuery({ queryKey: ["devices"], queryFn: () => api.listDevices() });
+  const devices = useQuery({
+    queryKey: client === null ? ["devices"] : ["devices", client],
+    queryFn: () => readApi.listDevices(),
+    enabled: ready,
+  });
   const deviceById = useMemo(
     () => new Map((devices.data?.items ?? []).map((device) => [device.id, device])),
     [devices.data],
@@ -142,14 +151,6 @@ export function SessionsPage() {
     [searched, tab],
   );
 
-  // Counted over the SEARCHED rows, not the whole page: a strip whose counts
-  // contradict the table under it reads as a table that failed to render rows
-  // it has (the defect DevicesPage documents against its own tab counts).
-  const tabCounts: Record<string, number> = {
-    all: searched.length,
-    active: searched.filter((session) => matchesTab(session, "active")).length,
-    recorded: searched.filter((session) => matchesTab(session, "recorded")).length,
-  };
 
   return (
     <>
@@ -158,7 +159,7 @@ export function SessionsPage() {
         description={t("remote.sessions.description")}
         actions={
           canControl ? (
-            <Btn variant="primary" icon="user-screen" label={t("remote.sessions.start")} onClick={() => setStartOpen(true)} />
+            <Btn variant="primary" icon="user-screen" label={t("remote.sessions.start")} onClick={started.start} />
           ) : undefined
         }
       />
@@ -191,7 +192,7 @@ export function SessionsPage() {
           label={t("remote.sessions.onlineDevices")}
           value={String(onlineDevices)}
           icon="devices"
-          to="/devices?state=online"
+          to={client === null ? "/devices?state=online" : `/devices?state=online&client=${client}`}
           tone="green"
           foot={t("remote.sessions.onlineFoot")}
           zeroLabel={t("remote.sessions.onlineZero")}
@@ -229,48 +230,49 @@ export function SessionsPage() {
       </StatsGrid>
 
       <h2 className="sr-only">{t("remote.sessions.listHeading")}</h2>
-      <Tabs
-        items={TABS.map((item) => ({ ...item, label: t(item.label), count: tabCounts[item.key] }))}
-        active={tab}
-        onSelect={setTab}
-        panelId="remote-tabpanel"
-      />
-
       <Panel bare>
-        <div
-          id="remote-tabpanel"
-          role="tabpanel"
-          aria-label={t(TABS.find((item) => item.key === tab)?.label ?? "remote.sessions.tabAll")}
-          tabIndex={-1}
-        >
-        <FilterBar>
-          <SearchField
-            placeholder={t("remote.sessions.searchPlaceholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("remote.sessions.searchLabel")}
-          />
-          {/* AND NO TRAILING SPACER (design review I5). `.filter-spacer` is
-              `flex: 1`, and so is the kit's search wrapper, so a spacer with
-              NOTHING AFTER IT does not push anything to the right -- it takes
-              half the row from the field beside it. Measured at 1440 the box
-              stopped at ~675px inside a 1140px card with bare panel to its
-              right. /licenses and /subscriptions run their search the full
-              width of the bar; /service-desk pairs it with chips; the only
-              honest use of a spacer is between a growing field and something
-              it has to push, which /licenses has (a result count) and this
-              row does not. AuditPage's filter bar carries the same note for
-              the same reason. */}
-        </FilterBar>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("remote.sessions.searchPlaceholder")}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label={t("remote.sessions.searchLabel")}
+            />
+          }
+          chips={
+            <>
+              {/* THE STRIP THAT FILTERED THE LIST IS CHIPS (redesign plan,
+                  Receta L point 5), on the same `?state=` the tiles link to.
+                  No numbers: the server sends a total and no count by state,
+                  and one counted over the rows in hand is the browser's. */}
+              <FilterChips
+                label={t("remote.sessions.stateLabel")}
+                options={TABS.map((item) => ({ value: item.key === "all" ? "" : item.key, label: t(item.label) }))}
+                value={tab === "all" ? "" : tab}
+                onChange={(value) => setTab(value === "" ? "all" : value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={sessions.data ? <ShowingCount shown={filtered.length} total={items.length} /> : null}
+        />
 
-        <QueryState
-          loading={sessions.isLoading}
-          error={sessions.error}
-          empty={filtered.length === 0}
-          emptyLabel={items.length === 0 ? t("remote.sessions.emptyNone") : t("remote.sessions.emptyFiltered")}
-          emptyIcon="user-screen"
-        >
-          <Table>
+        <QueryState loading={sessions.isPending} error={sessions.error} empty={false} emptyLabel="">
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="user-screen"
+              nothingYet={t("remote.sessions.emptyNone")}
+              action={
+                canControl ? (
+                  <Btn variant="primary" small icon="user-screen" label={t("remote.sessions.start")} onClick={started.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("remote.sessions.title")}>
             <thead>
               <tr>
                 <Th>{t("remote.sessions.colDevice")}</Th>
@@ -352,11 +354,11 @@ export function SessionsPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
-        </div>
       </Panel>
 
-      <StartSessionDialog open={startOpen} onClose={() => setStartOpen(false)} />
+      <StartSessionDialog open={started.open && canControl} onClose={started.close} />
     </>
   );
 }

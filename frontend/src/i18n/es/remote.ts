@@ -47,7 +47,7 @@ export const remote: Shape<typeof en> = {
     searchPlaceholder: "Buscar por dispositivo, protocolo o estado",
     searchLabel: "Buscar sesiones",
     emptyNone: "Aún no hay sesiones remotas.",
-    emptyFiltered: "Ninguna sesión coincide con ese filtro.",
+    stateLabel: "Sesiones",
     colDevice: "Dispositivo",
     colConsent: "Consentimiento",
     colState: "Estado",
@@ -97,7 +97,7 @@ export const remote: Shape<typeof en> = {
     noCredential:
       "Tu sesión en esta consola terminó, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
     titleFallback: "Sesión remota",
-    description: "La pantalla del dispositivo, en directo.",
+    back: "Sesiones remotas",
     ending: "Finalizando…",
     end: "Finalizar sesión",
     factConnection: "Conexión",
