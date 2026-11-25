@@ -30,13 +30,17 @@
 // disclosure. Offering it back as a control would be the choice this decision
 // removed.
 //
-// v3 draws no screen for this route, so it is composed from the kit alone: the
-// head, a two-column `.g2` of "what leaves" beside the provider, and the
-// flagged-content rows under both.
+// THE KIT'S SECTIONS, AND NO SAVE BAR (redesign plan, Task 12, 7.4). The page
+// is the head, then one collapsible `FormSection` per group: what leaves this
+// network, the provider it goes to, and the flagged content. It saves nothing,
+// so it draws no `SaveBar`: the operator's decision above removed every
+// control it had, and the dials an org-admin still tunes are saved on Settings
+// → Assistant, through the kit's bar. A form here would be a second editor of
+// one server-side setting, which rule 4 forbids.
 
 import { useT } from "../../i18n/context";
 import { Icon } from "../../shell/icons";
-import { KIND_ICON, PageHead, Panel } from "../../shell/components";
+import { FormSection, KIND_ICON, PageHead } from "../../shell/components";
 import { KV } from "../../shell/viz";
 import { useAiProviders } from "./api";
 import { EGRESS_DISCLOSURE } from "./egress";
@@ -83,8 +87,8 @@ export function AiSettingsPage() {
         title={t("aiAdmin.settings.title")}
         description={t("aiAdmin.settings.description")}
       />
-      <div className="g2" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 16 }}>
-        <Panel title={EGRESS_DISCLOSURE.heading}>
+      <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <FormSection title={EGRESS_DISCLOSURE.heading} icon="network">
           {/* Both lists are captioned, and the first one was not: four lines
               hanging straight off the panel title, then a heading, then three
               more, so the head that DID exist read as a divider rather than as
@@ -115,7 +119,7 @@ export function AiSettingsPage() {
           <p className="note" style={{ marginTop: 4 }}>
             {EGRESS_DISCLOSURE.contractual}
           </p>
-        </Panel>
+        </FormSection>
 
         {/* THE PROVIDER, beside WHAT GOES. The two belong together: "tool
             results: real customer data" is only actionable beside the name of
@@ -130,7 +134,10 @@ export function AiSettingsPage() {
             row labelled "Model provider" once a provider is configured; the
             heading now names the same thing rather than a phrase Notifications
             needs for something else. */}
-        <Panel title={t("aiAdmin.settings.providerTitle")} subtitle={t("aiAdmin.settings.providerSubtitle")}>
+        <FormSection title={t("aiAdmin.settings.providerTitle")} icon="sparkles">
+          <p className="note" style={{ marginBottom: 12 }}>
+            {t("aiAdmin.settings.providerSubtitle")}
+          </p>
           {providers.isLoading ? (
             <p className="note">{t("aiAdmin.settings.loading")}</p>
           ) : provider === null ? (
@@ -169,7 +176,7 @@ export function AiSettingsPage() {
           <p className="note" style={{ marginTop: 12 }}>
             {t("aiAdmin.settings.otherSettings")}
           </p>
-        </Panel>
+        </FormSection>
       </div>
 
       <InjectionFlagList />

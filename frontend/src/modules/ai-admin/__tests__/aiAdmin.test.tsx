@@ -141,8 +141,10 @@ describe("ChatPanel when the feature is off", () => {
     //     under it. Falsified against the previous card, which rendered
     //     `<h2>Assistant</h2>` above a bare underlined "Assistant settings"
     //     link.
+    // RE-POINTED (redesign plan, Task 12, 7.4): the settings are the head's
+    // secondary action now, in both states, rather than a button in the card.
     expect(
-      screen.getByRole("link", { name: /open assistant settings/i }),
+      screen.getByRole("link", { name: /assistant settings/i }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Assistant", level: 2 })).toBeNull();
 
@@ -231,6 +233,36 @@ describe("ChatPanel when the feature is off", () => {
     expect(
       await screen.findByRole("link", { name: /assistant settings/i }),
     ).toHaveAttribute("href", "/assistant/settings");
+  });
+});
+
+// The Assistant's head and its empty state (redesign plan, Task 12, 7.4; spec
+// §10.6): the settings are a secondary action for `ai.admin`, and a disabled
+// assistant says the cause and whom to ask, to everyone.
+describe("ChatPanel on the kit", () => {
+  it("says why the Assistant is off and whom to ask", async () => {
+    stubApi({
+      getAiStatus: vi.fn().mockResolvedValue({ enabled: false, reason: "no model provider is configured on this server" }),
+      me: vi.fn().mockResolvedValue({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: ["ai.use"] }),
+    });
+    renderWithProviders(<ChatPanel />);
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "No model provider is configured on this server." }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/turned on by whoever runs this server/)).toBeInTheDocument();
+    // Without `ai.admin` there is no settings action to offer.
+    expect(screen.queryByRole("link", { name: /assistant settings/i })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("offers the settings as a secondary action in the head, to ai.admin only", async () => {
+    stubApi({});
+    renderWithProviders(<ChatPanel />);
+    await screen.findByRole("textbox");
+    const link = screen.getByRole("link", { name: /assistant settings/i });
+    expect(link).toHaveAttribute("href", "/assistant/settings");
+    expect(link.className.split(/\s+/)).not.toContain("primary");
+    expect(link.closest(".ph")).not.toBeNull();
   });
 });
 

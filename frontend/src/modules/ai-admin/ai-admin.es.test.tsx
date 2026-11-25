@@ -157,7 +157,9 @@ describe("ChatPanel in Spanish", () => {
     );
     const { container } = mount(<ChatPanel />);
     expect(await screen.findByText("No hay ningún proveedor de modelos configurado en este servidor.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Abrir la configuración del asistente" })).toHaveAttribute("href", "/assistant/settings");
+    // RE-POINTED (redesign plan, Task 12, 7.4): the way out is the head's
+    // secondary action, the same in both states.
+    expect(screen.getByRole("link", { name: "Configuración del asistente" })).toHaveAttribute("href", "/assistant/settings");
     expect(screen.queryByRole("textbox")).toBeNull();
     expectNoEnglish(container);
   });
