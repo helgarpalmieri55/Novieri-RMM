@@ -36,6 +36,7 @@ import {
 import type { ExpenseListFilters, ExpenseOut } from "./types";
 import {
   Btn,
+  ChipSelect,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -208,21 +209,16 @@ export function ExpensesPage() {
                 onChange={(value) => filters.set("status", value)}
               />
               {/* The category as the kit's chip with a list, like the Client chip. */}
-              <span className={filters.values.category === "" ? "chip chip-select" : "chip chip-select on"}>
-                <span aria-hidden="true">{t("budget.common.category")}</span>
-                <select
-                  aria-label={t("budget.expenses.filterCategory")}
-                  value={filters.values.category}
-                  onChange={(e) => filters.set("category", e.target.value)}
-                >
-                  <option value="">{t("budget.expenses.allCategories")}</option>
-                  {categories.data?.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <ChipSelect
+                label={t("budget.common.category")}
+                ariaLabel={t("budget.expenses.filterCategory")}
+                options={[
+                  { value: "", label: t("budget.expenses.allCategories") },
+                  ...(categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                value={filters.values.category}
+                onChange={(value) => filters.set("category", value)}
+              />
               {/* The range: two calendar dates, sent as `date_from` and `date_to`. */}
               <label className="flex items-center gap-2">
                 <span className="note">{t("budget.expenses.filterFrom")}</span>
