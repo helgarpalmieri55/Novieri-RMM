@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { RowMenu } from "../../components/rowmenu";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
@@ -8,7 +8,8 @@ import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../componen
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel, StatusPill, Toggle } from "../../shell/components";
+import { Btn, FormSection, SaveBar, StatusPill, Toggle, UnsavedGuard, useDraft, useNewParam } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
 import { useApi } from "../../lib/ApiContext";
 import {
   useCreateNotificationRuleMutation,
@@ -62,7 +63,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   });
   const queuesForbidden = queues.error instanceof ApiError && queues.error.status === 403;
 
-  const [creating, setCreating] = useState(false);
+  // Add rule opens from the URL (`?new=rule`, decision D8), and only for
+  // someone who may create one, whatever the URL asks.
+  const created = useNewParam("rule");
+  const creating = canAdmin && created.open;
   const [eventType, setEventType] = useState<string>(DEFAULT_EVENT_TYPE);
   const [channelId, setChannelId] = useState("");
   const [recipientKind, setRecipientKind] = useState<RecipientKind>("queue_members");
@@ -98,14 +102,45 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
           setChannelId("");
           setRecipientKind("queue_members");
           setQueueId("");
-          setCreating(false);
+          created.close();
         },
       },
     );
   }
 
-  function toggleActive(id: string, active: boolean) {
-    update.mutate({ id, body: { active: !active } });
+  // THE PAGE'S SETTINGS (redesign plan, Task 7, 2.8; Receta FO): whether each
+  // rule routes, switched on the row and saved by the page's one save bar
+  // with the same `PATCH /notifications/rules/{id}` the switch used to send
+  // at once. One draft for every rule, so switching three and saving is one
+  // act, Discard puts them back, and leaving with a switch thrown asks.
+  const saved = useMemo(
+    () => (rules.data ? Object.fromEntries(rules.data.map((rule) => [rule.id, rule.active])) : undefined),
+    [rules.data],
+  );
+  const draft = useDraft<Readonly<Record<string, boolean>>>(saved);
+  const [saving, setSaving] = useState(false);
+  const activeOf = (rule: RuleOut): boolean => draft.draft?.[rule.id] ?? rule.active;
+
+  function toggleActive(id: string) {
+    if (!draft.draft) return;
+    draft.setDraft({ ...draft.draft, [id]: !draft.draft[id] });
+  }
+
+  async function saveActive() {
+    if (!draft.draft || !saved) return;
+    setSaving(true);
+    update.reset();
+    draft.markSent(draft.draft);
+    try {
+      for (const [id, active] of Object.entries(draft.draft)) {
+        if (saved[id] !== undefined && saved[id] !== active) await update.mutateAsync({ id, body: { active } });
+      }
+    } catch {
+      // Announced above, in the rule list's own words; the change stays unsaved.
+      draft.markSent(null);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function channelName(id: string): string {
@@ -139,23 +174,17 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   return (
     // The Rules stat tile links to `/notifications#rules`.
     <div id="rules">
-      <Panel
-        title={t("notification.rules.title")}
-        // Same sentence, verbatim, as Settings → Notifications
-        // (`NotificationsTab.tsx`): "reaches" here and "goes" there was one
-        // job described in two verbs. Picked "goes" — the glossary's own
-        // replacement for "channel" is "where it goes", so the family of
-        // words this panel already needs to speak in is the "goes" one.
-        subtitle={t("notification.rules.subtitle")}
-        bare
-        actions={canAdmin ? <Btn label={t("notification.rules.add")} icon="plus" variant="primary" onClick={() => setCreating(true)} /> : undefined}
-      >
+      <FormSection title={t("notification.rules.title")} icon="bell">
+        <SectionLead
+          text={t("notification.rules.subtitle")}
+          action={canAdmin ? <Btn label={t("notification.rules.add")} icon="plus" onClick={created.start} /> : undefined}
+        />
         {rules.isLoading ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.common.loading")}</p>
+          <p className="note">{t("notification.common.loading")}</p>
         ) : forbidden ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.rules.forbidden")}</p>
+          <p className="note">{t("notification.rules.forbidden")}</p>
         ) : failed ? (
-          <p role="alert" className="notice red" style={{ margin: 14 }}>
+          <p role="alert" className="notice red">
             {t("notification.rules.failed", { reason: describeSubmitError(rules.error) })}
           </p>
         ) : (
@@ -202,10 +231,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
                         "Pending" and "Sent". */}
                     {canAdmin ? (
                       <Toggle
-                        checked={r.active}
-                        onChange={() => toggleActive(r.id, r.active)}
-                        label={r.active ? t("notification.rules.on") : t("notification.rules.off")}
-                        disabled={update.isPending}
+                        checked={activeOf(r)}
+                        onChange={() => toggleActive(r.id)}
+                        label={activeOf(r) ? t("notification.rules.on") : t("notification.rules.off")}
+                        disabled={saving}
                       />
                     ) : (
                       <StatusPill value={r.active ? "active" : "inactive"} />
@@ -251,6 +280,9 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             rendered "Error: " for a bodyless 503 -- the row kept its old badge
             and the operator read a label with nothing after it, which is the
             silently-swallowed destructive call Auditor A filed as a BLOCKER. */}
+        {/* A refused switch keeps its own sentence here ("The rule was not
+            changed."), the error text of today; the save bar stays up with
+            the change still unsaved. */}
         {(create.isError || update.isError || del.isError) && (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
             {t("notification.rules.notChanged", { reason: describeSubmitError(create.error ?? update.error ?? del.error) })}
@@ -276,7 +308,8 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
           }}
         />
 
-        <Dialog open={creating} onClose={() => setCreating(false)} title={t("notification.rules.addTitle")}>
+      </FormSection>
+        <Dialog open={creating} onClose={created.close} title={t("notification.rules.addTitle")}>
           <div className="form-grid">
             <Field label={t("notification.rules.eventType")} full>
               <select className={inputClass} value={eventType} onChange={(e) => setEventType(e.target.value)}>
@@ -340,7 +373,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreating(false)}>
+            <Button variant="ghost" onClick={created.close}>
               {t("notification.rules.cancel")}
             </Button>
             <Button onClick={submit} disabled={create.isPending || !channelId}>
@@ -348,7 +381,20 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             </Button>
           </div>
         </Dialog>
-      </Panel>
+      {canAdmin ? (
+        <>
+          <UnsavedGuard dirty={draft.dirty} />
+          <SaveBar
+            dirty={draft.dirty}
+            saving={saving}
+            onDiscard={() => {
+              draft.discard();
+              update.reset();
+            }}
+            onSave={() => void saveActive()}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

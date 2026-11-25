@@ -199,6 +199,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // A SECTION OF THE SLA PAGE (redesign plan, Task 7, 2.6): its sentence and
     // "Add calendar" (secondary: the open dialog's Save is the primary), then
     // the list. No Client chip: calendars are the organisation's.
+    <>
     <FormSection title={t("sla.calendars.title")} icon="calendar">
       <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
         <p className="note" style={{ margin: 0 }}>
@@ -348,6 +349,34 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
 
       {/* A real <form>, so Enter in the name field saves instead of doing
           nothing -- the other half of the same finding. */}
+
+      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.calendars.editTitle")}>
+        <Form onSubmit={submitEdit}>
+          <CalendarFields
+            name={name}
+            timezone={timezone}
+            active={active}
+            onName={setName}
+            onTimezone={setTimezone}
+            onActive={setActive}
+          />
+          <p className="form-hint" style={{ marginBottom: 8 }}>
+            {t("sla.calendars.editHint")}
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
+              {t("common.actions.cancel")}
+            </Button>
+            <FormActions
+              label={t("common.actions.save")}
+              pending={update.isPending}
+              error={update.error}
+              problems={attemptProblems(attempt)}
+            />
+          </div>
+        </Form>
+      </Dialog>
+    </FormSection>
       <Dialog open={creating} onClose={created.close} title={t("sla.calendars.addTitle")}>
         <Form onSubmit={submitCreate}>
           <CalendarFields
@@ -379,34 +408,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
           </div>
         </Form>
       </Dialog>
-
-      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.calendars.editTitle")}>
-        <Form onSubmit={submitEdit}>
-          <CalendarFields
-            name={name}
-            timezone={timezone}
-            active={active}
-            onName={setName}
-            onTimezone={setTimezone}
-            onActive={setActive}
-          />
-          <p className="form-hint" style={{ marginBottom: 8 }}>
-            {t("sla.calendars.editHint")}
-          </p>
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
-              {t("common.actions.cancel")}
-            </Button>
-            <FormActions
-              label={t("common.actions.save")}
-              pending={update.isPending}
-              error={update.error}
-              problems={attemptProblems(attempt)}
-            />
-          </div>
-        </Form>
-      </Dialog>
-    </FormSection>
+    </>
   );
 }
 

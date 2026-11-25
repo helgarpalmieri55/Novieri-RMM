@@ -7,7 +7,8 @@ import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel } from "../../shell/components";
+import { Btn, FormSection } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
 import { useCreateAllowlistEntryMutation, useDeleteAllowlistEntryMutation, useNotificationAllowlist } from "./api";
 import type { AllowlistEntryOut } from "./types";
 
@@ -47,12 +48,8 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
   return (
     // The Allowlist entries stat tile links to `/notifications#allowlist`.
     <div id="allowlist">
-      <Panel
-        title={t("notification.allowlist.title")}
-        subtitle={t("notification.allowlist.subtitle")}
-        bare
-        actions={canAdmin ? <Btn label={t("notification.allowlist.add")} icon="plus" onClick={() => setCreating(true)} /> : undefined}
-      >
+      <FormSection title={t("notification.allowlist.title")} icon="shield-lock">
+        <SectionLead text={t("notification.allowlist.subtitle")} action={canAdmin ? <Btn label={t("notification.allowlist.add")} icon="plus" onClick={() => setCreating(true)} /> : undefined} />
         {/* Requirement #3: a visible warning, not decoration -- this always
             renders on the panel (not only inside the create form) so a reader
             understands what every row already on the list means, too. */}
@@ -63,9 +60,9 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
           </span>
         </p>
         {allowlist.isLoading ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.common.loading")}</p>
+          <p className="note">{t("notification.common.loading")}</p>
         ) : forbidden ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.allowlist.forbidden")}</p>
+          <p className="note">{t("notification.allowlist.forbidden")}</p>
         ) : failed ? (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
             {t("notification.allowlist.failed", { reason: describeSubmitError(allowlist.error) })}
@@ -194,7 +191,7 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
             </Button>
           </div>
         </Dialog>
-      </Panel>
+      </FormSection>
     </div>
   );
 }

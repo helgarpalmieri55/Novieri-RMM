@@ -265,6 +265,7 @@ export function PoliciesPanel({
     // A SECTION OF THE SLA PAGE (redesign plan, Task 7, 2.6; Receta FO): its
     // sentence, the Client chip and "Add policy" as a secondary button (the
     // open dialog's Save is the page's primary), then the list.
+    <>
     <FormSection title={t("sla.policies.title")} icon="shield-check">
       <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
         <p className="note" style={{ margin: 0 }}>
@@ -424,6 +425,33 @@ export function PoliciesPanel({
       />
 
       {/* A real <form>, so Enter submits from any field in the dialog. */}
+
+      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.policies.editTitle")}>
+        <Form onSubmit={submitEdit}>
+          <PolicyFields
+            draft={draft}
+            onChange={setDraft}
+            calendars={calendars.data ?? []}
+            calendarsLoading={calendars.isLoading}
+            calendarsFailed={calendars.error != null}
+          />
+          <p className="form-hint" style={{ marginBottom: 8 }}>
+            {t("sla.policies.editHint")}
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
+              {t("common.actions.cancel")}
+            </Button>
+            <FormActions
+              label={t("common.actions.save")}
+              pending={update.isPending}
+              error={update.error}
+              problems={attemptProblems(attempt)}
+            />
+          </div>
+        </Form>
+      </Dialog>
+    </FormSection>
       <Dialog open={creating} onClose={created.close} title={t("sla.policies.addTitle")}>
         <Form onSubmit={submitCreate}>
           <PolicyFields
@@ -474,33 +502,7 @@ export function PoliciesPanel({
           </div>
         </Form>
       </Dialog>
-
-      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.policies.editTitle")}>
-        <Form onSubmit={submitEdit}>
-          <PolicyFields
-            draft={draft}
-            onChange={setDraft}
-            calendars={calendars.data ?? []}
-            calendarsLoading={calendars.isLoading}
-            calendarsFailed={calendars.error != null}
-          />
-          <p className="form-hint" style={{ marginBottom: 8 }}>
-            {t("sla.policies.editHint")}
-          </p>
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
-              {t("common.actions.cancel")}
-            </Button>
-            <FormActions
-              label={t("common.actions.save")}
-              pending={update.isPending}
-              error={update.error}
-              problems={attemptProblems(attempt)}
-            />
-          </div>
-        </Form>
-      </Dialog>
-    </FormSection>
+    </>
   );
 }
 

@@ -8,7 +8,8 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel, StatusPill, Toggle } from "../../shell/components";
+import { Btn, FormSection, StatusPill, Toggle } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
 import {
   useCreateNotificationChannelMutation,
   useDeleteNotificationChannelMutation,
@@ -351,16 +352,12 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
     // `id` is a stat tile's destination: the Channels tile on this page
     // links to `/notifications#channels`.
     <div id="channels">
-      <Panel
-        title={t("notification.channels.title")}
-        subtitle={t("notification.channels.subtitle")}
-        bare
-        actions={canAdmin ? <Btn label={t("notification.channels.add")} icon="plus" onClick={openCreate} /> : undefined}
-      >
+      <FormSection title={t("notification.channels.title")} icon="link">
+        <SectionLead text={t("notification.channels.subtitle")} action={canAdmin ? <Btn label={t("notification.channels.add")} icon="plus" onClick={openCreate} /> : undefined} />
         {channels.isLoading ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.common.loading")}</p>
+          <p className="note">{t("notification.common.loading")}</p>
         ) : forbidden ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.channels.forbidden")}</p>
+          <p className="note">{t("notification.channels.forbidden")}</p>
         ) : failed ? (
           // `role="alert"` and the reason, through the one translation
           // (components/form.tsx): red text with no live region is not
@@ -668,7 +665,7 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
             </div>
           </Form>
         </Dialog>
-      </Panel>
+      </FormSection>
     </div>
   );
 }

@@ -213,6 +213,7 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
   }
 
   return (
+    <>
     <FormSection title={t("serviceDesk.admin.queues")} icon="list-check">
       <SectionLead
         text={t("serviceDesk.admin.queuesSubtitle")}
@@ -277,6 +278,7 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
       ) : null}
 
       {/* Open only for someone who may create one, whatever the URL asks. */}
+    </FormSection>
       <Dialog open={canAdmin && created.open} onClose={closeCreate} title={t("serviceDesk.admin.newQueue")}>
         {/* A real <form>, so Enter in Name saves instead of doing nothing --
             ui.tsx's Button sets no type, so the submit control was an orphan
@@ -316,7 +318,7 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
           </div>
         </Form>
       </Dialog>
-    </FormSection>
+    </>
   );
 }
 
@@ -378,6 +380,7 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
   }
 
   return (
+    <>
     <FormSection title={t("serviceDesk.admin.categories")} icon="tag">
       <SectionLead
         text={t("serviceDesk.admin.categoriesSubtitle")}
@@ -455,6 +458,7 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : null}
 
+    </FormSection>
       <Dialog open={canAdmin && created.open} onClose={closeCreate} title={t("serviceDesk.admin.newCategory")}>
         <Form onSubmit={submit}>
           <div className="form-grid">
@@ -528,6 +532,6 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
           </div>
         </Form>
       </Dialog>
-    </FormSection>
+    </>
   );
 }
