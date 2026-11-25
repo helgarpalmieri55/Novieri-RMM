@@ -191,3 +191,42 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
   computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
 - **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
   desplazar la página) y antes de pintar.
+
+---
+
+## Oleada O2: Inicio, tickets y portal (Task 7)
+
+Críticas `.impeccable/critique/2026-11-25T04-26-2[45]Z__…` de las once páginas (de `dashboardpage` a
+`portalticketdetailpage`), todas cerradas. Contestadas por la oleada con `DESIGN.md`, el encargo y las respuestas de
+arriba; las dos que no zanjan van al coordinador en el informe de la tarea (puntos 4 y 5).
+
+### 1. Los estados de la cola de tickets, once chips
+
+- **Respuesta: un `chip-select` con su nombre («Estado»), junto a los chips del alcance.** El encargo pedía
+  `FilterChips «Estado»`; en 1440 los once chips ocupaban tres líneas y bajaban el primer ticket fuera de la vista.
+- **Regla.** `DESIGN.md`, «Lists» (una barra de herramientas, no cinco); el cliente se dibuja igual (`ClientFilter`).
+  El vocabulario sigue cerrado y la clave de la URL (`?status=`) no cambia.
+
+### 2. Dos interruptores iguales que guardaban de dos maneras en Notificaciones
+
+- **Respuesta: los dos son ajustes de la página.** Las reglas y los canales comparten un borrador, una barra y una
+  guarda (`switches.tsx`); cada uno guarda con el mismo `PATCH { active }` de hoy.
+- **Regla.** `DESIGN.md`, «Forms»: una sola barra para toda la consola; el encargo 2.8 («los ajustes con SaveBar»).
+
+### 3. «Añadir buzón» primario en Entrada de correo
+
+- **Respuesta: secundario.** El primario del cuerpo es el «Guardar» de la barra o el del diálogo abierto.
+- **Regla.** `DESIGN.md`, «Buttons»: «One primary per page body».
+
+### 4. Los guardados propios que quedan en Niveles de servicio (abierta)
+
+- **Sin respuesta en las fuentes.** «Guardar configuración» (días de cierre automático) y «Guardar semana» del
+  calendario siguen con su botón; el encargo 2.6 no los nombra. Opciones: (a) dejarlos; (b) una barra para la página.
+  La oleada dejó (a) y lo sube al coordinador.
+
+### 5. El marco del portal, sin `AppShell`, y el título de la pestaña (abierta, menor)
+
+- **La oleada eligió**: cada página del portal nombra la pestaña solo dentro del marco del contacto
+  (`portalTitle.tsx`); dentro de la consola (un técnico con un código del portal) la nombra el armazón, y el marco
+  incrustado de `/__preview` no la toca. Sube al coordinador por si prefiere que el armazón del portal la nombre
+  desde la ruta.
