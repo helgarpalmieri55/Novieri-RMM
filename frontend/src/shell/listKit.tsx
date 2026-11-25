@@ -485,12 +485,17 @@ export function useNarrowedApi(clientId: string): NarrowedApi {
  * `client` is the client actually read: `useNarrowedApi`'s `client`, `null`
  * without one (Health's `withClient`, which this is), or a chip's raw value,
  * where `""` is no client too (O4's `withChip`). With none, `to` comes back
- * unchanged; otherwise `client=<id>` is added after `to`'s own query. `to`
- * names no client of its own.
+ * unchanged; otherwise `client=<id>` is added after `to`'s own query and
+ * before its fragment, never inside it (batch 2 review, H3: after a `#` it
+ * is part of the hash, and the list it opens is not narrowed). `to` names no
+ * client of its own.
  */
 export function withClient(to: string, client: string | null): string {
   if (client === null || client === "") return to;
-  return `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  const hash = to.indexOf("#");
+  const path = hash === -1 ? to : to.slice(0, hash);
+  const fragment = hash === -1 ? "" : to.slice(hash);
+  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}${fragment}`;
 }
 
 /**

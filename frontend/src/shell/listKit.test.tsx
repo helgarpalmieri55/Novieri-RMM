@@ -870,6 +870,17 @@ describe("withClient (kit requests batch 2, K1)", () => {
     expect(withClient("/devices", "a b&c")).toBe("/devices?client=a%20b%26c");
   });
 
+  it("puts the client before a fragment, never inside it (batch 2 review, H3)", () => {
+    expect(withClient("/devices#top", ANDES)).toBe(`/devices?client=${ANDES}#top`);
+    expect(withClient("/health?state=open#list", ANDES)).toBe(`/health?state=open&client=${ANDES}#list`);
+    expect(withClient("/devices#top", null)).toBe("/devices#top");
+  });
+
+  it("opens a link with a fragment on the same client", () => {
+    renderPage(withClient("/devices?state=offline#top", ANDES), <ChipPage />);
+    expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
+  });
+
   it("reads an empty chip as no client, so it never writes an empty client=", () => {
     expect(withClient("/devices?state=offline", "")).toBe("/devices?state=offline");
   });
