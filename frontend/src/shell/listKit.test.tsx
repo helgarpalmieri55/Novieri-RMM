@@ -770,18 +770,36 @@ describe("ChipSelect (kit requests batch 1, item 5)", () => {
     expect(select.closest(".chip")).not.toHaveClass("on");
   });
 
-  it("is the Client chip's own markup: ClientFilter is drawn by it", () => {
+  /**
+   * THE CLIENT CHIP'S MARKUP BEFORE CHIPSELECT, FROZEN (batch 1 review, F3):
+   * what 8507194's hand-drawn `ClientFilter` rendered for these two clients,
+   * captured from that commit's listKit.tsx. Compared against ChipSelect's own
+   * render, the test could not fail once ClientFilter was drawn by it; against
+   * the frozen text, a drift in either is red.
+   */
+  const FROZEN_CHIP = (on: boolean) =>
+    `<span class="chip chip-select${on ? " on" : ""}"><span aria-hidden="true">Client</span>` +
+    `<select aria-label="Client"><option value="">All clients</option>` +
+    `<option value="${ANDES}">Andes Logistics</option><option value="${BOGOTA}">Bogotá Retail</option></select></span>`;
+
+  it("is the Client chip's own markup: ClientFilter draws exactly what it drew before ChipSelect", () => {
     renderPage("/x", <ChipPage />);
-    const client = screen.getByRole("combobox", { name: "Client" }).closest(".chip") as HTMLElement;
-    const { container } = render(
-      <ChipSelect
-        label="Client"
-        options={[{ value: "", label: "All clients" }, { value: ANDES, label: "Andes Logistics" }, { value: BOGOTA, label: "Bogotá Retail" }]}
-        value=""
-        onChange={vi.fn()}
-      />,
-    );
-    expect(container.firstElementChild?.outerHTML).toBe(client.outerHTML);
+    expect(screen.getByRole("combobox", { name: "Client" }).closest(".chip")?.outerHTML).toBe(FROZEN_CHIP(false));
+  });
+
+  it("is the Client chip's own markup with a client chosen too", () => {
+    renderPage(`/x?client=${ANDES}`, <ChipPage />);
+    expect(screen.getByRole("combobox", { name: "Client" }).closest(".chip")?.outerHTML).toBe(FROZEN_CHIP(true));
+  });
+
+  it("draws that markup itself, for the same options", () => {
+    const options = [
+      { value: "", label: "All clients" },
+      { value: ANDES, label: "Andes Logistics" },
+      { value: BOGOTA, label: "Bogotá Retail" },
+    ];
+    const { container } = render(<ChipSelect label="Client" options={options} value="" onChange={vi.fn()} />);
+    expect(container.firstElementChild?.outerHTML).toBe(FROZEN_CHIP(false));
   });
 
   it("is on /__preview, holding a value, so the browser's a11y pass measures it", () => {
