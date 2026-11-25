@@ -6,7 +6,6 @@ export const credentials: Shape<typeof en> = {
     title: "Credenciales",
     description: "Contraseñas y claves para sesiones remotas y aprovisionamiento, almacenadas cifradas.",
     newCredential: "Nueva credencial",
-    listHeading: "Lista de credenciales",
   },
   tabs: {
     all: "Todas las credenciales",
@@ -21,6 +20,10 @@ export const credentials: Shape<typeof en> = {
     neverUsedZeroEmpty: "Aún no hay ninguna credencial guardada",
     neverUsedZeroUsed: "Todas las credenciales se han usado",
     neverUsedFoot: "Guardadas y sin descifrar desde entonces",
+    // The fourth tile (redesign Task 11, 6.9): the other half of "Never checked out".
+    used: "Retiradas",
+    usedZero: "Aún no se ha retirado ninguna",
+    usedFoot: "Cada una, en el registro de auditoría",
     typesInUse: "Tipos en uso",
     typesInUseZero: "Aún no hay ninguna credencial guardada",
     typesAvailable: { one: "{count} tipo disponible", other: "{count} tipos disponibles" },
@@ -28,9 +31,10 @@ export const credentials: Shape<typeof en> = {
   list: {
     title: "Perfiles de credenciales",
     subtitle: "Solo nombres: en esta lista nunca se muestra ninguna contraseña ni clave.",
+    // The state chips over ?state= (redesign Task 11, 6.9).
+    stateLabel: "Estado",
     emptyNone: "No hay credenciales guardadas.",
     client: "Cliente",
-    emptyView: "Ninguna credencial coincide con esta vista.",
     name: "Nombre",
     state: "Estado",
     lastUsed: "Último uso",

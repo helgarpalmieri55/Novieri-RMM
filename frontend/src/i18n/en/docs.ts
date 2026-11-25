@@ -10,6 +10,7 @@
  */
 export const docs = {
   page: {
+    backToList: "All articles",
     title: "IT documentation",
     description: "Runbooks, records and files, linked to the devices they describe.",
     newArticle: "New article",
@@ -51,14 +52,14 @@ export const docs = {
       searchPlaceholder: "Search articles, hosts, IPs",
       clearSearch: "Clear search",
       clear: "Clear",
+      // The article table's name and the phone's way back to it (redesign Task 11, 6.1).
+      tableLabel: "Articles",
       filterByCategory: "Filter by category",
       all: "All",
-      count: { one: "{count} article", other: "{count} articles" },
       searchNote:
         "Searches titles, descriptions, categories and the current file's name. It does not search inside stored files, and it does not search older versions' filenames.",
       noMatch: "No documentation matches that search.",
       noArticles: "No articles yet.",
-      noneInCategory: "No article in {category}.",
       searchResults: "Search results",
       groupArticles: "Articles",
       groupRecords: "Records",
@@ -80,7 +81,6 @@ export const docs = {
     markdown: "Markdown",
     preview: "Preview",
     cancel: "Cancel",
-    save: "Save",
   },
   article: {
     updated: "updated {date}",

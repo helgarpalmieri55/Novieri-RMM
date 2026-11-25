@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useState } from "react";
+import { useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -10,6 +10,7 @@ import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { formatDateTime } from "../../lib/datetime";
 import {
   useAddChangeLinkMutation,
@@ -49,7 +50,8 @@ import {
   provisionRunPickerOptions,
 } from "./pickerOptions";
 import type { LinkActionType } from "./types";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { ClientContext, DetailHead, Panel, QueryState, StatusPill, UrlTabs, useUrlTab } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 import { Facts, KV, kindOf } from "../../shell/viz";
 
@@ -101,6 +103,21 @@ function linkRules(actionType: LinkActionType): readonly FieldRule[] {
   return [{ name: "actionId", label: translate("change.detail.actionId"), validate: invalidActionId }];
 }
 
+/**
+ * ONE CHANGE AS A RECORD (redesign Task 11, 6.2; Receta F): the kit's head
+ * (the change's title, its state, its risk and its client; Export evidence),
+ * and its three sections in `?tab=` tabs, so a tab reloads and links: the
+ * summary with the lifecycle decision, the approval history, and the linked
+ * actions with the form that links one.
+ */
+const TABS = ["overview", "approvals", "links"] as const;
+type Tab = (typeof TABS)[number];
+const TAB_LABEL: Record<Tab, MessageKey> = {
+  overview: "change.detail.summary",
+  approvals: "change.detail.approvalHistory",
+  links: "change.detail.linkedActions",
+};
+
 // Triggers a browser download of a Blob. No shared download helper exists
 // elsewhere in src/ under modules/change; mirrors
 // modules/patch/FleetPatchPage.tsx's downloadBlob.
@@ -114,6 +131,15 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function ChangeDetail() {
+  const { changeId } = useParams<{ changeId: string }>();
+  // ONE CHANGE, ONE PAGE (general ruling 12). Another change under the same
+  // route keeps the element mounted, and with it the decision comment and the
+  // link being typed, which the next approval would then send with the change
+  // now shown. Keyed by the change, the page starts again.
+  return <ChangeRecord key={changeId} />;
+}
+
+function ChangeRecord() {
   const t = useT();
   const { changeId } = useParams<{ changeId: string }>();
   const api = useApi();
@@ -177,24 +203,16 @@ export function ChangeDetail() {
   const isOwnChange = change.data != null && change.data.created_by === me.data?.user_id;
   const decidingOwn = isOwnChange && allowed.some((spec) => spec.action === "approve");
 
-  // THE TAB HAD NO NAME (cycle 12, auditor B, LOW). `document.title` was the
-  // constant product name on all thirty screens, so "a user with several change tabs
-  // open cannot tell them apart" -- and the change's own title is the only
-  // stable identity this record has: `ChangeOut` (change_mgmt/schema.py) carries
-  // no change NUMBER, so the auditor's suggested `CHG-1042` cannot be rendered
-  // without a column that does not exist. Restored on unmount so navigating away
-  // does not leave another page wearing this change's name.
-  const changeTitle = change.data?.title;
-  // Worded here so the effect re-runs, and the tab re-words, on a language switch.
-  const tabTitle = changeTitle == null ? null : t("change.detail.tabTitle", { title: changeTitle });
-  useEffect(() => {
-    if (tabTitle == null) return;
-    const previous = document.title;
-    document.title = tabTitle;
-    return () => {
-      document.title = previous;
-    };
-  }, [tabTitle]);
+  // THE TAB HAD NO NAME (cycle 12, auditor B, LOW): with several change tabs
+  // open they could not be told apart. The change's own title is the only
+  // stable identity this record has (`ChangeOut` carries no change number);
+  // the shell composes "<title> · Changes · Novieri RMM" from it and puts the
+  // previous title back when the page goes (`useRecordTitle`, redesign Task 2).
+  useRecordTitle(change.data?.title);
+  const [tab, setTab] = useUrlTab<Tab>(TABS, "overview");
+  // The client's name is in the head when the session knows it (a link to its 360 page).
+  const { clients } = useClientScope();
+  const clientShown = change.data != null && clients.some((client) => client.id === change.data?.client_id);
 
   const lifecyclePending =
     submitChange.isPending ||
@@ -272,122 +290,45 @@ export function ChangeDetail() {
 
   return (
     <div>
-      {/* `PageHead`'s own slot, for BOTH of this page's actions. Auditor B
-          (MEDIUM) asked for a "back to changes" affordance inside <main>, and
-          it was added above the head as a bare link — which put a second
-          navigation line in the eyebrow slot v3 forbids, one line under the
-          crumb that already returns to the section. Its two sibling pages
-          (/changes/approvals, /changes/calendar) render the identical link in
-          this slot, so it goes here and reads the same way on all three. */}
-      <PageHead
+      <DetailHead
+        back={{ to: "/changes", label: t("change.common.allChanges") }}
         title={change.data?.title ?? t("change.detail.fallbackTitle")}
-        description={t("change.detail.description")}
-        actions={
-          <>
-            {canRead ? (
-              /* Secondary, not primary: the page's one commit is the lifecycle
-                 decision below, and an export is a read. */
-              <Button variant="outline" onClick={() => void exportEvidence()} disabled={exporting}>
-                <Icon name="file-download" size={14} />
-                {exporting ? t("change.detail.exporting") : t("change.detail.exportEvidence")}
-              </Button>
-            ) : null}
-            <Link className="btn" to="/changes">
-              <Icon name="git-branch" size={14} />
-              {t("change.common.allChanges")}
-            </Link>
-          </>
+        status={
+          change.data
+            ? { kind: changeStateKind(change.data.state), label: changeStateLabel(change.data.state) }
+            : undefined
         }
-      />
-      {exportError && (
-        <p role="alert" className="form-error mb-2">
-          {describeSubmitError(exportError.error)}
-        </p>
-      )}
-
-      {change.data && (
-        <>
-          {/* v3's facts strip: the state, the type, the risk and the window
-              as caption/value cells, then the prose in its own panel. */}
-          <h2 className="sr-only">{t("change.detail.summary")}</h2>
-          <Facts
-            items={[
-              {
-                k: t("change.common.state"),
-                v: (
-                  <StatusPill
-                    value={change.data.state}
-                    label={changeStateLabel(change.data.state)}
-                    kind={changeStateKind(change.data.state)}
-                  />
-                ),
-              },
-              { k: t("change.detail.type"), v: changeTypeLabel(change.data.type) },
-              {
-                k: t("change.common.risk"),
-                v: (
-                  <StatusPill
-                    value={change.data.risk}
-                    label={riskLabel(change.data.risk)}
-                    kind={riskKind(change.data.risk)}
-                  />
-                ),
-              },
-              {
-                k: t("change.detail.window"),
-                v: (
-                  <span className="mono">
-                    {formatDateTime(change.data.window_start, zone)}
-                    {" – "}
-                    {formatDateTime(change.data.window_end, zone)}
-                  </span>
-                ),
-              },
-              { k: t("change.detail.raised"), v: <span>{formatDateTime(change.data.created_at, zone)}</span> },
-            ]}
-          />
-          <Panel title={t("change.detail.descriptionPanel")}>
-            <p style={{ whiteSpace: "pre-wrap" }}>{change.data.description}</p>
-            {change.data.rollback_plan && (
-              <div className="mt-3">
-                <KV items={[[t("change.detail.rollbackPlan"), change.data.rollback_plan]]} />
-              </div>
-            )}
-          </Panel>
-        </>
-      )}
-
-      {/* THE BLOCKER FIX. Auditor B: "there is no Submit for approval, Approve,
-          Reject, Schedule, Implement, Close or Cancel control, and no state
-          dropdown... Records accumulate in `draft` indefinitely." The
-          transitions offered are exactly the ones state.py will accept from
-          this state and type, so no button here can 400. */}
-      {change.data && (
-        <div className="mb-4">
-          <Panel title={t("change.detail.lifecycle")}>
-            {allowed.length > 0 ? (
-              <>
-                {allowed.some((spec) => spec.action === "approve" || spec.action === "reject") && (
-                  <Field label={t("change.detail.decisionComment")}>
-                    <input
-                      className={inputClass}
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                    />
-                  </Field>
-                )}
-                <div className="flex flex-wrap items-center gap-2">
-                  {allowed.map((spec) => {
+        context={
+          change.data ? (
+            <span className="change-head-context">
+              <span>{t("change.common.risk")}</span>{" "}
+              <StatusPill value={change.data.risk} label={riskLabel(change.data.risk)} kind={riskKind(change.data.risk)} />
+              {clientShown ? " · " : null}
+              <ClientContext clientId={change.data.client_id} />
+            </span>
+          ) : undefined
+        }
+        actions={
+          change.data || canRead ? (
+            <>
+              {/* THE DECISIONS ARE THE HEAD'S (redesign Task 11, 6.2: "acciones
+                  de aprobación según el permiso de hoy"; fix round 1, M3), on
+                  every tab. The transitions offered are exactly the ones
+                  state.py will accept from this state and type, so no button
+                  here can 400 (the BLOCKER this page was filed for: "there is
+                  no Submit for approval, Approve, Reject, Schedule, Implement,
+                  Close or Cancel control"). */}
+              {change.data
+                ? allowed.map((spec) => {
                     // Approve and Reject differ here: the SoD guard bars the
                     // requester from DECIDING, and rejecting your own change is
                     // the same decision. state.py checks `actor_id ==
                     // created_by` for both, so both are refused.
-                    const barred =
-                      isOwnChange && (spec.action === "approve" || spec.action === "reject");
+                    const barred = isOwnChange && (spec.action === "approve" || spec.action === "reject");
                     return (
                       <Button
                         key={spec.action}
-                        /* One primary in the row: the forward step. Reject,
+                        /* One primary in the head: the forward step. Reject,
                            cancel and revise are the secondary shape. */
                         variant={
                           spec.confirm?.destructive ||
@@ -403,34 +344,287 @@ export function ChangeDetail() {
                         {spec.label}
                       </Button>
                     );
-                  })}
-                </div>
-                {decidingOwn && (
-                  <p className="note mt-2">
-                    {t("change.detail.ownChange")}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="note">{noActionsReason(change.data.state)}</p>
-            )}
-            {hidden.length > 0 && (
-              <p className="note mt-2">{hiddenActionsReason(hidden)}</p>
-            )}
-            {/* A refused transition used to have nowhere to land at all, because
-                no control existed to refuse. `describeSubmitError` renders the
-                server's own sentence for the ones it explains -- "approver
-                cannot be the change requester", "emergency change requires
-                retrospective approval before completion" -- and a status-based
-                one for the bodyless 503. */}
-            {lifecycleError != null && (
-              <p role="alert" className="form-error mt-2">
-                {describeSubmitError(lifecycleError)}
-              </p>
-            )}
-          </Panel>
+                  })
+                : null}
+              {canRead ? (
+                /* Secondary, not primary: the page's one commit is the
+                   lifecycle decision beside it, and an export is a read. */
+                <Button variant="outline" onClick={() => void exportEvidence()} disabled={exporting}>
+                  <Icon name="file-download" size={14} />
+                  {exporting ? t("change.detail.exporting") : t("change.detail.exportEvidence")}
+                </Button>
+              ) : null}
+            </>
+          ) : undefined
+        }
+      />
+      {exportError && (
+        <p role="alert" className="form-error mb-2">
+          {describeSubmitError(exportError.error)}
+        </p>
+      )}
+
+      {/* WHAT GOES WITH THE DECISION, UNDER THE HEAD ITS BUTTONS ARE IN, on
+          every tab: the comment a decision carries, why a control will not
+          move or is not offered (general ruling 8), and a refusal, in the
+          server's own sentence where it gives one ("approver cannot be the
+          change requester", "emergency change requires retrospective approval
+          before completion") and a status-based one for the bodyless 503. */}
+      {change.data && (
+        <div className="mb-4">
+          {allowed.some((spec) => spec.action === "approve" || spec.action === "reject") && (
+            <Field label={t("change.detail.decisionComment")}>
+              <input className={inputClass} value={comment} onChange={(e) => setComment(e.target.value)} />
+            </Field>
+          )}
+          {decidingOwn && <p className="note mt-2">{t("change.detail.ownChange")}</p>}
+          {allowed.length === 0 && <p className="note">{noActionsReason(change.data.state)}</p>}
+          {hidden.length > 0 && <p className="note mt-2">{hiddenActionsReason(hidden)}</p>}
+          {lifecycleError != null && (
+            <p role="alert" className="form-error mt-2">
+              {describeSubmitError(lifecycleError)}
+            </p>
+          )}
         </div>
       )}
+
+      <UrlTabs
+        label={t("change.detail.tabs")}
+        items={TABS.map((key) => ({ key, label: t(TAB_LABEL[key]) }))}
+        active={tab}
+        onSelect={setTab}
+      >
+        {tab === "overview" ? (
+          <>
+            {change.data && (
+              <>
+                {/* v3's facts strip: the state, the type, the risk and the window
+                    as caption/value cells, then the prose in its own panel. */}
+                <h2 className="sr-only">{t("change.detail.summary")}</h2>
+                {/* The state and the risk are the head's now; the strip keeps what
+                    the head does not say (the Task 5 ruling: no record says a fact
+                    twice on one screen). */}
+                <Facts
+                  items={[
+                    { k: t("change.detail.type"), v: changeTypeLabel(change.data.type) },
+                    {
+                      k: t("change.detail.window"),
+                      v: (
+                        <span className="mono">
+                          {formatDateTime(change.data.window_start, zone)}
+                          {" – "}
+                          {formatDateTime(change.data.window_end, zone)}
+                        </span>
+                      ),
+                    },
+                    { k: t("change.detail.raised"), v: <span>{formatDateTime(change.data.created_at, zone)}</span> },
+                  ]}
+                />
+                <Panel title={t("change.detail.descriptionPanel")}>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{change.data.description}</p>
+                  {change.data.rollback_plan && (
+                    <div className="mt-3">
+                      <KV items={[[t("change.detail.rollbackPlan"), change.data.rollback_plan]]} />
+                    </div>
+                  )}
+                </Panel>
+              </>
+            )}
+          </>
+        ) : tab === "approvals" ? (
+          <div className="mb-4">
+            <Panel title={t("change.detail.approvalHistory")} bare>
+              {/* THE KIT'S EMPTY, NOT A SENTENCE IN A SPANNED CELL. A column header
+                  row over one line of prose is the shape the empty state exists to
+                  replace, and /changes/approvals — the sibling this table's rows
+                  come from — already uses it. */}
+              <QueryState
+                loading={approvals.isLoading}
+                error={approvals.error}
+                empty={(approvals.data?.length ?? 0) === 0}
+                emptyLabel={t("change.detail.noApprovals")}
+                emptyIcon="circle-check"
+              >
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>{t("change.detail.approver")}</Th>
+                      <Th>{t("change.detail.decision")}</Th>
+                      <Th>{t("change.detail.comment")}</Th>
+                      <Th>{t("change.detail.retrospective")}</Th>
+                      <Th>{t("change.detail.decided")}</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {approvals.data?.map((approval) => (
+                      <tr key={approval.id}>
+                        <Td lead={<Icon name="user" size={18} />}>
+                          <span className="mono">{approval.approver_id}</span>
+                        </Td>
+                        <Td>
+                          <StatusPill value={approval.decision} label={decisionLabel(approval.decision)} kind={kindOf(approval.decision)} />
+                        </Td>
+                        <Td>{approval.comment ?? ""}</Td>
+                        <Td>{approval.is_retrospective ? t("change.detail.yes") : t("change.detail.no")}</Td>
+                        <Td>
+                          <span className="mono" style={{ whiteSpace: "nowrap" }}>
+                            {formatDateTime(approval.decided_at, zone)}
+                          </span>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </QueryState>
+            </Panel>
+          </div>
+
+        ) : (
+          <Panel title={t("change.detail.linkedActions")}>
+            <QueryState
+              loading={links.isLoading}
+              error={links.error}
+              empty={(links.data?.length ?? 0) === 0}
+              emptyLabel={t("change.detail.noLinks")}
+              emptyIcon="link"
+            >
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>{t("change.detail.actionType")}</Th>
+                    <Th>{t("change.detail.actionId")}</Th>
+                    <Th>{t("change.detail.linkedAt")}</Th>
+                    {canManage && <Th>{""}</Th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {links.data?.map((link) => (
+                    <tr key={link.id}>
+                      <Td lead={<Icon name="link" size={18} />}>{linkActionLabel(link.action_type)}</Td>
+                      <Td>
+                        <span className="mono">{link.action_id}</span>
+                      </Td>
+                      <Td>
+                        <span className="mono" style={{ whiteSpace: "nowrap" }}>
+                          {formatDateTime(link.linked_at, zone)}
+                        </span>
+                      </Td>
+                      {canManage && (
+                        <Td>
+                          <Button
+                            variant="outline"
+                            className="small"
+                            disabled={removeLink.isPending}
+                            onClick={() => removeLink.mutate({ id: changeId, linkId: link.id })}
+                          >
+                            {t("change.detail.remove")}
+                          </Button>
+                        </Td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </QueryState>
+
+            {/* SWALLOWED ENTIRELY BEFORE THIS. `removeLink` had no error surface
+                anywhere on the page: unlinking a patch run that the server refused
+                (403, or the 503 a proxy returns) left the row in the table with no
+                word about why, and the operator's own reading of the audit trail
+                for this change was wrong by one link. */}
+            {removeLink.isError && (
+              <p role="alert" className="form-error mt-2">
+                {describeSubmitError(removeLink.error)}
+              </p>
+            )}
+
+            {canManage && (
+              // A real <form>, so Enter in the Action ID field links instead of
+              // doing nothing — the other half of the same finding.
+              <Form onSubmit={submitLink}>
+                <div className="mt-4 flex flex-wrap items-end gap-2">
+                  <Field label={t("change.detail.actionType")}>
+                    <select
+                      className={inputClass}
+                      value={actionType}
+                      onChange={(e) => {
+                        // The chosen action does not survive the switch: a
+                        // deployment id is not a provisioning run id, and carrying
+                        // it across would link an id of the wrong kind to a type
+                        // the server existence-checks against a different table.
+                        setActionId("");
+                        setAttempt(null);
+                        setActionType(e.target.value as LinkActionType);
+                      }}
+                    >
+                      {LINK_ACTION_TYPES.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {linkActionLabel(kind)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {pickable ? (
+                    // THE UUID FIELD, REPLACED. Auditor B (HIGH): "the ID format is
+                    // a 36-character UUID which the user must find in another
+                    // module and transcribe."
+                    <EntityPicker
+                      label={t(pickable.label)}
+                      options={actionType === "deployment" ? deploymentOptions : runOptions}
+                      loading={
+                        actionType === "deployment"
+                          ? deployments.isLoading || packages.isLoading
+                          : runs.isLoading || profiles.isLoading
+                      }
+                      emptyHint={pickable.hint()}
+                      placeholder={t(pickable.search)}
+                      value={actionId}
+                      onChange={setActionId}
+                    />
+                  ) : (
+                    <Field label={t("change.detail.actionIdRequired")}>
+                      {/* NO PICKER FOR THESE TWO YET, and saying so beats a
+                          control that pretends otherwise. `GET /patch/runs` and
+                          `GET /patch/approvals` exist, so a picker is possible and
+                          is the real fix; until it is built the id is pasted.
+                          `required` states for
+                          assistive tech what the asterisk states on screen. It
+                          blocks nothing — <Form> is `noValidate`, because a native
+                          bubble that vanishes on the next click is the silent
+                          no-op wearing a hat. `linkRules` is what the user
+                          reads. */}
+                      <input
+                        className={inputClass}
+                        required
+                        // i18n-exempt: an example UUID, an identifier written the same in every language
+                        placeholder="06a85c19-55e2-7f3c-8000-831c7bdba357"
+                        value={actionId}
+                        onChange={(e) => setActionId(e.target.value)}
+                      />
+                    </Field>
+                  )}
+                  {/* Enabled with the field empty ON PURPOSE — the refusal is what
+                      the user gets to read, and a control that will not move is
+                      not. The failure comes from here too, replacing the
+                      `{String(addLink.error)}` line below it that rendered a raw
+                      object and rendered NOTHING at all for a bodyless 503. */}
+                  <FormActions
+                    label={t("change.detail.link")}
+                    pending={addLink.isPending}
+                    error={addLink.error}
+                    problems={attemptProblems(attempt)}
+                  />
+                </div>
+                {!pickable && (
+                  <p className="note mt-1">
+                    {t(actionType === "patch_run" ? "change.detail.patchRunNote" : "change.detail.patchApprovalNote")}
+                  </p>
+                )}
+              </Form>
+            )}
+          </Panel>
+        )}
+      </UrlTabs>
 
       <ConfirmDialog
         open={confirming != null}
@@ -449,197 +643,6 @@ export function ChangeDetail() {
         }}
         onCancel={() => setConfirming(null)}
       />
-
-      <div className="mb-4">
-        <Panel title={t("change.detail.approvalHistory")} bare>
-          {/* THE KIT'S EMPTY, NOT A SENTENCE IN A SPANNED CELL. A column header
-              row over one line of prose is the shape the empty state exists to
-              replace, and /changes/approvals — the sibling this table's rows
-              come from — already uses it. */}
-          <QueryState
-            loading={approvals.isLoading}
-            error={approvals.error}
-            empty={(approvals.data?.length ?? 0) === 0}
-            emptyLabel={t("change.detail.noApprovals")}
-            emptyIcon="circle-check"
-          >
-            <Table>
-              <thead>
-                <tr>
-                  <Th>{t("change.detail.approver")}</Th>
-                  <Th>{t("change.detail.decision")}</Th>
-                  <Th>{t("change.detail.comment")}</Th>
-                  <Th>{t("change.detail.retrospective")}</Th>
-                  <Th>{t("change.detail.decided")}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {approvals.data?.map((approval) => (
-                  <tr key={approval.id}>
-                    <Td lead={<Icon name="user" size={18} />}>
-                      <span className="mono">{approval.approver_id}</span>
-                    </Td>
-                    <Td>
-                      <StatusPill value={approval.decision} label={decisionLabel(approval.decision)} kind={kindOf(approval.decision)} />
-                    </Td>
-                    <Td>{approval.comment ?? ""}</Td>
-                    <Td>{approval.is_retrospective ? t("change.detail.yes") : t("change.detail.no")}</Td>
-                    <Td>
-                      <span className="mono" style={{ whiteSpace: "nowrap" }}>
-                        {formatDateTime(approval.decided_at, zone)}
-                      </span>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </QueryState>
-        </Panel>
-      </div>
-
-      <Panel title={t("change.detail.linkedActions")}>
-        <QueryState
-          loading={links.isLoading}
-          error={links.error}
-          empty={(links.data?.length ?? 0) === 0}
-          emptyLabel={t("change.detail.noLinks")}
-          emptyIcon="link"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("change.detail.actionType")}</Th>
-                <Th>{t("change.detail.actionId")}</Th>
-                <Th>{t("change.detail.linkedAt")}</Th>
-                {canManage && <Th>{""}</Th>}
-              </tr>
-            </thead>
-            <tbody>
-              {links.data?.map((link) => (
-                <tr key={link.id}>
-                  <Td lead={<Icon name="link" size={18} />}>{linkActionLabel(link.action_type)}</Td>
-                  <Td>
-                    <span className="mono">{link.action_id}</span>
-                  </Td>
-                  <Td>
-                    <span className="mono" style={{ whiteSpace: "nowrap" }}>
-                      {formatDateTime(link.linked_at, zone)}
-                    </span>
-                  </Td>
-                  {canManage && (
-                    <Td>
-                      <Button
-                        variant="outline"
-                        className="small"
-                        disabled={removeLink.isPending}
-                        onClick={() => removeLink.mutate({ id: changeId, linkId: link.id })}
-                      >
-                        {t("change.detail.remove")}
-                      </Button>
-                    </Td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </QueryState>
-
-        {/* SWALLOWED ENTIRELY BEFORE THIS. `removeLink` had no error surface
-            anywhere on the page: unlinking a patch run that the server refused
-            (403, or the 503 a proxy returns) left the row in the table with no
-            word about why, and the operator's own reading of the audit trail
-            for this change was wrong by one link. */}
-        {removeLink.isError && (
-          <p role="alert" className="form-error mt-2">
-            {describeSubmitError(removeLink.error)}
-          </p>
-        )}
-
-        {canManage && (
-          // A real <form>, so Enter in the Action ID field links instead of
-          // doing nothing — the other half of the same finding.
-          <Form onSubmit={submitLink}>
-            <div className="mt-4 flex flex-wrap items-end gap-2">
-              <Field label={t("change.detail.actionType")}>
-                <select
-                  className={inputClass}
-                  value={actionType}
-                  onChange={(e) => {
-                    // The chosen action does not survive the switch: a
-                    // deployment id is not a provisioning run id, and carrying
-                    // it across would link an id of the wrong kind to a type
-                    // the server existence-checks against a different table.
-                    setActionId("");
-                    setAttempt(null);
-                    setActionType(e.target.value as LinkActionType);
-                  }}
-                >
-                  {LINK_ACTION_TYPES.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {linkActionLabel(kind)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {pickable ? (
-                // THE UUID FIELD, REPLACED. Auditor B (HIGH): "the ID format is
-                // a 36-character UUID which the user must find in another
-                // module and transcribe."
-                <EntityPicker
-                  label={t(pickable.label)}
-                  options={actionType === "deployment" ? deploymentOptions : runOptions}
-                  loading={
-                    actionType === "deployment"
-                      ? deployments.isLoading || packages.isLoading
-                      : runs.isLoading || profiles.isLoading
-                  }
-                  emptyHint={pickable.hint()}
-                  placeholder={t(pickable.search)}
-                  value={actionId}
-                  onChange={setActionId}
-                />
-              ) : (
-                <Field label={t("change.detail.actionIdRequired")}>
-                  {/* NO PICKER FOR THESE TWO YET, and saying so beats a
-                      control that pretends otherwise. `GET /patch/runs` and
-                      `GET /patch/approvals` exist, so a picker is possible and
-                      is the real fix; until it is built the id is pasted.
-                      `required` states for
-                      assistive tech what the asterisk states on screen. It
-                      blocks nothing — <Form> is `noValidate`, because a native
-                      bubble that vanishes on the next click is the silent
-                      no-op wearing a hat. `linkRules` is what the user
-                      reads. */}
-                  <input
-                    className={inputClass}
-                    required
-                    // i18n-exempt: an example UUID, an identifier written the same in every language
-                    placeholder="06a85c19-55e2-7f3c-8000-831c7bdba357"
-                    value={actionId}
-                    onChange={(e) => setActionId(e.target.value)}
-                  />
-                </Field>
-              )}
-              {/* Enabled with the field empty ON PURPOSE — the refusal is what
-                  the user gets to read, and a control that will not move is
-                  not. The failure comes from here too, replacing the
-                  `{String(addLink.error)}` line below it that rendered a raw
-                  object and rendered NOTHING at all for a bodyless 503. */}
-              <FormActions
-                label={t("change.detail.link")}
-                pending={addLink.isPending}
-                error={addLink.error}
-                problems={attemptProblems(attempt)}
-              />
-            </div>
-            {!pickable && (
-              <p className="note mt-1">
-                {t(actionType === "patch_run" ? "change.detail.patchRunNote" : "change.detail.patchApprovalNote")}
-              </p>
-            )}
-          </Form>
-        )}
-      </Panel>
     </div>
   );
 }

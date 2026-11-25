@@ -46,7 +46,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { ApiError } from "../../lib/api";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -69,7 +69,8 @@ import type { ParamControl } from "./paramsForm";
 import { fieldLabel, reportName, reportProse, sourceLine, vocabularyCell } from "./reportText";
 import { ticketPriorityLabel } from "../service-desk/serviceDeskState";
 import type { ParamsSchema, ReportCell, ReportParams } from "./types";
-import { Btn, PageHead, Panel, StatsGrid, TableWrap } from "../../shell/components";
+import { Btn, DetailHead, FormSection, Panel, StatsGrid, TableWrap } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON, Tile } from "../../shell/viz";
 
@@ -410,6 +411,9 @@ export function ReportViewPage() {
     setApplied(toQuery(schema, first, zone));
   }
 
+  // THE TAB NAMES THE REPORT (redesign Task 11): "<report> · Reports · Novieri RMM".
+  useRecordTitle(entry ? reportName(entry.key) : undefined);
+
   const page = report.data;
   const columns = page != null && page.rows[0] != null ? Object.keys(page.rows[0]) : [];
   const totalKeys = page != null ? Object.keys(page.totals) : [];
@@ -434,40 +438,37 @@ export function ReportViewPage() {
           "the actual report names exist only in the URLs". The name is derived
           from that same URL key, so the address, the catalogue card and this
           heading cannot disagree. */}
-      <PageHead
+      {/* THE HEAD (redesign Task 11, "ReportView"; Receta O): the way back to
+          the catalogue is the head's back link, «Reports», where the record
+          pages keep theirs, instead of a second button beside Export. */}
+      <DetailHead
+        back={{ to: "/reports", label: t("reporting.view.back") }}
         title={reportName(entry?.key ?? reportKey)}
-        description={entry ? reportProse(entry.summary) : undefined}
         actions={
-          <>
-            {entry != null ? (
-              /* Export sends the APPLIED parameters (so the file and the screen
-                 agree), and before a run there are none: a "you may not do this
-                 yet" with the reason beside the bar below, not a dead button. */
-              <Btn
-                label={t("reporting.view.download")}
-                icon="file-download"
-                disabled={applied == null}
-                onClick={() => {
-                  if (applied == null) return;
-                  exporter.mutate(applied, {
-                    onSuccess: (blob) => downloadBlob(blob, `${reportKey}.csv`),
-                  });
-                }}
-              />
-            ) : null}
-            {/* THE WAY BACK LIVES IN THE HEAD'S ACTION SLOT. It was a bare
-                `<Link>` with an inline flex style above the head — the eyebrow
-                slot v3 forbids, a second navigation line under a crumb that
-                already returns to the section. Every sibling detail page in
-                this wave (the DR test report, the change record) puts the
-                identical link here. */}
-            <Link className="btn" to="/reports">
-              <Icon name="chart-bar" size={14} />
-              {t("reporting.view.allReports")}
-            </Link>
-          </>
+          entry != null ? (
+            /* Export sends the APPLIED parameters (so the file and the screen
+               agree), and before a run there are none: a "you may not do this
+               yet" with the reason beside the bar below, not a dead button. */
+            <Btn
+              label={t("reporting.view.download")}
+              icon="file-download"
+              disabled={applied == null}
+              onClick={() => {
+                if (applied == null) return;
+                exporter.reset();
+                exporter.mutate(applied, {
+                  onSuccess: (blob) => downloadBlob(blob, `${reportKey}.csv`),
+                });
+              }}
+            />
+          ) : undefined
         }
       />
+      {/* The question the report answers, then how it answers it: the head's
+          sentence and its detail (`DetailHead` has no sentence of its own). */}
+      {entry != null ? (
+        <p style={{ maxWidth: "70ch", marginBottom: 6 }}>{reportProse(entry.summary)}</p>
+      ) : null}
       {entry != null && (
         /* THE GAP IS AN INLINE STYLE BECAUSE `mb-4` IS INERT HERE.
            `shell/base.css` resets `p { margin: 0 }` unlayered, and Tailwind's
@@ -504,7 +505,7 @@ export function ReportViewPage() {
       )}
 
       {entry != null && (
-        <Panel title={t("reporting.view.parameters")}>
+        <FormSection title={t("reporting.view.parameters")} icon="adjustments-horizontal">
           <Form className="flex flex-wrap items-end gap-3" onSubmit={run}>
             {/* ONE CONTROL PER PUBLISHED PARAMETER. Nothing is listed here. */}
             {visibleControls.map((control) => (
@@ -545,7 +546,7 @@ export function ReportViewPage() {
               <span className="note">{t("reporting.view.runFirst")}</span>
             )}
           </Form>
-        </Panel>
+        </FormSection>
       )}
 
       {/* WHY THE PAGE IS EMPTY, which is not the same message as what is wrong

@@ -11,8 +11,9 @@
  */
 export const reporting = {
   catalogue: {
-    title: "Reporting & evidence",
-    description: "Reports on your devices, service desk and spend, each exportable as CSV.",
+    // The rail's label (coordinator ruling 1).
+    title: "Reports",
+    description: "Device, service desk and spend reports, each exportable as CSV.",
     tiles: {
       templates: "Report templates",
       templatesZero: "this deployment publishes none",
@@ -31,6 +32,10 @@ export const reporting = {
       other:
         "Showing only the reports you are missing a permission for. {hidden} of {count} are hidden by this filter. <link>Show every report</link>.",
     },
+    // The search and the family chips (redesign Task 11): a family is a module the report reads.
+    search: "Search reports",
+    familyLabel: "Family",
+    allFamilies: "All",
     heading: "Catalogue",
     emptyRunnable: "You can run none of the reports this deployment publishes.",
     emptyBlocked: "You are missing no permissions. Every report here is runnable by you.",
@@ -85,7 +90,8 @@ export const reporting = {
   },
   view: {
     download: "Download CSV",
-    allReports: "All reports",
+    // The head's way back to the catalogue, named as the rail names it (redesign Task 11).
+    back: "Reports",
     loadingParams: "Loading parameters…",
     catalogueFailed:
       "The report catalogue could not be loaded, so this page does not know what parameters this report takes. {reason}",

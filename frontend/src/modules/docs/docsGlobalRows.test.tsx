@@ -116,13 +116,16 @@ function renderPage() {
   );
 }
 
+// THE HEAD'S "New article" (redesign Task 11, 6.1): an empty library offers
+// the same action in its empty state (Receta L, 3), so the first of the two is
+// the head's.
 describe("'For every client', with a client chosen in the top bar", () => {
   it("files the article for every client with no X-Client-Id", async () => {
     const fetchMock = realApiOverFetch();
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
     await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -141,7 +144,7 @@ describe("'For every client', with a client chosen in the top bar", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(headersOf(fetchMock, "POST", "/docs/articles")).toBeTruthy());
@@ -181,6 +184,8 @@ describe("an existing article says whether it is every client's", () => {
     const api = renderArticle({ ...ARTICLE, client_id: clientId });
     await user.click(await screen.findByRole("button", { name: /VPN/ }));
     await user.click(await screen.findByRole("button", { name: "Edit" }));
+    // The save bar is there once something changed (Receta FO, redesign Task 11, 6.1).
+    await user.type(screen.getByLabelText("Title"), " (v2)");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.updateArticle).toHaveBeenCalledTimes(1));
     expect(api.updateArticle.mock.calls[0]?.[2]).toEqual({ global });

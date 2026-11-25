@@ -166,7 +166,8 @@ function renderPage(api: Record<string, unknown> = {}, entry = "/docs", permissi
 describe("the documentation library in Spanish", () => {
   it("renders the tiles, their feet, the article list and the sections", async () => {
     const { container } = renderPage();
-    expect(await screen.findByRole("heading", { name: "Documentación de TI" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator ruling 1).
+    expect(await screen.findByRole("heading", { name: "Documentación" })).toBeInTheDocument();
     expect(await screen.findByText("Procedimiento de copias")).toBeInTheDocument();
     const labels = [...container.querySelectorAll(".stat-card .stat-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Artículos", "Registros", "Referencias vinculadas", "Documentos"]);
@@ -174,7 +175,8 @@ describe("the documentation library in Spanish", () => {
     expect(screen.getByText("2 servicios, 1 proveedor")).toBeInTheDocument();
     expect(screen.getByText("De 1 de 2 artículos")).toBeInTheDocument();
     expect(screen.getByText("1 documento sin archivo subido todavía")).toBeInTheDocument();
-    expect(screen.getByText("2 artículos")).toBeInTheDocument();
+    // The kit's count (Receta L).
+    expect(screen.getByText("Mostrando 2 de 2")).toBeInTheDocument();
     expect(screen.getByText(/vinculado a 2 objetos/)).toBeInTheDocument();
     expect(screen.getByText(/^Busca en títulos, descripciones/)).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Buscar en la documentación" })).toHaveAttribute("placeholder", "Buscar artículos, hosts, IP");
@@ -197,9 +199,10 @@ describe("the documentation library in Spanish", () => {
     const user = userEvent.setup();
     const { container } = renderPage();
     await screen.findByText("Procedimiento de copias");
-    await user.click(screen.getByRole("button", { name: "Manual" }));
+    // The category chips carry their count now (Receta L, 4).
+    await user.click(screen.getByRole("button", { name: /^Manual/ }));
     expect(screen.queryByText("Procedimiento de copias")).toBeNull();
-    expect(screen.getByText("1 artículo")).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 1 de 2")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 

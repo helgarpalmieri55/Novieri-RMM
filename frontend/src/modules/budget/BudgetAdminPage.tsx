@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ConfirmDialog } from "../../components/confirm";
-import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
+import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -25,7 +25,20 @@ import {
   useUpdateFxRateMutation,
 } from "./api";
 import { BudgetPageNav, BudgetPickClient, useBudgetNeedsClient } from "./budgetState";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { useReportDirty } from "./dialogParams";
+import type { CategoryOut, CostCenterOut, FxRateOut } from "./types";
+import {
+  Btn,
+  FormSection,
+  PageHead,
+  QueryState,
+  SaveBar,
+  StatusPill,
+  useDraft,
+  useNewParam,
+  useUnsavedGuard,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -41,17 +54,6 @@ function ActivePill({ active, feminine = false }: { active: boolean; feminine?: 
     ? t(active ? "budget.admin.activeF" : "budget.admin.inactiveF")
     : t(active ? "budget.admin.activeM" : "budget.admin.inactiveM");
   return <StatusPill value={active ? "active" : "inactive"} label={label} kind={active ? "ok" : "mut"} />;
-}
-
-/** The announced failure line under a table whose row edit was refused. */
-function RefusedLine({ error }: { error: unknown }) {
-  useT();
-  return (
-    <p role="alert" className="notice red" style={{ margin: 12 }}>
-      <Icon name="circle-x" size={16} />
-      <span>{describeSubmitError(error)}</span>
-    </p>
-  );
 }
 
 /**
@@ -102,8 +104,20 @@ function decimalRate(value: string): string | null {
 // reach any budget page); every write below is `budget.manage`-gated,
 // presentationally only -- api.py's require_permission is the actual
 // authority on every one of these routes.
+//
+// ON THE FORM KIT (redesign Task 11, 6.6; Receta FO). "General" (the base
+// currency and the fiscal year's start) is a `FormSection` with the page's one
+// `SaveBar`; categories, cost centres and exchange rates are each a
+// `FormSection` with its table, its add dialog from `?new=` (`category`,
+// `costCenter`, `rate`; decision D8) and a row's edit in a dialog where it was
+// edited in the row. Every call and every body is the one it was.
+//
+// ONE GUARD FOR THE PAGE: General and whichever dialog is open each say
+// whether they hold changes. Closing an add dialog is leaving it (`?new=`).
 export function BudgetAdminPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.admin.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -117,12 +131,17 @@ export function BudgetAdminPage() {
   useScrollToHash(me.isFetched);
   const needsClient = useBudgetNeedsClient();
 
+  const general = useGeneralForm();
+  const [newDirty, setNewDirty] = useState(false);
+  const [editDirty, setEditDirty] = useState(false);
+  const { guard, release } = useUnsavedGuard(general.dirty || newDirty || editDirty, {
+    search: newDirty ? ["new"] : false,
+  });
+  const dialogs: DialogWiring = { onNewDirty: setNewDirty, onEditDirty: setEditDirty, release };
+
   return (
     <div>
-      <PageHead
-        title={t("budget.admin.title")}
-        description={t("budget.admin.description")}
-      />
+      <PageHead title={t("budget.admin.title")} description={t("budget.admin.description")} />
 
       <BudgetPageNav canRead={canRead} />
 
@@ -132,17 +151,46 @@ export function BudgetAdminPage() {
         <BudgetPickClient />
       ) : (
         <>
-          <SettingsPanel canManage={canManage} />
-          <CategoriesPanel canManage={canManage} />
-          <CostCentersPanel canManage={canManage} />
+          <GeneralSection canManage={canManage} form={general} />
+          <CategoriesSection canManage={canManage} dialogs={dialogs} />
+          <CostCentersSection canManage={canManage} dialogs={dialogs} />
         </>
       )}
-      {/* An anchor on a wrapper: `Panel` takes no id. */}
+      {/* An anchor on a wrapper: `FormSection` takes no id. */}
       <div id="fx-rates">
-        <FxRatesPanel canManage={canManageRates} />
+        <FxRatesSection canManage={canManageRates} dialogs={dialogs} />
       </div>
+      {/* The page's one save bar, for General. The server's refusal of a
+          base-currency change is a full sentence worth reading, passed
+          through verbatim. */}
+      <SaveBar
+        dirty={general.dirty}
+        saving={general.update.isPending}
+        error={general.update.error}
+        saved={general.update.isSuccess && !general.dirty}
+        onDiscard={() => {
+          general.update.reset();
+          general.discard();
+        }}
+        onSave={general.submit}
+      />
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
+}
+
+/** What a section's dialogs need from the page's one guard. */
+interface DialogWiring {
+  onNewDirty: (dirty: boolean) => void;
+  onEditDirty: (dirty: boolean) => void;
+  /** Lets the navigation a successful save makes through (`useUnsavedGuard`). */
+  release: () => void;
+}
+
+/** A section's add button, at the head of its body: the section has no action slot. */
+function SectionAction({ children }: { children: ReactNode }) {
+  return <div className="flex justify-end" style={{ marginBottom: 12 }}>{children}</div>;
 }
 
 /**
@@ -175,38 +223,52 @@ function fiscalYearStart(month: number): string {
     : translate("budget.admin.monthFallback", { number: month });
 }
 
-function SettingsPanel({ canManage }: { canManage: boolean }) {
-  const t = useT();
+/**
+ * The base currency and the fiscal year's start, as before: each field blank
+ * means "unchanged", so a save sends only what was chosen. The draft is that
+ * choice; the page's save bar sends it, and a change of base currency is read
+ * back in its confirmation first.
+ */
+interface GeneralDraft {
+  baseCurrency: string;
+  startMonth: string;
+}
+const NO_CHANGE: GeneralDraft = { baseCurrency: "", startMonth: "" };
+
+/** General's draft and its save, held by the page so its one save bar can sit at the page's foot. */
+function useGeneralForm() {
   const settings = useBudgetSettings();
   const update = useUpdateBudgetSettingsMutation();
-  const [baseCurrency, setBaseCurrency] = useState("");
-  const [startMonth, setStartMonth] = useState("");
   const [confirming, setConfirming] = useState(false);
-
+  const { draft, setDraft, dirty, discard } = useDraft<GeneralDraft>(settings.data ? NO_CHANGE : undefined);
+  const baseCurrency = draft?.baseCurrency ?? "";
+  const startMonth = draft?.startMonth ?? "";
   const current = settings.data;
 
-  // CHANGING THE BASE CURRENCY IS THE CONSEQUENTIAL ONE, and until now Save
-  // treated it exactly like nudging the fiscal-year start month. It never
+  // CHANGING THE BASE CURRENCY IS THE CONSEQUENTIAL ONE. It never
   // retro-converts what is stored (`rates.py`: "every existing
   // `expense.fx_rate`/`amount_base` is left exactly as it was written"), so
   // afterwards the module's totals are a mix of two bases -- which is why the
   // server refuses the change outright once any non-void expense carries a
-  // converted amount unless the caller passes `acknowledge_mixed_basis`.
-  //
-  // That flag had NO control in this UI, so the refusal was a dead end: an
-  // operator reading "pass acknowledge_mixed_basis=True to proceed" from a
-  // 400 body has been told to call the API by hand. The confirmation below is
-  // where that acknowledgement belongs -- read the consequence, then send it.
+  // converted amount unless the caller passes `acknowledge_mixed_basis`. The
+  // confirmation is where that acknowledgement belongs: read the consequence,
+  // then send it.
   const currencyChanging =
     baseCurrency.trim() !== "" &&
     baseCurrency.trim().toUpperCase() !== (current?.base_currency ?? "").toUpperCase();
 
   function save(acknowledgeMixedBasis: boolean) {
-    update.mutate({
-      base_currency: baseCurrency || undefined,
-      fiscal_year_start_month: startMonth ? Number(startMonth) : undefined,
-      ...(acknowledgeMixedBasis ? { acknowledge_mixed_basis: true } : {}),
-    });
+    // A new attempt starts without the last one's refusal (general ruling 7).
+    update.reset();
+    update.mutate(
+      {
+        base_currency: baseCurrency || undefined,
+        fiscal_year_start_month: startMonth ? Number(startMonth) : undefined,
+        ...(acknowledgeMixedBasis ? { acknowledge_mixed_basis: true } : {}),
+      },
+      // Saved: the fields are blank again ("unchanged"), over the new values.
+      { onSuccess: () => discard() },
+    );
   }
 
   function submit() {
@@ -219,8 +281,18 @@ function SettingsPanel({ canManage }: { canManage: boolean }) {
     save(false);
   }
 
+  return { settings, update, confirming, setConfirming, draft, setDraft, dirty, discard, save, submit };
+}
+
+function GeneralSection({ canManage, form }: { canManage: boolean; form: ReturnType<typeof useGeneralForm> }) {
+  const t = useT();
+  const { settings, confirming, setConfirming, draft, setDraft, save } = form;
+  const baseCurrency = draft?.baseCurrency ?? "";
+  const startMonth = draft?.startMonth ?? "";
+  const current = settings.data;
+
   return (
-    <Panel title={t("budget.admin.settings")}>
+    <FormSection title={t("budget.admin.general")} icon="settings">
       <QueryState
         loading={settings.isLoading}
         error={settings.error}
@@ -237,72 +309,44 @@ function SettingsPanel({ canManage }: { canManage: boolean }) {
             />
           </div>
         )}
-        {canManage && (
+        {canManage && draft && (
           <>
-            <Field label={t("budget.admin.newBaseCurrency")}>
-              <input
-                className={inputClass}
-                value={baseCurrency}
-                maxLength={3}
-                placeholder={current?.base_currency}
-                onChange={(e) => setBaseCurrency(e.target.value.toUpperCase())}
-              />
-            </Field>
-            {/* THE MONTH IS A MONTH, NOT ITS WIRE VALUE. This was a bare
-                number spinner holding `1`, two lines under a key/value row
-                that already reads "Fiscal year starts: 1 January" -- the one
-                control an operator actually operates was the only place the
-                month stayed a number to translate, and the spinner offered
-                `13` as readily as `12`. The design draws this setting as a
-                select of month names (`itms-prototype-v3.html`,
-                `P['budget/admin']`: `field('Fiscal year starts',
-                select('1 January'))`), and `fiscalYearStart` above is the
-                mapping this page already owns.
-
-                BLANK STILL MEANS UNCHANGED, which is what the panel's two
-                fields have always meant and what Save's disabled rule and the
-                `undefined` in the request body are built on. The first option
-                says so in words and names the month it would keep, the way the
-                currency field's placeholder names the currency it would
-                keep. */}
-            <Field label={t("budget.admin.newStartMonth")}>
-              <select
-                className="select-field"
-                value={startMonth}
-                onChange={(e) => setStartMonth(e.target.value)}
-              >
-                <option value="">
-                  {current
-                    ? t("budget.admin.unchangedWith", { month: fiscalYearStart(current.fiscal_year_start_month) })
-                    : t("budget.admin.unchanged")}
-                </option>
-                {MONTH_KEYS.map((key, index) => (
-                  <option key={key} value={String(index + 1)}>
-                    {fiscalYearStart(index + 1)}
+            <div className="form-grid">
+              <Field label={t("budget.admin.newBaseCurrency")}>
+                <input
+                  className={inputClass}
+                  value={baseCurrency}
+                  maxLength={3}
+                  placeholder={current?.base_currency}
+                  onChange={(e) => setDraft({ ...draft, baseCurrency: e.target.value.toUpperCase() })}
+                />
+              </Field>
+              {/* THE MONTH IS A MONTH, NOT ITS WIRE VALUE: a select of month
+                  names (the design's `field('Fiscal year starts',
+                  select('1 January'))`). BLANK STILL MEANS UNCHANGED, and the
+                  first option says so and names the month it would keep. */}
+              <Field label={t("budget.admin.newStartMonth")}>
+                <select
+                  className="select-field"
+                  value={startMonth}
+                  onChange={(e) => setDraft({ ...draft, startMonth: e.target.value })}
+                >
+                  <option value="">
+                    {current
+                      ? t("budget.admin.unchangedWith", { month: fiscalYearStart(current.fiscal_year_start_month) })
+                      : t("budget.admin.unchanged")}
                   </option>
-                ))}
-              </select>
-            </Field>
-            <Button onClick={submit} disabled={update.isPending || (!baseCurrency && !startMonth)}>
-              {update.isPending ? t("budget.common.saving") : t("budget.admin.saveSettings")}
-            </Button>
-            {/* `String(update.error)` printed the raw payload -- and for this
-                setting the server's refusal is a full sentence worth reading
-                ("base currency cannot change: at least one non-void expense
-                already carries a converted amount_base"), which
-                `describeSubmitError` passes through verbatim. */}
-            {update.isError && (
-              <p role="alert" className="notice red" style={{ marginTop: 12 }}>
-                <Icon name="circle-x" size={16} />
-                <span>{describeSubmitError(update.error)}</span>
-              </p>
-            )}
-
+                  {MONTH_KEYS.map((key, index) => (
+                    <option key={key} value={String(index + 1)}>
+                      {fiscalYearStart(index + 1)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
             {/* The subject is the actual transition, old to new, because the
-                field above holds only the new value and "USD" alone reads the
-                same whether it is the change or the thing being changed from.
-                Confirming SENDS `acknowledge_mixed_basis` -- the flag exists
-                precisely to make somebody read this sentence first. */}
+                field above holds only the new value. Confirming SENDS
+                `acknowledge_mixed_basis`. */}
             <ConfirmDialog
               open={confirming}
               title={t("budget.admin.changeTitle")}
@@ -322,66 +366,35 @@ function SettingsPanel({ canManage }: { canManage: boolean }) {
           </>
         )}
       </QueryState>
-    </Panel>
+    </FormSection>
   );
 }
 
-function CategoriesPanel({ canManage }: { canManage: boolean }) {
+/** The rule an edited name answers to: present. */
+const nameRules = (): readonly FieldRule[] => [{ name: "name", label: translate("budget.common.name") }];
+
+function CategoriesSection({ canManage, dialogs }: { canManage: boolean; dialogs: DialogWiring }) {
   const t = useT();
   const categories = useBudgetCategories(true);
-  const create = useCreateBudgetCategoryMutation();
-  const update = useUpdateBudgetCategoryMutation();
-  const [creating, setCreating] = useState(false);
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
-  // Filled ON SUBMIT, never while typing; held as data and worded at render.
-  const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  // Only one row is ever in edit mode at a time, so the edit inputs below
-  // can use a fixed accessible name instead of one keyed per row.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editActive, setEditActive] = useState(true);
-
+  // New → Category (decision D8): `?new=category` opens the add dialog.
+  const created = useNewParam("category");
+  const [editing, setEditing] = useState<CategoryOut | null>(null);
   const items = categories.data ?? [];
 
-  function submit() {
-    const next: Attempt = { rules: categoryRules, values: { key, name } };
-    setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
-
-    create.mutate(
-      { key: key.trim(), name: name.trim() },
-      { onSuccess: () => { setKey(""); setName(""); setAttempt(null); setCreating(false); } },
-    );
-  }
-
-  function startEdit(c: { id: string; name: string; active: boolean }) {
-    setEditingId(c.id);
-    setEditName(c.name);
-    setEditActive(c.active);
-  }
-
-  function saveEdit(id: string) {
-    update.mutate(
-      { id, body: { name: editName, active: editActive } },
-      { onSuccess: () => setEditingId(null) },
-    );
-  }
-
   return (
-    <Panel
-      title={t("budget.admin.categories")}
-      bare
-      actions={canManage ? <Button variant="outline" onClick={() => setCreating(true)}>{t("budget.admin.newCategory")}</Button> : undefined}
-    >
+    <FormSection title={t("budget.admin.categories")} icon="tag">
+      {canManage ? (
+        <SectionAction>
+          <Btn label={t("budget.admin.newCategory")} icon="plus" onClick={created.start} />
+        </SectionAction>
+      ) : null}
       <QueryState
         loading={categories.isLoading}
         error={categories.error}
         empty={items.length === 0}
         emptyLabel={t("budget.admin.categoriesEmpty")}
       >
-        <Table>
+        <Table label={t("budget.admin.categories")}>
           <thead>
             <tr>
               <Th>{t("budget.admin.colName")}</Th>
@@ -394,51 +407,19 @@ function CategoriesPanel({ canManage }: { canManage: boolean }) {
             {items.map((c) => (
               <tr key={c.id}>
                 <Td lead={<Icon name="tag" size={18} />}>
-                  {editingId === c.id ? (
-                    <input
-                      aria-label={t("budget.admin.categoryName")}
-                      className={inputClass}
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                    />
-                  ) : (
-                    <div className="cell-title">{c.name}</div>
-                  )}
+                  <div className="cell-title">{c.name}</div>
                 </Td>
                 <Td>
                   <span className="mono">{c.key}</span>
                 </Td>
                 <Td>
-                  {editingId === c.id ? (
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        aria-label={t("budget.admin.categoryActive")}
-                        checked={editActive}
-                        onChange={(e) => setEditActive(e.target.checked)}
-                      />
-                      {t("budget.admin.activeF")}
-                    </label>
-                  ) : (
-                    <ActivePill active={c.active} feminine />
-                  )}
+                  <ActivePill active={c.active} feminine />
                 </Td>
                 {canManage && (
                   <Td>
-                    {editingId === c.id ? (
-                      <div className="flex gap-2">
-                        <Button onClick={() => saveEdit(c.id)} disabled={update.isPending || !editName}>
-                          {update.isPending ? t("budget.common.saving") : t("budget.common.save")}
-                        </Button>
-                        <Button variant="outline" onClick={() => setEditingId(null)}>
-                          {t("budget.common.cancel")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button variant="outline" onClick={() => startEdit(c)}>
-                        {t("budget.common.edit")}
-                      </Button>
-                    )}
+                    <Button variant="outline" onClick={() => setEditing(c)}>
+                      {t("budget.common.edit")}
+                    </Button>
                   </Td>
                 )}
               </tr>
@@ -446,93 +427,175 @@ function CategoriesPanel({ canManage }: { canManage: boolean }) {
           </tbody>
         </Table>
       </QueryState>
-      {/* `String(update.error)` rendered "ApiError: " and nothing after it for
-          a bodyless 503, in no live region -- so a refused rename looked like
-          a successful one until the next reload. */}
-      {update.isError && <RefusedLine error={update.error} />}
 
-      <Dialog open={creating} onClose={() => setCreating(false)} title={t("budget.admin.newCategory")}>
-        <Form onSubmit={submit}>
-          <div className="form-grid">
-            <Field label={t("budget.common.key")}>
-              <input className={inputClass} required value={key} onChange={(e) => setKey(e.target.value)} />
-            </Field>
-            <Field label={t("budget.common.name")}>
-              <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2">
-            {/* `type="button"`: ui.tsx's Button sets no type, and a typeless
-                button inside a <form> IS a submit button -- Cancel would save. */}
-            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
-              {t("budget.common.cancel")}
-            </Button>
-            <FormActions
-              label={t("budget.common.save")}
-              pending={create.isPending}
-              error={create.error}
-              problems={attemptProblems(attempt)}
-            />
-          </div>
-        </Form>
-      </Dialog>
-    </Panel>
+      {/* KEYED on being open, so it starts empty however it opens. */}
+      <NewCategoryDialog
+        key={created.open && canManage ? "open" : "closed"}
+        open={created.open && canManage}
+        onClose={created.close}
+        onDirty={dialogs.onNewDirty}
+        onSaved={() => {
+          dialogs.release();
+          created.close();
+        }}
+      />
+      {editing ? (
+        <EditCategoryDialog
+          key={editing.id}
+          category={editing}
+          onDirty={dialogs.onEditDirty}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+    </FormSection>
   );
 }
 
-function CostCentersPanel({ canManage }: { canManage: boolean }) {
+function NewCategoryDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onSaved: () => void;
+}) {
   const t = useT();
-  const costCenters = useCostCenters(true);
-  const create = useCreateCostCenterMutation();
-  const update = useUpdateCostCenterMutation();
-  const [creating, setCreating] = useState(false);
-  const [code, setCode] = useState("");
+  const create = useCreateBudgetCategoryMutation();
+  const [key, setKey] = useState("");
   const [name, setName] = useState("");
+  // Filled ON SUBMIT, never while typing; held as data and worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editActive, setEditActive] = useState(true);
-
-  const items = costCenters.data ?? [];
+  useReportDirty(open && (key !== "" || name !== ""), onDirty);
 
   function submit() {
-    const next: Attempt = { rules: costCenterRules, values: { code, name } };
+    const next: Attempt = { rules: categoryRules, values: { key, name } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
-
-    create.mutate(
-      { code: code.trim(), name: name.trim() },
-      { onSuccess: () => { setCode(""); setName(""); setAttempt(null); setCreating(false); } },
-    );
-  }
-
-  function startEdit(cc: { id: string; name: string; active: boolean }) {
-    setEditingId(cc.id);
-    setEditName(cc.name);
-    setEditActive(cc.active);
-  }
-
-  function saveEdit(id: string) {
-    update.mutate(
-      { id, body: { name: editName, active: editActive } },
-      { onSuccess: () => setEditingId(null) },
-    );
+    create.mutate({ key: key.trim(), name: name.trim() }, { onSuccess: onSaved });
   }
 
   return (
-    <Panel
-      title={t("budget.admin.costCenters")}
-      bare
-      actions={canManage ? <Button variant="outline" onClick={() => setCreating(true)}>{t("budget.admin.newCostCenter")}</Button> : undefined}
-    >
+    <Dialog open={open} onClose={onClose} title={t("budget.admin.newCategory")}>
+      <Form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label={t("budget.common.key")}>
+            <input className={inputClass} required value={key} onChange={(e) => setKey(e.target.value)} />
+          </Field>
+          <Field label={t("budget.common.name")}>
+            <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2">
+          {/* `type="button"`: ui.tsx's Button sets no type, and a typeless
+              button inside a <form> IS a submit button -- Cancel would save. */}
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={create.isPending}
+            error={create.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
+  );
+}
+
+/**
+ * A category's name and whether it is active, in a dialog where the row used
+ * to turn into inputs (redesign Task 11, 6.6). The same `PATCH` body. Only
+ * one row is edited at a time, so the inputs keep their fixed names.
+ */
+function EditCategoryDialog({
+  category,
+  onDirty,
+  onClose,
+}: {
+  category: CategoryOut;
+  onDirty: (dirty: boolean) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const update = useUpdateBudgetCategoryMutation();
+  const [name, setName] = useState(category.name);
+  const [active, setActive] = useState(category.active);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const dirty = name !== category.name || active !== category.active;
+  useReportDirty(dirty, onDirty);
+
+  function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    // A name cleared to nothing used to disable Save in silence; it is named now.
+    const next: Attempt = { rules: nameRules, values: { name } };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    update.mutate({ id: category.id, body: { name, active } }, { onSuccess: onClose });
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={t("budget.admin.editCategory")}>
+      <Form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label={t("budget.admin.categoryName")}>
+            <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              aria-label={t("budget.admin.categoryActive")}
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+            />
+            {t("budget.admin.activeF")}
+          </label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={update.isPending}
+            error={update.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
+  );
+}
+
+function CostCentersSection({ canManage, dialogs }: { canManage: boolean; dialogs: DialogWiring }) {
+  const t = useT();
+  const costCenters = useCostCenters(true);
+  // New → Cost centre (decision D8): `?new=costCenter` opens the add dialog.
+  const created = useNewParam("costCenter");
+  const [editing, setEditing] = useState<CostCenterOut | null>(null);
+  const items = costCenters.data ?? [];
+
+  return (
+    <FormSection title={t("budget.admin.costCenters")} icon="building-warehouse">
+      {canManage ? (
+        <SectionAction>
+          <Btn label={t("budget.admin.newCostCenter")} icon="plus" onClick={created.start} />
+        </SectionAction>
+      ) : null}
       <QueryState
         loading={costCenters.isLoading}
         error={costCenters.error}
         empty={items.length === 0}
         emptyLabel={t("budget.admin.costCentersEmpty")}
       >
-        <Table>
+        <Table label={t("budget.admin.costCenters")}>
           <thead>
             <tr>
               <Th>{t("budget.admin.colName")}</Th>
@@ -545,51 +608,19 @@ function CostCentersPanel({ canManage }: { canManage: boolean }) {
             {items.map((cc) => (
               <tr key={cc.id}>
                 <Td lead={<Icon name="building-warehouse" size={18} />}>
-                  {editingId === cc.id ? (
-                    <input
-                      aria-label={t("budget.admin.costCenterName")}
-                      className={inputClass}
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                    />
-                  ) : (
-                    <div className="cell-title">{cc.name}</div>
-                  )}
+                  <div className="cell-title">{cc.name}</div>
                 </Td>
                 <Td>
                   <span className="mono">{cc.code}</span>
                 </Td>
                 <Td>
-                  {editingId === cc.id ? (
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        aria-label={t("budget.admin.costCenterActive")}
-                        checked={editActive}
-                        onChange={(e) => setEditActive(e.target.checked)}
-                      />
-                      {t("budget.admin.activeM")}
-                    </label>
-                  ) : (
-                    <ActivePill active={cc.active} />
-                  )}
+                  <ActivePill active={cc.active} />
                 </Td>
                 {canManage && (
                   <Td>
-                    {editingId === cc.id ? (
-                      <div className="flex gap-2">
-                        <Button onClick={() => saveEdit(cc.id)} disabled={update.isPending || !editName}>
-                          {update.isPending ? t("budget.common.saving") : t("budget.common.save")}
-                        </Button>
-                        <Button variant="outline" onClick={() => setEditingId(null)}>
-                          {t("budget.common.cancel")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button variant="outline" onClick={() => startEdit(cc)}>
-                        {t("budget.common.edit")}
-                      </Button>
-                    )}
+                    <Button variant="outline" onClick={() => setEditing(cc)}>
+                      {t("budget.common.edit")}
+                    </Button>
                   </Td>
                 )}
               </tr>
@@ -597,95 +628,165 @@ function CostCentersPanel({ canManage }: { canManage: boolean }) {
           </tbody>
         </Table>
       </QueryState>
-      {/* `String(update.error)` rendered "ApiError: " and nothing after it for
-          a bodyless 503, in no live region -- so a refused rename looked like
-          a successful one until the next reload. */}
-      {update.isError && <RefusedLine error={update.error} />}
 
-      <Dialog open={creating} onClose={() => setCreating(false)} title={t("budget.admin.newCostCenter")}>
-        <Form onSubmit={submit}>
-          <div className="form-grid">
-            <Field label={t("budget.common.code")}>
-              <input className={inputClass} required value={code} onChange={(e) => setCode(e.target.value)} />
-            </Field>
-            <Field label={t("budget.common.name")}>
-              <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
-              {t("budget.common.cancel")}
-            </Button>
-            <FormActions
-              label={t("budget.common.save")}
-              pending={create.isPending}
-              error={create.error}
-              problems={attemptProblems(attempt)}
-            />
-          </div>
-        </Form>
-      </Dialog>
-    </Panel>
+      <NewCostCenterDialog
+        key={created.open && canManage ? "open" : "closed"}
+        open={created.open && canManage}
+        onClose={created.close}
+        onDirty={dialogs.onNewDirty}
+        onSaved={() => {
+          dialogs.release();
+          created.close();
+        }}
+      />
+      {editing ? (
+        <EditCostCenterDialog
+          key={editing.id}
+          costCenter={editing}
+          onDirty={dialogs.onEditDirty}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+    </FormSection>
   );
 }
 
-function FxRatesPanel({ canManage }: { canManage: boolean }) {
+function NewCostCenterDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onSaved: () => void;
+}) {
   const t = useT();
-  const fxRates = useFxRates();
-  const create = useCreateFxRateMutation();
-  const update = useUpdateFxRateMutation();
-  const [creating, setCreating] = useState(false);
-  const [fromCurrency, setFromCurrency] = useState("");
-  const [rate, setRate] = useState("1.00000000");
-  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
+  const create = useCreateCostCenterMutation();
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRate, setEditRate] = useState("");
-
-  const items = fxRates.data ?? [];
+  useReportDirty(open && (code !== "" || name !== ""), onDirty);
 
   function submit() {
-    const next: Attempt = {
-      rules: fxRules,
-      values: { from_currency: fromCurrency, rate, effective_date: effectiveDate },
-    };
+    const next: Attempt = { rules: costCenterRules, values: { code, name } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
-
-    create.mutate(
-      // The rate stays a STRING all the way to the wire -- it is a Decimal
-      // server-side, and Number()-ing it here is how 0.92500000 becomes 0.925.
-      { from_currency: fromCurrency.trim().toUpperCase(), rate: rate.trim(), effective_date: effectiveDate },
-      { onSuccess: () => { setFromCurrency(""); setRate("1.00000000"); setAttempt(null); setCreating(false); } },
-    );
-  }
-
-  function startEdit(fx: { id: string; rate: string }) {
-    setEditingId(fx.id);
-    setEditRate(fx.rate);
-  }
-
-  function saveEdit(id: string) {
-    update.mutate(
-      { id, body: { rate: editRate } },
-      { onSuccess: () => setEditingId(null) },
-    );
+    create.mutate({ code: code.trim(), name: name.trim() }, { onSuccess: onSaved });
   }
 
   return (
-    <Panel
-      title={t("budget.admin.fxRates")}
-      bare
-      actions={canManage ? <Button variant="outline" onClick={() => setCreating(true)}>{t("budget.admin.newRate")}</Button> : undefined}
-    >
+    <Dialog open={open} onClose={onClose} title={t("budget.admin.newCostCenter")}>
+      <Form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label={t("budget.common.code")}>
+            <input className={inputClass} required value={code} onChange={(e) => setCode(e.target.value)} />
+          </Field>
+          <Field label={t("budget.common.name")}>
+            <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={create.isPending}
+            error={create.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
+  );
+}
+
+function EditCostCenterDialog({
+  costCenter,
+  onDirty,
+  onClose,
+}: {
+  costCenter: CostCenterOut;
+  onDirty: (dirty: boolean) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const update = useUpdateCostCenterMutation();
+  const [name, setName] = useState(costCenter.name);
+  const [active, setActive] = useState(costCenter.active);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const dirty = name !== costCenter.name || active !== costCenter.active;
+  useReportDirty(dirty, onDirty);
+
+  function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    const next: Attempt = { rules: nameRules, values: { name } };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    update.mutate({ id: costCenter.id, body: { name, active } }, { onSuccess: onClose });
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={t("budget.admin.editCostCenter")}>
+      <Form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label={t("budget.admin.costCenterName")}>
+            <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              aria-label={t("budget.admin.costCenterActive")}
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+            />
+            {t("budget.admin.activeM")}
+          </label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={update.isPending}
+            error={update.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
+  );
+}
+
+function FxRatesSection({ canManage, dialogs }: { canManage: boolean; dialogs: DialogWiring }) {
+  const t = useT();
+  const fxRates = useFxRates();
+  // New → Rate (decision D8): `?new=rate` opens the add dialog.
+  const created = useNewParam("rate");
+  const [editing, setEditing] = useState<FxRateOut | null>(null);
+  const items = fxRates.data ?? [];
+
+  return (
+    <FormSection title={t("budget.admin.fxRates")} icon="arrows-exchange">
+      {canManage ? (
+        <SectionAction>
+          <Btn label={t("budget.admin.newRate")} icon="plus" onClick={created.start} />
+        </SectionAction>
+      ) : null}
       <QueryState
         loading={fxRates.isLoading}
         error={fxRates.error}
         empty={items.length === 0}
         emptyLabel={t("budget.admin.fxEmpty")}
       >
-        <Table>
+        <Table label={t("budget.admin.fxRates")}>
           <thead>
             <tr>
               <Th>{t("budget.admin.colFrom")}</Th>
@@ -707,40 +808,17 @@ function FxRatesPanel({ canManage }: { canManage: boolean }) {
                 {/* Rate is a Decimal on the wire -- rendered verbatim as
                     the string the API returns, never coerced to a number. */}
                 <Td>
-                  {editingId === fx.id ? (
-                    <input
-                      aria-label={t("budget.admin.fxRateAria")}
-                      className={inputClass}
-                      value={editRate}
-                      onChange={(e) => setEditRate(e.target.value)}
-                    />
-                  ) : (
-                    <span className="mono">{fx.rate}</span>
-                  )}
+                  <span className="mono">{fx.rate}</span>
                 </Td>
                 {/* THE MODULE HAS ONE DATE FORMAT. `effective_date` is a
                     `date` on the wire -- a day with no time and no zone -- so
-                    it is pinned to UTC for the same reason the expense ledger
-                    pins its own: rendered in a westward zone the raw string
-                    would land a day early. It was the one date in this module
-                    still printed in the wire format. */}
+                    it is pinned to UTC, as the expense ledger pins its own. */}
                 <Td>{formatDate(fx.effective_date, "UTC")}</Td>
                 {canManage && (
                   <Td>
-                    {editingId === fx.id ? (
-                      <div className="flex gap-2">
-                        <Button onClick={() => saveEdit(fx.id)} disabled={update.isPending || !editRate}>
-                          {update.isPending ? t("budget.common.saving") : t("budget.common.save")}
-                        </Button>
-                        <Button variant="outline" onClick={() => setEditingId(null)}>
-                          {t("budget.common.cancel")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button variant="outline" onClick={() => startEdit(fx)}>
-                        {t("budget.common.edit")}
-                      </Button>
-                    )}
+                    <Button variant="outline" onClick={() => setEditing(fx)}>
+                      {t("budget.common.edit")}
+                    </Button>
                   </Td>
                 )}
               </tr>
@@ -748,73 +826,169 @@ function FxRatesPanel({ canManage }: { canManage: boolean }) {
           </tbody>
         </Table>
       </QueryState>
-      {/* `String(update.error)` rendered "ApiError: " and nothing after it for
-          a bodyless 503, in no live region -- so a refused rename looked like
-          a successful one until the next reload. */}
-      {update.isError && <RefusedLine error={update.error} />}
 
-      <Dialog open={creating} onClose={() => setCreating(false)} title={t("budget.admin.newFxTitle")}>
-        <Form onSubmit={submit}>
-          <div className="form-grid">
-            <Field label={t("budget.common.fromCurrency")}>
-              <input
-                className={inputClass}
-                value={fromCurrency}
-                maxLength={3}
-                required
-                onChange={(e) => setFromCurrency(e.target.value.toUpperCase())}
-              />
-            </Field>
-            <Field label={t("budget.common.rate")}>
-              {/* Text with a decimal keypad, not type="number": the value is a
-                  Decimal string on the wire, and a number input would hand back
-                  a locale-formatted or exponent-notation value to re-serialise. */}
-              <input
-                className={inputClass}
-                type="text"
-                inputMode="decimal"
-                required
-                value={rate}
-                onChange={(e) => setRate(e.target.value)}
-              />
-            </Field>
-            <Field label={t("budget.common.effectiveDate")}>
-              <input
-                type="date"
-                className={inputClass}
-                required
-                value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
-              />
-              {/* The date this holds is spelled out under the grid, below
-                  (design review M1): a native date input draws the USER
-                  AGENT'S mask and no CSS reorders it, so this reads
-                  `09/22/2026` to a US-locale browser on a console that renders
-                  every other date `22 Sept 2026`. It is not inside this
-                  `<Field>` because `Field` wraps its control in the `<label>`
-                  and text placed here becomes part of the field's NAME; the
-                  accounting is at `agent-push/PushAuthorizationsPage`. "UTC"
-                  because this is a calendar DATE, not an instant. */}
-            </Field>
-          </div>
-          {effectiveDate !== "" ? (
-            <p className="note" style={{ marginTop: 14, marginBottom: 14 }}>
-              {t("budget.admin.effective", { date: formatDate(`${effectiveDate}T00:00:00Z`, "UTC") })}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
-              {t("budget.common.cancel")}
-            </Button>
-            <FormActions
-              label={t("budget.common.save")}
-              pending={create.isPending}
-              error={create.error}
-              problems={attemptProblems(attempt)}
+      <NewFxRateDialog
+        key={created.open && canManage ? "open" : "closed"}
+        open={created.open && canManage}
+        onClose={created.close}
+        onDirty={dialogs.onNewDirty}
+        onSaved={() => {
+          dialogs.release();
+          created.close();
+        }}
+      />
+      {editing ? (
+        <EditFxRateDialog key={editing.id} rate={editing} onDirty={dialogs.onEditDirty} onClose={() => setEditing(null)} />
+      ) : null}
+    </FormSection>
+  );
+}
+
+function NewFxRateDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onSaved: () => void;
+}) {
+  const t = useT();
+  const create = useCreateFxRateMutation();
+  const today = new Date().toISOString().slice(0, 10);
+  const [fromCurrency, setFromCurrency] = useState("");
+  const [rate, setRate] = useState("1.00000000");
+  const [effectiveDate, setEffectiveDate] = useState(today);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  useReportDirty(open && (fromCurrency !== "" || rate !== "1.00000000" || effectiveDate !== today), onDirty);
+
+  function submit() {
+    const next: Attempt = {
+      rules: fxRules,
+      values: { from_currency: fromCurrency, rate, effective_date: effectiveDate },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    create.mutate(
+      // The rate stays a STRING all the way to the wire -- it is a Decimal
+      // server-side, and Number()-ing it here is how 0.92500000 becomes 0.925.
+      { from_currency: fromCurrency.trim().toUpperCase(), rate: rate.trim(), effective_date: effectiveDate },
+      { onSuccess: onSaved },
+    );
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title={t("budget.admin.newFxTitle")}>
+      <Form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label={t("budget.common.fromCurrency")}>
+            <input
+              className={inputClass}
+              value={fromCurrency}
+              maxLength={3}
+              required
+              onChange={(e) => setFromCurrency(e.target.value.toUpperCase())}
             />
-          </div>
-        </Form>
-      </Dialog>
-    </Panel>
+          </Field>
+          <Field label={t("budget.common.rate")}>
+            {/* Text with a decimal keypad, not type="number": the value is a
+                Decimal string on the wire, and a number input would hand back
+                a locale-formatted or exponent-notation value to re-serialise. */}
+            <input
+              className={inputClass}
+              type="text"
+              inputMode="decimal"
+              required
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+            />
+          </Field>
+          <Field label={t("budget.common.effectiveDate")}>
+            {/* The date is spelled out under the grid (design review M1): a
+                native date input draws the user agent's mask. Not inside the
+                `<Field>`, whose label would take the sentence as its name. */}
+            <input
+              type="date"
+              className={inputClass}
+              required
+              value={effectiveDate}
+              onChange={(e) => setEffectiveDate(e.target.value)}
+            />
+          </Field>
+        </div>
+        {effectiveDate !== "" ? (
+          <p className="note" style={{ marginTop: 14, marginBottom: 14 }}>
+            {t("budget.admin.effective", { date: formatDate(`${effectiveDate}T00:00:00Z`, "UTC") })}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={create.isPending}
+            error={create.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
+  );
+}
+
+/** A rate's figure, in a dialog where the row used to turn into an input. The same `PATCH` body. */
+function EditFxRateDialog({
+  rate,
+  onDirty,
+  onClose,
+}: {
+  rate: FxRateOut;
+  onDirty: (dirty: boolean) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const update = useUpdateFxRateMutation();
+  const [value, setValue] = useState(rate.rate);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const dirty = value !== rate.rate;
+  useReportDirty(dirty, onDirty);
+
+  function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    const next: Attempt = {
+      rules: () => [{ name: "rate", label: translate("budget.common.rate"), validate: decimalRate }],
+      values: { rate: value },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    update.mutate({ id: rate.id, body: { rate: value } }, { onSuccess: onClose });
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={t("budget.admin.editRate", { from: rate.from_currency, to: rate.to_currency })}>
+      <Form onSubmit={submit}>
+        <Field label={t("budget.admin.fxRateAria")}>
+          <input className={inputClass} inputMode="decimal" required value={value} onChange={(e) => setValue(e.target.value)} />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("budget.common.cancel")}
+          </Button>
+          <FormActions
+            label={t("budget.common.save")}
+            pending={update.isPending}
+            error={update.error}
+            problems={attemptProblems(attempt)}
+          />
+        </div>
+      </Form>
+    </Dialog>
   );
 }

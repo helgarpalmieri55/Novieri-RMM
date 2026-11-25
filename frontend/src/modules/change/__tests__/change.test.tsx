@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
 import { ClientNotChosen } from "../../../lib/clientSelection";
+import { recordingNarrowing } from "../../../test/narrowing";
+import { renderPage, TitleShell } from "../../../test/renderPage";
 import { ApprovalQueue } from "../ApprovalQueue";
 import { ChangeCalendar } from "../ChangeCalendar";
 import { availableChangeActions } from "../changeActions";
@@ -109,8 +111,9 @@ describe("ChangesPage", () => {
     renderWithProviders(<ChangesPage />);
 
     expect(await screen.findByText("Upgrade switch firmware")).toBeInTheDocument();
-    // Read as a word, not as the wire's identifier (cycle 12).
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    // Read as a word, not as the wire's identifier (cycle 12). In the table:
+    // the state chips above it say "Draft" too (redesign Task 11, 6.2).
+    expect(within(screen.getByRole("table")).getByText("Draft")).toBeInTheDocument();
     expect(screen.queryByText("draft")).not.toBeInTheDocument();
   });
 
@@ -154,6 +157,165 @@ describe("ChangesPage", () => {
 
     await screen.findByText("Upgrade switch firmware");
     expect(screen.queryByRole("button", { name: "New change" })).not.toBeInTheDocument();
+  });
+
+  // ---- The list kit (redesign Task 11, 6.2; Receta L) ----
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    api.listChanges = vi.fn().mockResolvedValue([CHANGES[0], SUBMITTED_CHANGE]);
+    const { router } = renderPage("/changes?state=submitted", <ChangesPage />);
+    expect(await screen.findByRole("table", { name: "Changes" })).toBeInTheDocument();
+    // The seven states are the kit's chip with a list (critique P1: thirteen
+    // chips buried the list); each option carries its count.
+    const state = screen.getByRole("combobox", { name: "State" });
+    expect(state).toHaveValue("submitted");
+    expect(within(state).getByRole("option", { name: "Draft (1)" })).toBeInTheDocument();
+    expect(screen.queryByText("Upgrade switch firmware")).toBeNull();
+    await userEvent.selectOptions(state, "draft");
+    expect(router.state.location.search).toContain("state=draft");
+    expect(await screen.findByText("Upgrade switch firmware")).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    renderPage("/changes?state=rejected", <ChangesPage />);
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("says there are no changes yet, with the way to raise one", async () => {
+    api.listChanges = vi.fn().mockResolvedValue([]);
+    renderPage("/changes", <ChangesPage />);
+    expect(await screen.findByText("No changes yet.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New change" })).toHaveLength(2);
+  });
+
+  it("names the page after its rail entry, and marks it in the module's own links", async () => {
+    renderPage("/changes", <ChangesPage />, "/changes");
+    expect(await screen.findByRole("heading", { level: 1, name: "Changes" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Change management pages" });
+    expect(within(nav).getByRole("link", { name: "Changes" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("asks before closing New change with something typed, and opens empty again", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/changes", <ChangesPage />, "/changes");
+    await user.click(await screen.findByRole("button", { name: "New change" }));
+    expect(router.state.location.search).toBe("?new=change");
+    const dialog = await screen.findByRole("dialog", { name: "New change" });
+    await user.type(within(dialog).getByLabelText(/^Title/), "Swap the core switch");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(router.state.location.search).toBe("?new=change");
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // Closed on screen (the router's state moves before React draws it).
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Whatever opens it next -- the button, a link, Forward -- it is empty.
+    await act(() => router.navigate("/changes?new=change"));
+    const again = await screen.findByRole("dialog", { name: "New change" });
+    expect(within(again).getByLabelText(/^Title/)).toHaveValue("");
+  });
+});
+
+describe("the changes list behind the Client chip (decisions D6, D17)", () => {
+  it("draws no empty state while the chip's client is not yet known (general ruling 10)", async () => {
+    // `/me` has not answered: the narrowed read waits, and so does the page.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    const listChanges = vi.fn().mockResolvedValue([]);
+    mockUseApi.mockReturnValue({
+      me: vi.fn(() => new Promise<Me>(() => {})),
+      listChanges,
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as ApiClient);
+    renderPage("/changes?client=5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57", <ChangesPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    // Long enough for a read that was not waiting to have answered and drawn its empty list.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(listChanges).not.toHaveBeenCalled();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No changes yet.")).toBeNull();
+  });
+
+  it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    mockUseApi.mockReturnValue({
+      me: vi.fn(() => new Promise<Me>(() => {})),
+      listChanges: vi.fn().mockResolvedValue([]),
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as ApiClient);
+    renderPage("/changes?client=5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57", <ChangesPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+    expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+  });
+
+  it("draws no number and no claim on a tile when the list fails to load (ruling 10a)", async () => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listChanges: vi.fn().mockRejectedValue(new ApiError(503, "")),
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as ApiClient);
+    renderPage("/changes", <ChangesPage />);
+    // The list says the error; the tiles say nothing.
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+    expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+  });
+
+  const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+  const ANDES_CLIENT: MeClient = { id: ANDES, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: [] };
+
+  beforeEach(() => selectClient(null, [SCOPE_INTERNAL, ANDES_CLIENT]));
+
+  function consoleApi(): ApiClient {
+    const api = {
+      // A narrowed API is the same double here: what this block asserts is the links, not the read.
+      forClient: () => api,
+      me: vi.fn().mockResolvedValue(ME),
+      listChanges: vi.fn().mockResolvedValue([SUBMITTED_CHANGE]),
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    };
+    return api as unknown as ApiClient;
+  }
+
+  it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    // What the page reads un-narrowed, legitimately: the change gates and the
+    // device groups they name (organisation settings, GatesPanel), and the
+    // roles the readiness check counts approvers in (ChangeReadiness). None
+    // of them is the list.
+    const narrowing = recordingNarrowing(consoleApi(), { console: ["listChangeGates", "listDeviceGroups", "listRoles"] });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderPage(`/changes?client=${ANDES}`, <ChangesPage />);
+    expect(await screen.findByRole("table", { name: "Changes" })).toBeInTheDocument();
+    expect(narrowing.client(ANDES).listChanges).toHaveBeenCalledWith();
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("leads each tile to exactly the rows it counted, the chip included", async () => {
+    mockUseApi.mockReturnValue(consoleApi());
+    renderPage(`/changes?client=${ANDES}`, <ChangesPage />);
+    await screen.findByRole("table", { name: "Changes" });
+    const hrefs = [...document.querySelectorAll("a.stat-card")].map((card) => card.getAttribute("href"));
+    expect(hrefs).toEqual([
+      `/changes?state=open&client=${ANDES}`,
+      // The approval queue is every client's: under the chip the tile opens this list's submitted view.
+      `/changes?state=submitted&client=${ANDES}`,
+      `/changes?state=implementing&client=${ANDES}`,
+      `/changes?type=emergency&client=${ANDES}`,
+    ]);
   });
 });
 
@@ -206,9 +368,11 @@ describe("the KPI tiles are links to the rows behind them", () => {
     await screen.findByText("Upgrade switch firmware");
 
     // Every destination is a route App.tsx declares: /changes, /changes/approvals.
+    // Four tiles (redesign Task 11, 6.2): the changes being carried out have their own.
     expect(tileHrefs()).toEqual({
       "Open changes": "/changes?state=open",
       "Awaiting approval": "/changes/approvals",
+      Implementing: "/changes?state=implementing",
       "Emergency changes": "/changes?type=emergency",
     });
   });
@@ -223,11 +387,15 @@ describe("the KPI tiles are links to the rows behind them", () => {
     expect(screen.getByText("Restart failed cluster node")).toBeInTheDocument();
     expect(screen.queryByText("Retire old firewall")).not.toBeInTheDocument();
     // And the way back out is on screen, so a narrowed list does not read as a
-    // list that lost its rows.
-    expect(screen.getByRole("link", { name: "Show all changes" })).toHaveAttribute(
-      "href",
-      "/changes",
-    );
+    // list that lost its rows: the pressed chip names the view, "Showing 3 of
+    // 4" says rows are hidden, and "All" is the way out (the list kit,
+    // redesign Task 11, 6.2, in place of the "Show all changes" sentence).
+    const views = screen.getByRole("group", { name: "Show" });
+    expect(within(views).getByRole("button", { name: /^Open/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(views).getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+    // Every open state at once is not one state: the list reads "Any state".
+    expect(screen.getByRole("combobox", { name: "State" })).toHaveValue("");
+    expect(screen.getByText("Showing 3 of 4")).toBeInTheDocument();
   });
 
   it("shows only the emergency changes at the emergency tile's destination", async () => {
@@ -252,7 +420,9 @@ describe("the KPI tiles are links to the rows behind them", () => {
     expect(document.querySelectorAll("a.stat-card.urgent")).toHaveLength(0);
   });
 
-  it("prints an em dash, not 0, while the list has not answered", async () => {
+  // "n/a", the kit's unmeasured value, and no longer an em dash: no dash in
+  // the interface (redesign Global Constraints, "Textos").
+  it("prints n/a, not 0, while the list has not answered", async () => {
     mockUseApi.mockReturnValue({
       me: vi.fn().mockResolvedValue(ME),
       listChanges: vi.fn().mockReturnValue(new Promise<never>(() => {})),
@@ -263,7 +433,25 @@ describe("the KPI tiles are links to the rows behind them", () => {
     const values = [...document.querySelectorAll("a.stat-card .stat-value")].map(
       (value) => value.textContent,
     );
-    expect(values).toEqual(["—", "—", "—"]);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+  });
+});
+
+// GENERAL RULING 1b (fix round 1): a sub-page with no rail entry of its own
+// names itself in the tab, agreeing with its h1; the rail's label follows.
+describe("the change sub-pages name themselves in the tab", () => {
+  it.each([
+    ["the approval queue", () => <ApprovalQueue />, "/changes/approvals", "Approval queue"],
+    ["the change calendar", () => <ChangeCalendar />, "/changes/calendar", "Change calendar"],
+  ] as const)("%s", async (_what, page, path, name) => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listChanges: vi.fn().mockResolvedValue([]),
+      getChangeCalendar: vi.fn().mockResolvedValue({ entries: [], conflicts: [] }),
+    } as unknown as ApiClient);
+    renderPage(path, page(), path, { page: "shell.nav.item.changes" });
+    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${name} · Changes · Novieri RMM`));
   });
 });
 
@@ -276,6 +464,23 @@ describe("ApprovalQueue", () => {
       listChanges: vi.fn().mockResolvedValue([SUBMITTED_CHANGE]),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
+  });
+
+  // GENERAL RULING 7 (fix round 1, M2): a new attempt clears the last one's
+  // error. A refused Reject after a refused Approve says the Reject's reason.
+  it("says the latest decision's refusal, not the one before it", async () => {
+    const user = userEvent.setup();
+    api.approveChange = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    api.rejectChange = vi
+      .fn()
+      .mockRejectedValue(new ApiError(409, JSON.stringify({ detail: "this change was already decided" })));
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<ApprovalQueue />);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByRole("alert")).not.toHaveTextContent("this change was already decided");
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("this change was already decided"));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("shows the approve control when the caller has change.approve", async () => {
@@ -295,6 +500,55 @@ describe("ApprovalQueue", () => {
     await screen.findByText("Patch prod database");
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+  });
+
+  // The list kit (redesign Task 11, 6.2; Receta L, 8: a list with no filter).
+  it("says why the list is empty", async () => {
+    api.listChanges = vi.fn().mockResolvedValue(CHANGES);
+    renderPage("/changes/approvals", <ApprovalQueue />, "/changes/approvals");
+    expect(await screen.findByText("Nothing is waiting for your approval.")).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Change management pages" });
+    expect(within(nav).getByRole("link", { name: "Approval queue" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("counts what waits for a decision", async () => {
+    renderPage("/changes/approvals", <ApprovalQueue />, "/changes/approvals");
+    expect(await screen.findByRole("table", { name: "Approval queue" })).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+});
+
+describe("ChangeCalendar keeps its window in the URL (redesign Task 11, 6.2)", () => {
+  let api: Partial<ApiClient>;
+
+  beforeEach(() => {
+    api = {
+      me: vi.fn().mockResolvedValue({ ...ME, timezone: "UTC" }),
+      getChangeCalendar: vi.fn().mockResolvedValue({ entries: [], conflicts: [] }),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+  });
+
+  it("keeps the window in the URL", async () => {
+    const { router } = renderPage("/changes/calendar?from=2026-02-01&to=2026-02-28", <ChangeCalendar />, "/changes/calendar");
+    expect(await screen.findByLabelText("From")).toHaveValue("2026-02-01");
+    expect(screen.getByLabelText("To")).toHaveValue("2026-02-28");
+    await waitFor(() =>
+      expect(api.getChangeCalendar).toHaveBeenCalledWith("2026-02-01T00:00:00.000Z", "2026-02-28T00:00:00.000Z"),
+    );
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-03-31" } });
+    expect(router.state.location.search).toBe("?from=2026-02-01&to=2026-03-31");
+    expect(await screen.findByText("No changes scheduled in this window.")).toBeInTheDocument();
+  });
+
+  it("writes nothing for the default window, and a cleared end stays cleared", async () => {
+    const { router } = renderPage("/changes/calendar", <ChangeCalendar />, "/changes/calendar");
+    await screen.findByText("No changes scheduled in this window.");
+    expect(router.state.location.search).toBe("");
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "" } });
+    expect(router.state.location.search).toBe("?from=");
+    expect(screen.getByLabelText("From")).toHaveValue("");
+    expect(await screen.findByText(/^From the earliest change to /)).toBeInTheDocument();
   });
 });
 
@@ -602,12 +856,13 @@ describe("ChangeDetail link action", () => {
     mockUseApi.mockReturnValue(api as ApiClient);
   });
 
+  // The linked actions are their own tab (redesign Task 11, 6.2: `?tab=links`).
   function renderDetail() {
     return renderWithProviders(
       <Routes>
         <Route path="/changes/:changeId" element={<ChangeDetail />} />
       </Routes>,
-      [`/changes/${CHANGE_ID}`],
+      [`/changes/${CHANGE_ID}?tab=links`],
     );
   }
 
@@ -871,12 +1126,13 @@ describe("change failures reach the user as a sentence", () => {
     mockUseApi.mockReturnValue(api as ApiClient);
   });
 
-  function renderDetail() {
+  // `query` opens a tab (redesign Task 11, 6.2: approvals and links are their own).
+  function renderDetail(query = "") {
     return renderWithProviders(
       <Routes>
         <Route path="/changes/:changeId" element={<ChangeDetail />} />
       </Routes>,
-      [`/changes/${CHANGE_ID}`],
+      [`/changes/${CHANGE_ID}${query}`],
     );
   }
 
@@ -902,7 +1158,7 @@ describe("change failures reach the user as a sentence", () => {
   // one link longer than the operator believed.
   it("announces a refused link removal that used to be swallowed", async () => {
     const user = userEvent.setup();
-    renderDetail();
+    renderDetail("?tab=links");
 
     await user.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -1056,6 +1312,46 @@ describe("ChangeDetail lifecycle controls", () => {
     await user.click(await screen.findByRole("button", { name: "Submit for approval" }));
 
     await waitFor(() => expect(api.submitChange).toHaveBeenCalledWith(CHANGE_ID));
+  });
+
+  // GENERAL RULING 12: the change is the route's, and another change under the
+  // same route does not remount the page by itself; a comment typed for one
+  // decision must never be sent with another change's.
+  it("drops a decision comment typed for one change when the page moves to another (ruling 12)", async () => {
+    const user = userEvent.setup();
+    const OTHER_ID = "06a85c19-55e2-7f3c-8000-831c7bdba358";
+    api.getChange = vi.fn((id: string) =>
+      Promise.resolve(changeIn("submitted", id === OTHER_ID ? { id: OTHER_ID, title: "Rotate VPN certificates" } : {})),
+    );
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage(`/changes/${CHANGE_ID}`, <ChangeDetail />, "/changes/:changeId");
+    await user.type(await screen.findByLabelText(/^Decision comment/), "Typed for the firmware change");
+    await act(() => router.navigate(`/changes/${OTHER_ID}`));
+    expect(await screen.findByRole("heading", { level: 1, name: "Rotate VPN certificates" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Decision comment/)).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(await screen.findByRole("button", { name: "Approve change" }));
+    await waitFor(() => expect(api.approveChange).toHaveBeenCalledWith(OTHER_ID, { comment: null }));
+  });
+
+  // FIX ROUND 1, M3: the brief puts the approval actions in the change's
+  // DetailHead, so they are there on every tab, not only on the Summary.
+  it("offers the decisions in the head, on every tab, with the comment and the refusal under it", async () => {
+    const user = userEvent.setup();
+    api.getChange = vi.fn().mockResolvedValue(changeIn("submitted"));
+    api.approveChange = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage(`/changes/${CHANGE_ID}?tab=approvals`, <ChangeDetail />, "/changes/:changeId");
+    const head = (await screen.findByRole("heading", { level: 1, name: "Upgrade switch firmware" })).closest(
+      ".detail-head",
+    ) as HTMLElement;
+    expect(within(head).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(within(head).getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Decision comment (optional)"), "Looks safe");
+    await user.click(within(head).getByRole("button", { name: "Approve" }));
+    await user.click(await screen.findByRole("button", { name: "Approve change" }));
+    await waitFor(() => expect(api.approveChange).toHaveBeenCalledWith(CHANGE_ID, { comment: "Looks safe" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
   it("asks before approving, and does not approve until the dialog is confirmed", async () => {
@@ -1241,26 +1537,65 @@ describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
     };
   }
 
-  function renderDetail(overrides: Partial<ApiClient> = {}) {
+  // `query` opens a tab (redesign Task 11, 6.2: approvals and links are their own).
+  function renderDetail(overrides: Partial<ApiClient> = {}, query = "") {
     mockUseApi.mockReturnValue(api(overrides) as ApiClient);
     return renderWithProviders(
       <Routes>
         <Route path="/changes/:changeId" element={<ChangeDetail />} />
       </Routes>,
-      [`/changes/${CHANGE_ID}`],
+      [`/changes/${CHANGE_ID}${query}`],
     );
   }
 
+  // THE SHELL COMPOSES THE TITLE NOW (redesign Task 2, `useRecordTitle`): the
+  // page names the record, the shell the page ("Changes", the rail's label).
   it("names the browser tab after the change, so two open changes are distinguishable", async () => {
-    document.title = "Novieri RMM";
-    const view = renderDetail();
-    await screen.findByRole("heading", { name: "Upgrade switch firmware" });
-    await waitFor(() => expect(document.title).toBe("Upgrade switch firmware · Change · Novieri RMM"));
+    mockUseApi.mockReturnValue(api() as ApiClient);
+    renderPage(`/changes/${CHANGE_ID}`, <ChangeDetail />, "/changes/:changeId", { page: "shell.nav.item.changes" });
+    await screen.findByRole("heading", { level: 1, name: "Upgrade switch firmware" });
+    await waitFor(() => expect(document.title).toBe("Upgrade switch firmware · Changes · Novieri RMM"));
+  });
 
-    // And gives the name back on the way out, so the next page is not left
-    // wearing this change's title.
-    view.unmount();
-    expect(document.title).toBe("Novieri RMM");
+  it("gives the name back on the way out, so the next page is not left wearing this change's title", async () => {
+    mockUseApi.mockReturnValue(api() as ApiClient);
+    const router = createMemoryRouter(
+      [
+        { path: "/changes/:changeId", element: <ChangeDetail /> },
+        { path: "*", element: <p>elsewhere</p> },
+      ],
+      { initialEntries: [`/changes/${CHANGE_ID}`] },
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TitleShell page="shell.nav.item.changes">
+          <RouterProvider router={router} />
+        </TitleShell>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.title).toBe("Upgrade switch firmware · Changes · Novieri RMM"));
+    await act(() => router.navigate("/changes"));
+    await waitFor(() => expect(document.title).toBe("Changes · Novieri RMM"));
+  });
+
+  it("puts the tab in the URL, and an unknown tab opens the default", async () => {
+    mockUseApi.mockReturnValue(api() as ApiClient);
+    const { router } = renderPage(`/changes/${CHANGE_ID}?tab=links`, <ChangeDetail />, "/changes/:changeId");
+    expect(await screen.findByRole("tab", { name: "Linked actions" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: "Approval history" }));
+    expect(router.state.location.search).toBe("?tab=approvals");
+    await act(() => router.navigate(`/changes/${CHANGE_ID}?tab=nope`));
+    expect(await screen.findByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("states the change's state, risk and client in its head", async () => {
+    mockUseApi.mockReturnValue(api() as ApiClient);
+    renderPage(`/changes/${CHANGE_ID}`, <ChangeDetail />, "/changes/:changeId");
+    const head = (await screen.findByRole("heading", { level: 1, name: "Upgrade switch firmware" })).closest("section") as HTMLElement;
+    expect(within(head).getByText("Draft")).toBeInTheDocument();
+    expect(within(head).getByText("Medium")).toBeInTheDocument();
+    expect(within(head).getByRole("link", { name: "Novieri" })).toHaveAttribute("href", "/clients/o1");
   });
 
   it("reads the state, type and risk as words rather than as wire values", async () => {
@@ -1284,7 +1619,7 @@ describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
           linked_by: "u1",
         },
       ]),
-    });
+    }, "?tab=links");
     // The table cell (the <option> of the same name is the second match). The
     // cell leads with the link glyph, so the words sit in a span inside it.
     expect((await screen.findAllByText("Provision run"))[0]?.closest("td")).not.toBeNull();
@@ -1317,7 +1652,7 @@ describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
           decided_at: "2026-02-01T00:00:00.000Z",
         },
       ]),
-    });
+    }, "?tab=approvals");
     expect(await screen.findByText("Approved")).toBeInTheDocument();
   });
 });
@@ -1458,12 +1793,13 @@ describe("ChangeDetail link action picker", () => {
     mockUseApi.mockReturnValue(api as ApiClient);
   });
 
+  // The linked actions are their own tab (redesign Task 11, 6.2: `?tab=links`).
   function renderDetail() {
     return renderWithProviders(
       <Routes>
         <Route path="/changes/:changeId" element={<ChangeDetail />} />
       </Routes>,
-      [`/changes/${CHANGE_ID}`],
+      [`/changes/${CHANGE_ID}?tab=links`],
     );
   }
 
@@ -1502,7 +1838,8 @@ describe("ChangeDetail link action picker", () => {
     await user.selectOptions(await screen.findByLabelText("Action type"), "deployment");
     await user.click(screen.getByRole("combobox", { name: "Deployment" }));
 
-    expect(await screen.findByText(/Fleet → Software deployment/)).toBeInTheDocument();
+    // The page by its rail label now: "Software" (coordinator, 2026-11-25).
+    expect(await screen.findByText(/once one is created in Software;/)).toBeInTheDocument();
   });
 
   it("names the unchosen deployment on submit rather than doing nothing", async () => {

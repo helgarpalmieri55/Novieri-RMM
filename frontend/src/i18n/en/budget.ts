@@ -45,7 +45,6 @@ export const budget = {
     na: "n/a",
     cancel: "Cancel",
     save: "Save",
-    saving: "Saving…",
     edit: "Edit",
     name: "Name",
     key: "Key",
@@ -65,7 +64,7 @@ export const budget = {
   confirm: {
     title: "Confirmation queue",
     description: "Expected expenses waiting on a confirmation or a void.",
-    empty: "Nothing to confirm.",
+    empty: "No expenses waiting for confirmation.",
     colExpense: "Expense",
     colAmountDecision: "Projected amount and decision",
     colAmount: "Projected amount",
@@ -89,11 +88,13 @@ export const budget = {
     description: "Recorded IT spend, entered by hand or fed from renewals.",
     addExpected: "Add expected expenses",
     newExpense: "New expense",
-    filterStatus: "Filter by status",
+    filterStatus: "Status",
     allStatuses: "All statuses",
+    // The ledger's date range, in the filter bar (redesign Task 11, 6.4).
+    filterFrom: "From",
+    filterTo: "To",
     filterCategory: "Filter by category",
     allCategories: "All categories",
-    count: { one: "{count} expense", other: "{count} expenses" },
     empty: "No expenses found.",
     colExpense: "Expense",
     colAmount: "Amount",
@@ -143,7 +144,8 @@ export const budget = {
     inactiveM: "Inactive",
     activeF: "Active",
     inactiveF: "Inactive",
-    settings: "Settings",
+    // The base currency and the fiscal year's start (redesign Task 11, 6.6).
+    general: "General",
     settingsEmpty: "No settings recorded yet.",
     baseCurrency: "Base currency",
     fiscalStarts: "Fiscal year starts",
@@ -167,7 +169,6 @@ export const budget = {
       m11: "November",
       m12: "December",
     },
-    saveSettings: "Save settings",
     changeTitle: "Change the budget base currency",
     changeSubject: "{from} to {to}",
     unknownCurrency: "unknown",
@@ -180,6 +181,12 @@ export const budget = {
     colName: "Name",
     colKey: "Key",
     colCode: "Code",
+    // A row's edit, in a dialog where the row used to turn into inputs.
+    editCategory: "Edit category",
+    editCostCenter: "Edit cost center",
+    // No lone word between the placeholders: "… {to} rate" left the fragment "rate", which the Spanish
+    // pages' English check (expectNoEnglish) then found in a recorded server message ("rate fuse tripped").
+    editRate: "Edit the exchange rate from {from} to {to}",
     categoryName: "Category name",
     categoryActive: "Category active",
     costCenters: "Cost centers",
@@ -201,8 +208,11 @@ export const budget = {
     rateShape: "Rate must be a positive number such as 0.92",
   },
   dashboard: {
-    title: "Budget dashboard",
+    // The rail's label (coordinator ruling 1).
+    title: "IT budget",
     description: "Plan against actuals by category. The ERP stays the system of record.",
+    // With the client the figures are for (budget is one client at a time).
+    descriptionFor: "Plan against actuals by category for {client}. The ERP stays the system of record.",
     budget: "Budget",
     unconvertible: {
       one: "{count} expense could not be converted to the base currency and is excluded from {scope}.",
@@ -271,6 +281,14 @@ export const budget = {
     yearNegative: "Fiscal year cannot be negative; budgets run from 2000 to 2100",
     yearShape: "Fiscal year must be a four-digit year such as 2026",
     yearRange: "Fiscal year must be between 2000 and 2100",
+    // The budget open, as the head's chip, and the list to choose from (redesign Task 11, 6.3).
+    budgetChip: "Budget",
+    // Said on screen when a budget is created while the open plan holds changes (fix round 2, N1).
+    createdAside: "{name} was created. It is in the Budget chip above; this plan stays open with its changes.",
+    chooseBudget: "Choose a budget",
+    budgetOption: "{name} (FY{year})",
+    listLabel: "Budgets",
+    detailsReadOnly: "{name}, fiscal year {year}. Changing it needs permission to manage budgets.",
     detailsTitle: "Budget details",
     closedNotice: "This budget is closed. Its lines are frozen and it cannot be reopened.",
     status: "Status",
@@ -280,7 +298,6 @@ export const budget = {
     closeSubject: "{name} (FY{year})",
     closeBody: "Freezes every planned amount in this budget. A closed budget cannot be reopened.",
     gridTitle: "Planned amounts",
-    saveGrid: "Save grid",
     gridEmpty: "No active categories to plan against.",
     colCategory: "Category",
     cellAria: "{category} period {period}",

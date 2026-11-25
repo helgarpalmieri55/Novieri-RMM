@@ -1,16 +1,44 @@
-import { useState } from "react";
+/**
+ * A person: what they hold, their sign-in, their tickets and their starter
+ * and leaver checklists.
+ *
+ * ON THE RECORD KIT (redesign Task 11, 6.7; Receta F). The head is the kit's
+ * `DetailHead`: the name, the status, job title and department as context,
+ * and "Edit" with the two checklists as its actions. Three tiles say what
+ * they hold, each a link to the tab where it lives. The seven panels that
+ * were stacked one under another are grouped in `?tab=` tabs, so a tab
+ * reloads and links: computers (the default, with the details and the
+ * sign-in beside them), licences and subscriptions, tickets, and history.
+ * An open checklist stays above the tabs: it is the work in progress, on
+ * whichever tab is open.
+ *
+ * The tab says "<name> · Person · Novieri RMM" (`useRecordTitle`): the page
+ * lives under Devices in the rail, as `shell.nav.page.person`.
+ */
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { describeSubmitError, Form, FormActions } from "../../components/form";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import type { MessageKey } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseStatus } from "../../lib/labels";
 import { roleChipName } from "../settings/types";
 import { ticketStatusLabel } from "../service-desk/serviceDeskState";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  DetailGrid,
+  DetailHead,
+  Panel,
+  QueryState,
+  StatCard,
+  StatsGrid,
+  UrlTabs,
+  useUrlTab,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { KV } from "../../shell/viz";
 import {
   useCan,
@@ -40,7 +68,28 @@ type Pending =
   | { kind: "licence"; id: string; name: string }
   | { kind: "sign-in"; id: string; name: string; account: AccountOut["kind"] };
 
+/** The record's tabs; computers are the default and write nothing to the URL. */
+const TABS = ["equipment", "licenses", "tickets", "history"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_LABEL: Record<Tab, MessageKey> = {
+  equipment: "people.person.tabs.equipment",
+  licenses: "people.person.tabs.licenses",
+  tickets: "people.person.tabs.tickets",
+  history: "people.person.tabs.history",
+};
+
 export function PersonPage() {
+  const { personId } = useParams<{ personId: string }>();
+  // ONE PERSON, ONE PAGE (general ruling 12). Another person under the same
+  // route keeps the element mounted, and with it an open Edit and what was
+  // typed there, which Save would then write onto the person now shown.
+  // Keyed by the person, the page starts again: nothing typed for one person
+  // carries to the next.
+  return <PersonRecord key={personId} />;
+}
+
+function PersonRecord() {
   const t = useT();
   const { personId } = useParams<{ personId: string }>();
   const person = usePerson(personId);
@@ -51,9 +100,12 @@ export function PersonPage() {
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState<ChecklistKind | null>(null);
   const start = useStartChecklist(personId ?? "");
+  const [tab, setTab] = useUrlTab<Tab>(TABS, "equipment");
+  const data = person.data;
+  useRecordTitle(data?.person.display_name);
 
   if (!personId) return null;
-  const data = person.data;
+  const here = `/people/${personId}`;
 
   return (
     <div>
@@ -65,15 +117,15 @@ export function PersonPage() {
       >
         {data ? (
           <>
-            <PageHead
+            <DetailHead
+              // No "All people": that list left on 2026-09-23 and its URL
+              // redirects to Devices, which is where the rail keeps this page.
+              back={{ to: "/devices", label: t("people.person.back") }}
               title={data.person.display_name}
-              description={[data.person.job_title, data.person.department, data.person.email]
-                .filter(Boolean)
-                .join(" · ")}
+              status={{ kind: STATUS_KIND[data.person.status], label: STATUS_LABEL[data.person.status] }}
+              context={[data.person.job_title, data.person.department].filter(Boolean).join(" · ") || undefined}
               actions={
                 <>
-                  {/* No "All people": that list left on 2026-09-23 and its
-                      URL redirects to Devices, which the crumb already names. */}
                   {canManage ? (
                     <Button variant="outline" onClick={() => setEditing(true)}>
                       {t("people.person.edit")}
@@ -92,13 +144,8 @@ export function PersonPage() {
                 </>
               }
             />
-            <div className="flex flex-wrap items-center gap-2" style={{ margin: "-8px 0 14px" }}>
-              <StatusPill
-                value={data.person.status}
-                label={STATUS_LABEL[data.person.status]}
-                kind={STATUS_KIND[data.person.status]}
-              />
-            </div>
+
+            <HoldingTiles data={data} here={here} />
 
             {start.isError && (
               <p role="alert" className="form-error">
@@ -115,48 +162,14 @@ export function PersonPage() {
               />
             ) : null}
 
-            <Holdings data={data} zone={zone} />
-
-            <Panel title={t("people.person.details.title")}>
-              <KV
-                items={[
-                  [t("people.person.details.email"), data.person.email ?? <NoValue label={t("people.person.details.noEmail")} />],
-                  [
-                    t("people.person.details.department"),
-                    data.person.department ?? <NoValue label={t("people.person.details.notRecorded")} />,
-                  ],
-                  [
-                    t("people.person.details.jobTitle"),
-                    data.person.job_title ?? <NoValue label={t("people.person.details.notRecorded")} />,
-                  ],
-                  [t("people.person.details.started"), formatDate(data.person.start_date, "UTC")],
-                  [t("people.person.details.left"), formatDate(data.person.end_date, "UTC")],
-                  [
-                    t("people.person.details.signsInAs"),
-                    data.logins.length ? (
-                      <span className="mono">{data.logins.map((l) => l.login).join(", ")}</span>
-                    ) : (
-                      <NoValue label={t("people.person.details.loginsLearned")} />
-                    ),
-                  ],
-                ]}
-              />
-            </Panel>
-
-            {data.past_checklists.length > 0 ? (
-              <Panel title={t("people.person.past.title")}>
-                <ul>
-                  {data.past_checklists.map((c) => (
-                    <li key={c.id}>
-                      {t(c.status === "completed" ? "people.person.past.finished" : "people.person.past.cancelled", {
-                        kind: CHECKLIST_LABEL[c.kind as ChecklistKind] ?? humaniseStatus(c.kind),
-                        date: formatDateTime(c.closed_at, zone),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
-            ) : null}
+            <UrlTabs
+              label={t("people.person.tabs.label")}
+              items={TABS.map((key) => ({ key, label: t(TAB_LABEL[key]) }))}
+              active={tab}
+              onSelect={setTab}
+            >
+              <Holdings data={data} zone={zone} tab={tab} />
+            </UrlTabs>
 
             {/* Mounted only while open, so the form starts from the saved values. */}
             {editing ? (
@@ -182,8 +195,115 @@ export function PersonPage() {
   );
 }
 
+/**
+ * What they hold, as three numbers that each lead to the tab listing them. A
+ * section the person may not see (`null` from the server) has no tile: its
+ * count is not known, and a zero would be invented (the Absent Zero Rule).
+ */
+function HoldingTiles({ data, here }: { data: PersonDetailOut; here: string }) {
+  const t = useT();
+  return (
+    <StatsGrid columns={3}>
+      <StatCard label={t("people.person.tiles.computers")} value={String(data.devices.length)} icon="devices" to={here} />
+      {data.licences != null ? (
+        <StatCard
+          label={t("people.person.tiles.licences")}
+          value={String(data.licences.length)}
+          icon="license"
+          to={`${here}?tab=licenses`}
+        />
+      ) : null}
+      {data.seats != null ? (
+        <StatCard
+          label={t("people.person.tiles.seats")}
+          value={String(data.seats.length)}
+          icon="subscription"
+          to={`${here}?tab=licenses`}
+        />
+      ) : null}
+    </StatsGrid>
+  );
+}
+
+/**
+ * A value that may be one long word (an address, a sign-in name): it breaks
+ * where it must rather than run past the narrow column beside the computers,
+ * where the panel clipped it (the wave's critique, P1). `anywhere` and not
+ * `break-word`, because only `anywhere` lets the column's grid track shrink.
+ */
+function LongValue({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
+  return (
+    <span className={mono ? "mono" : undefined} style={{ overflowWrap: "anywhere" }}>
+      {children}
+    </span>
+  );
+}
+
+/** The details of the person: who they are, beside what they hold. */
+function DetailsPanel({ data }: { data: PersonDetailOut }) {
+  const t = useT();
+  return (
+    <Panel title={t("people.person.details.title")}>
+      <KV
+        items={[
+          [
+            t("people.person.details.email"),
+            data.person.email ? <LongValue>{data.person.email}</LongValue> : <NoValue label={t("people.person.details.noEmail")} />,
+          ],
+          [
+            t("people.person.details.department"),
+            data.person.department ?? <NoValue label={t("people.person.details.notRecorded")} />,
+          ],
+          [
+            t("people.person.details.jobTitle"),
+            data.person.job_title ?? <NoValue label={t("people.person.details.notRecorded")} />,
+          ],
+          [t("people.person.details.started"), formatDate(data.person.start_date, "UTC")],
+          [t("people.person.details.left"), formatDate(data.person.end_date, "UTC")],
+          [
+            t("people.person.details.signsInAs"),
+            data.logins.length ? (
+              <LongValue mono>{data.logins.map((l) => l.login).join(", ")}</LongValue>
+            ) : (
+              <NoValue label={t("people.person.details.loginsLearned")} />
+            ),
+          ],
+        ]}
+      />
+    </Panel>
+  );
+}
+
+/** The checklists that have finished or been cancelled. */
+function PastChecklists({ data, zone }: { data: PersonDetailOut; zone: string | null | undefined }) {
+  const t = useT();
+  return (
+    <Panel title={t("people.person.past.title")}>
+      {data.past_checklists.length === 0 ? (
+        <p className="note">{t("people.person.past.none")}</p>
+      ) : (
+        <ul>
+          {data.past_checklists.map((c) => (
+            <li key={c.id}>
+              {t(c.status === "completed" ? "people.person.past.finished" : "people.person.past.cancelled", {
+                kind: CHECKLIST_LABEL[c.kind as ChecklistKind] ?? humaniseStatus(c.kind),
+                date: formatDateTime(c.closed_at, zone),
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
 /** Sign-in, computers, licences, subscriptions and tickets. */
-function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null | undefined }) {
+/**
+ * Sign-in, computers, licences, subscriptions and tickets, on the tab that
+ * shows them. One component for every tab, so the release and turn-off
+ * confirmations and their failures are the same wherever they start.
+ */
+function Holdings({ data, zone, tab }: { data: PersonDetailOut; zone: string | null | undefined; tab: Tab }) {
   const t = useT();
   const personId = data.person.id;
   // Staff are switched off in Settings, through a route of configuration every
@@ -201,6 +321,210 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
   const [pending, setPending] = useState<Pending | null>(null);
   const failure = releaseSeat.error ?? releaseLicence.error ?? turnOff.error;
 
+  const signIn = (
+    <Panel
+      title={t("people.holdings.signIn.title")}
+      actions={
+        canTurnOff && data.account?.status === "active" ? (
+          <Button
+            variant="outline"
+            onClick={() =>
+              data.account &&
+              setPending({
+                kind: "sign-in",
+                id: data.account.user_id,
+                name: data.account.email,
+                account: data.account.kind,
+              })
+            }
+          >
+            {t("people.holdings.signIn.turnOff")}
+          </Button>
+        ) : undefined
+      }
+    >
+      {data.account ? (
+        <KV
+          items={[
+            [t("people.holdings.signIn.account"), <LongValue>{data.account.email}</LongValue>],
+            [t("people.holdings.signIn.status"), accountStatusLabel(data.account.status)],
+            [t("people.holdings.signIn.lastSignedIn"), formatDateTime(data.account.last_login_at, zone)],
+            [
+              t("people.holdings.signIn.uses"),
+              t(data.account.console ? "people.holdings.signIn.usesBoth" : "people.holdings.signIn.usesPortal"),
+            ],
+            ...(data.account.roles
+              ? ([
+                  [t("people.holdings.signIn.roles"), data.account.roles.map(roleChipName).join(", ") || t("people.holdings.signIn.noRoles")],
+                ] as const)
+              : []),
+          ]}
+        />
+      ) : (
+        <p className="note">
+          <Trans
+            k="people.holdings.signIn.none"
+            components={{ link: <Link className="underline" to="/settings" /> }}
+          />
+        </p>
+      )}
+    </Panel>
+  );
+  const computers = (
+    <Panel title={t("people.holdings.computers.title")} bare>
+      {data.devices.length === 0 ? (
+        <p className="note" style={{ padding: 16 }}>
+          {t("people.holdings.computers.empty")}
+        </p>
+      ) : (
+        <Table label={t("people.holdings.computers.title")}>
+          <thead>
+            <tr>
+              <Th>{t("people.holdings.computers.computer")}</Th>
+              <Th>{t("people.holdings.computers.state")}</Th>
+              <Th>{t("people.holdings.computers.group")}</Th>
+              <Th>{t("people.holdings.computers.howWeKnow")}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.devices.map((device) => (
+              <tr key={device.device_id}>
+                <Td>
+                  <Link to={`/devices/${device.device_id}`}>{device.hostname ?? t("people.holdings.computers.unnamed")}</Link>
+                </Td>
+                <Td>{lifecycleLabel(device.lifecycle)}</Td>
+                <Td>{device.group_name ?? <NoValue label={t("people.holdings.computers.noGroup")} />}</Td>
+                <Td>{linkSourceLabel(device.source)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Panel>
+  );
+  const licences = (
+    <Panel title={t("people.holdings.licences.title")} bare>
+      {data.licences == null ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.licences.hidden")}</p>
+      ) : data.licences.length === 0 ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.licences.empty")}</p>
+      ) : (
+        <Table label={t("people.holdings.licences.title")}>
+          <thead>
+            <tr>
+              <Th>{t("people.holdings.licences.product")}</Th>
+              <Th>{t("people.holdings.licences.held")}</Th>
+              <Th>{t("people.holdings.licences.since")}</Th>
+              <Th>{canLicences ? t("people.holdings.licences.takeBack") : ""}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.licences.map((licence) => (
+              <tr key={licence.allocation_id}>
+                <Td>
+                  <Link to={`/licenses/${licence.license_id}`}>{licence.product_name}</Link>
+                </Td>
+                <Td>{t(licence.through_device_id ? "people.holdings.licences.throughComputer" : "people.holdings.licences.byThem")}</Td>
+                <Td>{formatDateTime(licence.allocated_at, zone)}</Td>
+                <Td>
+                  {canLicences ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() =>
+                        setPending({
+                          kind: "licence",
+                          id: licence.allocation_id,
+                          name: licence.product_name,
+                        })
+                      }
+                    >
+                      {t("people.holdings.licences.release")}
+                    </Button>
+                  ) : null}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Panel>
+  );
+  const subscriptions = (
+    <Panel title={t("people.holdings.subscriptions.title")} bare>
+      {data.seats == null ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.subscriptions.hidden")}</p>
+      ) : data.seats.length === 0 ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.subscriptions.empty")}</p>
+      ) : (
+        <Table label={t("people.holdings.subscriptions.title")}>
+          <thead>
+            <tr>
+              <Th>{t("people.holdings.subscriptions.service")}</Th>
+              <Th>{t("people.holdings.subscriptions.plan")}</Th>
+              <Th>{t("people.holdings.subscriptions.since")}</Th>
+              <Th>{canSeats ? t("people.holdings.subscriptions.takeBack") : ""}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.seats.map((seat) => (
+              <tr key={seat.seat_id}>
+                <Td>
+                  <Link to={`/subscriptions/${seat.subscription_id}`}>{seat.service_name}</Link>
+                </Td>
+                <Td>{seat.plan || <NoValue label={t("people.holdings.subscriptions.noPlan")} />}</Td>
+                <Td>{formatDateTime(seat.assigned_at, zone)}</Td>
+                <Td>
+                  {canSeats ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() =>
+                        setPending({ kind: "seat", id: seat.seat_id, name: seat.service_name })
+                      }
+                    >
+                      {t("people.holdings.subscriptions.release")}
+                    </Button>
+                  ) : null}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Panel>
+  );
+  const tickets = (
+    <Panel title={t("people.holdings.tickets.title")} bare>
+      {data.tickets == null ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.tickets.hidden")}</p>
+      ) : data.tickets.length === 0 ? (
+        <p className="note" style={{ padding: 16 }}>{t("people.holdings.tickets.empty")}</p>
+      ) : (
+        <Table label={t("people.holdings.tickets.title")}>
+          <thead>
+            <tr>
+              <Th>{t("people.holdings.tickets.ticket")}</Th>
+              <Th>{t("people.holdings.tickets.subject")}</Th>
+              <Th>{t("people.holdings.tickets.status")}</Th>
+              <Th>{t("people.holdings.tickets.raised")}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.tickets.map((ticket) => (
+              <tr key={ticket.ticket_id}>
+                <Td>
+                  <Link to={`/service-desk/tickets/${ticket.ticket_id}`}>{ticket.number}</Link>
+                </Td>
+                <Td>{ticket.subject}</Td>
+                <Td>{ticketStatusLabel(ticket.status)}</Td>
+                <Td>{formatDateTime(ticket.created_at, zone)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Panel>
+  );
+
   return (
     <>
       {failure ? (
@@ -209,203 +533,26 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
         </p>
       ) : null}
 
-      <Panel
-        title={t("people.holdings.signIn.title")}
-        actions={
-          canTurnOff && data.account?.status === "active" ? (
-            <Button
-              variant="outline"
-              onClick={() =>
-                data.account &&
-                setPending({
-                  kind: "sign-in",
-                  id: data.account.user_id,
-                  name: data.account.email,
-                  account: data.account.kind,
-                })
-              }
-            >
-              {t("people.holdings.signIn.turnOff")}
-            </Button>
-          ) : undefined
-        }
-      >
-        {data.account ? (
-          <KV
-            items={[
-              [t("people.holdings.signIn.account"), data.account.email],
-              [t("people.holdings.signIn.status"), accountStatusLabel(data.account.status)],
-              [t("people.holdings.signIn.lastSignedIn"), formatDateTime(data.account.last_login_at, zone)],
-              [
-                t("people.holdings.signIn.uses"),
-                t(data.account.console ? "people.holdings.signIn.usesBoth" : "people.holdings.signIn.usesPortal"),
-              ],
-              ...(data.account.roles
-                ? ([
-                    [t("people.holdings.signIn.roles"), data.account.roles.map(roleChipName).join(", ") || t("people.holdings.signIn.noRoles")],
-                  ] as const)
-                : []),
-            ]}
-          />
-        ) : (
-          <p className="note">
-            <Trans
-              k="people.holdings.signIn.none"
-              components={{ link: <Link className="underline" to="/settings" /> }}
-            />
-          </p>
-        )}
-      </Panel>
-
-      <Panel title={t("people.holdings.computers.title")} bare>
-        {data.devices.length === 0 ? (
-          <p className="note" style={{ padding: 16 }}>
-            {t("people.holdings.computers.empty")}
-          </p>
-        ) : (
-          <Table label={t("people.holdings.computers.title")}>
-            <thead>
-              <tr>
-                <Th>{t("people.holdings.computers.computer")}</Th>
-                <Th>{t("people.holdings.computers.state")}</Th>
-                <Th>{t("people.holdings.computers.group")}</Th>
-                <Th>{t("people.holdings.computers.howWeKnow")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.devices.map((device) => (
-                <tr key={device.device_id}>
-                  <Td>
-                    <Link to={`/devices/${device.device_id}`}>{device.hostname ?? t("people.holdings.computers.unnamed")}</Link>
-                  </Td>
-                  <Td>{lifecycleLabel(device.lifecycle)}</Td>
-                  <Td>{device.group_name ?? <NoValue label={t("people.holdings.computers.noGroup")} />}</Td>
-                  <Td>{linkSourceLabel(device.source)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Panel>
-
-      <Panel title={t("people.holdings.licences.title")} bare>
-        {data.licences == null ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.licences.hidden")}</p>
-        ) : data.licences.length === 0 ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.licences.empty")}</p>
-        ) : (
-          <Table label={t("people.holdings.licences.title")}>
-            <thead>
-              <tr>
-                <Th>{t("people.holdings.licences.product")}</Th>
-                <Th>{t("people.holdings.licences.held")}</Th>
-                <Th>{t("people.holdings.licences.since")}</Th>
-                <Th>{canLicences ? t("people.holdings.licences.takeBack") : ""}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.licences.map((licence) => (
-                <tr key={licence.allocation_id}>
-                  <Td>
-                    <Link to={`/licenses/${licence.license_id}`}>{licence.product_name}</Link>
-                  </Td>
-                  <Td>{t(licence.through_device_id ? "people.holdings.licences.throughComputer" : "people.holdings.licences.byThem")}</Td>
-                  <Td>{formatDateTime(licence.allocated_at, zone)}</Td>
-                  <Td>
-                    {canLicences ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() =>
-                          setPending({
-                            kind: "licence",
-                            id: licence.allocation_id,
-                            name: licence.product_name,
-                          })
-                        }
-                      >
-                        {t("people.holdings.licences.release")}
-                      </Button>
-                    ) : null}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Panel>
-
-      <Panel title={t("people.holdings.subscriptions.title")} bare>
-        {data.seats == null ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.subscriptions.hidden")}</p>
-        ) : data.seats.length === 0 ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.subscriptions.empty")}</p>
-        ) : (
-          <Table label={t("people.holdings.subscriptions.title")}>
-            <thead>
-              <tr>
-                <Th>{t("people.holdings.subscriptions.service")}</Th>
-                <Th>{t("people.holdings.subscriptions.plan")}</Th>
-                <Th>{t("people.holdings.subscriptions.since")}</Th>
-                <Th>{canSeats ? t("people.holdings.subscriptions.takeBack") : ""}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.seats.map((seat) => (
-                <tr key={seat.seat_id}>
-                  <Td>
-                    <Link to={`/subscriptions/${seat.subscription_id}`}>{seat.service_name}</Link>
-                  </Td>
-                  <Td>{seat.plan || <NoValue label={t("people.holdings.subscriptions.noPlan")} />}</Td>
-                  <Td>{formatDateTime(seat.assigned_at, zone)}</Td>
-                  <Td>
-                    {canSeats ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() =>
-                          setPending({ kind: "seat", id: seat.seat_id, name: seat.service_name })
-                        }
-                      >
-                        {t("people.holdings.subscriptions.release")}
-                      </Button>
-                    ) : null}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Panel>
-
-      <Panel title={t("people.holdings.tickets.title")} bare>
-        {data.tickets == null ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.tickets.hidden")}</p>
-        ) : data.tickets.length === 0 ? (
-          <p className="note" style={{ padding: 16 }}>{t("people.holdings.tickets.empty")}</p>
-        ) : (
-          <Table label={t("people.holdings.tickets.title")}>
-            <thead>
-              <tr>
-                <Th>{t("people.holdings.tickets.ticket")}</Th>
-                <Th>{t("people.holdings.tickets.subject")}</Th>
-                <Th>{t("people.holdings.tickets.status")}</Th>
-                <Th>{t("people.holdings.tickets.raised")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.tickets.map((ticket) => (
-                <tr key={ticket.ticket_id}>
-                  <Td>
-                    <Link to={`/service-desk/tickets/${ticket.ticket_id}`}>{ticket.number}</Link>
-                  </Td>
-                  <Td>{ticket.subject}</Td>
-                  <Td>{ticketStatusLabel(ticket.status)}</Td>
-                  <Td>{formatDateTime(ticket.created_at, zone)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Panel>
+      {tab === "equipment" ? (
+        <DetailGrid
+          main={computers}
+          aside={
+            <>
+              <DetailsPanel data={data} />
+              {signIn}
+            </>
+          }
+        />
+      ) : tab === "licenses" ? (
+        <>
+          {licences}
+          {subscriptions}
+        </>
+      ) : tab === "tickets" ? (
+        tickets
+      ) : (
+        <PastChecklists data={data} zone={zone} />
+      )}
 
       <ConfirmDialog
         open={pending != null}
@@ -464,23 +611,34 @@ function EditPersonDialog({
   const [startDate, setStartDate] = useState(person.start_date ?? "");
   const [endDate, setEndDate] = useState(person.end_date ?? "");
 
+  function submit() {
+    const body = {
+      display_name: name.trim(),
+      email: email.trim() || null,
+      department: department.trim() || null,
+      job_title: jobTitle.trim() || null,
+      start_date: startDate || null,
+      end_date: endDate || null,
+    };
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit
+    // entry (general ruling 13). Compared as the server would store it.
+    const unchanged =
+      body.display_name === person.display_name &&
+      body.email === (person.email ?? null) &&
+      body.department === (person.department ?? null) &&
+      body.job_title === (person.job_title ?? null) &&
+      body.start_date === (person.start_date ?? null) &&
+      body.end_date === (person.end_date ?? null);
+    if (unchanged) {
+      onClose();
+      return;
+    }
+    update.mutate(body, { onSuccess: onClose });
+  }
+
   return (
     <Dialog open={open} onClose={onClose} title={t("people.edit.title")}>
-      <Form
-        onSubmit={() =>
-          update.mutate(
-            {
-              display_name: name.trim(),
-              email: email.trim() || null,
-              department: department.trim() || null,
-              job_title: jobTitle.trim() || null,
-              start_date: startDate || null,
-              end_date: endDate || null,
-            },
-            { onSuccess: onClose },
-          )
-        }
-      >
+      <Form onSubmit={submit}>
         <div className="form-grid">
           <Field label={t("people.edit.name")}>
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />

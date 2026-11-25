@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
@@ -34,7 +34,22 @@ import {
   costCenterPickerOptions,
 } from "./pickerOptions";
 import type { ExpenseListFilters, ExpenseOut } from "./types";
-import { FilterBar, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
+import { useEditParam, useReportDirty } from "./dialogParams";
 import { Icon } from "../../shell/icons";
 import { humaniseEnum } from "../../lib/labels";
 
@@ -88,13 +103,28 @@ function isoDate(value: string): string | null {
   return null;
 }
 
+/**
+ * The expense ledger of the client chosen at the top.
+ *
+ * ON THE LIST KIT (redesign Task 11, 6.4; Receta L). The status, the
+ * category and the date range were `useState`; they are the URL now
+ * (`?status=`, `?category=`, `?from=`, `?to=`), sent as the same fields as
+ * before (`status`, `category_id`, `date_from`, `date_to`), so a filtered
+ * ledger reloads and links. Status is a row of chips (no count: the server
+ * sends none), the category the kit's chip with a list, the dates two fields
+ * in the same bar. "New expense" opens from `?new=expense` (decision D8) and
+ * a row's Edit from `?edit=<id>`; each dialog starts from what it opens on,
+ * and the page's one guard asks before Back or Close drop what was typed.
+ * No Client chip (decision D25): budget is one client at a time.
+ */
 export function ExpensesPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.expenses.title"));
   const api = useApi();
-  const [creating, setCreating] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<ExpenseOut | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const filters = useUrlFilters(["status", "category", "from", "to"] as const);
+  const created = useNewParam("expense");
+  const editing = useEditParam();
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -105,13 +135,37 @@ export function ExpensesPage() {
   const categories = useBudgetCategories();
   const categoryName = (id: string) => categories.data?.find((c) => c.id === id)?.name ?? id;
 
-  const filters: ExpenseListFilters = {
-    status: statusFilter || undefined,
-    category_id: categoryFilter || undefined,
+  const listFilters: ExpenseListFilters = {
+    status: filters.values.status || undefined,
+    category_id: filters.values.category || undefined,
+    date_from: filters.values.from || undefined,
+    date_to: filters.values.to || undefined,
   };
-  const expenses = useExpenses(filters);
+  const expenses = useExpenses(listFilters);
   const uploadAttachment = useUploadExpenseAttachmentMutation();
   const items = expenses.data ?? [];
+  const editingExpense = canRecord ? items.find((expense) => expense.id === editing.id && expense.status !== "void") : undefined;
+  // AN `?edit=` THAT OPENS NOTHING LEAVES THE URL (fix round 1, M10). Once
+  // the ledger and /me have answered, an id the ledger does not hold (outside
+  // the filter, voided, gone) or one this person may not edit is removed in
+  // place, rather than sitting in the address doing nothing. No new read:
+  // the API is asked what it was asked before.
+  const editNamesNothing =
+    editing.id !== "" && expenses.data !== undefined && me.data !== undefined && editingExpense === undefined;
+  const dropEdit = editing.drop;
+  useEffect(() => {
+    if (editNamesNothing) dropEdit();
+  }, [editNamesNothing, dropEdit]);
+
+  // THE PAGE'S ONE GUARD: the New and the Edit dialogs each say whether they
+  // hold changes; closing either one (`?new=`, `?edit=`) is leaving it.
+  const [newDirty, setNewDirty] = useState(false);
+  const [editDirty, setEditDirty] = useState(false);
+  const { guard, release } = useUnsavedGuard(newDirty || editDirty, { search: ["new", "edit"] });
+
+  const newExpense = canRecord ? (
+    <Btn label={t("budget.expenses.newExpense")} icon="plus" variant="primary" onClick={created.start} />
+  ) : undefined;
 
   // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
   // is no base currency to add these figures in, so the page asks for one.
@@ -133,12 +187,7 @@ export function ExpensesPage() {
         actions={
           <>
             {canRecord && <MaterializeControl />}
-            {canRecord && (
-              <Button onClick={() => setCreating(true)}>
-                <Icon name="plus" size={14} />
-                {t("budget.expenses.newExpense")}
-              </Button>
-            )}
+            {newExpense}
           </>
         }
       />
@@ -146,77 +195,103 @@ export function ExpensesPage() {
       <BudgetPageNav canRead={canRead} />
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            aria-label={t("budget.expenses.filterStatus")}
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            {STATUS_FILTERS.map((s) => (
-              <option key={s} value={s}>
-                {s === "" ? t("budget.expenses.allStatuses") : humaniseEnum(s, "ExpenseStatus")}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("budget.expenses.filterCategory")}
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-          >
-            <option value="">{t("budget.expenses.allCategories")}</option>
-            {categories.data?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-          {expenses.data ? <span className="note">{t("budget.expenses.count", { count: items.length })}</span> : null}
-        </FilterBar>
-
-        <QueryState
-          loading={expenses.isLoading}
-          error={expenses.error}
-          empty={items.length === 0}
-          emptyLabel={t("budget.expenses.empty")}
-          emptyIcon="budget"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("budget.expenses.colExpense")}</Th>
-                <Th>{t("budget.expenses.colAmount")}</Th>
-                <Th>{t("budget.expenses.colStatus")}</Th>
-                <Th>{t("budget.expenses.colSource")}</Th>
-                <Th>{t("budget.expenses.colDate")}</Th>
-                <Th>{t("budget.expenses.colAttachment")}</Th>
-                {canRecord && <Th />}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((expense) => (
-                <ExpenseRow
-                  key={expense.id}
-                  expense={expense}
-                  categoryName={categoryName(expense.category_id)}
-                  canRecord={canRecord}
-                  onUpload={(file) => uploadAttachment.mutate({ id: expense.id, file })}
-                  onEdit={() => setEditingExpense(expense)}
+        <ListToolbar
+          chips={
+            <>
+              <FilterChips
+                label={t("budget.expenses.filterStatus")}
+                options={STATUS_FILTERS.map((status) => ({
+                  value: status,
+                  label: status === "" ? t("budget.expenses.allStatuses") : humaniseEnum(status, "ExpenseStatus"),
+                }))}
+                value={filters.values.status}
+                onChange={(value) => filters.set("status", value)}
+              />
+              {/* The category as the kit's chip with a list, like the Client chip. */}
+              <span className={filters.values.category === "" ? "chip chip-select" : "chip chip-select on"}>
+                <span aria-hidden="true">{t("budget.common.category")}</span>
+                <select
+                  aria-label={t("budget.expenses.filterCategory")}
+                  value={filters.values.category}
+                  onChange={(e) => filters.set("category", e.target.value)}
+                >
+                  <option value="">{t("budget.expenses.allCategories")}</option>
+                  {categories.data?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </span>
+              {/* The range: two calendar dates, sent as `date_from` and `date_to`. */}
+              <label className="flex items-center gap-2">
+                <span className="note">{t("budget.expenses.filterFrom")}</span>
+                <input
+                  type="date"
+                  className="select-field"
+                  value={filters.values.from}
+                  onChange={(e) => filters.set("from", e.target.value, { replace: true })}
                 />
-              ))}
-            </tbody>
-          </Table>
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="note">{t("budget.expenses.filterTo")}</span>
+                <input
+                  type="date"
+                  className="select-field"
+                  value={filters.values.to}
+                  onChange={(e) => filters.set("to", e.target.value, { replace: true })}
+                />
+              </label>
+            </>
+          }
+          // The server sends the ledger without a total, so the count says what is shown.
+          end={expenses.data ? <ShowingCount shown={items.length} total={null} /> : null}
+        />
+
+        <QueryState loading={expenses.isLoading} error={expenses.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("budget.expenses.empty")}
+              icon="budget"
+              action={newExpense}
+            />
+          ) : (
+            <Table label={t("budget.expenses.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("budget.expenses.colExpense")}</Th>
+                  <Th>{t("budget.expenses.colAmount")}</Th>
+                  <Th>{t("budget.expenses.colStatus")}</Th>
+                  <Th>{t("budget.expenses.colSource")}</Th>
+                  <Th>{t("budget.expenses.colDate")}</Th>
+                  <Th>{t("budget.expenses.colAttachment")}</Th>
+                  {canRecord && <Th />}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((expense) => (
+                  <ExpenseRow
+                    key={expense.id}
+                    expense={expense}
+                    categoryName={categoryName(expense.category_id)}
+                    canRecord={canRecord}
+                    onUpload={(file) => {
+                      uploadAttachment.reset();
+                      uploadAttachment.mutate({ id: expense.id, file });
+                    }}
+                    onEdit={() => editing.start(expense.id)}
+                  />
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
 
-        {/* SWALLOWED ENTIRELY BEFORE THIS. `uploadAttachment.mutate(...)` had
-            no `onError` and its state was rendered nowhere, so a refused
-            upload -- 413 for an oversized invoice, 403, 503 from a proxy --
-            looked exactly like a successful one: the file dialog closed, the
-            row did not change, and the operator had no reason to think the
-            invoice was not attached until an audit asked for it.
-            Auditor A's swallowed-failure class, on this route. */}
+        {/* SWALLOWED ENTIRELY BEFORE THIS. A refused upload -- 413 for an
+            oversized invoice, 403, a proxy's 503 -- looked exactly like a
+            successful one. Auditor A's swallowed-failure class, on this route. */}
         {uploadAttachment.isError && (
           <p role="alert" className="notice red" style={{ margin: 12 }}>
             <Icon name="circle-x" size={16} />
@@ -230,14 +305,32 @@ export function ExpensesPage() {
         )}
       </Panel>
 
-      <NewExpenseDialog open={creating} onClose={() => setCreating(false)} />
+      {/* KEYED on being open, so it starts empty however it opens (the
+          button, a link, Back or Forward). Only for someone who may record one. */}
+      <NewExpenseDialog
+        key={created.open && canRecord ? "open" : "closed"}
+        open={created.open && canRecord}
+        onClose={created.close}
+        onDirty={setNewDirty}
+        onSaved={() => {
+          release();
+          created.close();
+        }}
+      />
       {editingExpense && (
         <EditExpenseDialog
           key={editingExpense.id}
           expense={editingExpense}
-          onClose={() => setEditingExpense(null)}
+          onClose={editing.close}
+          onDirty={setEditDirty}
+          onSaved={() => {
+            release();
+            editing.close();
+          }}
         />
       )}
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
 }
@@ -446,17 +539,31 @@ function ExpenseRow({
 // currency/category/cost-center edits are deliberately out of scope here --
 // the New/Edit split keeps this dialog from re-deriving the FX-conversion
 // side effects `update_expense` runs when amount/currency/date change.
-function EditExpenseDialog({ expense, onClose }: { expense: ExpenseOut; onClose: () => void }) {
+function EditExpenseDialog({
+  expense,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  expense: ExpenseOut;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onSaved: () => void;
+}) {
   const t = useT();
   const update = useUpdateExpenseMutation();
   const [description, setDescription] = useState(expense.description);
   const [invoiceRef, setInvoiceRef] = useState(expense.invoice_ref ?? "");
+  const dirty = description !== expense.description || invoiceRef !== (expense.invoice_ref ?? "");
+  useReportDirty(dirty, onDirty);
 
   function submit() {
-    update.mutate(
-      { id: expense.id, body: { description, invoice_ref: invoiceRef || null } },
-      { onSuccess: () => onClose() },
-    );
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    update.mutate({ id: expense.id, body: { description, invoice_ref: invoiceRef || null } }, { onSuccess: onSaved });
   }
 
   return (
@@ -493,7 +600,17 @@ function EditExpenseDialog({ expense, onClose }: { expense: ExpenseOut; onClose:
   );
 }
 
-function NewExpenseDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function NewExpenseDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onSaved: () => void;
+}) {
   const t = useT();
   const create = useCreateExpenseMutation();
   const categories = useBudgetCategories();
@@ -521,23 +638,23 @@ function NewExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   // the rules and the values they were checked against, worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
-  function reset() {
-    setExpenseDate(today);
-    setAmount("0.00");
-    setCurrency("USD");
-    setCategoryId("");
-    setCostCenterId("");
-    setDescription("");
-    setInvoiceRef("");
-    setAttempt(null);
-  }
+  // What would be lost: anything typed over the values it opened with. The
+  // page remounts this dialog each time it opens, so those are its defaults.
+  useReportDirty(
+    open &&
+      (expenseDate !== today ||
+        amount !== "0.00" ||
+        currency !== "USD" ||
+        categoryId !== "" ||
+        costCenterId !== "" ||
+        description !== "" ||
+        invoiceRef !== ""),
+    onDirty,
+  );
 
-  // ExpensesPage keeps this dialog mounted and toggles `open`, so without
-  // clearing the mutation a failure from one attempt sits in the form waiting
-  // to be read as the next one's.
+  // Mounted fresh on every open, so a failure from one attempt is never read
+  // as the next one's; a close only has to go.
   function close() {
-    create.reset();
-    setAttempt(null);
     onClose();
   }
 
@@ -562,7 +679,7 @@ function NewExpenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         invoice_ref: invoiceRef || null,
         status: "expected",
       },
-      { onSuccess: () => { reset(); close(); } },
+      { onSuccess: onSaved },
     );
   }
 

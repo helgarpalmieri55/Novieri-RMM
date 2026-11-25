@@ -8,9 +8,11 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { useT } from "../../i18n/context";
 import { useApproveChangeMutation, useChanges, useRejectChangeMutation, useUserTimezone } from "./api";
+import { ChangeSectionNav } from "./changeNav";
 import { changeStateKind, changeStateLabel, changeTypeLabel, riskKind, riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount, StatusPill } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 
 // Submitted changes awaiting an approve/reject decision. The approve/reject
@@ -20,8 +22,15 @@ import { Icon } from "../../shell/icons";
 // segregation-of-duties guard the backend enforces regardless
 // (app/modules/change_mgmt/state.py next_state: "approver cannot be the
 // change requester").
+//
+// ON THE LIST KIT (redesign Task 11, 6.2; Receta L, 8: a list with no
+// filter): the module's `SectionNav`, "Showing x of y", and an empty queue
+// that says why. It reads every client's changes (`useChanges()` with no
+// chip): the queue is a person's work across clients.
 export function ApprovalQueue() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("change.approvals.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canApprove = (me.data?.permissions ?? []).includes("change.approve");
@@ -32,45 +41,36 @@ export function ApprovalQueue() {
 
   return (
     <div>
-      <PageHead
-        title={t("change.approvals.title")}
-        description={t("change.approvals.description")}
-        actions={
-          <Link className="btn" to="/changes">
-            <Icon name="git-branch" size={14} />
-            {t("change.common.allChanges")}
-          </Link>
-        }
-      />
+      <PageHead title={t("change.approvals.title")} description={t("change.approvals.description")} />
+      <ChangeSectionNav />
       <Panel bare>
-        <QueryState
-          loading={changes.isLoading}
-          error={changes.error}
-          empty={submitted.length === 0}
-          emptyLabel={t("change.approvals.empty")}
-          emptyIcon="circle-check"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("change.common.name")}</Th>
-                <Th>{t("change.common.risk")}</Th>
-                <Th>{t("change.common.state")}</Th>
-                {canApprove && <Th>{t("change.approvals.decisionHeader")}</Th>}
-              </tr>
-            </thead>
-            <tbody>
-              {submitted.map((change) => (
-                <ApprovalRow
-                  key={change.id}
-                  change={change}
-                  zone={zone}
-                  canApprove={canApprove}
-                  isOwnChange={change.created_by === me.data?.user_id}
-                />
-              ))}
-            </tbody>
-          </Table>
+        <ListToolbar end={changes.data ? <ShowingCount shown={submitted.length} total={submitted.length} /> : null} />
+        <QueryState loading={changes.isPending} error={changes.error} empty={false} emptyLabel="">
+          {submitted.length === 0 ? (
+            <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("change.approvals.empty")} icon="circle-check" />
+          ) : (
+            <Table label={t("change.approvals.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("change.common.name")}</Th>
+                  <Th>{t("change.common.risk")}</Th>
+                  <Th>{t("change.common.state")}</Th>
+                  {canApprove && <Th>{t("change.approvals.decisionHeader")}</Th>}
+                </tr>
+              </thead>
+              <tbody>
+                {submitted.map((change) => (
+                  <ApprovalRow
+                    key={change.id}
+                    change={change}
+                    zone={zone}
+                    canApprove={canApprove}
+                    isOwnChange={change.created_by === me.data?.user_id}
+                  />
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
       </Panel>
     </div>
@@ -124,21 +124,35 @@ function ApprovalRow({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
             />
+            {/* Outline, as Reject beside it: a queue of twenty rows would be
+                twenty primaries, and the page may carry one (DESIGN.md; the
+                budget's confirmation queue does the same). */}
             <Button
+              variant="outline"
               disabled={approve.isPending || isOwnChange}
               title={isOwnChange ? t("change.approvals.ownChangeTitle") : undefined}
-              onClick={() => approve.mutate({ id: change.id, body: { comment: comment || null } })}
+              onClick={() => {
+                // A new attempt clears the other's refusal (general ruling 7).
+                reject.reset();
+                approve.mutate({ id: change.id, body: { comment: comment || null } });
+              }}
             >
               {t("change.common.approve")}
             </Button>
             <Button
               variant="outline"
               disabled={reject.isPending}
-              onClick={() => reject.mutate({ id: change.id, body: { comment: comment || null } })}
+              onClick={() => {
+                approve.reset();
+                reject.mutate({ id: change.id, body: { comment: comment || null } });
+              }}
             >
               {t("change.common.reject")}
             </Button>
           </div>
+          {/* The reason Approve will not move is on screen, not only in its
+              tooltip (general ruling 8). */}
+          {isOwnChange ? <p className="note mt-1">{t("change.approvals.ownChangeTitle")}</p> : null}
           {/* `{String(approve.error ?? reject.error)}` rendered
               "[object Object]", and for the bodyless 503 a proxy returns it
               rendered an EMPTY STRING -- an approval decision that never

@@ -1,4 +1,3 @@
-import { Link, useLocation } from "react-router-dom";
 import { EmptyState } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
@@ -6,6 +5,7 @@ import { useClientScope } from "../../lib/clientScope";
 import { humaniseStatus } from "../../lib/labels";
 import type { BadgeVariant } from "../jobs/jobState";
 import type { Kind } from "../../shell/viz";
+import { SectionNav } from "../../shell/components";
 
 // Expense.status vocabulary exactly as written by the backend
 // (backend/app/modules/budget/schema.py's `ExpenseStatus` Literal is
@@ -76,55 +76,24 @@ export const BUDGET_NAV_ITEMS: ReadonlyArray<{ to: string; label: string }> = [
 ];
 
 /**
- * The nav itself -- previously duplicated verbatim in all five page files
- * (a new surface or a markup change meant five synchronized edits). Every
- * budget page renders this one component instead.
+ * The nav itself, one component every budget page renders.
  *
- * WHY THE MARKUP CHANGED. Auditor B, [MEDIUM]: "All five tabs are `<button
- * class="btn">`. Checking ARIA: `role` = null on every tab, `aria-selected` =
- * null on every tab, and the container's role = null (no tablist) ... A screen
- * reader user hears five unrelated buttons with no indication that they form a
- * set, which one is active, or how many there are." And [LOW], the same bar:
- * "the control is a `<button>`, so it cannot be middle-clicked, opened in a new
- * tab, or copied via right-click" -- the finding notes the state IS addressable,
- * so the routing work was already done and being thrown away.
- *
- * Both are fixed by the shape this module's sibling already ships:
- * `licenses/licenseNav.tsx` renders `NavLink`s carrying `role="tab"` and the
- * design's `.tabs`/`.tab` classes. A `<button>` nested inside an `<a>` was also
- * invalid markup -- two interactive elements, one of them unreachable as a
- * link. `aria-selected` and `aria-current="page"` are both set from one
- * computed match, so assistive tech is told which tab is active by either
- * convention.
+ * THE KIT'S `SectionNav` NOW (redesign Task 11, "BudgetDashboard"; the
+ * waves' rule for module menus): one row of real links with the current page
+ * marked by `aria-current="page"`, the shape every module strip in the console
+ * takes. The earlier `role="tablist"` of links promised arrow keys and tab
+ * panels a navigation does not have. Same exported name, same labels, same
+ * permission: nothing for a reader without `budget.read`. `/budget` matches
+ * only itself (`end`), so the dashboard is not marked on the four pages under it.
  */
 export function BudgetPageNav({ canRead }: { canRead: boolean }) {
   const t = useT();
-  // `NavLink`'s own `isActive` is only available to `className`/`style`, and
-  // `aria-selected` needs it too -- so the match is computed once here, from
-  // the same rule `NavLink`'s `end` would apply: `/budget` is a prefix of every
-  // other budget route, so the Dashboard tab matches only itself.
-  const { pathname } = useLocation();
-  const isActive = (to: string) => (to === "/budget" ? pathname === to : pathname.startsWith(to));
-
   if (!canRead) return null;
   return (
-    <nav aria-label={t("budget.nav.label")} className="tabs" role="tablist">
-      {BUDGET_NAV_ITEMS.map((item) => {
-        const active = isActive(item.to);
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            role="tab"
-            aria-selected={active}
-            aria-current={active ? "page" : undefined}
-            className={`tab${active ? " active" : ""}`}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <SectionNav
+      label={t("budget.nav.label")}
+      items={BUDGET_NAV_ITEMS.map((item) => ({ to: item.to, label: item.label, end: item.to === "/budget" }))}
+    />
   );
 }
 
@@ -182,5 +151,9 @@ export function useBudgetNeedsClient(): boolean {
 /** What a budget page says instead of its figures with every client chosen. */
 export function BudgetPickClient() {
   const t = useT();
-  return <EmptyState icon="building" title={t("budget.pickClient.title")} body={t("budget.pickClient.body")} />;
+  // An h2: with every client chosen it is the page's only section under the h1
+  // (axe `heading-order`; the wave's critique).
+  return (
+    <EmptyState icon="building" title={t("budget.pickClient.title")} body={t("budget.pickClient.body")} headingLevel={2} />
+  );
 }

@@ -52,6 +52,18 @@ function renderPage(api: Partial<ApiClient>) {
 
 beforeEach(() => selectClient("o1"));
 
+/**
+ * The New credential dialog. With every client chosen the list's Client chip
+ * is on the page too (redesign Task 11, 6.9), so the form's Client field is
+ * read inside the dialog.
+ */
+function inDialog() {
+  return within(screen.getByRole("dialog"));
+}
+
+// THE HEAD'S "New credential" (redesign Task 11, 6.9): an empty vault's list
+// offers the same action in its empty state (Receta L, 3), so the first of
+// the two is the head's.
 describe("a push credential's client", () => {
   it("files it under the client chosen at the top, which is not the organisation's own", async () => {
     // `org_id` is "o1": the phase 1-2 rule filed every new row there whoever
@@ -61,10 +73,10 @@ describe("a push credential's client", () => {
     const createCredential = vi.fn().mockResolvedValue(credential());
     const user = userEvent.setup();
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     await user.selectOptions(screen.getByLabelText("Type"), "push_install");
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(inDialog().queryByLabelText("Client")).toBeNull();
     await user.type(screen.getByLabelText("Name"), "Branch installer");
     await user.type(screen.getByLabelText("Secret"), "s3cret");
     await user.click(screen.getByRole("button", { name: "Store" }));
@@ -83,8 +95,8 @@ describe("a push credential's client", () => {
     const createCredential = vi.fn().mockResolvedValue(credential());
     const user = userEvent.setup();
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
-    expect(screen.getByLabelText("Client")).toBeInTheDocument();
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
+    expect(inDialog().getByLabelText("Client")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Type"), "push_install");
     await user.type(screen.getByLabelText("Name"), "Branch installer");
@@ -93,7 +105,7 @@ describe("a push credential's client", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
     expect(createCredential).not.toHaveBeenCalled();
 
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.selectOptions(inDialog().getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Store" }));
     await waitFor(() =>
       expect(createCredential).toHaveBeenCalledExactlyOnceWith({
@@ -127,7 +139,7 @@ describe("a credential of any other type", () => {
   }
 
   async function openNew(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Domain admin");
     await user.type(screen.getByLabelText("Secret"), "s3cret");
   }
@@ -138,7 +150,7 @@ describe("a credential of any other type", () => {
     const user = userEvent.setup();
     renderPage({ me: meWith([]), listCredentials: () => Promise.resolve([]), createCredential });
     await openNew(user);
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(inDialog().queryByLabelText("Client")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Store" }));
     await waitFor(() =>
       expect(createCredential).toHaveBeenCalledExactlyOnceWith({
@@ -153,9 +165,9 @@ describe("a credential of any other type", () => {
     const user = userEvent.setup();
     renderPage({ me: meWith(["credentials.manage"]), listCredentials: () => Promise.resolve([]), createCredential });
     await openNew(user);
-    expect(screen.getByLabelText("Client")).toBeInTheDocument();
+    expect(inDialog().getByLabelText("Client")).toBeInTheDocument();
     await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(inDialog().queryByLabelText("Client")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Store" }));
     await waitFor(() =>
       expect(createCredential).toHaveBeenCalledExactlyOnceWith({
@@ -168,13 +180,13 @@ describe("a credential of any other type", () => {
     selectClient(null);
     const user = userEvent.setup();
     const { unmount } = renderPage({ me: meWith([]), listCredentials: () => Promise.resolve([]) });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
-    await screen.findByLabelText("Client");
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
+    await within(await screen.findByRole("dialog")).findByLabelText("Client");
     expect(screen.queryByRole("checkbox", { name: /For every client/ })).toBeNull();
     unmount();
 
     renderPage({ me: meWith(["credentials.manage"]), listCredentials: () => Promise.resolve([]) });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
     expect(await screen.findByRole("checkbox", { name: /For every client/ })).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Type"), "push_install");
     expect(screen.queryByRole("checkbox", { name: /For every client/ })).toBeNull();
