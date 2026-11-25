@@ -1,7 +1,8 @@
 /**
- * The narrowing double (Task 5 review, fix round 1): a read that should have
- * been narrowed and was not must be able to fail a test. The first version
- * answered `forClient` with the same double, and could not.
+ * The narrowing double (Task 5 review, fix rounds 1 and 2): a read that should
+ * have been narrowed and was not must fail a test. The first version answered
+ * `forClient` with the same double, and could not; the second needed every
+ * test to assert `unnarrowed`, and a test that forgot passed with a leak.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,6 +24,17 @@ describe("recordingNarrowing", () => {
     await expect(narrowing.api.listThings({ state: "open" })).rejects.toThrow("un-narrowed");
     expect(narrowing.unnarrowed).toEqual(["listThings"]);
     expect(api.listThings).not.toHaveBeenCalled();
+    // The leak was this test's subject and is asserted above: emptied, so the
+    // helper's own check at the end of the test does not fail it.
+    narrowing.unnarrowed.length = 0;
+  });
+
+  // EXPECTED TO FAIL, and that failure is the point: the body leaks a read and
+  // asserts nothing, and the helper's own end-of-test check must fail it.
+  // Without that check the body passes and `it.fails` reports "Expect test to fail".
+  it.fails("fails a test that leaks an un-narrowed read and never asserts it", async () => {
+    const narrowing = recordingNarrowing(wrapped());
+    await narrowing.api.listThings({ state: "open" }).catch(() => undefined);
   });
 
   it("answers /me and what the test allows on the console's API, through the wrapped API", async () => {

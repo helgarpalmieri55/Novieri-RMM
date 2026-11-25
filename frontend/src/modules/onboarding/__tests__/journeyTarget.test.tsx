@@ -91,11 +91,15 @@ describe("a page opened from the journey", () => {
   });
 
   it("leaves a bare `?client=` and `?site=` alone: they narrow a list, never switch the console (decision D20)", () => {
-    renderAt("/enrollment?client=c-andes&site=s-north");
+    const first = renderAt("/enrollment?client=c-andes&site=s-north");
     expect(clientScope.select).not.toHaveBeenCalled();
+    first.unmount();
+    // Even with that client chosen above, a bare `?site=` seeds no site: only
+    // `journey_site` does (fix round 2: the first render is gone, so this half can fail).
     clientScope.selected = "c-andes";
     renderAt("/enrollment?client=c-andes&site=s-north", "second");
-    expect(screen.getAllByText("none").length).toBeGreaterThan(0);
+    expect(screen.getByText("none")).toBeInTheDocument();
+    expect(screen.queryByText("s-north")).toBeNull();
   });
 
   it("never overrides a client chosen above, and ignores that client's site", () => {

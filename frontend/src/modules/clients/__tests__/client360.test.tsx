@@ -107,6 +107,10 @@ describe("the client 360 (redesign design §1.3)", () => {
     // empty under its non-zero tile (Task 5 review, fix round 1).
     expect(await screen.findByRole("link", { name: "por-ws-008" })).toHaveAttribute("href", "/devices/dev-4");
     expect(link).toHaveTextContent("(3)");
+    // And the Devices tile counts the same three (fix round 2): `device_count`
+    // in the clients and settings fixtures matches what `listDevices` gives Andes.
+    const tile = screen.getAllByRole("link").find((item) => item.getAttribute("href") === `/clients/${ANDES}?tab=devices`);
+    expect(tile).toHaveTextContent(/^Devices\s*3$/);
   });
 
   it("reads the devices tab only through the client's narrowed API (decision D6)", async () => {

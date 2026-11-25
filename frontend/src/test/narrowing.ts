@@ -1,6 +1,6 @@
 /**
  * AN API DOUBLE THAT CAN TELL A NARROWED READ FROM AN UN-NARROWED ONE
- * (decision D6; Task 5 review, fix round 1).
+ * (decision D6; Task 5 review, fix rounds 1 and 2).
  *
  * The first version answered `forClient(id)` with the same double, so a test
  * asserting "the list read through `forClient(<client>)`" passed whenever
@@ -17,14 +17,20 @@
  *   `forClient(other)` is `other`'s double, as `ApiClient.forClient` is.
  * - `narrowing.client(id)` is the same spies, for the test to assert on,
  *   whether or not the page has reached them yet.
+ * - IT CHECKS ITSELF (fix round 2): `recordingNarrowing` registers an
+ *   `onTestFinished` hook that fails the test when `unnarrowed` is not empty
+ *   at its end, so a test that forgets to assert it still fails on a leak.
+ *   Call it inside a test (not at a `describe`'s top level). A test whose
+ *   subject IS the leak asserts it and then empties the array
+ *   (`narrowing.unnarrowed.length = 0`).
  *
  *   const narrowing = recordingNarrowing(fixtureClient(), { console: ["getClientRecord"] });
  *   mockUseApi.mockReturnValue(narrowing.api);
  *   renderPage(...);
  *   await waitFor(() => expect(narrowing.client(ANDES).listHealthAlerts).toHaveBeenCalledWith({ state: "active" }));
- *   expect(narrowing.unnarrowed).toEqual([]);
+ *   expect(narrowing.unnarrowed).toEqual([]);   // also checked by the helper at the test's end
  */
-import { vi, type Mock } from "vitest";
+import { expect, onTestFinished, vi, type Mock } from "vitest";
 
 /** Every method of `T` as a spy with that method's own signature. */
 export type Spies<T> = {
@@ -36,7 +42,10 @@ export interface Narrowing<T> {
   readonly api: T;
   /** Every id `forClient` was called with, in order, on the console's API or on a narrowed one. */
   readonly narrowedTo: string[];
-  /** Methods called on the console's API that `options.console` does not allow, in call order. Each one rejected. */
+  /**
+   * Methods called on the console's API that `options.console` does not allow, in call order. Each one
+   * rejected, and a non-empty list fails the test at its end.
+   */
   readonly unnarrowed: string[];
   /** `id`'s narrowed double, as spies: what its reads went through. */
   client(id: string): Spies<T>;
@@ -59,6 +68,10 @@ export function recordingNarrowing<T extends object>(
   const narrowedTo: string[] = [];
   const unnarrowed: string[] = [];
   const allowed = new Set([...ALWAYS, ...(options.console ?? [])]);
+  // The helper's own check, whether or not the test asserts `unnarrowed`.
+  onTestFinished(() => {
+    expect(unnarrowed, "reads called on the console's un-narrowed API (recordingNarrowing)").toEqual([]);
+  });
   const doubles = new Map<string, T>();
   const spies = new Map<string, Map<string, Mock>>();
 
