@@ -10,7 +10,17 @@ import { useClientName } from "../settings/api";
 import { useProducts, useRenewals } from "./api";
 import { LicensePageNav } from "./licenseNav";
 import { dueKind } from "./licenseState";
-import { ListEmpty, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  ClientFilter,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  useUrlFilters,
+} from "../../shell/components";
 import type { RenewalRow } from "./types";
 
 /**
@@ -46,7 +56,11 @@ export function RenewalCalendar() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("licenses.read");
 
-  const renewals = useRenewals();
+  // THE CLIENT CHIP (decision D6): the register's renewal tile links here
+  // with its client (`?client=`), so the calendar opens exactly the renewals
+  // the tile counted, and a person with every client shown can narrow it.
+  const filters = useUrlFilters(["client"] as const);
+  const renewals = useRenewals(undefined, filters.values.client);
   const products = useProducts();
   const clientName = useClientName();
   // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
@@ -72,9 +86,18 @@ export function RenewalCalendar() {
           for each month, so a quarter reads as three blocks instead of one
           long list. Nothing to show is a sentence with its cause. */}
       <Panel bare>
-        <QueryState loading={renewals.isLoading} error={renewals.error} empty={false} emptyLabel="">
+        <ListToolbar
+          chips={<ClientFilter filters={filters} />}
+          end={renewals.data ? <ShowingCount shown={items.length} total={items.length} /> : null}
+        />
+        <QueryState loading={renewals.isPending} error={renewals.error} empty={false} emptyLabel="">
           {items.length === 0 ? (
-            <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("licenses.renewals.empty")} icon="calendar-event" />
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.renewals.empty")}
+              icon="calendar-event"
+            />
           ) : (
           <Table label={t("licenses.renewals.title")}>
             <thead>

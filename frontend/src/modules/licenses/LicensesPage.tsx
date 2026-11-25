@@ -77,7 +77,9 @@ import {
   StatCard,
   StatsGrid,
   StatusPill,
+  useNarrowedApi,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -195,6 +197,11 @@ export function LicensesPage() {
   // and the vendors are the organisation's, shared by every client, and stay
   // the console's reads.
   const chip = filters.values.client;
+  // The client the chip narrowed to (`null` without one): a tile that counts
+  // that client's rows opens the page with the same `client=`, so it opens
+  // exactly the rows it counted (coordinator's ruling on the wave reviews).
+  const { client: narrowedTo } = useNarrowedApi(chip);
+  const withClient = (path: string) => (narrowedTo === null ? path : `${path}?client=${narrowedTo}`);
   const licenses = useLicenses(chip);
   const products = useProducts();
   const vendors = useVendors();
@@ -326,7 +333,7 @@ export function LicensesPage() {
           label={t("licenses.list.tileOver")}
           value={compliance.error ? t("licenses.common.na") : String(breachCount)}
           icon="alert-triangle"
-          to="/licenses/compliance"
+          to={withClient("/licenses/compliance")}
           tone="red"
           urgent={!compliance.error && breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
@@ -347,7 +354,7 @@ export function LicensesPage() {
           label={t("licenses.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
           value={renewals.error ? t("licenses.common.na") : String((renewals.data ?? []).length)}
           icon="clock"
-          to="/licenses/renewals"
+          to={withClient("/licenses/renewals")}
           tone="gold"
           zeroLabel={t("licenses.list.tileRenewalsZero")}
           pending={renewals.isPending && !renewals.error}
@@ -369,7 +376,7 @@ export function LicensesPage() {
           label={t("licenses.list.tileCompliant")}
           value={compliance.error ? t("licenses.common.na") : String(compliantCount)}
           icon="circle-check"
-          to="/licenses/compliance"
+          to={withClient("/licenses/compliance")}
           tone="green"
           zeroLabel={t("licenses.list.tileCompliantZero")}
           pending={compliance.isPending && !compliance.error}
@@ -497,7 +504,8 @@ export function LicensesPage() {
         </QueryState>
       </Panel>
 
-      {canManage ? <NewLicenseDialog open={newLicense.open} onClose={newLicense.close} /> : null}
+      {/* Mounted only while open: each opening starts from an empty form. */}
+      {canManage && newLicense.open ? <NewLicenseDialog open onClose={newLicense.close} /> : null}
     </div>
   );
 }
@@ -543,6 +551,22 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   // key is NOT in the snapshot: it is not a rule's business and never copied.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews; formKit's "A FORM IN THE DIALOG"): Back, Cancel or Escape
+  // with something typed asks first, since `?new=license` is what holds the
+  // form. The dialog is mounted only while open, so every opening -- its
+  // button, a link, Back or Forward -- starts from an empty form.
+  const dirty =
+    productId !== "" ||
+    vendorId !== "" ||
+    type !== "perpetual" ||
+    entitlements !== "1" ||
+    key !== "" ||
+    cost !== "" ||
+    currency !== "" ||
+    clientField.picked !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
+
   function reset() {
     setProductId("");
     setVendorId("");
@@ -556,9 +580,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setAttempt(null);
   }
 
-  // This dialog is never unmounted -- LicensesPage keeps it rendered and
-  // toggles `open` -- so without clearing the mutation here a failure from
-  // one attempt sits in the form waiting to be read as the next one's.
+  // Clearing the mutation on close keeps a failure from one attempt off the
+  // next, should the dialog ever be kept mounted again.
   function close() {
     create.reset();
     setAttempt(null);
@@ -599,6 +622,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
       }),
       {
         onSuccess: () => {
+          // Saved: closing leaves without asking (useUnsavedGuard's release).
+          release();
           reset();
           close();
         },
@@ -607,6 +632,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={close} title={t("licenses.new.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -753,5 +780,6 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

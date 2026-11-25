@@ -141,7 +141,6 @@ export const licenses: Shape<typeof en> = {
     tileOver: { one: "{count} asignada por encima del derecho de uso", other: "{count} asignadas por encima del derecho de uso" },
     notFound: "Licencia no encontrada.",
     titleFallback: "Licencia",
-    description: "Derechos de uso, costo, renovación y asignación de una licencia.",
     revealing: "Mostrando…",
     reveal: "Mostrar clave",
     deleting: "Eliminando…",

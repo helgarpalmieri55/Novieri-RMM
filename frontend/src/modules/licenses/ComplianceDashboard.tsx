@@ -12,7 +12,18 @@ import { useCompliance, useProducts } from "./api";
 import { LicenseReadiness } from "./LicenseReadiness";
 import { LicensePageNav } from "./licenseNav";
 import { complianceKind } from "./licenseState";
-import { PageHead, Panel, Progress, QueryState, StatusPill } from "../../shell/components";
+import {
+  ClientFilter,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  Progress,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
 export function ComplianceDashboard() {
@@ -21,7 +32,11 @@ export function ComplianceDashboard() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("licenses.read");
 
-  const compliance = useCompliance();
+  // THE CLIENT CHIP (decision D6): the register's compliance tiles link here
+  // with their client (`?client=`), so the page opens exactly the positions
+  // the tile counted, and a person with every client shown can narrow it.
+  const filters = useUrlFilters(["client"] as const);
+  const compliance = useCompliance(filters.values.client);
   const clientName = useClientName();
   // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
   // chosen every row is that client's, and the column would only repeat it.
@@ -64,13 +79,19 @@ export function ComplianceDashboard() {
       <LicenseReadiness />
 
       <Panel bare>
-        <QueryState
-          loading={compliance.isLoading}
-          error={compliance.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.compliance.empty")}
-          emptyIcon="license"
-        >
+        <ListToolbar
+          chips={<ClientFilter filters={filters} />}
+          end={compliance.data ? <ShowingCount shown={items.length} total={items.length} /> : null}
+        />
+        <QueryState loading={compliance.isPending} error={compliance.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.compliance.empty")}
+              icon="license"
+            />
+          ) : (
           <Table label={t("licenses.compliance.title")}>
             <thead>
               <tr>
@@ -157,6 +178,7 @@ export function ComplianceDashboard() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
     </div>

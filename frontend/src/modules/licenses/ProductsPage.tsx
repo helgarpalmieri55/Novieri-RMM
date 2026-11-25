@@ -23,6 +23,7 @@ import {
   SearchField,
   ShowingCount,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
   writeQuery,
 } from "../../shell/components";
@@ -248,6 +249,16 @@ function ProductEditor({
 
   const mutation = existing ? update : create;
 
+  // A CHANGE IN THE EDITOR ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews): `?new=product` or `?edit=<id>` is what holds the form, so
+  // Back, Cancel or Escape with a change asks first. The page mounts the
+  // editor per opening (its `key`), so each one starts from what it opens.
+  const dirty =
+    name !== (existing?.name ?? "") ||
+    publisher !== (existing?.publisher ?? "") ||
+    JSON.stringify(matchRules) !== JSON.stringify(existing?.match_rules ?? []);
+  const { guard, release } = useUnsavedGuard(dirty, { search: [product === "new" ? "new" : "edit"] });
+
   function reset() {
     setName("");
     setPublisher("");
@@ -255,9 +266,7 @@ function ProductEditor({
     setAttempt(null);
   }
 
-  // ProductsPage keeps this editor mounted and toggles `product`, so without
-  // clearing the mutation here a failure from one attempt sits in the form
-  // waiting to be read as the next one's.
+  // Clearing the mutations on close keeps a failure from one attempt off the next.
   function close() {
     create.reset();
     update.reset();
@@ -284,6 +293,8 @@ function ProductEditor({
 
     const body = { name: name.trim(), publisher, match_rules: matchRules };
     const onSuccess = () => {
+      // Saved: closing leaves without asking (useUnsavedGuard's release).
+      release();
       reset();
       close();
     };
@@ -295,6 +306,8 @@ function ProductEditor({
   }
 
   return (
+    <>
+    {guard}
     <Dialog
       open={product != null}
       onClose={close}
@@ -378,5 +391,6 @@ function ProductEditor({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

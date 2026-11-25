@@ -146,7 +146,6 @@ export const licenses = {
     tileOver: { one: "{count} allocated over the entitlement", other: "{count} allocated over the entitlement" },
     notFound: "License not found.",
     titleFallback: "License",
-    description: "Entitlement, cost, renewal and allocation for one license.",
     revealing: "Revealing…",
     reveal: "Reveal key",
     deleting: "Deleting…",

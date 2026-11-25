@@ -26,6 +26,24 @@ const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CU
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
+/** The fixture session with `/me` held: the chip's client is not decided yet. */
+function meHeld() {
+  return fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) });
+}
+
+describe("no empty state before the narrowed read (coordinator's ruling 10)", () => {
+  it.each([
+    ["the register", `/licenses?client=${ANDES}`, <LicensesPage key="l" />, ["No licenses yet."]],
+    ["compliance", `/licenses/compliance?client=${ANDES}`, <ComplianceDashboard key="c" />, ["No compliance data yet."]],
+    ["the renewal calendar", `/licenses/renewals?client=${ANDES}`, <RenewalCalendar key="r" />, ["No license renews in this period."]],
+  ])("%s draws loading while the Client chip's client is still being decided", async (_name, path, page, empties) => {
+    mockUseApi.mockReturnValue(meHeld());
+    renderPage(path, page);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    for (const empty of [...empties, "Nothing matches these filters."]) expect(screen.queryByText(empty)).toBeNull();
+  });
+});
+
 describe("the license register on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
@@ -86,6 +104,36 @@ describe("the license register on the list kit", () => {
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
+  it("opens, from a tile counted for the chip's client, exactly the rows it counted", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(`/licenses?client=${ANDES}`, <LicensesPage />, "/licenses");
+    // Once /me has said the chip's client is the person's (until then nothing is narrowed or counted).
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Over-deployed/ })).toHaveAttribute("href", `/licenses/compliance?client=${ANDES}`),
+    );
+    expect(screen.getByRole("link", { name: /Renewals in 90 days/ })).toHaveAttribute("href", `/licenses/renewals?client=${ANDES}`);
+    expect(screen.getByRole("link", { name: /Compliant/ })).toHaveAttribute("href", `/licenses/compliance?client=${ANDES}`);
+    // The catalog is the organisation's: its tile counts no client.
+    expect(screen.getByRole("link", { name: /License products/ })).toHaveAttribute("href", "/licenses/products");
+  });
+
+  it("asks before leaving New license with something typed, and opens empty again", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/licenses", <LicensesPage />, "/licenses");
+    await userEvent.click(await screen.findByRole("button", { name: "New license" }));
+    let dialog = await screen.findByRole("dialog", { name: "New license" });
+    await userEvent.type(within(dialog).getByLabelText("Cost (optional)"), "12");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(router.state.location.search).toBe("?new=license");
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // Opened again, it starts empty (it is mounted only while open).
+    await userEvent.click(screen.getByRole("button", { name: "New license" }));
+    dialog = await screen.findByRole("dialog", { name: "New license" });
+    expect(within(dialog).getByLabelText("Cost (optional)")).toHaveValue("");
+  });
+
   it("opens New license from ?new=license, and closing it leaves the list", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/licenses?new=license", <LicensesPage />, "/licenses");
@@ -119,6 +167,20 @@ describe("a license on the record kit", () => {
 });
 
 describe("license compliance", () => {
+  it("reads the positions only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    // On the console's own API: the product catalog (the organisation's, for
+    // which products have a match rule), the fleet and the review queue (the
+    // readiness panel and the no-usage rule: the organisation's setup, D20).
+    const narrowing = recordingNarrowing(fixtureClient(), {
+      console: ["listProducts", "listDevices", "reviewQueue"],
+    });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderPage(`/licenses/compliance?client=${ANDES}`, <ComplianceDashboard />, "/licenses/compliance");
+    expect(await screen.findByRole("table", { name: "License compliance" })).toBeInTheDocument();
+    expect(narrowing.client(ANDES).licenseCompliance).toHaveBeenCalledWith();
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
   it("leads each figure to the list that explains it", async () => {
     mockUseApi.mockReturnValue(
       fixtureClient({
@@ -146,6 +208,17 @@ describe("license compliance", () => {
 });
 
 describe("the renewal calendar (licenses)", () => {
+  it("reads the renewals only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    // On the console's own API: the product catalog, which names each row
+    // (the organisation's, shared by every client).
+    const narrowing = recordingNarrowing(fixtureClient(), { console: ["listProducts"] });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderPage(`/licenses/renewals?client=${ANDES}`, <RenewalCalendar />, "/licenses/renewals");
+    expect(await screen.findByRole("table", { name: "Upcoming renewals" })).toBeInTheDocument();
+    expect(narrowing.client(ANDES).licenseRenewals).toHaveBeenCalledWith(undefined);
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
   it("says why the calendar is empty", async () => {
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), licenseRenewals: () => [] }));
     renderPage("/licenses/renewals", <RenewalCalendar />, "/licenses/renewals");
@@ -209,6 +282,16 @@ describe("the product catalog", () => {
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
 
+  it("asks before leaving an edit with a change in it", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/licenses/products?edit=prod-visio", <ProductsPage />, "/licenses/products");
+    const dialog = await screen.findByRole("dialog", { name: "Edit product" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), " 2024");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?edit=prod-visio");
+  });
+
   it("saves an edit's match rules as it did before", async () => {
     const updateProduct = vi.fn((id: string, body: object) => ({ ...body, id, created_at: "2026-01-01T00:00:00Z" }));
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateProduct } as never));
@@ -249,6 +332,17 @@ describe("vendors", () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/licenses/vendors?new=vendor", <VendorsPage />, "/licenses/vendors");
     expect(await screen.findByRole("dialog", { name: "New vendor" })).toBeInTheDocument();
+  });
+
+  it("leaves New vendor without asking once it is saved", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/licenses/vendors", <VendorsPage />, "/licenses/vendors");
+    await userEvent.click(await screen.findByRole("button", { name: "New vendor" }));
+    const dialog = await screen.findByRole("dialog", { name: "New vendor" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Globex");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 
   it("counts each vendor's licenses as before", async () => {

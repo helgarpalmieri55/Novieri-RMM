@@ -21,6 +21,7 @@ import {
   SearchField,
   ShowingCount,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -130,7 +131,8 @@ export function VendorsPage() {
         </QueryState>
       </Panel>
 
-      {canManage ? <NewVendorDialog open={newVendor.open} onClose={newVendor.close} /> : null}
+      {/* Mounted only while open: each opening starts from an empty form. */}
+      {canManage && newVendor.open ? <NewVendorDialog open onClose={newVendor.close} /> : null}
     </div>
   );
 }
@@ -144,6 +146,11 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   // Populated ON SUBMIT, never while typing; worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const create = useCreateVendorMutation();
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews): `?new=vendor` holds the form. Mounted only while open, so
+  // every opening starts from an empty form.
+  const dirty = name !== "" || website !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function reset() {
     setName("");
@@ -151,9 +158,7 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
     setAttempt(null);
   }
 
-  // VendorsPage keeps this dialog mounted and toggles `open`, so without
-  // clearing the mutation a failure from one attempt would still be on screen
-  // the next time the form opens, describing a request nobody made.
+  // Clearing the mutation on close keeps a failure from one attempt off the next.
   function close() {
     create.reset();
     setAttempt(null);
@@ -169,6 +174,8 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
       { name: name.trim(), website: website.trim() || null },
       {
         onSuccess: () => {
+          // Saved: closing leaves without asking (useUnsavedGuard's release).
+          release();
           reset();
           close();
         },
@@ -177,6 +184,8 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={close} title={t("licenses.vendors.newTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -212,5 +221,6 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }
