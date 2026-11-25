@@ -17,6 +17,9 @@ import {
   useNewParam,
   useUrlFilters,
 } from "./listKit";
+// The pieces kit requests batch 1 added, imported through `components.tsx`,
+// the kit's one door, so a piece that is not re-exported there fails here.
+import { useEditParam as useEditParamFromKit } from "./components";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
 const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
@@ -406,5 +409,136 @@ describe("useNewParam (decision D8)", () => {
     expect(router.state.location.search).toBe("?state=open");
     await act(() => router.navigate("/service-desk?new=other"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+/**
+ * `?edit=<id>` (kit requests batch 1, item 6; O4's K2): the editor's twin of
+ * `useNewParam`, imported through `components.tsx`, the kit's one door.
+ */
+function Editing({ kind = "policy" }: { kind?: string }) {
+  const edit = useEditParamFromKit(kind);
+  const filters = useUrlFilters(["state"] as const);
+  return (
+    <>
+      <button type="button" onClick={() => edit.open("pol-1")}>
+        Edit Pilot
+      </button>
+      <button type="button" onClick={() => filters.set("state", "open")}>
+        Open only
+      </button>
+      {edit.id !== "" ? (
+        <div role="dialog" aria-label={`Edit ${edit.id}`}>
+          <button type="button" onClick={edit.close}>
+            Close
+          </button>
+        </div>
+      ) : (
+        <p>no editor</p>
+      )}
+    </>
+  );
+}
+
+/** Two editors on one page, each with its own kind: only the one that opened goes Back. */
+function TwoEditors() {
+  const policy = useEditParamFromKit("policy");
+  const schedule = useEditParamFromKit("schedule");
+  return (
+    <>
+      <button type="button" onClick={() => policy.open("pol-1")}>
+        Edit policy
+      </button>
+      <button type="button" onClick={schedule.close}>
+        Close schedule
+      </button>
+    </>
+  );
+}
+
+describe("useEditParam (kit requests batch 1, item 6)", () => {
+  it("opens an editor from ?edit=<id>, so an edit is a link", () => {
+    renderPage("/backup/policies?edit=pol-1", <Editing />);
+    expect(screen.getByRole("dialog", { name: "Edit pol-1" })).toBeInTheDocument();
+  });
+
+  it("names no record while the URL names none", () => {
+    renderPage("/backup/policies", <Editing />);
+    expect(screen.getByText("no editor")).toBeInTheDocument();
+  });
+
+  it("puts the id in the URL when opened here, as a new entry, and takes it out when closed, keeping the rest", async () => {
+    const { router } = renderPage("/backup/policies?state=open", <Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    expect(router.state.location.search).toBe("?state=open&edit=pol-1");
+    expect(router.state.historyAction).toBe("PUSH");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("?state=open");
+  });
+
+  it("closing an editor opened here goes back, so the next Back leaves the list", async () => {
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.pathname + router.state.location.search).toBe("/backup/policies");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("closing an editor that arrived in a link replaces, and Back still leaves the list", async () => {
+    const router = withHistory(["/start", "/backup/policies?edit=pol-1"], "/backup/policies", <Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.pathname + router.state.location.search).toBe("/backup/policies");
+    expect(router.state.historyAction).toBe("REPLACE");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("closing after the query moved on replaces rather than going back to an older state", async () => {
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open only" }));
+    expect(router.state.location.search).toBe("?edit=pol-1&state=open");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("?state=open");
+  });
+
+  it("writes nothing when the editor asked for is already open, so Back is not spent on a duplicate", async () => {
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/start");
+  });
+
+  it("goes Back only from an entry its own kind opened: another editor's close replaces", async () => {
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <TwoEditors />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit policy" }));
+    expect(router.state.location.search).toBe("?edit=pol-1");
+    await userEvent.click(screen.getByRole("button", { name: "Close schedule" }));
+    expect(router.state.location.search).toBe("");
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("is not useNewParam's mark: a ?new= dialog's entry is not one an editor goes Back from", async () => {
+    function Both() {
+      const created = useNewParam("policy");
+      const edit = useEditParamFromKit("policy");
+      return (
+        <>
+          <button type="button" onClick={created.start}>New policy</button>
+          <button type="button" onClick={() => edit.open("pol-1")}>Edit Pilot</button>
+          <button type="button" onClick={edit.close}>Close editor</button>
+        </>
+      );
+    }
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <Both />);
+    await userEvent.click(screen.getByRole("button", { name: "New policy" }));
+    expect(router.state.location.search).toBe("?new=policy");
+    // No ?edit= to close: nothing is written and nobody goes Back.
+    await userEvent.click(screen.getByRole("button", { name: "Close editor" }));
+    expect(router.state.location.search).toBe("?new=policy");
+    expect(router.state.historyAction).toBe("PUSH");
   });
 });

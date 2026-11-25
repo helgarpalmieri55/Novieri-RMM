@@ -359,6 +359,67 @@ export function useNewParam(kind: string): { open: boolean; start: () => void; c
   return { open, start, close };
 }
 
+/** Marks the history entry an editor's `open()` pushed: what it edits, which record, and this document. */
+interface EditOpenedMark {
+  readonly kitEditOpened?: { readonly kind: string; readonly id: string; readonly document: string };
+}
+
+/**
+ * `?edit=<id>` opens the page's editor for one record (kit requests batch 1,
+ * item 6): the twin of `useNewParam`, so an edit is a link as a create is.
+ *
+ *   const created = useNewParam("policy");   // ?new=policy
+ *   const edit = useEditParam("policy");     // ?edit=<the policy's id>
+ *   <Btn label="Edit" onClick={() => edit.open(policy.id)} />
+ *   {edit.id !== "" ? <PolicyEditor id={edit.id} onClose={edit.close} /> : null}
+ *
+ * - `id`: the record the URL names, `""` when it names none (the kit's
+ *   absent value, as `useUrlFilters`'s).
+ * - `open(id)`: adds a history entry, so Back closes the editor. Opening the
+ *   editor already open writes nothing.
+ * - `close()`: CLOSING UNDOES OPENING, exactly as `useNewParam`'s does. It
+ *   goes Back when the current entry is the one this editor's `open()` added
+ *   in this document; an editor that arrived in a link, or one whose query has
+ *   moved on since (a filter written meanwhile), is closed in place. Writing
+ *   `?edit=` through `useUrlFilters` instead pushed a second entry on close,
+ *   and Back reopened the editor (O4 review, item 7).
+ * - `kind` names what the editor edits, as `useNewParam`'s does, and is part
+ *   of the mark: only this editor's `close()` goes Back from the entry its
+ *   `open()` added, never another editor's of the same page.
+ *
+ * A FORM IN THE EDITOR passes `search={["edit"]}` (or `["new", "edit"]` when
+ * the same form creates too) to its `UnsavedGuard`, so Back or Close with a
+ * change in it asks first (see `useUnsavedGuard`).
+ */
+export function useEditParam(kind: string): { id: string; open: (id: string) => void; close: () => void } {
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const id = params.get("edit") ?? "";
+  const open = useCallback(
+    (record: string) => {
+      const next = new URLSearchParams(params);
+      next.set("edit", record);
+      writeQuery(params, next, setParams, {
+        state: { kitEditOpened: { kind, id: record, document: OPENED_IN } } satisfies EditOpenedMark,
+      });
+    },
+    [params, setParams, kind],
+  );
+  const close = useCallback(() => {
+    if (!params.has("edit")) return;
+    const mark = (location.state as EditOpenedMark | null)?.kitEditOpened;
+    if (mark?.kind === kind && mark.id === params.get("edit") && mark.document === OPENED_IN) {
+      void navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(params);
+    next.delete("edit");
+    writeQuery(params, next, setParams, { replace: true });
+  }, [params, setParams, location.state, navigate, kind]);
+  return { id, open, close };
+}
+
 /** The head of a list, flush inside its bare panel: search, chips, then the count at the end. */
 export function ListToolbar({ search, chips, end }: { search?: ReactNode; chips?: ReactNode; end?: ReactNode }) {
   return (
