@@ -126,6 +126,8 @@ export const ROUTES = [
   "/devices/push-runs",
   "/devices/push-runs/run-1",
   "/devices/dev-1",
+  "/devices/dev-1?tab=hardware",
+  "/devices/dev-1?tab=health",
   "/software",
   "/credentials",
   "/docs",
@@ -186,6 +188,11 @@ export const ROUTES = [
   "/site-servers/ss-1",
   "/sla",
   "/health",
+  // Alerts' configuration views (redesign decision D21): the profiles, the
+  // approved actions and the settings that /health alone no longer draws.
+  "/health?view=profiles",
+  "/health?view=actions",
+  "/health?view=settings",
   "/platform-status",
   "/error-monitor",
   "/assistant",
@@ -203,6 +210,7 @@ export const ROUTES = [
   "/ipam/scan-authorizations",
   "/ipam/import",
   "/ipam/subnets/subnet-1",
+  "/ipam/subnets/subnet-1?tab=sweeps",
   "/email-intake",
   "/portal",
   "/portal/new",
@@ -216,6 +224,11 @@ export const ROUTES = [
   "/agent-packages",
   "/clients",
   "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
+  // The client 360's tabs that read other modules (redesign design §1.3).
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=devices",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=tickets",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=alerts",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=assets",
   "/settings",
   // A QUERY VARIANT: `/settings` opens Organization, so no other tab is ever
   // measured. A variant is `<a route listed here>?<query>`; the guard checks
