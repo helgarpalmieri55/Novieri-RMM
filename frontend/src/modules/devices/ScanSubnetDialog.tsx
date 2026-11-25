@@ -5,6 +5,7 @@ import { describeSubmitError } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
+import { useUnsavedGuard } from "../../shell/components";
 import { useDispatchIpamSweepMutation, useIpamSubnets } from "../ipam/api";
 import { formatAge } from "../ipam/ipamState";
 import type { SubnetOut } from "../ipam/types";
@@ -54,11 +55,22 @@ export function ScanSubnetDialog({ open, onClose }: { open: boolean; onClose: ()
     [subnets.data],
   );
   const chosen = options.find((s) => s.id === subnetId) ?? null;
+  /**
+   * A CHOSEN SUBNET NOBODY HAS SCANNED YET ASKS BEFORE IT IS DROPPED
+   * (coordinator ruling 3). The dialog lives in `?new=scan`, so Close, Escape
+   * and Back are all a change of `new`. Once the scan is queued there is
+   * nothing left to lose.
+   */
+  const { guard } = useUnsavedGuard(subnetId !== "" && dispatched === null, { search: ["new"] });
 
+  /**
+   * CLOSING IS THE URL'S CHANGE, AND NOTHING ELSE (coordinator ruling 4). The
+   * page mounts this dialog only while `?new=scan` is set, so every opening --
+   * the button, a link, Forward -- starts from an empty picker; resetting
+   * here instead missed every close it did not see (Back), and clearing the
+   * choice before the guard could ask would have dropped it unasked.
+   */
   function close() {
-    setSubnetId("");
-    setDispatched(null);
-    dispatch.reset();
     onClose();
   }
 
@@ -70,116 +82,124 @@ export function ScanSubnetDialog({ open, onClose }: { open: boolean; onClose: ()
   }
 
   return (
-    <Dialog open={open} onClose={close} title={t("devices.scan.title")}>
-      {dispatched ? (
-        // THE SWEEP IS A JOB, NOT AN ANSWER. It was queued for the segment's
-        // agent, which runs it on its own schedule and reports back; the rows
-        // it finds are recorded automatically and land on the fleet list. So
-        // the honest confirmation is "asked", with where to look, not "found".
-        <div className="grid gap-3">
-          <p>
-            <Trans
-              k="devices.scan.queued"
-              vars={{ prefix: dispatched.prefix }}
-              components={{ strong: <strong /> }}
-            />
-          </p>
-          <p className="note">
-            <Trans
-              k="devices.scan.nothingConfirms"
-              components={{ link: <Link to="/devices?provenance=sweep" onClick={close} /> }}
-            />
-          </p>
-          {/* A BARE FLEX ROW, NOT A `.field` IN A `.form-grid`. `.field` is
-              `flex-direction: column` and unlayered, so it BEATS Tailwind's
-              layered `flex-row` and stacks the buttons full width -- the exact
-              "cascade is the component" trap this codebase has hit before. The
-              dialog footer is `flex items-center justify-end`, the way every
-              other dialog renders it. */}
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={close}>
-              {t("devices.scan.done")}
-            </Button>
-            <Button
-              variant="default"
-              onClick={() => {
-                setDispatched(null);
-                dispatch.reset();
-              }}
-            >
-              {t("devices.scan.another")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          <p>
-            <Trans
-              k="devices.scan.intro"
-              components={{ strong: <strong />, link: <Link to="/ipam" onClick={close} /> }}
-            />
-          </p>
-
-          <div className="form-grid">
-            <Field label={t("devices.scan.subnet")} full>
-              <select
-                className={inputClass}
-                value={subnetId}
-                onChange={(event) => setSubnetId(event.target.value)}
-              >
-                <option value="">{t("devices.scan.choose")}</option>
-                {options.map((subnet) => (
-                  <option key={subnet.id} value={subnet.id}>
-                    {subnet.prefix}
-                    {subnet.name ? `, ${subnet.name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          {subnets.isLoading ? (
-            <p className="note">{t("devices.scan.loading")}</p>
-          ) : options.length === 0 ? (
-            <p className="notice gold">
+    <>
+      <Dialog open={open} onClose={close} title={t("devices.scan.title")}>
+        {dispatched ? (
+          // THE SWEEP IS A JOB, NOT AN ANSWER. It was queued for the segment's
+          // agent, which runs it on its own schedule and reports back; the rows
+          // it finds are recorded automatically and land on the fleet list. So
+          // the honest confirmation is "asked", with where to look, not "found".
+          <div className="grid gap-3">
+            <p>
               <Trans
-                k="devices.scan.noSubnets"
-                components={{ link: <Link to="/ipam" onClick={close} /> }}
+                k="devices.scan.queued"
+                vars={{ prefix: dispatched.prefix }}
+                components={{ strong: <strong /> }}
               />
             </p>
-          ) : chosen ? (
-            // The two signals this dialog can honestly show. Neither is the
-            // authorization -- that is the server's to check -- but a subnet
-            // with no designated agent cannot be swept at all, and that is
-            // worth saying before the button is pressed rather than after.
             <p className="note">
-              {chosen.sweep_device_id ? t("devices.scan.hasAgent") : t("devices.scan.noAgent")}{" "}
-              {chosen.last_swept_at
-                ? t("devices.scan.lastSwept", { age: formatAge(chosen.last_swept_at) })
-                : t("devices.scan.neverSwept")}
+              <Trans
+                k="devices.scan.nothingConfirms"
+                components={{ link: <Link to="/devices?provenance=sweep" onClick={close} /> }}
+              />
             </p>
-          ) : null}
-
-          {dispatch.isError ? (
-            <p className="notice red" role="alert">
-              {describeSubmitError(dispatch.error)}
-            </p>
-          ) : null}
-
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={close}>
-              {t("common.actions.cancel")}
-            </Button>
-            <Button
-              variant="default"
-              disabled={!chosen || dispatch.isPending}
-              onClick={run}
-            >
-              {dispatch.isPending ? t("devices.scan.queuing") : t("devices.scan.scanNow")}
-            </Button>
+            {/* A BARE FLEX ROW, NOT A `.field` IN A `.form-grid`. `.field` is
+                `flex-direction: column` and unlayered, so it BEATS Tailwind's
+                layered `flex-row` and stacks the buttons full width -- the exact
+                "cascade is the component" trap this codebase has hit before. The
+                dialog footer is `flex items-center justify-end`, the way every
+                other dialog renders it. */}
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={close}>
+                {t("devices.scan.done")}
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => {
+                  // Another subnet: the picker starts empty, so the one just
+                  // scanned is not held as an unsaved choice.
+                  setSubnetId("");
+                  setDispatched(null);
+                  dispatch.reset();
+                }}
+              >
+                {t("devices.scan.another")}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
-    </Dialog>
+        ) : (
+          <div className="grid gap-3">
+            <p>
+              <Trans
+                k="devices.scan.intro"
+                components={{ strong: <strong />, link: <Link to="/ipam" onClick={close} /> }}
+              />
+            </p>
+
+            <div className="form-grid">
+              <Field label={t("devices.scan.subnet")} full>
+                <select
+                  className={inputClass}
+                  value={subnetId}
+                  onChange={(event) => setSubnetId(event.target.value)}
+                >
+                  <option value="">{t("devices.scan.choose")}</option>
+                  {options.map((subnet) => (
+                    <option key={subnet.id} value={subnet.id}>
+                      {subnet.prefix}
+                      {subnet.name ? `, ${subnet.name}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            {subnets.isLoading ? (
+              <p className="note">{t("devices.scan.loading")}</p>
+            ) : options.length === 0 ? (
+              <p className="notice gold">
+                <Trans
+                  k="devices.scan.noSubnets"
+                  components={{ link: <Link to="/ipam" onClick={close} /> }}
+                />
+              </p>
+            ) : chosen ? (
+              // The two signals this dialog can honestly show. Neither is the
+              // authorization -- that is the server's to check -- but a subnet
+              // with no designated agent cannot be swept at all, and that is
+              // worth saying before the button is pressed rather than after.
+              <p className="note">
+                {chosen.sweep_device_id ? t("devices.scan.hasAgent") : t("devices.scan.noAgent")}{" "}
+                {chosen.last_swept_at
+                  ? t("devices.scan.lastSwept", { age: formatAge(chosen.last_swept_at) })
+                  : t("devices.scan.neverSwept")}
+              </p>
+            ) : null}
+
+            {dispatch.isError ? (
+              <p className="notice red" role="alert">
+                {describeSubmitError(dispatch.error)}
+              </p>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={close}>
+                {t("common.actions.cancel")}
+              </Button>
+              <Button
+                variant="default"
+                disabled={!chosen || dispatch.isPending}
+                onClick={run}
+              >
+                {dispatch.isPending ? t("devices.scan.queuing") : t("devices.scan.scanNow")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+      {/* AFTER THE DIALOG, so the leave question paints above it: the two share
+          the `.modal` z-index and DOM order decides (coordinator ruling 3a). */}
+      {guard}
+    </>
   );
 }

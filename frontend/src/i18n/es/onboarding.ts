@@ -3,17 +3,17 @@ import type { onboarding as en } from "../en/onboarding";
 
 export const onboarding: Shape<typeof en> = {
   page: {
-    title: "Añadir un equipo",
+    back: "Equipos",
     description: "Instala el agente en un equipo o encuentra todos los equipos de una red.",
     oneComputer: {
       title: "Un equipo",
       subtitle: "Descarga el instalador de su plataforma o copia un comando de instalación de una sola línea.",
       getInstaller: "Obtener el instalador",
       enrollmentTokens: "Tokens de inscripción",
-      note: "De cualquier forma, el equipo genera su propia clave, que nunca sale de él, y recibe su propio certificado. Aparece en Dispositivos en cuanto se conecta por primera vez.",
+      note: "De cualquier forma, el equipo genera su propia clave, que nunca sale de él, y recibe su propio certificado. Aparece en Equipos en cuanto se conecta por primera vez.",
     },
     manyNote:
-      "Muchos equipos en una red: esta plataforma nunca se conecta a un equipo, así que el primero de un segmento nuevo siempre se instala a mano. Ese equipo pasa a ser el que barre la red y encuentra el resto.",
+      "Esta plataforma nunca se conecta a un equipo, así que el primero de un segmento nuevo siempre se instala a mano. Ese equipo pasa a ser el que barre la red y encuentra el resto.",
     manyTitle: "Muchos equipos en una red",
     needsAdmin: "Esto debe hacerlo un administrador. Requiere {permissions}, que tu cuenta no tiene.",
     youAreHere: "Estás aquí",

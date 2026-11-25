@@ -1,6 +1,5 @@
 export const agentReleases = {
   page: {
-    title: "Agent packages",
     description: "Installers for each platform, and the commands that install them.",
     publish: "Publish a release…",
     releases: "Releases",
@@ -11,16 +10,18 @@ export const agentReleases = {
     platformsZero: "No platform is covered",
     catalogue: "Published releases",
     newestSubtitle: {
-      one: "Version {version}, {count} package. Older versions are folded away below.",
-      other: "Version {version}, {count} packages. Older versions are folded away below.",
+      one: "Version {version}, {count} package. The older versions show with their filter.",
+      other: "Version {version}, {count} packages. The older versions show with their filter.",
     },
     allSubtitle: {
       one: "{count} package across {platforms}",
       other: "{count} packages across {platforms}",
     },
     platformCount: { one: "{count} platform", other: "{count} platforms" },
-    showOlder: "Show older versions ({versions})",
-    hideOlder: "Hide older versions",
+    // The older versions as a chip on `?older=1` (redesign Task 6, 1.11).
+    versionsShown: "Versions shown",
+    chipNewest: "Newest version",
+    chipOlder: "With older versions ({versions})",
   },
   // The site new machines are enrolled into (MSP clients phase 3, design §3.2).
   where: { title: "Where new machines go", subtitle: "The site an install command, the install link and a managed deployment enrol machines into." },
@@ -224,6 +225,7 @@ export const agentReleases = {
     perHour: "Most computers per hour",
     perHourHelp: "Between 1 and 500. Beyond it, the link asks the next computer to try later.",
     noNetwork: "List at least one network before switching the link on.",
+    unchanged: "Nothing has changed, so nothing was saved.",
     notChanged: "The install link was not changed. {detail}",
     save: "Save install link",
     regenerate: "Generate a new link…",

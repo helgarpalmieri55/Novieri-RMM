@@ -1,7 +1,6 @@
 export const devices = {
   // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   page: {
-    title: "Devices",
     description: "Every computer and device you manage, with or without an agent.",
     addAsset: "Add asset",
     exportInventory: "Export inventory",
@@ -38,6 +37,8 @@ export const devices = {
     searchPeople: "Search name, description, IP, FQDN, operating system, architecture or who it's assigned to",
     search: "Search name, description, IP, FQDN, operating system or architecture",
     searchAria: "Search devices",
+    // The state chips' group (redesign Receta L, 5: the tab strip on `?state=` became chips).
+    stateLabel: "Filter by state",
     clear: "Clear search",
     provenanceAria: "Filter by how the record came to exist",
     provenanceAny: "Recorded by anyone",
@@ -48,13 +49,11 @@ export const devices = {
       other: "{count} of at most {max} machines selected for push install.",
     },
     pushSelected: "Push install the agent… ({count})",
-    clearSelection: "Clear selection",
     approveAll: "Approve all…",
   },
   empty: {
-    none: "No devices enrolled yet.",
-    search: "No devices match “{term}”.",
-    filter: "No devices match that filter.",
+    // The empty fleet's cause and its way forward (redesign Task 6, 1.1: `ListEmpty` with Add a computer).
+    yet: "No devices yet. Install the agent on the first one.",
   },
   table: {
     selectForPush: "Select for push install",
@@ -155,7 +154,6 @@ export const devices = {
     lifecycle: "Lifecycle",
     location: "Location",
     locationPlaceholder: "HQ, rack 3",
-    cancel: "Cancel",
     submit: "Add asset",
     adding: "Adding…",
     failed: "The asset was not added.",
@@ -176,7 +174,6 @@ export const devices = {
     failed: "Nothing was changed.",
   },
   candidates: {
-    title: "Discovered on the network",
     description: "Addresses the fleet has seen that no asset record accounts for.",
     scan: "Scan a subnet",
     swept: "Recorded by a sweep",
@@ -190,9 +187,9 @@ export const devices = {
       one: "<strong>{count} subnet</strong> has no agent that can sweep it, so nothing below can be true of that subnet.",
       other: "<strong>{count} subnets</strong> have no agent that can sweep them, so nothing below can be true of those subnets.",
     },
-    truncated: "Showing {shown} of {total}. Narrow the sweep or promote what you recognise.",
-    count: { one: "{count} candidate", other: "{count} candidates" },
-    promote: "Promote",
+    // The list kit (redesign Task 6, 1.4): the search over address and name, and what a list that stops short says.
+    search: "Search the addresses found",
+    truncatedHint: "The list stops short of every address seen. Narrow the sweep or promote what you recognise.",
     promoteN: "Promote {count}",
     promoting: "Promoting…",
     emptySwept: "Nothing unaccounted for on the subnets that were swept.",
@@ -236,7 +233,6 @@ export const devices = {
     noAgent: "No designated agent yet, so nothing can run a sweep. Set one in IPAM.",
     lastSwept: "Last swept {age}.",
     neverSwept: "It has never been swept.",
-    cancel: "Cancel",
     queuing: "Queuing…",
     scanNow: "Scan now",
   },
@@ -267,7 +263,6 @@ export const devices = {
     noAgent: "No agent",
   },
   groups: {
-    title: "Device groups",
     description: "Carve the fleet into groups for policy and deployment.",
     newGroup: "New group",
     prerequisitesTitle: "Before a group has computers to hold",
@@ -275,6 +270,11 @@ export const devices = {
     panelTitle: "Groups",
     panelSubtitle: "Lower precedence claims a device first.",
     showArchived: "Show archived",
+    // The list kit (redesign Task 6, 1.5): the search, the archived chip and closing an open group.
+    search: "Search groups",
+    chipActive: "Active",
+    chipArchived: "Including archived",
+    closeMembers: "Close",
     colGroup: "Group",
     colClient: "Client",
     colPrecedence: "Precedence",
@@ -398,7 +398,6 @@ export const devices = {
     },
     memberDialog: {
       title: "Members of {name}",
-      titleBare: "Members",
       byRules: "Membership is decided by rules, so devices cannot be placed in this group by hand.",
       none: "No devices in this group.",
       remove: "Remove",

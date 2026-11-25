@@ -146,7 +146,7 @@ export function PushReadiness() {
     missing: {
       severity: "warn",
       detail: t("agentPush.readiness.authorization.missing"),
-      cta: { to: "/agent-push/authorizations#authorize", label: t("agentPush.readiness.authorization.cta") },
+      cta: { to: "/agent-push/authorizations?new=authorization", label: t("agentPush.readiness.authorization.cta") },
     },
   });
 

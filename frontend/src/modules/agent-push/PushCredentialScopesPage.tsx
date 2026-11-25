@@ -1,10 +1,25 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
-import { describeSubmitError } from "../../components/form";
-import { Button, Field, Td, Th, inputClass } from "../../components/ui";
-import { FilterBar, PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
+import { translate } from "../../i18n/core";
+import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  TableWrap,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { formatDate } from "../../lib/datetime";
 import { useOrgZone } from "../../lib/zone";
 import { Icon } from "../../shell/icons";
@@ -45,13 +60,18 @@ import { PUSH_CREDENTIAL_TYPE, type PushCredentialScopeOut } from "./types";
 // appears to hold the code. That is cosmetic: the server refuses regardless.
 //
 // v3 draws this as one list: the key glyph, the credential's name, the prefix
-// it may be presented in, its state. The bind form the design opens from its
-// "New scope" button is inline below the list here.
+// it may be presented in, its state; and opens the bind form from its "New
+// scope" button. ON THE LIST KIT (redesign plan Task 6, 1.10): that button
+// opens the form in a dialog from `?new=scope` (decision D8), with its safety
+// text (invariant 2a(d)) beside its controls and the same body as before;
+// "include unbound" is the `?unbound=1` chip, so it survives a reload.
 export function PushCredentialScopesPage() {
   const t = useT();
   const permissions = usePushPermissions();
-  const [includeUnbound, setIncludeUnbound] = useState(false);
+  const filters = useUrlFilters(["unbound"] as const);
+  const includeUnbound = filters.values.unbound === "1";
   const scopes = usePushCredentialScopes(includeUnbound);
+  const creating = useNewParam("scope");
   const unbind = useUnbindPushCredentialScopeMutation();
 
   return (
@@ -65,8 +85,15 @@ export function PushCredentialScopesPage() {
           sentence reads as prose to nobody and is a role name to an admin;
           both readers need the code, neither needs it unannounced. */}
       <PageHead
-        title={t("agentPush.scopes.title")}
+        // The area's name in the navigation (coordinator ruling, fix round 1: a
+        // page's h1 is its rail label); the section nav under it says which page.
+        title={t("shell.nav.item.pushInstall")}
         description={t("agentPush.scopes.description")}
+        actions={
+          permissions.scopeManage ? (
+            <Btn label={t("agentPush.scopes.new")} icon="plus" variant="primary" onClick={creating.start} />
+          ) : undefined
+        }
       />
 
       <PushNav />
@@ -76,29 +103,41 @@ export function PushCredentialScopesPage() {
       <PushReadiness />
 
       <Panel bare>
-        <FilterBar>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeUnbound}
-              onChange={(e) => setIncludeUnbound(e.target.checked)}
+        <ListToolbar
+          chips={
+            /* Asks the server for unbound scopes too, as the checkbox did. */
+            <FilterChips
+              label={t("agentPush.scopes.showUnbound")}
+              options={[
+                { value: "", label: t("agentPush.scopes.chipBound") },
+                { value: "1", label: t("agentPush.scopes.chipUnbound") },
+              ]}
+              value={filters.values.unbound}
+              onChange={(value) => filters.set("unbound", value)}
             />
-            <span>{t("agentPush.scopes.showUnbound")}</span>
-          </label>
-          <span className="filter-spacer" />
-          <span className="note mono">
-            {scopes.data ? t("agentPush.scopes.count", { count: scopes.data.length }) : "…"}
-          </span>
-        </FilterBar>
-        <QueryState
-          loading={scopes.isLoading}
-          error={scopes.error}
-          empty={(scopes.data ?? []).length === 0}
-          emptyLabel={t("agentPush.scopes.empty")}
-          emptyIcon="lock"
-        >
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={scopes.data ? <ShowingCount shown={scopes.data.length} total={scopes.data.length} /> : null}
+        />
+        <QueryState loading={scopes.isLoading} error={scopes.error} empty={false} emptyLabel="">
+          {(scopes.data ?? []).length === 0 ? (
+            /* NEVER "NOTHING MATCHES": the chip only ever adds rows (the
+               unbound ones), so an empty list is the real cause -- no
+               credential bound, every push refused -- with or without it. */
+            <ListEmpty
+              filtered={false}
+              onClear={filters.clear}
+              nothingYet={t("agentPush.scopes.empty")}
+              icon="lock"
+              action={
+                permissions.scopeManage ? (
+                  <Btn label={t("agentPush.scopes.new")} icon="plus" onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("agentPush.scopes.title")}>
               <thead>
                 <tr>
                   <th scope="col">{t("agentPush.shared.credential")}</th>
@@ -124,6 +163,7 @@ export function PushCredentialScopesPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
         {unbind.isError && (
           <p role="alert" className="form-error" style={{ margin: "12px 18px" }}>
@@ -132,7 +172,11 @@ export function PushCredentialScopesPage() {
         )}
       </Panel>
 
-      {permissions.scopeManage && <BindForm />}
+      {/* Only for a holder of the scope code, whatever the URL asks: the
+          server refuses the write either way (invariant 6). Mounted only while
+          `?new=scope` is set, so each opening starts empty (ruling 4); the
+          form draws its own dialog, with the leave question after it. */}
+      {creating.open && permissions.scopeManage ? <BindForm onClose={creating.close} /> : null}
     </div>
   );
 }
@@ -206,22 +250,44 @@ function ScopeRow({
   );
 }
 
-function BindForm() {
+function BindForm({ onClose }: { onClose: () => void }) {
   const t = useT();
   const bind = useBindPushCredentialScopeMutation();
   const credentials = usePushCredentials();
   const [credentialId, setCredentialId] = useState("");
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
+  // Populated on Bind, never while typing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const problems = attemptProblems(attempt);
+  /**
+   * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
+   * form lives in the `?new=scope` dialog, so Back, Close and Escape are all
+   * a change of `new`: with anything chosen or typed, each asks first. A
+   * binding that was made lets its own close through (`release`).
+   */
+  const { guard, release } = useUnsavedGuard(credentialId !== "" || prefix !== "" || note !== "", {
+    search: ["new"],
+  });
+  /**
+   * The dialog, and the leave question AFTER it: the two share the `.modal`
+   * z-index, so DOM order decides which paints on top (coordinator ruling 3a).
+   */
+  const frame = (body: ReactNode) => (
+    <>
+      <Dialog open onClose={onClose} title={t("agentPush.scopes.form.title")}>
+        {body}
+      </Dialog>
+      {guard}
+    </>
+  );
 
   const parsed = parsePrefix(prefix);
   const available = credentials.data ?? [];
 
-  return (
-    <Panel
-      title={t("agentPush.scopes.form.title")}
-      subtitle={t("agentPush.scopes.form.subtitle")}
-    >
+  return frame(
+    <>
+      <p className="note mb-3">{t("agentPush.scopes.form.subtitle")}</p>
       <div className="notice gold">
         <Icon name="warning" size={17} />
         <div>
@@ -303,18 +369,41 @@ function BindForm() {
 
       <div className="mt-3">
         <Button
-          onClick={() =>
+          onClick={() => {
+            // ENABLED, AND SAYS WHAT IS MISSING ON SUBMIT (coordinator
+            // clarification 8a): the form has several inputs, so Bind never
+            // waits disabled on one of them. A refusal of the last attempt is
+            // cleared first (ruling 7).
+            const next: Attempt = {
+              rules: () => [
+                { name: "credential", label: translate("agentPush.shared.credential") },
+                {
+                  name: "prefix",
+                  label: translate("agentPush.shared.prefix"),
+                  validate: (value: string) => (parsePrefix(value) ? null : translate("agentPush.shared.notAPrefix")),
+                },
+              ],
+              values: { credential: credentialId, prefix },
+            };
+            setAttempt(next);
+            if (attemptProblems(next).length > 0) {
+              bind.reset();
+              return;
+            }
             bind.mutate(
               { credential_id: credentialId, prefix, note },
               {
                 onSuccess: () => {
                   setPrefix("");
                   setNote("");
+                  // The binding is made: its own close is not a lost change.
+                  release();
+                  onClose();
                 },
               },
-            )
-          }
-          disabled={bind.isPending || parsed === null || credentialId === ""}
+            );
+          }}
+          disabled={bind.isPending}
         >
           {t("agentPush.scopes.form.submit")}
         </Button>
@@ -324,11 +413,15 @@ function BindForm() {
           It was the tail of a 391-char page description. */}
       <p className="note mt-2">{t("agentPush.scopes.form.separation")}</p>
 
-      {bind.isError && (
+      {bind.isError ? (
         <p role="alert" className="form-error mt-2">
           {describeSubmitError(bind.error)}
         </p>
-      )}
-    </Panel>
+      ) : problems.length > 0 ? (
+        <p role="alert" className="form-error mt-2">
+          {problems.map((problem) => problem.message).join(". ")}.
+        </p>
+      ) : null}
+    </>,
   );
 }

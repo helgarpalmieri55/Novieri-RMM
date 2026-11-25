@@ -362,3 +362,22 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     );
   });
 });
+
+/* --- the kit's form shape (redesign plan Task 6, 1.6) ------------------------------- */
+
+describe("the page on the form kit", () => {
+  it("leads back to the computers", async () => {
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "Add a computer" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Devices" })).toHaveAttribute("href", "/devices");
+  });
+
+  it("draws each block as a section that folds, and no save bar: it keeps nothing", async () => {
+    renderPage();
+    await screen.findByRole("heading", { level: 1, name: "Add a computer" });
+    for (const name of ["One computer", "Many computers on a network"]) {
+      expect(screen.getByRole("button", { name, expanded: true })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+});

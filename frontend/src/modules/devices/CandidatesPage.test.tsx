@@ -15,7 +15,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -23,6 +23,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, AssetCandidate, AssetCandidatePage, Me, MeClient } from "../../lib/api";
 import { ApiError } from "../../lib/api";
+import { recordingNarrowing } from "../../test/narrowing";
+import { renderPage as renderAt } from "../../test/renderPage";
 import { CandidatesPage } from "./CandidatesPage";
 
 const mockUseApi = vi.fn();
@@ -432,7 +434,9 @@ describe("CandidatesPage", () => {
     // into a request whose result the operator has no way to interpret.
     renderPage(() => Promise.resolve(page()));
     await screen.findByText("172.22.104.55");
-    expect(screen.getByRole("button", { name: /promote/i })).toBeDisabled();
+    // Not even drawn: Promote lives in the kit's bulk bar, which shows only
+    // with a selection (redesign Task 6, 1.4), so there is nothing to click.
+    expect(screen.queryByRole("button", { name: /promote/i })).toBeNull();
   });
 
   it("says how many candidates were not shown", async () => {
@@ -624,7 +628,8 @@ describe("the tiles are links", () => {
     // loss.
     const user = userEvent.setup();
     renderPage(() => Promise.resolve(page()));
-    expect(await screen.findByText(/1 candidate/i)).toBeInTheDocument();
+    // The kit's count (redesign Receta L): "Showing x of y".
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /172\.22\.104\.55/ }));
     expect(screen.getByRole("button", { name: /promote 1/i })).toBeInTheDocument();
   });
@@ -654,7 +659,9 @@ describe("the tiles are links", () => {
     const card = (await screen.findByText("Subnets nobody can sweep")).closest(
       ".stat-card",
     ) as HTMLElement;
-    expect(within(card).getByText("No sweep has reported a missing agent")).toBeInTheDocument();
+    // Awaited: before the candidates answer the tile draws the absent mark and
+    // no zero sentence (coordinator ruling 10a), so the zero is the read's.
+    expect(await within(card).findByText("No sweep has reported a missing agent")).toBeInTheDocument();
     // And only that line: the foot below is about a count that exists.
     expect(
       within(card).queryByText("Nothing there could run a sweep"),
@@ -739,4 +746,246 @@ describe("once a sweep records what it finds", () => {
     expect(await within(dialog).findByRole("alert")).toBeInTheDocument();
   });
 
+});
+
+/* --- the list kit (redesign plan Task 6, 1.4; Receta L) ------------------------------ */
+
+describe("Discovered on the list kit", () => {
+  /** A UUID: the console reads back only a UUID as a client (`lib/clientChoice.ts`). */
+  const ANDES: MeClient = {
+    id: "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
+    name: "Andes Logistics",
+    kind: "customer",
+    enabled_modules: [],
+    permissions: [],
+  };
+  const TWO = [SCOPE_INTERNAL, ANDES];
+  const rows = () =>
+    Promise.resolve(
+      page({
+        items: [candidate(), candidate({ address: "10.9.9.9", hostname: "printer-3f", client_id: ANDES.id })],
+        total: 2,
+      }),
+    );
+
+  function under(path: string, api: Partial<ApiClient> = {}) {
+    mockUseApi.mockReturnValue({
+      listAssetCandidates: vi.fn(rows),
+      promoteAssetCandidates: promote,
+      listAssetSuggestions: vi.fn().mockResolvedValue({ items: [] }),
+      listIpamSubnets,
+      dispatchIpamSweep,
+      listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      ...api,
+    } as unknown as ApiClient);
+    return renderAt(path, <CandidatesPage />);
+  }
+
+  it("keeps its search in the URL, so a reload finds the same rows", async () => {
+    const { router } = under("/discovered");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Search the addresses found" }), "printer");
+    expect(router.state.location.search).toBe("?q=printer");
+    await act(() => router.navigate("/discovered?q=printer"));
+    expect(screen.getByRole("textbox", { name: "Search the addresses found" })).toHaveValue("printer");
+    expect(await screen.findByText("10.9.9.9")).toBeInTheDocument();
+    expect(screen.queryByText("172.22.104.55")).toBeNull();
+  });
+
+  it("says why the list is empty", async () => {
+    under("/discovered?q=nothing-is-called-this");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("offers Promote in the bulk bar only with a selection", async () => {
+    under("/discovered");
+    await screen.findByText("172.22.104.55");
+    expect(screen.queryByRole("region", { name: "Bulk actions" })).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "172.22.104.55" }));
+    const bar = screen.getByRole("region", { name: "Bulk actions" });
+    expect(within(bar).getByRole("button", { name: /promote 1/i })).toBeEnabled();
+  });
+
+  it("opens Scan a subnet from ?new=scan, as its head's primary action", async () => {
+    const { router } = under("/discovered");
+    const scan = await screen.findByRole("button", { name: /scan a subnet/i });
+    expect(scan).toHaveClass("primary");
+    await userEvent.click(scan);
+    expect(router.state.location.search).toBe("?new=scan");
+    expect(await screen.findByRole("dialog", { name: /scan a subnet/i })).toBeInTheDocument();
+  });
+
+  it("opens Scan a subnet afresh after Back closed it on a queued scan (coordinator ruling 4)", async () => {
+    // The dialog's state outlived a close it did not see: Back takes `?new=`
+    // away without calling its own close, and reopening showed the last
+    // scan's "queued" answer instead of the picker.
+    const { router } = under("/discovered");
+    await userEvent.click(await screen.findByRole("button", { name: /scan a subnet/i }));
+    let dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    await within(dialog).findByRole("option", { name: /10\.0\.4\.0\/24/ });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "sub-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: /scan now/i }));
+    expect(await within(dialog).findByText(/queued for the/i)).toBeInTheDocument();
+
+    await act(() => router.navigate(-1));
+    expect(screen.queryByRole("dialog", { name: /scan a subnet/i })).toBeNull();
+    await act(() => router.navigate(1));
+    dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    expect(within(dialog).queryByText(/queued for the/i)).toBeNull();
+    expect(within(dialog).getByRole("combobox")).toHaveValue("");
+  });
+
+  it("asks before Close drops a chosen subnet nobody has scanned yet (coordinator ruling 3)", async () => {
+    const { router } = under("/discovered");
+    await userEvent.click(await screen.findByRole("button", { name: /scan a subnet/i }));
+    const dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    await within(dialog).findByRole("option", { name: /10\.0\.4\.0\/24/ });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "sub-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(router.state.location.search).toBe("?new=scan");
+    expect(within(dialog).getByRole("combobox")).toHaveValue("sub-1");
+  });
+
+  it("narrows the list and leaves the console's client alone (decision D20)", async () => {
+    const select = vi.fn();
+    mockClientScope.mockReturnValue({ selected: null, select, clients: TWO, ready: true });
+    // The page's other reads stay on the console's choice: the suggestions
+    // panel and, once opened, the Scan a subnet dialog's subnet picker.
+    // Neither is this list. (The "Recorded by a sweep" tile is narrowed like
+    // the table since fix round 1; the test below is about it.)
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: rows,
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 0 }),
+        listIpamSubnets: () => Promise.resolve([]),
+        me: () => Promise.resolve({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions", "listIpamSubnets"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    expect(await screen.findByText("172.22.104.55")).toBeInTheDocument();
+    expect(narrowing.client(ANDES.id).listAssetCandidates).toHaveBeenCalledWith();
+    expect(narrowing.unnarrowed).toEqual([]);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("still takes the journey's client from ?journey_client=", async () => {
+    const select = vi.fn();
+    mockClientScope.mockReturnValue({ selected: null, select, clients: TWO, ready: true });
+    under(`/discovered?journey_client=${ANDES.id}`);
+    await screen.findByText("172.22.104.55");
+    await waitFor(() => expect(select).toHaveBeenCalledWith(ANDES.id));
+  });
+
+  it("counts and opens the sweep's rows of the chip's client, like the table (fix round 1)", async () => {
+    // Coordinator ruling 2: a tile counted on a narrowed read links with the
+    // same `client`. Under the chip the tile counted every client's sweep rows
+    // and opened every client's: now it counts the chip's client's, through
+    // its narrowed API, and opens the fleet list narrowed to it. The note's
+    // link to the same rows follows.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: TWO, ready: true });
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: rows,
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 4 }),
+        listIpamSubnets: () => Promise.resolve([]),
+        me: () => Promise.resolve({ org_id: "o1", permissions: ["devices.read"], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions", "listIpamSubnets"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    const tile = (await screen.findByText("Recorded by a sweep")).closest(".stat-card") as HTMLElement;
+    await waitFor(() => expect(within(tile).getByText("4")).toBeInTheDocument());
+    expect(narrowing.client(ANDES.id).listDevices).toHaveBeenCalledWith({ provenance: "sweep", limit: 1 });
+    expect(tile.getAttribute("href")).toBe(`/devices?provenance=sweep&client=${ANDES.id}`);
+    expect(screen.getByRole("link", { name: /review them there/i })).toHaveAttribute(
+      "href",
+      `/devices?provenance=sweep&client=${ANDES.id}`,
+    );
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("opens the subnets nobody can sweep under the chip's client, as it counted them (ruling 2)", async () => {
+    // The unsweepable count comes from the candidates read, which the chip
+    // narrows; the tile opens IPAM narrowed the same way.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: TWO, ready: true });
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: () => Promise.resolve(page({ unsweepable_subnets: 2 })),
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 0 }),
+        me: () => Promise.resolve({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    const tile = (await screen.findByText("Subnets nobody can sweep")).closest(".stat-card") as HTMLElement;
+    await waitFor(() => expect(within(tile).getByText("2")).toBeInTheDocument());
+    expect(tile.getAttribute("href")).toBe(`/ipam?client=${ANDES.id}`);
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("draws no tile number or claim when the reads failed, and the list says why (coordinator ruling 10a)", async () => {
+    // Both reads refused, for an account that may make them: no data is no
+    // data, whether it is still coming or will not come.
+    under("/discovered", {
+      listAssetCandidates: () => Promise.reject(new ApiError(503, "candidates unavailable")),
+      listDevices: () => Promise.reject(new ApiError(503, "fleet unavailable")),
+      me: () => Promise.resolve({ org_id: "o1", permissions: ["devices.read"], clients: TWO } as unknown as Me),
+    } as Partial<ApiClient>);
+    expect(await screen.findByText(/candidates unavailable/)).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(2);
+    for (const tile of tiles) {
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
+  it("draws no tile number or claim before the reads answer (coordinator ruling 10a)", async () => {
+    // "0" and "No sweep has reported a missing agent" under it, while nothing
+    // has been read, is a claim about the network made from no answer.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    under(`/discovered?client=${ANDES.id}`, { me: () => new Promise<never>(() => {}) } as Partial<ApiClient>);
+    await screen.findByRole("heading", { level: 1 });
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(2);
+    for (const tile of tiles) {
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (ruling 10)", async () => {
+    // Coordinator ruling 10: with the chip set and `/me` pending the narrowed
+    // read is disabled, and a disabled query is not "loading" to TanStack v5.
+    // The page must not say "nothing matches" or "nothing unaccounted" about
+    // a list it has not read.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    const listAssetCandidates = vi.fn(rows);
+    under(`/discovered?client=${ANDES.id}`, {
+      listAssetCandidates,
+      me: () => new Promise<never>(() => {}),
+    } as Partial<ApiClient>);
+    // The list's own panel: the one its search sits in (the suggestions panel
+    // above it draws its own loading).
+    const list = (await screen.findByRole("textbox", { name: "Search the addresses found" })).closest(".panel") as HTMLElement;
+    expect(within(list).getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText(/nothing unaccounted/i)).toBeNull();
+    expect(listAssetCandidates).not.toHaveBeenCalled();
+  });
 });

@@ -3,7 +3,6 @@ import type { agentReleases as en } from "../en/agentReleases";
 
 export const agentReleases: Shape<typeof en> = {
   page: {
-    title: "Paquetes del agente",
     description: "Instaladores para cada plataforma y los comandos que los instalan.",
     publish: "Publicar una versión…",
     releases: "Versiones",
@@ -14,16 +13,17 @@ export const agentReleases: Shape<typeof en> = {
     platformsZero: "No se cubre ninguna plataforma",
     catalogue: "Versiones publicadas",
     newestSubtitle: {
-      one: "Versión {version}, {count} paquete. Las versiones anteriores están plegadas más abajo.",
-      other: "Versión {version}, {count} paquetes. Las versiones anteriores están plegadas más abajo.",
+      one: "Versión {version}, {count} paquete. Las versiones anteriores se ven con su filtro.",
+      other: "Versión {version}, {count} paquetes. Las versiones anteriores se ven con su filtro.",
     },
     allSubtitle: {
       one: "{count} paquete en {platforms}",
       other: "{count} paquetes en {platforms}",
     },
     platformCount: { one: "{count} plataforma", other: "{count} plataformas" },
-    showOlder: "Mostrar las versiones anteriores ({versions})",
-    hideOlder: "Ocultar las versiones anteriores",
+    versionsShown: "Versiones que se muestran",
+    chipNewest: "La versión más reciente",
+    chipOlder: "Con las versiones anteriores ({versions})",
   },
   where: { title: "Dónde van las máquinas nuevas", subtitle: "La sede en la que inscriben máquinas una instrucción de instalación, el enlace de instalación y un despliegue gestionado." },
   empty: {
@@ -225,6 +225,7 @@ export const agentReleases: Shape<typeof en> = {
     perHour: "Máximo de equipos por hora",
     perHourHelp: "Entre 1 y 500. Por encima, el enlace pide al siguiente equipo que lo intente más tarde.",
     noNetwork: "Indica al menos una red antes de activar el enlace.",
+    unchanged: "No ha cambiado nada, así que no se ha guardado nada.",
     notChanged: "No se cambió el enlace de instalación. {detail}",
     save: "Guardar el enlace de instalación",
     regenerate: "Generar un enlace nuevo…",

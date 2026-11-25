@@ -282,13 +282,14 @@ describe("agent packages in Spanish", () => {
     stubApi();
     const { container } = renderPage();
     expect(await screen.findByRole("heading", { name: "Paquetes del agente" })).toBeInTheDocument();
-    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. Las versiones anteriores están plegadas más abajo.")).toBeInTheDocument();
+    // The older versions are a chip on the list's toolbar now (redesign Task 6, 1.11), and the subtitle says so.
+    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. Las versiones anteriores se ven con su filtro.")).toBeInTheDocument();
     expect(screen.getAllByText(/Aún sin probar en un equipo Windows real/).length).toBeGreaterThan(0);
     expect(screen.getByText("No se ha subido ningún archivo")).toBeInTheDocument();
     await screen.findByText("3 agentes · última estable 1.8.2 · 2 pueden actualizarse");
     expectNoEnglish(container);
-    await user.click(screen.getByRole("button", { name: "Mostrar las versiones anteriores (1.8.2-rc1, 1.8.1)" }));
-    expect(screen.getByRole("button", { name: "Ocultar las versiones anteriores" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Con las versiones anteriores (1.8.2-rc1, 1.8.1)" }));
+    expect(screen.getByRole("button", { name: "La versión más reciente" })).toBeInTheDocument();
     expect(screen.getByText("5 paquetes en 3 plataformas")).toBeInTheDocument();
     expectNoEnglish(container);
   });
@@ -412,6 +413,8 @@ describe("agent packages in Spanish", () => {
     expect(await screen.findByText("Desactivado. Aún no se ha generado ningún enlace.")).toBeInTheDocument();
     expect(screen.getByText("Activa el enlace para descargar el MSI: los equipos se unen a través de él.")).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Aceptar equipos nuevos a través del enlace" }));
+    // Said on submit, not while typing (coordinator clarification 8a).
+    await user.click(screen.getByRole("button", { name: "Guardar el enlace de instalación" }));
     expect(await screen.findByText("Indica al menos una red antes de activar el enlace.")).toBeInTheDocument();
     expectNoEnglish(container);
     await user.type(screen.getByLabelText("Redes a las que responde el enlace"), "10.20.0.0/16");
@@ -747,8 +750,9 @@ describe("a live language switch on the agent packages page", () => {
     expect(screen.getAllByText("Rolled back").length).toBeGreaterThan(0);
     expect(screen.getByText("1.8.1 (rollback)")).toBeInTheDocument();
     // A folded version's button word follows too.
-    expect(screen.getByRole("button", { name: /Show older versions/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Show older versions/ }));
-    expect(screen.getByRole("button", { name: "Hide older versions" })).toBeInTheDocument();
+    // The older versions are a chip on `?older=1` (redesign Task 6, 1.11).
+    expect(screen.getByRole("button", { name: /With older versions/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /With older versions/ }));
+    expect(screen.getByRole("button", { name: /With older versions/ })).toHaveAttribute("aria-pressed", "true");
   });
 });

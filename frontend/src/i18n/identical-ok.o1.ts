@@ -23,5 +23,4 @@ export const IDENTICAL_OK_O1: Record<string, string> = {
   "inventory.detail.tabSoftware": "\"Software\" is the word Spanish uses for software.",
   "inventory.detail.tabHardware": "\"Hardware\" is the word Spanish uses for hardware.",
   "inventory.detail.factCpu": "\"CPU\" is an acronym, written the same in Spanish.",
-  "inventory.software.title": "\"Software\" is the word Spanish uses for software.",
 };
