@@ -44,3 +44,18 @@ describe("FormSection's lead paragraph (kit requests batch 1, item 3)", () => {
     expect(rule(KIT, ".form-section-lead")).toMatch(/max-width:\s*70ch/);
   });
 });
+
+describe("a page's and a record's title balance their lines (kit requests batch 1, item 2)", () => {
+  it("balances the page head's h1, so a long title does not leave one word on its last line", () => {
+    // The detector's `unbalanced-heading` on /service-desk/tickets/tkt-1 and
+    // /service-desk/admin at 390 (O2's K1).
+    expect(rule(KIT, ".ph h1")).toMatch(/text-wrap:\s*balance/);
+  });
+
+  it("reaches every head the kit draws: the page's, the record's and the form's are all `.ph`", () => {
+    const source = (name: string) => readFileSync(resolve(import.meta.dirname, name), "utf8");
+    expect(source("./components.tsx")).toMatch(/<section className="ph">\s*<div className="ph-row">\s*<div>\s*<h1>/);
+    expect(source("./detailKit.tsx")).toMatch(/<section className="ph detail-head">/);
+    expect(source("./formKit.tsx")).toMatch(/<section className="ph">/);
+  });
+});
