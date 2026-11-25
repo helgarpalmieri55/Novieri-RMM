@@ -392,7 +392,7 @@ describe("JobsPage", () => {
     api.getJob = vi.fn().mockResolvedValue({ ...STALE, result: null, params: {} });
     renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
-    expect(await screen.findByText("No result yet — this job has not run.")).toBeInTheDocument();
+    expect(await screen.findByText("No result yet: this job has not run.")).toBeInTheDocument();
     expect(screen.queryByText("{}")).not.toBeInTheDocument();
   });
 
