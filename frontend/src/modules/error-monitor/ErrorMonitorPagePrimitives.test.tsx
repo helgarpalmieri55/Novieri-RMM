@@ -17,6 +17,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Me } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { ErrorMonitorPage } from "./ErrorMonitorPage";
 import type { ErrorGroup, ErrorGroupDetail, ErrorGroupList } from "./types";
 
@@ -116,14 +117,14 @@ describe("ErrorMonitorPage timestamps", () => {
     expect(within(eventRow).getByText("16 Aug 2026, 11:30")).toBeInTheDocument();
   });
 
-  it("renders an unparseable timestamp as an em dash, never 'Invalid Date'", async () => {
+  it("renders an unparseable timestamp as NO_DATE, never 'Invalid Date'", async () => {
     renderPage(
       { listErrorGroups: vi.fn().mockResolvedValue({ groups: [{ ...GROUP, last_seen: "" }], dropped: 0 }) },
       "Asia/Tokyo",
     );
     const row = (await screen.findByText("ValueError")).closest("tr") as HTMLElement;
     expect(screen.queryByText(/invalid date/i)).not.toBeInTheDocument();
-    expect(within(row).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(row).getAllByText(NO_DATE).length).toBeGreaterThan(0);
   });
 });
 

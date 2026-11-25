@@ -20,6 +20,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Me, type SecurityEvent } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { SecurityPage } from "./SecurityPage";
 
 const mockUseApi = vi.fn();
@@ -85,7 +86,7 @@ describe("SecurityPage timestamps", () => {
     expect(screen.queryByText("16 Aug 2026, 11:32")).not.toBeInTheDocument();
   });
 
-  it("renders an unparseable timestamp as an em dash, never 'Invalid Date'", async () => {
+  it("renders an unparseable timestamp as NO_DATE, never 'Invalid Date'", async () => {
     renderPage({ listSecurityEvents: vi.fn().mockResolvedValue({ items: [{ ...EVENT, ts: "" }], total: 1 }) },
       "Asia/Tokyo");
     await screen.findByText("DC-01");
@@ -94,7 +95,7 @@ describe("SecurityPage timestamps", () => {
     // as the design draws it), so it is located by position from the end.
     const cells = (await screen.findByText("DC-01")).closest("tr")?.querySelectorAll("td");
     const when = cells?.[cells.length - 1];
-    expect(when?.textContent).toBe("—");
+    expect(when?.textContent).toBe(NO_DATE);
   });
 });
 
