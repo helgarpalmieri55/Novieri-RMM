@@ -85,8 +85,6 @@ import { Person } from "../../shell/viz";
 
 const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"];
 const RENEWAL_WINDOW_DAYS = 90;
-/** A tile with no data, pending or failed (the coordinator's ruling 10a). */
-const NO_DATA = "—";
 
 /**
  * What a subscription may not be registered without, and what each field may
@@ -287,6 +285,14 @@ export function SubscriptionsPage() {
   // deliberately NOT here: QueryState already reports it over the table, and
   // saying it twice is how a page teaches people to skip its alerts.
   const statsError = renewals.error ?? spend.error;
+  // ONE CONDITION PER TILE (the coordinator's ruling 10a, the Absent Zero
+  // Rule): a tile with no data (pending, narrowing undecided, or failed) is
+  // `pending` -- the kit's absent mark, "n/a" / "n/d", muted, no wash -- and
+  // draws no line under it; the alert under the row says why a read failed.
+  const activeNoData = !subscriptions.data;
+  const renewalsNoData = !renewals.data;
+  const noticeNoData = !renewals.data;
+  const noOwnerNoData = !subscriptions.data;
 
   const primary = canManage ? (
     <Btn label={t("subscriptions.list.newSubscription")} icon="plus" variant="primary" onClick={newSubscription.start} />
@@ -346,26 +352,28 @@ export function SubscriptionsPage() {
         )}
         <StatCard
           label={t("subscriptions.list.tileActive")}
-          value={subscriptions.data ? String(activeCount) : NO_DATA}
+          value={String(activeCount)}
           icon="subscription"
           to={withClient("/subscriptions")}
           tone="blue"
           zeroLabel={t("subscriptions.list.tileActiveZero")}
+          pending={activeNoData}
           foot={
-            subscriptions.data && activeCount > 0 && items.length > activeCount
+            !activeNoData && activeCount > 0 && items.length > activeCount
               ? t("subscriptions.list.ofRecorded", { count: items.length })
               : undefined
           }
         />
         <StatCard
           label={t("subscriptions.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
-          value={renewals.data ? String(renewalRows.length) : NO_DATA}
+          value={String(renewalRows.length)}
           icon="clock"
           to={withClient("/subscriptions/renewals")}
           tone="gold"
           zeroLabel={t("subscriptions.list.tileRenewalsZero")}
+          pending={renewalsNoData}
           foot={
-            renewals.data && nextRenewal?.renews_at
+            !renewalsNoData && nextRenewal?.renews_at
               ? t("subscriptions.list.nextRenewal", {
                   service: nextRenewal.service_name,
                   date: formatDate(nextRenewal.renews_at, "UTC"),
@@ -375,28 +383,30 @@ export function SubscriptionsPage() {
         />
         <StatCard
           label={t("subscriptions.list.tileNotice")}
-          value={renewals.data ? String(noticeDueCount) : NO_DATA}
+          value={String(noticeDueCount)}
           icon="warning"
           to={withClient("/subscriptions/renewals")}
           tone="orange"
-          urgent={renewals.data !== undefined && noticeDueCount > 0}
+          urgent={noticeDueCount > 0}
           zeroLabel={t("subscriptions.list.tileNoticeZero")}
+          pending={noticeNoData}
           foot={
-            renewals.data && noticeDueCount > 0
+            !noticeNoData && noticeDueCount > 0
               ? nameList(noticeDue.map((row) => row.service_name))
               : undefined
           }
         />
         <StatCard
           label={t("subscriptions.list.tileNoOwner")}
-          value={subscriptions.data ? String(noOwnerCount) : NO_DATA}
+          value={String(noOwnerCount)}
           icon="user"
           to={withClient("/subscriptions")}
           tone="gold"
-          urgent={subscriptions.data !== undefined && noOwnerCount > 0}
+          urgent={noOwnerCount > 0}
           zeroLabel={t("subscriptions.list.tileNoOwnerZero")}
+          pending={noOwnerNoData}
           foot={
-            subscriptions.data && noOwnerCount > 0
+            !noOwnerNoData && noOwnerCount > 0
               ? nameList(noOwner.map((sub) => sub.service_name))
               : undefined
           }

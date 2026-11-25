@@ -94,8 +94,6 @@ const LICENSE_TYPES: LicenseType[] = [
 ];
 
 const RENEWAL_WINDOW_DAYS = 90;
-/** A tile with no data, pending or failed (the coordinator's ruling 10a). */
-const NO_DATA = "—";
 
 /**
  * What a license record may not be created without.
@@ -294,6 +292,13 @@ export function LicensesPage() {
   // still looked successful after a failure. Each card falls back to NO_DATE
   // for its own query, and the reason is said once, announced.
   const statsError = products.error ?? compliance.error ?? renewals.error;
+  // ONE CONDITION PER TILE (the coordinator's ruling 10a): a tile with no data
+  // (pending, narrowing undecided, or failed) draws the kit's absent mark and
+  // no line under it.
+  const overNoData = !compliance.data;
+  const renewalsNoData = !renewals.data;
+  const productsNoData = !products.data;
+  const compliantNoData = !compliance.data;
 
   const primary = canManage ? (
     <Btn label={t("licenses.list.newLicense")} icon="plus" variant="primary" onClick={newLicense.start} />
@@ -316,11 +321,14 @@ export function LicensesPage() {
           critical wash; the renewal window is the warning; the compliant
           count colours its figure ok; the catalog count is plain.
 
-          NO DATA IS A DASH (the coordinator's ruling 10a): while a tile's
-          read is pending, its narrowing is not decided, or the read failed,
-          the tile draws "—" and no line under it (the alert below the row
-          says why a read failed). So "nothing over-deployed" can only appear
-          when the compliance query actually returned and found nothing.
+          NO DATA IS ABSENT, NEVER ZERO (the coordinator's ruling 10a, the
+          Absent Zero Rule): while a tile's read is pending, its narrowing is
+          not decided, or the read failed, the tile is `pending` -- the kit's
+          absent mark (`shell.viz.na`, "n/a" / "n/d"), muted, no wash -- and
+          draws no line under it (the alert below the row says why a read
+          failed). So "nothing over-deployed" can only appear when the
+          compliance query actually returned and found nothing. One named
+          condition per tile, for the kit's `Tile pending` to take over.
 
           The over-deployed tile carries v3's foot line: the names of the
           products that are over, which are already in the compliance result.
@@ -334,52 +342,55 @@ export function LicensesPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("licenses.list.tileOver")}
-          value={compliance.data ? String(breachCount) : NO_DATA}
+          value={String(breachCount)}
           icon="alert-triangle"
           to={withClient("/licenses/compliance")}
           tone="red"
-          urgent={compliance.data !== undefined && breachCount > 0}
+          urgent={breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
+          pending={overNoData}
           foot={
             // One compliance row per (client, product): two clients over on
             // one product are one product over and one name.
-            compliance.data && breachCount > 0
-              ? [...new Set(compliance.data.filter((row) => row.breach).map((row) => row.name))].join(", ")
+            !overNoData && breachCount > 0
+              ? [...new Set((compliance.data ?? []).filter((row) => row.breach).map((row) => row.name))].join(", ")
               : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
-          value={renewals.data ? String(renewals.data.length) : NO_DATA}
+          value={String((renewals.data ?? []).length)}
           icon="clock"
           to={withClient("/licenses/renewals")}
           tone="gold"
           zeroLabel={t("licenses.list.tileRenewalsZero")}
-          foot={renewals.data && renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
+          pending={renewalsNoData}
+          foot={!renewalsNoData && renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
         />
         <StatCard
           label={t("licenses.list.tileProducts")}
-          value={products.data ? String(products.data.length) : NO_DATA}
+          value={String((products.data ?? []).length)}
           icon="license"
           to="/licenses/products"
           tone="blue"
           zeroLabel={t("licenses.list.tileProductsZero")}
+          pending={productsNoData}
           foot={
-            products.data && publisherCount > 0
+            !productsNoData && publisherCount > 0
               ? t("licenses.list.publishers", { count: publisherCount })
               : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileCompliant")}
-          value={compliance.data ? String(compliantCount) : NO_DATA}
+          value={String(compliantCount)}
           icon="circle-check"
           to={withClient("/licenses/compliance")}
-          // No figure, no colour: green is for a count that was read.
-          tone={compliance.data ? "green" : "neutral"}
+          tone="green"
           zeroLabel={t("licenses.list.tileCompliantZero")}
+          pending={compliantNoData}
           foot={
-            compliance.data && compliantCount > 0
+            !compliantNoData && compliantCount > 0
               ? t("licenses.list.reconciled", { count: reconciledCount })
               : undefined
           }

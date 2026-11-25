@@ -504,14 +504,10 @@ describe("LicensesPage", () => {
 
     const stats = document.querySelectorAll(".stat-card");
     const values = [...stats].map((card) => card.querySelector(".stat-value")?.textContent);
-    // The breach card and the compliant card draw "—", not "0" (the
-    // coordinator's ruling 10a: a tile with no data, pending or failed, shows
-    // a dash and no line under it; the alert above says why) -- both read the
-    // compliance query; the two cards whose own queries succeeded still
-    // report their real counts.
-    expect(values).toEqual(["—", "0", "1", "—"]);
-    expect(stats[0]?.querySelector(".z")).toBeNull();
-    expect(stats[3]?.querySelector(".z")).toBeNull();
+    // The breach card and the compliant card are "n/a", not "0" --
+    // both read the compliance query; the two cards whose own queries
+    // succeeded still report their real counts.
+    expect(values).toEqual(["n/a", "0", "1", "n/a"]);
   });
 
   // "all tiles and all numbers or kpis need to be clickable and direct the

@@ -267,9 +267,8 @@ describe("SubscriptionsPage", () => {
     const stats = document.querySelectorAll(".stat-card");
     const values = [...stats].map((card) => card.querySelector(".stat-value")?.textContent);
     // Active subscriptions and the owner count still count -- their own
-    // query succeeded. The two fed by the failed one draw "—", not "0" (the
-    // coordinator's ruling 10a: no data, pending or failed, is a dash).
-    expect(values).toEqual(["1", "—", "—", "1"]);
+    // query succeeded. The two fed by the failed one are "n/a", not "0".
+    expect(values).toEqual(["1", "n/a", "n/a", "1"]);
   });
 
   // "i dont want dead tiles everywhere". Every tile is an anchor, and every
@@ -425,7 +424,7 @@ describe("SubscriptionsPage", () => {
     const feet = [...document.querySelectorAll<HTMLElement>(".stat-card")].map(
       (tile) => tile.querySelector(".stat-foot")?.textContent ?? null,
     );
-    // The two renewal tiles draw "—" for the refused query; neither offers
+    // The two renewal tiles read "n/a" from the refused query; neither offers
     // a breakdown of it. The owner tile's own query succeeded, so it still
     // names the subscription nobody owns.
     expect(feet).toEqual([null, null, null, "Acme SaaS"]);

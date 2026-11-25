@@ -175,6 +175,9 @@ export function SubnetTreePage() {
   // counting a dormant row if a future filter change puts one in this list.
   // Narrowed with the tree, so its tile counts the chip's client's subnets.
   const drift = useIpamDrift({}, chip);
+  // The With drift tile's one condition (the coordinator's ruling 10a): no
+  // drift read, pending or failed, is absent, never zero.
+  const driftNoData = !drift.data;
 
   const driftBySubnet = useMemo(() => {
     const counts = new Map<string, number>();
@@ -301,20 +304,22 @@ export function SubnetTreePage() {
           />
           <StatCard
             label={t("ipam.tree.withDrift")}
-            /* No data (pending, narrowing undecided or failed): "—" and no line
-               under it, never a zero it did not count (the coordinator's ruling
-               10a); the drift page's list says why a read failed. */
-            value={drift.data ? String(driftBySubnet.size) : "—"}
+            value={String(driftBySubnet.size)}
             icon="arrows-exchange"
             to={withClient("/ipam/drift")}
             tone="gold"
-            urgent={drift.data !== undefined}
+            urgent
+            /* No data (pending, narrowing undecided or failed): the kit's
+               absent mark, "n/a" / "n/d", and no line under it, never a zero it
+               did not count (the coordinator's ruling 10a, the Absent Zero
+               Rule); the drift page's list says why a read failed. */
+            pending={driftNoData}
             /* The zero this module most needs to disambiguate: the drift list
                answered and no subnet is in it. The "nothing has been measured"
                zero never reaches a tile at all; the whole row is replaced by
                the first-run sentence below. */
             zeroLabel={t("ipam.tree.withDriftZero")}
-            foot={drift.data ? <span>{t("ipam.tree.withDriftFoot")}</span> : undefined}
+            foot={driftNoData ? undefined : <span>{t("ipam.tree.withDriftFoot")}</span>}
           />
           <StatCard
             label={t("ipam.tree.neverSwept")}

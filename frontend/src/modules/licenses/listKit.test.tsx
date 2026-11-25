@@ -44,9 +44,13 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
-/** The coordinator's ruling 10a: a tile with no data (pending or failed) draws "—" and no line under it. */
+/**
+ * The coordinator's ruling 10a (corrected): a tile with no data, pending or
+ * failed, draws the kit's absent mark (`shell.viz.na`, "n/a") and no line
+ * under it -- never "—", never "0".
+ */
 function expectNoFigure(tile: HTMLElement) {
-  expect(tile.querySelector(".v")?.textContent).toBe("—");
+  expect(tile.querySelector(".v")?.textContent).toBe("n/a");
   expect(tile.querySelector(".z")).toBeNull();
 }
 

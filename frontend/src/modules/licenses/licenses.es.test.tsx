@@ -177,7 +177,7 @@ describe("the licenses register in Spanish", () => {
     expect(screen.getByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
-  it("draws a failed tile query as a dash and words the empty states in Spanish", async () => {
+  it("says a failed tile query as n/d and the empty states in Spanish", async () => {
     mockUseApi.mockReturnValue(
       api({
         licenseCompliance: vi.fn().mockRejectedValue(new ApiError(503, "")),
@@ -186,11 +186,7 @@ describe("the licenses register in Spanish", () => {
     );
     const { container } = mount(<LicensesPage />);
     expect(await screen.findByText("Aún no hay licencias.")).toBeInTheDocument();
-    // A tile with no data shows "—", in either language (the coordinator's ruling 10a).
-    await waitFor(() =>
-      expect([...container.querySelectorAll(".stat-card .stat-value")].map((v) => v.textContent)).toContain("—"),
-    );
-    expect(screen.queryByText("n/d")).toBeNull();
+    expect((await screen.findAllByText("n/d")).length).toBeGreaterThan(0);
     expectNoEnglish(container, RECORDED);
   });
 

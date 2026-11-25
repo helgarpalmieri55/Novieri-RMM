@@ -45,9 +45,13 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
-/** The coordinator's ruling 10a: a tile with no data (pending or failed) draws "—" and no line under it. */
+/**
+ * The coordinator's ruling 10a (corrected): a tile with no data, pending or
+ * failed, draws the kit's absent mark (`shell.viz.na`, "n/a") and no line
+ * under it -- never "—", never "0".
+ */
 function expectNoFigure(tile: HTMLElement) {
-  expect(tile.querySelector(".v")?.textContent).toBe("—");
+  expect(tile.querySelector(".v")?.textContent).toBe("n/a");
   expect(tile.querySelector(".z")).toBeNull();
 }
 
@@ -79,7 +83,7 @@ describe("no tile figure before its read (coordinator's ruling 10a)", () => {
     const { container } = renderPage("/ipam/drift", <DriftPage />, "/ipam/drift");
     // The list beside the tiles says why.
     expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
-    await waitFor(() => expect(container.querySelectorAll(".stat-card .v")[2]?.textContent).toBe("—"));
+    await waitFor(() => expect(container.querySelectorAll(".stat-card .v")[2]?.textContent).toBe("n/a"));
     for (const tile of container.querySelectorAll<HTMLElement>(".stat-card")) expectNoFigure(tile);
     expect(screen.queryByText("No unresolved finding")).toBeNull();
   });

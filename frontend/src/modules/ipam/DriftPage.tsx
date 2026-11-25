@@ -210,14 +210,16 @@ export function DriftPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("ipam.fields.drift")}
-          /* No data (pending, narrowing undecided or failed): "—" and no line
-             under it, never a zero it did not count (the coordinator's ruling
-             10a); the list below says why a read failed. */
-          value={driftCounted ? String(counts.drift) : "—"}
+          value={String(counts.drift)}
           icon="arrows-exchange"
           to={withClient("/ipam/drift")}
           tone="gold"
-          urgent={driftCounted}
+          urgent
+          /* No data (pending, narrowing undecided or failed): the kit's absent
+             mark, "n/a" / "n/d", and no line under it, never a zero it did not
+             count (the coordinator's ruling 10a, the Absent Zero Rule); the
+             list below says why a read failed. */
+          pending={!driftCounted}
           foot={driftCounted ? <span>{t("ipam.drift.tileDriftFoot")}</span> : undefined}
           /* A MEASURED zero, and it says so: the drift list answered. This
              page never renders the other zero: "nothing has been looked at"
@@ -226,19 +228,21 @@ export function DriftPage() {
         />
         <StatCard
           label={t("ipam.fields.dormant")}
-          value={dormantCounted ? String(counts.dormant) : "—"}
+          value={String(counts.dormant)}
           icon="clock"
           to={withClient("/ipam/drift?class=dormant")}
           tone="neutral"
+          pending={!dormantCounted}
           foot={dormantCounted ? <span>{t("ipam.drift.tileDormantFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileDormantZero")}
         />
         <StatCard
           label={t("ipam.fields.orphans")}
-          value={orphansCounted ? String(counts.orphans) : "—"}
+          value={String(counts.orphans)}
           icon="eye"
           to={withClient("/ipam/drift?class=orphans")}
           tone="blue"
+          pending={!orphansCounted}
           foot={orphansCounted ? <span>{t("ipam.drift.tileOrphansFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileOrphansZero")}
         />
