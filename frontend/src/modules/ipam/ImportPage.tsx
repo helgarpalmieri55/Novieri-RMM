@@ -61,6 +61,7 @@ import { Steps, type StepState } from "../../shell/viz";
 export function ImportPage() {
   const t = useT();
   const permissions = useIpamPermissions();
+  const { selected } = useClientScope();
   const exports = useCsvExport();
   return (
     <div>
@@ -88,7 +89,10 @@ export function ImportPage() {
       )}
       {permissions.manage ? (
         <>
-          <CsvImportWizard />
+          {/* Keyed by the top bar's client: a switch of client drops the chosen
+              file, its mapping and its target instead of carrying them to the
+              new client (the coordinator's ruling 12). */}
+          <CsvImportWizard key={selected ?? ""} />
           <DocRecordSection />
         </>
       ) : (

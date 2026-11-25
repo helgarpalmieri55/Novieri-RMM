@@ -513,8 +513,12 @@ export function LicensesPage() {
         </QueryState>
       </Panel>
 
-      {/* Mounted only while open: each opening starts from an empty form. */}
-      {canManage && newLicense.open ? <NewLicenseDialog open onClose={newLicense.close} /> : null}
+      {/* Mounted only while open: each opening starts from an empty form. Keyed
+          by the top bar's client, so a switch of client drops what was typed
+          instead of filing it under the new one (the coordinator's ruling 12). */}
+      {canManage && newLicense.open ? (
+        <NewLicenseDialog key={selected ?? ""} open onClose={newLicense.close} />
+      ) : null}
     </div>
   );
 }

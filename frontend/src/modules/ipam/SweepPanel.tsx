@@ -73,6 +73,13 @@ export function SweepPanel({
     String(subnet.sweep_interval_hours ?? DEFAULT_SWEEP_INTERVAL_HOURS),
   );
 
+  // The settings as stored: an untouched Save sends nothing (the coordinator's
+  // ruling 13), so no PATCH records a change that is not one.
+  const settingsChanged =
+    enabled !== subnet.sweep_enabled ||
+    deviceId !== (subnet.sweep_device_id ?? "") ||
+    interval !== String(subnet.sweep_interval_hours ?? DEFAULT_SWEEP_INTERVAL_HOURS);
+
   const scope = effectiveSweepScope(subnet, scopes.data ?? []);
   const latest = runs.data?.[0];
   const intervalNumber = Number(interval);
@@ -230,6 +237,7 @@ export function SweepPanel({
                 variant="primary"
                 disabled={settings.isPending || intervalTooShort}
                 onClick={() =>
+                  settingsChanged &&
                   settings.mutate({
                     subnetId: subnet.id,
                     body: {

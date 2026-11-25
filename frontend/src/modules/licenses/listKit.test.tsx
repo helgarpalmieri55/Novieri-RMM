@@ -8,9 +8,10 @@
  */
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
+import { setSelectedClient } from "../../lib/clientChoice";
 import { recordingNarrowing } from "../../test/narrowing";
 import { renderPage } from "../../test/renderPage";
 import { ComplianceDashboard } from "./ComplianceDashboard";
@@ -103,6 +104,35 @@ describe("the leave question is drawn on top of its dialog (coordinator's ruling
     await userEvent.type(within(form).getByLabelText(field), "12");
     await userEvent.click(within(form).getByRole("button", { name: "Close" }));
     expectDrawnAbove(await screen.findByRole("dialog", { name: "Leave without saving?" }), form);
+  });
+});
+
+afterEach(() => setSelectedClient(null));
+
+describe("an edit never carries to another client or record (coordinator's ruling 12)", () => {
+  it("New license drops what was typed when the top bar's client changes", async () => {
+    const createLicense = vi.fn();
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), createLicense } as never));
+    renderPage("/licenses?new=license", <LicensesPage />, "/licenses");
+    let form = await screen.findByRole("dialog", { name: "New license" });
+    await userEvent.type(within(form).getByLabelText("Cost (optional)"), "12");
+    act(() => setSelectedClient("org-toeshee"));
+    // The form is the new client's, empty; Save sends nothing of the old edit.
+    form = await screen.findByRole("dialog", { name: "New license" });
+    expect(within(form).getByLabelText("Cost (optional)")).toHaveValue("");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(createLicense).not.toHaveBeenCalled();
+  });
+
+  it("a revealed key does not follow to another license's record", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/licenses/lic-1", <LicenseDetail />, "/licenses/:licenseId");
+    await userEvent.click(await screen.findByRole("button", { name: "Reveal key" }));
+    expect(await screen.findByRole("dialog", { name: "License key" })).toBeInTheDocument();
+    await act(() => router.navigate("/licenses/lic-3"));
+    expect(await screen.findByRole("heading", { name: "Microsoft Visio" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "License key" })).toBeNull();
   });
 });
 
@@ -371,14 +401,27 @@ describe("the product catalog", () => {
     const row = (await screen.findByText("Microsoft Visio", { selector: ".cell-title" })).closest("tr") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit product" });
+    // Something changed: an untouched Save sends nothing (the coordinator's ruling 13).
+    await userEvent.type(within(dialog).getByLabelText("Name"), " Pro");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(updateProduct).toHaveBeenCalledWith("prod-visio", {
-        name: "Microsoft Visio",
+        name: "Microsoft Visio Pro",
         publisher: "Microsoft",
         match_rules: [{ type: "prefix", pattern: "Microsoft Visio", publisher: "Microsoft Corporation" }],
       }),
     );
+  });
+
+  it("sends nothing when Save is pressed on an untouched product (coordinator's ruling 13)", async () => {
+    const updateProduct = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateProduct } as never));
+    const { router } = renderPage("/licenses/products?edit=prod-visio", <ProductsPage />, "/licenses/products");
+    const dialog = await screen.findByRole("dialog", { name: "Edit product" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    // It closes, as a save would, and writes nothing (no false audit entry).
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(updateProduct).not.toHaveBeenCalled();
   });
 });
 

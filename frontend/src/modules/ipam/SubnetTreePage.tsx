@@ -509,9 +509,12 @@ export function SubnetTreePage() {
         </QueryState>
       </Panel>
 
-      {/* Mounted only while open (`?new=subnet`): each opening starts empty. */}
+      {/* Mounted only while open (`?new=subnet`): each opening starts empty.
+          Keyed by the top bar's client, so a switch of client drops what was
+          typed instead of filing it under the new one (the coordinator's
+          ruling 12). */}
       {permissions.manage && newSubnet.open ? (
-        <CreateSubnetForm onClose={newSubnet.close} />
+        <CreateSubnetForm key={selected ?? ""} onClose={newSubnet.close} />
       ) : null}
     </div>
   );

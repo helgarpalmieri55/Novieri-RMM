@@ -29,7 +29,17 @@ import { PersonLink } from "../people/links";
 // The revealed key lives only in local component state (`revealed`) and is
 // never written into a react-query cache -- shown once and cleared on close.
 // Mirrors modules/credentials/CredentialsPage.tsx's checkout/reveal pattern.
+//
+// ONE RECORD PER MOUNT (the coordinator's ruling 12): going from one license
+// to another keeps this route mounted, so the record is keyed by its id and
+// nothing held for the last one -- a revealed key, a confirmation -- follows
+// to the next.
 export function LicenseDetail() {
+  const { licenseId } = useParams<{ licenseId: string }>();
+  return <LicenseRecord key={licenseId} />;
+}
+
+function LicenseRecord() {
   const t = useT();
   const { licenseId } = useParams<{ licenseId: string }>();
   const api = useApi();

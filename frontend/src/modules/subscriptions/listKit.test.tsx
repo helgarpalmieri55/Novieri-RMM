@@ -8,9 +8,10 @@
  */
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
+import { setSelectedClient } from "../../lib/clientChoice";
 import { recordingNarrowing } from "../../test/narrowing";
 import { renderPage } from "../../test/renderPage";
 import { RenewalCalendar } from "./RenewalCalendar";
@@ -220,6 +221,65 @@ describe("a subscription on the record kit", () => {
     await userEvent.click(screen.getByRole("link", { name: "All subscriptions" }));
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/subscriptions/sub-1");
+  });
+
+  it("sends nothing when the terms are submitted untouched (coordinator's ruling 13)", async () => {
+    const updateSubscription = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateSubscription } as never));
+    renderPage("/subscriptions/sub-1", <SubscriptionDetail />, "/subscriptions/:subscriptionId");
+    // Enter in a field submits the form; with nothing changed there is nothing to write.
+    await userEvent.type(await screen.findByLabelText("Notice period (days)"), "{Enter}");
+    expect(updateSubscription).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => setSelectedClient(null));
+
+describe("an edit never carries to another client or record (coordinator's ruling 12)", () => {
+  it("New subscription drops what was typed when the top bar's client changes", async () => {
+    const createSubscription = vi.fn();
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), createSubscription } as never));
+    renderPage("/subscriptions?new=subscription", <SubscriptionsPage />, "/subscriptions");
+    let form = await screen.findByRole("dialog", { name: "New subscription" });
+    await userEvent.type(within(form).getByLabelText("Service name"), "Globex CRM");
+    act(() => setSelectedClient("org-toeshee"));
+    form = await screen.findByRole("dialog", { name: "New subscription" });
+    expect(within(form).getByLabelText("Service name")).toHaveValue("");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(createSubscription).not.toHaveBeenCalled();
+  });
+
+  it("a renewal-terms edit left on one subscription does not reach the next", async () => {
+    const updateSubscription = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateSubscription } as never));
+    // Slack Business+ first, so it is already read when the edit leaves for it.
+    const { router } = renderPage("/subscriptions/sub-3", <SubscriptionDetail />, "/subscriptions/:subscriptionId");
+    await screen.findByRole("heading", { level: 1, name: "Slack Business+" });
+    await act(() => router.navigate("/subscriptions/sub-1"));
+    await screen.findByRole("heading", { level: 1, name: "Figma Organization" });
+    const notice = await screen.findByLabelText("Notice period (days)");
+    await userEvent.clear(notice);
+    await userEvent.type(notice, "45");
+    // Blocked by the leave question, so the navigation is not awaited here.
+    void router.navigate("/subscriptions/sub-3");
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    // Slack Business+ with its own 60 days, and no change to save.
+    expect(await screen.findByRole("heading", { level: 1, name: "Slack Business+" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Notice period (days)")).toHaveValue(60));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Notice period (days)"), "{Enter}");
+    expect(updateSubscription).not.toHaveBeenCalled();
+  });
+
+  it("an assignee typed on one subscription does not reach the next", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/subscriptions/sub-1", <SubscriptionDetail />, "/subscriptions/:subscriptionId");
+    await userEvent.type(await screen.findByLabelText("Assignee name"), "Ana Duarte");
+    await act(() => router.navigate("/subscriptions/sub-3"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Slack Business+" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Assignee name")).toHaveValue("");
   });
 });
 

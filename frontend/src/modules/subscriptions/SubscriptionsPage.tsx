@@ -524,8 +524,12 @@ export function SubscriptionsPage() {
         </QueryState>
       </Panel>
 
-      {/* Mounted only while open: each opening starts from an empty form. */}
-      {canManage && newSubscription.open ? <NewSubscriptionDialog open onClose={newSubscription.close} /> : null}
+      {/* Mounted only while open: each opening starts from an empty form. Keyed
+          by the top bar's client, so a switch of client drops what was typed
+          instead of filing it under the new one (the coordinator's ruling 12). */}
+      {canManage && newSubscription.open ? (
+        <NewSubscriptionDialog key={selected ?? ""} open onClose={newSubscription.close} />
+      ) : null}
     </div>
   );
 }

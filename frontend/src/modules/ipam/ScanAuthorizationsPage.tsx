@@ -223,9 +223,12 @@ export function ScanAuthorizationsPage() {
         onCancel={() => setRevoking(null)}
       />
 
-      {/* Mounted only while open (`?new=grant`): each opening starts empty. */}
+      {/* Mounted only while open (`?new=grant`): each opening starts empty.
+          Keyed by the top bar's client, so a switch of client drops what was
+          typed instead of filing it under the new one (the coordinator's
+          ruling 12). */}
       {permissions.scopeManage && grant.open ? (
-        <GrantForm subnets={subnets.data ?? []} onClose={grant.close} />
+        <GrantForm key={selected ?? ""} subnets={subnets.data ?? []} onClose={grant.close} />
       ) : null}
     </div>
   );

@@ -259,6 +259,12 @@ function ProductEditor({
   }
 
   function submit() {
+    // An untouched product sends nothing: Save closes as a save would, and no
+    // PATCH writes a change that is not one (the coordinator's ruling 13).
+    if (existing && !dirty) {
+      close();
+      return;
+    }
     const next: Attempt = { rules: productRules, values: { name } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

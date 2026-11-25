@@ -485,6 +485,11 @@ describe("the designated sweeper is one of the subnet's client's machines", () =
 
     const picker = (await screen.findByLabelText("Designated agent")) as HTMLSelectElement;
     expect(picker.value).toBe("dev-unlisted");
+    // Another field changed, so the save is sent (an untouched one sends
+    // nothing: the coordinator's ruling 13); the designation travels as it was.
+    const interval = screen.getByLabelText("Interval (hours)");
+    await user.clear(interval);
+    await user.type(interval, "48");
     await user.click(screen.getByRole("button", { name: "Save sweep settings" }));
     await waitFor(() => expect(updateIpamSweepSettings).toHaveBeenCalled());
     expect(updateIpamSweepSettings.mock.calls[0]?.[1]).toMatchObject({

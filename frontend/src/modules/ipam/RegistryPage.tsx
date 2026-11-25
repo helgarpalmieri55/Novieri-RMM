@@ -63,6 +63,7 @@ import {
 export function RegistryPage() {
   const t = useT();
   const permissions = useIpamPermissions();
+  const { selected } = useClientScope();
   const newVrf = useNewParam("vrf");
   const newVlan = useNewParam("vlan");
   return (
@@ -76,13 +77,12 @@ export function RegistryPage() {
       <SiteSection />
       <VlanSection canManage={permissions.manage} onNew={newVlan.start} />
 
-      {/* Mounted only while open: each opening starts from an empty form. */}
-      {permissions.manage && newVrf.open ? (
-        <VrfForm onClose={newVrf.close} />
-      ) : null}
-      {permissions.manage && newVlan.open ? (
-        <VlanForm onClose={newVlan.close} />
-      ) : null}
+      {/* Mounted only while open: each opening starts from an empty form.
+          Keyed by the top bar's client, so a switch of client drops what was
+          typed instead of filing it under the new one (the coordinator's
+          ruling 12). */}
+      {permissions.manage && newVrf.open ? <VrfForm key={selected ?? ""} onClose={newVrf.close} /> : null}
+      {permissions.manage && newVlan.open ? <VlanForm key={selected ?? ""} onClose={newVlan.close} /> : null}
     </div>
   );
 }

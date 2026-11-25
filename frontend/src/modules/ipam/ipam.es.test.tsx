@@ -747,7 +747,9 @@ describe("editing and deleting a subnet in Spanish", () => {
     expect(within(dialog).getByText(/Gateway must be an IP address such as 10\.4\.7\.1; "nope" is not one/)).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     await user.clear(gateway);
-    await user.type(gateway, "10.20.9.1");
+    // Another gateway than the stored 10.20.9.1: an unchanged edit sends
+    // nothing (the coordinator's ruling 13).
+    await user.type(gateway, "10.20.9.254");
     await user.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
     await waitFor(() => expect(api.updateIpamSubnet).toHaveBeenCalled());
   });
@@ -757,6 +759,9 @@ describe("editing and deleting a subnet in Spanish", () => {
     renderDetail("subnet-1");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Editar" }));
+    // A change, so the save is sent (an untouched one sends nothing: the
+    // coordinator's ruling 13).
+    await user.type(await screen.findByLabelText("Nombre"), " 2");
     await user.click(await screen.findByRole("button", { name: "Guardar cambios" }));
     expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
     expectNoEnglish(body());

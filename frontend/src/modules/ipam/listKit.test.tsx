@@ -259,6 +259,79 @@ describe("a subnet on the record kit", () => {
     await waitFor(() => expect(document.title).toBe("10.20.9.0/24 · IP addresses · Novieri RMM"));
     expect(screen.getByRole("link", { name: "All subnets" })).toHaveAttribute("href", "/ipam");
   });
+
+  it("sends nothing when the subnet's edit is saved untouched (coordinator's ruling 13)", async () => {
+    const updateIpamSubnet = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSubnet } as never));
+    renderPage("/ipam/subnets/subnet-1", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit subnet 10.20.9.0/24" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    // It closes, as a save would, and writes nothing.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit subnet 10.20.9.0/24" })).toBeNull());
+    expect(updateIpamSubnet).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when an address's edits are saved untouched (coordinator's ruling 13)", async () => {
+    const updateIpamAddress = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamAddress } as never));
+    renderPage("/ipam/subnets/subnet-1", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    await userEvent.click((await screen.findAllByRole("button", { name: "Manage" }))[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "10.20.9.1" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save edits" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "10.20.9.1" })).toBeNull());
+    expect(updateIpamAddress).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the sweep settings are saved untouched (coordinator's ruling 13)", async () => {
+    const updateIpamSweepSettings = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSweepSettings } as never));
+    renderPage("/ipam/subnets/subnet-1?tab=sweeps", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    await userEvent.click(await screen.findByRole("button", { name: "Save sweep settings" }));
+    expect(updateIpamSweepSettings).not.toHaveBeenCalled();
+  });
+
+  it("a sweep-settings edit left on one subnet does not reach the next (coordinator's ruling 12)", async () => {
+    const updateIpamSweepSettings = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSweepSettings } as never));
+    // 10.20.4.0/24 first, so it is already read when the edit leaves for it.
+    const { router } = renderPage("/ipam/subnets/subnet-2?tab=sweeps", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    await screen.findByRole("heading", { level: 1, name: "10.20.4.0/24" });
+    await act(() => router.navigate("/ipam/subnets/subnet-1?tab=sweeps"));
+    await screen.findByRole("heading", { level: 1, name: "10.20.9.0/24" });
+    const interval = await screen.findByLabelText("Interval (hours)");
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "48");
+    await act(() => router.navigate("/ipam/subnets/subnet-2?tab=sweeps"));
+    await screen.findByRole("heading", { level: 1, name: "10.20.4.0/24" });
+    // Its own 24 hours, and Save writes nothing of the other subnet's edit.
+    expect(await screen.findByLabelText("Interval (hours)")).toHaveValue(24);
+    await userEvent.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    expect(updateIpamSweepSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("an edit never carries to another client (coordinator's ruling 12)", () => {
+  it.each([
+    ["Register a subnet", "/ipam?new=subnet", <SubnetTreePage key="t" />, "/ipam", "Prefix", "10.9.9.0/24", "Register", "createIpamSubnet"],
+    ["New VRF", "/ipam/registry?new=vrf", <RegistryPage key="v" />, "/ipam/registry", "Name", "lab2", "Add VRF", "createIpamVrf"],
+    ["New VLAN", "/ipam/registry?new=vlan", <RegistryPage key="l" />, "/ipam/registry", "VID", "70", "Add VLAN", "createIpamVlan"],
+    ["Authorize a prefix", "/ipam/scan-authorizations?new=grant", <ScanAuthorizationsPage key="g" />, "/ipam/scan-authorizations", "Prefix", "10.9.9.0/24", "Authorize", "createIpamScanAuthorization"],
+  ])("%s drops what was typed when the top bar's client changes", async (title, path, page, pattern, field, typed, submit, create) => {
+    const spy = vi.fn();
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), [create]: spy } as never));
+    renderPage(path, page, pattern);
+    let form = await screen.findByRole("dialog", { name: title });
+    await userEvent.type(within(form).getByLabelText(field), typed);
+    act(() => setSelectedClient("org-toeshee"));
+    // The form is the new client's, empty; its button sends nothing of the old edit.
+    form = await screen.findByRole("dialog", { name: title });
+    expect(within(form).getByLabelText(field)).toHaveValue(field === "VID" ? null : "");
+    const button = within(form).getByRole("button", { name: submit });
+    if (!(button as HTMLButtonElement).disabled) await userEvent.click(button);
+    expect(spy).not.toHaveBeenCalled();
+  });
 });
 
 describe("the drift page on the list kit", () => {
@@ -421,6 +494,23 @@ describe("scan authorizations on the list kit", () => {
 });
 
 describe("the import wizard", () => {
+  it("drops a chosen file and its mapping when the top bar's client changes (coordinator's ruling 12)", async () => {
+    const previewIpamImport = vi.fn();
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), previewIpamImport } as never));
+    renderPage("/ipam/import", <ImportPage />, "/ipam/import");
+    const input = (await screen.findByLabelText("CSV file")) as HTMLInputElement;
+    await userEvent.upload(input, new File(["address,hostname\n10.20.9.40,WS-40\n"], "plan.csv", { type: "text/csv" }));
+    expect(await screen.findByText("plan.csv", { exact: false })).toBeInTheDocument();
+    act(() => setSelectedClient("org-toeshee"));
+    // The wizard is the new client's, back at its first step; Preview sends nothing of the old file.
+    expect(await screen.findByText("Choose a CSV first: its first line names the columns to map.")).toBeInTheDocument();
+    expect(((await screen.findByLabelText("CSV file")) as HTMLInputElement).files?.length ?? 0).toBe(0);
+    const previewButton = screen.getByRole("button", { name: "Preview" });
+    if (!(previewButton as HTMLButtonElement).disabled) await userEvent.click(previewButton);
+    expect(previewIpamImport).not.toHaveBeenCalled();
+  });
+
   it("asks before leaving with a file that is not applied", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/ipam/import", <ImportPage />, "/ipam/import");

@@ -66,7 +66,17 @@ const TAB_LABEL: Readonly<Record<Tab, MessageKey>> = {
   drift: "ipam.subnet.tabDrift",
 };
 
+// ONE RECORD PER MOUNT (the coordinator's ruling 12): going from one subnet
+// to another keeps this route mounted, and a subnet already read draws at
+// once, so an unsaved sweep-settings or subnet edit would follow to the next
+// subnet and Save would write it there. Keyed by the id, the next subnet
+// starts from its own values.
 export function SubnetDetailPage() {
+  const { subnetId } = useParams<{ subnetId: string }>();
+  return <SubnetRecord key={subnetId} />;
+}
+
+function SubnetRecord() {
   const t = useT();
   const { subnetId } = useParams<{ subnetId: string }>();
   const permissions = useIpamPermissions();

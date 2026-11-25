@@ -102,7 +102,18 @@ function emailAddress(value: string): string | null {
 // The seats panel below has WORKING Assign/Release controls wired to the
 // real mutation hooks -- a read-only allocations table was the Phase-11
 // lesson (top follow-up on that PR), not to be repeated here.
+//
+// ONE RECORD PER MOUNT (the coordinator's ruling 12): going from one
+// subscription to another keeps this route mounted, and a record already read
+// draws at once, so an unsaved terms draft or a half-typed assignee would
+// follow to the next record and Save would write it there. Keyed by the id,
+// the next record starts from its own values.
 export function SubscriptionDetail() {
+  const { subscriptionId } = useParams<{ subscriptionId: string }>();
+  return <SubscriptionRecord key={subscriptionId} />;
+}
+
+function SubscriptionRecord() {
   const t = useT();
   const { subscriptionId } = useParams<{ subscriptionId: string }>();
   const api = useApi();
@@ -603,6 +614,9 @@ function RenewalTermsForm({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   function submit() {
+    // Nothing changed, nothing to write (the coordinator's ruling 13): an
+    // unchanged PATCH would leave a false entry in the audit log.
+    if (!dirty) return;
     const next: Attempt = { rules: renewalRules, values: { notice_days: terms.notice_days } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

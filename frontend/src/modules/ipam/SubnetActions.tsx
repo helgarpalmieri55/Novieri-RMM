@@ -65,7 +65,22 @@ function EditSubnetDialog({ subnet, onClose }: { subnet: SubnetOut; onClose: () 
   // language switch re-words a refusal that is already on screen.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
+  // What the dialog opened with: an untouched Save sends nothing.
+  const dirty =
+    name !== subnet.name ||
+    description !== subnet.description ||
+    siteId !== (subnet.site_id ?? "") ||
+    vlanId !== (subnet.vlan_id ?? "") ||
+    gateway !== (subnet.gateway ?? "") ||
+    dns !== subnet.dns_servers.join(", ");
+
   function submit() {
+    // Nothing changed: close as a save would, and write nothing -- an unchanged
+    // PATCH leaves a false entry in the audit log (the coordinator's ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
     const snapshot = gateway.trim()
       ? { rules: () => [gatewayRule()], values: { gateway } }
       : null;
