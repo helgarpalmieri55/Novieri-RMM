@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/patch/FleetPatchPage.tsx"
+target_identity: "file:frontend/src/modules/patch/FleetPatchPage.tsx"
 target_fingerprint: "sha256:69ff533323183de8408b1e9400de12de23581fce9c2b45134036855ee9a5ad9b"
-target_path: /home/user/rmm-w3/frontend/src/modules/patch/FleetPatchPage.tsx
+target_path: frontend/src/modules/patch/FleetPatchPage.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-patch-fleetpatchpage-tsx
 closed: true

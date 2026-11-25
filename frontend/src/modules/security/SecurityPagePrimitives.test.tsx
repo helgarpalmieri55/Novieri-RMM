@@ -117,7 +117,7 @@ describe("SecurityPage's raw-event panel", () => {
   // Redesign plan, O3 3.10: the event opens in a drawer from `?event=`, so
   // nothing waits under the list before a choice; what this held -- the
   // resting state is not a failure -- still holds: no drawer, no alert.
-  it("still invites a selection when nothing has been selected and nothing has failed", async () => {
+  it("shows no event drawer and no alert before an event is chosen", async () => {
     renderPage({}, "Asia/Tokyo");
     await screen.findByText("DC-01");
     expect(screen.queryByRole("dialog", { name: "Raw event" })).toBeNull();

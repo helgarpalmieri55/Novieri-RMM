@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/error-monitor/ErrorMonitorPage.tsx"
+target_identity: "file:frontend/src/modules/error-monitor/ErrorMonitorPage.tsx"
 target_fingerprint: "sha256:ded1f63f1e84a8466ac6b16a7a9b9ff200b817bd621015254372e2868d60bfa7"
-target_path: /home/user/rmm-w3/frontend/src/modules/error-monitor/ErrorMonitorPage.tsx
+target_path: frontend/src/modules/error-monitor/ErrorMonitorPage.tsx
 timestamp: 2026-11-25T04-21-41Z
 slug: odules-error-monitor-errormonitorpage-tsx-30b26036
 closed: true

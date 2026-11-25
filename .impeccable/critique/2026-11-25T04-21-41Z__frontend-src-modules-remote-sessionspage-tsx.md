@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/remote/SessionsPage.tsx"
+target_identity: "file:frontend/src/modules/remote/SessionsPage.tsx"
 target_fingerprint: "sha256:3373ef0fa37550c2e5bf55e664809f9cd6f4fe867df84a8561b03cd64d6db695"
-target_path: /home/user/rmm-w3/frontend/src/modules/remote/SessionsPage.tsx
+target_path: frontend/src/modules/remote/SessionsPage.tsx
 timestamp: 2026-11-25T04-21-41Z
 slug: frontend-src-modules-remote-sessionspage-tsx
 closed: true

@@ -1981,8 +1981,8 @@ describe("Scan cannot be dispatched twice while the first request is in flight",
 // for the dialog -- it can be left without the mouse, and it leaves the page
 // as it found it -- is held for the form: Discard closes a new policy, and
 // nothing locks the page, since nothing covers it.
-describe("PatchPolicyEditor's dialog can be left with the keyboard", () => {
-  it("closes on Escape", async () => {
+describe("PatchPolicyEditor's form leaves the page as it found it", () => {
+  it("closes a new policy on Discard", async () => {
     const { user } = await openPolicyDialog([]);
     await user.click(screen.getByRole("button", { name: "Discard" }));
 
@@ -1991,7 +1991,7 @@ describe("PatchPolicyEditor's dialog can be left with the keyboard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("locks the page behind it, and gives the scrollbar back on close", async () => {
+  it("never locks the page's scrolling, open or discarded", async () => {
     const { user } = await openPolicyDialog([]);
     expect(document.body.style.overflow).toBe("");
 

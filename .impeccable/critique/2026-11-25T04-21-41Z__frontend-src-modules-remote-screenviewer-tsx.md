@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/remote/ScreenViewer.tsx"
+target_identity: "file:frontend/src/modules/remote/ScreenViewer.tsx"
 target_fingerprint: "sha256:a328725eb4ee7c108fd74298abcb5ee96ca63eb6c2f7119e6b302b6789ce7068"
-target_path: /home/user/rmm-w3/frontend/src/modules/remote/ScreenViewer.tsx
+target_path: frontend/src/modules/remote/ScreenViewer.tsx
 timestamp: 2026-11-25T04-21-41Z
 slug: frontend-src-modules-remote-screenviewer-tsx
 closed: true

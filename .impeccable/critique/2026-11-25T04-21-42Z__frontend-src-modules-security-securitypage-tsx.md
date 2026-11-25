@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 3
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/security/SecurityPage.tsx"
+target_identity: "file:frontend/src/modules/security/SecurityPage.tsx"
 target_fingerprint: "sha256:8e93bb99287dc7f737b0540f6c7bc509adf0d6863509c1c2716ffde7bbf18513"
-target_path: /home/user/rmm-w3/frontend/src/modules/security/SecurityPage.tsx
+target_path: frontend/src/modules/security/SecurityPage.tsx
 timestamp: 2026-11-25T04-21-42Z
 slug: frontend-src-modules-security-securitypage-tsx
 closed: true

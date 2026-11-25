@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/platform-status/PlatformStatusPage.tsx"
+target_identity: "file:frontend/src/modules/platform-status/PlatformStatusPage.tsx"
 target_fingerprint: "sha256:f75eb3341a4d19f0c2653eccf35aaa6f8429d12705d5ad9e50c9d06dd2445f55"
-target_path: /home/user/rmm-w3/frontend/src/modules/platform-status/PlatformStatusPage.tsx
+target_path: frontend/src/modules/platform-status/PlatformStatusPage.tsx
 timestamp: 2026-11-25T04-21-42Z
 slug: es-platform-status-platformstatuspage-tsx-0b4e316e
 closed: true

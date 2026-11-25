@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/audit/AuditPage.tsx"
+target_identity: "file:frontend/src/modules/audit/AuditPage.tsx"
 target_fingerprint: "sha256:d54e14502326e651a10b5b1c621c07a61488165a33dc6e6cc21ea4b8dd022114"
-target_path: /home/user/rmm-w3/frontend/src/modules/audit/AuditPage.tsx
+target_path: frontend/src/modules/audit/AuditPage.tsx
 timestamp: 2026-11-25T04-21-42Z
 slug: frontend-src-modules-audit-auditpage-tsx
 closed: true

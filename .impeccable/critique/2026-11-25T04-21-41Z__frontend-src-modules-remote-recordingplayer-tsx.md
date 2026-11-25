@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/remote/RecordingPlayer.tsx"
+target_identity: "file:frontend/src/modules/remote/RecordingPlayer.tsx"
 target_fingerprint: "sha256:bc9d6fe453c02874f4912f696d5b6e9c554b69998a01ce2acb154372d77d8f51"
-target_path: /home/user/rmm-w3/frontend/src/modules/remote/RecordingPlayer.tsx
+target_path: frontend/src/modules/remote/RecordingPlayer.tsx
 timestamp: 2026-11-25T04-21-41Z
 slug: frontend-src-modules-remote-recordingplayer-tsx
 closed: true

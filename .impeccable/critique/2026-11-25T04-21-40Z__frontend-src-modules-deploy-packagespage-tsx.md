@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/deploy/PackagesPage.tsx"
+target_identity: "file:frontend/src/modules/deploy/PackagesPage.tsx"
 target_fingerprint: "sha256:3e62f9ae79d1a8ec07c710371f7225293a13eed39295dbba3bfae806e6102c3b"
-target_path: /home/user/rmm-w3/frontend/src/modules/deploy/PackagesPage.tsx
+target_path: frontend/src/modules/deploy/PackagesPage.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-deploy-packagespage-tsx
 closed: true

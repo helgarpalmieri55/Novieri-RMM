@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/deploy/ScriptsPage.tsx"
+target_identity: "file:frontend/src/modules/deploy/ScriptsPage.tsx"
 target_fingerprint: "sha256:2697bb22f087cebb64434f0b7352ce3ded4b6598d9b77941019248968e4f3477"
-target_path: /home/user/rmm-w3/frontend/src/modules/deploy/ScriptsPage.tsx
+target_path: frontend/src/modules/deploy/ScriptsPage.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-deploy-scriptspage-tsx
 closed: true

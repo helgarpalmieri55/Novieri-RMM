@@ -48,7 +48,6 @@ export const audit = {
     searchAria: "Search the loaded page by action, actor or target",
     actionPlaceholder: "Exact action, e.g. job.dispatch",
     actionAria: "Filter by exact action, server-side",
-    emptyForAction: "No audit events recorded for action \"{action}\".",
     emptyNone: "No audit events recorded yet.",
     action: "Action",
     actor: "Actor",

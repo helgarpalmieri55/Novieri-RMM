@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/deploy/DeployPage.tsx"
+target_identity: "file:frontend/src/modules/deploy/DeployPage.tsx"
 target_fingerprint: "sha256:5105330aea5cf0bd3a0cab4774063d936f852a2c7456e462d7e2bca045ad156e"
-target_path: /home/user/rmm-w3/frontend/src/modules/deploy/DeployPage.tsx
+target_path: frontend/src/modules/deploy/DeployPage.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-deploy-deploypage-tsx
 closed: true

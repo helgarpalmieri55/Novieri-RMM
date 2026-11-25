@@ -77,7 +77,6 @@ export const deploy: Shape<typeof en> = {
     filterLabel: "Filtrar por estado",
     filterAll: "Todos los despliegues",
     emptyNone: "Aún no hay despliegues.",
-    emptyFiltered: "Ningún despliegue coincide con ese filtro.",
     colPackage: "Paquete",
     colAction: "Acción",
     colTarget: "Destino",

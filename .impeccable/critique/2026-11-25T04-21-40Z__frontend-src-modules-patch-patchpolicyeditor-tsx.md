@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 2
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/patch/PatchPolicyEditor.tsx"
+target_identity: "file:frontend/src/modules/patch/PatchPolicyEditor.tsx"
 target_fingerprint: "sha256:2e3a31557f89ba70cdf311448ddde4e781a2a963b9cdf6def527c92d05e92b0a"
-target_path: /home/user/rmm-w3/frontend/src/modules/patch/PatchPolicyEditor.tsx
+target_path: frontend/src/modules/patch/PatchPolicyEditor.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-patch-patchpolicyeditor-tsx
 closed: true

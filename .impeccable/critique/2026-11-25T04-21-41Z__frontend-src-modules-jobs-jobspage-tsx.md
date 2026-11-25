@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/jobs/JobsPage.tsx"
+target_identity: "file:frontend/src/modules/jobs/JobsPage.tsx"
 target_fingerprint: "sha256:804a4d8b39d71b01939d70725622ea15d8dcd656c8ce9360ba7c47d8f862ce70"
-target_path: /home/user/rmm-w3/frontend/src/modules/jobs/JobsPage.tsx
+target_path: frontend/src/modules/jobs/JobsPage.tsx
 timestamp: 2026-11-25T04-21-41Z
 slug: frontend-src-modules-jobs-jobspage-tsx
 closed: true

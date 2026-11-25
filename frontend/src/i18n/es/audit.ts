@@ -51,7 +51,6 @@ export const audit: Shape<typeof en> = {
     searchAria: "Buscar en la página cargada por acción, actor o destino",
     actionPlaceholder: "Acción exacta, p. ej., job.dispatch",
     actionAria: "Filtrar por acción exacta, en el servidor",
-    emptyForAction: "No hay eventos de auditoría registrados para la acción \"{action}\".",
     emptyNone: "Aún no hay eventos de auditoría registrados.",
     action: "Acción",
     actor: "Actor",

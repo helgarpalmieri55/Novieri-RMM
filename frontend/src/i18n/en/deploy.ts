@@ -80,7 +80,6 @@ export const deploy = {
     filterLabel: "Filter by state",
     filterAll: "All deployments",
     emptyNone: "No deployments yet.",
-    emptyFiltered: "No deployments match that filter.",
     colPackage: "Package",
     colAction: "Action",
     colTarget: "Target",

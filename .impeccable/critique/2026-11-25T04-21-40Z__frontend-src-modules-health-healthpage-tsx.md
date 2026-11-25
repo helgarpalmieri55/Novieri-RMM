@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w3/frontend/src/modules/health/HealthPage.tsx"
+target_identity: "file:frontend/src/modules/health/HealthPage.tsx"
 target_fingerprint: "sha256:05081d00a6faee9da677b896f10de170ff6964399a81e427eecb881d898f7e5f"
-target_path: /home/user/rmm-w3/frontend/src/modules/health/HealthPage.tsx
+target_path: frontend/src/modules/health/HealthPage.tsx
 timestamp: 2026-11-25T04-21-40Z
 slug: frontend-src-modules-health-healthpage-tsx
 closed: true
