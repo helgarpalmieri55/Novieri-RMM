@@ -88,6 +88,20 @@ describe("Job history on the list kit", () => {
     expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
   });
 
+  it("draws no number and no claim in its tiles while the Client chip waits for /me (clarification 10a)", async () => {
+    // A tile counts the narrowed read; before it answers there is nothing to
+    // count, so no "0" and no "nothing has ever…" (Health's tiles: "—", no sub).
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    const { container } = renderPage(`/jobs?client=${ANDES}`, <JobsPage />, "/jobs");
+    await screen.findAllByText("Loading…");
+    const tiles = Array.from(container.querySelectorAll(".tile"));
+    expect(tiles.length).toBe(4);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".v")?.textContent).toBe("—");
+      expect(tile.querySelector(".z")).toBeNull();
+    }
+  });
+
   it("opens a job from ?job= in its drawer", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/jobs?status=failed&job=job-1", <JobsPage />, "/jobs");

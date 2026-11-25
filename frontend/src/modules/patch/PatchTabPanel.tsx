@@ -216,6 +216,19 @@ export function PatchTabPanel({
     return count === 0 ? undefined : words;
   };
 
+  /**
+   * AND BEFORE THE READ, NEITHER (clarification 10a). Until the response a
+   * tile counts has answered -- under the Client chip that includes the wait
+   * for `/me`, when the reads are not even sent -- there is no figure and no
+   * claim: "—" and no line under it, as Alerts' tiles do. "0 ... every
+   * reporting machine is up to date" before anything was asked was a finding
+   * the page had not made.
+   */
+  const updatesFigure = (count: number): string =>
+    updates.isPending || neverScanned ? "—" : String(count);
+  const updatesFoot = (count: number, words: string): string | undefined =>
+    updates.isPending ? undefined : tileFoot(count, words);
+
   /** Both lists answered, and both are empty. Not "the filter matched nothing"
    *  — the severity filter cannot reach `total_unfiltered`, and the device
    *  rollup is never severity-filtered at all, so this really is "this platform
@@ -332,28 +345,28 @@ export function PatchTabPanel({
       <StatsGrid columns={4}>
         <StatCard
           label={t("patch.tab.updatesOutstanding")}
-          value={neverScanned ? "—" : String(outstanding)}
+          value={updatesFigure(outstanding)}
           icon="patch"
           to={severityHref(ALL_SEVERITIES_PARAM)}
           tone="neutral"
-          foot={tileFoot(outstanding, t("patch.tab.updatesFoot", { label }))}
+          foot={updatesFoot(outstanding, t("patch.tab.updatesFoot", { label }))}
           zeroLabel={t("patch.tab.updatesZero", { label })}
         />
         <StatCard
           label={t("patch.tab.critical")}
-          value={neverScanned ? "—" : String(criticalCount)}
+          value={updatesFigure(criticalCount)}
           icon="alert-triangle"
           to={severityHref("critical")}
           tone="red"
           urgent={criticalCount > 0}
-          foot={tileFoot(criticalCount, t("patch.tab.criticalFoot"))}
+          foot={updatesFoot(criticalCount, t("patch.tab.criticalFoot"))}
           zeroLabel={
             family === "macos" ? t("patch.tab.criticalZeroMac") : t("patch.tab.criticalZero")
           }
         />
         <StatCard
           label={t("patch.tab.important")}
-          value={neverScanned ? "—" : String(importantCount)}
+          value={updatesFigure(importantCount)}
           icon="clock-exclamation"
           to={severityHref("important")}
           tone="orange"
@@ -361,18 +374,18 @@ export function PatchTabPanel({
              rule that a measured zero is never loud still holds inside
              `StatCard`. */
           urgent={importantCount > 0}
-          foot={tileFoot(importantCount, t("patch.tab.importantFoot"))}
+          foot={updatesFoot(importantCount, t("patch.tab.importantFoot"))}
           zeroLabel={
             family === "linux" ? t("patch.tab.importantZeroLinux") : t("patch.tab.importantZero")
           }
         />
         <StatCard
           label={t("patch.tab.machines")}
-          value={neverScanned ? "—" : String(deviceTotal)}
+          value={devices.isPending || neverScanned ? "—" : String(deviceTotal)}
           icon="devices"
           to={devicesHref()}
           tone="blue"
-          foot={tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
+          foot={devices.isPending ? undefined : tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
           zeroLabel={t("patch.tab.machinesZero", { label })}
         />
       </StatsGrid>

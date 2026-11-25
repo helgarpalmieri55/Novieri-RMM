@@ -140,6 +140,20 @@ describe("Remote sessions on the list kit", () => {
     expect(router.state.location.search).toBe("");
   }, 20_000);
 
+  it("draws no number and no claim in its tiles while the Client chip waits for /me (clarification 10a)", async () => {
+    // A tile counts the narrowed read; before it answers there is nothing to
+    // count, so no "0" and no "nothing has ever…" (Health's tiles: "—", no sub).
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    const { container } = renderPage(`/remote?client=${ANDES}`, <SessionsPage />, "/remote");
+    await screen.findAllByText("Loading…");
+    const tiles = Array.from(container.querySelectorAll(".tile"));
+    expect(tiles.length).toBe(4);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".v")?.textContent).toBe("—");
+      expect(tile.querySelector(".z")).toBeNull();
+    }
+  });
+
   it("opens Start remote session from ?new=session", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/remote?new=session", <SessionsPage />, "/remote");

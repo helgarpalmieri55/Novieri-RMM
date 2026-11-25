@@ -11,7 +11,7 @@ import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { Prerequisites } from "../../components/prerequisites";
 import { useFleetPrerequisite } from "../../lib/detectors";
-import { formatDateTime, intlLocale } from "../../lib/datetime";
+import { NO_DATE, formatDateTime, intlLocale } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { getLanguage } from "../../i18n/core";
@@ -508,45 +508,49 @@ export function JobsPage() {
           that need a person are loud. The zero labels are the other half:
           "0 failed" and "0 because nothing has run" are the same glyph, and
           only one of them is good news. */}
+      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
+          read a tile counts has answered -- under the Client chip that
+          includes the wait for `/me` -- it reads "—" with no line under it,
+          as Alerts' tiles do. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("jobs.tiles.jobs")}
-          value={String(total)}
+          value={jobs.isPending ? NO_DATE : String(total)}
           icon="jobs"
           // The whole queue: from a filtered view this is the way back to it.
           to={underChip("/jobs")}
           tone="neutral"
           zeroLabel={t("jobs.tiles.jobsZero")}
-          foot={totalFoot}
+          foot={jobs.isPending ? undefined : totalFoot}
         />
         <StatCard
           label={t("jobs.tiles.running")}
-          value={String(running)}
+          value={jobs.isPending ? NO_DATE : String(running)}
           icon="progress"
           to={underChip("/jobs?status=running")}
           tone="violet"
           zeroLabel={t("jobs.tiles.runningZero")}
-          foot={runningFoot}
+          foot={jobs.isPending ? undefined : runningFoot}
         />
         <StatCard
           label={t("jobs.tiles.failed")}
-          value={String(failed)}
+          value={jobs.isPending ? NO_DATE : String(failed)}
           icon="circle-x"
           to={underChip("/jobs?status=failed")}
           tone="red"
           urgent={failed > 0}
           zeroLabel={t("jobs.tiles.failedZero")}
-          foot={failedFoot}
+          foot={jobs.isPending ? undefined : failedFoot}
         />
         <StatCard
           label={t("jobs.tiles.waiting")}
-          value={String(stuck)}
+          value={jobs.isPending ? NO_DATE : String(stuck)}
           icon="clock-exclamation"
           to={underChip("/jobs?status=stuck")}
           tone="gold"
           urgent={stuck > 0}
           zeroLabel={t("jobs.tiles.waitingZero")}
-          foot={stuckFoot}
+          foot={jobs.isPending ? undefined : stuckFoot}
         />
       </StatsGrid>
 

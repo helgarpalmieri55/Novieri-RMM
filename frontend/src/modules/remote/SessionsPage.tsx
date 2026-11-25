@@ -23,6 +23,7 @@ import { Link } from "react-router-dom";
 import { NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { NO_DATE } from "../../lib/datetime";
 import type { MessageKey } from "../../i18n/core";
 import { humaniseEnum } from "../../lib/labels";
 import type { Me, RemoteSession } from "../../lib/api";
@@ -193,44 +194,49 @@ export function SessionsPage() {
           Only "Active now" is `urgent`: a session that has not ended is
           somebody on an employee's machine right now, and it is the one number
           here a person may have to end. */}
+      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
+          read a tile counts has answered -- under the Client chip that
+          includes the wait for `/me` -- it reads "—" with no line under it,
+          as Alerts' tiles do. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("remote.sessions.onlineDevices")}
-          value={String(onlineDevices)}
+          value={devices.isPending ? NO_DATE : String(onlineDevices)}
           icon="devices"
           to={underChip("/devices?state=online")}
           tone="green"
-          foot={t("remote.sessions.onlineFoot")}
+          foot={devices.isPending ? undefined : t("remote.sessions.onlineFoot")}
           zeroLabel={t("remote.sessions.onlineZero")}
         />
         <StatCard
           label={t("remote.sessions.sessions")}
-          value={String(sessions.data?.total ?? items.length)}
+          value={sessions.isPending ? NO_DATE : String(sessions.data?.total ?? items.length)}
           icon="history"
           to={underChip("/remote")}
           tone="neutral"
-          foot={t("remote.sessions.sessionsFoot")}
+          foot={sessions.isPending ? undefined : t("remote.sessions.sessionsFoot")}
           zeroLabel={t("remote.sessions.sessionsZero")}
         />
         <StatCard
           label={t("remote.sessions.activeNow")}
-          value={String(activeCount)}
+          value={sessions.isPending ? NO_DATE : String(activeCount)}
           icon="user-screen"
           to={underChip("/remote?state=active")}
           tone="violet"
-          urgent
-          foot={t("remote.sessions.activeFoot")}
+          // Not loud before the read: "—" is no session on anyone's machine.
+          urgent={!sessions.isPending}
+          foot={sessions.isPending ? undefined : t("remote.sessions.activeFoot")}
           /* WHICH zero: the list loaded and nothing in it is live. Not "no
              session has ever run" — that is the tile to the left. */
           zeroLabel={t("remote.sessions.activeZero")}
         />
         <StatCard
           label={t("remote.sessions.recorded")}
-          value={String(recordedCount)}
+          value={sessions.isPending ? NO_DATE : String(recordedCount)}
           icon="archive"
           to={underChip("/remote?state=recorded")}
           tone="blue"
-          foot={t("remote.sessions.recordedFoot")}
+          foot={sessions.isPending ? undefined : t("remote.sessions.recordedFoot")}
           zeroLabel={t("remote.sessions.recordedZero")}
         />
       </StatsGrid>
