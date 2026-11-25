@@ -274,6 +274,7 @@ export const budget: Shape<typeof en> = {
     yearRange: "El año fiscal debe estar entre 2000 y 2100",
     // The budget open, as the head's chip, and the list to choose from (redesign Task 11, 6.3).
     budgetChip: "Presupuesto",
+    createdAside: "Se creó {name}. Está en «Presupuesto», arriba; este plan sigue abierto con sus cambios.",
     chooseBudget: "Elige un presupuesto",
     budgetOption: "{name} (año fiscal {year})",
     listLabel: "Presupuestos",

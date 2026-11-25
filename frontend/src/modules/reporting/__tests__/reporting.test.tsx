@@ -487,6 +487,25 @@ describe("the report catalogue", () => {
     ]);
   });
 
+  // Fix round 2, N2: the labels are looked up as the object's OWN keys, so a
+  // module named like something every object inherits is still one with no name.
+  it("drops a module named like an inherited property, such as toString", async () => {
+    mockUseApi.mockReturnValue(
+      client({
+        me: vi.fn().mockResolvedValue(ME),
+        listReports: vi.fn().mockResolvedValue({
+          reports: CATALOGUE.reports.map((entry) =>
+            entry.key === "fleet-posture" ? { ...entry, requires: ["devices.read", "toString.read"] } : entry,
+          ),
+        }),
+      }),
+    );
+    renderPage("/reports", <ReportCataloguePage />, "/reports");
+    const families = await screen.findByRole("group", { name: "Family" });
+    await screen.findByTestId("report-card-fleet-posture");
+    expect(within(families).getAllByRole("button").map((chip) => chip.textContent)).toEqual(["All", "Service levels1"]);
+  });
+
   it("drops a module it has no name for, and lists the report under All only", async () => {
     mockUseApi.mockReturnValue(
       client({

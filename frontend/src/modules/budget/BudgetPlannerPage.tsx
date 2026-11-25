@@ -155,6 +155,11 @@ export function BudgetPlannerPage() {
   // which sits over the plan, also by closing it (`?new=`).
   const [planDirty, setPlanDirty] = useState(false);
   const [newDirty, setNewDirty] = useState(false);
+  // A BUDGET CREATED BESIDE AN UNSAVED PLAN (fix round 1, I3) is not opened,
+  // so the page says it exists and where to find it (fix round 2, N1). The
+  // line belongs to the budget open when it was said: another budget drops it.
+  const [createdAside, setCreatedAside] = useState<{ name: string; beside: string } | null>(null);
+  const shownAside = createdAside !== null && createdAside.beside === filters.values.budget ? createdAside : null;
   const { guard, release } = useUnsavedGuard(planDirty || newDirty, {
     search: newDirty ? ["budget", "new"] : ["budget"],
   });
@@ -207,6 +212,13 @@ export function BudgetPlannerPage() {
       />
 
       <BudgetPageNav canRead={canRead} />
+
+      {shownAside ? (
+        <p role="status" className="notice">
+          <Icon name="circle-check" size={16} />
+          <span>{t("budget.planner.createdAside", { name: shownAside.name })}</span>
+        </p>
+      ) : null}
 
       {/* WHY THERE IS NO BUTTON, said where the button would be. The
           dashboard's "No budget yet" links HERE, and this page offers "New
@@ -283,6 +295,7 @@ export function BudgetPlannerPage() {
           // but not opened: switching would drop the plan, and the release
           // above is for closing the dialog, never for leaving the plan.
           if (!planDirty) next.set("budget", budget.id);
+          setCreatedAside(planDirty ? { name: budget.name, beside: filters.values.budget } : null);
           writeQuery(params, next, setParams, { replace: true });
         }}
       />

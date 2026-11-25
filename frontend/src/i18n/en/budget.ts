@@ -283,6 +283,8 @@ export const budget = {
     yearRange: "Fiscal year must be between 2000 and 2100",
     // The budget open, as the head's chip, and the list to choose from (redesign Task 11, 6.3).
     budgetChip: "Budget",
+    // Said on screen when a budget is created while the open plan holds changes (fix round 2, N1).
+    createdAside: "{name} was created. It is in the Budget chip above; this plan stays open with its changes.",
     chooseBudget: "Choose a budget",
     budgetOption: "{name} (FY{year})",
     listLabel: "Budgets",

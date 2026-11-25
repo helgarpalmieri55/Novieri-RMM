@@ -273,6 +273,26 @@ describe("the budget planner in Spanish", () => {
     expectNoEnglish(dialog, RECORDED);
   });
 
+  // Fix round 2, N1: a budget created beside an unsaved plan is not opened,
+  // and the page says so, in Spanish.
+  it("says a budget created beside an unsaved plan was created, and where it is", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(
+      api({ createBudget: vi.fn().mockResolvedValue({ ...BUDGET, id: "b2", name: "Presupuesto TI 2027", fiscal_year: 2027 }) }),
+    );
+    mount(<BudgetPlannerPage />);
+    await user.click(await screen.findByRole("link", { name: "Presupuesto TI 2026" }));
+    await user.type(await screen.findByLabelText("Herramientas de oficina, periodo 2"), "75.00");
+    await user.click(screen.getByRole("button", { name: "Nuevo presupuesto" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo presupuesto" });
+    await user.type(within(dialog).getByLabelText("Nombre"), "Presupuesto TI 2027{Enter}");
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent(
+      "Se creó Presupuesto TI 2027. Está en «Presupuesto», arriba; este plan sigue abierto con sus cambios.",
+    );
+    expectNoEnglish(status, [...RECORDED, "Presupuesto TI 2027"]);
+  });
+
   it("words the close confirmation", async () => {
     const user = userEvent.setup();
     mount(<BudgetPlannerPage />);

@@ -178,13 +178,14 @@ function familyOf(entry: CatalogueEntry): string | null {
   for (const code of [...entry.requires].sort()) {
     const module = code.split(".").slice(0, -1).join(".");
     if (CONTEXT_ONLY.has(module)) continue;
-    return module in FAMILY_LABEL ? module : null;
+    // The label's OWN key: `in` would also find what every object inherits (`toString`) (fix round 2, N2).
+    return Object.hasOwn(FAMILY_LABEL, module) ? module : null;
   }
   return null;
 }
 
 function familyLabel(family: string): string {
-  const key = FAMILY_LABEL[family];
+  const key = Object.hasOwn(FAMILY_LABEL, family) ? FAMILY_LABEL[family] : undefined;
   return key ? translate(key) : "";
 }
 

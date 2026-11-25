@@ -2389,6 +2389,10 @@ describe("BudgetPlannerPage on the form kit", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Software licenses period 2")).toHaveValue("75.00");
     expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    // It says so, on screen (fix round 2, N1): created, and where to find it.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "FY27 IT Budget was created. It is in the Budget chip above; this plan stays open with its changes.",
+    );
     // And the plan is still guarded: the release was spent on the dialog, not on the plan.
     await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
     expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
