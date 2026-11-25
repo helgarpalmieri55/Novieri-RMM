@@ -38,6 +38,9 @@ async function guardsThenStartsEmpty(
   await change(dialog);
   await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   const ask = await screen.findByRole("dialog", { name: "Leave without saving?" });
+  // The question paints over the form it guards: both are `.modal` at one
+  // z-index, so the later in the document is the one on top (fix round 2, C1).
+  expect(dialog.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(router.state.location.search).toBe(search);
   await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
   holdsChange(screen.getByRole("dialog", { name: title }));

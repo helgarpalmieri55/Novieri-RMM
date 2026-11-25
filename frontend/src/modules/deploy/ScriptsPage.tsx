@@ -282,7 +282,6 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
 
   return (
     <>
-    {guard}
     <Dialog open={open} onClose={dismiss} title={t("deploy.scripts.authorTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -330,6 +329,9 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
         </div>
       </Form>
     </Dialog>
+    {/* AFTER THE FORM (fix round 2, C1): the leave question and the form are both
+        `.modal` at one z-index, so the later one in the document paints on top. */}
+    {guard}
     </>
   );
 }

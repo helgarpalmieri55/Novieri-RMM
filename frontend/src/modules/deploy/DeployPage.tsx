@@ -658,7 +658,6 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
 
   return (
     <>
-    {guard}
     <Dialog open={open} onClose={dismiss} title={t("deploy.deployments.create.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -809,6 +808,9 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
         </div>
       </Form>
     </Dialog>
+    {/* AFTER THE FORM (fix round 2, C1): the leave question and the form are both
+        `.modal` at one z-index, so the later one in the document paints on top. */}
+    {guard}
     </>
   );
 }

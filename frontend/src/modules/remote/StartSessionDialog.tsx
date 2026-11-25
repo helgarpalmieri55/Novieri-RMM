@@ -193,7 +193,6 @@ export function StartSessionDialog({
 
   return (
     <>
-      {guard}
       <Dialog open={open} onClose={dismiss} title={t("remote.start.dialogTitle")}>
         <Form onSubmit={submit}>
           <div className="form-grid">
@@ -313,6 +312,10 @@ export function StartSessionDialog({
           start.mutate();
         }}
       />
+      {/* AFTER THE FORM (fix round 2, C1), for the same reason as the
+          confirmation above: the leave question is a `.modal` at the form's
+          z-index, so the later one in the document paints on top. */}
+      {guard}
     </>
   );
 }
