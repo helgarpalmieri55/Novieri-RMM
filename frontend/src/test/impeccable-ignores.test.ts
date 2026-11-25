@@ -29,12 +29,26 @@ describe("the detector's shared ignores", () => {
     );
   });
 
-  it("ignores nested-cards on the consent page's notice, and nowhere else (kit requests batch 2, K6)", () => {
+  /** Every `nested-cards` ignore, not the first one `find` would return (batch 2 review, H5). */
+  const nested = values.filter((item) => item.rule === "nested-cards");
+
+  it("scopes every nested-cards ignore to named files, each with its reason", () => {
+    // A notice inside a card is a reviewed false positive page by page; an
+    // unscoped ignore would silence the rule on every card in the console.
+    expect(nested.length).toBeGreaterThan(0);
+    for (const entry of nested) {
+      expect(entry.files?.length, JSON.stringify(entry)).toBeGreaterThan(0);
+      expect(entry.reason, JSON.stringify(entry)).toBeTruthy();
+    }
+  });
+
+  it("ignores nested-cards on the consent page's notice in an entry of its own, and nowhere else (kit requests batch 2, K6)", () => {
     // O8: the overlay's `nested-cards` on ConsentPage's `.notice.gold` is a
     // false positive: a notice is a message in the card, not a card in a card.
-    const entry = values.find((item) => item.rule === "nested-cards");
-    expect(entry?.value).toBe("*");
-    expect(entry?.files).toEqual(["frontend/src/modules/auth/ConsentPage.tsx"]);
-    expect(entry?.reason).toMatch(/a notice is a message, not a card/);
+    const consent = nested.filter((item) => item.files?.includes("frontend/src/modules/auth/ConsentPage.tsx"));
+    expect(consent).toHaveLength(1);
+    expect(consent[0]?.value).toBe("*");
+    expect(consent[0]?.files).toEqual(["frontend/src/modules/auth/ConsentPage.tsx"]);
+    expect(consent[0]?.reason).toMatch(/a notice is a message, not a card/);
   });
 });
