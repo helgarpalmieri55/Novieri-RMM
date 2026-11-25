@@ -424,11 +424,11 @@ describe("the Start session dialog, in Spanish", () => {
     await user.type(screen.getByLabelText("Motivo"), "x");
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "El motivo se escribe en el registro de auditoría — indica al menos una referencia de ticket",
+      "El motivo se escribe en el registro de auditoría: indica al menos una referencia de ticket",
     );
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Reason is written to the audit log — give at least a ticket reference",
+      "Reason is written to the audit log: give at least a ticket reference",
     );
   });
 
@@ -457,7 +457,7 @@ describe("the Start session dialog, in Spanish", () => {
     await pick(user, /sentinel-2/);
     await user.type(screen.getByLabelText("Motivo"), "INC-4821");
     expect(screen.getAllByRole("status")[0]).toHaveTextContent(
-      "sentinel-2 está sin conexión — el agente no responde, así que la conexión no se completará.",
+      "sentinel-2 está sin conexión: el agente no responde, así que la conexión no se completará.",
     );
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     const confirm = await screen.findByRole("dialog", { name: "Iniciar una sesión en un dispositivo que no puede responder" });
@@ -471,7 +471,7 @@ describe("the Start session dialog, in Spanish", () => {
     await pick(user, /legacy-3/);
     expect(
       await screen.findByText(
-        "legacy-3 tiene un agente demasiado antiguo para compartir su pantalla — la sesión se rechaza hasta que se actualice el agente.",
+        "legacy-3 tiene un agente demasiado antiguo para compartir su pantalla: la sesión se rechaza hasta que se actualice el agente.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Actualizar el agente" })).toHaveAttribute(
@@ -707,7 +707,7 @@ describe("the live screen, in Spanish", () => {
     expectNoEnglish(confirm);
     await user.click(within(confirm).getByRole("button", { name: "Finalizar sesión" }));
     await waitFor(() => expect(api.stopRemoteSession).toHaveBeenCalled());
-    expect(await screen.findByRole("alert")).toHaveTextContent("Esa sesión sigue en marcha — no se finalizó.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esa sesión sigue en marcha: no se finalizó.");
   });
 });
 
@@ -799,14 +799,15 @@ describe("the remote sentences built outside React, in Spanish", () => {
     expect(consentModeLabel("attended")).toBe("Asistida");
     expect(consentModeLabel("unattended")).toBe("Desatendida");
     expect(formatDuration("2026-01-01T00:00:00.000Z", "2026-01-01T00:02:05.000Z")).toBe("2 min 05 s");
-    expect(formatDuration(null, null)).toBe("—");
+    // A session not started has no duration: the kit's absent mark, in Spanish.
+    expect(formatDuration(null, null)).toBe("n/d");
     setActiveLanguage("en");
     expect(formatDuration("2026-01-01T00:00:00.000Z", "2026-01-01T00:02:05.000Z")).toBe("2m 05s");
   });
 
   it("words why a device cannot be reached", () => {
-    expect(unreachableReason(NO_AGENT)).toBe("no tiene agente — una sesión remota necesita uno, así que no se puede establecer la conexión");
-    expect(unreachableReason(OFFLINE)).toBe("está sin conexión — el agente no responde, así que la conexión no se completará");
+    expect(unreachableReason(NO_AGENT)).toBe("no tiene agente: una sesión remota necesita uno, así que no se puede establecer la conexión");
+    expect(unreachableReason(OFFLINE)).toBe("está sin conexión: el agente no responde, así que la conexión no se completará");
     expect(unreachableReason(OLD_AGENT)).toContain("demasiado antiguo para compartir su pantalla");
     expect(unreachableReason(ONLINE)).toBeNull();
   });

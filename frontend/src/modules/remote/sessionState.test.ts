@@ -22,8 +22,8 @@ describe("consentModeLabel", () => {
 });
 
 describe("formatDuration", () => {
-  it("returns an em dash when the session has not started", () => {
-    expect(formatDuration(null, null)).toBe("—");
+  it("returns the kit's absent mark when the session has not started", () => {
+    expect(formatDuration(null, null)).toBe("n/a");
   });
 
   it("formats elapsed minutes and seconds between start and end", () => {

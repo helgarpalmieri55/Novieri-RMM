@@ -14,10 +14,10 @@ export const remote: Shape<typeof en> = {
       "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     credentialEmptyHint:
       "No hay credenciales en la bóveda. Guarda una en Flota → Credenciales y podrás elegirla aquí; también puede que no tengas permiso para listarlas.",
-    unreachableNoAgent: "no tiene agente — una sesión remota necesita uno, así que no se puede establecer la conexión",
-    unreachableOffline: "está sin conexión — el agente no responde, así que la conexión no se completará",
+    unreachableNoAgent: "no tiene agente: una sesión remota necesita uno, así que no se puede establecer la conexión",
+    unreachableOffline: "está sin conexión: el agente no responde, así que la conexión no se completará",
     unreachableTooOld:
-      "tiene un agente demasiado antiguo para compartir su pantalla — la sesión se rechaza hasta que se actualice el agente",
+      "tiene un agente demasiado antiguo para compartir su pantalla: la sesión se rechaza hasta que se actualice el agente",
     statusOnline: "en línea",
     statusOnlineTooOld: "en línea · agente demasiado antiguo para compartir su pantalla",
     statusNoAgent: "sin agente · no se puede conectar",
@@ -62,7 +62,7 @@ export const remote: Shape<typeof en> = {
     updateAgent: "Actualizar el agente",
     fieldDevice: "Dispositivo",
     fieldReason: "Motivo",
-    reasonShort: "El motivo se escribe en el registro de auditoría — indica al menos una referencia de ticket",
+    reasonShort: "El motivo se escribe en el registro de auditoría: indica al menos una referencia de ticket",
     unreachableLine: "{device} {reason}.",
     confirmTitleUnattended: "Iniciar una sesión desatendida",
     confirmTitleTooOld: "Iniciar una sesión que el agente no puede compartir",
@@ -108,7 +108,7 @@ export const remote: Shape<typeof en> = {
     controlTaken: "Recuperado por el usuario",
     controlYou: "Tienes el control",
     controlViewOnly: "Solo visualización",
-    stopFailed: "Esa sesión sigue en marcha — no se finalizó. {detail}",
+    stopFailed: "Esa sesión sigue en marcha: no se finalizó. {detail}",
     controlTakenNote:
       "La persona que está en el dispositivo recuperó el control. Aún puedes mirar; para volver a controlar, inicia una sesión nueva, que se lo pedirá de nuevo.",
     panelTitle: "Pantalla",
