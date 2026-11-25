@@ -26,7 +26,7 @@ export const deploy = {
   },
   device: {
     emptyTitle: "No deployments recorded",
-    emptyBody: "Create one from Software deployment to push a package here.",
+    emptyBody: "Create one from Software to push a package here.",
     colDeployment: "Deployment",
     colPackage: "Package",
     colAction: "Action",

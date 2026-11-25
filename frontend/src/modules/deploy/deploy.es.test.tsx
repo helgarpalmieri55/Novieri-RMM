@@ -695,8 +695,11 @@ describe("a device's Deploy tab, in Spanish", () => {
     baseApi({ getDeviceDeployments: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<DeviceDeployTab deviceId="dev1" />);
     expect(await screen.findByText("No hay despliegues registrados")).toBeInTheDocument();
-    expect(screen.getByText("Crea uno desde Despliegue de software para enviar un paquete a este dispositivo.")).toBeInTheDocument();
+    // The page it names is the rail's "Software" (fix round 2, Minor 1; ruling 1).
+    expect(screen.getByText("Crea uno desde Software para enviar un paquete a este dispositivo.")).toBeInTheDocument();
     expectNoEnglish(container);
+    act(() => setActiveLanguage("en"));
+    expect(screen.getByText("Create one from Software to push a package here.")).toBeInTheDocument();
   });
 });
 

@@ -24,7 +24,7 @@ export const deploy: Shape<typeof en> = {
   },
   device: {
     emptyTitle: "No hay despliegues registrados",
-    emptyBody: "Crea uno desde Despliegue de software para enviar un paquete a este dispositivo.",
+    emptyBody: "Crea uno desde Software para enviar un paquete a este dispositivo.",
     colDeployment: "Despliegue",
     colPackage: "Paquete",
     colAction: "Acción",
