@@ -45,12 +45,13 @@ import {
   QueryState,
   ShowingCount,
   StatusPill,
+  useEditParam,
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
-import { useEditParam, useReportDirty } from "./dialogParams";
+import { useDropParam, useReportDirty } from "./dialogParams";
 import { Icon } from "../../shell/icons";
 import { humaniseEnum } from "../../lib/labels";
 
@@ -125,7 +126,7 @@ export function ExpensesPage() {
   const api = useApi();
   const filters = useUrlFilters(["status", "category", "from", "to"] as const);
   const created = useNewParam("expense");
-  const editing = useEditParam();
+  const editing = useEditParam("expense");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -153,7 +154,7 @@ export function ExpensesPage() {
   // the API is asked what it was asked before.
   const editNamesNothing =
     editing.id !== "" && expenses.data !== undefined && me.data !== undefined && editingExpense === undefined;
-  const dropEdit = editing.drop;
+  const dropEdit = useDropParam("edit");
   useEffect(() => {
     if (editNamesNothing) dropEdit();
   }, [editNamesNothing, dropEdit]);
