@@ -103,6 +103,10 @@ export function SessionsPage() {
   // as `{ client }`, never bare: `["remote-sessions", id]` is one session
   // (useSessionDevice) and `["devices", id]` one device.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
+  // as Alerts' `withClient`): every tile below counts the chip's client.
+  const underChip = (to: string): string =>
+    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
   const sessions = useQuery({
     queryKey: client === null ? ["remote-sessions"] : ["remote-sessions", { client }],
     queryFn: () => readApi.listRemoteSessions(),
@@ -194,7 +198,7 @@ export function SessionsPage() {
           label={t("remote.sessions.onlineDevices")}
           value={String(onlineDevices)}
           icon="devices"
-          to={client === null ? "/devices?state=online" : `/devices?state=online&client=${client}`}
+          to={underChip("/devices?state=online")}
           tone="green"
           foot={t("remote.sessions.onlineFoot")}
           zeroLabel={t("remote.sessions.onlineZero")}
@@ -203,7 +207,7 @@ export function SessionsPage() {
           label={t("remote.sessions.sessions")}
           value={String(sessions.data?.total ?? items.length)}
           icon="history"
-          to="/remote"
+          to={underChip("/remote")}
           tone="neutral"
           foot={t("remote.sessions.sessionsFoot")}
           zeroLabel={t("remote.sessions.sessionsZero")}
@@ -212,7 +216,7 @@ export function SessionsPage() {
           label={t("remote.sessions.activeNow")}
           value={String(activeCount)}
           icon="user-screen"
-          to="/remote?state=active"
+          to={underChip("/remote?state=active")}
           tone="violet"
           urgent
           foot={t("remote.sessions.activeFoot")}
@@ -224,7 +228,7 @@ export function SessionsPage() {
           label={t("remote.sessions.recorded")}
           value={String(recordedCount)}
           icon="archive"
-          to="/remote?state=recorded"
+          to={underChip("/remote?state=recorded")}
           tone="blue"
           foot={t("remote.sessions.recordedFoot")}
           zeroLabel={t("remote.sessions.recordedZero")}

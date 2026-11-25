@@ -56,6 +56,7 @@ import {
   StatCard,
   StatsGrid,
   StatusPill,
+  useNarrowedApi,
   useNewParam,
   useUrlFilters,
 } from "../../shell/components";
@@ -155,6 +156,12 @@ export function DeployPage() {
 
   // Narrowed to the Client chip's client; executing keeps `useApi()`.
   const deployments = useDeployments(filters.values.client);
+  // The client the list was read for (null without a chip, or before `/me`).
+  const { client } = useNarrowedApi(filters.values.client);
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
+  // as Alerts' `withClient`): the tiles below count the chip's client.
+  const underChip = (to: string): string =>
+    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
   const execute = useExecuteDeploymentMutation();
 
   // Fetched by the PAGE, not only by the create dialog: the table rendered
@@ -325,7 +332,7 @@ export function DeployPage() {
           value={String(stats.total)}
           icon="package"
           // Every deployment: from a filtered view, the way back.
-          to="/deploy"
+          to={underChip("/deploy")}
           tone="neutral"
           zeroLabel={t("deploy.deployments.tileDeploymentsZero")}
           foot={
@@ -340,7 +347,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileWeek")}
           value={String(stats.thisWeek)}
           icon="calendar-event"
-          to="/deploy?state=week"
+          to={underChip("/deploy?state=week")}
           tone="blue"
           zeroLabel={t("deploy.deployments.tileWeekZero")}
           foot={stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
@@ -349,7 +356,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileRate")}
           value={stats.successRate}
           icon="circle-check"
-          to="/deploy?state=complete"
+          to={underChip("/deploy?state=complete")}
           tone="green"
           // NO `zeroLabel`: this tile's "nothing measured" case is "—", not 0,
           // and `rateFoot` already says which: "No completed runs yet".
@@ -367,7 +374,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileFailed")}
           value={String(stats.failed)}
           icon="circle-x"
-          to="/deploy?state=failed"
+          to={underChip("/deploy?state=failed")}
           tone="red"
           urgent={stats.failed > 0}
           zeroLabel={t("deploy.deployments.tileFailedZero")}

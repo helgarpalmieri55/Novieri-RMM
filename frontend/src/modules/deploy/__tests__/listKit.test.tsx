@@ -79,6 +79,24 @@ describe("Deployments (/deploy)", () => {
     }
   });
 
+  it("opens each tile's rows under the same Client chip (general ruling 2)", async () => {
+    // The tiles count the chip's client, so each opens that client's rows.
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(`/deploy?client=${ANDES}`, <DeployPage />, "/deploy");
+    await screen.findByRole("table", { name: "Deployments" });
+    // The page's own links (the section nav) name pages, not counted rows.
+    const hrefs = screen
+      .getAllByRole("link")
+      .filter((link) => link.closest("nav") === null)
+      .map((link) => link.getAttribute("href") ?? "");
+    expect(hrefs).toContain(`/deploy?client=${ANDES}`);
+    expect(hrefs).toContain(`/deploy?state=week&client=${ANDES}`);
+    expect(hrefs).toContain(`/deploy?state=complete&client=${ANDES}`);
+    expect(hrefs).toContain(`/deploy?state=failed&client=${ANDES}`);
+    const lists = hrefs.filter((href) => href === "/deploy" || href.startsWith("/deploy?"));
+    expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
+  });
+
   it("opens New deployment from ?new=deployment", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/deploy?new=deployment", <DeployPage />, "/deploy");

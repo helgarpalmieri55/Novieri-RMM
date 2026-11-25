@@ -73,6 +73,25 @@ describe("Remote sessions on the list kit", () => {
     }
   });
 
+  it("opens each tile's rows under the same Client chip (general ruling 2)", async () => {
+    // The tiles count the chip's client (its sessions, its machines), so each
+    // opens that client's rows, not every client's.
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(`/remote?client=${ANDES}`, <SessionsPage />, "/remote");
+    await screen.findByRole("table", { name: "Remote sessions" });
+    // The page's own links (the section nav) name pages, not counted rows.
+    const hrefs = screen
+      .getAllByRole("link")
+      .filter((link) => link.closest("nav") === null)
+      .map((link) => link.getAttribute("href") ?? "");
+    expect(hrefs).toContain(`/devices?state=online&client=${ANDES}`);
+    expect(hrefs).toContain(`/remote?client=${ANDES}`);
+    expect(hrefs).toContain(`/remote?state=active&client=${ANDES}`);
+    expect(hrefs).toContain(`/remote?state=recorded&client=${ANDES}`);
+    const lists = hrefs.filter((href) => href === "/remote" || href.startsWith("/remote?"));
+    expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
+  });
+
   it("opens Start remote session from ?new=session", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/remote?new=session", <SessionsPage />, "/remote");

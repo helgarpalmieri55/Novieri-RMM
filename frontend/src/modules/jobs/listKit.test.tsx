@@ -70,6 +70,24 @@ describe("Job history on the list kit", () => {
     }
   });
 
+  it("opens each tile's rows under the same Client chip (general ruling 2)", async () => {
+    // The tiles count the chip's client, so each opens that client's rows.
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(`/jobs?client=${ANDES}`, <JobsPage />, "/jobs");
+    await screen.findByRole("table", { name: "Job queue" });
+    // The page's own links (the section nav) name pages, not counted rows.
+    const hrefs = screen
+      .getAllByRole("link")
+      .filter((link) => link.closest("nav") === null)
+      .map((link) => link.getAttribute("href") ?? "");
+    expect(hrefs).toContain(`/jobs?client=${ANDES}`);
+    expect(hrefs).toContain(`/jobs?status=running&client=${ANDES}`);
+    expect(hrefs).toContain(`/jobs?status=failed&client=${ANDES}`);
+    expect(hrefs).toContain(`/jobs?status=stuck&client=${ANDES}`);
+    const lists = hrefs.filter((href) => href === "/jobs" || href.startsWith("/jobs?"));
+    expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
+  });
+
   it("opens a job from ?job= in its drawer", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/jobs?status=failed&job=job-1", <JobsPage />, "/jobs");

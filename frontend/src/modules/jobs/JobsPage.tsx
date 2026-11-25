@@ -267,6 +267,10 @@ export function JobsPage() {
   // invalidate `["jobs"]`, which reaches every copy, and stop and retry keep
   // `useApi()`. The open job is read by id, as before.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
+  // as Alerts' `withClient`): the tiles below count the chip's client.
+  const underChip = (to: string): string =>
+    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
   const jobs = useQuery({
     queryKey: client === null ? ["jobs"] : ["jobs", { client }],
     queryFn: () => readApi.listJobs(),
@@ -510,7 +514,7 @@ export function JobsPage() {
           value={String(total)}
           icon="jobs"
           // The whole queue: from a filtered view this is the way back to it.
-          to="/jobs"
+          to={underChip("/jobs")}
           tone="neutral"
           zeroLabel={t("jobs.tiles.jobsZero")}
           foot={totalFoot}
@@ -519,7 +523,7 @@ export function JobsPage() {
           label={t("jobs.tiles.running")}
           value={String(running)}
           icon="progress"
-          to="/jobs?status=running"
+          to={underChip("/jobs?status=running")}
           tone="violet"
           zeroLabel={t("jobs.tiles.runningZero")}
           foot={runningFoot}
@@ -528,7 +532,7 @@ export function JobsPage() {
           label={t("jobs.tiles.failed")}
           value={String(failed)}
           icon="circle-x"
-          to="/jobs?status=failed"
+          to={underChip("/jobs?status=failed")}
           tone="red"
           urgent={failed > 0}
           zeroLabel={t("jobs.tiles.failedZero")}
@@ -538,7 +542,7 @@ export function JobsPage() {
           label={t("jobs.tiles.waiting")}
           value={String(stuck)}
           icon="clock-exclamation"
-          to="/jobs?status=stuck"
+          to={underChip("/jobs?status=stuck")}
           tone="gold"
           urgent={stuck > 0}
           zeroLabel={t("jobs.tiles.waitingZero")}
