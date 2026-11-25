@@ -334,13 +334,28 @@ describe("license compliance", () => {
 
   // Review M4 (10a in spirit): until the catalog says which products have a
   // rule, a rule-less product's row drew a measured "0 / 300" and "300 free".
+  //
+  // It waits for the compliance read, not for a fixed time (adoption pass, O5
+  // leftover 3): a 50 ms wait passed whenever the read was slower than that,
+  // with or without the catalog in the loading condition.
   it("draws no row figure until the catalog says which products can be counted", async () => {
-    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listProducts: () => new Promise<never>(() => {}) } as never));
-    renderPage("/licenses/compliance", <ComplianceDashboard />, "/licenses/compliance");
+    let answerCatalog: () => void = () => {};
+    const listProducts = () =>
+      new Promise((resolve) => {
+        answerCatalog = () => resolve(fixtureRegistry().listProducts!());
+      });
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listProducts } as never));
+    const { queryClient } = renderPage("/licenses/compliance", <ComplianceDashboard />, "/licenses/compliance");
     expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
-    // The compliance rows have answered by now; none is drawn as measured.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The compliance rows are in hand, and the page has had its turn to draw them.
+    await waitFor(() => expect(queryClient.getQueryState(["license-compliance", null])?.status).toBe("success"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(screen.queryByText("Windows Server 2022 user CAL")).toBeNull();
+    expect(screen.queryByText("300 free")).toBeNull();
+    // Once the catalog answers, the row is drawn: as unmeasured, never as "300 free".
+    await act(async () => answerCatalog());
+    const row = (await screen.findByText("Windows Server 2022 user CAL")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("No usage data")).toBeInTheDocument();
     expect(screen.queryByText("300 free")).toBeNull();
   });
 });

@@ -8,6 +8,7 @@
  */
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
@@ -20,6 +21,11 @@ import { SubscriptionDetail } from "./SubscriptionDetail";
 import { SubscriptionsPage } from "./SubscriptionsPage";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
+
+/** The registry, and the renewal calendar once a tile opens it: one router, both pages. */
+function RegistryThenCalendar() {
+  return useLocation().pathname === "/subscriptions/renewals" ? <RenewalCalendar /> : <SubscriptionsPage />;
+}
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -179,13 +185,20 @@ describe("the subscriptions registry on the list kit", () => {
     );
   });
 
+  // It draws the calendar it opens (adoption pass, O5 leftover 3): the URL
+  // alone held whatever the link wrote, read or not by the page behind it.
   it("opens the renewal calendar on the 90 days its tiles count", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
-    const { router } = renderPage("/subscriptions", <SubscriptionsPage />, "/subscriptions");
+    const { router } = renderPage("/subscriptions", <RegistryThenCalendar />);
     const tile = await screen.findByRole("link", { name: /Renewals in 90 days/ });
     expect(tile).toHaveAttribute("href", "/subscriptions/renewals?within=90");
-    await act(() => router.navigate(tile.getAttribute("href") as string));
+    await userEvent.click(tile);
     expect(router.state.location.search).toBe("?within=90");
+    const calendar = await screen.findByRole("table", { name: "Upcoming renewals" });
+    const window = screen.getByRole("group", { name: "Window" });
+    expect(within(window).getByRole("button", { name: "Next 90 days" })).toHaveAttribute("aria-pressed", "true");
+    // GitHub's notice deadline falls in 86 days: inside the 90 the tile counted, not the default 30.
+    expect(within(calendar).getByText("GitHub Enterprise")).toBeInTheDocument();
   });
 
   it("asks before leaving New subscription with something typed, and opens empty again", async () => {
