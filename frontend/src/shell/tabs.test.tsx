@@ -213,3 +213,59 @@ describe("a tab's note", () => {
     expect(preview).toMatch(/note:\s*key === "b"/);
   });
 });
+
+/**
+ * THE SELECTED TAB STAYS IN VIEW WHEN A LABEL BEFORE IT GROWS (kit requests
+ * batch 3, B3-3; O7's K3). Settings on a phone: "Email · Set up" arrived after
+ * the strip had scrolled Sessions into view, pushed it past the edge, and the
+ * strip did not follow, because it re-scrolled only on a change of tab.
+ * jsdom lays nothing out, so a tab here is 20px per character of its text, side
+ * by side in a 300px strip, moved by the strip's scroll.
+ */
+describe("Tabs that scroll, when a label changes (B3-3)", () => {
+  const scrolled = new WeakMap<Element, number>();
+
+  function layOutByText() {
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockImplementation(function (this: HTMLElement) {
+      return scrolled.get(this) ?? 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "set").mockImplementation(function (this: HTMLElement, value: number) {
+      scrolled.set(this, value);
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("role") === "tablist") return DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 40 });
+      const strip = this.parentElement as HTMLElement;
+      const before = Array.from(strip.children).slice(0, Array.from(strip.children).indexOf(this));
+      const x = before.reduce((sum, tab) => sum + (tab.textContent ?? "").length * 20, 0);
+      return DOMRect.fromRect({ x: x - (scrolled.get(strip) ?? 0), y: 0, width: (this.textContent ?? "").length * 20, height: 40 });
+    });
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  const settings = (email: string, note?: string) => [
+    { key: "org", label: "Org" },
+    { key: "email", label: email, ...(note === undefined ? {} : { note }) },
+    { key: "sessions", label: "Sessions" },
+  ];
+
+  it("follows the selected tab when a label before it grows", () => {
+    layOutByText();
+    const { rerender } = render(<Tabs items={settings("Email")} active="sessions" onSelect={() => {}} scroll label="Settings" />);
+    const strip = screen.getByRole("tablist", { name: "Settings" });
+    // Sessions spans 160-320 in a 0-300 strip: scrolled by 20 plus the 16px margin.
+    expect(strip.scrollLeft).toBe(36);
+    rerender(<Tabs items={settings("Email · Set up")} active="sessions" onSelect={() => {}} scroll label="Settings" />);
+    // "Email · Set up" is 280px: Sessions is at 340-500, 304-464 on screen; it follows by 164 + 16.
+    expect(strip.scrollLeft).toBe(216);
+  });
+
+  it("follows it when a note arrives beside a tab before it", () => {
+    layOutByText();
+    const { rerender } = render(<Tabs items={settings("Email")} active="sessions" onSelect={() => {}} scroll label="Settings" />);
+    const strip = screen.getByRole("tablist", { name: "Settings" });
+    rerender(<Tabs items={settings("Email", "Set up")} active="sessions" onSelect={() => {}} scroll label="Settings" />);
+    // "Email Set up" is 240px: Sessions is at 300-460, 264-424 on screen; it follows by 124 + 16.
+    expect(strip.scrollLeft).toBe(176);
+  });
+});

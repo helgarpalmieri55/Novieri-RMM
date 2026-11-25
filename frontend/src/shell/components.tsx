@@ -388,6 +388,13 @@ export function Tabs({
   // showed Summary to Tickets and no selected tab at all. Sideways only:
   // `scrollIntoView` would also scroll the page down to a strip below the
   // fold. Before paint, so the strip never draws at its start first.
+  //
+  // AND AGAIN WHEN THE TABS' TEXT CHANGES (kit requests batch 3, B3-3; O7's
+  // K3): a label, a count or a note arriving after the strip scrolled widens
+  // the tabs before the selected one and pushes it past the edge, as Settings'
+  // "Set up" did on a phone. Their text is the layout's input, so it is the
+  // effect's.
+  const text = items.map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000")).join("\u0001");
   useLayoutEffect(() => {
     const list = strip.current;
     if (!scroll || !list) return;
@@ -398,7 +405,7 @@ export function Tabs({
     const margin = 16;
     if (own.left < box.left) list.scrollLeft -= box.left - own.left + margin;
     else if (own.right > box.right) list.scrollLeft += own.right - box.right + margin;
-  }, [scroll, active]);
+  }, [scroll, active, text]);
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     const jump = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
