@@ -1319,11 +1319,12 @@ describe("SLA stat tiles", () => {
 
     await screen.findAllByText("UK business hours");
     const missing = tile("Tickets with no SLA");
-    expect(missing.querySelector(".stat-value")?.textContent).toBe("—");
+    // The kit's absent mark (StatCard pending; ruling 10a), not an em dash.
+    expect(missing.querySelector(".stat-value")?.textContent).toBe("n/a");
     // And not loud: an alarm colour over "no answer yet" is the same lie as
     // a 0 over it, pointing the other way.
     expect(missing.className).not.toContain("urgent");
-    expect(tile("Deadlines out of date").querySelector(".stat-value")?.textContent).toBe("—");
+    expect(tile("Deadlines out of date").querySelector(".stat-value")?.textContent).toBe("n/a");
   });
 
   it("says WHICH zero a measured zero is", async () => {

@@ -98,10 +98,12 @@ export function SlaAdminPage() {
    * "0 tickets with no SLA" while `GET /sla/settings` is still in flight, or
    * has failed, or was refused -- the audit's finding of nine cards reading 0
    * on a page where nothing had been measured, on the page whose whole
-   * subject is unkept promises. An em dash says "no answer yet"; the
-   * `zeroLabel` on each card below says what a real 0 means.
+   * subject is unkept promises. A tile with no data is `pending` (ruling
+   * 10a): StatCard draws the kit's absent mark, "no answer yet", and no wash;
+   * the `zeroLabel` on each card below says what a real 0 means.
    */
-  const count = (loaded: boolean, value: number): string => (loaded ? String(value) : "\u2014");
+  const noCalendars = calendars.data === undefined;
+  const noPolicies = policies.data === undefined;
   const settingsLoaded = settings.data !== undefined;
 
   return (
@@ -132,7 +134,8 @@ export function SlaAdminPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("sla.admin.calendarsLabel")}
-          value={count(calendars.data !== undefined, calendars.data?.length ?? 0)}
+          value={String(calendars.data?.length ?? "")}
+          pending={noCalendars}
           icon="calendar"
           to="/sla"
           tone="neutral"
@@ -141,7 +144,8 @@ export function SlaAdminPage() {
         />
         <StatCard
           label={t("sla.admin.policiesLabel")}
-          value={count(policies.data !== undefined, activePolicyCount)}
+          value={String(activePolicyCount)}
+          pending={noPolicies}
           icon="shield-check"
           // Counted on the chip's narrowed read, it opens that client's (general ruling 2).
           to={withClient("/sla", filters.values.client)}
@@ -151,13 +155,15 @@ export function SlaAdminPage() {
         />
         <StatCard
           label={t("sla.admin.noSlaLabel")}
-          value={count(settingsLoaded, ticketsWithoutSla)}
+          value={String(ticketsWithoutSla)}
+          pending={!settingsLoaded}
           icon="alert-triangle"
           to="/service-desk"
           tone="gold"
-          // Never loud on an em dash: an alarm colour over "no answer yet"
-          // is the same lie as a 0 over it, pointing the other way.
-          urgent={settingsLoaded}
+          // Never loud while pending (StatCard drops the wash): an alarm
+          // colour over "no answer yet" is the same lie as a 0 over it,
+          // pointing the other way.
+          urgent
           // WHY, ON THE TILE THAT STATES THE NUMBER. The SLA settings panel
           // below used to restate both of these counts as pills within 200px
           // of the tiles that already carried them, purely to have somewhere
@@ -172,7 +178,8 @@ export function SlaAdminPage() {
         />
         <StatCard
           label={t("sla.admin.staleLabel")}
-          value={count(settingsLoaded, staleTicketSla)}
+          value={String(staleTicketSla)}
+          pending={!settingsLoaded}
           icon="clock-exclamation"
           to="/service-desk"
           tone="orange"
