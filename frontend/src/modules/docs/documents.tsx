@@ -244,7 +244,8 @@ export function DocumentsSection({
         }
       >
         <QueryState
-          loading={documents.isLoading}
+          // `isPending`: narrowed, the read waits for /me, and a disabled query is not "loading" (ruling 10).
+          loading={documents.isPending}
           error={documents.error}
           empty={byCategory.length === 0}
           emptyLabel={t("docs.documents.empty")}

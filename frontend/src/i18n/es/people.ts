@@ -197,7 +197,7 @@ export const people: Shape<typeof en> = {
   unmatched: {
     title: "Necesita una persona",
     // Una frase de 40 a 70 caracteres (Receta L, 1); las acciones están en cada fila.
-    description: "Estos elementos nombran a alguien sin persona según su correo.",
+    description: "Nombran a alguien que no pudimos asociar a una persona por su correo.",
     empty: "Todo está vinculado a una persona.",
     /** One type per chip (redesign Task 11, 6.8): what the list under it holds. */
     kindLabel: "Tipo",

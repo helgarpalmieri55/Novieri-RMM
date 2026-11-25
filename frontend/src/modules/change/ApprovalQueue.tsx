@@ -12,6 +12,7 @@ import { ChangeSectionNav } from "./changeNav";
 import { changeStateKind, changeStateLabel, changeTypeLabel, riskKind, riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
 import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount, StatusPill } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 
 // Submitted changes awaiting an approve/reject decision. The approve/reject
@@ -28,6 +29,8 @@ import { Icon } from "../../shell/icons";
 // chip): the queue is a person's work across clients.
 export function ApprovalQueue() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("change.approvals.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canApprove = (me.data?.permissions ?? []).includes("change.approve");
@@ -128,14 +131,21 @@ function ApprovalRow({
               variant="outline"
               disabled={approve.isPending || isOwnChange}
               title={isOwnChange ? t("change.approvals.ownChangeTitle") : undefined}
-              onClick={() => approve.mutate({ id: change.id, body: { comment: comment || null } })}
+              onClick={() => {
+                // A new attempt clears the other's refusal (general ruling 7).
+                reject.reset();
+                approve.mutate({ id: change.id, body: { comment: comment || null } });
+              }}
             >
               {t("change.common.approve")}
             </Button>
             <Button
               variant="outline"
               disabled={reject.isPending}
-              onClick={() => reject.mutate({ id: change.id, body: { comment: comment || null } })}
+              onClick={() => {
+                approve.reset();
+                reject.mutate({ id: change.id, body: { comment: comment || null } });
+              }}
             >
               {t("change.common.reject")}
             </Button>

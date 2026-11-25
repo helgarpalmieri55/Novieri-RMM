@@ -437,6 +437,24 @@ describe("the KPI tiles are links to the rows behind them", () => {
   });
 });
 
+// GENERAL RULING 1b (fix round 1): a sub-page with no rail entry of its own
+// names itself in the tab, agreeing with its h1; the rail's label follows.
+describe("the change sub-pages name themselves in the tab", () => {
+  it.each([
+    ["the approval queue", () => <ApprovalQueue />, "/changes/approvals", "Approval queue"],
+    ["the change calendar", () => <ChangeCalendar />, "/changes/calendar", "Change calendar"],
+  ] as const)("%s", async (_what, page, path, name) => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listChanges: vi.fn().mockResolvedValue([]),
+      getChangeCalendar: vi.fn().mockResolvedValue({ entries: [], conflicts: [] }),
+    } as unknown as ApiClient);
+    renderPage(path, page(), path, { page: "shell.nav.item.changes" });
+    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${name} · Changes · Novieri RMM`));
+  });
+});
+
 describe("ApprovalQueue", () => {
   let api: Partial<ApiClient>;
 
@@ -446,6 +464,23 @@ describe("ApprovalQueue", () => {
       listChanges: vi.fn().mockResolvedValue([SUBMITTED_CHANGE]),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
+  });
+
+  // GENERAL RULING 7 (fix round 1, M2): a new attempt clears the last one's
+  // error. A refused Reject after a refused Approve says the Reject's reason.
+  it("says the latest decision's refusal, not the one before it", async () => {
+    const user = userEvent.setup();
+    api.approveChange = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    api.rejectChange = vi
+      .fn()
+      .mockRejectedValue(new ApiError(409, JSON.stringify({ detail: "this change was already decided" })));
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<ApprovalQueue />);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByRole("alert")).not.toHaveTextContent("this change was already decided");
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("this change was already decided"));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("shows the approve control when the caller has change.approve", async () => {
@@ -1297,6 +1332,26 @@ describe("ChangeDetail lifecycle controls", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
     await user.click(await screen.findByRole("button", { name: "Approve change" }));
     await waitFor(() => expect(api.approveChange).toHaveBeenCalledWith(OTHER_ID, { comment: null }));
+  });
+
+  // FIX ROUND 1, M3: the brief puts the approval actions in the change's
+  // DetailHead, so they are there on every tab, not only on the Summary.
+  it("offers the decisions in the head, on every tab, with the comment and the refusal under it", async () => {
+    const user = userEvent.setup();
+    api.getChange = vi.fn().mockResolvedValue(changeIn("submitted"));
+    api.approveChange = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage(`/changes/${CHANGE_ID}?tab=approvals`, <ChangeDetail />, "/changes/:changeId");
+    const head = (await screen.findByRole("heading", { level: 1, name: "Upgrade switch firmware" })).closest(
+      ".detail-head",
+    ) as HTMLElement;
+    expect(within(head).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(within(head).getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Decision comment (optional)"), "Looks safe");
+    await user.click(within(head).getByRole("button", { name: "Approve" }));
+    await user.click(await screen.findByRole("button", { name: "Approve change" }));
+    await waitFor(() => expect(api.approveChange).toHaveBeenCalledWith(CHANGE_ID, { comment: "Looks safe" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
   it("asks before approving, and does not approve until the dialog is confirmed", async () => {

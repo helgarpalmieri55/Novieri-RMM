@@ -1205,6 +1205,9 @@ describe("DocsPage on the kit", () => {
       expect(listArticles).not.toHaveBeenCalled();
       expect(screen.queryByText("No articles yet.")).toBeNull();
       expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+      // The records and the stored documents are narrowed too: no "none yet" before their reads either (fix round 1, I1).
+      expect(screen.queryByText("No records yet.")).toBeNull();
+      expect(screen.queryByText("No documents yet.")).toBeNull();
     });
 
     it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
@@ -1229,6 +1232,17 @@ describe("DocsPage on the kit", () => {
         expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
         expect(card.querySelectorAll(".stat-zero, .stat-foot")).toHaveLength(0);
       }
+    });
+
+    // FIX ROUND 1, M4: the tiles count the whole library (narrowed by the
+    // chip), so their links drop the search and the category, which would
+    // open fewer rows than the number says.
+    it("drops the search and the category from a tile's link, and keeps the chip", async () => {
+      mockUseApi.mockReturnValue(kitApi({ searchDocs: vi.fn().mockResolvedValue([]) }));
+      renderKitPage(`/docs?client=${ANDES}&category=Runbook&q=share`, <DocsPage />, "/docs");
+      await waitFor(() => expect(tile("Articles").getAttribute("href")).toBe(`/docs?client=${ANDES}#articles`));
+      expect(tile("Linked references").getAttribute("href")).toBe(`/docs?client=${ANDES}#articles`);
+      expect(tile("Records").getAttribute("href")).toBe(`/docs?client=${ANDES}#records`);
     });
 
     it("keeps the chip in a tile's link, so a tile opens the rows it counted", async () => {

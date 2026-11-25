@@ -309,13 +309,52 @@ function ChangeRecord() {
           ) : undefined
         }
         actions={
-          canRead ? (
-            /* Secondary, not primary: the page's one commit is the lifecycle
-               decision on the summary, and an export is a read. */
-            <Button variant="outline" onClick={() => void exportEvidence()} disabled={exporting}>
-              <Icon name="file-download" size={14} />
-              {exporting ? t("change.detail.exporting") : t("change.detail.exportEvidence")}
-            </Button>
+          change.data || canRead ? (
+            <>
+              {/* THE DECISIONS ARE THE HEAD'S (redesign Task 11, 6.2: "acciones
+                  de aprobación según el permiso de hoy"; fix round 1, M3), on
+                  every tab. The transitions offered are exactly the ones
+                  state.py will accept from this state and type, so no button
+                  here can 400 (the BLOCKER this page was filed for: "there is
+                  no Submit for approval, Approve, Reject, Schedule, Implement,
+                  Close or Cancel control"). */}
+              {change.data
+                ? allowed.map((spec) => {
+                    // Approve and Reject differ here: the SoD guard bars the
+                    // requester from DECIDING, and rejecting your own change is
+                    // the same decision. state.py checks `actor_id ==
+                    // created_by` for both, so both are refused.
+                    const barred = isOwnChange && (spec.action === "approve" || spec.action === "reject");
+                    return (
+                      <Button
+                        key={spec.action}
+                        /* One primary in the head: the forward step. Reject,
+                           cancel and revise are the secondary shape. */
+                        variant={
+                          spec.confirm?.destructive ||
+                          spec.action === "reject" ||
+                          spec.action === "revise" ||
+                          spec.action === "cancel"
+                            ? "outline"
+                            : "default"
+                        }
+                        disabled={lifecyclePending || barred}
+                        onClick={() => press(spec)}
+                      >
+                        {spec.label}
+                      </Button>
+                    );
+                  })
+                : null}
+              {canRead ? (
+                /* Secondary, not primary: the page's one commit is the
+                   lifecycle decision beside it, and an export is a read. */
+                <Button variant="outline" onClick={() => void exportEvidence()} disabled={exporting}>
+                  <Icon name="file-download" size={14} />
+                  {exporting ? t("change.detail.exporting") : t("change.detail.exportEvidence")}
+                </Button>
+              ) : null}
+            </>
           ) : undefined
         }
       />
@@ -323,6 +362,30 @@ function ChangeRecord() {
         <p role="alert" className="form-error mb-2">
           {describeSubmitError(exportError.error)}
         </p>
+      )}
+
+      {/* WHAT GOES WITH THE DECISION, UNDER THE HEAD ITS BUTTONS ARE IN, on
+          every tab: the comment a decision carries, why a control will not
+          move or is not offered (general ruling 8), and a refusal, in the
+          server's own sentence where it gives one ("approver cannot be the
+          change requester", "emergency change requires retrospective approval
+          before completion") and a status-based one for the bodyless 503. */}
+      {change.data && (
+        <div className="mb-4">
+          {allowed.some((spec) => spec.action === "approve" || spec.action === "reject") && (
+            <Field label={t("change.detail.decisionComment")}>
+              <input className={inputClass} value={comment} onChange={(e) => setComment(e.target.value)} />
+            </Field>
+          )}
+          {decidingOwn && <p className="note mt-2">{t("change.detail.ownChange")}</p>}
+          {allowed.length === 0 && <p className="note">{noActionsReason(change.data.state)}</p>}
+          {hidden.length > 0 && <p className="note mt-2">{hiddenActionsReason(hidden)}</p>}
+          {lifecycleError != null && (
+            <p role="alert" className="form-error mt-2">
+              {describeSubmitError(lifecycleError)}
+            </p>
+          )}
+        </div>
       )}
 
       <UrlTabs
@@ -367,82 +430,6 @@ function ChangeRecord() {
                 </Panel>
               </>
             )}
-
-            {/* THE BLOCKER FIX. Auditor B: "there is no Submit for approval, Approve,
-                Reject, Schedule, Implement, Close or Cancel control, and no state
-                dropdown... Records accumulate in `draft` indefinitely." The
-                transitions offered are exactly the ones state.py will accept from
-                this state and type, so no button here can 400. */}
-            {change.data && (
-              <div className="mb-4">
-                <Panel title={t("change.detail.lifecycle")}>
-                  {allowed.length > 0 ? (
-                    <>
-                      {allowed.some((spec) => spec.action === "approve" || spec.action === "reject") && (
-                        <Field label={t("change.detail.decisionComment")}>
-                          <input
-                            className={inputClass}
-                            value={comment}
-                            onChange={(e) => setComment(e.target.value)}
-                          />
-                        </Field>
-                      )}
-                      <div className="flex flex-wrap items-center gap-2">
-                        {allowed.map((spec) => {
-                          // Approve and Reject differ here: the SoD guard bars the
-                          // requester from DECIDING, and rejecting your own change is
-                          // the same decision. state.py checks `actor_id ==
-                          // created_by` for both, so both are refused.
-                          const barred =
-                            isOwnChange && (spec.action === "approve" || spec.action === "reject");
-                          return (
-                            <Button
-                              key={spec.action}
-                              /* One primary in the row: the forward step. Reject,
-                                 cancel and revise are the secondary shape. */
-                              variant={
-                                spec.confirm?.destructive ||
-                                spec.action === "reject" ||
-                                spec.action === "revise" ||
-                                spec.action === "cancel"
-                                  ? "outline"
-                                  : "default"
-                              }
-                              disabled={lifecyclePending || barred}
-                              onClick={() => press(spec)}
-                            >
-                              {spec.label}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                      {decidingOwn && (
-                        <p className="note mt-2">
-                          {t("change.detail.ownChange")}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="note">{noActionsReason(change.data.state)}</p>
-                  )}
-                  {hidden.length > 0 && (
-                    <p className="note mt-2">{hiddenActionsReason(hidden)}</p>
-                  )}
-                  {/* A refused transition used to have nowhere to land at all, because
-                      no control existed to refuse. `describeSubmitError` renders the
-                      server's own sentence for the ones it explains -- "approver
-                      cannot be the change requester", "emergency change requires
-                      retrospective approval before completion" -- and a status-based
-                      one for the bodyless 503. */}
-                  {lifecycleError != null && (
-                    <p role="alert" className="form-error mt-2">
-                      {describeSubmitError(lifecycleError)}
-                    </p>
-                  )}
-                </Panel>
-              </div>
-            )}
-
           </>
         ) : tab === "approvals" ? (
           <div className="mb-4">

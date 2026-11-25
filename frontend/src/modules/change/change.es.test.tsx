@@ -462,7 +462,7 @@ describe("ChangeDetail in Spanish", () => {
     expect(screen.getByText("Borrador")).toBeInTheDocument();
     expect(screen.getByText("Estándar")).toBeInTheDocument();
     expect(screen.getByText("Plan de reversión")).toBeInTheDocument();
-    expect(screen.getByText("Ciclo de vida")).toBeInTheDocument();
+    // The decisions are the head's now (fix round 1, M3: the brief's DetailHead), so no "Ciclo de vida" panel.
     expect(screen.getByRole("button", { name: "Enviar a aprobación" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancelar cambio" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exportar evidencias" })).toBeInTheDocument();

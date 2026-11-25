@@ -246,10 +246,11 @@ export function CredentialsPage() {
   const created = useNewParam("credential");
   const requestedType = params.get("new");
   const newType = CREDENTIAL_TYPES.some((type) => type.value === requestedType) ? requestedType : null;
-  // Opened by the URL as before, whoever follows the link: the server checks
-  // `credentials.manage` on the save (invariant 6); only the button is a
-  // courtesy the page hides (the brief: `open={… || created.open || newType != null}`).
-  const createOpen = created.open || newType != null;
+  // `?new=<type>` opens as on the base, whoever follows a push page's link:
+  // the server checks `credentials.manage` on the save (invariant 6).
+  // `?new=credential` is this wave's own link and gets the button's courtesy
+  // check, as every other `?new=` dialog does (fix round 1, M1).
+  const createOpen = (created.open && canManage) || newType != null;
   const closeCreate = () => {
     if (created.open) {
       created.close();

@@ -6,6 +6,7 @@ import { useChangeCalendar, useUserTimezone } from "./api";
 import { changeStateKind, changeStateLabel, changeTypeLabel, riskKind, riskLabel } from "./changeState";
 import { ChangeSectionNav } from "./changeNav";
 import { PageHead, Panel, QueryState, StatusPill, writeQuery } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 
@@ -45,7 +46,7 @@ function defaultTo(zone: string | null): string {
  * the sentence under the fields says -- which is a different fact from never
  * having chosen one, so the key stays with no value.
  */
-function useWindowEnd(
+function windowEnd(
   params: URLSearchParams,
   key: "from" | "to",
   fallback: () => string,
@@ -56,13 +57,15 @@ function useWindowEnd(
 
 export function ChangeCalendar() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("change.calendar.title"));
   const zone = useUserTimezone();
   const [params, setParams] = useSearchParams();
   // The defaults are the reader's month. Before `/me` has answered on a cold
   // load they are the browser's; the boundaries sent from them are qualified
   // below either way.
-  const from = useWindowEnd(params, "from", () => defaultFrom(zone));
-  const to = useWindowEnd(params, "to", () => defaultTo(zone));
+  const from = windowEnd(params, "from", () => defaultFrom(zone));
+  const to = windowEnd(params, "to", () => defaultTo(zone));
   // Typing a date is one entry, not one per keystroke: the field replaces it.
   const setEnd = (key: "from" | "to", value: string) => {
     const next = new URLSearchParams(params);

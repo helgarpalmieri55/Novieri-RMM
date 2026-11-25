@@ -469,16 +469,40 @@ describe("the report catalogue", () => {
     expect(within(families).getByRole("button", { name: /Service levels/ })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByTestId("report-card-sla-attainment")).toBeInTheDocument();
     expect(screen.queryByTestId("report-card-fleet-posture")).toBeNull();
-    await userEvent.click(within(families).getByRole("button", { name: /Devices/ }));
-    expect(router.state.location.search).toBe("?family=devices");
+    await userEvent.click(within(families).getByRole("button", { name: /Alerts/ }));
+    expect(router.state.location.search).toBe("?family=health");
   });
 
-  it("counts each family over the whole catalogue: the modules each report reads", async () => {
+  // One family per report (fix round 1, I2): its first module that is not
+  // context-only. Devices and jobs are what a report reads for context, so
+  // fleet posture is an Alerts report, and SLA attainment a Service levels one.
+  it("counts each family over the whole catalogue: one family per report", async () => {
     onKit("/reports");
     const families = await screen.findByRole("group", { name: "Family" });
     await screen.findByTestId("report-card-fleet-posture");
-    expect(within(families).getByRole("button", { name: /Devices/ })).toHaveTextContent("1");
-    expect(within(families).getByRole("button", { name: /Tickets/ })).toHaveTextContent("1");
+    expect(within(families).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "All",
+      "Alerts1",
+      "Service levels1",
+    ]);
+  });
+
+  it("drops a module it has no name for, and lists the report under All only", async () => {
+    mockUseApi.mockReturnValue(
+      client({
+        me: vi.fn().mockResolvedValue(ME),
+        listReports: vi.fn().mockResolvedValue({
+          reports: CATALOGUE.reports.map((entry) =>
+            entry.key === "fleet-posture" ? { ...entry, requires: ["devices.read", "inventory.read"] } : entry,
+          ),
+        }),
+      }),
+    );
+    renderPage("/reports", <ReportCataloguePage />, "/reports");
+    const families = await screen.findByRole("group", { name: "Family" });
+    await screen.findByTestId("report-card-fleet-posture");
+    // Never humanised into an English word: no chip at all.
+    expect(within(families).getAllByRole("button").map((chip) => chip.textContent)).toEqual(["All", "Service levels1"]);
   });
 
   it("says why the list is empty", async () => {

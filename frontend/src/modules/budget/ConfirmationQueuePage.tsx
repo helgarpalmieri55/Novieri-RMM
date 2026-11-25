@@ -23,6 +23,7 @@ import {
 } from "./budgetState";
 import type { ExpenseOut } from "./types";
 import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount, StatusPill } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 
 // The operator worklist that makes spec §0.3 workable: GET
@@ -30,6 +31,8 @@ import { Icon } from "../../shell/icons";
 // void, never auto-confirmed by the backend.
 export function ConfirmationQueuePage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.confirm.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];

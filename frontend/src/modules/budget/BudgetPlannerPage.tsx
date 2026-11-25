@@ -58,6 +58,7 @@ import {
   useUrlFilters,
   writeQuery,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 
 const GRANULARITIES: Granularity[] = ["month", "quarter"];
@@ -130,6 +131,8 @@ function savedCells(lines: readonly BudgetLineOut[]): { cells: Record<string, st
 
 export function BudgetPlannerPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.planner.title"));
   const api = useApi();
   // New → Budget (decision D8): `?new=budget` opens the new form.
   const created = useNewParam("budget");
@@ -269,13 +272,17 @@ export function BudgetPlannerPage() {
         onClose={created.close}
         onDirty={setNewDirty}
         onCreated={(budget) => {
-          // Saved: the dialog's entry gives way to the budget it made, and leaving it must not ask.
+          // Saved: the dialog's own entry goes without asking, since what it held is stored.
           release();
           setNewDirty(false);
           // In place of the dialog's entry: Back returns to where New was pressed.
           const next = new URLSearchParams(params);
           next.delete("new");
-          next.set("budget", budget.id);
+          // THE OPEN PLAN'S CHANGES STAY (fix round 1, I3). With unsaved
+          // planned amounts the new budget is created and listed in the chip,
+          // but not opened: switching would drop the plan, and the release
+          // above is for closing the dialog, never for leaving the plan.
+          if (!planDirty) next.set("budget", budget.id);
           writeQuery(params, next, setParams, { replace: true });
         }}
       />

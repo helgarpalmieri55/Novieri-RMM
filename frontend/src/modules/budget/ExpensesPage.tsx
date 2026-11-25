@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
@@ -48,6 +48,7 @@ import {
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { useEditParam, useReportDirty } from "./dialogParams";
 import { Icon } from "../../shell/icons";
 import { humaniseEnum } from "../../lib/labels";
@@ -118,6 +119,8 @@ function isoDate(value: string): string | null {
  */
 export function ExpensesPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.expenses.title"));
   const api = useApi();
   const filters = useUrlFilters(["status", "category", "from", "to"] as const);
   const created = useNewParam("expense");
@@ -142,6 +145,17 @@ export function ExpensesPage() {
   const uploadAttachment = useUploadExpenseAttachmentMutation();
   const items = expenses.data ?? [];
   const editingExpense = canRecord ? items.find((expense) => expense.id === editing.id && expense.status !== "void") : undefined;
+  // AN `?edit=` THAT OPENS NOTHING LEAVES THE URL (fix round 1, M10). Once
+  // the ledger and /me have answered, an id the ledger does not hold (outside
+  // the filter, voided, gone) or one this person may not edit is removed in
+  // place, rather than sitting in the address doing nothing. No new read:
+  // the API is asked what it was asked before.
+  const editNamesNothing =
+    editing.id !== "" && expenses.data !== undefined && me.data !== undefined && editingExpense === undefined;
+  const dropEdit = editing.drop;
+  useEffect(() => {
+    if (editNamesNothing) dropEdit();
+  }, [editNamesNothing, dropEdit]);
 
   // THE PAGE'S ONE GUARD: the New and the Edit dialogs each say whether they
   // hold changes; closing either one (`?new=`, `?edit=`) is leaving it.

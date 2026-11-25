@@ -1189,6 +1189,20 @@ describe("CredentialsPage on the list kit", () => {
     expect(within(dialog).getByLabelText("Type")).toHaveValue("windows_admin");
   });
 
+  // FIX ROUND 1, M1: `?new=credential` is this wave's own link, gated as the
+  // button is (the courtesy every other `?new=` dialog has); a push page's
+  // `?new=<type>` still opens for whoever follows it, as on the base (D23).
+  it("opens ?new=credential only for someone who may store one, and ?new=<type> as before", async () => {
+    mockUseApi.mockReturnValue(consoleApi({ me: vi.fn().mockResolvedValue({ permissions: [], org_id: "o1" } as unknown as Me) }));
+    const { unmount } = renderKitPage("/credentials?new=credential", <CredentialsPage />, "/credentials");
+    await screen.findByText("Domain support admin");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByRole("dialog", { name: "New credential" })).toBeNull();
+    unmount();
+    renderKitPage("/credentials?new=push_install", <CredentialsPage />, "/credentials");
+    expect(await screen.findByRole("dialog", { name: "New credential" })).toBeInTheDocument();
+  });
+
   it("asks before closing New credential with something typed, and opens empty again", async () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(consoleApi());

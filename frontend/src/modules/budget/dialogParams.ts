@@ -21,7 +21,7 @@ interface EditMark {
   readonly budgetEditOpened?: string;
 }
 
-export function useEditParam(): { id: string; start: (id: string) => void; close: () => void } {
+export function useEditParam(): { id: string; start: (id: string) => void; close: () => void; drop: () => void } {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -44,7 +44,14 @@ export function useEditParam(): { id: string; start: (id: string) => void; close
     query.delete("edit");
     writeQuery(params, query, setParams, { replace: true });
   }, [params, setParams, location.state, navigate]);
-  return { id, start, close };
+  /** Removes the key in place, whoever added it: for an id that names nothing the page holds. */
+  const drop = useCallback(() => {
+    if (!params.has("edit")) return;
+    const query = new URLSearchParams(params);
+    query.delete("edit");
+    writeQuery(params, query, setParams, { replace: true });
+  }, [params, setParams]);
+  return { id, start, close, drop };
 }
 
 /** Tells the page whether a form holds changes, for its one guard; forgets them when the form goes. */

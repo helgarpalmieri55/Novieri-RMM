@@ -169,11 +169,10 @@ function recordRules(): readonly FieldRule[] {
  *
  * WHERE IT POINTS. `/docs` is this module's only route in App.tsx, so every
  * tile above links to a view OF this page — which is honest, because the rows
- * behind each number are on this screen. `link()` PRESERVES whatever is
- * already in the query string and only overwrites the keys it is given: a tile
- * is a place to look, not a reset button, and a tile that rebuilt the URL from
- * scratch would silently discard the reader's current filter or selection on
- * the way past.
+ * behind each number are on this screen. `link()` keeps the Client chip and
+ * the open selection, and only overwrites the keys it is given: a tile is a
+ * place to look, not a reset button. It drops the search and the category,
+ * which the tiles do not count by.
  *
  * MAKING IT LAND. React Router pushes a fragment and stops there — it does not
  * scroll, and `App.tsx` wires no scroll restoration. Without the effect below,
@@ -197,6 +196,12 @@ function useStatLinks(route: string) {
   return useCallback(
     (fragment: string, params: Readonly<Record<string, string>> = {}) => {
       const next = new URLSearchParams(searchParams);
+      // THE ROWS IT COUNTED (fix round 1, M4; general ruling 2). The tiles
+      // count the whole library, narrowed only by the Client chip, so a tile
+      // drops the search and the category, which would open fewer rows than
+      // its number; the chip and the open selection stay.
+      next.delete("q");
+      next.delete("category");
       for (const [key, value] of Object.entries(params)) next.set(key, value);
       const query = next.toString();
       return `${route}${query ? `?${query}` : ""}#${fragment}`;
@@ -895,7 +900,8 @@ export function DocsPage() {
               }
             >
               <QueryState
-                loading={records.isLoading}
+                // `isPending`: narrowed, the read waits for /me, and a disabled query is not "loading" (ruling 10).
+                loading={records.isPending}
                 error={records.error}
                 empty={(records.data?.items ?? []).length === 0}
                 emptyLabel={t("docs.page.records.empty")}

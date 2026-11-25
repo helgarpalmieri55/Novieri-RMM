@@ -38,6 +38,7 @@ import {
   useNewParam,
   useUnsavedGuard,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -115,6 +116,8 @@ function decimalRate(value: string): string | null {
 // whether they hold changes. Closing an add dialog is leaving it (`?new=`).
 export function BudgetAdminPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.admin.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];

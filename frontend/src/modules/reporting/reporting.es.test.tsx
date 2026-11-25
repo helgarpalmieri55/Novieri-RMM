@@ -239,6 +239,43 @@ describe("the report catalogue in Spanish", () => {
     expectNoEnglish(container);
   });
 
+  // FIX ROUND 1, I2 (coordinator's decision on the report families). The
+  // server's real `requires`, sorted as `service.py` sends them
+  // (`sorted(REGISTRY[key].requires)`, from each definition's `sources`
+  // through `registry.py`'s TABLE_PERMISSIONS): patch-compliance reads `jobs`
+  // for its last scan. A family is the first module that is not context-only
+  // (devices, jobs), so each report is in exactly one, and every one is named.
+  it("puts each report in exactly one family, named in Spanish, from the server's real requires", async () => {
+    const REAL: Record<string, string[]> = {
+      "fleet-posture": ["devices.read", "health.read"],
+      "sla-attainment": ["sla.read", "ticket.read"],
+      "patch-compliance": ["devices.read", "jobs.read", "patch.read"],
+      "backup-coverage": ["backup.read", "devices.read"],
+    };
+    const { container } = mountCatalogue({
+      listReports: vi.fn().mockResolvedValue({
+        reports: CATALOGUE.reports.map((entry) => ({ ...entry, requires: REAL[entry.key] ?? entry.requires })),
+      }),
+    });
+    const families = await screen.findByRole("group", { name: "Familia" });
+    await screen.findByRole("heading", { name: "Postura del parque" });
+    expect(within(families).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "Todos",
+      "Alertas1",
+      "Copias de seguridad1",
+      "Niveles de servicio1",
+      "Parches1",
+    ]);
+    expectNoEnglish(container);
+    // Each chip lists one report, and the four together list each report once.
+    const seen: string[] = [];
+    for (const chip of within(families).getAllByRole("button").slice(1)) {
+      await userEvent.click(chip);
+      seen.push(...[...container.querySelectorAll("[data-testid^='report-card-']")].map((row) => row.getAttribute("data-testid") ?? ""));
+    }
+    expect(seen.sort()).toEqual(Object.keys(REAL).map((key) => `report-card-${key}`).sort());
+  });
+
   it("says what the readiness panel is waiting for, with every count agreeing", async () => {
     const { container } = mountCatalogue({
       listPatchApprovals: vi.fn().mockResolvedValue({ items: [], total: 0 }),

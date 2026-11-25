@@ -54,7 +54,6 @@ export const change: Shape<typeof en> = {
     raised: "Registrado",
     descriptionPanel: "Descripción",
     rollbackPlan: "Plan de reversión",
-    lifecycle: "Ciclo de vida",
     decisionComment: "Comentario de la decisión (opcional)",
     ownChange:
       "Solicitaste este cambio, así que no puedes decidir sobre él. Otra persona con permiso para aprobar cambios tiene que aprobarlo o rechazarlo.",

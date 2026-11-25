@@ -602,7 +602,8 @@ describe("the unmatched list in Spanish", () => {
     mockUseApi.mockReturnValue(api({ listUnmatched: vi.fn().mockResolvedValue(FILLED) }, ["people.read", "people.manage"]));
     const { container } = mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched");
     expect(await screen.findByRole("heading", { name: "Necesita una persona" })).toBeInTheDocument();
-    expect(screen.getByText(/^Estos elementos nombran a alguien/)).toBeInTheDocument();
+    // Says what the English says, "…we couldn't match to a person by email" (fix round 1, M9).
+    expect(screen.getByText("Nombran a alguien que no pudimos asociar a una persona por su correo.")).toBeInTheDocument();
     // ONE TYPE AT A TIME (redesign Task 11, 6.8): the three groups are the
     // three "Tipo" chips, computers first, and each draws its own table.
     const user = userEvent.setup();

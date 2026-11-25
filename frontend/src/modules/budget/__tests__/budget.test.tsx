@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
@@ -313,8 +313,11 @@ describe("BudgetDashboard navigation", () => {
       "Admin",
     ]);
     // A `<button>` nested inside an `<a>` was two interactive elements, one of
-    // them unreachable as a link.
-    expect(document.querySelector(".tabs button")).toBeNull();
+    // them unreachable as a link. Asked of the navigation itself (fix round 1,
+    // M8: `.tabs button` could no longer fail once the strip stopped being `.tabs`).
+    const nav = screen.getByRole("navigation", { name: "Budget" });
+    expect(within(nav).queryAllByRole("button")).toEqual([]);
+    expect(nav.querySelectorAll("a button, button a")).toHaveLength(0);
   });
 
   it("says which page is the current one", async () => {
@@ -2294,6 +2297,22 @@ describe("BudgetDashboard on the kit", () => {
   });
 });
 
+// GENERAL RULING 1b (fix round 1): a sub-page with no rail entry of its own
+// names itself in the tab, agreeing with its h1; the rail's label follows.
+describe("the budget sub-pages name themselves in the tab", () => {
+  it.each([
+    ["the planner", () => <BudgetPlannerPage />, "/budget/planner", "Budget planner"],
+    ["the expenses", () => <ExpensesPage />, "/budget/expenses", "Expenses"],
+    ["the confirmation queue", () => <ConfirmationQueuePage />, "/budget/confirm", "Confirmation queue"],
+    ["the settings", () => <BudgetAdminPage />, "/budget/admin", "Budget settings"],
+  ] as const)("%s", async (_what, page, path, name) => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage(path, page(), path, { page: "shell.nav.item.itBudget" });
+    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${name} · IT budget · Novieri RMM`));
+  });
+});
+
 describe("BudgetPlannerPage on the form kit", () => {
   it("shows one save bar only while something changed, and Discard puts it back", async () => {
     mockUseApi.mockReturnValue(kitApi() as ApiClient);
@@ -2352,6 +2371,28 @@ describe("BudgetPlannerPage on the form kit", () => {
     await waitFor(() => expect(screen.getByLabelText("Software licenses period 2")).toHaveValue(""));
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
     expect(api.putBudgetLines).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, I3 (the reviewer's probe). Creating a budget while the open
+  // plan holds changes used to jump to the new budget and drop them, unasked.
+  // It keeps the open budget, and its edits, and does not switch.
+  it("keeps the open budget and its unsaved plan when a new budget is created", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.click(screen.getByRole("button", { name: "New budget" }));
+    const dialog = await screen.findByRole("dialog", { name: "New budget" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "FY27 IT Budget{Enter}");
+    await waitFor(() => expect(api.createBudget).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.search).toBe("?budget=b1"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Software licenses period 2")).toHaveValue("75.00");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    // And the plan is still guarded: the release was spent on the dialog, not on the plan.
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/budget/planner");
   });
 
   it("keeps the budget open in the URL, so a reload opens it again", async () => {
@@ -2434,6 +2475,51 @@ describe("ExpensesPage on the list kit", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     expect(router.state.location.search).toBe("?edit=e1");
     expect(await screen.findByRole("dialog", { name: "Edit expense" })).toBeInTheDocument();
+  });
+
+  // GENERAL RULING 12 (fix round 1, M5): `?edit=<id>` is a selection that
+  // changes without a route change. Moving to another row's edit with
+  // changes asks, and leaving drops them: nothing typed for one expense is
+  // saved onto the next.
+  it("drops an edit typed for one expense when the dialog moves to another (ruling 12)", async () => {
+    const SECOND: ExpenseOut = { ...EXPENSE_EXPECTED, id: "e2", description: "Second expense" };
+    const updateExpense = vi.fn().mockResolvedValue(SECOND);
+    mockUseApi.mockReturnValue(kitApi({ listExpenses: vi.fn().mockResolvedValue([EXPENSE_EXPECTED, SECOND]), updateExpense }) as ApiClient);
+    // The move as Forward would make it: a link to the other row's edit, beside
+    // the page (a bare router.navigate() held by the guard leaves a pending transition).
+    const { router } = renderPage(
+      "/budget/expenses?edit=e1",
+      <>
+        <ExpensesPage />
+        <Link to="/budget/expenses?edit=e2">Second</Link>
+      </>,
+      "/budget/expenses",
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
+    await userEvent.type(within(dialog).getByLabelText("Description"), "Typed for e1");
+    await userEvent.click(screen.getByRole("link", { name: "Second" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?edit=e2"));
+    const again = await screen.findByRole("dialog", { name: "Edit expense" });
+    await waitFor(() => expect(within(again).getByLabelText("Description")).toHaveValue("Second expense"));
+    await userEvent.click(within(again).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(updateExpense).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, M10: an `?edit=` whose row the ledger does not hold (outside
+  // the filter, voided, gone) opens nothing; once the list has answered it
+  // leaves the URL in place, rather than sitting there doing nothing.
+  it("drops an ?edit= the ledger does not hold, once the list has answered", async () => {
+    const listExpenses = vi.fn().mockResolvedValue([]);
+    mockUseApi.mockReturnValue(kitApi({ listExpenses }) as ApiClient);
+    const { router } = renderPage("/budget/expenses?status=confirmed&edit=e1", <ExpensesPage />, "/budget/expenses");
+    await waitFor(() => expect(listExpenses).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.search).toBe("?status=confirmed"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // In place: no extra history entry to go Back into.
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 
   it("sends nothing when an expense is saved untouched (ruling 13)", async () => {

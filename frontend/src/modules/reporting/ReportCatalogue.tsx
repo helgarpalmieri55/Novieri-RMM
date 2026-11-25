@@ -23,7 +23,6 @@ import { ReportReadiness } from "./ReportReadiness";
 import { reportName, reportProse } from "./reportText";
 import type { CatalogueEntry } from "./types";
 import type { MessageKey } from "../../i18n/core";
-import { humaniseKey } from "../../lib/labels";
 import {
   FilterChips,
   ListEmpty,
@@ -151,16 +150,22 @@ function readAccess(raw: string): Access {
 }
 
 /**
- * A REPORT'S FAMILIES ARE THE MODULES IT READS (redesign Task 11, "ReportCatalogue").
- * The catalogue publishes no family of its own; what it publishes is
- * `requires`, every module read permission a report needs, derived on the
- * server from the tables it reads. So a family is a module, named as the rail
- * names it, and a report belongs to each module it reads: "Devices" holds
- * every report that reads devices. Nothing here is a second table the server
- * does not have.
+ * A REPORT'S FAMILY IS THE MODULE IT IS ABOUT (redesign Task 11,
+ * "ReportCatalogue"; coordinator's decision, fix round 1). The catalogue
+ * publishes no family of its own; what it publishes is `requires`, every
+ * module read permission a report needs, sorted, derived on the server from
+ * the tables it reads (`registry.py`, TABLE_PERMISSIONS). A family is the
+ * FIRST of those modules that is not context-only, so a report is in exactly
+ * one: devices and jobs are what a report reads to say which machine and when
+ * it last ran, not what it is about (patch compliance reads both, and is a
+ * Patching report). Every module the server can name a family by has its
+ * label here, as the rail names it, in both languages; a module this console
+ * has no name for is dropped, and the report then appears under All only. It
+ * is never turned into a word from its code.
  */
+const CONTEXT_ONLY: ReadonlySet<string> = new Set(["devices", "jobs"]);
+
 const FAMILY_LABEL: Readonly<Record<string, MessageKey>> = {
-  devices: "shell.nav.item.devices",
   patch: "shell.nav.item.patching",
   backup: "shell.nav.item.backup",
   health: "shell.nav.item.alerts",
@@ -168,13 +173,19 @@ const FAMILY_LABEL: Readonly<Record<string, MessageKey>> = {
   ticket: "shell.nav.item.tickets",
 };
 
-function familiesOf(entry: CatalogueEntry): string[] {
-  return entry.requires.map((code) => code.split(".").slice(0, -1).join("."));
+/** The report's one family, or `null` when its first non-context module has no name here. */
+function familyOf(entry: CatalogueEntry): string | null {
+  for (const code of [...entry.requires].sort()) {
+    const module = code.split(".").slice(0, -1).join(".");
+    if (CONTEXT_ONLY.has(module)) continue;
+    return module in FAMILY_LABEL ? module : null;
+  }
+  return null;
 }
 
 function familyLabel(family: string): string {
   const key = FAMILY_LABEL[family];
-  return key ? translate(key) : humaniseKey(family);
+  return key ? translate(key) : "";
 }
 
 /** For the search: case and accents do not count, the Admin panel's rule. */
@@ -207,7 +218,7 @@ export function ReportCataloguePage() {
   const family = filters.values.family;
   const shown = byAccess.filter(
     (entry) =>
-      (family === "" || familiesOf(entry).includes(family)) &&
+      (family === "" || familyOf(entry) === family) &&
       (wanted === "" ||
         [reportName(entry.key), reportProse(entry.summary), reportProse(entry.description)].some((text) =>
           fold(text).includes(wanted),
@@ -216,7 +227,8 @@ export function ReportCataloguePage() {
   // Each family once, the most-read first; counted over the whole catalogue.
   const familyCounts = new Map<string, number>();
   for (const entry of reports) {
-    for (const name of new Set(familiesOf(entry))) familyCounts.set(name, (familyCounts.get(name) ?? 0) + 1);
+    const name = familyOf(entry);
+    if (name !== null) familyCounts.set(name, (familyCounts.get(name) ?? 0) + 1);
   }
   const families = [...familyCounts.entries()].sort(
     (a, b) => b[1] - a[1] || familyLabel(a[0]).localeCompare(familyLabel(b[0])),

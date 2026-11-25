@@ -59,7 +59,6 @@ export const change = {
     raised: "Raised",
     descriptionPanel: "Description",
     rollbackPlan: "Rollback plan",
-    lifecycle: "Lifecycle",
     decisionComment: "Decision comment (optional)",
     ownChange:
       "You raised this change, so you cannot decide it. Someone else with permission to approve changes has to approve or reject it.",
