@@ -14,7 +14,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -28,6 +28,16 @@ import { TicketDetailPage } from "../TicketDetailPage";
 import { devicePickerOptions, nameForOption, userPickerOptions } from "../pickerOptions";
 import { statusChangeWarning } from "../serviceDeskState";
 import type { AttachmentOut, CommentOut, QueueOut, StatusHistoryOut, TicketOut } from "../types";
+
+/**
+ * The ticket's properties save through the kit's one save bar (redesign plan,
+ * Task 7, 2.3): its "Save" stands where the panel's "Save changes" was, and
+ * the bar is there only while something changed.
+ */
+function saveBarSave(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" });
+}
+
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -210,7 +220,7 @@ describe("service desk reports every failure as an announced sentence", () => {
     renderDetail(detailApi({ updateTicket: vi.fn().mockRejectedValue(BODYLESS_503) }));
 
     await user.type(await screen.findByLabelText("Subject"), " again");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/unavailable right now/i);
@@ -233,7 +243,7 @@ describe("service desk reports every failure as an announced sentence", () => {
     );
 
     await user.selectOptions(await screen.findByLabelText("Status"), "resolved");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("To status: not a legal transition");
@@ -248,7 +258,7 @@ describe("service desk reports every failure as an announced sentence", () => {
     // fixture serves one through `listUsers`.
     await user.click(await screen.findByLabelText("Assigned to"));
     await user.click(await screen.findByRole("option", { name: /Tessa Technician/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "You do not have permission to do that.",

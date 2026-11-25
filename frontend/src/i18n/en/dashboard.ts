@@ -1,12 +1,16 @@
 export const dashboard = {
   page: {
-    title: "Dashboard",
     description: "What needs you first, then how the fleet is doing.",
     done: "Done",
-    customize: "Customize",
+    customize: "Edit",
+    saveFirst: "Save or discard your changes first.",
     loading: "Loading…",
     nothingTitle: "Nothing to show here",
     nothingBody: "This account holds no module read permissions. Ask an administrator for one.",
+  },
+  tile: {
+    failed: "Could not be read, so nothing is counted.",
+    waiting: "Not counted yet.",
   },
   needs: {
     title: "Needs you",

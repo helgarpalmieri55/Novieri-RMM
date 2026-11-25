@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { describeSubmitError } from "../../components/form";
 import { Badge, Field, inputClass, Table, Td, Th } from "../../components/ui";
-import { Panel } from "../../shell/components";
+import { Panel, useUrlFilters } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
@@ -29,7 +29,10 @@ import type { SlaPriority } from "./types";
 // ticket got.
 export function PolicyResolverPanel() {
   const t = useT();
-  const policies = useSlaPolicies();
+  // The same policies the list below shows: with the Client chip, that
+  // client's and every client's, so the preview answers for that client.
+  const filters = useUrlFilters(["client"] as const);
+  const policies = useSlaPolicies(filters.values.client);
   const calendars = useSlaCalendars();
   const queues = useSlaTicketQueues();
   const queuesForbidden = queues.error instanceof ApiError && queues.error.status === 403;
@@ -62,7 +65,8 @@ export function PolicyResolverPanel() {
       title={t("sla.resolver.title")}
       subtitle={t("sla.resolver.subtitle")}
     >
-      {policies.isLoading ? (
+      {/* `isPending`, not `isLoading`: until `/me` decides the Client chip the read is not enabled yet, and that is still loading. */}
+      {policies.isPending ? (
         <p className="note">{t("sla.common.loading")}</p>
       ) : forbidden ? (
         <p className="note">{t("sla.resolver.forbidden")}</p>

@@ -12,6 +12,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type {
   ApprovalDecision,
   CannedResponseCreate,
@@ -102,18 +103,25 @@ export function useUpdateTicketCategoryMutation() {
 // Tickets
 // --------------------------------------------------------------------------
 
-export function useTickets(filters: TicketListFilters = {}, options: { enabled?: boolean } = {}) {
-  const api = useApi();
+export function useTickets(
+  filters: TicketListFilters = {},
+  options: { enabled?: boolean; chip?: string } = {},
+) {
+  // THE CLIENT CHIP NARROWS THE READ (redesign plan, Receta L, 7; decision
+  // D6): `chip` is the list's `?client=` ("" without one, as My work and
+  // every other caller read). The same call with the same arguments, read
+  // through the narrowed API and keyed on the client it was narrowed to, so
+  // a change of chip reads again and no row of the last client stays. Until
+  // `/me` has said the chip's client is one of the person's, nothing is read
+  // (`ready`). Mutations keep invalidating the `["service-desk-tickets"]`
+  // prefix, which reaches every client's key.
+  const { api, client, ready } = useNarrowedApi(options.chip ?? "");
   return useQuery({
-    queryKey: ["service-desk-tickets", filters],
+    queryKey: ["service-desk-tickets", filters, client],
     queryFn: () => api.listTickets(filters),
-    // C5 fix: `TicketListPage`'s default view now runs two of these side by
-    // side (an "assigned to me" query and a wider "pool" query, see that
-    // page's own comment) and toggles which one is live via `enabled` --
-    // `options.enabled` left `undefined` (every other caller, e.g.
-    // `MyWorkPage`) is TanStack Query's own "always enabled" default, so
-    // this is backward compatible.
-    enabled: options.enabled,
+    // C5 fix: `options.enabled` left `undefined` (every caller but a page
+    // that toggles one of two reads) is "always enabled".
+    enabled: (options.enabled ?? true) && ready,
   });
 }
 

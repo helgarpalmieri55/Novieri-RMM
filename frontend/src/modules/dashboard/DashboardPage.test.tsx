@@ -20,7 +20,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -28,6 +28,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, Device } from "../../lib/api";
 import { DashboardPage } from "./DashboardPage";
+
+/** The edit mode's save bar (redesign plan, Task 7, 2.1): its Save writes the arrangement. */
+function saveBarSave(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" });
+}
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -239,6 +244,8 @@ describe("DashboardPage", () => {
     });
 
     const panel = (await screen.findByText("Fleet at a glance")).closest(".panel") as HTMLElement;
+    // The panel's title is drawn while its devices load; wait for the strip.
+    await waitFor(() => expect(panel.querySelector(".heat")).not.toBeNull());
 
     // The strip is still the strip.
     expect(panel.querySelector(".heat")).not.toBeNull();
@@ -268,6 +275,8 @@ describe("DashboardPage", () => {
     renderPage();
 
     const panel = (await screen.findByText("Fleet at a glance")).closest(".panel") as HTMLElement;
+    // The panel's title is drawn while its devices load; wait for the strip.
+    await waitFor(() => expect(panel.querySelector(".heat")).not.toBeNull());
     expect(panel.querySelector(".facts")).not.toBeNull();
     expect(panel).not.toHaveTextContent("Without an agent");
   });
@@ -957,7 +966,7 @@ describe("customizing the dashboard", () => {
       },
     });
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     // EVERY BUTTON NAMES ITS WIDGET. In edit mode there are three controls per
     // widget across a dozen widgets; three dozen buttons called "Move earlier"
@@ -965,6 +974,9 @@ describe("customizing the dashboard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Move Open alerts earlier" }));
 
     expect(order().slice(0, 2)).toEqual(["open-alerts", "jobs-attention"]);
+    // A draft until Save (Task 7, 2.1): nothing is written by the move itself.
+    expect(saved).toHaveLength(0);
+    await userEvent.click(saveBarSave());
     await waitFor(() => expect(saved).toHaveLength(1));
     const first = saved[0] as { id: string }[];
     expect(first.map((entry) => entry.id).slice(0, 2)).toEqual(["open-alerts", "jobs-attention"]);
@@ -976,7 +988,8 @@ describe("customizing the dashboard", () => {
     // closed that gap; the caller simply never passed it.
     renderPage();
     await screen.findByText("ws-alpha");
-    const customize = screen.getByRole("button", { name: "Customize" });
+    // «Edit» is the head's secondary action now (redesign plan, Task 7, 2.1), where it read «Customize».
+    const customize = screen.getByRole("button", { name: "Edit" });
     expect(customize).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(customize);
     expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute("aria-pressed", "true");
@@ -990,7 +1003,7 @@ describe("customizing the dashboard", () => {
     // started.
     renderPage();
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     const lifted = screen.getByRole("button", { name: /Move Open alerts earlier/ }).closest(".dash-widget");
     expect(lifted, "no widget frame for Open alerts").not.toBeNull();
@@ -1006,7 +1019,7 @@ describe("customizing the dashboard", () => {
     // A button that silently no-ops reads as broken; disabled says why.
     renderPage();
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(
       screen.getByRole("button", { name: "Move Jobs needing attention earlier" }),
     ).toBeDisabled();
@@ -1021,7 +1034,7 @@ describe("customizing the dashboard", () => {
       },
     });
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     const tile = () => document.querySelector('[data-widget="managed-endpoints"]');
     expect(tile()?.getAttribute("data-size")).toBe("small");
@@ -1029,6 +1042,7 @@ describe("customizing the dashboard", () => {
       screen.getByRole("button", { name: /Managed endpoints is small; make it medium/ }),
     );
     expect(tile()?.getAttribute("data-size")).toBe("medium");
+    await userEvent.click(saveBarSave());
     await waitFor(() =>
       expect(saved.at(-1)?.find((entry) => entry.id === "managed-endpoints")?.size).toBe("medium"),
     );
@@ -1040,15 +1054,16 @@ describe("customizing the dashboard", () => {
     // the same gesture, so it stays in the list, framed and empty.
     renderPage();
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Hide Open alerts" }));
 
     expect(order()[1]).toBe("open-alerts");
     expect(screen.getByText("Hidden from your dashboard.")).toBeInTheDocument();
     expect(screen.getByText("1 tile is hidden.", { exact: false })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(order()).not.toContain("open-alerts");
+    // Saving the change ends edit mode (Done waits while something is unsaved).
+    await userEvent.click(saveBarSave());
+    await waitFor(() => expect(order()).not.toContain("open-alerts"));
     expect(order()[0]).toBe("jobs-attention");
   });
 
@@ -1082,11 +1097,50 @@ describe("customizing the dashboard", () => {
       saveDashboardLayout: () => Promise.reject(new Error("network down")),
     });
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Move Open alerts earlier" }));
+    await userEvent.click(saveBarSave());
 
     expect(order()[0]).toBe("open-alerts");
     expect(await screen.findByRole("alert")).toHaveTextContent(/was not saved/i);
+  });
+
+  // A DRAFT UNTIL SAVE (redesign plan, Task 7, 2.1): Discard puts the
+  // arrangement back without a call, and outside edit mode there is no bar.
+  it("discards an edit of the layout", async () => {
+    const save = vi.fn((widgets: unknown) => Promise.resolve({ widgets }));
+    renderPage({ saveDashboardLayout: save });
+    await screen.findByText("ws-alpha");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    const before = order();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Hide Open alerts" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move Managed endpoints earlier" }));
+    // Done waits while something is unsaved, and says why on the page (fix round 1).
+    expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
+    expect(screen.getByText("Save or discard your changes first.")).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Discard" }));
+    expect(order()).toEqual(before);
+    expect(save).not.toHaveBeenCalled();
+    // Discard ends edit mode: no bar, no edit controls.
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Move /i })).toBeNull();
+  });
+
+  it("a tile with nothing measured says so", async () => {
+    renderPage({ listJobs: () => Promise.reject(new Error("boom")) });
+    await screen.findByText("ws-alpha");
+    const tile = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>(".stat-card")].find(
+        (card) => card.querySelector(".stat-label")?.textContent === "Jobs needing attention",
+      );
+      expect(found).toBeDefined();
+      return found as HTMLElement;
+    });
+    await waitFor(() => expect(tile).toHaveTextContent("Could not be read, so nothing is counted."));
+    // And it still leads to its list.
+    expect(tile).toHaveAttribute("href", "/jobs");
   });
 
   it("does not offer a widget the operator may not see", async () => {
@@ -1094,7 +1148,7 @@ describe("customizing the dashboard", () => {
     // afternoon cannot rewrite somebody's saved arrangement.
     renderPage({ permissions: ["devices.read"] });
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("button", { name: "Customize" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(order()).toEqual(["managed-endpoints", "online-now", "fleet-glance", "recent-devices"]);
     expect(screen.queryByRole("button", { name: /Open alerts/ })).not.toBeInTheDocument();
   });

@@ -64,7 +64,6 @@ export const portal = {
     },
   },
   myTickets: {
-    title: "My tickets",
     description: "Raise a request or check on one you already opened.",
     newRequest: "New request",
     empty: "You have not filed any tickets yet.",
@@ -72,9 +71,11 @@ export const portal = {
     status: "Status",
     lastUpdate: "Last update",
     opened: "opened {age}",
+    stateLabel: "Show",
+    stateOpen: "Open",
+    stateAll: "All",
   },
   newTicket: {
-    title: "New ticket",
     description: "Tell us what is wrong. You do not need to know who will fix it.",
     category: "Category",
     selectCategory: "Select a category",
@@ -87,6 +88,7 @@ export const portal = {
     attachments: "Attachments (optional)",
     drop: "Drop files here or click to choose",
     submit: "Submit",
+    section: "Your request",
     noCategory: "You cannot file a ticket without a category, and the catalog is unavailable.",
   },
   help: {

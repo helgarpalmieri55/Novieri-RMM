@@ -46,7 +46,7 @@ import { useT } from "../../i18n/context";
 import type { Device, Job, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { NO_DATE, formatDate, formatDateTime } from "../../lib/datetime";
-import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { Btn, PageHead, Panel, QueryState, SaveBar, StatusPill, UnsavedGuard } from "../../shell/components";
 import { DashboardReadiness } from "./DashboardReadiness";
 import { Icon } from "../../shell/icons";
 import {
@@ -152,6 +152,7 @@ function KpiTile({
   sub,
   zeroLabel,
   spark,
+  failed = false,
 }: {
   label: string;
   value: number | null;
@@ -164,7 +165,15 @@ function KpiTile({
   sub?: string;
   zeroLabel: string;
   spark?: readonly number[];
+  /**
+   * The read behind the figure failed. A tile with nothing measured SAYS WHY
+   * in a sentence (redesign plan, Task 7, 2.1; Atera's flaw: "Los widgets
+   * vacíos quedan en blanco, sin mensaje ni paso siguiente"): not counted
+   * yet, or could not be read.
+   */
+  failed?: boolean;
 }) {
+  const t = useT();
   const measured = value !== null;
   const isZero = value === 0;
   const loud = urgent && measured && !isZero;
@@ -177,7 +186,7 @@ function KpiTile({
       icon={icon}
       to={to}
       kind={loud || kind === "ok" ? kind : undefined}
-      sub={isZero ? zeroLabel : measured ? sub : undefined}
+      sub={isZero ? zeroLabel : measured ? sub : t(failed ? "dashboard.tile.failed" : "dashboard.tile.waiting")}
       spark={spark}
     />
   );
@@ -472,6 +481,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.jobsAttention.title")}
           value={jobs.data ? needAttention : null}
+          failed={jobs.isError}
           icon="jobs"
           to="/jobs"
           kind="crit"
@@ -495,6 +505,7 @@ export function DashboardPage() {
              headed "Active alerts" and still lists exactly those -- two
              different questions, each labelled with the one it answers. */
           value={alertSummary.data ? alertSummary.data.open : null}
+          failed={alertSummary.isError}
           icon="health"
           to="/health"
           kind="warn"
@@ -524,6 +535,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.managed.title")}
           value={fleet ? fleet.managed : null}
+          failed={devices.isError}
           icon="devices"
           to="/devices"
           sub={fleet ? t("dashboard.managed.sub", { total: fleet.total }) : undefined}
@@ -540,6 +552,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.online.title")}
           value={fleet ? fleet.online : null}
+          failed={devices.isError}
           icon="activity"
           /* `state` is the param /devices already filters on
              (DevicesPage's `useSearchParams`), so this lands on the online
@@ -561,6 +574,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.openTickets.title")}
           value={tickets.data ? openTickets : null}
+          failed={tickets.isError}
           icon="ticket"
           to="/service-desk"
           sub={t("dashboard.openTickets.sub", { count: untriagedTickets })}
@@ -577,6 +591,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.remote.title")}
           value={remote.data ? remote.data.total : null}
+          failed={remote.isError}
           icon="remote"
           to="/remote"
           sub={
@@ -1070,22 +1085,30 @@ export function DashboardPage() {
   return (
     <>
       <PageHead
-        title={t("dashboard.page.title")}
+        title={t("shell.nav.item.dashboard")}
         description={t("dashboard.page.description")}
         actions={
           arrangement.visible.length > 0 ? (
-            <Btn
-              label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
-              icon={editing ? "check" : "adjustments"}
-              variant={editing ? "primary" : "secondary"}
-              // It is a toggle, so it says so. `Btn` has carried `pressed`
-              // since the kit closed that gap; this caller never passed it,
-              // and a screen reader heard "Customize" then "Done" with no
-              // indication that one control had changed state.
-              pressed={editing}
-              disabled={arrangement.loading}
-              onClick={() => setEditing((current) => !current)}
-            />
+            <>
+              {/* EDIT IS A SECONDARY ACTION (redesign plan, Task 7, 2.1): the
+                  page is read far more than it is arranged. While editing, a
+                  change is saved or discarded from the save bar, which also
+                  ends edit mode; Done ends it when nothing changed. DISABLED
+                  WITH ITS REASON SHOWN (components/form.tsx, Rule 1; fix round
+                  1): while something is unsaved, the reason stands beside it. */}
+              {editing && arrangement.dirty ? <span className="note">{t("dashboard.page.saveFirst")}</span> : null}
+              <Btn
+                label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
+                icon={editing ? "check" : "adjustments"}
+                // It is a toggle, so it says so. `Btn` has carried `pressed`
+                // since the kit closed that gap; this caller never passed it,
+                // and a screen reader heard "Edit" then "Done" with no
+                // indication that one control had changed state.
+                pressed={editing}
+                disabled={arrangement.loading || (editing && arrangement.dirty)}
+                onClick={() => setEditing((current) => !current)}
+              />
+            </>
           ) : undefined
         }
       />
@@ -1102,6 +1125,25 @@ export function DashboardPage() {
       <DashboardReadiness />
 
       <DashboardCanvas arrangement={arrangement} editing={editing} />
+
+      {/* THE ONE SAVE BAR, IN EDIT MODE ONLY: the arrangement is a draft until
+          Save, and Discard puts it back without a call (undoing what Atera
+          cannot undo). Its failure is the canvas's own announced line, so the
+          bar does not say it a second time. */}
+      {editing ? (
+        <>
+          <UnsavedGuard dirty={arrangement.dirty} />
+          <SaveBar
+            dirty={arrangement.dirty}
+            saving={arrangement.saving}
+            onDiscard={() => {
+              arrangement.discard();
+              setEditing(false);
+            }}
+            onSave={() => arrangement.commit(() => setEditing(false))}
+          />
+        </>
+      ) : null}
 
       {/* An operator who holds none of the read codes above would otherwise see
           a page head over nothing at all. */}

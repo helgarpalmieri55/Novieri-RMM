@@ -71,7 +71,6 @@ export const notification = {
     queuesCta: "Set up queues",
   },
   admin: {
-    title: "Notifications",
     description: "Who is told when something happens, and where.",
     channelsLabel: "Channels",
     channelsZero: "none configured, so nothing can be delivered",

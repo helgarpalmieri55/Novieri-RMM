@@ -1,13 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
+import { resetSessionEnd } from "../../../lib/sessionEnd";
+import { renderPage } from "../../../test/renderPage";
 import { MyTicketsPage } from "../MyTicketsPage";
 import { NewTicketPage } from "../NewTicketPage";
+import { PortalShell } from "../PortalShell";
 import { PortalTicketDetailPage } from "../PortalTicketDetailPage";
 import { portalApprovalVariant, portalTicketPriorityVariant, portalTicketStatusVariant } from "../portalState";
 import type {
@@ -98,6 +101,11 @@ const TICKET_DETAIL: PortalTicketDetail = {
   approval: null,
 };
 
+// The ticket's head reads "<number> <subject>" (redesign plan, Task 7, 2.11:
+// `DetailHead`, the record pattern, as the service desk's ticket); it read
+// "INC-1: VPN" before.
+const TICKET_HEAD = "INC-1 VPN";
+
 const REJECTED_APPROVAL: PortalApprovalOut = {
   state: "rejected",
   reason: "no budget",
@@ -149,6 +157,23 @@ describe("MyTicketsPage", () => {
     expect(screen.getByRole("link", { name: "New ticket" })).toHaveAttribute("href", "/portal/new");
   });
 
+  // General ruling 1a (fix round 2): drawn in the console, the page takes the
+  // console rail's label for /portal -- "End-user portal" for an operator,
+  // "My tickets" for an account holding only portal codes (its rail is the
+  // portal's); in the contact's frame, "My tickets" (App.portal.test.tsx).
+  it("in the console, names itself as the console rail does for an operator", async () => {
+    api.me = vi.fn().mockResolvedValue({ ...ME_REQUESTER, permissions: ["ticket.read", "portal.ticket.read"] });
+    renderWithProviders(<MyTicketsPage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "End-user portal" })).toBeInTheDocument();
+  });
+
+  it("in the console, names itself My tickets for an account holding only portal codes", async () => {
+    renderWithProviders(<MyTicketsPage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "My tickets" })).toBeInTheDocument();
+  });
+
   it("hides portal navigation entirely without portal.ticket.read", async () => {
     api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: [] }));
     renderWithProviders(<MyTicketsPage />);
@@ -188,6 +213,66 @@ describe("MyTicketsPage", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText(/You have not filed any tickets yet/i)).not.toBeInTheDocument();
+  });
+
+  // ON THE LIST KIT (redesign plan, Task 7, 2.9; Receta L). The route lists
+  // every ticket of the requester; Open (the chip that writes nothing) leaves
+  // out the ones whose work is over, All (`?state=all`) shows them.
+  const CLOSED: PortalTicketSummary = { ...TICKET_SUMMARY, id: "t2", number: "INC-2", subject: "Printer", status: "closed" };
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    api.listPortalTickets = vi.fn().mockResolvedValue([TICKET_SUMMARY, CLOSED]);
+    const { router } = renderPage("/portal", <MyTicketsPage />);
+
+    expect(await screen.findByRole("link", { name: "INC-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("link", { name: "INC-2" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /All/ }));
+    expect(router.state.location.search).toContain("state=all");
+    expect(await screen.findByRole("link", { name: "INC-2" })).toBeInTheDocument();
+    // A reload of that link shows the closed one too.
+    await act(() => router.navigate("/portal?state=all"));
+    expect(screen.getByRole("button", { name: /All/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "INC-2" })).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    // Every ticket of the requester is closed: Open is what hides them.
+    api.listPortalTickets = vi.fn().mockResolvedValue([CLOSED]);
+    const { router } = renderPage("/portal", <MyTicketsPage />);
+
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.queryByText("You have not filed any tickets yet.")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("?state=all");
+    expect(await screen.findByRole("link", { name: "INC-2" })).toBeInTheDocument();
+  });
+
+  // Fix round 1 (review): the total is of what the chip matches, not of
+  // every ticket answered -- "1 of 2" under Open read as one open ticket
+  // missing. Under Open: the one open ticket of one; under All: two of two.
+  it("says how many it shows, of those the chip matches", async () => {
+    api.listPortalTickets = vi.fn().mockResolvedValue([TICKET_SUMMARY, CLOSED]);
+    const { router } = renderPage("/portal", <MyTicketsPage />);
+
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+    await act(() => router.navigate("/portal?state=all"));
+    expect(await screen.findByText("Showing 2 of 2")).toBeInTheDocument();
+  });
+
+  it("offers New ticket from an empty list only to someone who may file one", async () => {
+    api.listPortalTickets = vi.fn().mockResolvedValue([]);
+    const first = renderPage("/portal", <MyTicketsPage />);
+    expect(await screen.findByText("You have not filed any tickets yet.")).toBeInTheDocument();
+    const empty = screen.getByText("You have not filed any tickets yet.").closest(".empty") as HTMLElement;
+    expect(within(empty).getByRole("link", { name: "New ticket" })).toHaveAttribute("href", "/portal/new");
+    first.unmount();
+
+    api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: ["portal.ticket.read"] }));
+    renderPage("/portal", <MyTicketsPage />);
+    const readOnly = (await screen.findByText("You have not filed any tickets yet.")).closest(".empty") as HTMLElement;
+    await waitFor(() => expect(screen.getByRole("navigation", { name: "Portal" })).toBeInTheDocument());
+    expect(within(readOnly).queryByRole("link", { name: "New ticket" })).toBeNull();
   });
 });
 
@@ -597,6 +682,42 @@ describe("NewTicketPage", () => {
     await waitFor(() => expect(api.uploadPortalAttachment).toHaveBeenCalledTimes(2));
     expect(api.createPortalTicket).toHaveBeenCalledTimes(1);
   });
+
+  // A FORM THAT LEAVES WHEN IT IS SENT (redesign plan, Task 7, 2.10; Receta
+  // FO, 6; decision D16): leaving with text written asks first, and filing the
+  // ticket goes to it without asking.
+  it("asks before leaving a half-written ticket", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/portal/new", <NewTicketPage />, "/portal/new");
+
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.type(screen.getByLabelText("Description"), "It stopped working after the update.");
+    await user.click(screen.getByRole("link", { name: "My tickets" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/portal/new");
+  });
+
+  it("leaves for the ticket it filed without asking", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/portal/new", <NewTicketPage />, "/portal/new");
+
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "VPN broken");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/portal/tickets/t1"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("leaves an untouched form without asking", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/portal/new", <NewTicketPage />, "/portal/new");
+
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.click(screen.getByRole("link", { name: "My tickets" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/portal"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
 });
 
 // --------------------------------------------------------------------------
@@ -628,7 +749,7 @@ describe("PortalTicketDetailPage", () => {
   it("shows status, description, public comments, and status history", async () => {
     renderDetail("t1");
 
-    expect(await screen.findByText("INC-1: VPN")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: TICKET_HEAD })).toBeInTheDocument();
     // "In progress" appears twice (the header badge and the status-history
     // row) -- assert both are present rather than picking one. Cycle 12: it
     // was the raw `in_progress` in both places.
@@ -652,7 +773,7 @@ describe("PortalTicketDetailPage", () => {
     api.createResolverTurn = vi.fn().mockResolvedValue({ answer: "Try restarting the VPN client." });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(screen.getByRole("heading", { name: "Ask about your ticket" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("Ask the assistant"), "What now?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
@@ -669,7 +790,7 @@ describe("PortalTicketDetailPage", () => {
     });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     // The type itself has no `reason` field to render (see the "types carry
     // no staff-only fields" suite below) -- this additionally confirms
     // nothing renders one even if a stray value slipped through at runtime.
@@ -680,7 +801,7 @@ describe("PortalTicketDetailPage", () => {
   it("never renders a queue, an assignee, or an internal-note affordance", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(screen.queryByText(/queue/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/assignee/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/internal/i)).not.toBeInTheDocument();
@@ -691,7 +812,7 @@ describe("PortalTicketDetailPage", () => {
   it("renders nothing approval-shaped when there is no approval outcome", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(screen.queryByText("Approval")).not.toBeInTheDocument();
   });
 
@@ -699,7 +820,7 @@ describe("PortalTicketDetailPage", () => {
     api.getPortalTicket = vi.fn().mockResolvedValue({ ...TICKET_DETAIL, approval: REJECTED_APPROVAL });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(await screen.findByText(/rejected/i)).toBeInTheDocument();
     expect(await screen.findByText(/no budget/i)).toBeInTheDocument();
   });
@@ -708,7 +829,7 @@ describe("PortalTicketDetailPage", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     await user.type(screen.getByLabelText("Reply"), "Still broken.");
     await user.click(screen.getByRole("button", { name: "Post reply" }));
 
@@ -721,7 +842,7 @@ describe("PortalTicketDetailPage", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     const reply = screen.getByLabelText("Reply");
     expect(reply.tagName).toBe("TEXTAREA");
 
@@ -737,7 +858,7 @@ describe("PortalTicketDetailPage", () => {
     api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: ["portal.ticket.read"] }));
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(screen.queryByLabelText("Reply")).not.toBeInTheDocument();
   });
 
@@ -777,7 +898,7 @@ describe("PortalTicketDetailPage", () => {
       .mockResolvedValue({ ...TICKET_DETAIL, attachments: [uploadedAttachment] });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: VPN");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
     expect(screen.getByText("No attachments yet.")).toBeInTheDocument();
 
     const file = new File(["x"], "log.txt", { type: "text/plain" });
@@ -795,7 +916,7 @@ describe("PortalTicketDetailPage", () => {
     api.portalMe = vi.fn().mockRejectedValue(new ApiError(403, "forbidden"));
     renderDetail("t1");
 
-    expect(await screen.findByText("INC-1: VPN")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: TICKET_HEAD })).toBeInTheDocument();
     expect(screen.queryByText(/^error/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Reply")).not.toBeInTheDocument();
   });
@@ -815,7 +936,30 @@ describe("PortalTicketDetailPage", () => {
     renderDetail("t1");
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("INC-1: VPN")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: TICKET_HEAD })).not.toBeInTheDocument();
+  });
+
+  // The portal has no `AppShell`: in the contact's own frame the page names
+  // the tab itself, by the ticket's number (redesign plan, Task 7, 2.11).
+  it("names the ticket in the browser tab", async () => {
+    document.title = "Novieri RMM";
+    const view = renderPage(
+      "/portal/tickets/t1",
+      <PortalShell>
+        <PortalTicketDetailPage />
+      </PortalShell>,
+      "/portal/tickets/:ticketId",
+    );
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
+    await waitFor(() => expect(document.title).toBe("INC-1 · Novieri RMM"));
+    view.unmount();
+    resetSessionEnd();
+  });
+
+  it("goes back to My tickets from its head", async () => {
+    renderDetail("t1");
+    await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
+    expect(screen.getByRole("link", { name: "My tickets" })).toHaveAttribute("href", "/portal");
   });
 });
 

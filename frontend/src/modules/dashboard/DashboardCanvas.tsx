@@ -47,6 +47,13 @@ export interface DashboardArrangement {
   reset: () => void;
   resetting: boolean;
   saveError: unknown;
+  /** The arrangement differs from the saved one (edit mode's draft). */
+  dirty: boolean;
+  /** Back to the saved arrangement, with no call to the server. */
+  discard: () => void;
+  /** Save the draft; `then` once the server took it. */
+  commit: (then?: () => void) => void;
+  saving: boolean;
 }
 
 export function useDashboardArrangement(
@@ -69,7 +76,8 @@ export function useDashboardArrangement(
     [availableKey],
   );
 
-  const { layout, loading, apply, reset, saveError, resetting } = useDashboardLayout(available);
+  const { layout, loading, apply, reset, saveError, resetting, dirty, discard, commit, saving } =
+    useDashboardLayout(available);
   // The stock arrangement while the stored one is in flight. Rendering nothing
   // would blank the first screen on every page load for the sake of a
   // preference; rendering the defaults means a customized dashboard settles
@@ -78,7 +86,7 @@ export function useDashboardArrangement(
     layout ??
     visible.map((widget) => ({ id: widget.id, size: widget.defaultSize, hidden: false }));
 
-  return { visible, placements, loading, apply, reset, resetting, saveError };
+  return { visible, placements, loading, apply, reset, resetting, saveError, dirty, discard, commit, saving };
 }
 
 /**

@@ -134,7 +134,6 @@ export const sla: Shape<typeof en> = {
     shadowed: "Desplazada por un nivel más específico",
   },
   admin: {
-    title: "Niveles de servicio",
     description: "Objetivos de respuesta y resolución, por prioridad y calendario.",
     calendarsLabel: "Calendarios laborales",
     calendarsZero: "Aún no hay ningún calendario laboral definido",

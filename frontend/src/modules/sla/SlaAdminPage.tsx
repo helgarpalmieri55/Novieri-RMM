@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
@@ -10,7 +9,7 @@ import { PoliciesPanel } from "./PoliciesPanel";
 import { PolicyResolverPanel } from "./PolicyResolverPanel";
 import { SlaPrerequisites } from "./SlaPrerequisites";
 import { SlaSettingsPanel } from "./SlaSettingsPanel";
-import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { PageHead, StatCard, StatsGrid, useNewParam, useUrlFilters } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §9.1's admin surface: business calendars (with the weekly window grid
@@ -56,14 +55,16 @@ export function SlaAdminPage() {
 
   // Each of these is the SAME query a panel below already issues, served from
   // the same cache entry rather than doubling the request count.
+  // With the Client chip on the policies, the count is of what the list shows.
+  const filters = useUrlFilters(["client"] as const);
   const calendars = useSlaCalendars();
-  const policies = useSlaPolicies();
+  const policies = useSlaPolicies(filters.values.client);
   const settings = useSlaSettings();
   // The policy form's escape hatch out of the first-run dead end (cycle 7):
-  // "Add a business calendar" inside the Add-policy dialog bumps this, and the
-  // calendars panel below opens its own create dialog. A COUNTER, not a flag,
-  // so a user who dismisses the calendar dialog and asks again gets it back.
-  const [calendarCreateNonce, setCalendarCreateNonce] = useState(0);
+  // "Add a business calendar" inside the Add-policy dialog opens the
+  // calendars' own create dialog, through the URL (`?new=calendar` in place
+  // of `?new=policy`); Back reopens Add policy, with an empty form (ruling 4).
+  const calendarCreate = useNewParam("calendar");
   const activePolicyCount = (policies.data ?? []).filter((policy) => policy.active).length;
   // WHAT THE TWO CONFIGURATION FIGURES ARE MADE OF. The two consequence tiles
   // beside them carry a sentence at a non-zero count and these carried
@@ -106,7 +107,7 @@ export function SlaAdminPage() {
   return (
     <div>
       <PageHead
-        title={t("sla.admin.title")}
+        title={t("shell.nav.item.serviceLevels")}
         description={t("sla.admin.description")}
       />
 
@@ -142,7 +143,8 @@ export function SlaAdminPage() {
           label={t("sla.admin.policiesLabel")}
           value={count(policies.data !== undefined, activePolicyCount)}
           icon="shield-check"
-          to="/sla"
+          // Counted on the chip's narrowed read, it opens that client's (general ruling 2).
+          to={filters.values.client === "" ? "/sla" : `/sla?client=${encodeURIComponent(filters.values.client)}`}
           tone="blue"
           foot={policyFoot}
           zeroLabel={t("sla.admin.policiesZero")}
@@ -187,13 +189,13 @@ export function SlaAdminPage() {
         <SlaSettingsPanel canAdmin={canConfigure} />
         <PolicyResolverPanel />
       </div>
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+      <div>
         <PoliciesPanel
           canAdmin={canAdmin}
           queueName={queueName}
-          onCreateCalendar={canConfigure ? () => setCalendarCreateNonce((n) => n + 1) : undefined}
+          onCreateCalendar={canConfigure ? calendarCreate.start : undefined}
         />
-        <CalendarsPanel canAdmin={canConfigure} openCreateNonce={calendarCreateNonce} />
+        <CalendarsPanel canAdmin={canConfigure} />
       </div>
     </div>
   );

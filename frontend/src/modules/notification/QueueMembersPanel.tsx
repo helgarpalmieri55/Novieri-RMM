@@ -6,7 +6,8 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
-import { Panel } from "../../shell/components";
+import { FormSection } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
 import { Person } from "../../shell/viz";
 import { initialsOf, personIndex } from "../../lib/people";
 import { useApi } from "../../lib/ApiContext";
@@ -81,7 +82,8 @@ export function QueueMembersPanel({ canAdmin }: { canAdmin: boolean }) {
   }
 
   return (
-    <Panel title={t("notification.queueMembers.title")} subtitle={t("notification.queueMembers.subtitle")}>
+    <FormSection title={t("notification.queueMembers.title")} icon="users">
+      <SectionLead text={t("notification.queueMembers.subtitle")} />
       <Field label={t("notification.common.queue")}>
         {queuesForbidden || (queues.data && queues.data.length === 0) ? (
           <input
@@ -213,6 +215,6 @@ export function QueueMembersPanel({ canAdmin }: { canAdmin: boolean }) {
           )}
         </>
       )}
-    </Panel>
+    </FormSection>
   );
 }

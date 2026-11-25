@@ -530,7 +530,9 @@ describe("email-intake mailbox form", () => {
     await user.type(screen.getByLabelText("IMAP host"), "imap.acme.test");
     await user.type(screen.getByLabelText("Username"), "helpdesk@acme.test");
     await user.type(screen.getByLabelText("Password"), "hunter2");
-    const window = screen.getByLabelText("Reopen window (days)");
+    // Within the dialog: the page now draws each mailbox's settings with the
+    // same labels (redesign plan, Task 7, 2.7).
+    const window = within(screen.getByRole("dialog")).getByLabelText("Reopen window (days)");
     await user.clear(window);
     await user.type(window, "0");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -567,7 +569,13 @@ describe("email-intake mailbox form", () => {
     renderAdmin();
 
     await user.click(await screen.findByRole("button", { name: "Edit helpdesk@acme.test" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    // A real change, so Save writes: an untouched Save sends nothing (general
+    // ruling 13, wave O2 fix round 3). The password stays blank, which is the point.
+    const dialog = screen.getByRole("dialog");
+    const reopen = within(dialog).getByLabelText("Reopen window (days)");
+    await user.clear(reopen);
+    await user.type(reopen, "21");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(screen.queryByRole("alert")).toBeNull();
@@ -891,7 +899,8 @@ describe("email-intake — cycles 6/7/8", () => {
     renderAdmin();
 
     await user.click(await screen.findByRole("button", { name: "Add mailbox" }));
-    await user.click(screen.getByLabelText("Default category"));
+    // Within the dialog: the page's mailbox settings carry the same label (Task 7, 2.7).
+    await user.click(within(screen.getByRole("dialog")).getByLabelText("Default category"));
 
     expect(await screen.findByText(/No ticket categories exist yet/)).toBeInTheDocument();
     expect(screen.getByText(/Service desk → Admin → Categories/)).toBeInTheDocument();
