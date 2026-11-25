@@ -333,9 +333,11 @@ export function AuditPage() {
     intact: t("audit.tiles.chainFoot.intact"),
     broken: t("audit.tiles.chainFoot.broken"),
   };
-  // NO FIGURE FOR THE LOG'S TWO TILES: not this account's to read, still on
-  // its way, or failed. One named condition, drawn by the kit's `pending`
-  // (ruling 10a; the absent mark, never an em dash or a 0).
+  // NO FIGURE FOR THE LOG'S TWO TILES, two ways (coordinator, P3 adoption
+  // pass). Still on its way or failed: the kit's `pending`, busy (ruling 10a).
+  // Not this account's to read, once `/me` has said so: nothing is coming, so
+  // the kit's `absent`, not busy. Either way the absent mark, never a dash or 0.
+  const cannotRead = me.data !== undefined && !canRead;
   const eventsNoData = !canRead || !events.data;
   const loadedFoot =
     eventsNoData
@@ -395,7 +397,8 @@ export function AuditPage() {
         <StatCard
           label={t("audit.tiles.events")}
           value={String(events.data?.total ?? 0)}
-          pending={eventsNoData}
+          pending={eventsNoData && !cannotRead}
+          absent={cannotRead}
           icon="logs"
           to="/audit"
           tone="blue"
@@ -418,9 +421,12 @@ export function AuditPage() {
           label={t("audit.tiles.verified")}
           // Only a SUCCESSFUL verification may report a count. A count from a
           // failed walk would read as reassurance: any other state has no
-          // figure, and draws the kit's absent mark.
+          // figure, and draws the kit's absent mark. Busy while the walk is on
+          // its way or failed; not for a broken chain or an account that may
+          // not ask, where no count is coming.
           value={String(verify.data?.count ?? 0)}
-          pending={chain !== "intact"}
+          pending={!cannotRead && (chain === "verifying" || chain === "unknown")}
+          absent={cannotRead || chain === "broken"}
           icon="list-check"
           to={`/audit?${TAB_PARAM}=${INTEGRITY_TAB}`}
           tone="green"
@@ -433,7 +439,8 @@ export function AuditPage() {
         <StatCard
           label={t("audit.tiles.actionTypes")}
           value={String(actionTypes)}
-          pending={eventsNoData}
+          pending={eventsNoData && !cannotRead}
+          absent={cannotRead}
           icon="filter"
           // The loaded page IS the view this counts, and the action filter that
           // narrows it sits on that tab.

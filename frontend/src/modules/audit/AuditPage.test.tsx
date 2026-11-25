@@ -278,19 +278,46 @@ describe("AuditPage", () => {
   // because its read is on its way, failed, or is not this account's to make,
   // draws the kit's one absent mark through StatCard's `pending`, muted, and
   // never an em dash or a 0.
+  //
+  // TWO KINDS OF NO FIGURE (coordinator, P3 adoption pass): a read on its way
+  // or failed is `pending`, busy; a read this account may not make is never
+  // coming, so the tile is `absent` and says nothing is loading.
   it.each([
-    ["still on its way", { events: () => new Promise<never>(() => {}) }],
-    ["failed", { events: () => Promise.reject(new Error("boom")) }],
-    ["not this account's to read", { permissions: [] as string[] }],
-  ])("draws the absent mark on the log's tiles while the log is %s", async (_, options) => {
+    ["still on its way", { events: () => new Promise<never>(() => {}) }, true],
+    ["failed", { events: () => Promise.reject(new Error("boom")) }, true],
+    ["not this account's to read", { permissions: [] as string[] }, false],
+  ])("draws the absent mark on the log's tiles while the log is %s", async (_, options, busy) => {
     renderPage(options);
     await waitFor(() => expect(tileByLabel("Audit events")).toBeDefined());
+    if (!busy) await waitFor(() => expect(tileByLabel("Audit events")).not.toHaveAttribute("aria-busy"));
     for (const label of ["Audit events", "Action types in view"]) {
       const tile = tileByLabel(label) as HTMLElement;
       expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.className).toContain("mut");
       expect(tile).not.toHaveTextContent("—");
+      if (busy) expect(tile).toHaveAttribute("aria-busy", "true");
+      else expect(tile).not.toHaveAttribute("aria-busy");
     }
+  });
+
+  it("draws no verified count for a broken chain, and does not call it loading", async () => {
+    renderPage({
+      events: () => Promise.resolve({ items: [event()], total: 1 }),
+      verify: () => Promise.resolve({ ok: false, count: 41, broken_at: "cccccccc-0000-0000-0000-000000000009" }),
+    });
+    await screen.findByText("Broken");
+    const verified = tileByLabel("Events in verified chain") as HTMLElement;
+    expect(verified.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(verified).not.toHaveAttribute("aria-busy");
+  });
+
+  it("calls the verified count loading while the chain is still being walked", async () => {
+    renderPage({
+      events: () => Promise.resolve({ items: [event()], total: 1 }),
+      verify: () => new Promise<never>(() => {}),
+    });
+    await waitFor(() => expect(tileByLabel("Chain integrity")).toHaveTextContent("Verifying…"));
+    expect(tileByLabel("Events in verified chain")).toHaveAttribute("aria-busy", "true");
   });
 
   it("never says verified for a verification that did not come back", async () => {
