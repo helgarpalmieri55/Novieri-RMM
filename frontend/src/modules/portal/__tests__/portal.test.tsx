@@ -101,10 +101,10 @@ const TICKET_DETAIL: PortalTicketDetail = {
   approval: null,
 };
 
-// The ticket's head reads "#<number> <subject>" (redesign plan, Task 7, 2.11:
+// The ticket's head reads "<number> <subject>" (redesign plan, Task 7, 2.11:
 // `DetailHead`, the record pattern, as the service desk's ticket); it read
 // "INC-1: VPN" before.
-const TICKET_HEAD = "#INC-1 VPN";
+const TICKET_HEAD = "INC-1 VPN";
 
 const REJECTED_APPROVAL: PortalApprovalOut = {
   state: "rejected",
@@ -929,7 +929,7 @@ describe("PortalTicketDetailPage", () => {
       "/portal/tickets/:ticketId",
     );
     await screen.findByRole("heading", { level: 1, name: TICKET_HEAD });
-    await waitFor(() => expect(document.title).toBe("#INC-1 · Novieri RMM"));
+    await waitFor(() => expect(document.title).toBe("INC-1 · Novieri RMM"));
     view.unmount();
     resetSessionEnd();
   });

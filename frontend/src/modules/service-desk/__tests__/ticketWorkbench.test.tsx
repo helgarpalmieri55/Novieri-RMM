@@ -151,8 +151,8 @@ function renderTicket(overrides: Partial<ApiClient> = {}) {
 }
 
 const header = async () => {
-  // The record's head (redesign plan, Task 7, 2.3): "#<number> <subject>".
-  await screen.findByRole("heading", { level: 1, name: "#INC-1 Printer jams on tray 2" });
+  // The record's head (redesign plan, Task 7, 2.3): "<number> <subject>".
+  await screen.findByRole("heading", { level: 1, name: "INC-1 Printer jams on tray 2" });
   return document.querySelector(".facts") as HTMLElement;
 };
 
@@ -545,7 +545,7 @@ describe("the ticket on the record kit", () => {
   it("names the record in the browser tab", async () => {
     page({ page: "shell.nav.item.tickets" });
     await header();
-    await waitFor(() => expect(document.title).toBe("#INC-1 · Tickets · Novieri RMM"));
+    await waitFor(() => expect(document.title).toBe("INC-1 · Tickets · Novieri RMM"));
   });
 
   it("goes back to the queue from its head", async () => {

@@ -2,7 +2,8 @@
  * A PORTAL PAGE NAMES THE BROWSER TAB, BUT ONLY IN THE CONTACT'S OWN FRAME
  * (redesign plan, Task 7, "El marco del portal"; design §5). The portal has no
  * `AppShell`, so each of its pages names itself with `useDocumentTitle`:
- * "My tickets · Novieri RMM", "#INC-4127 · Novieri RMM".
+ * "My tickets · Novieri RMM", "INC-4127 · Novieri RMM" (a ticket by its number,
+ * which carries its own prefix).
  *
  * NOT ANYWHERE ELSE. A technician who holds a portal code opens the same pages
  * inside the console, where `AppShell` already names the tab from its rail;

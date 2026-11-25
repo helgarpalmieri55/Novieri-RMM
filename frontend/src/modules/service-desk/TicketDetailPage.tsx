@@ -107,7 +107,7 @@ const VARIANT_KIND: Record<BadgeVariant, Kind> = {
  * and one edit form plus the SLA, device and copilot panels on the right.
  *
  * ATERA'S TWO PANELS ON THE RECORD KIT (redesign plan, Task 7, 2.3; Receta F):
- * `DetailHead` (back to the queue, "#<number> <subject>", the state, the
+ * `DetailHead` (back to the queue, "<number> <subject>" (the number carries its own prefix, INC- or REQ-), the state, the
  * client and the requester, today's actions), then `DetailGrid` with the
  * conversation on the left and the properties on the right. The properties
  * save through the kit's one `SaveBar`, at the foot of the page.
@@ -143,8 +143,8 @@ export function TicketDetailPage() {
     replyBox.current?.scrollIntoView?.({ block: "center" });
   }
 
-  // The tab: "#<number> · Tickets · Novieri RMM".
-  useRecordTitle(ticket.data ? `#${ticket.data.number}` : undefined);
+  // The tab: "<number> · Tickets · Novieri RMM" ("INC-4127 · Tickets · Novieri RMM").
+  useRecordTitle(ticket.data?.number);
   // Where the properties' save bar is drawn: the page's own foot, so it sticks
   // to the bottom of the window over the whole page, not over one column.
   const [barHost, setBarHost] = useState<HTMLDivElement | null>(null);
@@ -327,7 +327,7 @@ function TicketHeader({
     <>
       <DetailHead
         back={{ to: "/service-desk", label: t("serviceDesk.nav.tickets") }}
-        title={`#${ticket.number} ${ticket.subject}`}
+        title={`${ticket.number} ${ticket.subject}`}
         status={{ kind: VARIANT_KIND[ticketStatusVariant(ticket.status)], label: ticketStatusLabel(ticket.status) }}
         context={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">

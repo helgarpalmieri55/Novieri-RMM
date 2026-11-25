@@ -73,8 +73,8 @@ export function PortalTicketDetailPage() {
   return (
     <div>
       {/* The tab names the ticket by its number (redesign plan, Task 7, 2.11):
-          "#INC-4127 · Novieri RMM". The portal has no `AppShell`. */}
-      <PortalTitle page={ticket.data ? `#${ticket.data.number}` : undefined} />
+          "INC-4127 · Novieri RMM". The portal has no `AppShell`. */}
+      <PortalTitle page={ticket.data?.number} />
       <QueryState
         loading={ticket.isLoading}
         error={ticket.error}
@@ -90,7 +90,7 @@ export function PortalTicketDetailPage() {
                 one conversation. */}
             <DetailHead
               back={{ to: "/portal", label: t("portal.nav.myTickets") }}
-              title={`#${ticket.data.number} ${ticket.data.subject}`}
+              title={`${ticket.data.number} ${ticket.data.subject}`}
               status={{
                 kind: STATUS_KIND[portalTicketStatusVariant(ticket.data.status)],
                 label: portalTicketStatusLabel(ticket.data.status),

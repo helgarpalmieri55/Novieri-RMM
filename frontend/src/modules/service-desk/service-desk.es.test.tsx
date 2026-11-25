@@ -517,8 +517,8 @@ describe("a ticket's page in Spanish", () => {
   it("words the header, the conversation and the reply box", async () => {
     detailApi(OPEN_TICKET);
     const { container } = renderTicket(OPEN_TICKET);
-    // The record's head (redesign plan, Task 7, 2.3): "#<number> <subject>".
-    expect(await screen.findByRole("heading", { name: "#INC-100 La impresora t1 atasca el papel" })).toBeInTheDocument();
+    // The record's head (redesign plan, Task 7, 2.3): "<number> <subject>".
+    expect(await screen.findByRole("heading", { name: "INC-100 La impresora t1 atasca el papel" })).toBeInTheDocument();
     expect(screen.getByText(/Abierto el .+ por Rosa Solicitante · Soporte general/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Responder" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Añadir nota interna" })).toBeInTheDocument();
