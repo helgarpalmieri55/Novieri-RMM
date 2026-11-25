@@ -231,6 +231,9 @@ export const ROUTES = [
   "/dashboard",
   "/audit",
   "/enrollment",
+  // Enrollment -> Certificates (kit requests batch 2, K7): `/enrollment` opens
+  // Tokens, so the certificates' list and its revoked chip are walked only here.
+  "/enrollment?tab=certificates",
   "/device-groups",
   "/discovered",
   "/agent-packages",

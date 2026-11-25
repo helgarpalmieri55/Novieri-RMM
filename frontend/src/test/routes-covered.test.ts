@@ -122,6 +122,10 @@ describe("scripts/routes.mjs covers App.tsx", () => {
     }
   });
 
+  it("walks Enrollment -> Certificates, which /enrollment alone never opens (kit requests batch 2, K7)", () => {
+    expect(ROUTES).toContain("/enrollment?tab=certificates");
+  });
+
   it("has no duplicates", () => {
     expect(new Set(ROUTES).size).toBe(ROUTES.length);
   });
