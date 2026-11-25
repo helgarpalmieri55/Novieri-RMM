@@ -15,10 +15,16 @@
  * Decimal money strings are never summed client-side -- only the backend,
  * which owns the FX conversion, is trusted to add money together. Shown
  * only as the per-row figures the variance table already carries below.
+ *
+ * REDESIGN Task 11 ("BudgetDashboard", Receta O): the h1 is the rail's label
+ * ("IT budget") and the sentence under it names the client the figures are
+ * for (budget is one client at a time). The budget and the period shown are
+ * in the URL (`?budget=`, `?period=`), the budget as the head's chip, so a
+ * view reloads and links. The module's pages are the kit's `SectionNav`.
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { BarChart } from "../../components/chart";
 import { EmptyState, NoValue } from "../../components/emptystate";
@@ -26,6 +32,7 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import {
   useBudgetCategories,
   useBudgetPosition,
@@ -36,7 +43,7 @@ import {
 import { BudgetReadiness } from "./BudgetReadiness";
 import { BudgetPageNav, BudgetPickClient, useBudgetNeedsClient } from "./budgetState";
 import { chartFigure, compactMoney, exactMoney } from "./money";
-import { PageHead, Panel, Progress, QueryState, StatsGrid } from "../../shell/components";
+import { PageHead, Panel, Progress, QueryState, StatsGrid, useUrlFilters } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Pill, Tile } from "../../shell/viz";
 
@@ -110,9 +117,15 @@ export function BudgetDashboard() {
   const canRead = permissions.includes("budget.read");
   const needsClient = useBudgetNeedsClient();
 
+  const filters = useUrlFilters(["budget", "period"] as const);
+  const { selected: chosenClient, clients } = useClientScope();
+  const clientName = clients.find((client) => client.id === chosenClient)?.name;
+
   const budgets = useBudgets();
-  const [budgetIdOverride, setBudgetIdOverride] = useState<string | undefined>(undefined);
-  const budgetId = budgetIdOverride ?? budgets.data?.[0]?.id;
+  // The budget in the URL when it is one of this client's; otherwise the
+  // first, which writes nothing (the page's default view).
+  const budgetId =
+    budgets.data?.find((budget) => budget.id === filters.values.budget)?.id ?? budgets.data?.[0]?.id;
 
   const categories = useBudgetCategories();
   const categoryName = (id: string) => categories.data?.find((c) => c.id === id)?.name ?? id;
@@ -140,11 +153,9 @@ export function BudgetDashboard() {
     () => [...new Set(rows.map((row) => row.period_index))].sort((a, b) => a - b),
     [rows],
   );
-  const [periodOverride, setPeriodOverride] = useState<number | undefined>(undefined);
+  const periodAsked = filters.values.period === "" ? undefined : Number(filters.values.period);
   const period =
-    periodOverride != null && periodsAvailable.includes(periodOverride)
-      ? periodOverride
-      : periodsAvailable.at(-1);
+    periodAsked != null && periodsAvailable.includes(periodAsked) ? periodAsked : periodsAvailable.at(-1);
 
   const rowsForPeriod = rows.filter((row) => row.period_index === period);
   const chartCategories = rowsForPeriod.map((row) => categoryName(row.category_id));
@@ -208,24 +219,26 @@ export function BudgetDashboard() {
     <div>
       <PageHead
         title={t("budget.dashboard.title")}
-        description={t("budget.dashboard.description")}
+        description={
+          clientName ? t("budget.dashboard.descriptionFor", { client: clientName }) : t("budget.dashboard.description")
+        }
         actions={
-          noBudgets ? undefined : (
-            <label className="flex items-center gap-2">
-              <span className="note">{t("budget.dashboard.budget")}</span>
+          noBudgets || !budgets.data ? undefined : (
+            // THE BUDGET SHOWN, AS A CHIP (the kit's `.chip-select`), in the URL.
+            <span className="chip chip-select on">
+              <span aria-hidden="true">{t("budget.dashboard.budget")}</span>
               <select
-                className="select-field"
-                style={{ width: "auto" }}
+                aria-label={t("budget.dashboard.budget")}
                 value={budgetId ?? ""}
-                onChange={(e) => setBudgetIdOverride(e.target.value)}
+                onChange={(e) => filters.set("budget", e.target.value)}
               >
-                {budgets.data?.map((budget) => (
+                {budgets.data.map((budget) => (
                   <option key={budget.id} value={budget.id}>
                     {budget.name} ({budget.fiscal_year})
                   </option>
                 ))}
               </select>
-            </label>
+            </span>
           )
         }
       />
@@ -430,7 +443,7 @@ export function BudgetDashboard() {
               className="select-field"
               style={{ width: "auto" }}
               value={period ?? ""}
-              onChange={(e) => setPeriodOverride(Number(e.target.value))}
+              onChange={(e) => filters.set("period", e.target.value)}
             >
               {periodsAvailable.map((index) => (
                 <option key={index} value={index}>

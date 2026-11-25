@@ -167,7 +167,8 @@ describe("the budget dashboard in Spanish", () => {
   it("words the tiles, the money, the bars, the chart, the notices and the variance table", async () => {
     const { container } = mount(<BudgetDashboard />);
     expect(await screen.findByText("Real en lo que va del año")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Panel del presupuesto" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator ruling 1).
+    expect(screen.getByRole("heading", { name: "Presupuesto de TI" })).toBeInTheDocument();
     // Money follows the language: Spanish compact and grouped figures.
     expect(screen.getByText(/^1,2\s?M\s?€$/)).toBeInTheDocument();
     expect(screen.getByText("1.234.567,89 EUR")).toBeInTheDocument();
@@ -200,9 +201,10 @@ describe("the budget dashboard in Spanish", () => {
     expect(screen.getByText("1,234,567.89 EUR")).toBeInTheDocument();
     expect(screen.getByText("1 period elapsed")).toBeInTheDocument();
     expect(screen.getByText("+30% over plan")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Confirm queue" })).toBeInTheDocument();
+    // The module's pages are the kit's SectionNav: links, not tabs (redesign Task 11).
+    expect(screen.getByRole("link", { name: "Confirm queue" })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
-    expect(screen.getByRole("tab", { name: "Cola de confirmación" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cola de confirmación" })).toBeInTheDocument();
   });
 
   it("words the one-expense notice and the first-run state", async () => {
@@ -245,11 +247,12 @@ describe("the budget dashboard in Spanish", () => {
 describe("the budget planner in Spanish", () => {
   it("words the table, the details and the planned-amount grid", async () => {
     const user = userEvent.setup();
+    // A budget's name is a link to its plan, `?budget=<id>` (redesign Task 11, 6.3).
     const { container } = mount(<BudgetPlannerPage />);
     expect(await screen.findByRole("heading", { name: "Planificador del presupuesto" })).toBeInTheDocument();
     expect(await screen.findByText("Mensual", { selector: "td" }).catch(() => screen.findByText("Mes", { selector: "td" }))).toBeInTheDocument();
     expect(screen.getByText("Activo", { selector: ".pill, span, td, div" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Presupuesto TI 2026" }));
+    await user.click(screen.getByRole("link", { name: "Presupuesto TI 2026" }));
     expect(await screen.findByText("Detalles del presupuesto")).toBeInTheDocument();
     expect(await screen.findByText("Importes planificados")).toBeInTheDocument();
     expect(screen.getByLabelText("Herramientas de oficina, periodo 1")).toBeInTheDocument();
@@ -262,7 +265,7 @@ describe("the budget planner in Spanish", () => {
   it("words the grid delete confirmation, with and without an amount", async () => {
     const user = userEvent.setup();
     mount(<BudgetPlannerPage />);
-    await user.click(await screen.findByRole("button", { name: "Presupuesto TI 2026" }));
+    await user.click(await screen.findByRole("link", { name: "Presupuesto TI 2026" }));
     await user.click(await screen.findByRole("button", { name: "Eliminar la línea de Herramientas de oficina del periodo 1" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Herramientas de oficina, periodo 1, 500.00")).toBeInTheDocument();
@@ -273,7 +276,7 @@ describe("the budget planner in Spanish", () => {
   it("words the close confirmation", async () => {
     const user = userEvent.setup();
     mount(<BudgetPlannerPage />);
-    await user.click(await screen.findByRole("button", { name: "Presupuesto TI 2026" }));
+    await user.click(await screen.findByRole("link", { name: "Presupuesto TI 2026" }));
     await user.click(await screen.findByRole("button", { name: "Cerrar presupuesto" }));
     const dialog = await screen.findByRole("dialog");
     // Typing to confirm repeats the subject beside the field, so it is on the page twice.
@@ -288,7 +291,7 @@ describe("the budget planner in Spanish", () => {
     mount(<BudgetPlannerPage />);
     expect(await screen.findByText("Cerrado")).toBeInTheDocument();
     expect(screen.getByText("Trimestre")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Presupuesto TI 2026" }));
+    await user.click(screen.getByRole("link", { name: "Presupuesto TI 2026" }));
     expect(await screen.findByText("Este presupuesto está cerrado. Sus líneas están congeladas y no se puede reabrir.")).toBeInTheDocument();
   });
 
@@ -351,11 +354,14 @@ describe("the expense ledger in Spanish", () => {
     const { container } = mount(<ExpensesPage />);
     expect(await screen.findByText("Figma renewal")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Gastos" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Filtrar por estado")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Todos los estados" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Anulado" })).toBeInTheDocument();
+    // The status is a row of chips and the count the kit's (redesign Task 11, 6.4).
+    const statuses = screen.getByRole("group", { name: "Estado" });
+    expect(within(statuses).getByRole("button", { name: "Todos los estados" })).toBeInTheDocument();
+    expect(within(statuses).getByRole("button", { name: "Anulado" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Todas las categorías" })).toBeInTheDocument();
-    expect(screen.getByText("1 gasto")).toBeInTheDocument();
+    expect(screen.getByLabelText("Desde")).toBeInTheDocument();
+    expect(screen.getByLabelText("Hasta")).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 1")).toBeInTheDocument();
     expect(screen.getByText("Previsto", { selector: ".pill, span" })).toBeInTheDocument();
     expect(screen.getByText("Suscripción", { selector: ".pill, span" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Añadir gastos previstos" })).toBeInTheDocument();
@@ -516,7 +522,8 @@ describe("the confirmation queue in Spanish", () => {
   it("words the empty queue", async () => {
     mockUseApi.mockReturnValue(api({ listExpenses: vi.fn().mockResolvedValue([]) }));
     const { container } = mount(<ConfirmationQueuePage />);
-    expect(await screen.findByText("Nada que confirmar.")).toBeInTheDocument();
+    // The queue's empty sentence (redesign Task 11, 6.5).
+    expect(await screen.findByText("No hay gastos por confirmar.")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 });
@@ -525,6 +532,7 @@ describe("the budget admin page in Spanish", () => {
   it("words the settings, the three tables and the month the fiscal year starts", async () => {
     const { container } = mount(<BudgetAdminPage />);
     expect(await screen.findByText("Configuración del presupuesto")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
     expect(await screen.findByText("1 de abril", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Sin cambios (1 de abril)")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "1 de diciembre" })).toBeInTheDocument();
@@ -547,7 +555,8 @@ describe("the budget admin page in Spanish", () => {
     const user = userEvent.setup();
     mount(<BudgetAdminPage />);
     await user.type(await screen.findByLabelText("Nueva moneda base"), "usd");
-    await user.click(screen.getByRole("button", { name: "Guardar configuración" }));
+    // The page's one save bar (Receta FO, 4).
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("EUR a USD")).toBeInTheDocument();
     expect(within(dialog).getByText("Cambiar la moneda base del presupuesto")).toBeInTheDocument();

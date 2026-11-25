@@ -22,7 +22,7 @@ import {
   useBudgetNeedsClient,
 } from "./budgetState";
 import type { ExpenseOut } from "./types";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
 // The operator worklist that makes spec §0.3 workable: GET
@@ -79,57 +79,57 @@ export function ConfirmationQueuePage() {
 
       <BudgetPageNav canRead={canRead} />
 
+      {/* ON THE LIST KIT (redesign Task 11, 6.5; Receta L, 8: a list with no
+          filter): "Showing x" and an empty queue that says why.
+
+          THE DECISION COLUMN COMES SECOND, AND THE AMOUNT TRAVELS WITH IT. At
+          390px the table is wider than the viewport whatever it carries (the
+          kit floors it at 560px), so what matters is WHICH columns are inside
+          the first screenful. Confirm and Void were last, behind the status
+          pill, on a queue whose entire job is confirm-or-void. They sit beside
+          the amount they commit, in one cell that wraps, and the date and the
+          status -- context, not decisions -- take the columns that fall off
+          the right. */}
       <Panel bare>
-        <QueryState
-          loading={expenses.isLoading}
-          error={expenses.error}
-          empty={items.length === 0}
-          emptyLabel={t("budget.confirm.empty")}
-          emptyIcon="budget"
-        >
-          {/* THE DECISION COLUMN COMES SECOND, AND THE AMOUNT TRAVELS WITH
-              IT. At 390px the table is wider than the viewport whatever it
-              carries (the kit floors it at 560px), so what matters is WHICH
-              columns are inside the first screenful. Confirm and Void were
-              last, behind the status pill, on a queue whose entire job is
-              confirm-or-void: both decisions were off screen with nothing
-              saying they existed. They now sit beside the amount they commit,
-              in one cell that wraps rather than one that has to be scrolled
-              to, and the date and the status -- context, not decisions --
-              take the columns that fall off the right. */}
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("budget.confirm.colExpense")}</Th>
-                <Th>{canConfirm ? t("budget.confirm.colAmountDecision") : t("budget.confirm.colAmount")}</Th>
-                <Th>{t("budget.confirm.colDate")}</Th>
-                <Th>{t("budget.confirm.colStatus")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((expense) => (
-                <QueueRow
-                  key={expense.id}
-                  expense={expense}
-                  categoryName={categoryName(expense.category_id)}
-                  canConfirm={canConfirm}
-                  onConfirm={(amount) =>
-                    setConfirming({
-                      expense,
-                      amount,
-                      title: expense.description || categoryName(expense.category_id),
-                    })
-                  }
-                  onVoid={() =>
-                    setVoiding({
-                      expense,
-                      title: expense.description || categoryName(expense.category_id),
-                    })
-                  }
-                />
-              ))}
-            </tbody>
-          </Table>
+        <ListToolbar end={expenses.data ? <ShowingCount shown={items.length} total={null} /> : null} />
+        <QueryState loading={expenses.isLoading} error={expenses.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("budget.confirm.empty")} icon="budget" />
+          ) : (
+            <Table label={t("budget.confirm.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("budget.confirm.colExpense")}</Th>
+                  <Th>{canConfirm ? t("budget.confirm.colAmountDecision") : t("budget.confirm.colAmount")}</Th>
+                  <Th>{t("budget.confirm.colDate")}</Th>
+                  <Th>{t("budget.confirm.colStatus")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((expense) => (
+                  <QueueRow
+                    key={expense.id}
+                    expense={expense}
+                    categoryName={categoryName(expense.category_id)}
+                    canConfirm={canConfirm}
+                    onConfirm={(amount) =>
+                      setConfirming({
+                        expense,
+                        amount,
+                        title: expense.description || categoryName(expense.category_id),
+                      })
+                    }
+                    onVoid={() =>
+                      setVoiding({
+                        expense,
+                        title: expense.description || categoryName(expense.category_id),
+                      })
+                    }
+                  />
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
       </Panel>
       {/* The subject carries the AMOUNT, not just the category: the box on the
@@ -155,6 +155,9 @@ export function ConfirmationQueuePage() {
         onCancel={() => setConfirming(null)}
         onConfirm={() => {
           if (confirming) {
+            // A new attempt starts without the last one's refusal (general ruling 7).
+            confirm.reset();
+            voidExpense.reset();
             confirm.mutate({
               id: confirming.expense.id,
               body: { amount: confirming.amount },
@@ -182,7 +185,11 @@ export function ConfirmationQueuePage() {
         destructive
         onCancel={() => setVoiding(null)}
         onConfirm={() => {
-          if (voiding) voidExpense.mutate(voiding.expense.id);
+          if (voiding) {
+            confirm.reset();
+            voidExpense.reset();
+            voidExpense.mutate(voiding.expense.id);
+          }
           setVoiding(null);
         }}
       />
