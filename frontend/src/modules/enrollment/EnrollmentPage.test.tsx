@@ -900,7 +900,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/unavailable right now/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
     // The row is still there to try again on, and the token still reads active.
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
@@ -935,7 +935,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/do not have permission/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
   });
 
   it("shows no column or panel the API cannot fill", async () => {

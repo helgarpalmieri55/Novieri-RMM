@@ -7,7 +7,7 @@ export const health: Shape<typeof en> = {
     acknowledged: {
       label: "Reconocida",
       meaning:
-        "Asignada a una persona, y SIGUE ABIERTA. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
+        "Asignada a una persona, pero sigue abierta. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
     },
     muted: {
       label: "Silenciada",
@@ -356,7 +356,7 @@ export const health: Shape<typeof en> = {
     deactivateBody:
       "La acción deja de poder enviarse. Cualquier comprobación que la declare deja de corregir, y no falla nada: simplemente la corrección nunca se declara.",
     activateAutoBody:
-      "Esta acción se ejecuta AUTOMÁTICAMENTE, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
+      "Esta acción se ejecuta automáticamente, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
     activateBody:
       "La acción pasa a poder enviarse. Cada ejecución sigue esperando la aprobación de una persona en la alerta que la declara.",
     exemptField: "Eximir {key} ({script} v{version})",

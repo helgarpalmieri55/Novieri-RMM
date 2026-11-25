@@ -315,7 +315,7 @@ describe("the enrollment page in Spanish", () => {
     expect(within(dialog).getByText(/El token deja de funcionar de inmediato/)).toBeInTheDocument();
     expectNoEnglish(dialog, STORED);
     await user.click(within(dialog).getByRole("button", { name: "Revocar token" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("El token NO se revocó y todavía puede inscribir un dispositivo.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("El token no se revocó: todavía puede inscribir un dispositivo.");
     expectNoEnglish(container, STORED);
   });
 

@@ -441,7 +441,7 @@ describe("the Start session dialog, in Spanish", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No se pide consentimiento a nadie en el dispositivo.");
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     const confirm = await screen.findByRole("dialog", { name: "Iniciar una sesión desatendida" });
-    expect(confirm).toHaveTextContent("El modo desatendido se conecta SIN pedir consentimiento a la persona que está en ese dispositivo.");
+    expect(confirm).toHaveTextContent("El modo desatendido se conecta sin pedir nunca consentimiento a la persona que está en ese dispositivo.");
     expect(confirm).toHaveTextContent("El motivo que has indicado se escribe en el registro de auditoría inmutable junto con esta sesión.");
     expect(within(confirm).getByRole("button", { name: "Iniciar sesión remota desatendida" })).toBeInTheDocument();
     expectNoEnglish(confirm);

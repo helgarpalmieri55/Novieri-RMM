@@ -68,7 +68,7 @@ export const remote: Shape<typeof en> = {
     confirmTitleTooOld: "Iniciar una sesión que el agente no puede compartir",
     confirmTitleOffline: "Iniciar una sesión en un dispositivo que no puede responder",
     confirmUnattended:
-      "El modo desatendido se conecta SIN pedir consentimiento a la persona que está en ese dispositivo. Queda grabado, y el registro de auditoría te nombra como el técnico que lo eligió.",
+      "El modo desatendido se conecta sin pedir nunca consentimiento a la persona que está en ese dispositivo. Queda grabado, y el registro de auditoría te nombra como el técnico que lo eligió.",
     confirmReason: "El motivo que has indicado se escribe en el registro de auditoría inmutable junto con esta sesión.",
     dialogTitle: "Iniciar sesión remota",
     devicePlaceholder: "Buscar dispositivos inscritos…",

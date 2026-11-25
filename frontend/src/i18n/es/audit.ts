@@ -12,7 +12,7 @@ export const audit: Shape<typeof en> = {
     unknown: "desconocido",
   },
   broken: {
-    title: "Ha FALLADO la verificación de la cadena de hashes.",
+    title: "Ha fallado la verificación de la cadena de hashes.",
     body: "La cadena de solo anexado no se verifica a partir del evento <mono>{id}</mono>. No se puede confiar en la evidencia de auditoría posterior a ese eslabón. Trátalo como un incidente de seguridad.",
   },
   tiles: {
@@ -25,7 +25,7 @@ export const audit: Shape<typeof en> = {
       verifying: "Verificando…",
       unknown: "Sin verificar",
       intact: "Verificada",
-      broken: "ROTA",
+      broken: "Rota",
     },
     chainFoot: {
       verifying: "Recorriendo la cadena ahora",
@@ -69,7 +69,7 @@ export const audit: Shape<typeof en> = {
     didNotRun: "La verificación no se ejecutó.",
     didNotRunBody:
       "La solicitud para verificar la cadena falló, así que no se sabe nada de su estado. Esto <em>no</em> significa que la cadena esté intacta.",
-    brokenTitle: "La cadena está ROTA.",
+    brokenTitle: "La cadena está rota.",
     brokenBody: {
       one: "La verificación recorrió {count} evento y se detuvo en <mono>{id}</mono>. Todos los eventos a partir de ese eslabón quedan sin comprobar.",
       other: "La verificación recorrió {count} eventos y se detuvo en <mono>{id}</mono>. Todos los eventos a partir de ese eslabón quedan sin comprobar.",

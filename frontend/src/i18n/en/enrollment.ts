@@ -57,7 +57,7 @@ export const enrollment = {
   tokens: {
     filterLabel: "Filter tokens by revocation",
     limitLabel: "Filter tokens by use limit",
-    notRevoked: "The token was NOT revoked and can still enroll a device.",
+    notRevoked: "The token was not revoked: it can still enroll a device.",
     unlimited: {
       one: "{count} enrollment token has no use limit.",
       other: "{count} enrollment tokens have no use limit.",
@@ -93,7 +93,7 @@ export const enrollment = {
   },
   certs: {
     filterLabel: "Filter certificates by revocation",
-    notRevoked: "The agent certificate was NOT revoked and the device can still connect.",
+    notRevoked: "The agent certificate was not revoked: the device can still connect.",
     searchPlaceholder: "Search device, FQDN or certificate state",
     searchAria: "Search certificates",
     showRevokedNone: "Show revoked certificates (none have been revoked)",

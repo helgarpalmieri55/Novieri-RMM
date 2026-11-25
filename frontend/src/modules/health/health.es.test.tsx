@@ -915,7 +915,7 @@ describe("the approved-action registry, in Spanish", () => {
     // Activating an autonomous action.
     await user.click(screen.getByRole("button", { name: "Activar" }));
     let dialog = await screen.findByRole("dialog", { name: "Activar esta acción aprobada" });
-    expect(dialog).toHaveTextContent("Esta acción se ejecuta AUTOMÁTICAMENTE, sin ninguna persona en el circuito");
+    expect(dialog).toHaveTextContent("Esta acción se ejecuta automáticamente, sin ninguna persona en el circuito");
     expect(dialog).toHaveTextContent("hasta 3 por dispositivo y día y 20 por hora en toda la organización");
     expectNoEnglish(dialog, [...STORED, "clean-temp", "Clean Temp"]);
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
@@ -1184,7 +1184,7 @@ describe("the health sentences built outside React, in Spanish", () => {
     expect(decisionTitle({ kind: "active", action: a })).toBe("Desactivar esta acción aprobada");
     expect(decisionConfirmLabel({ kind: "active", action: a })).toBe("Desactivar");
     expect(decisionSubject({ kind: "active", action: a })).toBe("restart-spooler · Reiniciar la cola");
-    expect(decisionBody({ kind: "active", action: { ...a, active: false } })).toContain("AUTOMÁTICAMENTE");
+    expect(decisionBody({ kind: "active", action: { ...a, active: false } })).toContain("se ejecuta automáticamente");
     expect(decisionBody({ kind: "active", action: { ...a, active: false, autonomy: "suggest" } })).toContain("sigue esperando la aprobación de una persona");
   });
 

@@ -9,7 +9,7 @@ export const health = {
     acknowledged: {
       label: "Acknowledged",
       meaning:
-        "Owned by a person, and STILL OPEN. Acknowledging does not stop the check, does not prevent it clearing on its own, and does not cancel a fix already in flight: it only pauses re-notification and escalation.",
+        "Owned by a person, but still open. Acknowledging does not stop the check, does not prevent it clearing on its own, and does not cancel a fix already in flight: it only pauses re-notification and escalation.",
     },
     muted: {
       label: "Muted",
@@ -356,7 +356,7 @@ export const health = {
     deactivateBody:
       "The action stops being dispatchable. Any check declaring it stops fixing, and nothing errors: the fix simply is never declared.",
     activateAutoBody:
-      "This action runs AUTOMATICALLY, with no human in the loop, on every device whose check declares it, up to {perDevice} per device per day and {perOrg} per hour across the organisation. Activating it can put a signed job on the fleet before anyone reads this page again.",
+      "This action runs automatically, with no human in the loop, on every device whose check declares it, up to {perDevice} per device per day and {perOrg} per hour across the organisation. Activating it can put a signed job on the fleet before anyone reads this page again.",
     activateBody:
       "The action becomes dispatchable. Every run still waits for a human approval on the alert that declares it.",
     exemptField: "Exempt {key} ({script} v{version})",

@@ -69,7 +69,7 @@ export const remote = {
     confirmTitleTooOld: "Start a session the agent cannot share",
     confirmTitleOffline: "Start a session on a device that cannot answer",
     confirmUnattended:
-      "Unattended mode connects WITHOUT asking the person at that device to consent. It is recorded, and the audit log names you as the technician who chose it.",
+      "Unattended mode connects and never asks the person at that device to consent. It is recorded, and the audit log names you as the technician who chose it.",
     confirmReason: "The reason you gave is written to the immutable audit log with this session.",
     dialogTitle: "Start remote session",
     devicePlaceholder: "Search enrolled devices…",

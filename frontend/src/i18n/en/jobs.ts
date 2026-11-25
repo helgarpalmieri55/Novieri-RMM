@@ -114,8 +114,8 @@ export const jobs = {
   },
   retry: {
     title: "Run this job again",
-    body: "This does not re-send the original job. The platform creates a NEW job for the same device, signs it fresh, and sends it; the record of this attempt is left exactly as it is.",
-    bodyCancelled: "Somebody cancelled this job. This does not re-send the original job. The platform creates a NEW job for the same device, signs it fresh, and sends it; the record of this attempt is left exactly as it is.",
+    body: "This does not re-send the original job. The platform creates a separate, new job for the same device, signs it fresh, and sends it; the record of this attempt is left exactly as it is.",
+    bodyCancelled: "Somebody cancelled this job. This does not re-send the original job. The platform creates a separate, new job for the same device, signs it fresh, and sends it; the record of this attempt is left exactly as it is.",
     succeeded: "This job succeeded. Running the same work again is a new job rather than a retry, and it is dispatched from wherever that work is normally started.",
     notFinished: "This job has not finished, so there is nothing to re-run yet. A job that never reaches its device is re-sent automatically; a job that is running will report its own outcome.",
   },
