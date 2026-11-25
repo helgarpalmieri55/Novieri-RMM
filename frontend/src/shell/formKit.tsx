@@ -32,7 +32,12 @@ export function FormPage({
   description,
   children,
 }: {
-  back: { to: string; label: string };
+  /**
+   * Where the page was opened from. OPTIONAL (kit requests batch 3, B3-2;
+   * O7's K2): a page reached from the account menu, such as Your profile, has
+   * no list to go back to, and draws no back link.
+   */
+  back?: { to: string; label: string };
   title: string;
   description?: string;
   children: ReactNode;
@@ -40,10 +45,12 @@ export function FormPage({
   return (
     <div className="form-page">
       <section className="ph">
-        <Link className="back-link" to={back.to}>
-          <Icon name="chevron-left" size={14} />
-          {back.label}
-        </Link>
+        {back ? (
+          <Link className="back-link" to={back.to}>
+            <Icon name="chevron-left" size={14} />
+            {back.label}
+          </Link>
+        ) : null}
         <div className="ph-row">
           <div>
             <h1>{title}</h1>

@@ -872,3 +872,28 @@ describe("Escape on the leave question (kit requests batch 2, G2)", () => {
     expect(router.state.location.search).toBe("");
   });
 });
+
+/**
+ * A FORM PAGE WITH NOTHING TO GO BACK TO (kit requests batch 3, B3-2; O7's
+ * K2): Your profile is reached from the account menu, so it had to draw its
+ * own head instead of the kit's.
+ */
+describe("FormPage without a back link (B3-2)", () => {
+  it("draws its title and description, and no back link", () => {
+    renderPage(
+      "/profile",
+      <FormPage title="Your profile" description="Your name, your language and how you sign in.">
+        <p>fields</p>
+      </FormPage>,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Your profile" })).toBeInTheDocument();
+    expect(screen.getByText("Your name, your language and how you sign in.")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(document.querySelector(".back-link")).toBeNull();
+  });
+
+  it("still draws the back link when given one", () => {
+    renderPage("/settings", <FormPage back={{ to: "/admin", label: "Admin" }} title="Settings">x</FormPage>);
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+  });
+});
