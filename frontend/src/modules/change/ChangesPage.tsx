@@ -6,7 +6,7 @@
  * table and named in a sentence above it; they are now chips on the same
  * keys, so the subset a tile opened is the chip that is pressed and "All" is
  * the way back. "All" and "Open" (the tiles' views) are plain chips; the seven
- * states and the three types are the kit's chip with a list (`.chip-select`,
+ * states and the three types are the kit's chip with a list (`ChipSelect`,
  * as the Client chip), each option with its count: as thirteen chips they were
  * two rows at 1440 and seven at 390 before the first change (the wave's
  * critique, P1). The Client chip narrows the read (`?client=`,
@@ -38,6 +38,7 @@ import { GatesPanel } from "./GatesPanel";
 import type { ChangeRequest, ChangeState, ChangeType } from "./types";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -103,39 +104,9 @@ function ofType(change: ChangeRequest, type: string): boolean {
   return type === "" || change.type === type;
 }
 
-/**
- * One filter as the kit's chip with a list (`.chip-select`, as the Client
- * chip): the visible word is the filter's name, the list its values, each
- * with its count once the list has answered.
- */
-function ChipList({
-  label,
-  every,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  /** The first option, `""`: no value of this filter chosen. */
-  every: string;
-  value: string;
-  options: readonly { value: string; label: string; count?: number }[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{label}</span>
-      {/* A person's choice is a new entry, so Back undoes it, as for any chip. */}
-      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{every}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.count === undefined ? option.label : `${option.label} (${option.count})`}
-          </option>
-        ))}
-      </select>
-    </span>
-  );
+/** An option of a chip with a list, with its count once the list has answered ("Draft (1)"). */
+function counted(label: string, count: number | undefined): string {
+  return count === undefined ? label : `${label} (${count})`;
 }
 
 export function ChangesPage() {
@@ -272,20 +243,24 @@ export function ChangesPage() {
                 value={stateFilter}
                 onChange={(value) => filters.set("state", value)}
               />
-              <ChipList
+              <ChipSelect
                 label={t("change.list.stateLabel")}
-                every={t("change.list.anyState")}
                 // "Open" is every open state at once, not one of them; an
                 // unknown state matches nothing and the empty state says so.
                 value={(STATES as readonly string[]).includes(stateFilter) ? stateFilter : ""}
-                options={STATES.map((state) => ({ value: state, label: changeStateLabel(state), count: stateCount(state) }))}
+                options={[
+                  { value: "", label: t("change.list.anyState") },
+                  ...STATES.map((state) => ({ value: state, label: counted(changeStateLabel(state), stateCount(state)) })),
+                ]}
                 onChange={(value) => filters.set("state", value)}
               />
-              <ChipList
+              <ChipSelect
                 label={t("change.list.typeLabel")}
-                every={t("change.list.allTypes")}
                 value={(TYPES as readonly string[]).includes(typeFilter) ? typeFilter : ""}
-                options={TYPES.map((type) => ({ value: type, label: changeTypeLabel(type), count: typeCount(type) }))}
+                options={[
+                  { value: "", label: t("change.list.allTypes") },
+                  ...TYPES.map((type) => ({ value: type, label: counted(changeTypeLabel(type), typeCount(type)) })),
+                ]}
                 onChange={(value) => filters.set("type", value)}
               />
               <ClientFilter filters={filters} />
