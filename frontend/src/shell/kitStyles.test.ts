@@ -117,3 +117,20 @@ describe("the leave question's own layer (kit requests batch 2, G1)", () => {
     expect(z(KIT, ".leave-layer")).toBeLessThan(z(OVERLAYS, ".toast-stack"));
   });
 });
+
+describe("a read-only field looks read-only (kit requests batch 2, K5)", () => {
+  const COMPONENTS = read("./components.css");
+
+  it("is sunken: --surface-2 behind the value, so it does not look editable", () => {
+    expect(rule(COMPONENTS, ".input-field[readonly]")).toMatch(/background-color:\s*var\(--surface-2\)/);
+  });
+
+  it("paints only the colour, so a select's chevron image is never wiped by a shorthand", () => {
+    expect(rule(COMPONENTS, ".input-field[readonly]")).not.toMatch(/(^|[;\s])background:/);
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<input className=\{inputClass\}[^>]*\breadOnly\b/);
+  });
+});

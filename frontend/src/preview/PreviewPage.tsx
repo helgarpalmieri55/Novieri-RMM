@@ -1155,6 +1155,10 @@ function KitPreview() {
             <Field label="Name">
               <input className={inputClass} defaultValue="Andes Logistics" />
             </Field>
+            {/* A value the person cannot change (kit requests batch 2, K5). */}
+            <Field label="Organization ID">
+              <input className={inputClass} value="org-toeshee" readOnly />
+            </Field>
           </div>
         </FormSection>
         <div>
