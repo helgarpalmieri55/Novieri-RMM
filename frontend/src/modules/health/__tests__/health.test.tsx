@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
+import { NO_DATE } from "../../../lib/datetime";
 import { AlertConsole } from "../AlertConsole";
 import { AlertDetail } from "../AlertDetail";
 import { ApprovedActionList, decisionBody } from "../ApprovedActionList";
@@ -266,7 +267,7 @@ describe("AlertConsole", () => {
     // permanently handled.
     expect(within(muted).getByText(/^until/)).toBeInTheDocument();
     // Only the cleared row names an outcome.
-    expect(within(cleared).getByText(/Cleared — Recovered/)).toBeInTheDocument();
+    expect(within(cleared).getByText(/Cleared · Recovered/)).toBeInTheDocument();
     expect(within(cleared).queryByText("n/a")).not.toBeInTheDocument();
 
     // "1 open of 3 shown": the acknowledged and muted rows count as OPEN.
@@ -1864,9 +1865,15 @@ describe("datetime rendering — the reader's zone, one format", () => {
 
     for (const label of ["Escalated", "Muted until", "Acknowledged"]) {
       const value = (await screen.findByText(label)).nextElementSibling as HTMLElement;
-      expect(value).toHaveTextContent("—");
+      expect(value).toHaveTextContent(NO_DATE);
       expect(value).not.toHaveTextContent(/Invalid Date|null|undefined|NaN/);
     }
+    // A missing ticket is the kit's absent mark beside its spoken name
+    // (NoValue), never a bare dash.
+    const ticket = (await screen.findByText("Ticket")).nextElementSibling as HTMLElement;
+    expect(within(ticket).getByText("n/a")).toHaveAttribute("aria-hidden", "true");
+    expect(within(ticket).getByText("No ticket")).toBeInTheDocument();
+    expect(ticket).not.toHaveTextContent("—");
   });
 
   it("renders a device's last contact and last report in the operator's zone", async () => {
@@ -1929,7 +1936,7 @@ describe("datetime rendering — the reader's zone, one format", () => {
 
   it("falls back to the browser zone when the profile carries no timezone", async () => {
     // `timezone` is nullable on /me and most operators never set it. The
-    // fallback must be a real rendering, not "—" and not "Invalid Date".
+    // fallback must be a real rendering, not NO_DATE and not "Invalid Date".
     stubApi({
       me: vi.fn().mockResolvedValue(me(null)),
       listHealthAlerts: vi
@@ -1941,7 +1948,8 @@ describe("datetime rendering — the reader's zone, one format", () => {
     const row = await waitFor(() => screen.getByText("WS-01").closest("tr") as HTMLElement);
     const seen = within(row).getByTitle(PRODUCT_FORMAT);
     expect(seen).toBeInTheDocument();
-    expect(seen.getAttribute("title")).not.toMatch(/Invalid Date|—/);
+    expect(seen.getAttribute("title")).not.toMatch(/Invalid Date/);
+    expect(seen.getAttribute("title")).not.toBe(NO_DATE);
   });
 });
 

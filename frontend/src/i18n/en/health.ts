@@ -9,7 +9,7 @@ export const health = {
     acknowledged: {
       label: "Acknowledged",
       meaning:
-        "Owned by a person, and STILL OPEN. Acknowledging does not stop the check, does not prevent it clearing on its own, and does not cancel a fix already in flight — it only pauses re-notification and escalation.",
+        "Owned by a person, and STILL OPEN. Acknowledging does not stop the check, does not prevent it clearing on its own, and does not cancel a fix already in flight: it only pauses re-notification and escalation.",
     },
     muted: {
       label: "Muted",
@@ -27,7 +27,7 @@ export const health = {
     unavailable_timeout: {
       label: "Sensor went away",
       meaning:
-        "The check stopped being answerable and the unavailable timeout expired. Nothing was fixed — the sensor went away.",
+        "The check stopped being answerable and the unavailable timeout expired. Nothing was fixed: the sensor went away.",
     },
     policy_removed: {
       label: "Check removed",
@@ -43,7 +43,7 @@ export const health = {
         "A human closed it. That is not evidence that anything was fixed, which is why it is counted separately from a recovery.",
     },
   },
-  statusCleared: "{state} — {reason}",
+  statusCleared: "{state} · {reason}",
   severity: { critical: "Critical", warning: "Warning", info: "Info" },
   comparator: {
     gt: "over",
@@ -65,7 +65,7 @@ export const health = {
     unavailable: {
       label: "Unavailable",
       meaning:
-        "The device could not answer this check. It has neither opened nor cleared an alert — this is not a healthy result, and it is not a failing one.",
+        "The device could not answer this check. It has neither opened nor cleared an alert: this is not a healthy result, and it is not a failing one.",
     },
     unknown: {
       label: "Never reported",
@@ -86,7 +86,7 @@ export const health = {
     offline: {
       label: "Offline",
       detail:
-        "No contact from the agent inside the offline window. A quiet device is not a healthy device — it simply is not answering.",
+        "No contact from the agent inside the offline window. A quiet device is not a healthy device: it simply is not answering.",
     },
     partial: "Partially answered",
     partialDetail: {
@@ -252,6 +252,7 @@ export const health = {
     notFix: "not counted as a fix",
     factDevice: "Device",
     factProfile: "Profile",
+    factProfileNone: "No profile recorded",
     factCheck: "Check",
     factObserved: "Observed",
     factOpened: "Opened",
@@ -259,6 +260,7 @@ export const health = {
     factOccurrences: "Occurrences",
     factEscalated: "Escalated",
     factTicket: "Ticket",
+    factTicketNone: "No ticket",
     factMutedUntil: "Muted until",
     factAcknowledged: "Acknowledged",
     reopened: "Re-opened after a previous alert",
@@ -335,7 +337,7 @@ export const health = {
     colGrantedBy: "Granted by",
     colGranted: "Granted",
     colReason: "Reason",
-    noReason: "— (no reason recorded)",
+    noReason: "No reason recorded",
     revoke: "Revoke",
     failedActivate: "Activate/deactivate",
     failedExempt: "Grant exemption",
@@ -352,9 +354,9 @@ export const health = {
     exemptBody:
       "This says that this exact version of the script is not destructive. The grant is keyed to the version, not to {key}: it outlives this action, and any later action pinning the same version inherits it.",
     deactivateBody:
-      "The action stops being dispatchable. Any check declaring it stops fixing, and nothing errors — the fix simply is never declared.",
+      "The action stops being dispatchable. Any check declaring it stops fixing, and nothing errors: the fix simply is never declared.",
     activateAutoBody:
-      "This action runs AUTOMATICALLY, with no human in the loop, on every device whose check declares it — up to {perDevice} per device per day and {perOrg} per hour across the organisation. Activating it can put a signed job on the fleet before anyone reads this page again.",
+      "This action runs AUTOMATICALLY, with no human in the loop, on every device whose check declares it, up to {perDevice} per device per day and {perOrg} per hour across the organisation. Activating it can put a signed job on the fleet before anyone reads this page again.",
     activateBody:
       "The action becomes dispatchable. Every run still waits for a human approval on the alert that declares it.",
     exemptField: "Exempt {key} ({script} v{version})",
@@ -369,7 +371,7 @@ export const health = {
     agentReporting: "agent reporting",
     agentOffline: "agent offline",
     quiet:
-      "Last contact {when}, outside the {window} offline window. Alerts do not clear because a device went quiet — anything open below is still open.",
+      "Last contact {when}, outside the {window} offline window. Alerts do not clear because a device went quiet: anything open below is still open.",
     never: "never",
     noProfileStrong: "No health profile resolves to this device.",
     noProfileRest:
@@ -400,7 +402,7 @@ export const health = {
     noValue: "This check has reported no value",
     openAlerts: "Open alerts",
     noOpenAlerts: "No open alerts.",
-    noOpenAlertsQuiet: "No open alerts — but this device is not reporting, so that is not evidence of health.",
+    noOpenAlertsQuiet: "No open alerts, but this device is not reporting, so that is not evidence of health.",
     open: "Open",
   },
   report: {
@@ -451,7 +453,7 @@ export const health = {
     save: "Save",
     saved: "Saved. Values above are what the server returned.",
     noPermission: "You do not have permission to change health settings.",
-    nothingChanged: "Nothing has changed yet — edit a value before saving",
+    nothingChanged: "Nothing has changed yet: edit a value before saving",
     notWhole: "{label} must be a whole number",
     between: "{label} must be between {min} and {max}",
     betweenUnit: "{label} must be between {min} and {max} {unit}",
@@ -463,7 +465,7 @@ export const health = {
       },
       escalate_after_s: {
         label: "Escalate an unanswered alert after",
-        help: "If nobody acknowledges it, the alert escalates once — never twice.",
+        help: "If nobody acknowledges it, the alert escalates once, never twice.",
       },
       unavailable_clear_after_s: {
         label: "Give up on an unanswerable check after",
@@ -528,18 +530,18 @@ export const health = {
     create: "Create",
     created: "Profile created.",
     deleteTitle: "Delete health profile",
-    deleteBody: "{impact} This cannot be undone — to stop a profile alarming without destroying it, use Retire instead.",
+    deleteBody: "{impact} This cannot be undone: to stop a profile alarming without destroying it, use Retire instead.",
     deleteLabel: "Delete profile",
     failedRetire: "Retire/reactivate",
     failedClone: "Clone",
     failedDelete: "Delete",
     mutationFailed: "{label} failed: {detail}",
     impactNone: {
-      one: "It is assigned to nothing, so no device stops being checked — but its {count} check(s) go with it.",
-      other: "It is assigned to nothing, so no device stops being checked — but its {count} check(s) go with it.",
+      one: "It is assigned to nothing, so no device stops being checked, but its {count} check(s) go with it.",
+      other: "It is assigned to nothing, so no device stops being checked, but its {count} check(s) go with it.",
     },
     impactSome:
-      "Devices resolved by its {assignments} assignment(s) stop being checked by its {checks} check(s), and fall through to the next profile that resolves to them — or to nothing at all.",
+      "Devices resolved by its {assignments} assignment(s) stop being checked by its {checks} check(s), and fall through to the next profile that resolves to them, or to nothing at all.",
     orgDefault: "org default",
     clientDefaults: { one: "default of {count} client", other: "default of {count} clients" },
     groups: { one: "{count} group", other: "{count} groups" },
@@ -599,8 +601,8 @@ export const health = {
     keep: "Keep",
     remove: "Remove",
     removalNotice: {
-      one: "Saving will remove {count} check(s). Any alert they have open is cleared as <strong>“check removed”</strong> — which is not a fix, and is excluded from resolution reporting. The alert rows themselves are kept.",
-      other: "Saving will remove {count} check(s). Any alert they have open is cleared as <strong>“check removed”</strong> — which is not a fix, and is excluded from resolution reporting. The alert rows themselves are kept.",
+      one: "Saving will remove {count} check(s). Any alert they have open is cleared as <strong>“check removed”</strong>, which is not a fix, and is excluded from resolution reporting. The alert rows themselves are kept.",
+      other: "Saving will remove {count} check(s). Any alert they have open is cleared as <strong>“check removed”</strong>, which is not a fix, and is excluded from resolution reporting. The alert rows themselves are kept.",
     },
     saveSet: "Save check set",
     cancel: "Cancel",
@@ -609,6 +611,7 @@ export const health = {
     matrixType: "Check type",
     matrixCadence: "Cadence",
     matrixSelector: "Selector",
+    matrixSelectorNone: "Takes no selector",
     answersOn: "{type} answers on {family}",
     unavailableOnFamily: "{type} is unavailable on {family}",
     yes: "yes",

@@ -382,8 +382,8 @@ describe("the alert console, in Spanish", () => {
     expect(within(row("MUT-HOST")).getByText("Silenciada")).toBeInTheDocument();
     expect(within(row("MUT-HOST")).getByText(/^hasta/)).toBeInTheDocument();
     expect(within(row("MUT-HOST")).getByText("se repite ×4")).toBeInTheDocument();
-    expect(within(row("REC-HOST")).getByText("Cerrada — Recuperada")).toBeInTheDocument();
-    expect(within(row("GONE-HOST")).getByText("Cerrada — El sensor desapareció")).toBeInTheDocument();
+    expect(within(row("REC-HOST")).getByText("Cerrada · Recuperada")).toBeInTheDocument();
+    expect(within(row("GONE-HOST")).getByText("Cerrada · El sensor desapareció")).toBeInTheDocument();
     expect(within(row("GONE-HOST")).getByText("Estado del antivirus")).toBeInTheDocument();
     expect(within(row("GONE-HOST")).getByText("No se observó nada, se esperaba true")).toBeInTheDocument();
     expect(within(row("ACT-HOST")).getByText("CPU ocupada")).toBeInTheDocument();
@@ -430,7 +430,7 @@ describe("the alert console, in Spanish", () => {
     act(() => setActiveLanguage("en"));
     expect(screen.getByText("3 open of 5 shown")).toBeInTheDocument();
     const row = screen.getByText("REC-HOST").closest("tr") as HTMLElement;
-    expect(within(row).getByText("Cleared — Recovered")).toBeInTheDocument();
+    expect(within(row).getByText("Cleared · Recovered")).toBeInTheDocument();
     expect(within(screen.getByText("ACT-HOST").closest("tr") as HTMLElement).getByText("CPU busy")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "State" })).toBeInTheDocument();
   });
@@ -516,7 +516,7 @@ describe("the alert detail, in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Aprobar y enviar" }));
     const dialog = await screen.findByRole("dialog", { name: "Aprobar una corrección destructiva" });
     expect(dialog).toHaveTextContent("Esta acción está marcada como destructiva");
-    expect(dialog).toHaveTextContent("restart-spooler — Reiniciar la cola — Restart Spooler v4");
+    expect(dialog).toHaveTextContent("restart-spooler · Reiniciar la cola · Restart Spooler v4");
     expectNoEnglish(dialog, STORED);
   });
 
@@ -901,7 +901,7 @@ describe("the approved-action registry, in Spanish", () => {
     expect(within(loud).getByRole("button", { name: "Activar" })).toBeInTheDocument();
     // Exemptions.
     expect(screen.getByText("Scripts marcados como seguros")).toBeInTheDocument();
-    expect(screen.getByText("— (sin motivo registrado)")).toBeInTheDocument();
+    expect(screen.getByText("Sin motivo registrado")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revocar" })).toBeInTheDocument();
     expect(screen.getByLabelText("Eximir restart-spooler (Restart Spooler v4)")).toHaveAttribute("placeholder", "¿Por qué es segura esta versión exacta?");
     expectNoEnglish(container, [...STORED, "clean-temp", "Clean Temp", "ops", "script.run", "Reiniciar la cola", "Limpiar temporales"]);
@@ -994,7 +994,7 @@ describe("the settings panel, in Spanish", () => {
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Todavía no ha cambiado nada: edita un valor antes de guardar");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("alert")).toHaveTextContent("Nothing has changed yet — edit a value before saving");
+    expect(screen.getByRole("alert")).toHaveTextContent("Nothing has changed yet: edit a value before saving");
   });
 
   it("quotes the bound in the field's own unit", async () => {
@@ -1128,7 +1128,7 @@ describe("the health sentences built outside React, in Spanish", () => {
     expect(ACTION_STATE_PRESENTATION.awaiting_approval.label).toBe("Esperando aprobación");
     expect(AUTONOMY_PRESENTATION.autonomous.label).toBe("Se ejecuta automáticamente");
     expect(ACTION_KIND_LABEL.open_ticket).toBe("Abrir un ticket");
-    expect(describeAlertStatus({ state: "cleared", cleared_reason: "manual" })).toBe("Cerrada — Cerrada por una persona");
+    expect(describeAlertStatus({ state: "cleared", cleared_reason: "manual" })).toBe("Cerrada · Cerrada por una persona");
     // The variants and flags are data, not words.
     expect(ALERT_STATE_PRESENTATION.acknowledged.open).toBe(true);
     expect(CLEARED_REASON_PRESENTATION.manual.countsAsResolution).toBe(true);
@@ -1179,11 +1179,11 @@ describe("the health sentences built outside React, in Spanish", () => {
       "No está asignado a nada, así que ningún dispositivo deja de comprobarse, pero se va con él su comprobación (1).",
     );
     expect(describeDeleteImpact({ assignment_count: 0, check_count: 3 })).toContain("se van con él sus comprobaciones (3)");
-    expect(describeApprovalSubject({ kind: "remediate", approved_action_key: "k", approved_action_name: "Nombre", script_name: "S", script_version: 2 })).toBe("k — Nombre — S v2");
+    expect(describeApprovalSubject({ kind: "remediate", approved_action_key: "k", approved_action_name: "Nombre", script_name: "S", script_version: 2 })).toBe("k · Nombre · S v2");
     const a = approved({ autonomy: "autonomous", active: true });
     expect(decisionTitle({ kind: "active", action: a })).toBe("Desactivar esta acción aprobada");
     expect(decisionConfirmLabel({ kind: "active", action: a })).toBe("Desactivar");
-    expect(decisionSubject({ kind: "active", action: a })).toBe("restart-spooler — Reiniciar la cola");
+    expect(decisionSubject({ kind: "active", action: a })).toBe("restart-spooler · Reiniciar la cola");
     expect(decisionBody({ kind: "active", action: { ...a, active: false } })).toContain("AUTOMÁTICAMENTE");
     expect(decisionBody({ kind: "active", action: { ...a, active: false, autonomy: "suggest" } })).toContain("sigue esperando la aprobación de una persona");
   });
