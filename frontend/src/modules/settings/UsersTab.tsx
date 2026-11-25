@@ -601,7 +601,6 @@ export function UsersTab({
 
   return (
     <>
-      {guard}
       {!canManage ? <ReadOnlyNotice reason={reason} /> : null}
       {emailMissing ? (
         // `role="alert"` and named, so it is announced rather than merely
@@ -1297,6 +1296,10 @@ export function UsersTab({
           <Btn label={t("common.actions.cancel")} onClick={newUser.close} />
         </div>
       </Dialog>
+      {/* AFTER the dialog it guards (coordinator clarification 3a): the two
+          share the modal's stacking, so the question must come later in the
+          DOM to paint over the form. */}
+      {guard}
 
       <Dialog
         open={confirming != null}

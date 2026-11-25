@@ -294,9 +294,6 @@ export function NotificationsTab({
 
   return (
     <>
-      {/* ONE GUARD FOR THE TAB (decision D16): a channel's dialog holding a
-          change asks before the tab, or the page, is left. */}
-      <UnsavedGuard dirty={channelDirty()} search={["tab"]} />
       {!canAdmin && !forbidden ? <ReadOnlyNotice reason={reason} /> : null}
       <Panel
         title={t("settings.notifications.channels.title")}
@@ -476,6 +473,10 @@ export function NotificationsTab({
           </form>
         ) : null}
       </Dialog>
+      {/* ONE GUARD FOR THE TAB (decision D16): a channel's dialog holding a
+          change asks before the tab, or the page, is left. After the dialog
+          (coordinator clarification 3a), so the question paints over it. */}
+      <UnsavedGuard dirty={channelDirty()} search={["tab"]} />
 
       {canRead ? (
         <Panel title={t("settings.notifications.add.title")} subtitle={t("settings.notifications.add.subtitle")}>
