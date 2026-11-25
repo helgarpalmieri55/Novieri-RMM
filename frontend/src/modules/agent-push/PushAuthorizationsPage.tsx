@@ -4,18 +4,24 @@ import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
-import { Button, Field, Td, Th, inputClass } from "../../components/ui";
+import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
 import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDate, toInstant } from "../../lib/datetime";
 import {
-  FilterBar,
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatusPill,
   TableWrap,
+  useNewParam,
+  useUrlFilters,
   type Kind,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -81,14 +87,18 @@ const KIND_OF_VARIANT: Record<BadgeVariant, Kind> = {
 // and it is the only thing that refuses.
 //
 // v3 draws this as one list -- prefix, who authorized it and when, state,
-// expiry -- and one note under it. The grant form the design opens from its
-// "New authorization" button is inline below the list here, so the head
-// carries no button that would only scroll to it.
+// expiry -- and one note under it, and opens the grant form from its "New
+// authorization" button. ON THE LIST KIT (redesign plan Task 6, 1.9): that
+// button opens the form in a dialog from `?new=authorization` (decision D8),
+// with every sentence of the form's safety text (invariant 2a) still beside
+// its controls; "include inactive" is the `?inactive=1` chip.
 export function PushAuthorizationsPage() {
   const t = useT();
   const permissions = usePushPermissions();
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const filters = useUrlFilters(["inactive"] as const);
+  const includeInactive = filters.values.inactive === "1";
   const grants = usePushAuthorizations(includeInactive);
+  const creating = useNewParam("authorization");
   const revoke = useRevokePushAuthorizationMutation();
   // With every client chosen, each grant says whose network it opens.
   const { selected } = useClientScope();
@@ -105,6 +115,11 @@ export function PushAuthorizationsPage() {
       <PageHead
         title={t("agentPush.authorizations.title")}
         description={t("agentPush.authorizations.description")}
+        actions={
+          permissions.scopeManage ? (
+            <Btn label={t("agentPush.authorizations.new")} icon="plus" variant="primary" onClick={creating.start} />
+          ) : undefined
+        }
       />
 
       <PushNav />
@@ -118,29 +133,41 @@ export function PushAuthorizationsPage() {
         subtitle={t("agentPush.authorizations.panelSubtitle")}
         bare
       >
-        <FilterBar>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(e) => setIncludeInactive(e.target.checked)}
+        <ListToolbar
+          chips={
+            /* Asks the server for revoked and expired grants too, as the checkbox did. */
+            <FilterChips
+              label={t("agentPush.authorizations.showRevoked")}
+              options={[
+                { value: "", label: t("agentPush.authorizations.chipInForce") },
+                { value: "1", label: t("agentPush.authorizations.chipInactive") },
+              ]}
+              value={filters.values.inactive}
+              onChange={(value) => filters.set("inactive", value)}
             />
-            <span>{t("agentPush.authorizations.showRevoked")}</span>
-          </label>
-          <span className="filter-spacer" />
-          <span className="note mono">
-            {grants.data ? t("agentPush.authorizations.count", { count: grants.data.length }) : "…"}
-          </span>
-        </FilterBar>
-        <QueryState
-          loading={grants.isLoading}
-          error={grants.error}
-          empty={(grants.data ?? []).length === 0}
-          emptyLabel={t("agentPush.authorizations.empty")}
-          emptyIcon="shield"
-        >
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={grants.data ? <ShowingCount shown={grants.data.length} total={grants.data.length} /> : null}
+        />
+        <QueryState loading={grants.isLoading} error={grants.error} empty={false} emptyLabel="">
+          {(grants.data ?? []).length === 0 ? (
+            /* NEVER "NOTHING MATCHES": the chip only ever adds rows (the
+               revoked and expired ones), so an empty list is the real cause --
+               nothing authorized, and every push refused -- with or without it. */
+            <ListEmpty
+              filtered={false}
+              onClear={filters.clear}
+              nothingYet={t("agentPush.authorizations.empty")}
+              icon="shield"
+              action={
+                permissions.scopeManage ? (
+                  <Btn label={t("agentPush.authorizations.new")} icon="plus" onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("agentPush.authorizations.title")}>
               <thead>
                 <tr>
                   <th scope="col">{t("agentPush.shared.prefix")}</th>
@@ -168,6 +195,7 @@ export function PushAuthorizationsPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
         {revoke.isError && (
           <p role="alert" className="form-error" style={{ margin: "12px 18px" }}>
@@ -182,7 +210,15 @@ export function PushAuthorizationsPage() {
           this page does not name is one an operator will assume away. */}
       <p className="note mb-4">{t("agentPush.authorizations.fourBounds")}</p>
 
-      {permissions.scopeManage && <GrantForm />}
+      {/* Only for a holder of the scope code, whatever the URL asks: the
+          server refuses the write either way (invariant 6). */}
+      <Dialog
+        open={creating.open && permissions.scopeManage}
+        onClose={creating.close}
+        title={t("agentPush.authorizations.form.title")}
+      >
+        <GrantForm onDone={creating.close} />
+      </Dialog>
     </div>
   );
 }
@@ -271,7 +307,7 @@ function GrantRow({
   );
 }
 
-function GrantForm() {
+function GrantForm({ onDone }: { onDone: () => void }) {
   const t = useT();
   const create = useCreatePushAuthorizationMutation();
   // A prefix is one client's network (MSP clients phase 2, Task 12): the
@@ -294,24 +330,16 @@ function GrantForm() {
   // instead of a form whose Authorize can only fail.
   if (client.refused === "unassigned") {
     return (
-      <div id="authorize">
-        <Panel
-          title={t("agentPush.authorizations.form.title")}
-          subtitle={t("agentPush.authorizations.form.subtitle")}
-        >
-          <UnassignedRefusal />
-        </Panel>
-      </div>
+      <>
+        <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
+        <UnassignedRefusal />
+      </>
     );
   }
 
   return (
-    // `id` is the target of the readiness panel's "Authorize a range".
-    <div id="authorize">
-    <Panel
-      title={t("agentPush.authorizations.form.title")}
-      subtitle={t("agentPush.authorizations.form.subtitle")}
-    >
+    <>
+      <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
       <div className="form-grid">
         {client.needsField ? <ClientField field={client} /> : null}
         <Field label={t("agentPush.shared.prefix")}>
@@ -426,6 +454,7 @@ function GrantForm() {
                   setPrefix("");
                   setNote("");
                   setExpiresAt("");
+                  onDone();
                 },
               },
             );
@@ -450,7 +479,6 @@ function GrantForm() {
           {problems.map((problem) => problem.message).join(". ")}.
         </p>
       ) : null}
-    </Panel>
-    </div>
+    </>
   );
 }

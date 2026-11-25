@@ -319,7 +319,8 @@ beforeEach(() => mockUseApi.mockReset());
 describe("push install pages in Spanish", () => {
   it("words the authorizations page, its readiness panel and the grant form", async () => {
     stubApi();
-    const { container } = renderPage(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    const { container } = renderPage(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     expect(await screen.findByRole("heading", { name: "Autorizaciones de instalación remota" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
@@ -352,12 +353,14 @@ describe("push install pages in Spanish", () => {
   it("words the credential scopes page and its bind form", async () => {
     const user = userEvent.setup();
     stubApi();
-    const { container } = renderPage(<PushCredentialScopesPage />);
+    // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
+    const { container } = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByRole("heading", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByText("(credencial eliminada)")).toBeInTheDocument();
     expect(screen.getByText("Desvinculado")).toBeInTheDocument();
-    expect(screen.getByText("3 ámbitos")).toBeInTheDocument();
+    // The kit's count (redesign Receta L): "Mostrando x de y".
+    expect(screen.getByText("Mostrando 3 de 3")).toBeInTheDocument();
     expect(screen.getByText("1 dirección")).toBeInTheDocument();
     expectNoEnglish(container);
 
@@ -375,14 +378,15 @@ describe("push install pages in Spanish", () => {
 
   it("explains an empty credential picker, and one the account may not read", async () => {
     stubApi({ listCredentials: vi.fn().mockResolvedValue([]), listPushCredentialScopes: vi.fn().mockResolvedValue([]) });
-    const first = renderPage(<PushCredentialScopesPage />);
+    // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
+    const first = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/Todavía no existe ninguna credencial de instalación remota/)).toBeInTheDocument();
     expect(screen.getByText(/Ninguna credencial está vinculada a un prefijo/)).toBeInTheDocument();
     expectNoEnglish(first.container);
     first.unmount();
 
     stubApi({ listCredentials: vi.fn().mockRejectedValue(new ApiError(403, JSON.stringify({ detail: "no" }))) });
-    const second = renderPage(<PushCredentialScopesPage />);
+    const second = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/Esta cuenta no puede ver las credenciales, así que no se puede mostrar la lista/)).toBeInTheDocument();
     expectNoEnglish(second.container);
   });

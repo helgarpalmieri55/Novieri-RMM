@@ -33,7 +33,10 @@ export const agentPush = {
     colClient: "Client",
     panelSubtitle: "A push is refused unless all four pass.",
     showRevoked: "Show revoked authorizations",
-    count: { one: "{count} authorization", other: "{count} authorizations" },
+    // The list kit (redesign Task 6, 1.9): the head's create action and the inactive chip.
+    new: "New authorization",
+    chipInForce: "In force",
+    chipInactive: "Including revoked and expired",
     empty: "No address range is authorized for push install, so every push is refused.",
     expires: "Expires",
     fourBounds: "A push is refused unless the target is an asset a person vouched for, an authorization covers its address, a credential is scoped to it, and a site server serves its segment. A refusal is recorded before any signature is produced.",
@@ -67,7 +70,10 @@ export const agentPush = {
     title: "Credential scopes",
     description: "Which vaulted credential may be presented to which addresses.",
     showUnbound: "Show unbound scopes",
-    count: { one: "{count} scope", other: "{count} scopes" },
+    // The list kit (redesign Task 6, 1.10): the head's create action and the unbound chip.
+    new: "New scope",
+    chipBound: "Bound now",
+    chipUnbound: "Including unbound",
     empty: "No credential is bound to any prefix. Every push is refused for want of a credential scope.",
     mayBePresentedIn: "May be presented in",
     bound: "Bound",

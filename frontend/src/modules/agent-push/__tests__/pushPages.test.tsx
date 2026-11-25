@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, MeClient } from "../../../lib/api";
 import { ApiError } from "../../../lib/api";
 import { ClientNotChosen } from "../../../lib/clientSelection";
+import { renderPage as renderRouted } from "../../../test/renderPage";
 import { PushAuthorizationsPage } from "../PushAuthorizationsPage";
 import { PushCredentialScopesPage } from "../PushCredentialScopesPage";
 import { PUSH_PLATFORMS } from "../PushReadiness";
@@ -52,11 +53,11 @@ const SITE_READ = "site.read";
 const RELEASE_READ = "agent.release.read";
 const PUSH_RUN = "agent.push.run";
 
-function renderWithProviders(node: React.ReactNode) {
+function renderWithProviders(node: React.ReactNode, path = "/agent-push/authorizations") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/agent-push/authorizations"]}>{node}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -182,12 +183,13 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("says an IPAM scan authorization grants nothing here", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The assumption most likely to be made, and exactly wrong: authorizing an
     // ICMP echo is not authorizing an administrative login. It is stated on
     // the grant form -- the control that acts on the assumption -- rather than
     // in the page description it used to trail.
     stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     expect(
       await screen.findByText(
         /IPAM scan authorization over the same prefix authorizes nothing here/i,
@@ -269,10 +271,11 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("previews what a grant would open before it is made", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Deny-by-default only helps if the person granting knows what they are
     // opening. The preview is sized from what is typed, before any round trip.
     stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.0.0.0/8");
     await waitFor(() =>
@@ -284,11 +287,12 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("authorizes the prefix in the client chosen at the top", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // A prefix is one client's network (MSP clients phase 2, Task 12). The
     // grant is the client chosen at the top's: here the internal one, `o1`.
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
     stubApi({ createPushAuthorization });
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
@@ -303,11 +307,12 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("sends no grant before its client is known", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
     // `/me` has not answered: the selector cannot say whose the grant is yet.
     mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
     stubApi({ createPushAuthorization });
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
@@ -316,8 +321,9 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("refuses to preview something that is not a prefix", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "server-17.corp.example");
     await waitFor(() => expect(screen.getByText(/That is not a prefix/)).toBeTruthy());
@@ -339,10 +345,11 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("names the permission in words, never as its code", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Stated on the bind form -- the control the permission gates -- and in
     // the words an administrator finds on the role screen.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const stated = await screen.findByText(/Binding and unbinding need/);
     expect(stated.textContent).toContain("permission to manage push install scopes");
     expect(stated.textContent).toContain("separate from permission to run a push");
@@ -350,23 +357,26 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("says the credential should not be a domain admin, where the choice is made", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The platform cannot check what rights an account holds in somebody
     // else's directory. It can refuse to pretend the choice does not matter.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/not Domain Admin/i)).toBeTruthy();
   });
 
   it("explains an empty picker instead of leaving a blank dropdown", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // "There are no push credentials yet" and "you cannot read the vault" are
     // different facts with different remedies, and a bare empty select says
     // neither.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/No push credential exists yet/i)).toBeTruthy();
   });
 
   it("offers only push credentials in the picker", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The server refuses any other type. A picker listing the domain
     // remote-control account would teach an operator that the dedication rule
     // is an obstacle rather than the point. A Windows domain account is a push
@@ -379,7 +389,7 @@ describe("PushCredentialScopesPage", () => {
         { id: "c3", name: "corp-push", type: "windows_domain", has_secret: true },
       ]),
     });
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     await screen.findByText(/Bind a credential to a prefix/);
     await waitFor(() => expect(screen.getByRole("option", { name: "branch-installer" })).toBeTruthy());
     expect(screen.getByRole("option", { name: /^corp-push · Windows domain/ })).toBeTruthy();
@@ -388,6 +398,7 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("keeps Bind disabled until both a credential and a prefix are chosen", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Both halves are the bound: a credential with no prefix binds nothing,
     // and a prefix with no credential binds nothing to it.
     stubApi({
@@ -397,7 +408,7 @@ describe("PushCredentialScopesPage", () => {
           { id: "c1", name: "branch-installer", type: "push_install", has_secret: true },
         ]),
     });
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const button = (await screen.findByRole("button", { name: "Bind" })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     await userEvent.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
@@ -407,8 +418,9 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("says binding authorizes nothing on its own", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await waitFor(() =>
@@ -812,5 +824,64 @@ describe("Before a push can run: Windows over WinRM", () => {
     const detail = await screen.findByText(/^1 credential is saved for push install\./);
     expect(detail.textContent).toMatch(/Domain Admin/);
     expect(detail.textContent).toMatch(/compromised domain/);
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.9 and 1.10; Receta L) ------------------- */
+
+describe("Push authorizations on the list kit", () => {
+  it("opens New authorization from its button and from ?new=authorization, with its safety text", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/authorizations", <PushAuthorizationsPage />);
+    const head = (await screen.findByRole("heading", { level: 1, name: "Push authorizations" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New authorization" }));
+    expect(router.state.location.search).toBe("?new=authorization");
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    // The safety text of the grant form (invariant 2a) stays with the form.
+    expect(within(dialog).getByText(/IPAM scan authorization over the same prefix authorizes nothing here/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/separate from permission to run a push/)).toBeInTheDocument();
+  });
+
+  it("opens the dialog from a link that carries ?new=authorization", async () => {
+    stubApi();
+    renderRouted("/agent-push/authorizations?new=authorization", <PushAuthorizationsPage />);
+    expect(await screen.findByRole("dialog", { name: "Authorize a prefix" })).toBeInTheDocument();
+  });
+
+  it("keeps the inactive chip in the URL, and asks the server for those rows", async () => {
+    const listPushAuthorizations = vi.fn().mockResolvedValue([grant()]);
+    stubApi({ listPushAuthorizations });
+    const { router } = renderRouted("/agent-push/authorizations?inactive=1", <PushAuthorizationsPage />);
+    expect(await screen.findByRole("button", { name: "Including revoked and expired" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(listPushAuthorizations).toHaveBeenCalledWith(true));
+    await userEvent.click(screen.getByRole("button", { name: "In force" }));
+    expect(router.state.location.search).toBe("");
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+});
+
+describe("Credential scopes on the list kit", () => {
+  it("opens New scope from its button and from ?new=scope, with its safety text", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/credential-scopes", <PushCredentialScopesPage />);
+    const head = (await screen.findByRole("heading", { level: 1, name: "Credential scopes" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New scope" }));
+    expect(router.state.location.search).toBe("?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    // The safety text of the binding form (invariant 2a(d)) stays with the form.
+    expect(within(dialog).getByText(/not Domain Admin/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Binding and unbinding need permission to manage push install scopes/)).toBeInTheDocument();
+  });
+
+  it("keeps the unbound chip in the URL, and it survives a reload", async () => {
+    const listPushCredentialScopes = vi.fn().mockResolvedValue([scope()]);
+    stubApi({ listPushCredentialScopes });
+    const { router } = renderRouted("/agent-push/credential-scopes?unbound=1", <PushCredentialScopesPage />);
+    expect(await screen.findByRole("button", { name: "Including unbound" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(listPushCredentialScopes).toHaveBeenCalledWith(true));
+    await act(() => router.navigate("/agent-push/credential-scopes?unbound=1"));
+    expect(screen.getByRole("button", { name: "Including unbound" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Bound now" }));
+    expect(router.state.location.search).toBe("");
   });
 });

@@ -3,8 +3,21 @@ import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { describeSubmitError } from "../../components/form";
-import { Button, Field, Td, Th, inputClass } from "../../components/ui";
-import { FilterBar, PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
+import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  TableWrap,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { formatDate } from "../../lib/datetime";
 import { useOrgZone } from "../../lib/zone";
 import { Icon } from "../../shell/icons";
@@ -45,13 +58,18 @@ import { PUSH_CREDENTIAL_TYPE, type PushCredentialScopeOut } from "./types";
 // appears to hold the code. That is cosmetic: the server refuses regardless.
 //
 // v3 draws this as one list: the key glyph, the credential's name, the prefix
-// it may be presented in, its state. The bind form the design opens from its
-// "New scope" button is inline below the list here.
+// it may be presented in, its state; and opens the bind form from its "New
+// scope" button. ON THE LIST KIT (redesign plan Task 6, 1.10): that button
+// opens the form in a dialog from `?new=scope` (decision D8), with its safety
+// text (invariant 2a(d)) beside its controls and the same body as before;
+// "include unbound" is the `?unbound=1` chip, so it survives a reload.
 export function PushCredentialScopesPage() {
   const t = useT();
   const permissions = usePushPermissions();
-  const [includeUnbound, setIncludeUnbound] = useState(false);
+  const filters = useUrlFilters(["unbound"] as const);
+  const includeUnbound = filters.values.unbound === "1";
   const scopes = usePushCredentialScopes(includeUnbound);
+  const creating = useNewParam("scope");
   const unbind = useUnbindPushCredentialScopeMutation();
 
   return (
@@ -67,6 +85,11 @@ export function PushCredentialScopesPage() {
       <PageHead
         title={t("agentPush.scopes.title")}
         description={t("agentPush.scopes.description")}
+        actions={
+          permissions.scopeManage ? (
+            <Btn label={t("agentPush.scopes.new")} icon="plus" variant="primary" onClick={creating.start} />
+          ) : undefined
+        }
       />
 
       <PushNav />
@@ -76,29 +99,41 @@ export function PushCredentialScopesPage() {
       <PushReadiness />
 
       <Panel bare>
-        <FilterBar>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeUnbound}
-              onChange={(e) => setIncludeUnbound(e.target.checked)}
+        <ListToolbar
+          chips={
+            /* Asks the server for unbound scopes too, as the checkbox did. */
+            <FilterChips
+              label={t("agentPush.scopes.showUnbound")}
+              options={[
+                { value: "", label: t("agentPush.scopes.chipBound") },
+                { value: "1", label: t("agentPush.scopes.chipUnbound") },
+              ]}
+              value={filters.values.unbound}
+              onChange={(value) => filters.set("unbound", value)}
             />
-            <span>{t("agentPush.scopes.showUnbound")}</span>
-          </label>
-          <span className="filter-spacer" />
-          <span className="note mono">
-            {scopes.data ? t("agentPush.scopes.count", { count: scopes.data.length }) : "…"}
-          </span>
-        </FilterBar>
-        <QueryState
-          loading={scopes.isLoading}
-          error={scopes.error}
-          empty={(scopes.data ?? []).length === 0}
-          emptyLabel={t("agentPush.scopes.empty")}
-          emptyIcon="lock"
-        >
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={scopes.data ? <ShowingCount shown={scopes.data.length} total={scopes.data.length} /> : null}
+        />
+        <QueryState loading={scopes.isLoading} error={scopes.error} empty={false} emptyLabel="">
+          {(scopes.data ?? []).length === 0 ? (
+            /* NEVER "NOTHING MATCHES": the chip only ever adds rows (the
+               unbound ones), so an empty list is the real cause -- no
+               credential bound, every push refused -- with or without it. */
+            <ListEmpty
+              filtered={false}
+              onClear={filters.clear}
+              nothingYet={t("agentPush.scopes.empty")}
+              icon="lock"
+              action={
+                permissions.scopeManage ? (
+                  <Btn label={t("agentPush.scopes.new")} icon="plus" onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("agentPush.scopes.title")}>
               <thead>
                 <tr>
                   <th scope="col">{t("agentPush.shared.credential")}</th>
@@ -124,6 +159,7 @@ export function PushCredentialScopesPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
         {unbind.isError && (
           <p role="alert" className="form-error" style={{ margin: "12px 18px" }}>
@@ -132,7 +168,11 @@ export function PushCredentialScopesPage() {
         )}
       </Panel>
 
-      {permissions.scopeManage && <BindForm />}
+      {/* Only for a holder of the scope code, whatever the URL asks: the
+          server refuses the write either way (invariant 6). */}
+      <Dialog open={creating.open && permissions.scopeManage} onClose={creating.close} title={t("agentPush.scopes.form.title")}>
+        <BindForm onDone={creating.close} />
+      </Dialog>
     </div>
   );
 }
@@ -206,7 +246,7 @@ function ScopeRow({
   );
 }
 
-function BindForm() {
+function BindForm({ onDone }: { onDone: () => void }) {
   const t = useT();
   const bind = useBindPushCredentialScopeMutation();
   const credentials = usePushCredentials();
@@ -218,10 +258,8 @@ function BindForm() {
   const available = credentials.data ?? [];
 
   return (
-    <Panel
-      title={t("agentPush.scopes.form.title")}
-      subtitle={t("agentPush.scopes.form.subtitle")}
-    >
+    <>
+      <p className="note mb-3">{t("agentPush.scopes.form.subtitle")}</p>
       <div className="notice gold">
         <Icon name="warning" size={17} />
         <div>
@@ -310,6 +348,7 @@ function BindForm() {
                 onSuccess: () => {
                   setPrefix("");
                   setNote("");
+                  onDone();
                 },
               },
             )
@@ -329,6 +368,6 @@ function BindForm() {
           {describeSubmitError(bind.error)}
         </p>
       )}
-    </Panel>
+    </>
   );
 }
