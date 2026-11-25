@@ -442,7 +442,7 @@ export function PlatformStatusPage() {
             tile that happens to have an href. */}
         <div id="dependencies">
           <Panel title={t("platformStatus.dependencies.title")} bare>
-            <Table>
+            <Table label={t("platformStatus.dependencies.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.dependencies.probe")}</Th>
@@ -463,7 +463,7 @@ export function PlatformStatusPage() {
 
         <div id="processes">
           <Panel title={t("platformStatus.processes.title")} bare>
-            <Table>
+            <Table label={t("platformStatus.processes.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.processes.process")}</Th>
@@ -488,7 +488,7 @@ export function PlatformStatusPage() {
             subtitle={t("platformStatus.modules.subtitle")}
             bare
           >
-            <Table>
+            <Table label={t("platformStatus.modules.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.modules.module")}</Th>

@@ -516,3 +516,29 @@ describe("PlatformStatusPage stat tiles", () => {
     expect(screen.queryByText("Every probe answered OK")).not.toBeInTheDocument();
   });
 });
+
+
+// THE SECOND CARRIER (redesign plan, O3 3.9; DESIGN.md: colour is never the
+// only carrier). Each dependency's state is a word, beside its kind's glyph,
+// in its row -- and the platform's own verdict, at the head, the same.
+describe("each dependency's state in words", () => {
+  it("says each dependency's state in words, not only in colour", async () => {
+    mockUseApi.mockReturnValue({ getPlatformStatus: vi.fn().mockResolvedValue(STATUS) } as unknown as ApiClient);
+    renderWithProviders(<PlatformStatusPage />);
+    const table = await screen.findByRole("table", { name: "Dependencies" });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(STATUS.probes.length);
+    const states = rows.map((row) => {
+      const pill = row.querySelector(".pill") as HTMLElement;
+      // A word, and a glyph beside it.
+      expect(pill.querySelector("svg")).not.toBeNull();
+      return pill.textContent;
+    });
+    expect(states).toEqual(["Healthy", "Down", "Healthy"]);
+    // The verdict at the head: a word with its glyph too.
+    const head = screen.getByRole("heading", { level: 1 }).closest("section") as HTMLElement;
+    const verdict = head.querySelector(".pill") as HTMLElement;
+    expect(verdict).toHaveTextContent("Degraded");
+    expect(verdict.querySelector("svg")).not.toBeNull();
+  });
+});
