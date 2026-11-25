@@ -43,6 +43,29 @@ describe("DetailHead (design §2, Ficha)", () => {
 });
 
 describe("UrlTabs and useUrlTab (design §2: tabs that change the URL)", () => {
+  // `TabItem.note` through `UrlTabs` (P3 adoption pass): its items type took no
+  // `note`, so Settings, the one caller, could pass one only by widening its
+  // array. The note is drawn by `Tabs`; the panel keeps the tab's NAME.
+  it("draws a tab's note, and names the panel after the tab's name alone", () => {
+    function Noted() {
+      const [tab, setTab] = useUrlTab<Tab>(TABS, "overview");
+      return (
+        <UrlTabs
+          label="Computer"
+          items={TABS.map((key) => ({ key, label: LABEL[key], ...(key === "hardware" ? { note: "Not collected" } : {}) }))}
+          active={tab}
+          onSelect={setTab}
+        >
+          <p>{tab} panel</p>
+        </UrlTabs>
+      );
+    }
+    renderPage("/devices/dev-1?tab=hardware", <Noted />);
+    const hardware = screen.getByRole("tab", { name: "Hardware Not collected" });
+    expect(hardware.querySelector(".tab-note")).toHaveTextContent("Not collected");
+    expect(screen.getByRole("tabpanel", { name: "Hardware" })).toHaveTextContent("hardware panel");
+  });
+
   it("opens the tab the URL names", () => {
     renderPage("/devices/dev-1?tab=hardware", <Device />);
     expect(screen.getByRole("tab", { name: "Hardware" })).toHaveAttribute("aria-selected", "true");

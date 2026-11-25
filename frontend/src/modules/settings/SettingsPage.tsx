@@ -237,8 +237,8 @@ export function SettingsPage() {
   // `?tab=sessions` opened with Sessions in view and then lost it to Email's
   // note. The kit's `Tabs` re-scrolls when the text that can move the selected
   // tab changes (batch 3, B3-3), so the page repeats nothing itself.
-  const items: TabItem[] = tabs.map((tab) => ({
-    key: tab.key,
+  const items: { key: TabKey; label: string; note?: string }[] = tabs.map((tab) => ({
+    key: tab.key as TabKey,
     label: tab.label,
     ...(tab.state ? { note: t(STATE_LABEL[tab.state]) } : {}),
   }));
