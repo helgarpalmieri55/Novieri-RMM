@@ -1169,6 +1169,20 @@ function KitPreview() {
         />
       </div>
 
+      {/* NOTHING OPEN BESIDE THE LIBRARY (P3 adoption pass, C's request R1):
+          with no main, the library is drawn alone across the row. */}
+      <div style={{ marginTop: 24 }} data-bench="library-alone">
+        <DetailGrid
+          asideFirst
+          main={null}
+          aside={
+            <Panel title="Library, nothing open">
+              <div style={{ padding: 14 }}>Open a runbook, a diagram or a contract to read it beside the list.</div>
+            </Panel>
+          }
+        />
+      </div>
+
       {/* A FORM, on the page ground: a section, then the one save bar in each
           state that paints something the others do not (critique answer 2):
           with a change, failed, not allowed, and saved. Each bar has a name of
