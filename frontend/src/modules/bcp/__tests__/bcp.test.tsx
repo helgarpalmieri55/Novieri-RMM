@@ -42,6 +42,14 @@ function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTE
 
 beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
+/**
+ * The KPI tile whose label is `label`. Found among the tiles: the list's chips
+ * (redesign plan, Receta L) carry some of the same words.
+ */
+function tileLabelled(label: string): Element | null {
+  return [...document.querySelectorAll(".stat-card")].find((tile) => within(tile as HTMLElement).queryByText(label)) ?? null;
+}
+
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -130,8 +138,10 @@ describe("PlansPage", () => {
     renderWithProviders(<PlansPage />);
 
     expect(await screen.findByText("Core datacenter failover")).toBeInTheDocument();
-    // Read as a word, not as the wire's identifier (cycle 12).
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    // Read as a word, not as the wire's identifier (cycle 12). In the row: the
+    // state chips over the list say "Active" too (redesign plan, Receta L).
+    const row = screen.getByText("Core datacenter failover").closest("tr") as HTMLElement;
+    expect(within(row).getByText("Active")).toBeInTheDocument();
     expect(screen.queryByText("active")).not.toBeInTheDocument();
   });
 
@@ -993,7 +1003,8 @@ describe("PlansPage review column", () => {
     renderWithProviders(<PlansPage />);
 
     await screen.findByText("Never reviewed");
-    const kpi = screen.getByText("Review overdue").closest(".stat-card");
+    // The tile's label (the review chip over the list says the same words).
+    const kpi = tileLabelled("Review overdue");
     expect(kpi).toHaveTextContent("1");
   });
 
@@ -1094,7 +1105,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
     renderWithProviders(<PlansPage />, ["/bcp"]);
     await screen.findByText("Core datacenter failover");
 
-    const card = (label: string) => screen.getByText(label).closest(".stat-card");
+    const card = (label: string) => tileLabelled(label);
     // One active plan of the two on record.
     expect(card("Active plans")).toHaveTextContent("of 2 on record");
     // plan1 has never been reviewed; nothing else is past its interval.
@@ -1125,7 +1136,11 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     expect(await screen.findByText("Core datacenter failover")).toBeInTheDocument();
     expect(screen.queryByText("Retired mail failover")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Show all plans" })).toHaveAttribute("href", "/bcp");
+    // The way back to every plan is the list kit's now (redesign plan, Receta
+    // L): the pressed chip says which view this is, and All plans clears it.
+    const chips = screen.getByRole("group", { name: "Plan state" });
+    expect(within(chips).getByRole("button", { name: /^Active/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(chips).getByRole("button", { name: /All plans/ })).toBeInTheDocument();
   });
 
   it("opens the overdue tile on the overdue plans and nothing else", async () => {
@@ -1157,7 +1172,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     // And the overdue tile names WHICH zero it would be showing: with no
     // status response the interval half of the question was never asked.
-    const overdue = screen.getByText("Review overdue").closest(".stat-card");
+    const overdue = tileLabelled("Review overdue");
     expect(overdue).toHaveTextContent("1");
   });
 

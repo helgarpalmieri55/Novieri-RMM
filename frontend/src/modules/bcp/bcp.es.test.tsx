@@ -284,7 +284,8 @@ describe("the plans page, in Spanish", () => {
     // The tiles and their second lines.
     expect(screen.getByText("Planes activos")).toBeInTheDocument();
     expect(screen.getByText("de 3 registrados")).toBeInTheDocument();
-    expect(screen.getByText("Revisiones vencidas")).toBeInTheDocument();
+    // The tile (the review chip over the list says the same words).
+    expect(screen.getAllByText("Revisiones vencidas").some((el) => el.closest(".stat-card"))).toBe(true);
     expect(screen.getByText("1 nunca revisado, 1 fuera del intervalo")).toBeInTheDocument();
     expect(screen.getByText("Hallazgos abiertos")).toBeInTheDocument();
     expect(screen.getByText("en 2 planes")).toBeInTheDocument();
@@ -322,15 +323,21 @@ describe("the plans page, in Spanish", () => {
     baseApi({ listPlans: vi.fn().mockResolvedValue([PLANS[0]]), planStatus: vi.fn().mockResolvedValue([STATUS[0]!]) });
     const first = renderPage(<PlansPage />, "/bcp?review=overdue");
     await screen.findByText("Conmutación del centro de datos");
-    expect(screen.getByText(/Mostrando 1 de 1: planes cuya revisión está vencida o nunca se ha hecho\./)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Mostrar todos los planes" })).toBeInTheDocument();
+    // The filter note is the list kit's now (redesign plan, Receta L): the
+    // count, and the pressed chip that names the view.
+    expect(screen.getByText("Mostrando 1 de 1")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("group", { name: "Revisión" })).getByRole("button", { name: /Revisiones vencidas/ }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("en 1 plan")).toBeInTheDocument();
     expect(screen.getByText("1 nunca revisado, 0 fuera del intervalo")).toBeInTheDocument();
     expect(screen.getByText("de 1 registrado")).toBeInTheDocument();
     expectNoEnglish(first.container, ["RTO", "RPO"]);
     first.unmount();
     renderPage(<PlansPage />, "/bcp?state=archived");
-    expect(await screen.findByText("Ningún plan coincide con esta vista: planes archivados.")).toBeInTheDocument();
+    // A filter that found nothing says so in the kit's words, with its way out (Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
   });
 
   it("says every review is current when none is overdue", async () => {
@@ -402,7 +409,9 @@ describe("a plan's detail, in Spanish", () => {
     const { container } = renderDetail();
     expect(await screen.findByRole("heading", { name: "Conmutación del centro de datos" })).toBeInTheDocument();
     expect(await screen.findByText("WKS-042, Centro de datos principal")).toBeInTheDocument();
-    expect(screen.getByText("Objetivos, ámbito, procedimientos, pruebas y hallazgos de un plan.")).toBeInTheDocument();
+    // The record head (redesign plan, Receta F): the way back, the plan's
+    // state and its client, where the generic sentence under the title was.
+    expect(screen.getByRole("link", { name: "Todos los planes" })).toHaveAttribute("href", "/bcp");
     for (const name of ["Registrar revisión", "Editar plan", "Archivar"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
@@ -648,7 +657,9 @@ describe("the test recorder, in Spanish", () => {
     const { container } = renderRecorder();
     expect(await screen.findByRole("heading", { name: "Prueba de recuperación" })).toBeInTheDocument();
     expect(await screen.findByText("Instantánea de evidencia de copias de seguridad")).toBeInTheDocument();
-    expect(screen.getByText("Registra el resultado de una prueba frente a los objetivos de recuperación de su plan.")).toBeInTheDocument();
+    // The record head (redesign plan, Receta F): back to the test's plan and
+    // the outcome it stands at, where the generic sentence under the title was.
+    expect(screen.getByRole("link", { name: "Volver al plan" })).toHaveAttribute("href", "/bcp/plans/plan1");
     expect(screen.getByRole("link", { name: "Ver informe" })).toBeInTheDocument();
     for (const label of ["Tipo", "Resultado", "Programada", "Ejecutada"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
