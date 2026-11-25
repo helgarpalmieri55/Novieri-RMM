@@ -161,8 +161,8 @@ export const agentPush: Shape<typeof en> = {
       other: "{count} equipos de esta subred no aparecen en la lista porque nadie los ha avalado: el barrido de la red los encontró por sí solo. <link>Reclámalos en Descubiertos</link> para incluirlos.",
     },
     awaitingReview: {
-      one: "{count} equipo de esta subred no aparece en la lista porque está pendiente de revisión. Apruébalo en Dispositivos para incluirlo.",
-      other: "{count} equipos de esta subred no aparecen en la lista porque están pendientes de revisión. Apruébalos en Dispositivos para incluirlos.",
+      one: "{count} equipo de esta subred no aparece en la lista porque está pendiente de revisión. Apruébalo en Equipos para incluirlo.",
+      other: "{count} equipos de esta subred no aparecen en la lista porque están pendientes de revisión. Apruébalos en Equipos para incluirlos.",
     },
     ambiguous: {
       one: "{count} dirección de esta subred no aparece en la lista porque no nombra un solo equipo.",

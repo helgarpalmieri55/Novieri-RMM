@@ -582,7 +582,10 @@ describe("push install pages in Spanish", () => {
     expect(within(table).getByText("No está listo")).toBeInTheDocument();
     expect(screen.getByText(/3 equipos de esta subred no aparecen en la lista porque nadie los ha avalado/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reclámalos en Descubiertos" })).toBeInTheDocument();
-    expect(screen.getByText(/1 equipo de esta subred no aparece en la lista porque está pendiente de revisión/)).toBeInTheDocument();
+    // The machine list is «Equipos» in the rail and on its page (D13).
+    expect(
+      screen.getByText("1 equipo de esta subred no aparece en la lista porque está pendiente de revisión. Apruébalo en Equipos para incluirlo."),
+    ).toBeInTheDocument();
     expectNoEnglish(container);
 
     await user.click(await screen.findByRole("button", { name: "Iniciar la instalación remota en 2 equipos" }));

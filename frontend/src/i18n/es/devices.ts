@@ -99,7 +99,7 @@ export const devices: Shape<typeof en> = {
     approveAria: "Aprobar {label}",
     rejectAria: "Rechazar {label}",
     confirmTitle: "Rechazar este equipo",
-    confirmBody: "Se le ordena a su agente que se desinstale. Hasta que lo confirme (hasta 24 horas) sigue conectado, pero no recibe nada salvo la desinstalación; después se revoca su certificado. Un agente demasiado antiguo para eliminarse solo queda desconectado de inmediato y hay que quitarlo a mano. El equipo sale ahora de Dispositivos. Esto no se puede deshacer: para recuperarlo, hay que volver a instalar el agente.",
+    confirmBody: "Se le ordena a su agente que se desinstale. Hasta que lo confirme (hasta 24 horas) sigue conectado, pero no recibe nada salvo la desinstalación; después se revoca su certificado. Un agente demasiado antiguo para eliminarse solo queda desconectado de inmediato y hay que quitarlo a mano. Desde ahora deja de aparecer en Equipos. Esto no se puede deshacer: para recuperarlo, hay que volver a instalar el agente.",
     confirmLabel: "Rechazar y desinstalar",
     removed: "Ya lo quité",
     removedAria: "Ya quité el agente de {label}",
