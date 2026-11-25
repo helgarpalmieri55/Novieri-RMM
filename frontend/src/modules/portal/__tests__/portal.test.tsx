@@ -231,11 +231,16 @@ describe("MyTicketsPage", () => {
     expect(await screen.findByRole("link", { name: "INC-2" })).toBeInTheDocument();
   });
 
-  it("says how many it shows", async () => {
+  // Fix round 1 (review): the total is of what the chip matches, not of
+  // every ticket answered -- "1 of 2" under Open read as one open ticket
+  // missing. Under Open: the one open ticket of one; under All: two of two.
+  it("says how many it shows, of those the chip matches", async () => {
     api.listPortalTickets = vi.fn().mockResolvedValue([TICKET_SUMMARY, CLOSED]);
-    renderPage("/portal", <MyTicketsPage />);
+    const { router } = renderPage("/portal", <MyTicketsPage />);
 
-    expect(await screen.findByText("Showing 1 of 2")).toBeInTheDocument();
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+    await act(() => router.navigate("/portal?state=all"));
+    expect(await screen.findByText("Showing 2 of 2")).toBeInTheDocument();
   });
 
   it("offers New ticket from an empty list only to someone who may file one", async () => {

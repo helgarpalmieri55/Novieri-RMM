@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/service-desk/MyWorkPage.tsx"
+target_identity: "file:frontend/src/modules/service-desk/MyWorkPage.tsx"
 target_fingerprint: "sha256:0d808f923706f829454ecf0bad1efe57b828c51e998ce42bf4ed6818e232f3d7"
-target_path: /home/user/rmm-w2/frontend/src/modules/service-desk/MyWorkPage.tsx
+target_path: frontend/src/modules/service-desk/MyWorkPage.tsx
 timestamp: 2026-11-25T04-26-24Z
 slug: frontend-src-modules-service-desk-myworkpage-tsx
 closed: true

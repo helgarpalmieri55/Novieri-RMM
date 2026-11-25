@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 2
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/email-intake/EmailIntakeAdminPage.tsx"
+target_identity: "file:frontend/src/modules/email-intake/EmailIntakeAdminPage.tsx"
 target_fingerprint: "sha256:8b19c9c821dc36554ebb6e83571e49f70aae8673bd73d7b2918ba3f06d5d626a"
-target_path: /home/user/rmm-w2/frontend/src/modules/email-intake/EmailIntakeAdminPage.tsx
+target_path: frontend/src/modules/email-intake/EmailIntakeAdminPage.tsx
 timestamp: 2026-11-25T04-26-25Z
 slug: les-email-intake-emailintakeadminpage-tsx-59975b67
 closed: true

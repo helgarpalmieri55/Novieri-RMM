@@ -81,7 +81,7 @@ export function OAuthCallback() {
     // head, with the way back to Email intake above it, and the same panel of
     // today under it. Microsoft sends the person back here mid-flow, so the
     // first thing on the page says where they are and how to return.
-    <FormPage back={{ to: "/email-intake", label: t("emailIntake.admin.title") }} title={t("emailIntake.oauth.title")}>
+    <FormPage back={{ to: "/email-intake", label: t("shell.nav.item.emailIntake") }} title={t("emailIntake.oauth.title")}>
       <Panel>
         {phase === "working" ? <p className="note">{t("emailIntake.oauth.working")}</p> : null}
         {phase === "done" ? (

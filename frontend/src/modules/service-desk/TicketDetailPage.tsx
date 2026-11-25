@@ -28,10 +28,9 @@ import {
   QueryState,
   SaveBar,
   UnsavedGuard,
-  type Kind,
 } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
-import type { BadgeVariant } from "../jobs/jobState";
+import { BADGE_KIND } from "./badgeKind";
 import { Icon } from "../../shell/icons";
 import { Facts, KV, Person } from "../../shell/viz";
 import type { DeviceStatus } from "../patch/types";
@@ -91,15 +90,6 @@ import type {
   TicketPriority,
   TicketUpdate,
 } from "./types";
-
-/** The ticket's state pill, from the module's badge vocabulary (`serviceDeskState.ts`). */
-const VARIANT_KIND: Record<BadgeVariant, Kind> = {
-  muted: "mut",
-  info: "info",
-  success: "ok",
-  destructive: "crit",
-  warning: "warn",
-};
 
 /**
  * The ticket page: a compact header (state, deadlines, requester, device and
@@ -328,7 +318,7 @@ function TicketHeader({
       <DetailHead
         back={{ to: "/service-desk", label: t("serviceDesk.nav.tickets") }}
         title={`${ticket.number} ${ticket.subject}`}
-        status={{ kind: VARIANT_KIND[ticketStatusVariant(ticket.status)], label: ticketStatusLabel(ticket.status) }}
+        status={{ kind: BADGE_KIND[ticketStatusVariant(ticket.status)], label: ticketStatusLabel(ticket.status) }}
         context={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <ClientContext clientId={ticket.client_id} />
@@ -899,6 +889,9 @@ function EditTicketPanel({
 
   function submit() {
     if (!subject.trim()) {
+      // The bar says one thing at a time: a refusal from the last Save would
+      // hide "Write a subject…" behind it (fix round 1).
+      setError(null);
       setSubjectAsked(true);
       return;
     }

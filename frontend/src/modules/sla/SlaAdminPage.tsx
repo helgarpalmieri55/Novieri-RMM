@@ -107,7 +107,7 @@ export function SlaAdminPage() {
   return (
     <div>
       <PageHead
-        title={t("sla.admin.title")}
+        title={t("shell.nav.item.serviceLevels")}
         description={t("sla.admin.description")}
       />
 

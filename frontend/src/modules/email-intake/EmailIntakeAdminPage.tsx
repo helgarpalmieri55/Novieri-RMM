@@ -182,7 +182,7 @@ export function EmailIntakeAdminPage() {
   return (
     <div>
       <PageHead
-        title={t("emailIntake.admin.title")}
+        title={t("shell.nav.item.emailIntake")}
         description={t("emailIntake.admin.description")}
       />
 

@@ -8,10 +8,10 @@
  * The connection (address, server, TLS, account, the password or the
  * Microsoft sign-in) stays in the mailbox's own dialog: a secret is written
  * there and never read back (invariant 3), and nothing here touches it. The
- * save is the same `PATCH /email-intake/mailboxes/{id}` the dialog makes,
- * with only the settings that changed.
+ * save is the same `PATCH /email-intake/mailboxes/{id}` the dialog makes
+ * (`api.updateEmailMailbox`), with only the settings that changed.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import type { Problem } from "../../components/form";
@@ -21,7 +21,7 @@ import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { FormSection, SaveBar, UnsavedGuard, useDraft } from "../../shell/components";
-import { useEmailMailboxes, useUpdateEmailMailboxMutation } from "./api";
+import { useEmailMailboxes } from "./api";
 import { invalidReopenWindow } from "./MailboxForm";
 import type { MailboxOut } from "./types";
 
@@ -61,7 +61,7 @@ export function MailboxSettings({ canAdmin }: { canAdmin: boolean }) {
   const t = useT();
   const api = useApi();
   const mailboxes = useEmailMailboxes();
-  const update = useUpdateEmailMailboxMutation();
+  const queryClient = useQueryClient();
   // The same read `MailboxList` makes (one cache entry): the category picker's choices.
   const categories = useQuery({
     queryKey: ["email-intake-ticket-categories"],
@@ -95,8 +95,13 @@ export function MailboxSettings({ canAdmin }: { canAdmin: boolean }) {
     setSaving(true);
     setError(null);
     markSent(draft);
+    // EVERY ROW, THEN ONE REFETCH (fix round 1). Through the mutation, each
+    // PATCH refetched the mailboxes on its own, and the draft adopted the
+    // first answer mid-loop, with the second mailbox not saved yet. So the
+    // PATCHes go out one after another, and the list is read again once, at
+    // the end -- after `markSent(null)` when one of them failed, so that
+    // answer cannot replace what is still unsaved.
     try {
-      // One mailbox after another, only those that changed, and only what changed.
       for (const mailbox of rows) {
         const next = draft[mailbox.id];
         const before = saved[mailbox.id];
@@ -104,15 +109,16 @@ export function MailboxSettings({ canAdmin }: { canAdmin: boolean }) {
         const body: { default_category_id?: string; reopen_window_days?: number } = {};
         if (next.category !== before.category) body.default_category_id = next.category.trim();
         if (next.reopen !== before.reopen) body.reopen_window_days = Number(next.reopen.trim());
-        if (Object.keys(body).length > 0) await update.mutateAsync({ id: mailbox.id, body });
+        if (Object.keys(body).length > 0) await api.updateEmailMailbox(mailbox.id, body);
       }
       setAsked(false);
     } catch (caught) {
-      // Not saved: what is on screen is still a change, and a refetch must not wipe it.
+      // Not saved: what is on screen is still a change, and the refetch must not wipe it.
       markSent(null);
       setError(caught);
     } finally {
       setSaving(false);
+      void queryClient.invalidateQueries({ queryKey: ["email-intake-mailboxes"] });
     }
   }
 

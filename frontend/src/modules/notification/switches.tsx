@@ -12,10 +12,11 @@
  * rule was not changed. ...", "The channel was not changed. ..."), and the
  * change stays unsaved (`markSent(null)`).
  */
+import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useMemo, useState } from "react";
 
+import { useApi } from "../../lib/ApiContext";
 import { useDraft } from "../../shell/components";
-import { useUpdateNotificationChannelMutation, useUpdateNotificationRuleMutation } from "./api";
 import type { ChannelOut, RuleOut } from "./types";
 
 type Kind = "rule" | "channel";
@@ -52,44 +53,60 @@ function byId(rows: readonly { id: string; active: boolean }[] | undefined): Rec
 export function useSwitchDraft(rules: readonly RuleOut[] | undefined, channels: readonly ChannelOut[] | undefined) {
   const saved = useMemo<SwitchState>(() => ({ rule: byId(rules), channel: byId(channels) }), [rules, channels]);
   const { draft, setDraft, dirty, discard, markSent } = useDraft<SwitchState>(saved);
-  const updateRule = useUpdateNotificationRuleMutation();
-  const updateChannel = useUpdateNotificationChannelMutation();
+  const api = useApi();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
+  const [ruleError, setRuleError] = useState<unknown>(null);
+  const [channelError, setChannelError] = useState<unknown>(null);
 
+  // EVERY SWITCH, THEN ONE REFETCH (fix round 1): through the mutations, each
+  // PATCH refetched its list and the draft adopted an answer mid-loop. Now
+  // the PATCHes go out one after another and both lists are read again once,
+  // at the end -- after `markSent(null)` when one failed.
   async function save() {
     if (!draft) return;
     setSaving(true);
-    updateRule.reset();
-    updateChannel.reset();
+    setRuleError(null);
+    setChannelError(null);
     markSent(draft);
+    let kind: Kind = "rule";
     try {
       for (const [id, active] of Object.entries(draft.rule)) {
-        if (saved.rule[id] !== undefined && saved.rule[id] !== active) await updateRule.mutateAsync({ id, body: { active } });
+        if (saved.rule[id] !== undefined && saved.rule[id] !== active) await api.updateNotificationRule(id, { active });
       }
+      kind = "channel";
       for (const [id, active] of Object.entries(draft.channel)) {
         if (saved.channel[id] !== undefined && saved.channel[id] !== active) {
-          await updateChannel.mutateAsync({ id, body: { active } });
+          await api.updateNotificationChannel(id, { active });
         }
       }
-    } catch {
-      // Announced in the switch's own panel; the change stays unsaved.
+    } catch (caught) {
+      // Said in the switch's own panel; the change stays unsaved.
       markSent(null);
+      if (kind === "rule") setRuleError(caught);
+      else setChannelError(caught);
     } finally {
       setSaving(false);
+      void queryClient.invalidateQueries({ queryKey: ["notification-rules"] });
+      void queryClient.invalidateQueries({ queryKey: ["notification-channels"] });
     }
   }
 
+  // A switch the draft has not met yet -- a rule or channel created while
+  // other switches were thrown, so the draft did not adopt the new list --
+  // starts from the row's saved state (fix round 1).
+  const current = (kind: Kind, id: string): boolean | undefined => draft?.[kind][id] ?? saved[kind][id];
   const switches: Switches = {
-    active: (kind, id, fallback) => draft?.[kind][id] ?? fallback,
+    active: (kind, id, fallback) => current(kind, id) ?? fallback,
     toggle: (kind, id) => {
       if (!draft) return;
-      const current = draft[kind][id];
-      if (current === undefined) return;
-      setDraft({ ...draft, [kind]: { ...draft[kind], [id]: !current } });
+      const now = current(kind, id);
+      if (now === undefined) return;
+      setDraft({ ...draft, [kind]: { ...draft[kind], [id]: !now } });
     },
     saving,
-    ruleError: updateRule.error,
-    channelError: updateChannel.error,
+    ruleError,
+    channelError,
   };
   return {
     switches,
@@ -97,8 +114,8 @@ export function useSwitchDraft(rules: readonly RuleOut[] | undefined, channels: 
     saving,
     save: () => void save(),
     discard: () => {
-      updateRule.reset();
-      updateChannel.reset();
+      setRuleError(null);
+      setChannelError(null);
       discard();
     },
   };

@@ -205,183 +205,183 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // "Add calendar" (secondary: the open dialog's Save is the primary), then
     // the list. No Client chip: calendars are the organisation's.
     <>
-    <FormSection title={t("sla.calendars.title")} icon="calendar">
-      <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
-        <p className="note" style={{ margin: 0 }}>
-          {t("sla.calendars.subtitle")}
-        </p>
-        {canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={created.start} /> : null}
-      </div>
-      {calendars.isLoading ? (
-        <p className="note">{t("sla.common.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">{t("sla.calendars.forbidden")}</p>
-      ) : failed ? (
-        /* The generic half says WHICH surface is missing; `describeSubmitError`
-           says why, which is the difference between "retry" and "you do not
-           have permission" being the right next move. Announced, because the
-           table it replaces is otherwise just absent. */
-        <p role="alert" className="notice red">
-          {t("sla.calendars.failed", { reason: describeSubmitError(calendars.error) })}
-        </p>
-      ) : (
-        <Table>
-          <thead>
-            <tr>
-              <Th>{t("sla.common.name")}</Th>
-              <Th>{t("sla.calendars.colHealth")}</Th>
-              <Th>{t("sla.common.active")}</Th>
-              <Th>{t("sla.calendars.colCreated")}</Th>
-              <Th>{""}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {calendars.data?.map((calendar) => (
-              <tr key={calendar.id}>
-                {/* The timezone under the name, in mono: a working window is
-                    meaningless without it, and it is the one fact that tells
-                    two calendars of the same name apart. */}
-                <Td lead={<Icon name="calendar-event" size={18} />}>
-                  <div className="cell-title">{calendar.name}</div>
-                  <div className="cell-sub mono">{calendar.timezone}</div>
-                </Td>
-                <Td>
-                  <Badge variant={calendarHealthVariant(calendar.health)}>
-                    {calendarHealthLabel(calendar.health)}
-                  </Badge>
-                </Td>
-                <Td>
-                  {/* Humanised by the one table that humanises: the column
-                      read "active"/"inactive" in the wire's own lower case,
-                      beside a HEALTH column that read "ok". */}
-                  <StatusPill value={calendar.active ? "active" : "inactive"} />
-                </Td>
-                <Td>
-                  <span className="mono">{formatDateTime(calendar.created_at, zone)}</span>
-                </Td>
-                <Td>
-                  {/* ONE WEIGHT FOR THE WHOLE CLUSTER: "Hours & holidays" and
-                      "Edit" were borderless ghosts beside a bordered danger
-                      "Delete", so the only action that looked like a control
-                      was the one that destroys the row. All three are
-                      `Btn small` now and Delete differs only in the ink and
-                      edge its `danger` variant paints. */}
-                  <div className="flex flex-wrap gap-2">
-                    <Btn
-                      small
-                      label={selectedId === calendar.id ? t("sla.calendars.close") : t("sla.calendars.hoursAndHolidays")}
-                      onClick={() =>
-                        setSelectedId(selectedId === calendar.id ? null : calendar.id)
-                      }
-                    />
-                    {canAdmin && (
-                      <>
-                        <Btn small label={t("sla.common.edit")} onClick={() => openEdit(calendar)} />
-                        <Btn
-                          small
-                          variant="danger"
-                          label={t("sla.common.delete")}
-                          onClick={() => {
-                            del.reset();
-                            setPendingDelete(calendar);
-                          }}
-                        />
-                      </>
-                    )}
-                  </div>
-                </Td>
-              </tr>
-            ))}
-            {calendars.data && calendars.data.length === 0 && (
-              <tr>
-                <Td colSpan={5}>
-                  <span className="note">
-                    {t("sla.calendars.empty")}
-                  </span>
-                </Td>
-              </tr>
-            )}
-          </tbody>
-        </Table>
-      )}
-
-      {/* Health is a per-calendar diagnosis of a fault that otherwise only
-          shows up as tickets quietly having no SLA -- so the cause is spelled
-          out, not left as a coloured word. */}
-      {calendars.data
-        ?.filter((calendar) => calendar.health !== "ok")
-        .map((calendar) => (
-          <p key={calendar.id} className="notice gold" style={{ margin: 14 }}>
-            {`${calendar.name}: ${calendarHealthExplanation(calendar.health) ?? ""}`}
+      <FormSection title={t("sla.calendars.title")} icon="calendar">
+        <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+          <p className="note" style={{ margin: 0 }}>
+            {t("sla.calendars.subtitle")}
           </p>
-        ))}
-
-      {/* DELETE IS DESTRUCTIVE AND HAS NOWHERE ELSE TO SPEAK -- it is a row
-          action, not a form, so this paragraph is the only thing between a
-          failed delete and an operator who believes the calendar is gone.
-          `describeError` returned "" for a bodyless 503, this paragraph
-          rendered empty, and the UI looked exactly like a success. That is
-          auditor A's BLOCKER, at this call site. */}
-      {del.isError && (
-        <p role="alert" className="notice red" style={{ margin: 14 }}>
-          {t("sla.common.deleteFailed", { reason: describeSubmitError(del.error) })}
-        </p>
-      )}
-
-      {/* The consequence, not the record: a calendar is referenced BY policies,
-          and deleting one takes the deadline computation out from under every
-          policy pointing at it. */}
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title={t("sla.calendars.deleteTitle")}
-        subject={pendingDelete ? `${pendingDelete.name} (${pendingDelete.timezone})` : ""}
-        body={t("sla.calendars.deleteBody")}
-        confirmLabel={t("sla.calendars.deleteConfirm")}
-        destructive
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={() => {
-          const calendar = pendingDelete;
-          setPendingDelete(null);
-          if (calendar) del.mutate(calendar.id);
-        }}
-      />
-
-      {selectedId && (
-        <div style={{ paddingTop: 16, marginTop: 16, borderTop: "1px solid var(--line)" }}>
-          <CalendarDetailPanel calendarId={selectedId} canAdmin={canAdmin} />
+          {canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={created.start} /> : null}
         </div>
-      )}
-
-      {/* A real <form>, so Enter in the name field saves instead of doing
-          nothing -- the other half of the same finding. */}
-
-      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.calendars.editTitle")}>
-        <Form onSubmit={submitEdit}>
-          <CalendarFields
-            name={name}
-            timezone={timezone}
-            active={active}
-            onName={setName}
-            onTimezone={setTimezone}
-            onActive={setActive}
-          />
-          <p className="form-hint" style={{ marginBottom: 8 }}>
-            {t("sla.calendars.editHint")}
+        {calendars.isLoading ? (
+          <p className="note">{t("sla.common.loading")}</p>
+        ) : forbidden ? (
+          <p className="note">{t("sla.calendars.forbidden")}</p>
+        ) : failed ? (
+          /* The generic half says WHICH surface is missing; `describeSubmitError`
+             says why, which is the difference between "retry" and "you do not
+             have permission" being the right next move. Announced, because the
+             table it replaces is otherwise just absent. */
+          <p role="alert" className="notice red">
+            {t("sla.calendars.failed", { reason: describeSubmitError(calendars.error) })}
           </p>
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
-              {t("common.actions.cancel")}
-            </Button>
-            <FormActions
-              label={t("common.actions.save")}
-              pending={update.isPending}
-              error={update.error}
-              problems={attemptProblems(attempt)}
-            />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>{t("sla.common.name")}</Th>
+                <Th>{t("sla.calendars.colHealth")}</Th>
+                <Th>{t("sla.common.active")}</Th>
+                <Th>{t("sla.calendars.colCreated")}</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {calendars.data?.map((calendar) => (
+                <tr key={calendar.id}>
+                  {/* The timezone under the name, in mono: a working window is
+                      meaningless without it, and it is the one fact that tells
+                      two calendars of the same name apart. */}
+                  <Td lead={<Icon name="calendar-event" size={18} />}>
+                    <div className="cell-title">{calendar.name}</div>
+                    <div className="cell-sub mono">{calendar.timezone}</div>
+                  </Td>
+                  <Td>
+                    <Badge variant={calendarHealthVariant(calendar.health)}>
+                      {calendarHealthLabel(calendar.health)}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    {/* Humanised by the one table that humanises: the column
+                        read "active"/"inactive" in the wire's own lower case,
+                        beside a HEALTH column that read "ok". */}
+                    <StatusPill value={calendar.active ? "active" : "inactive"} />
+                  </Td>
+                  <Td>
+                    <span className="mono">{formatDateTime(calendar.created_at, zone)}</span>
+                  </Td>
+                  <Td>
+                    {/* ONE WEIGHT FOR THE WHOLE CLUSTER: "Hours & holidays" and
+                        "Edit" were borderless ghosts beside a bordered danger
+                        "Delete", so the only action that looked like a control
+                        was the one that destroys the row. All three are
+                        `Btn small` now and Delete differs only in the ink and
+                        edge its `danger` variant paints. */}
+                    <div className="flex flex-wrap gap-2">
+                      <Btn
+                        small
+                        label={selectedId === calendar.id ? t("sla.calendars.close") : t("sla.calendars.hoursAndHolidays")}
+                        onClick={() =>
+                          setSelectedId(selectedId === calendar.id ? null : calendar.id)
+                        }
+                      />
+                      {canAdmin && (
+                        <>
+                          <Btn small label={t("sla.common.edit")} onClick={() => openEdit(calendar)} />
+                          <Btn
+                            small
+                            variant="danger"
+                            label={t("sla.common.delete")}
+                            onClick={() => {
+                              del.reset();
+                              setPendingDelete(calendar);
+                            }}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+              {calendars.data && calendars.data.length === 0 && (
+                <tr>
+                  <Td colSpan={5}>
+                    <span className="note">
+                      {t("sla.calendars.empty")}
+                    </span>
+                  </Td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        )}
+
+        {/* Health is a per-calendar diagnosis of a fault that otherwise only
+            shows up as tickets quietly having no SLA -- so the cause is spelled
+            out, not left as a coloured word. */}
+        {calendars.data
+          ?.filter((calendar) => calendar.health !== "ok")
+          .map((calendar) => (
+            <p key={calendar.id} className="notice gold" style={{ margin: 14 }}>
+              {`${calendar.name}: ${calendarHealthExplanation(calendar.health) ?? ""}`}
+            </p>
+          ))}
+
+        {/* DELETE IS DESTRUCTIVE AND HAS NOWHERE ELSE TO SPEAK -- it is a row
+            action, not a form, so this paragraph is the only thing between a
+            failed delete and an operator who believes the calendar is gone.
+            `describeError` returned "" for a bodyless 503, this paragraph
+            rendered empty, and the UI looked exactly like a success. That is
+            auditor A's BLOCKER, at this call site. */}
+        {del.isError && (
+          <p role="alert" className="notice red" style={{ margin: 14 }}>
+            {t("sla.common.deleteFailed", { reason: describeSubmitError(del.error) })}
+          </p>
+        )}
+
+        {/* The consequence, not the record: a calendar is referenced BY policies,
+            and deleting one takes the deadline computation out from under every
+            policy pointing at it. */}
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title={t("sla.calendars.deleteTitle")}
+          subject={pendingDelete ? `${pendingDelete.name} (${pendingDelete.timezone})` : ""}
+          body={t("sla.calendars.deleteBody")}
+          confirmLabel={t("sla.calendars.deleteConfirm")}
+          destructive
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const calendar = pendingDelete;
+            setPendingDelete(null);
+            if (calendar) del.mutate(calendar.id);
+          }}
+        />
+
+        {selectedId && (
+          <div style={{ paddingTop: 16, marginTop: 16, borderTop: "1px solid var(--line)" }}>
+            <CalendarDetailPanel calendarId={selectedId} canAdmin={canAdmin} />
           </div>
-        </Form>
-      </Dialog>
-    </FormSection>
+        )}
+
+        {/* A real <form>, so Enter in the name field saves instead of doing
+            nothing -- the other half of the same finding. */}
+
+        <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.calendars.editTitle")}>
+          <Form onSubmit={submitEdit}>
+            <CalendarFields
+              name={name}
+              timezone={timezone}
+              active={active}
+              onName={setName}
+              onTimezone={setTimezone}
+              onActive={setActive}
+            />
+            <p className="form-hint" style={{ marginBottom: 8 }}>
+              {t("sla.calendars.editHint")}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
+                {t("common.actions.cancel")}
+              </Button>
+              <FormActions
+                label={t("common.actions.save")}
+                pending={update.isPending}
+                error={update.error}
+                problems={attemptProblems(attempt)}
+              />
+            </div>
+          </Form>
+        </Dialog>
+      </FormSection>
       <Dialog open={creating} onClose={created.close} title={t("sla.calendars.addTitle")}>
         <Form onSubmit={submitCreate}>
           <CalendarFields

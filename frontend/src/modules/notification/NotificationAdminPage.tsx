@@ -181,7 +181,7 @@ export function NotificationAdminPage() {
   return (
     <div>
       <PageHead
-        title={t("notification.admin.title")}
+        title={t("shell.nav.item.notifications")}
         description={t("notification.admin.description")}
       />
 
@@ -249,16 +249,16 @@ export function NotificationAdminPage() {
           panel: every row here names a destination or a person, and a
           half-width column truncates exactly the part that matters. */}
       <SwitchesProvider value={switchDraft.switches}>
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-        <RulesPanel canAdmin={canAdmin} />
-        <ChannelsPanel canAdmin={canAdmin} />
-        <QueueMembersPanel canAdmin={canAdmin} />
-        <AllowlistPanel canAdmin={canAdmin} />
-        {/* The profile zone (`/me`.timezone, cycle 2) reaches the one panel
-            that renders a time. This page already holds `me` for its
-            permission gate, so nothing new is fetched. */}
-        <DeliveriesPanel zone={me.data?.timezone} />
-      </div>
+        <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <RulesPanel canAdmin={canAdmin} />
+          <ChannelsPanel canAdmin={canAdmin} />
+          <QueueMembersPanel canAdmin={canAdmin} />
+          <AllowlistPanel canAdmin={canAdmin} />
+          {/* The profile zone (`/me`.timezone, cycle 2) reaches the one panel
+              that renders a time. This page already holds `me` for its
+              permission gate, so nothing new is fetched. */}
+          <DeliveriesPanel zone={me.data?.timezone} />
+        </div>
       </SwitchesProvider>
       {/* THE ONE SAVE BAR AND THE ONE GUARD (Task 7, 2.8): the rules' and
           channels' switches, saved or discarded together. */}

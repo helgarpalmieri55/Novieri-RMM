@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/dashboard/DashboardPage.tsx"
+target_identity: "file:frontend/src/modules/dashboard/DashboardPage.tsx"
 target_fingerprint: "sha256:c327130a695509116945367f1362d2997cc0f01efee866b4c3f0aa87ce254bfb"
-target_path: /home/user/rmm-w2/frontend/src/modules/dashboard/DashboardPage.tsx
+target_path: frontend/src/modules/dashboard/DashboardPage.tsx
 timestamp: 2026-11-25T04-26-24Z
 slug: frontend-src-modules-dashboard-dashboardpage-tsx
 closed: true

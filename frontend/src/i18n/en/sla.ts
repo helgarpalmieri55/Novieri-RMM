@@ -144,7 +144,6 @@ export const sla = {
     shadowed: "Shadowed by a more specific level",
   },
   admin: {
-    title: "Service levels",
     description: "Response and resolution targets, by priority and calendar.",
     calendarsLabel: "Business calendars",
     calendarsZero: "No business calendar defined yet",

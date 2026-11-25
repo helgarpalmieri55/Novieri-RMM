@@ -295,7 +295,8 @@ describe("the ticket queue in Spanish", () => {
 
     baseApi({ listTickets: vi.fn().mockResolvedValue(listPage([])) });
     const { container } = renderAt(<TicketListPage />, "/service-desk");
-    expect(await screen.findByText("No se encontró ningún ticket.")).toBeInTheDocument();
+    // Fix round 1 (review): the default view is the open tickets, and the empty queue says so.
+    expect(await screen.findByText("No hay tickets abiertos.")).toBeInTheDocument();
     expect(screen.getByText("Ningún ticket coincide con estos filtros")).toBeInTheDocument();
     expectNoEnglish(container);
   });

@@ -10,6 +10,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
 import { renderPage } from "../../../test/renderPage";
 import { TicketDetailPage } from "../TicketDetailPage";
@@ -526,6 +527,21 @@ describe("the ticket on the record kit", () => {
     );
     await user.type(screen.getByLabelText("Subject"), "Printer jams");
     expect(within(screen.getByRole("region", { name: "Unsaved changes" })).queryByRole("alert")).toBeNull();
+  });
+
+  it("says the missing subject even after a refused save (fix round 1)", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    api = { ...api, updateTicket: vi.fn().mockRejectedValue(new ApiError(503, "")) };
+    page();
+    await header();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.click(saveBarSave());
+    expect(await within(screen.getByRole("region", { name: "Unsaved changes" })).findByRole("alert")).toHaveTextContent(/unavailable/i);
+    await user.clear(screen.getByLabelText("Subject"));
+    await user.click(saveBarSave());
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("alert")).toHaveTextContent(
+      "Write a subject for the ticket.",
+    );
   });
 
   it("discards every change back to what the ticket says", async () => {

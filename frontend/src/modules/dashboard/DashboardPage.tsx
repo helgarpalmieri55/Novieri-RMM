@@ -1085,27 +1085,30 @@ export function DashboardPage() {
   return (
     <>
       <PageHead
-        title={t("dashboard.page.title")}
+        title={t("shell.nav.item.dashboard")}
         description={t("dashboard.page.description")}
         actions={
           arrangement.visible.length > 0 ? (
-            // EDIT IS A SECONDARY ACTION (redesign plan, Task 7, 2.1): the page
-            // is read far more than it is arranged. While editing, a change is
-            // saved or discarded from the save bar, which also ends edit mode;
-            // Done ends it when nothing changed, and says why it waits when
-            // something did.
-            <Btn
-              label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
-              icon={editing ? "check" : "adjustments"}
-              // It is a toggle, so it says so. `Btn` has carried `pressed`
-              // since the kit closed that gap; this caller never passed it,
-              // and a screen reader heard "Edit" then "Done" with no
-              // indication that one control had changed state.
-              pressed={editing}
-              disabled={arrangement.loading || (editing && arrangement.dirty)}
-              title={editing && arrangement.dirty ? t("dashboard.page.saveFirst") : undefined}
-              onClick={() => setEditing((current) => !current)}
-            />
+            <>
+              {/* EDIT IS A SECONDARY ACTION (redesign plan, Task 7, 2.1): the
+                  page is read far more than it is arranged. While editing, a
+                  change is saved or discarded from the save bar, which also
+                  ends edit mode; Done ends it when nothing changed. DISABLED
+                  WITH ITS REASON SHOWN (components/form.tsx, Rule 1; fix round
+                  1): while something is unsaved, the reason stands beside it. */}
+              {editing && arrangement.dirty ? <span className="note">{t("dashboard.page.saveFirst")}</span> : null}
+              <Btn
+                label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
+                icon={editing ? "check" : "adjustments"}
+                // It is a toggle, so it says so. `Btn` has carried `pressed`
+                // since the kit closed that gap; this caller never passed it,
+                // and a screen reader heard "Edit" then "Done" with no
+                // indication that one control had changed state.
+                pressed={editing}
+                disabled={arrangement.loading || (editing && arrangement.dirty)}
+                onClick={() => setEditing((current) => !current)}
+              />
+            </>
           ) : undefined
         }
       />

@@ -23,7 +23,6 @@ export const serviceDesk = {
     active: "Active",
     edit: "Edit",
     delete: "Delete",
-    saving: "Saving…",
     noSla: "No SLA",
     firstResponse: "First response",
     resolution: "Resolution",
@@ -132,7 +131,6 @@ export const serviceDesk = {
     empty: "No open tickets are assigned to you.",
   },
   list: {
-    title: "Tickets",
     description: "Pick up work, soonest deadline first.",
     newTicket: "New ticket",
     shown: "Tickets shown",
@@ -184,7 +182,7 @@ export const serviceDesk = {
     anyone: "Anyone",
     shownCount: { one: "{n} shown", other: "{n} shown" },
     truncated: "Showing {shown} of {total} matching tickets. Narrow the filters above to see the rest.",
-    empty: "No tickets found.",
+    empty: "No open tickets.",
   },
   newTicket: {
     title: "New ticket",
@@ -241,7 +239,6 @@ export const serviceDesk = {
     nobody: "Nobody",
     nobodyHint: "Anyone can pick it up",
     noDevice: "No device",
-    saveChanges: "Save changes",
     subjectRequired: "Write a subject for the ticket",
     moveTo: "Move to {status}",
     closeTicket: "Close ticket",

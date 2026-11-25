@@ -20,7 +20,6 @@ export const serviceDesk: Shape<typeof en> = {
     active: "Activa",
     edit: "Editar",
     delete: "Eliminar",
-    saving: "Guardando…",
     noSla: "Sin SLA",
     firstResponse: "Primera respuesta",
     resolution: "Resolución",
@@ -132,7 +131,6 @@ export const serviceDesk: Shape<typeof en> = {
     empty: "No tienes tickets abiertos asignados.",
   },
   list: {
-    title: "Tickets",
     description: "Empieza por lo que vence antes.",
     newTicket: "Nuevo ticket",
     shown: "Tickets mostrados",
@@ -188,7 +186,7 @@ export const serviceDesk: Shape<typeof en> = {
     shownCount: { one: "{n} mostrado", other: "{n} mostrados" },
     truncated:
       "Se muestran {shown} de {total} tickets que coinciden. Acota los filtros de arriba para ver el resto.",
-    empty: "No se encontró ningún ticket.",
+    empty: "No hay tickets abiertos.",
   },
   newTicket: {
     title: "Nuevo ticket",
@@ -247,7 +245,6 @@ export const serviceDesk: Shape<typeof en> = {
     nobody: "Nadie",
     nobodyHint: "Cualquiera puede hacerse cargo",
     noDevice: "Ningún dispositivo",
-    saveChanges: "Guardar cambios",
     subjectRequired: "Escribe un asunto para el ticket",
     moveTo: "Pasar a «{status}»",
     closeTicket: "Cerrar ticket",

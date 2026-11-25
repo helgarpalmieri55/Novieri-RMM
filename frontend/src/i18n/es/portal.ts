@@ -71,7 +71,6 @@ export const portal: Shape<typeof en> = {
     },
   },
   myTickets: {
-    title: "Mis tickets",
     description: "Crea una solicitud o consulta cómo va una que ya abriste.",
     newRequest: "Nueva solicitud",
     empty: "Todavía no has creado ningún ticket.",
@@ -84,7 +83,6 @@ export const portal: Shape<typeof en> = {
     stateAll: "Todos",
   },
   newTicket: {
-    title: "Nuevo ticket",
     description: "Cuéntanos qué pasa. No hace falta que sepas quién lo va a arreglar.",
     category: "Categoría",
     selectCategory: "Elige una categoría",

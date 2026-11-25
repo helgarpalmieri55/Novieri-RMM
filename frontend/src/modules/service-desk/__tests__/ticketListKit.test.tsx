@@ -50,14 +50,21 @@ describe("the ticket queue on the list kit", () => {
     expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(router.state.location.search).toBe("");
-    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(await screen.findByText("No open tickets.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("clears the filters and keeps the sort (fix round 1)", async () => {
+    mockUseApi.mockReturnValue(emptyQueue());
+    const { router } = renderPage("/service-desk?status=resolved&sort=newest", <TicketListPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("?sort=newest");
   });
 
   it("does not call a sort a filter", async () => {
     mockUseApi.mockReturnValue(emptyQueue());
     renderPage("/service-desk?sort=newest", <TicketListPage />);
-    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(await screen.findByText("No open tickets.")).toBeInTheDocument();
     expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
   });
 

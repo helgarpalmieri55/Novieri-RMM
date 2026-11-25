@@ -224,71 +224,71 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-    <FormSection title={t("serviceDesk.admin.queues")} icon="list-check">
-      <SectionLead
-        text={t("serviceDesk.admin.queuesSubtitle")}
-        action={canAdmin ? <Btn label={t("serviceDesk.admin.newQueue")} icon="plus" onClick={created.start} /> : undefined}
-      />
-      <QueryState
-        loading={queues.isLoading}
-        error={queues.error}
-        empty={queues.data != null && queues.data.length === 0}
-        emptyIcon="list-check"
-        emptyLabel={t("serviceDesk.admin.noQueues")}
-      >
-        <Table label={t("serviceDesk.admin.queues")}>
-          <thead>
-            <tr>
-              <Th>{t("serviceDesk.common.name")}</Th>
-              <Th>{t("serviceDesk.admin.activeColumn")}</Th>
-              {canAdmin && <Th>{""}</Th>}
-            </tr>
-          </thead>
-          <tbody>
-            {queues.data?.map((q) => (
-              <tr key={q.id}>
-                <Td lead={<Icon name="list-check" size={18} />}>
-                  <div className="cell-title">{q.name}</div>
-                  {/* The key is what the rest of the product addresses a queue
-                      by, so it stays under the name in mono rather than in a
-                      column of its own. */}
-                  <div className="cell-sub mono">{q.key}</div>
-                </Td>
-                <Td>
-                  <ActivePill active={q.active} />
-                </Td>
-                {canAdmin && (
-                  <Td>
-                    <Btn
-                      small
-                      label={t("serviceDesk.common.edit")}
-                      onClick={() => setEditing({ id: q.id, name: q.name, active: q.active })}
-                    />
-                  </Td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </QueryState>
-
-      {editing ? (
-        <EditRowDialog
-          title={t("serviceDesk.admin.editQueue")}
-          nameLabel={t("serviceDesk.admin.queueName")}
-          activeLabel={t("serviceDesk.admin.queueActive")}
-          row={editing}
-          pending={update.isPending}
-          error={update.error}
-          onSave={(nextName, active) =>
-            update.mutate({ id: editing.id, body: { name: nextName, active } }, { onSuccess: () => setEditing(null) })
-          }
-          onClose={closeEdit}
+      <FormSection title={t("serviceDesk.admin.queues")} icon="list-check">
+        <SectionLead
+          text={t("serviceDesk.admin.queuesSubtitle")}
+          action={canAdmin ? <Btn label={t("serviceDesk.admin.newQueue")} icon="plus" onClick={created.start} /> : undefined}
         />
-      ) : null}
+        <QueryState
+          loading={queues.isLoading}
+          error={queues.error}
+          empty={queues.data != null && queues.data.length === 0}
+          emptyIcon="list-check"
+          emptyLabel={t("serviceDesk.admin.noQueues")}
+        >
+          <Table label={t("serviceDesk.admin.queues")}>
+            <thead>
+              <tr>
+                <Th>{t("serviceDesk.common.name")}</Th>
+                <Th>{t("serviceDesk.admin.activeColumn")}</Th>
+                {canAdmin && <Th>{""}</Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {queues.data?.map((q) => (
+                <tr key={q.id}>
+                  <Td lead={<Icon name="list-check" size={18} />}>
+                    <div className="cell-title">{q.name}</div>
+                    {/* The key is what the rest of the product addresses a queue
+                        by, so it stays under the name in mono rather than in a
+                        column of its own. */}
+                    <div className="cell-sub mono">{q.key}</div>
+                  </Td>
+                  <Td>
+                    <ActivePill active={q.active} />
+                  </Td>
+                  {canAdmin && (
+                    <Td>
+                      <Btn
+                        small
+                        label={t("serviceDesk.common.edit")}
+                        onClick={() => setEditing({ id: q.id, name: q.name, active: q.active })}
+                      />
+                    </Td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </QueryState>
 
-      {/* Open only for someone who may create one, whatever the URL asks. */}
-    </FormSection>
+        {editing ? (
+          <EditRowDialog
+            title={t("serviceDesk.admin.editQueue")}
+            nameLabel={t("serviceDesk.admin.queueName")}
+            activeLabel={t("serviceDesk.admin.queueActive")}
+            row={editing}
+            pending={update.isPending}
+            error={update.error}
+            onSave={(nextName, active) =>
+              update.mutate({ id: editing.id, body: { name: nextName, active } }, { onSuccess: () => setEditing(null) })
+            }
+            onClose={closeEdit}
+          />
+        ) : null}
+      </FormSection>
+      {/* Open only for someone who may create one, whatever the URL asks; outside
+          the section, so a folded section does not hide it. */}
       <Dialog open={canAdmin && created.open} onClose={closeCreate} title={t("serviceDesk.admin.newQueue")}>
         {/* A real <form>, so Enter in Name saves instead of doing nothing --
             ui.tsx's Button sets no type, so the submit control was an orphan
@@ -402,84 +402,84 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-    <FormSection title={t("serviceDesk.admin.categories")} icon="tag">
-      <SectionLead
-        text={t("serviceDesk.admin.categoriesSubtitle")}
-        action={canAdmin ? <Btn label={t("serviceDesk.admin.newCategory")} icon="plus" onClick={created.start} /> : undefined}
-      />
-      <QueryState
-        loading={categories.isLoading}
-        error={categories.error}
-        empty={categories.data != null && categories.data.length === 0}
-        emptyIcon="tag"
-        emptyLabel={t("serviceDesk.admin.noCategories")}
-      >
-        <Table label={t("serviceDesk.admin.categories")}>
-          <thead>
-            <tr>
-              <Th>{t("serviceDesk.common.name")}</Th>
-              <Th>{t("serviceDesk.common.type")}</Th>
-              <Th>{t("serviceDesk.admin.approval")}</Th>
-              <Th>{t("serviceDesk.admin.activeColumn")}</Th>
-              {canAdmin && <Th>{""}</Th>}
-            </tr>
-          </thead>
-          <tbody>
-            {categories.data?.map((c) => (
-              <tr key={c.id}>
-                <Td lead={<Icon name="tag" size={18} />}>
-                  <div className="cell-title">{c.name}</div>
-                  <div className="cell-sub">
-                    <span className="mono">{c.key}</span>
-                    {queueName(c.default_queue_id)
-                      ? ` · ${t("serviceDesk.admin.defaultsTo", { queue: queueName(c.default_queue_id) ?? "" })}`
-                      : ""}
-                  </div>
-                </Td>
-                {/* Auditor A (MEDIUM): the category table printed `incident` /
-                    `request` raw, beside a Type select that does not. */}
-                <Td>{ticketTypeLabel(c.type)}</Td>
-                <Td>
-                  {c.requires_approval ? (
-                    t("serviceDesk.admin.required")
-                  ) : (
-                    <span className="cell-sub">{t("serviceDesk.admin.notRequired")}</span>
-                  )}
-                </Td>
-                <Td>
-                  <ActivePill active={c.active} />
-                </Td>
-                {canAdmin && (
-                  <Td>
-                    <Btn
-                      small
-                      label={t("serviceDesk.common.edit")}
-                      onClick={() => setEditing({ id: c.id, name: c.name, active: c.active })}
-                    />
-                  </Td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </QueryState>
-
-      {editing ? (
-        <EditRowDialog
-          title={t("serviceDesk.admin.editCategory")}
-          nameLabel={t("serviceDesk.admin.categoryName")}
-          activeLabel={t("serviceDesk.admin.categoryActive")}
-          row={editing}
-          pending={update.isPending}
-          error={update.error}
-          onSave={(nextName, active) =>
-            update.mutate({ id: editing.id, body: { name: nextName, active } }, { onSuccess: () => setEditing(null) })
-          }
-          onClose={closeEdit}
+      <FormSection title={t("serviceDesk.admin.categories")} icon="tag">
+        <SectionLead
+          text={t("serviceDesk.admin.categoriesSubtitle")}
+          action={canAdmin ? <Btn label={t("serviceDesk.admin.newCategory")} icon="plus" onClick={created.start} /> : undefined}
         />
-      ) : null}
+        <QueryState
+          loading={categories.isLoading}
+          error={categories.error}
+          empty={categories.data != null && categories.data.length === 0}
+          emptyIcon="tag"
+          emptyLabel={t("serviceDesk.admin.noCategories")}
+        >
+          <Table label={t("serviceDesk.admin.categories")}>
+            <thead>
+              <tr>
+                <Th>{t("serviceDesk.common.name")}</Th>
+                <Th>{t("serviceDesk.common.type")}</Th>
+                <Th>{t("serviceDesk.admin.approval")}</Th>
+                <Th>{t("serviceDesk.admin.activeColumn")}</Th>
+                {canAdmin && <Th>{""}</Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {categories.data?.map((c) => (
+                <tr key={c.id}>
+                  <Td lead={<Icon name="tag" size={18} />}>
+                    <div className="cell-title">{c.name}</div>
+                    <div className="cell-sub">
+                      <span className="mono">{c.key}</span>
+                      {queueName(c.default_queue_id)
+                        ? ` · ${t("serviceDesk.admin.defaultsTo", { queue: queueName(c.default_queue_id) ?? "" })}`
+                        : ""}
+                    </div>
+                  </Td>
+                  {/* Auditor A (MEDIUM): the category table printed `incident` /
+                      `request` raw, beside a Type select that does not. */}
+                  <Td>{ticketTypeLabel(c.type)}</Td>
+                  <Td>
+                    {c.requires_approval ? (
+                      t("serviceDesk.admin.required")
+                    ) : (
+                      <span className="cell-sub">{t("serviceDesk.admin.notRequired")}</span>
+                    )}
+                  </Td>
+                  <Td>
+                    <ActivePill active={c.active} />
+                  </Td>
+                  {canAdmin && (
+                    <Td>
+                      <Btn
+                        small
+                        label={t("serviceDesk.common.edit")}
+                        onClick={() => setEditing({ id: c.id, name: c.name, active: c.active })}
+                      />
+                    </Td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </QueryState>
 
-    </FormSection>
+        {editing ? (
+          <EditRowDialog
+            title={t("serviceDesk.admin.editCategory")}
+            nameLabel={t("serviceDesk.admin.categoryName")}
+            activeLabel={t("serviceDesk.admin.categoryActive")}
+            row={editing}
+            pending={update.isPending}
+            error={update.error}
+            onSave={(nextName, active) =>
+              update.mutate({ id: editing.id, body: { name: nextName, active } }, { onSuccess: () => setEditing(null) })
+            }
+            onClose={closeEdit}
+          />
+        ) : null}
+
+      </FormSection>
       <Dialog open={canAdmin && created.open} onClose={closeCreate} title={t("serviceDesk.admin.newCategory")}>
         <Form onSubmit={submit}>
           <div className="form-grid">

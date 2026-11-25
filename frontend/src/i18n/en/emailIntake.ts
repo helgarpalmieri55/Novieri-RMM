@@ -29,7 +29,6 @@ export const emailIntake = {
     senderCta: "Add these senders as users",
   },
   admin: {
-    title: "Email intake",
     description: "Mail to the support address becomes a ticket; replies thread back.",
     mailboxesLabel: "Mailboxes configured",
     mailboxesZero: "none configured, so no mail is polled",

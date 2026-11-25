@@ -1,6 +1,5 @@
 export const dashboard = {
   page: {
-    title: "Dashboard",
     description: "What needs you first, then how the fleet is doing.",
     done: "Done",
     customize: "Edit",

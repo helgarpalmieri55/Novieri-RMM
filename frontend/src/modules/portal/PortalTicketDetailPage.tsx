@@ -26,18 +26,10 @@ import {
   portalTicketStatusVariant,
   portalTicketTypeLabel,
 } from "./portalState";
-import type { BadgeVariant } from "../jobs/jobState";
+import { BADGE_KIND } from "../service-desk/badgeKind";
 import type { PortalAttachmentOut } from "./types";
-import { Btn, DetailGrid, DetailHead, Panel, QueryState, type Kind } from "../../shell/components";
+import { Btn, DetailGrid, DetailHead, Panel, QueryState } from "../../shell/components";
 
-/** The status pill's kind, from the portal's own badge vocabulary (`portalState.ts`). */
-const STATUS_KIND: Record<BadgeVariant, Kind> = {
-  muted: "mut",
-  info: "info",
-  success: "ok",
-  destructive: "crit",
-  warning: "warn",
-};
 
 // Ticket detail (spec §7): status, history, the public comment thread,
 // attachments, approval outcome when present, and a reply box.
@@ -92,7 +84,7 @@ export function PortalTicketDetailPage() {
               back={{ to: "/portal", label: t("portal.nav.myTickets") }}
               title={`${ticket.data.number} ${ticket.data.subject}`}
               status={{
-                kind: STATUS_KIND[portalTicketStatusVariant(ticket.data.status)],
+                kind: BADGE_KIND[portalTicketStatusVariant(ticket.data.status)],
                 label: portalTicketStatusLabel(ticket.data.status),
               }}
               context={

@@ -1117,8 +1117,9 @@ describe("customizing the dashboard", () => {
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Hide Open alerts" }));
     await userEvent.click(screen.getByRole("button", { name: "Move Managed endpoints earlier" }));
-    // Done waits while something is unsaved, and says why.
+    // Done waits while something is unsaved, and says why on the page (fix round 1).
     expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
+    expect(screen.getByText("Save or discard your changes first.")).toBeInTheDocument();
     await userEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Discard" }));
     expect(order()).toEqual(before);
     expect(save).not.toHaveBeenCalled();

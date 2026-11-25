@@ -273,192 +273,192 @@ export function PoliciesPanel({
     // sentence, the Client chip and "Add policy" as a secondary button (the
     // open dialog's Save is the page's primary), then the list.
     <>
-    <FormSection title={t("sla.policies.title")} icon="shield-check">
-      <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
-        <p className="note" style={{ margin: 0 }}>
-          {t("sla.policies.subtitle")}
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <ClientFilter filters={filters} />
-          {canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" onClick={created.start} /> : null}
+      <FormSection title={t("sla.policies.title")} icon="shield-check">
+        <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+          <p className="note" style={{ margin: 0 }}>
+            {t("sla.policies.subtitle")}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <ClientFilter filters={filters} />
+            {canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" onClick={created.start} /> : null}
+          </div>
         </div>
-      </div>
-      {/* `isPending`, not `isLoading`: until `/me` decides the Client chip the read is not enabled yet, and that is still loading. */}
-      {policies.isPending ? (
-        <p className="note">{t("sla.common.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">{t("sla.policies.forbidden")}</p>
-      ) : failed ? (
-        <p role="alert" className="notice red">
-          {t("sla.policies.failed", { reason: describeSubmitError(policies.error) })}
-        </p>
-      ) : (
-        <Table label={t("sla.policies.title")}>
-          <thead>
-            <tr>
-              <Th>{t("sla.common.priority")}</Th>
-              {showClient ? <Th>{t("sla.policies.colClient")}</Th> : null}
-              <Th>{t("sla.common.calendar")}</Th>
-              <Th>{t("sla.common.response")}</Th>
-              <Th>{t("sla.common.resolution")}</Th>
-              <Th>{t("sla.policies.colOnBreach")}</Th>
-              <Th>{t("sla.policies.colActive")}</Th>
-              {canAdmin && <Th>{""}</Th>}
-            </tr>
-          </thead>
-          <tbody>
-            {policies.data?.map((policy) => (
-              <tr key={policy.id}>
-                {/* v3 leads each policy row with its priority as a kind pill
-                    (P1 crit, P2 warn, P3 mut); the queue it is scoped to sits
-                    beside it. NULL in either is a WILDCARD and
-                    is rendered as the word "any", never as a blank. */}
-                <Td
-                  lead={
-                    <Badge variant={ticketPriorityVariant(policy.priority ?? "normal")}>
-                      {policy.priority === null ? t("sla.common.any") : ticketPriorityLabel(policy.priority)}
-                    </Badge>
-                  }
-                >
-                  {/* THE PILL ALREADY SAID IT. The title beside it read
-                      "Urgent priority" next to a pill reading "Urgent", and
-                      the echo repeated on all six rows. A policy's identity
-                      is the (priority, queue) PAIR -- the pill carries the
-                      priority, so the line beside it carries the other half
-                      rather than saying the same word twice. */}
-                  <div className="cell-title">
-                    {policy.queue_id === null ? t("sla.common.anyQueue") : queueName(policy.queue_id)}
-                  </div>
-                </Td>
-                {showClient ? <Td>{clientName(policy.client_id)}</Td> : null}
-                <Td>{calendarName(policy.calendar_id)}</Td>
-                <Td>
-                  <span className="mono">{formatMinutes(policy.response_target_minutes)}</span>
-                </Td>
-                <Td>
-                  <span className="mono">{formatMinutes(policy.resolution_target_minutes)}</span>
-                </Td>
-                <Td>
-                  <span className="cell-sub">{describeEscalation(policy, queueName)}</span>
-                </Td>
-                <Td>
-                  {/* `StatusPill`, so the state is humanised by the one table
-                      that does it: this column printed the wire's "active" and
-                      "inactive" in lower case beside a HEALTH column doing the
-                      same, in a console whose every other pill is sentence
-                      case. */}
-                  <StatusPill value={policy.active ? "active" : "inactive"} />
-                </Td>
-                {canAdmin && (
-                  <Td>
-                    {/* ONE WEIGHT FOR THE WHOLE CLUSTER. Edit was a borderless
-                        ghost and Delete a bordered danger, so the row's least
-                        reversible action was the only one that looked like a
-                        control. Both are `Btn small` now -- the same box the
-                        rest of the console's row actions use -- and Delete
-                        differs only in the ink and edge its `danger` variant
-                        paints. The `.btn` box is also what the coarse-pointer
-                        rule raises to 44px; a borderless text link is not. */}
-                    <div className="flex gap-2">
-                      <Btn
-                        small
-                        label={t("sla.common.edit")}
-                        onClick={() => openEdit(policy)}
-                      />
-                      <Btn
-                        small
-                        variant="danger"
-                        label={t("sla.common.delete")}
-                        onClick={() => {
-                          // A refusal left over from a previous row would
-                          // otherwise sit under this dialog reading as a
-                          // refusal of the delete being asked about now.
-                          del.reset();
-                          setPendingDelete(policy);
-                        }}
-                      />
+        {/* `isPending`, not `isLoading`: until `/me` decides the Client chip the read is not enabled yet, and that is still loading. */}
+        {policies.isPending ? (
+          <p className="note">{t("sla.common.loading")}</p>
+        ) : forbidden ? (
+          <p className="note">{t("sla.policies.forbidden")}</p>
+        ) : failed ? (
+          <p role="alert" className="notice red">
+            {t("sla.policies.failed", { reason: describeSubmitError(policies.error) })}
+          </p>
+        ) : (
+          <Table label={t("sla.policies.title")}>
+            <thead>
+              <tr>
+                <Th>{t("sla.common.priority")}</Th>
+                {showClient ? <Th>{t("sla.policies.colClient")}</Th> : null}
+                <Th>{t("sla.common.calendar")}</Th>
+                <Th>{t("sla.common.response")}</Th>
+                <Th>{t("sla.common.resolution")}</Th>
+                <Th>{t("sla.policies.colOnBreach")}</Th>
+                <Th>{t("sla.policies.colActive")}</Th>
+                {canAdmin && <Th>{""}</Th>}
+              </tr>
+            </thead>
+            <tbody>
+              {policies.data?.map((policy) => (
+                <tr key={policy.id}>
+                  {/* v3 leads each policy row with its priority as a kind pill
+                      (P1 crit, P2 warn, P3 mut); the queue it is scoped to sits
+                      beside it. NULL in either is a WILDCARD and
+                      is rendered as the word "any", never as a blank. */}
+                  <Td
+                    lead={
+                      <Badge variant={ticketPriorityVariant(policy.priority ?? "normal")}>
+                        {policy.priority === null ? t("sla.common.any") : ticketPriorityLabel(policy.priority)}
+                      </Badge>
+                    }
+                  >
+                    {/* THE PILL ALREADY SAID IT. The title beside it read
+                        "Urgent priority" next to a pill reading "Urgent", and
+                        the echo repeated on all six rows. A policy's identity
+                        is the (priority, queue) PAIR -- the pill carries the
+                        priority, so the line beside it carries the other half
+                        rather than saying the same word twice. */}
+                    <div className="cell-title">
+                      {policy.queue_id === null ? t("sla.common.anyQueue") : queueName(policy.queue_id)}
                     </div>
                   </Td>
-                )}
-              </tr>
-            ))}
-            {policies.data && policies.data.length === 0 && (
-              <tr>
-                <Td colSpan={(canAdmin ? 7 : 6) + (showClient ? 1 : 0)}>
-                  <span className="note">
-                    {t("sla.policies.empty")}
-                  </span>
-                </Td>
-              </tr>
-            )}
-          </tbody>
-        </Table>
-      )}
+                  {showClient ? <Td>{clientName(policy.client_id)}</Td> : null}
+                  <Td>{calendarName(policy.calendar_id)}</Td>
+                  <Td>
+                    <span className="mono">{formatMinutes(policy.response_target_minutes)}</span>
+                  </Td>
+                  <Td>
+                    <span className="mono">{formatMinutes(policy.resolution_target_minutes)}</span>
+                  </Td>
+                  <Td>
+                    <span className="cell-sub">{describeEscalation(policy, queueName)}</span>
+                  </Td>
+                  <Td>
+                    {/* `StatusPill`, so the state is humanised by the one table
+                        that does it: this column printed the wire's "active" and
+                        "inactive" in lower case beside a HEALTH column doing the
+                        same, in a console whose every other pill is sentence
+                        case. */}
+                    <StatusPill value={policy.active ? "active" : "inactive"} />
+                  </Td>
+                  {canAdmin && (
+                    <Td>
+                      {/* ONE WEIGHT FOR THE WHOLE CLUSTER. Edit was a borderless
+                          ghost and Delete a bordered danger, so the row's least
+                          reversible action was the only one that looked like a
+                          control. Both are `Btn small` now -- the same box the
+                          rest of the console's row actions use -- and Delete
+                          differs only in the ink and edge its `danger` variant
+                          paints. The `.btn` box is also what the coarse-pointer
+                          rule raises to 44px; a borderless text link is not. */}
+                      <div className="flex gap-2">
+                        <Btn
+                          small
+                          label={t("sla.common.edit")}
+                          onClick={() => openEdit(policy)}
+                        />
+                        <Btn
+                          small
+                          variant="danger"
+                          label={t("sla.common.delete")}
+                          onClick={() => {
+                            // A refusal left over from a previous row would
+                            // otherwise sit under this dialog reading as a
+                            // refusal of the delete being asked about now.
+                            del.reset();
+                            setPendingDelete(policy);
+                          }}
+                        />
+                      </div>
+                    </Td>
+                  )}
+                </tr>
+              ))}
+              {policies.data && policies.data.length === 0 && (
+                <tr>
+                  <Td colSpan={(canAdmin ? 7 : 6) + (showClient ? 1 : 0)}>
+                    <span className="note">
+                      {t("sla.policies.empty")}
+                    </span>
+                  </Td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        )}
 
-      {/* Delete is a row action, not a form, so it has nowhere else to speak.
-          Create and update were also funnelled through here and are not any
-          more: `FormActions` renders their refusal inside the dialog the user
-          is looking at, and repeating it on the panel behind the modal was one
-          message in two places, only one of them visible. */}
-      {del.isError && (
-        <p role="alert" className="notice red" style={{ margin: 14 }}>
-          {/* `describeSubmitError`, not the module-local `describeError`: a
-              policy delete refused with a bodyless 503 announced an alert
-              containing only the words "Delete failed:" and no reason, and a
-              policy delete refused with FastAPI's `{"detail": [...]}` printed
-              the raw payload. Both are the same call site. */}
-          {t("sla.common.deleteFailed", { reason: describeSubmitError(del.error) })}
-        </p>
-      )}
-
-      {/* NOT `requireTyping`: one policy, restorable by re-entering four
-          fields, and a typed name here would be ceremony that teaches people to
-          copy words. The body carries the two things a name cannot -- which
-          (queue, priority) pair stops being matched, and what happens to the
-          tickets currently measured against it. */}
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title={t("sla.policies.deleteTitle")}
-        subject={pendingDelete ? describePolicySubject(pendingDelete, queueName) : ""}
-        body={t("sla.policies.deleteBody")}
-        confirmLabel={t("sla.policies.deleteConfirm")}
-        destructive
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={() => {
-          const policy = pendingDelete;
-          setPendingDelete(null);
-          if (policy) del.mutate(policy);
-        }}
-      />
-
-      {/* A real <form>, so Enter submits from any field in the dialog. */}
-
-      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.policies.editTitle")}>
-        <Form onSubmit={submitEdit}>
-          <PolicyFields
-            draft={draft}
-            onChange={setDraft}
-            calendars={calendars.data ?? []}
-            calendarsLoading={calendars.isLoading}
-            calendarsFailed={calendars.error != null}
-          />
-          <p className="form-hint" style={{ marginBottom: 8 }}>
-            {t("sla.policies.editHint")}
+        {/* Delete is a row action, not a form, so it has nowhere else to speak.
+            Create and update were also funnelled through here and are not any
+            more: `FormActions` renders their refusal inside the dialog the user
+            is looking at, and repeating it on the panel behind the modal was one
+            message in two places, only one of them visible. */}
+        {del.isError && (
+          <p role="alert" className="notice red" style={{ margin: 14 }}>
+            {/* `describeSubmitError`, not the module-local `describeError`: a
+                policy delete refused with a bodyless 503 announced an alert
+                containing only the words "Delete failed:" and no reason, and a
+                policy delete refused with FastAPI's `{"detail": [...]}` printed
+                the raw payload. Both are the same call site. */}
+            {t("sla.common.deleteFailed", { reason: describeSubmitError(del.error) })}
           </p>
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
-              {t("common.actions.cancel")}
-            </Button>
-            <FormActions
-              label={t("common.actions.save")}
-              pending={update.isPending}
-              error={update.error}
-              problems={attemptProblems(attempt)}
+        )}
+
+        {/* NOT `requireTyping`: one policy, restorable by re-entering four
+            fields, and a typed name here would be ceremony that teaches people to
+            copy words. The body carries the two things a name cannot -- which
+            (queue, priority) pair stops being matched, and what happens to the
+            tickets currently measured against it. */}
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title={t("sla.policies.deleteTitle")}
+          subject={pendingDelete ? describePolicySubject(pendingDelete, queueName) : ""}
+          body={t("sla.policies.deleteBody")}
+          confirmLabel={t("sla.policies.deleteConfirm")}
+          destructive
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const policy = pendingDelete;
+            setPendingDelete(null);
+            if (policy) del.mutate(policy);
+          }}
+        />
+
+        {/* A real <form>, so Enter submits from any field in the dialog. */}
+
+        <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t("sla.policies.editTitle")}>
+          <Form onSubmit={submitEdit}>
+            <PolicyFields
+              draft={draft}
+              onChange={setDraft}
+              calendars={calendars.data ?? []}
+              calendarsLoading={calendars.isLoading}
+              calendarsFailed={calendars.error != null}
             />
-          </div>
-        </Form>
-      </Dialog>
-    </FormSection>
+            <p className="form-hint" style={{ marginBottom: 8 }}>
+              {t("sla.policies.editHint")}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
+                {t("common.actions.cancel")}
+              </Button>
+              <FormActions
+                label={t("common.actions.save")}
+                pending={update.isPending}
+                error={update.error}
+                problems={attemptProblems(attempt)}
+              />
+            </div>
+          </Form>
+        </Dialog>
+      </FormSection>
       <Dialog open={creating} onClose={created.close} title={t("sla.policies.addTitle")}>
         <Form onSubmit={submitCreate}>
           <PolicyFields

@@ -97,4 +97,43 @@ describe("notifications on the form kit", () => {
     await within(await rulesSection()).findAllByRole("switch");
     expect(document.querySelectorAll(".btn.primary")).toHaveLength(0);
   });
+
+  // FIX ROUND 1 (review): every PATCH goes out, then each list is read again
+  // ONCE; a refetch between two PATCHes used to be adopted mid-save.
+  it("saves every switched row, then reads the lists again once", async () => {
+    const registry = fixtureRegistry();
+    const listRules = vi.fn(registry.listNotificationRules as (...a: unknown[]) => unknown);
+    mockUseApi.mockReturnValue(fixtureClient({ ...registry, listNotificationRules: listRules as never }));
+    renderPage("/notifications", <NotificationAdminPage />);
+    const rules = await rulesSection();
+    const switches = await within(rules).findAllByRole("switch");
+    await userEvent.click(switches[0] as HTMLElement);
+    await userEvent.click(switches[1] as HTMLElement);
+    const before = listRules.mock.calls.length;
+    await userEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull());
+    expect(listRules.mock.calls.length - before).toBe(1);
+  });
+
+  it("switches a rule created while other switches were thrown", async () => {
+    const { queryClient } = renderPage("/notifications", <NotificationAdminPage />);
+    const rules = await rulesSection();
+    await userEvent.click((await within(rules).findAllByRole("switch"))[0] as HTMLElement);
+    const current = queryClient.getQueryData<{ id: string }[]>(["notification-rules"]) ?? [];
+    const countBefore = current.length;
+    expect(countBefore).toBeGreaterThan(0);
+    act(() => {
+      queryClient.setQueryData(["notification-rules"], [
+        ...current,
+        { ...(current[0] as object), id: "rule-new", event_type: "ticket.resolved", active: true },
+      ]);
+    });
+    const count = within(rules).getAllByRole("switch").length;
+    await waitFor(() => expect(within(rules).getAllByRole("switch").length).toBe(count + 1));
+    const all = within(rules).getAllByRole("switch");
+    const added = all[all.length - 1] as HTMLElement;
+    expect(added).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(added);
+    expect(added).toHaveAttribute("aria-checked", "false");
+  });
 });

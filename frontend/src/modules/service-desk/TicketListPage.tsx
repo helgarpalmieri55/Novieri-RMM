@@ -135,6 +135,11 @@ export function TicketListPage() {
   // "Nothing matches these filters" is said of a filter, never of the sort.
   const filtered = FILTER_KEYS.some((key) => key !== "sort" && filters.values[key] !== "");
 
+  /** "Clear filters" drops every filter and keeps the sort, which is not one (fix round 1). */
+  function clearFilters() {
+    update(Object.fromEntries(FILTER_KEYS.filter((key) => key !== "sort").map((key) => [key, ""])));
+  }
+
   /** Several keys in one history entry (one Back undoes the change); only when the query changes. */
   function update(patch: Record<string, string>) {
     const next = new URLSearchParams(params);
@@ -298,7 +303,7 @@ export function TicketListPage() {
 
   return (
     <div>
-      <PageHead title={t("serviceDesk.list.title")} description={t("serviceDesk.list.description")} actions={newTicket} />
+      <PageHead title={t("shell.nav.item.tickets")} description={t("serviceDesk.list.description")} actions={newTicket} />
       <ServiceDeskNav canRead={canRead} canAdmin={canAdmin} />
       <TicketReadiness />
 
@@ -470,14 +475,14 @@ export function TicketListPage() {
             // NO SECOND "NEW TICKET" HERE: the default view is the OPEN
             // tickets, so an empty queue is "nothing open", not "nothing
             // yet", and the head offers New ticket one line above.
-            <ListEmpty filtered={filtered} onClear={filters.clear} nothingYet={t("serviceDesk.list.empty")} icon="ticket" />
+            <ListEmpty filtered={filtered} onClear={clearFilters} nothingYet={t("serviceDesk.list.empty")} icon="ticket" />
           ) : (
             <TicketTable
               tickets={visibleTickets}
               queueName={queueName}
               userOptions={userOptions}
               now={now}
-              label={t("serviceDesk.list.title")}
+              label={t("shell.nav.item.tickets")}
             />
           )}
         </QueryState>

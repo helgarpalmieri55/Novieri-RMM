@@ -64,7 +64,6 @@ export const portal = {
     },
   },
   myTickets: {
-    title: "My tickets",
     description: "Raise a request or check on one you already opened.",
     newRequest: "New request",
     empty: "You have not filed any tickets yet.",
@@ -77,7 +76,6 @@ export const portal = {
     stateAll: "All",
   },
   newTicket: {
-    title: "New ticket",
     description: "Tell us what is wrong. You do not need to know who will fix it.",
     category: "Category",
     selectCategory: "Select a category",

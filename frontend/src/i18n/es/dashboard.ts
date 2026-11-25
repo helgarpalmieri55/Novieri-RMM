@@ -3,7 +3,6 @@ import type { dashboard as en } from "../en/dashboard";
 
 export const dashboard: Shape<typeof en> = {
   page: {
-    title: "Inicio",
     description: "Primero lo que requiere tu atención y después cómo va la flota.",
     done: "Listo",
     customize: "Editar",

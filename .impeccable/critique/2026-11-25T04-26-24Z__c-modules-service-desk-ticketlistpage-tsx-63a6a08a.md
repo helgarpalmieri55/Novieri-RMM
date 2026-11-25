@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/service-desk/TicketListPage.tsx"
+target_identity: "file:frontend/src/modules/service-desk/TicketListPage.tsx"
 target_fingerprint: "sha256:d1f6bfd0b89d456a113a6d746a4c338e9b292155e542d9645250b2f5a391657d"
-target_path: /home/user/rmm-w2/frontend/src/modules/service-desk/TicketListPage.tsx
+target_path: frontend/src/modules/service-desk/TicketListPage.tsx
 timestamp: 2026-11-25T04-26-24Z
 slug: c-modules-service-desk-ticketlistpage-tsx-63a6a08a
 closed: true

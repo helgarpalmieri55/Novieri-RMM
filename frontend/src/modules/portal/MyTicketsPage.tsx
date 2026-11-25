@@ -67,7 +67,7 @@ export function MyTicketsPage() {
 
   return (
     <div>
-      <PortalTitle page={t("portal.myTickets.title")} />
+      <PortalTitle page={t("shell.nav.item.myTickets")} />
       {/* v3 draws the portal's one call to action as a primary button in the
           page head (`P['portal']`), and this page offered it only as the
           second tab -- so the thing the portal exists for had no primary
@@ -81,7 +81,7 @@ export function MyTicketsPage() {
           same reason the nav is: the server is the authority either way
           (invariant 6); this is only what is worth offering. */}
       <PageHead
-        title={t("portal.myTickets.title")}
+        title={t("shell.nav.item.myTickets")}
         description={t("portal.myTickets.description")}
         actions={
           canRead ? (
@@ -111,7 +111,9 @@ export function MyTicketsPage() {
           // No count before the list has answered: "Showing 0" would be an invented zero.
           end={
             tickets.data ? (
-              <ShowingCount shown={items.length} total={all.length < PORTAL_LIST_PAGE ? all.length : null} />
+              // Of how many MATCH the chip: all of them are on screen when the
+              // page is not full; a full page may hide more, so it says none.
+              <ShowingCount shown={items.length} total={all.length < PORTAL_LIST_PAGE ? items.length : null} />
             ) : null
           }
         />
@@ -128,7 +130,7 @@ export function MyTicketsPage() {
               action={newTicket}
             />
           ) : (
-            <Table label={t("portal.myTickets.title")}>
+            <Table label={t("shell.nav.item.myTickets")}>
               <thead>
                 <tr>
                   <Th>{t("portal.myTickets.ticket")}</Th>

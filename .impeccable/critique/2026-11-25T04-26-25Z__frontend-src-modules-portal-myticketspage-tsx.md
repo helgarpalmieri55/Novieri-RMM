@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/portal/MyTicketsPage.tsx"
+target_identity: "file:frontend/src/modules/portal/MyTicketsPage.tsx"
 target_fingerprint: "sha256:4f2e5342c1bc2fd2bcde63778f44608017eb065440b0028cbfb9c53025c8ebc8"
-target_path: /home/user/rmm-w2/frontend/src/modules/portal/MyTicketsPage.tsx
+target_path: frontend/src/modules/portal/MyTicketsPage.tsx
 timestamp: 2026-11-25T04-26-25Z
 slug: frontend-src-modules-portal-myticketspage-tsx
 closed: true

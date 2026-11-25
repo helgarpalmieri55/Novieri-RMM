@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/service-desk/ServiceDeskAdminPage.tsx"
+target_identity: "file:frontend/src/modules/service-desk/ServiceDeskAdminPage.tsx"
 target_fingerprint: "sha256:4307c3d46345f3ca0b561418cc575a53cfe4a1154abcb6b040f8d57fbf6af870"
-target_path: /home/user/rmm-w2/frontend/src/modules/service-desk/ServiceDeskAdminPage.tsx
+target_path: frontend/src/modules/service-desk/ServiceDeskAdminPage.tsx
 timestamp: 2026-11-25T04-26-25Z
 slug: les-service-desk-servicedeskadminpage-tsx-cd6dc264
 closed: true

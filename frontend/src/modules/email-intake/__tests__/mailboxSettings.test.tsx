@@ -76,6 +76,8 @@ describe("a mailbox's settings", () => {
     await userEvent.type(within(legacy).getByLabelText("Reopen window (days)"), "45");
     await userEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    // Every PATCH, then the list is read again once (fix round 1).
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull());
     for (const [, body] of update.mock.calls) {
       expect(Object.keys(body as object)).toEqual(["reopen_window_days"]);
     }
@@ -99,5 +101,25 @@ describe("a mailbox's settings", () => {
     renderPage("/email-intake", <EmailIntakeAdminPage />);
     expect(await screen.findByRole("heading", { level: 1, name: "Email intake" })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("heading", { name: /files tickets$/ })).toBeNull());
+  });
+
+  it("saves every changed mailbox, then reads the list again once (fix round 1)", async () => {
+    // Values no earlier test in this file saved (the fixture keeps what a test saves).
+    const registry = fixtureRegistry();
+    const list = vi.fn(registry.listEmailMailboxes as (...a: unknown[]) => unknown);
+    mockUseApi.mockReturnValue(fixtureClient({ ...registry, listEmailMailboxes: list as never }));
+    renderPage("/email-intake", <EmailIntakeAdminPage />);
+    const support = await section("support@toeshee.example");
+    const legacy = await section("helpdesk@legacy.toeshee.example");
+    await userEvent.clear(within(support).getByLabelText("Reopen window (days)"));
+    await userEvent.type(within(support).getByLabelText("Reopen window (days)"), "21");
+    await userEvent.clear(within(legacy).getByLabelText("Reopen window (days)"));
+    await userEvent.type(within(legacy).getByLabelText("Reopen window (days)"), "9");
+    const before = list.mock.calls.length;
+    await userEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull());
+    expect(list.mock.calls.length - before).toBe(1);
+    expect(within(support).getByLabelText("Reopen window (days)")).toHaveValue("21");
+    expect(within(legacy).getByLabelText("Reopen window (days)")).toHaveValue("9");
   });
 });

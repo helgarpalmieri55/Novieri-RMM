@@ -175,10 +175,10 @@ export function NewTicketPage() {
     // (no save bar: there is nothing to discard back to).
     <FormPage
       back={{ to: "/portal", label: t("portal.nav.myTickets") }}
-      title={t("portal.newTicket.title")}
+      title={t("shell.nav.item.newTicket")}
       description={t("portal.newTicket.description")}
     >
-      <PortalTitle page={t("portal.newTicket.title")} />
+      <PortalTitle page={t("shell.nav.item.newTicket")} />
       {guard}
       <DetailGrid
         main={

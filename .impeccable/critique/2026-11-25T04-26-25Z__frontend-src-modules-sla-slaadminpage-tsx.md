@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/sla/SlaAdminPage.tsx"
+target_identity: "file:frontend/src/modules/sla/SlaAdminPage.tsx"
 target_fingerprint: "sha256:fb2b7c4f860d551f788245338e12304c1043a34991456003a764fef2aadc6e38"
-target_path: /home/user/rmm-w2/frontend/src/modules/sla/SlaAdminPage.tsx
+target_path: frontend/src/modules/sla/SlaAdminPage.tsx
 timestamp: 2026-11-25T04-26-25Z
 slug: frontend-src-modules-sla-slaadminpage-tsx
 closed: true

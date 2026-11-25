@@ -472,14 +472,16 @@ describe("TicketListPage query states", () => {
     renderWithProviders(<TicketListPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("No tickets found.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No open tickets.")).not.toBeInTheDocument();
   });
 
+  // Fix round 1 (review): the default view is the OPEN tickets, so the empty
+  // queue says that, "No open tickets.", where it read "No tickets found.".
   it("says there are no tickets when the queue is genuinely empty", async () => {
     mockUseApi.mockReturnValue(baseApi(vi.fn(() => Promise.resolve(page([])))) as ApiClient);
     renderWithProviders(<TicketListPage />);
 
-    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(await screen.findByText("No open tickets.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -2234,7 +2236,7 @@ describe("service-desk stat tiles", () => {
     mockUseApi.mockReturnValue(baseApi([]) as ApiClient);
     renderOnRoute(<TicketListPage />, "/service-desk");
 
-    await screen.findByText("No tickets found.");
+    await screen.findByText("No open tickets.");
     for (const card of tiles()) {
       expect(card.querySelector(".stat-foot")).toBeNull();
       expect(card.querySelector(".stat-zero")?.textContent ?? "").not.toBe("");
@@ -2249,7 +2251,7 @@ describe("service-desk stat tiles", () => {
     mockUseApi.mockReturnValue(baseApi([]) as ApiClient);
     renderOnRoute(<TicketListPage />, "/service-desk");
 
-    await screen.findByText("No tickets found.");
+    await screen.findByText("No open tickets.");
     const unassigned = tile("Unassigned");
     expect(unassigned.querySelector(".stat-value")?.textContent).toBe("0");
     expect(unassigned).toHaveTextContent("Every ticket here has an owner");

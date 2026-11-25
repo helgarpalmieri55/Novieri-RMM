@@ -8,7 +8,6 @@ export const IDENTICAL_OK_O2: Record<string, string> = {
   "serviceDesk.common.no": "\"No\" is the same word in Spanish.",
   "serviceDesk.nav.tickets": "\"Tickets\" is the glossary term for tickets in Spanish too (a loanword).",
   "serviceDesk.table.ticket": "\"Ticket\" is the glossary term for a ticket in Spanish too (a loanword).",
-  "serviceDesk.list.title": "\"Tickets\" is the glossary term for tickets in Spanish too (a loanword).",
   "serviceDesk.list.footNormal#one": "A count and \"normal\", which is the same word in the singular in Spanish.",
   "portal.nav.aria": "\"Portal\" is the same word in Spanish.",
   "portal.myTickets.ticket": "\"Ticket\" is the glossary term for a ticket in Spanish too (a loanword).",

@@ -24,7 +24,6 @@ export const emailIntake: Shape<typeof en> = {
     senderCta: "Añadir a estos remitentes como usuarios",
   },
   admin: {
-    title: "Entrada de correo",
     description: "El correo enviado a la dirección de soporte se convierte en ticket; las respuestas se añaden al mismo ticket.",
     mailboxesLabel: "Buzones configurados",
     mailboxesZero: "ninguno configurado, así que no se comprueba ningún correo",

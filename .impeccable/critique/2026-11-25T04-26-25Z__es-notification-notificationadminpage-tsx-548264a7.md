@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w2/frontend/src/modules/notification/NotificationAdminPage.tsx"
+target_identity: "file:frontend/src/modules/notification/NotificationAdminPage.tsx"
 target_fingerprint: "sha256:4150a8b58e36c1afbcec3a8a50ae5efb99a32ba515cb143bf579ee8b2d681915"
-target_path: /home/user/rmm-w2/frontend/src/modules/notification/NotificationAdminPage.tsx
+target_path: frontend/src/modules/notification/NotificationAdminPage.tsx
 timestamp: 2026-11-25T04-26-25Z
 slug: es-notification-notificationadminpage-tsx-548264a7
 closed: true
