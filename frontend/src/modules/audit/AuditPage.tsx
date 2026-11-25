@@ -333,8 +333,12 @@ export function AuditPage() {
     intact: t("audit.tiles.chainFoot.intact"),
     broken: t("audit.tiles.chainFoot.broken"),
   };
+  // NO FIGURE FOR THE LOG'S TWO TILES: not this account's to read, still on
+  // its way, or failed. One named condition, drawn by the kit's `pending`
+  // (ruling 10a; the absent mark, never an em dash or a 0).
+  const eventsNoData = !canRead || !events.data;
   const loadedFoot =
-    !canRead || !events.data
+    eventsNoData
       ? undefined
       : items.length < events.data.total
         ? t("audit.tiles.loaded", { loaded: items.length })
@@ -390,7 +394,8 @@ export function AuditPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("audit.tiles.events")}
-          value={canRead && events.data ? String(events.data.total) : "—"}
+          value={String(events.data?.total ?? 0)}
+          pending={eventsNoData}
           icon="logs"
           to="/audit"
           tone="blue"
@@ -412,8 +417,10 @@ export function AuditPage() {
         <StatCard
           label={t("audit.tiles.verified")}
           // Only a SUCCESSFUL verification may report a count. A count from a
-          // failed walk would read as reassurance.
-          value={chain === "intact" ? String(verify.data?.count ?? 0) : "—"}
+          // failed walk would read as reassurance: any other state has no
+          // figure, and draws the kit's absent mark.
+          value={String(verify.data?.count ?? 0)}
+          pending={chain !== "intact"}
           icon="list-check"
           to={`/audit?${TAB_PARAM}=${INTEGRITY_TAB}`}
           tone="green"
@@ -425,7 +432,8 @@ export function AuditPage() {
         />
         <StatCard
           label={t("audit.tiles.actionTypes")}
-          value={canRead && events.data ? String(actionTypes) : "—"}
+          value={String(actionTypes)}
+          pending={eventsNoData}
           icon="filter"
           // The loaded page IS the view this counts, and the action filter that
           // narrows it sits on that tab.

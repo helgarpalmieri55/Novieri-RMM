@@ -195,7 +195,7 @@ describe("AuditPage", () => {
     expect(await screen.findByText("16 Aug 2026, 14:32")).toBeInTheDocument();
   });
 
-  it("renders an em dash for an event with no timestamp, never 'Invalid Date'", async () => {
+  it("renders the absent mark for an event with no timestamp, never 'Invalid Date'", async () => {
     // A row whose `ts` did not survive the wire is a defect worth seeing as a
     // gap, not as the words "Invalid Date" in an evidence table.
     renderPage({
@@ -207,7 +207,9 @@ describe("AuditPage", () => {
     // The When cell is the row's THIRD cell on the v3 kit (action, actor,
     // when, hash: the action leads, as the design draws it).
     const cells = [...document.querySelectorAll("tbody td")].map((cell) => cell.textContent);
-    expect(cells[2]).toBe("—");
+    // The kit's absent mark, n/a, where this was an em dash (P3 adoption pass:
+    // `NO_DATE` is `shell.viz.na`). Same cell, same meaning.
+    expect(cells[2]).toBe("n/a");
   });
 
   it("filters the loaded page client-side and distinguishes no-match from empty", async () => {
@@ -265,7 +267,28 @@ describe("AuditPage", () => {
     const values = [...document.querySelectorAll(".stat-card")].map(
       (card) => card.querySelector(".stat-value")?.textContent,
     );
-    expect(values[2]).toBe("—");
+    // The kit's absent mark, n/a (StatCard `pending`), where this was an em
+    // dash (P3 adoption pass; ruling 10a). Same tile, same meaning.
+    expect(values[2]).toBe("n/a");
+  });
+
+  // RULING 10a, THROUGH THE KIT (P3 adoption pass): a tile with no figure,
+  // because its read is on its way, failed, or is not this account's to make,
+  // draws the kit's one absent mark through StatCard's `pending`, muted, and
+  // never an em dash or a 0.
+  it.each([
+    ["still on its way", { events: () => new Promise<never>(() => {}) }],
+    ["failed", { events: () => Promise.reject(new Error("boom")) }],
+    ["not this account's to read", { permissions: [] as string[] }],
+  ])("draws the absent mark on the log's tiles while the log is %s", async (_, options) => {
+    renderPage(options);
+    await waitFor(() => expect(tileByLabel("Audit events")).toBeDefined());
+    for (const label of ["Audit events", "Action types in view"]) {
+      const tile = tileByLabel(label) as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.className).toContain("mut");
+      expect(tile).not.toHaveTextContent("—");
+    }
   });
 
   it("never says verified for a verification that did not come back", async () => {
