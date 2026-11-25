@@ -1186,7 +1186,7 @@ describe("Settings — Users on the list pattern", () => {
     const user = userEvent.setup();
     const { router } = renderSettings("/settings?tab=users&status=invited");
     const chips = await screen.findByRole("group", { name: "Status" });
-    expect(within(chips).getByRole("button", { name: /Invited/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(chips).getByRole("button", { name: /Invitation pending/ })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByRole("row", { name: /invitee@example\.com/ })).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /operator@example\.com/ })).toBeNull();
     await user.click(within(chips).getByRole("button", { name: /Active/ }));

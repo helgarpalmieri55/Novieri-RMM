@@ -194,11 +194,11 @@ export const settings: Shape<typeof en> = {
     list: {
       search: "Buscar personas",
       statusLabel: "Estado",
-      all: "Todas",
-      active: "Activas",
-      invited: "Invitadas",
-      disabled: "Desactivadas",
-      deleted: "Eliminadas",
+      all: "Todos",
+      active: "Activo",
+      invited: "Invitación pendiente",
+      disabled: "Deshabilitado",
+      deleted: "Eliminado",
     },
     columns: {
       person: "Persona",

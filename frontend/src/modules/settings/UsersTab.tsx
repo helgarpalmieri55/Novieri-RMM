@@ -232,9 +232,10 @@ const UNDER_TABLE: CSSProperties = { padding: "12px 18px" };
 const DANGER_SEPARATOR: CSSProperties = { borderLeft: "1px solid var(--line)", marginLeft: 2, paddingLeft: 10 };
 
 /**
- * THE STATUS CHIPS (redesign, Receta L; `?status=`). Read from what the
- * directory already answers: an invitation is an account with
- * `invite_pending`, so "Invited" is that flag and "Active" an account in use.
+ * THE STATUS CHIPS (redesign, Receta L; `?status=`), in the words the rows'
+ * own pills use. Read from what the directory already answers: an invitation
+ * is an account with `invite_pending`, so "Invitation pending" is that flag
+ * and "Active" an account in use.
  * The directory carries no per-status totals, so the chips carry no number
  * (the Absent Zero Rule).
  */

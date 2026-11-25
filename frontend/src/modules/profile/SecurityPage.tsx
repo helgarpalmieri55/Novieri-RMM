@@ -156,16 +156,19 @@ function Block({
 }) {
   return (
     <section style={first ? undefined : BLOCK_RULED}>
-      {title || actions ? (
+      {title ? (
         <div style={BLOCK_HEAD}>
-          {title ? <h3 style={BLOCK_TITLE}>{title}</h3> : null}
+          <h3 style={BLOCK_TITLE}>{title}</h3>
           {actions}
         </div>
       ) : null}
-      {subtitle ? (
-        <p className="note" style={{ margin: "2px 0 12px" }}>
-          {subtitle}
-        </p>
+      {/* Untitled (the section's own title names it), its state sits on the
+          sentence's line rather than floating alone above it. */}
+      {subtitle || (actions && !title) ? (
+        <div style={{ ...BLOCK_HEAD, margin: "2px 0 12px" }}>
+          {subtitle ? <p className="note" style={{ margin: 0 }}>{subtitle}</p> : null}
+          {title ? null : actions}
+        </div>
       ) : null}
       {children}
     </section>

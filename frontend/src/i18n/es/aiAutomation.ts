@@ -63,7 +63,7 @@ export const aiAutomation: Shape<typeof en> = {
   list: {
     title: "Acciones del asistente",
     description: "Todo lo que ha propuesto el asistente y lo que ha pasado con ello.",
-    all: "Todas",
+    all: "Todos",
     empty: "No hay nada a la espera de una decisión.",
     action: "Acción",
     whatRuns: "Qué se ejecuta",

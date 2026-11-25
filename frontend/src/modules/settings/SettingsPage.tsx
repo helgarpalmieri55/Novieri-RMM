@@ -73,7 +73,7 @@
  * | The "Patch policy" body v3 draws under Settings | It is the patch module's own policy editor (`/patch/policies`), which owns the maintenance-window painter. One server-side policy must not have two editors |
  */
 
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { MessageKey } from "../../i18n/core";
 
 import { useT } from "../../i18n/context";
@@ -235,6 +235,25 @@ export function SettingsPage() {
     key: tab.key as TabKey,
     label: tab.state ? `${tab.label} · ${t(STATE_LABEL[tab.state])}` : tab.label,
   }));
+  // THE SELECTED TAB STAYS IN VIEW WHEN A LABEL GROWS. Three labels lengthen
+  // when their section's own query answers ("Email · Set up"), and the kit's
+  // `Tabs` brings the selected tab into view only when the selection changes:
+  // on a phone `?tab=sessions` opened with Sessions in view and then lost it
+  // to the longer Email label. This repeats the kit's own sideways scroll when
+  // the labels change (a kit request in the wave's report asks `Tabs` to do it
+  // itself, and this effect then goes).
+  const stripHolder = useRef<HTMLDivElement>(null);
+  const labels = items.map((item) => item.label).join("|");
+  useLayoutEffect(() => {
+    const list = stripHolder.current?.querySelector<HTMLElement>('[role="tablist"]');
+    const tab = list?.querySelector<HTMLElement>(`[data-tab="${current}"]`);
+    if (!list || !tab) return;
+    const box = list.getBoundingClientRect();
+    const own = tab.getBoundingClientRect();
+    const margin = 16;
+    if (own.left < box.left) list.scrollLeft -= box.left - own.left + margin;
+    else if (own.right > box.right) list.scrollLeft += own.right - box.right + margin;
+  }, [labels, current]);
 
   return (
     <>
@@ -255,13 +274,14 @@ export function SettingsPage() {
         }
       />
 
-      <UrlTabs
-        label={t("settings.page.sections")}
-        items={items}
-        active={current}
-        onSelect={select}
-      >
-        {current === "organization" ? <OrganizationTab canManage={everywhere.has(ORGS_MANAGE)} /> : null}
+      <div ref={stripHolder}>
+        <UrlTabs
+          label={t("settings.page.sections")}
+          items={items}
+          active={current}
+          onSelect={select}
+        >
+          {current === "organization" ? <OrganizationTab canManage={everywhere.has(ORGS_MANAGE)} /> : null}
           {current === "email" ? (
             <EmailTab canManage={canManageOrg} canEdit={everywhere.has(ORGS_MANAGE)} />
           ) : null}
@@ -307,7 +327,8 @@ export function SettingsPage() {
               canReadUsers={canReadUsers}
             />
           ) : null}
-      </UrlTabs>
+        </UrlTabs>
+      </div>
     </>
   );
 }

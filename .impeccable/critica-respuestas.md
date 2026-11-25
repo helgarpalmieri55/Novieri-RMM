@@ -191,3 +191,40 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
   computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
 - **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
   desplazar la página) y antes de pintar.
+
+---
+
+## Oleada O7: administración y cuenta (`settings`, `profile`, `ai-admin`, `ai-automation`), Task 12
+
+Críticas `.impeccable/critique/2026-11-25T06-40-33Z__…` de `SettingsPage.tsx` (29/40), `ProfilePage.tsx` (30/40),
+`SecurityPage.tsx` (31/40), `AiSettingsPage.tsx` (29/40), `ChatPanel.tsx` (30/40), `AutonomyDialPage.tsx` (31/40) y
+`ActionsPage.tsx` (30/40), todas cerradas tras el pulido. Las preguntas que zanjan `DESIGN.md`, el diseño y las
+decisiones se contestan aquí; las que no, van al coordinador en el informe de la tarea.
+
+### 1. El estado «Configurado» en la pestaña de Configuración
+
+- **Respuesta: (a).** Se queda en las dos formas, «Correo electrónico · Configurado» y «· Sin configurar», como
+  parte del nombre de la pestaña.
+- **Por qué.** Las pruebas del estado (Task 7 de su ciclo) fijan las dos frases; el color nunca es el único
+  portador (`DESIGN.md`, «Un acento y cinco severidades»), así que el estado es texto y no un punto.
+- **Regla.** `DESIGN.md`, «el color nunca es el único portador»; Global Constraints, «Ninguna prueba existente se
+  borra». Que la tira lo dibuje en una ranura propia es una petición al kit (`TabItem.note`).
+
+### 2. Los chips de estado de una lista usan las palabras de las etiquetas de sus filas
+
+- **Respuesta: (a).** Usuarios: Activo, Invitación pendiente, Deshabilitado, Eliminado (las etiquetas de la fila);
+  Acciones del asistente: Pendiente de aprobación, Ejecutado, Rechazado, Caducado, con «Todos» concordando con
+  «Estado».
+- **Por qué.** Dos palabras para un estado en una pantalla («Desactivadas» encima de «deshabilitado»).
+- **Regla.** `PRODUCT.md`, principio 5 («every word exists in both»); el glosario de `src/i18n/es/index.ts`.
+
+### 3. Notas y pistas a lo ancho de una sección
+
+- **Respuesta: (a).** Una nota larga dentro de una sección se limita a la medida de los avisos (76ch).
+- **Regla.** `components.css`, `.notice { max-width: 76ch }` (la medida del subtítulo de página, 70ch de texto).
+
+### 4. Dos marcos en una página (Tu perfil)
+
+- **Respuesta: (a).** El bloque «Inicio de sesión y seguridad» es una sección como «Tus datos», no un panel con
+  cabecera rayada.
+- **Regla.** `DESIGN.md`, «Forms»: secciones plegables; una página no mezcla dos estilos de tarjeta.

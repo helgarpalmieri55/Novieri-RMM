@@ -557,7 +557,8 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
             disabled={!canEdit || !settings.data?.configured || test.isPending}
             onClick={() => test.mutate(recipient.trim() ? { recipient: recipient.trim() } : {})}
           />
-          <span className="form-hint">
+          {/* At the notices' measure: one ~1,100px line at 1440 otherwise. */}
+          <span className="form-hint" style={{ maxWidth: "76ch" }}>
             {t("settings.email.testHint")}
           </span>
           {test.error ? (

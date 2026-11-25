@@ -20,8 +20,8 @@
 // is diagnostic, not actionable, and one product speaking one way about
 // failure was the point of the cycle.
 
-import type { Attempt, Problem } from "../../components/form";
-import { translate, type MessageKey } from "../../i18n/core";
+import type { Problem } from "../../components/form";
+import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 
 /** A 403 is "you may not", which is not the same screen as "it broke". */
@@ -53,11 +53,6 @@ export function everyClientReason(code: string): string {
   return translate("settings.readOnlyEveryClient", { code });
 }
 
-/** Field-level dirtiness, so "Saved." disappears the moment an edit resumes. */
-export function isDirty<T>(form: T, seed: T): boolean {
-  return JSON.stringify(form) !== JSON.stringify(seed);
-}
-
 /**
  * `""` is a cleared field, not zero.
  *
@@ -70,16 +65,6 @@ export function parseIntegerField(raw: string): number | null {
   if (text === "") return null;
   const value = Number(text);
   return Number.isInteger(value) ? value : null;
-}
-
-/**
- * A refusal that is not a missing field ("there are no unsaved changes"), held
- * as DATA the way `Attempt` holds the rest: the sentence is the catalogue's,
- * looked up when the form is drawn, so a language switch re-words it. The
- * field name is only the carrier; it is never shown.
- */
-export function refusal(name: string, key: MessageKey): Attempt {
-  return { rules: () => [{ name, label: name, validate: () => translate(key) }], values: { [name]: "x" } };
 }
 
 /**

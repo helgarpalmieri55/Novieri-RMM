@@ -203,7 +203,7 @@ export const settings = {
       statusLabel: "Status",
       all: "All",
       active: "Active",
-      invited: "Invited",
+      invited: "Invitation pending",
       disabled: "Disabled",
       deleted: "Deleted",
     },

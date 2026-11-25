@@ -37,7 +37,6 @@ import {
   FormSection,
   KIND_ICON,
   PageHead,
-  Panel,
   SaveBar,
   UnsavedGuard,
   useDraft,
@@ -139,7 +138,8 @@ export function ProfilePage() {
         // A REAL `<form>`: Enter in a field saves, through the bar's Save.
         <Form onSubmit={submit}>
           <FormSection title={t("profile.page.details")} icon="user">
-            <p className="note" style={{ marginBottom: 14 }}>
+            {/* Notes at the notices' measure (76ch), never the section's full width. */}
+            <p className="note" style={{ marginBottom: 14, maxWidth: "76ch" }}>
               {t("profile.page.signedInAs", { email: me.data?.email ?? "" })}
             </p>
 
@@ -185,7 +185,7 @@ export function ProfilePage() {
               </Field>
             </div>
 
-            <p className="note" style={{ marginTop: 10 }}>
+            <p className="note" style={{ marginTop: 10, maxWidth: "76ch" }}>
               {t("profile.page.smsNote")}
             </p>
           </FormSection>
@@ -207,8 +207,15 @@ export function ProfilePage() {
         </Form>
       )}
 
-      <Panel title={t("profile.security.title")} subtitle={t("profile.security.subtitle")}>
-        <p className="note">{t("profile.security.note")}</p>
+      {/* The same frame as the details above (critique, P2): a section, not a
+          second card style on one page. */}
+      <FormSection title={t("profile.security.title")} icon="shield-lock">
+        <p className="note" style={{ marginBottom: 6, maxWidth: "76ch" }}>
+          {t("profile.security.subtitle")}
+        </p>
+        <p className="note" style={{ maxWidth: "76ch" }}>
+          {t("profile.security.note")}
+        </p>
         <div className="form-actions">
           {/* A LINK, BECAUSE IT GOES SOMEWHERE: it opens a page of this
               console and changes nothing by itself. Drawn as the kit's button
@@ -218,7 +225,7 @@ export function ProfilePage() {
             <span>{t("profile.security.open")}</span>
           </Link>
         </div>
-      </Panel>
+      </FormSection>
     </div>
   );
 }
