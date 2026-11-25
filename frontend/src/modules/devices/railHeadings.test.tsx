@@ -38,7 +38,9 @@ const PAGES: readonly { route: string; page: () => ReactElement; label: MessageK
   { route: "/devices/onboard", page: () => <OnboardPage />, label: "shell.nav.page.addComputer" },
   { route: "/devices/push-runs", page: () => <PushRunsPage />, label: "shell.nav.page.pushRuns" },
   { route: "/agent-push/authorizations", page: () => <PushAuthorizationsPage />, label: "shell.nav.item.pushInstall" },
-  { route: "/agent-push/credential-scopes", page: () => <PushCredentialScopesPage />, label: "shell.nav.item.pushInstall" },
+  // A sub-page under the rail's Push install (the authorizations page): its own
+  // name, which its tab puts in front (general ruling 1b; final review I2).
+  { route: "/agent-push/credential-scopes", page: () => <PushCredentialScopesPage />, label: "agentPush.scopes.title" },
   { route: "/agent-packages", page: () => <AgentReleasesPage />, label: "shell.nav.item.agentPackages" },
 ];
 
