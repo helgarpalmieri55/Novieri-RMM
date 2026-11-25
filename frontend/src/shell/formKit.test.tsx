@@ -802,6 +802,15 @@ async function askToLeaveStrict(guardInside: boolean) {
   };
 }
 
+describe("the leave question's two layouts on the kit bench (batch 2 review, H6)", () => {
+  it("draws a guarded form in a dialog with the guard before the dialog AND one with it inside", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    const forms = [...preview.matchAll(/<GuardedTicketForm\b[^>]*\/>/g)].map((match) => match[0]);
+    expect(forms.filter((form) => /\bguardInside\b/.test(form))).toHaveLength(1);
+    expect(forms.filter((form) => !/\bguardInside\b/.test(form))).toHaveLength(1);
+  });
+});
+
 describe("the leave question gives focus back to the form under StrictMode (batch 2 review, H1)", () => {
   for (const guardInside of [false, true]) {
     const where = guardInside ? "inside the dialog" : "before the dialog";

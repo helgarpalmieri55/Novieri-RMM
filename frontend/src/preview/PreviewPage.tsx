@@ -1208,25 +1208,42 @@ function KitPreview() {
  * measures the page as before.
  */
 function GuardedDialogBench() {
-  const created = useNewParam("kit-ticket");
+  const ticket = useNewParam("kit-ticket");
+  const request = useNewParam("kit-request");
   return (
-    <div style={{ marginTop: 24 }}>
-      <Btn label="New ticket in a dialog" icon="plus" onClick={created.start} />
-      {/* The form lives while its dialog is open, so closing drops the draft
-          and opening starts clean, as a page's create dialog does. */}
-      {created.open ? <GuardedTicketForm onClose={created.close} /> : null}
+    <div style={{ marginTop: 24, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <Btn label="New ticket in a dialog" icon="plus" onClick={ticket.start} />
+      <Btn label="New request, guard inside the dialog" icon="plus" onClick={request.start} />
+      {/* Each form lives while its dialog is open, so closing drops the draft
+          and opening starts clean, as a page's create dialog does. Both
+          layouts a page draws (batch 2 review, H6): the guard before the
+          dialog and the guard inside it. One is open at a time, so one guard
+          holds changes. */}
+      {ticket.open ? <GuardedTicketForm title="New ticket" onClose={ticket.close} /> : null}
+      {request.open ? <GuardedTicketForm title="New request" onClose={request.close} guardInside /> : null}
     </div>
   );
 }
 
-function GuardedTicketForm({ onClose }: { onClose: () => void }) {
+function GuardedTicketForm({
+  title,
+  onClose,
+  guardInside = false,
+}: {
+  title: string;
+  onClose: () => void;
+  guardInside?: boolean;
+}) {
   const [subject, setSubject] = useState("");
   const { guard } = useUnsavedGuard(subject !== "", { search: ["new"] });
   return (
     <>
-      {/* BEFORE the dialog on purpose: the order that hid the question. */}
-      {guard}
-      <Dialog open onClose={onClose} title="New ticket">
+      {/* BEFORE the dialog: the order that hid the question (G1). */}
+      {guardInside ? null : guard}
+      <Dialog open onClose={onClose} title={title}>
+        {/* INSIDE the dialog: the panel's transform would hold the question
+            without the portal (G1). */}
+        {guardInside ? guard : null}
         <div className="form-grid">
           <Field label="Subject" full>
             <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} />
