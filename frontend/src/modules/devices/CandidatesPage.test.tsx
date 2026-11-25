@@ -915,6 +915,23 @@ describe("Discovered on the list kit", () => {
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
+  it("draws no tile number or claim when the reads failed, and the list says why (coordinator ruling 10a)", async () => {
+    // Both reads refused, for an account that may make them: no data is no
+    // data, whether it is still coming or will not come.
+    under("/discovered", {
+      listAssetCandidates: () => Promise.reject(new ApiError(503, "candidates unavailable")),
+      listDevices: () => Promise.reject(new ApiError(503, "fleet unavailable")),
+      me: () => Promise.resolve({ org_id: "o1", permissions: ["devices.read"], clients: TWO } as unknown as Me),
+    } as Partial<ApiClient>);
+    expect(await screen.findByText(/candidates unavailable/)).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(2);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
   it("draws no tile number or claim before the reads answer (coordinator ruling 10a)", async () => {
     // "0" and "No sweep has reported a missing agent" under it, while nothing
     // has been read, is a claim about the network made from no answer.

@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
-import type { Me } from "../../lib/api";
+import { ApiError, type Me } from "../../lib/api";
 import { recordingNarrowing } from "../../test/narrowing";
 import { renderPage } from "../../test/renderPage";
 import { DEVICES_PAGE_SIZE, DevicesPage } from "./DevicesPage";
@@ -165,6 +165,22 @@ describe("before /me answers (coordinator ruling 10)", () => {
     expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
     expect(screen.queryByText("No devices yet. Install the agent on the first one.")).toBeNull();
     expect(listDevices).not.toHaveBeenCalled();
+  });
+
+  it("draws no tile number or claim when the read failed, and the list says why (coordinator ruling 10a)", async () => {
+    // No data is no data, pending or failed: "0 managed" under a refusal would
+    // be the same invented count.
+    mockUseApi.mockReturnValue(
+      fixtureClient({ ...fixtureRegistry(), listDevices: () => Promise.reject(new ApiError(503, "fleet unavailable")) }),
+    );
+    renderPage("/devices", <DevicesPage />);
+    expect(await screen.findByText(/fleet unavailable/)).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(4);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
   });
 
   it("draws no tile number or claim before the read answers (coordinator ruling 10a)", async () => {

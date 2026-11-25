@@ -174,6 +174,17 @@ describe("AgentReleasesPage", () => {
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
   });
 
+  it("draws no tile number or claim when the catalogue read failed (coordinator ruling 10a)", async () => {
+    renderPage(() => Promise.reject(new ApiError(503, "catalogue unavailable")));
+    expect(await screen.findByText(/catalogue unavailable/)).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
   it("draws no tile number or claim while the catalogue has not answered (coordinator ruling 10a)", async () => {
     renderPage(() => new Promise<never>(() => {}));
     await screen.findByText("Loading…");
