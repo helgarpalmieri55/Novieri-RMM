@@ -22,7 +22,7 @@ export const IDENTICAL_OK_O5: Record<string, string> = {
   "ipam.sweepRun.head": "Only placeholders: the already-worded state and the age, both worded where they are supplied.",
   "ipam.importAction.error.label": "\"Error\" is the same word in Spanish.",
   "ipam.subnet.dns": "\"DNS\" is an acronym (domain name system), written the same in Spanish.",
-  "ipam.drift.chip": "Only placeholders: the already-worded class and its count.",
+  "ipam.subnet.inVrf": "Only a placeholder and the acronym \"VRF\", written the same in Spanish.",
   "ipam.registry.colRd": "\"RD\" is an acronym (route distinguisher), written the same in Spanish.",
   "ipam.registry.vid": "\"VID\" is an acronym (VLAN identifier), written the same in Spanish.",
   "licenses.new.costPlaceholder": "An example amount, digits only, written the same in Spanish.",

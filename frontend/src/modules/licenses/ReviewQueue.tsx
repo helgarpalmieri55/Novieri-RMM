@@ -22,11 +22,12 @@ import {
 import { LicensePageNav } from "./licenseNav";
 import { productPickerEmptyHint, productPickerOptions } from "./pickerOptions";
 import type { ReviewQueueRow } from "./types";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
+import { useRecordTitle } from "../../shell/title";
 
 /** The Client field Ignore needs with every client chosen, named like any required field. */
 const ignoreClientRules = (): readonly FieldRule[] => [
@@ -35,6 +36,9 @@ const ignoreClientRules = (): readonly FieldRule[] => [
 
 export function ReviewQueue() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.review.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -112,15 +116,17 @@ export function ReviewQueue() {
         </div>
       ) : null}
 
+      {/* ON THE LIST KIT (Receta L, a list with no filter; Task 10, 5.1): the
+          count at the end of the toolbar, and an empty queue that says why.
+          No bulk bar: the queue has no bulk action today, and the kit draws
+          one only where one exists (Receta L, point 2). */}
       <Panel bare>
-        <QueryState
-          loading={queue.isLoading}
-          error={queue.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.review.empty")}
-          emptyIcon="license"
-        >
-          <Table>
+        <ListToolbar end={queue.data ? <ShowingCount shown={items.length} total={items.length} /> : null} />
+        <QueryState loading={queue.isLoading} error={queue.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("licenses.review.empty")} icon="license" />
+          ) : (
+          <Table label={t("licenses.review.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.review.colName")}</Th>
@@ -186,10 +192,15 @@ export function ReviewQueue() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <MapSoftwareDialog row={mapping} onClose={() => setMapping(null)} />
+      {/* Mounted only while a title is being mapped, and keyed by it: each
+          title starts with no product chosen, so a product picked for one and
+          cancelled is never mapped onto the next (the coordinator's rulings 4
+          and 12). */}
+      {mapping ? <MapSoftwareDialog key={mapping.name} row={mapping} onClose={() => setMapping(null)} /> : null}
 
       {/* The subject is the discovered title AND its device count, because the
           count is what makes the difference between ignoring a stray utility
@@ -239,7 +250,7 @@ function MapSoftwareDialog({
   row,
   onClose,
 }: {
-  row: ReviewQueueRow | null;
+  row: ReviewQueueRow;
   onClose: () => void;
 }) {
   const t = useT();
@@ -253,9 +264,8 @@ function MapSoftwareDialog({
   // Populated ON SUBMIT, never while typing; worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
-  // ReviewQueue keeps this dialog mounted and toggles `row`, so without
-  // clearing the mutation a failure from mapping one title would still be on
-  // screen while the operator maps the next, attached to the wrong name.
+  // Clearing the mutation on close keeps a failure off the next opening (the
+  // dialog is mounted per title now, so the next title starts clean anyway).
   function close() {
     map.reset();
     setAttempt(null);
@@ -263,10 +273,14 @@ function MapSoftwareDialog({
   }
 
   function submit() {
-    if (!row) return;
     const next: Attempt = { rules: mapRules, values: { product_id: productId } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error must not hide this attempt's missing product (the
+      // coordinator's ruling 7).
+      map.reset();
+      return;
+    }
 
     map.mutate(
       { name: row.name, product_id: productId },
@@ -280,7 +294,7 @@ function MapSoftwareDialog({
   }
 
   return (
-    <Dialog open={row != null} onClose={close} title={t("licenses.review.mapTitle", { name: row?.name ?? "" })}>
+    <Dialog open onClose={close} title={t("licenses.review.mapTitle", { name: row.name })}>
       <Form onSubmit={submit}>
         {/* Same empty-lookup dead end as the New license dialog, on the screen
             an operator reaches FIRST: a fresh install discovers software before

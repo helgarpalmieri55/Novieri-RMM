@@ -542,3 +542,62 @@ respuestas que zanjan las fuentes van aquí; las dos que no, al coordinador en e
 
 - **Respuesta: se queda.** Nombra el presupuesto que se ve.
 - **Regla.** El encargo, 6.3: el presupuesto elegido como `.chip-select` en la cabecera.
+---
+
+## Activos: licencias, suscripciones y direcciones IP (oleada O5), Task 10
+
+Críticas `.impeccable/critique/2026-11-25T07-00-05Z__…` y `…07-00-06Z__…` (las dieciocho páginas de la oleada,
+28 a 30/40, todas cerradas). Las preguntas que zanjan `DESIGN.md`, el diseño aprobado, las decisiones del operador
+y las reglas generales del coordinador se contestan aquí y se aplicaron en el pulido; las que no zanjan (puntos 6
+a 8) van al coordinador en el informe de la tarea.
+
+### 1. Las fichas repiten en Detalles lo que dicen las tarjetas o la cabecera
+
+- **Respuesta: quitarlo de Detalles.** La licencia ya no repite «Derechos de uso» bajo la tarjeta «Con derecho»;
+  la suscripción no repite costo, puestos ni fecha de renovación; la subred no repite la puerta de enlace en el
+  contexto de la cabecera (la dicen los datos).
+- **Regla.** La respuesta del coordinador a la ficha 360 (punto 5, (b)): Detalles conserva lo que no está en
+  ninguna otra parte de la página.
+
+### 2. El gasto dibujaba los totales dos veces (tarjetas y tabla «Por moneda»)
+
+- **Respuesta: solo las tarjetas.** Cada tarjeta lleva el cliente, la moneda, el total mensual y el anual, que son
+  las columnas de la tabla; la frase «Nunca se suma entre clientes ni entre monedas» va bajo las tarjetas.
+- **Regla.** `DESIGN.md`, «Elevation & Depth» y el suelo de oficio (un hecho, un lugar); el encargo de la oleada
+  («cada total un StatCard»).
+
+### 3. Un producto sin regla de coincidencia decía «0 instalaciones»
+
+- **Respuesta: «sin datos de uso».** Nada puede detectarlo, así que el 0 es «nadie miró»; el catálogo y el
+  cumplimiento lo dicen igual.
+- **Regla.** The Absent Zero Rule (`DESIGN.md`, `PRODUCT.md`).
+
+### 4. Cuatro tarjetas en Licencias y cinco en Suscripciones, no las cinco y seis del encargo
+
+- **Respuesta: las de hoy.** «Gasto anual», «Asientos sin usar» y «Ahorro identificado» no tienen una cifra honesta
+  detrás (los docstrings de cada página) y una tarjeta sin lista detrás es la tarjeta muerta que el operador pidió
+  dejar de enviar.
+- **Regla.** `PRODUCT.md`, principio 2 («Every control leads somewhere real»); la regla de las tarjetas con `to`.
+
+### 5. La cola de revisión sin barra de acciones en lote
+
+- **Respuesta: sin `BulkBar`.** La cola no tiene ninguna acción en lote hoy, y la receta solo la dibuja donde la
+  hay.
+- **Regla.** Receta L, punto 2.
+
+### 6. Cumplimiento: «cada cifra un StatCard» (sin respuesta en las fuentes)
+
+- La página conserva su tabla (las mismas cifras) y hace de cada cifra («58 / 50») el enlace a las licencias de
+  ese producto y cliente. Una tarjeta por posición (cliente, producto) no escala a cuarenta productos. Opciones:
+  (a) la cifra como enlace, como queda; (b) una `StatCard` por posición. Sube al coordinador.
+
+### 7. Deriva con chip «Cliente», contra el «Sin chip» del encargo (sin respuesta en las fuentes)
+
+- La regla general 2 pide que la tarjeta «Con deriva» del árbol, estrechada por el chip, abra los hallazgos que
+  contó con `client=`; la página de deriva lee el chip para poder hacerlo. Opciones: (a) el chip en Deriva, como
+  queda; (b) la tarjeta del árbol cuenta la deriva sin estrechar y enlaza sin cliente. Sube al coordinador.
+
+### 8. Autorizaciones de escaneo sin chip «Cliente» (sin respuesta en las fuentes)
+
+- El encargo dice «Sin chip» (invariante 2a(d)); el mensaje del coordinador nombra `/ipam/scan-authorizations`
+  entre las páginas cuyo `?client=` es del chip. La página no lo dibuja. Sube al coordinador.

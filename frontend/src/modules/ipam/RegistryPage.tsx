@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
-import { attemptProblems, type Attempt } from "../../components/form";
-import { Field, Table, Td, Th, inputClass } from "../../components/ui";
+import { attemptProblems, Form, FormActions, type Attempt, type FieldRule } from "../../components/form";
+import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
 import { useNewRowClientField } from "../../lib/clientSelection";
 import { useMePermissions } from "../../lib/mePermissions";
@@ -18,21 +19,31 @@ import {
   useIpamVlans,
   useIpamVrfs,
 } from "./api";
-import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
-import { clientRule, ProblemLine } from "./NewRowClient";
+import { clientRule } from "./NewRowClient";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { IPAM_MANAGE } from "./types";
 import { Icon } from "../../shell/icons";
-import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  FormSection,
+  PageHead,
+  QueryState,
+  StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // VRFs, VLANs and the client's sites: what everything else is scoped by.
 //
-// ON THE v3 KIT: three bare panels of rows, each led by its glyph, with the
-// panel's sentence in its head and the add form flush under the list for a
-// caller with `ipam.manage`. The design's Registry screen lists addresses;
-// this console's registry is the scoping tables, and the address list is the
-// subnet detail's grid.
+// ON THE FORM KIT (redesign plan, Receta FO; Task 10, 5.9): three folding
+// sections, each its sentence and its table, and for a caller with
+// `ipam.manage` a New VRF / New VLAN that opens its dialog from `?new=vrf` /
+// `?new=vlan` (decision D8), with the fields the add rows had. No save bar:
+// each row is saved when its dialog is confirmed. The design's Registry
+// screen lists addresses; this console's registry is the scoping tables, and
+// the address list is the subnet detail's grid.
 //
 // EVERY ROW IS ONE CLIENT'S (MSP clients phase 2): a new one goes to its
 // parent's client, else to the client chosen at the top, else to the one its
@@ -52,7 +63,13 @@ import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/compon
 //     nullable scoping column would let the same prefix be registered twice.
 export function RegistryPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.registry.title"));
   const permissions = useIpamPermissions();
+  const { selected } = useClientScope();
+  const newVrf = useNewParam("vrf");
+  const newVlan = useNewParam("vlan");
   return (
     <div>
       <PageHead
@@ -60,61 +77,48 @@ export function RegistryPage() {
         description={t("ipam.registry.description")}
       />
       <IpamNav />
-      <div className="grid grid-2">
-        <VrfPanel canManage={permissions.manage} />
-        <SitePanel />
-      </div>
-      <VlanPanel canManage={permissions.manage} />
+      <VrfSection canManage={permissions.manage} onNew={newVrf.start} />
+      <SiteSection />
+      <VlanSection canManage={permissions.manage} onNew={newVlan.start} />
+
+      {/* Mounted only while open: each opening starts from an empty form.
+          Keyed by the top bar's client, so a switch of client drops what was
+          typed instead of filing it under the new one (the coordinator's
+          ruling 12). */}
+      {permissions.manage && newVrf.open ? <VrfForm key={selected ?? ""} onClose={newVrf.close} /> : null}
+      {permissions.manage && newVlan.open ? <VlanForm key={selected ?? ""} onClose={newVlan.close} /> : null}
     </div>
   );
 }
 
-/** The add form, flush under a bare panel's list. */
-function AddRow({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="panel-b" style={{ borderTop: "1px solid var(--line)" }}>
-      {children}
-    </div>
-  );
+/** A section's New button (or why there is none), above its table. */
+function SectionAction({ children }: { children: React.ReactNode }) {
+  return <div style={{ marginBottom: 12 }}>{children}</div>;
 }
 
-function VrfPanel({ canManage }: { canManage: boolean }) {
+/**
+ * The section's New button, or why there is none: with Unassigned chosen at
+ * the top nothing new can be filed under it, and the section says so where
+ * the button would be rather than opening a dialog that can only refuse.
+ */
+function NewRowAction({ canManage, label, onNew }: { canManage: boolean; label: string; onNew: () => void }) {
+  // No parent above a VRF or a VLAN: the top bar's choice decides alone.
+  const refused = useNewRowClientField(IPAM_MANAGE).refused === "unassigned";
+  if (!canManage) return null;
+  return refused ? <UnassignedRefusal /> : <Btn label={label} icon="plus" onClick={onNew} />;
+}
+
+function VrfSection({ canManage, onNew }: { canManage: boolean; onNew: () => void }) {
   const t = useT();
   const vrfs = useIpamVrfs();
   // A VRF is one client's, and decides the client of what is filed in it.
   const clientName = useClientName();
-  const create = useCreateIpamVrfMutation();
-  // No parent: the client chosen at the top, or the Client field's (§3.1).
-  const client = useNewRowClientField(IPAM_MANAGE);
-  const [name, setName] = useState("");
-  const [rd, setRd] = useState("");
-  // Populated on Add, never while typing (the form kernel's rule).
-  const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  function add() {
-    const next: Attempt = { rules: () => clientRule(client), values: { client: client.clientId } };
-    setAttempt(next);
-    if (attemptProblems(next).length > 0) {
-      create.reset();
-      return;
-    }
-    create.mutate(
-      { name, rd: rd || null, client_id: client.clientId },
-      {
-        onSuccess: () => {
-          setName("");
-          setRd("");
-        },
-      },
-    );
-  }
 
   return (
-    <Panel
-      title={t("ipam.registry.vrfsTitle")}
-      subtitle={t("ipam.registry.vrfsSubtitle")}
-      bare
-    >
+    <FormSection title={t("ipam.registry.vrfsTitle")} icon="topology-star-3" description={t("ipam.registry.vrfsSubtitle")}>
+      <SectionAction>
+        <NewRowAction canManage={canManage} label={t("ipam.registry.newVrf")} onNew={onNew} />
+      </SectionAction>
       <QueryState
         loading={vrfs.isLoading}
         error={vrfs.error}
@@ -122,7 +126,7 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
         emptyLabel={t("ipam.registry.vrfsEmpty")}
         emptyIcon="network"
       >
-        <Table>
+        <Table label={t("ipam.registry.vrfsTitle")}>
           <thead>
             <tr>
               <Th>{t("ipam.fields.name")}</Th>
@@ -150,41 +154,81 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
           </tbody>
         </Table>
       </QueryState>
-      {canManage && (
-        <AddRow>
-          {client.refused === "unassigned" ? (
-            <UnassignedRefusal />
-          ) : (
-            <>
-              <div className="form-grid">
-                {client.needsField ? <ClientField field={client} /> : null}
-                <Field label={t("ipam.fields.name")}>
-                  <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-                </Field>
-                <Field label={t("ipam.registry.routeDistinguisher")}>
-                  <input className={inputClass} value={rd} onChange={(e) => setRd(e.target.value)} />
-                </Field>
-              </div>
-              <div className="form-actions">
-                <Btn
-                  label={t("ipam.registry.addVrf")}
-                  icon="plus"
-                  disabled={create.isPending || name.trim() === ""}
-                  onClick={add}
-                />
-                <ProblemLine problems={attemptProblems(attempt)} />
-                {create.isError && <ErrorLine error={create.error} />}
-              </div>
-            </>
-          )}
-        </AddRow>
-      )}
-    </Panel>
+    </FormSection>
+  );
+}
+
+/** What a VRF may not be added without, named on Add (it used to sit disabled, saying nothing). */
+const vrfRules = (): readonly FieldRule[] => [{ name: "name", label: translate("ipam.fields.name") }];
+
+/** New VRF, in its dialog: the add row's fields and the same body. */
+function VrfForm({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const create = useCreateIpamVrfMutation();
+  // No parent: the client chosen at the top, or the Client field's (§3.1).
+  const client = useNewRowClientField(IPAM_MANAGE);
+  const [name, setName] = useState("");
+  const [rd, setRd] = useState("");
+  // Populated on Add, never while typing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // `?new=vrf` holds the form: a change asks before it is left, a saved one leaves.
+  const { guard, release } = useUnsavedGuard(name !== "" || rd !== "" || client.picked !== "", { search: ["new"] });
+
+  function add() {
+    const next: Attempt = {
+      rules: () => [...clientRule(client), ...vrfRules()],
+      values: { client: client.clientId, name },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) {
+      create.reset();
+      return;
+    }
+    create.mutate(
+      { name, rd: rd || null, client_id: client.clientId },
+      {
+        onSuccess: () => {
+          release();
+          onClose();
+        },
+      },
+    );
+  }
+
+  return (
+    <>
+      <Dialog open onClose={onClose} title={t("ipam.registry.newVrf")}>
+        {client.refused === "unassigned" ? (
+          <UnassignedRefusal />
+        ) : (
+          <Form onSubmit={add}>
+            <div className="form-grid">
+              {client.needsField ? <ClientField field={client} /> : null}
+              <Field label={t("ipam.fields.name")}>
+                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label={t("ipam.registry.routeDistinguisher")}>
+                <input className={inputClass} value={rd} onChange={(e) => setRd(e.target.value)} />
+              </Field>
+            </div>
+            <FormActions
+              label={t("ipam.registry.addVrf")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          </Form>
+        )}
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top (coordinator's ruling 3a). */}
+      {guard}
+    </>
   );
 }
 
 /** The sites in view, read-only: IPAM names them and no longer creates them. */
-function SitePanel() {
+function SiteSection() {
   const t = useT();
   const { selected } = useClientScope();
   const clientName = useClientName();
@@ -193,18 +237,15 @@ function SitePanel() {
   const canReadClients = useMePermissions().has("clients.read");
 
   return (
-    <Panel
-      title={t("ipam.registry.sitesTitle")}
-      subtitle={t("ipam.registry.sitesSubtitle")}
-      actions={
-        canReadClients ? (
+    <FormSection title={t("ipam.registry.sitesTitle")} icon="building" description={t("ipam.registry.sitesSubtitle")}>
+      {canReadClients ? (
+        <SectionAction>
           <Link className="btn" to="/clients">
-            {t("ipam.registry.manageSites")}
+            <Icon name="external-link" size={14} />
+            <span>{t("ipam.registry.manageSites")}</span>
           </Link>
-        ) : undefined
-      }
-      bare
-    >
+        </SectionAction>
+      ) : null}
       <QueryState
         loading={directory.isLoading}
         error={directory.error}
@@ -212,16 +253,15 @@ function SitePanel() {
         emptyLabel={t("ipam.registry.sitesEmpty")}
         emptyIcon="building"
       >
-        <Table>
+        <Table label={t("ipam.registry.sitesTitle")}>
           <thead>
             <tr>
               <Th>{t("ipam.fields.name")}</Th>
             </tr>
           </thead>
           <tbody>
-            {/* One column: in the two-column grid a second column clipped at
-                the panel edge at 1440, so the address -- and, with every
-                client chosen, whose office it is -- rides in the sub-line. */}
+            {/* One column: the address -- and, with every client chosen,
+                whose office it is -- rides in the sub-line. */}
             {directory.sites.map((site) => {
               const sub = [
                 selected === null ? clientName(site.client_id) : "",
@@ -239,55 +279,23 @@ function SitePanel() {
           </tbody>
         </Table>
       </QueryState>
-    </Panel>
+    </FormSection>
   );
 }
 
-function VlanPanel({ canManage }: { canManage: boolean }) {
+function VlanSection({ canManage, onNew }: { canManage: boolean; onNew: () => void }) {
   const t = useT();
   const vlans = useIpamVlans();
   const { selected } = useClientScope();
   const clientName = useClientName();
   const directory = useIpamSiteDirectory();
-  // No parent above the form: the client chosen at the top, or the Client
-  // field's. Its sites are the only ones a new VLAN may name; a site, once
-  // picked, decides the VLAN's client (the body then names none).
-  const [siteId, setSiteId] = useState("");
-  // Another client is another set of sites.
-  const client = useNewRowClientField(IPAM_MANAGE, undefined, { onPick: () => setSiteId("") });
-  const vlanClient = client.clientId;
-  const sites = useIpamSites(vlanClient);
   const showClient = selected === null;
-  const create = useCreateIpamVlanMutation();
-  const [vid, setVid] = useState("");
-  const [name, setName] = useState("");
-  // Populated on Add, never while typing (the form kernel's rule).
-  const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  function add() {
-    const next: Attempt = { rules: () => clientRule(client), values: { client: vlanClient } };
-    setAttempt(next);
-    if (attemptProblems(next).length > 0) {
-      create.reset();
-      return;
-    }
-    create.mutate(
-      { vid: Number(vid), site_id: siteId || null, client_id: vlanClient, name },
-      {
-        onSuccess: () => {
-          setVid("");
-          setName("");
-        },
-      },
-    );
-  }
 
   return (
-    <Panel
-      title={t("ipam.registry.vlansTitle")}
-      subtitle={t("ipam.registry.vlansSubtitle")}
-      bare
-    >
+    <FormSection title={t("ipam.registry.vlansTitle")} icon="router" description={t("ipam.registry.vlansSubtitle")}>
+      <SectionAction>
+        <NewRowAction canManage={canManage} label={t("ipam.registry.newVlan")} onNew={onNew} />
+      </SectionAction>
       <QueryState
         loading={vlans.isLoading}
         error={vlans.error}
@@ -295,7 +303,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
         emptyLabel={t("ipam.registry.vlansEmpty")}
         emptyIcon="network"
       >
-        <Table>
+        <Table label={t("ipam.registry.vlansTitle")}>
           <thead>
             <tr>
               <Th>{t("ipam.fields.vlan")}</Th>
@@ -316,17 +324,9 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
                 {showClient ? <Td>{clientName(vlan.client_id)}</Td> : null}
                 <Td>
                   {vlan.site_id === null ? (
-                    <StatusPill
-                      value="client-wide"
-                      kind="info"
-                      label={t("ipam.registry.clientWide")}
-                    />
+                    <StatusPill value="client-wide" kind="info" label={t("ipam.registry.clientWide")} />
                   ) : (
-                    <StatusPill
-                      value="site"
-                      kind="mut"
-                      label={directory.siteName(vlan.site_id)}
-                    />
+                    <StatusPill value="site" kind="mut" label={directory.siteName(vlan.site_id)} />
                   )}
                 </Td>
               </tr>
@@ -334,54 +334,101 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
           </tbody>
         </Table>
       </QueryState>
-      {canManage && client.refused === "unassigned" ? (
-        <AddRow>
+    </FormSection>
+  );
+}
+
+/** What a VLAN may not be added without, named on Add (it used to sit disabled, saying nothing). */
+const vlanRules = (): readonly FieldRule[] => [{ name: "vid", label: translate("ipam.registry.vid") }];
+
+/** New VLAN, in its dialog: the add row's fields, its client and site chosen as before, and the same body. */
+function VlanForm({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  // No parent above the form: the client chosen at the top, or the Client
+  // field's. Its sites are the only ones a new VLAN may name; a site, once
+  // picked, decides the VLAN's client (the body then names none).
+  const [siteId, setSiteId] = useState("");
+  // Another client is another set of sites.
+  const client = useNewRowClientField(IPAM_MANAGE, undefined, { onPick: () => setSiteId("") });
+  const vlanClient = client.clientId;
+  const sites = useIpamSites(vlanClient);
+  const create = useCreateIpamVlanMutation();
+  const [vid, setVid] = useState("");
+  const [name, setName] = useState("");
+  // Populated on Add, never while typing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // `?new=vlan` holds the form: a change asks before it is left, a saved one leaves.
+  const { guard, release } = useUnsavedGuard(
+    vid !== "" || name !== "" || siteId !== "" || client.picked !== "",
+    { search: ["new"] },
+  );
+
+  function add() {
+    const next: Attempt = {
+      rules: () => [...clientRule(client), ...vlanRules()],
+      values: { client: vlanClient, vid },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) {
+      create.reset();
+      return;
+    }
+    create.mutate(
+      { vid: Number(vid), site_id: siteId || null, client_id: vlanClient, name },
+      {
+        onSuccess: () => {
+          release();
+          onClose();
+        },
+      },
+    );
+  }
+
+  return (
+    <>
+      <Dialog open onClose={onClose} title={t("ipam.registry.newVlan")}>
+        {client.refused === "unassigned" ? (
           <UnassignedRefusal />
-        </AddRow>
-      ) : canManage ? (
-        <AddRow>
-          <div className="form-grid">
-            {client.needsField ? <ClientField field={client} /> : null}
-            <Field label={t("ipam.registry.vid")}>
-              <input
-                className={inputClass}
-                type="number"
-                min={1}
-                max={4094}
-                value={vid}
-                onChange={(e) => setVid(e.target.value)}
-              />
-            </Field>
-            <Field label={t("ipam.fields.site")}>
-              <select
-                className={inputClass}
-                value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
-              >
-                <option value="">{t("ipam.registry.clientWideNoSite")}</option>
-                {sites.data?.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("ipam.fields.name")}>
-              <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          </div>
-          <div className="form-actions">
-            <Btn
+        ) : (
+          <Form onSubmit={add}>
+            <div className="form-grid">
+              {client.needsField ? <ClientField field={client} /> : null}
+              <Field label={t("ipam.registry.vid")}>
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={1}
+                  max={4094}
+                  value={vid}
+                  onChange={(e) => setVid(e.target.value)}
+                />
+              </Field>
+              <Field label={t("ipam.fields.site")}>
+                <select className={inputClass} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+                  <option value="">{t("ipam.registry.clientWideNoSite")}</option>
+                  {sites.data?.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t("ipam.fields.name")}>
+                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+            </div>
+            <FormActions
               label={t("ipam.registry.addVlan")}
-              icon="plus"
-              disabled={create.isPending || vid === ""}
-              onClick={add}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
             />
-            <ProblemLine problems={attemptProblems(attempt)} />
-            {create.isError && <ErrorLine error={create.error} />}
-          </div>
-        </AddRow>
-      ) : null}
-    </Panel>
+          </Form>
+        )}
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top (coordinator's ruling 3a). */}
+      {guard}
+    </>
   );
 }

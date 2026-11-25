@@ -85,6 +85,10 @@ export function AddressDialog({
   const [mac, setMac] = useState(entry.mac ?? "");
   const [method, setMethod] = useState("static");
 
+  // The edit as it opened: an untouched "Save edits" sends nothing.
+  const edited =
+    hostname !== entry.hostname || assetLabel !== entry.asset_label || description !== "" || method !== "static";
+
   const status = statusPresentation(entry.status);
   const state = statePresentation(entry.state);
   const inDhcpPool = entry.range_kinds.includes("dhcp_pool");
@@ -231,18 +235,22 @@ export function AddressDialog({
                   icon="edit"
                   disabled={update.isPending}
                   onClick={() =>
-                    update.mutate(
-                      {
-                        id: entry.address_id as string,
-                        body: {
-                          hostname,
-                          asset_label: assetLabel,
-                          description,
-                          allocation_method: method,
-                        },
-                      },
-                      { onSuccess: onClose },
-                    )
+                    // Nothing changed: close as a save would, and write nothing
+                    // (the coordinator's ruling 13: no false audit entry).
+                    edited
+                      ? update.mutate(
+                          {
+                            id: entry.address_id as string,
+                            body: {
+                              hostname,
+                              asset_label: assetLabel,
+                              description,
+                              allocation_method: method,
+                            },
+                          },
+                          { onSuccess: onClose },
+                        )
+                      : onClose()
                   }
                 />
                 <Btn

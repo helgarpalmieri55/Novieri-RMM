@@ -304,6 +304,24 @@ describe("VendorsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Name is required");
     expect(api.createVendor).not.toHaveBeenCalled();
   });
+
+  // The coordinator's ruling 7 (review I2): the 503 of the last attempt used to
+  // stay on screen over the next attempt's missing field.
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createVendor = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<VendorsPage />);
+    await screen.findByText("Acme Software");
+    await user.click(screen.getByRole("button", { name: "New vendor" }));
+    await user.type(screen.getByLabelText("Name"), "Globex");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Name"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Name is required");
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
 });
 
 describe("ProductsPage", () => {
@@ -320,6 +338,24 @@ describe("ProductsPage", () => {
   it("lists products from the mocked api", async () => {
     renderWithProviders(<ProductsPage />);
     expect(await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).toBeInTheDocument();
+  });
+
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createProduct = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<ProductsPage />);
+    await screen.findByText("Acme Office Suite", { selector: ".cell-title" });
+    await user.click(screen.getAllByRole("button", { name: "New product" })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "New product" });
+    await user.type(within(dialog).getByLabelText("Name"), "Globex Suite");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(within(dialog).getByLabelText("Name"));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("Name is required");
+    expect(alert).not.toHaveTextContent(/unavailable/i);
   });
 
   // The compliance report is one row per (client, product) since MSP clients
@@ -690,7 +726,8 @@ describe("LicensesPage", () => {
     const user = await openNewLicense();
     expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
     await pick(user, "Product", /Acme Office Suite/);
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    // The dialog's field: the list's Client chip carries the same name (Receta L, point 6).
+    await user.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme" })));
   });
@@ -705,7 +742,7 @@ describe("LicensesPage", () => {
     ]);
     const user = await openNewLicense();
     await pick(user, "Product", /Acme Office Suite/);
-    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(within(screen.getByRole("dialog")).getByLabelText("Client")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -737,7 +774,7 @@ describe("LicensesPage", () => {
       { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
     ]);
     await openNewLicense();
-    const field = screen.getByLabelText("Client");
+    const field = within(screen.getByRole("dialog")).getByLabelText("Client");
     expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Choose a client",
       "Novieri",
@@ -822,6 +859,20 @@ describe("LicensesPage", () => {
 
   // The valid path, so the rules above cannot be satisfied by a form that
   // refuses everything: money travels as the typed STRING, never a number.
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    api.createLicense = vi.fn().mockRejectedValue(bodylessUnavailable());
+    const user = await openNewLicense();
+    await pick(user, "Product", /Acme Office Suite/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Entitlements"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Entitlements/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
+
   it("sends the entered values once they are valid, with money as a string", async () => {
     const user = await openNewLicense();
 
@@ -906,15 +957,18 @@ describe("LicenseDetail", () => {
 
     const head = document.querySelector(".ph") as HTMLElement;
     // Nothing unpressable in the action row.
-    expect(head.querySelectorAll("[data-kind]")).toHaveLength(0);
+    expect((head.querySelector(".ph-act") as HTMLElement).querySelectorAll("[data-kind]")).toHaveLength(0);
     expect(head.querySelector(".ph-act")).toContainElement(
       screen.getByRole("button", { name: "Reveal key" }),
     );
 
-    // The state is a pill, and it sits outside the head.
+    // The state is a pill under the title. The record kit's head draws it in
+    // its meta row, inside the head and outside the action row (redesign
+    // plan, Receta F: "DetailHead ... etiqueta de estado").
     const pill = screen.getByText("Perpetual").closest("[data-kind]") as HTMLElement;
     expect(pill).not.toBeNull();
-    expect(pill.closest(".ph")).toBeNull();
+    expect(pill.closest(".detail-meta")).not.toBeNull();
+    expect(pill.closest(".ph-act")).toBeNull();
   });
 
   it("hides the Reveal key control when the caller lacks licenses.keys.read", async () => {
@@ -1214,13 +1268,14 @@ describe("RenewalCalendar (licenses)", () => {
     api.licenseRenewals = vi.fn().mockRejectedValue(new Error("boom"));
     renderWithProviders(<RenewalCalendar />);
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText(/No upcoming renewals/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No license renews in this period/i)).not.toBeInTheDocument();
   });
 
   it("says there are no renewals when the list is genuinely empty", async () => {
     api.licenseRenewals = vi.fn().mockResolvedValue([]);
     renderWithProviders(<RenewalCalendar />);
-    expect(await screen.findByText("No upcoming renewals.")).toBeInTheDocument();
+    // The empty calendar says its cause (Task 10, 5.1: "Ninguna licencia se renueva en este periodo.").
+    expect(await screen.findByText("No license renews in this period.")).toBeInTheDocument();
   });
 
   it("renders renewal rows from the mocked api", async () => {
@@ -1470,7 +1525,9 @@ describe("New license: the empty-lookup blocked flow", () => {
     const user = userEvent.setup();
     renderWithProviders(<LicensesPage />);
     await screen.findByText("No licenses yet.");
-    await user.click(screen.getByRole("button", { name: "New license" }));
+    // The head's: an empty register offers New license again in its empty
+    // state (Receta L, point 3), so there are two buttons of that name.
+    await user.click(screen.getAllByRole("button", { name: "New license" })[0] as HTMLElement);
     return user;
   }
 
@@ -1506,7 +1563,8 @@ describe("New license: the empty-lookup blocked flow", () => {
     const user = userEvent.setup();
     renderWithProviders(<LicensesPage />);
     await screen.findByText("No licenses yet.");
-    await user.click(screen.getByRole("button", { name: "New license" }));
+    // The head's (the empty state offers a second one, Receta L, point 3).
+    await user.click(screen.getAllByRole("button", { name: "New license" })[0] as HTMLElement);
 
     expect(
       screen.queryByRole("link", { name: /Add a product to the catalog/ }),

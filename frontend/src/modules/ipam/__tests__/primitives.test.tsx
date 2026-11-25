@@ -12,6 +12,9 @@ import { ScanAuthorizationsPage } from "../ScanAuthorizationsPage";
 import { SweepPanel } from "../SweepPanel";
 import type { DriftOut, GridEntryOut, ScopeOut, SubnetOut } from "../types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 // The two shared primitives, as they behave INSIDE this module.
 //
 // `lib/datetime.ts` and `components/form.tsx` have their own unit tests. What
@@ -101,7 +104,7 @@ function stubApi(overrides: Partial<ApiClient>, timezone: string | null = BOGOTA
 
 /** The grant form lives in the dialog the head's primary action opens. */
 async function openGrantForm(): Promise<void> {
-  await userEvent.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+  await userEvent.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
 }
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {

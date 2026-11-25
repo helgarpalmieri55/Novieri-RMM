@@ -12,6 +12,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type {
   AllocationCreate,
   LicenseCreate,
@@ -99,9 +100,22 @@ export function useUpdateProductMutation() {
   });
 }
 
-export function useLicenses() {
-  const api = useApi();
-  return useQuery({ queryKey: ["licenses"], queryFn: () => api.listLicenses() });
+/**
+ * THE REGISTER, NARROWED BY THE CLIENT CHIP (decision D6; redesign plan,
+ * Receta L, point 7). `chip` is `?client=` ("" without one): the same call
+ * with the same arguments, read through `useNarrowedApi` and keyed by the
+ * client it narrowed to, so a change of chip reads again and never shows the
+ * last client's rows under the new one. `VendorsPage` calls it without a chip.
+ * Mutations still invalidate the `["licenses"]` prefix, which reaches every
+ * client's key.
+ */
+export function useLicenses(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: ["licenses", client],
+    queryFn: () => api.listLicenses(),
+    enabled: ready,
+  });
 }
 
 export function useCreateLicenseMutation() {
@@ -209,9 +223,14 @@ export function useReleaseAllocationMutation() {
   });
 }
 
-export function useCompliance() {
-  const api = useApi();
-  return useQuery({ queryKey: ["license-compliance"], queryFn: () => api.licenseCompliance() });
+/** Narrowed like `useLicenses`: the register's tiles count the client its chip chose. */
+export function useCompliance(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: ["license-compliance", client],
+    queryFn: () => api.licenseCompliance(),
+    enabled: ready,
+  });
 }
 
 export function useReviewQueue() {
@@ -243,11 +262,13 @@ export function useIgnoreSoftwareMutation() {
   });
 }
 
-export function useRenewals(withinDays?: number) {
-  const api = useApi();
+/** Narrowed like `useLicenses`: the register's renewal tile counts the client its chip chose. */
+export function useRenewals(withinDays?: number, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: ["license-renewals", withinDays],
+    queryKey: ["license-renewals", withinDays, client],
     queryFn: () => api.licenseRenewals(withinDays),
+    enabled: ready,
   });
 }
 

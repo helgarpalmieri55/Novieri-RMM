@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -16,6 +16,7 @@ import {
 import { DetailFacts } from "./DetailFacts";
 import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
+import { useOpenParam } from "./openParam";
 import type { EvidenceNames } from "./ipamState";
 import {
   describeDriftDetail,
@@ -32,16 +33,25 @@ import type { DriftOut } from "./types";
 import { DORMANT_CLASS, DRIFT_CLASSES } from "./types";
 import { formatDate, toInstant } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
-import { Chips } from "../../shell/viz";
 import {
   Btn,
+  ChipSelect,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNarrowedApi,
+  useUnsavedGuard,
+  useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // The drift page.
 //
@@ -79,42 +89,48 @@ const CONFIDENCE_LINE: Readonly<Record<string, MessageKey>> = {
 
 export function DriftPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.drift.title"));
   const permissions = useIpamPermissions();
   /**
-   * THE TAB IS IN THE URL, and that is what makes the tiles clickable.
+   * THE VIEW IS IN THE URL, and that is what makes the tiles clickable.
    *
    * `subnet` was already read from here (the tree's per-row drift badge links
    * with it). `class` joins it, named after the API's own `?class=` filter and
-   * carrying the same values: a drift class, `dormant`, or `orphans`. The
-   * tiles above then point at the view their number was counted from instead
-   * of being three numbers with nowhere to go, and a dormant view survives
-   * being pasted to the colleague who asked which addresses could not be
-   * verified.
+   * carrying the same values: a drift class, `dormant`, or `orphans`. ON THE
+   * LIST KIT (Task 10, 5.7) they are a chip row and a chip-shaped select, and
+   * the finding being handled is `?finding=<id>`, so it too is a link.
+   *
+   * THE CLIENT CHIP is here because the subnet tree's "With drift" tile, under
+   * its chip, counts one client's subnets and opens this page with the same
+   * `client=` (coordinator's ruling on the wave reviews): the page opens
+   * exactly the findings it counted.
    */
-  const [params, setParams] = useSearchParams();
-  const subnetFilter = params.get("subnet") ?? undefined;
-  const tab = params.get("class") ?? "all";
-  const setTab = (key: string) => {
-    const next = new URLSearchParams(params);
-    if (key === "all") next.delete("class");
-    else next.set("class", key);
-    setParams(next);
-  };
+  const filters = useUrlFilters(["class", "subnet", "client"] as const);
+  const subnetFilter = filters.values.subnet || undefined;
+  const tab = filters.values.class || "all";
+  const chip = filters.values.client;
+  const { client: narrowedTo } = useNarrowedApi(chip);
+  const withClient = (path: string): string =>
+    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
 
   // Three separate reads, because they are three separate kinds of fact. The
   // default `/drift` list already excludes `dormant`; it is fetched by name so
   // its tab can exist at all.
-  const drift = useIpamDrift(subnetFilter ? { subnet: subnetFilter } : {});
+  const drift = useIpamDrift(subnetFilter ? { subnet: subnetFilter } : {}, chip);
   const dormant = useIpamDrift(
     subnetFilter ? { class: DORMANT_CLASS, subnet: subnetFilter } : { class: DORMANT_CLASS },
+    chip,
   );
-  const orphans = useIpamOrphans();
+  const orphans = useIpamOrphans(chip);
   // WHICH SUBNET, BY NAME. Every row's second line linked to its subnet under
   // the bare word "subnet", so six rows offered six identical links that said
   // nothing about where they went (and a screen reader's link list read
   // "subnet" six times). The registry is already fetched on the other pages of
-  // this module and is cheap; the prefix is what an operator recognises.
-  const subnets = useIpamSubnets();
+  // this module and is cheap; the prefix is what an operator recognises. It is
+  // also the subnet chip's list, so it narrows with the page.
+  const subnets = useIpamSubnets({}, chip);
   const subnetLabels = useMemo(() => {
     const byId = new Map<string, string>();
     for (const row of subnets.data ?? []) {
@@ -144,7 +160,7 @@ export function DriftPage() {
 
   // Counted over BOTH lists together, on purpose: the page holds dormant rows
   // in hand and must still report them apart. `driftCounts` is the one place
-  // that separation is made.
+  // that separation is made. The lists are fetched whole, so these are totals.
   const counts = useMemo(
     () =>
       driftCounts(
@@ -153,6 +169,12 @@ export function DriftPage() {
       ),
     [drift.data, dormant.data, orphans.data],
   );
+  // EACH COUNT ONCE ITS OWN LIST ANSWERED, never a zero for a list not read
+  // yet (The Absent Zero Rule): the drift classes from the drift list, dormant
+  // from its own read, orphans from theirs.
+  const driftCounted = drift.data !== undefined;
+  const dormantCounted = dormant.data !== undefined;
+  const orphansCounted = orphans.data !== undefined;
 
   const visible: DriftOut[] =
     tab === "all"
@@ -161,24 +183,19 @@ export function DriftPage() {
         ? (dormant.data ?? [])
         : (drift.data ?? []).filter((item) => item.drift_class === tab);
 
-  // The chip row: every drift class, then the two lists that are not drift.
-  // The labels carry the counts, as the buttons always have.
-  const chips = [
-    { key: "all", label: t("ipam.drift.chipAll", { count: counts.drift }) },
+  // The class chips: every drift class, then the two lists that are not
+  // drift, each with the count its tile above shows.
+  const classOptions = [
+    { value: "", label: t("ipam.drift.allDrift"), count: driftCounted ? counts.drift : undefined },
     ...DRIFT_CLASSES.map((driftClass) => ({
-      key: driftClass,
-      label: t("ipam.drift.chip", {
-        label: driftClassPresentation(driftClass).label,
-        count: counts.byClass[driftClass] ?? 0,
-      }),
+      value: driftClass,
+      label: driftClassPresentation(driftClass).label,
+      count: driftCounted ? (counts.byClass[driftClass] ?? 0) : undefined,
     })),
-    { key: DORMANT_CLASS, label: t("ipam.drift.chip", { label: t("ipam.fields.dormant"), count: counts.dormant }) },
-    { key: "orphans", label: t("ipam.drift.chip", { label: t("ipam.fields.orphans"), count: counts.orphans }) },
+    { value: DORMANT_CLASS, label: t("ipam.fields.dormant"), count: dormantCounted ? counts.dormant : undefined },
+    { value: "orphans", label: t("ipam.fields.orphans"), count: orphansCounted ? counts.orphans : undefined },
   ];
-  const activeChip = Math.max(
-    0,
-    chips.findIndex((chip) => chip.key === tab),
-  );
+  const listLoading = tab === DORMANT_CLASS ? dormant.isPending : drift.isPending;
 
   return (
     <div>
@@ -188,20 +205,26 @@ export function DriftPage() {
       />
       <IpamNav />
 
-      {/* EACH TILE OPENS ITS OWN TAB, because each counts a different list and
-          the tabs are in the URL. The hues say the same thing the page says in
-          words: drift is work (warn, and the only `urgent` one: it is the
-          only queue here), dormant is inert (nothing to do, by definition),
-          orphans are an observation waiting for a plan. */}
+      {/* EACH TILE OPENS ITS OWN VIEW, because each counts a different list
+          and the views are in the URL (with the chip's `client=` when it
+          narrows). The hues say the same thing the page says in words: drift
+          is work (warn, and the only `urgent` one: it is the only queue here),
+          dormant is inert (nothing to do, by definition), orphans are an
+          observation waiting for a plan. */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("ipam.fields.drift")}
           value={String(counts.drift)}
           icon="arrows-exchange"
-          to="/ipam/drift"
+          to={withClient("/ipam/drift")}
           tone="gold"
           urgent
-          foot={<span>{t("ipam.drift.tileDriftFoot")}</span>}
+          /* No data (pending, narrowing undecided or failed): the kit's absent
+             mark, "n/a" / "n/d", and no line under it, never a zero it did not
+             count (the coordinator's ruling 10a, the Absent Zero Rule); the
+             list below says why a read failed. */
+          pending={!driftCounted}
+          foot={driftCounted ? <span>{t("ipam.drift.tileDriftFoot")}</span> : undefined}
           /* A MEASURED zero, and it says so: the drift list answered. This
              page never renders the other zero: "nothing has been looked at"
              produces no findings and no tile row on /ipam either. */
@@ -211,65 +234,98 @@ export function DriftPage() {
           label={t("ipam.fields.dormant")}
           value={String(counts.dormant)}
           icon="clock"
-          to="/ipam/drift?class=dormant"
+          to={withClient("/ipam/drift?class=dormant")}
           tone="neutral"
-          foot={<span>{t("ipam.drift.tileDormantFoot")}</span>}
+          pending={!dormantCounted}
+          foot={dormantCounted ? <span>{t("ipam.drift.tileDormantFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileDormantZero")}
         />
         <StatCard
           label={t("ipam.fields.orphans")}
           value={String(counts.orphans)}
           icon="eye"
-          to="/ipam/drift?class=orphans"
+          to={withClient("/ipam/drift?class=orphans")}
           tone="blue"
-          foot={<span>{t("ipam.drift.tileOrphansFoot")}</span>}
+          pending={!orphansCounted}
+          foot={orphansCounted ? <span>{t("ipam.drift.tileOrphansFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileOrphansZero")}
         />
       </StatsGrid>
 
-      <div style={{ marginBottom: 14 }}>
-        <Chips
-          items={chips.map((chip) => chip.label)}
-          active={activeChip}
-          onSelect={(at) => setTab(chips[at]?.key ?? "all")}
-          label={t("ipam.drift.chipsLabel")}
-        />
-      </div>
-
-      {tab === "orphans" ? (
-        <OrphansTab />
-      ) : (
-        <>
-          {tab !== "all" && (
-            <div className="notice" style={{ marginBottom: 14 }}>
-              <Icon name="info" size={16} />
-              <div>
-                <p>{driftClassPresentation(tab).meaning}</p>
-                <p style={{ marginTop: 4 }}>
-                  <b>{t("ipam.drift.remedy")}</b>
-                  {driftClassPresentation(tab).remedy}
-                </p>
-              </div>
-            </div>
-          )}
-          <Panel bare>
-            <QueryState
-              loading={tab === DORMANT_CLASS ? dormant.isLoading : drift.isLoading}
-              error={drift.error ?? dormant.error}
-              empty={visible.length === 0}
-              emptyLabel={t("ipam.drift.empty")}
-              emptyIcon="arrows-exchange"
-            >
-              <DriftTable
-                items={visible}
-                canAssign={permissions.assign}
-                subnetLabels={subnetLabels}
-                evidenceNames={evidenceNames}
+      <Panel bare>
+        <ListToolbar
+          chips={
+            <>
+              <FilterChips
+                label={t("ipam.drift.chipsLabel")}
+                options={classOptions}
+                value={filters.values.class}
+                onChange={(value) => filters.set("class", value)}
               />
+              {/* Many values: the kit's chip that opens a choice. A subnet the
+                  list does not hold (another client's, or one deleted since the
+                  link was made) still reads as itself. */}
+              <ChipSelect
+                label={t("ipam.drift.subnetCaption")}
+                ariaLabel={t("ipam.drift.subnetAria")}
+                options={[
+                  { value: "", label: t("ipam.subnet.allSubnets") },
+                  ...(subnets.data ?? []).map((row) => ({ value: row.id, label: subnetLabels.get(row.id) ?? row.prefix })),
+                  ...(filters.values.subnet !== "" && !subnetLabels.has(filters.values.subnet)
+                    ? [{ value: filters.values.subnet, label: filters.values.subnet }]
+                    : []),
+                ]}
+                value={filters.values.subnet}
+                onChange={(value) => filters.set("subnet", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={
+            tab === "orphans" ? null : (
+              <ShowingCount shown={visible.length} total={listLoading ? null : visible.length} />
+            )
+          }
+        />
+
+        {tab === "orphans" ? (
+          <OrphansTab chip={chip} onClearChip={() => filters.set("client", "")} />
+        ) : (
+          <>
+            {tab !== "all" && (
+              <div className="notice" style={{ margin: "12px 16px" }}>
+                <Icon name="info" size={16} />
+                <div>
+                  <p>{driftClassPresentation(tab).meaning}</p>
+                  <p style={{ marginTop: 4 }}>
+                    <b>{t("ipam.drift.remedy")}</b>
+                    {driftClassPresentation(tab).remedy}
+                  </p>
+                </div>
+              </div>
+            )}
+            <QueryState loading={listLoading} error={drift.error ?? dormant.error} empty={false} emptyLabel="">
+              {visible.length === 0 ? (
+                /* Nothing drifts: the cause, said. Nothing under these filters:
+                   the kit's sentence and its way out. */
+                <ListEmpty
+                  filtered={filters.active}
+                  onClear={filters.clear}
+                  nothingYet={t("ipam.drift.empty")}
+                  icon="arrows-exchange"
+                />
+              ) : (
+                <DriftTable
+                  items={visible}
+                  canAssign={permissions.assign}
+                  subnetLabels={subnetLabels}
+                  evidenceNames={evidenceNames}
+                />
+              )}
             </QueryState>
-          </Panel>
-        </>
-      )}
+          </>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -289,16 +345,15 @@ function DriftTable({
   evidenceNames: EvidenceNames;
 }) {
   const t = useT();
-  const acknowledge = useAcknowledgeIpamDriftMutation();
-  const suppress = useSuppressIpamDriftMutation();
-  const zone = useUserTimezone();
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [note, setNote] = useState("");
-  const [until, setUntil] = useState("");
+  // THE FINDING BEING HANDLED IS IN THE URL (`?finding=<id>`, Task 10, 5.7):
+  // a link opens it, Back closes it. Only a finding on this list opens: a
+  // stale id opens nothing rather than a form about a row nobody can see.
+  const handling = useOpenParam("finding");
+  const finding = canAssign ? items.find((item) => item.id === handling.id) : undefined;
 
   return (
     <>
-      <Table>
+      <Table label={t("ipam.drift.title")}>
         <thead>
           <tr>
             <Th>{t("ipam.fields.address")}</Th>
@@ -417,7 +472,7 @@ function DriftTable({
                 </Td>
                 {canAssign && (
                   <Td>
-                    <Btn label={t("ipam.drift.handle")} icon="edit" small onClick={() => setOpenId(item.id)} />
+                    <Btn label={t("ipam.drift.handle")} icon="edit" small onClick={() => handling.open(item.id)} />
                   </Td>
                 )}
               </tr>
@@ -426,115 +481,140 @@ function DriftTable({
         </tbody>
       </Table>
 
-      {openId !== null && canAssign && (
-        <div className="panel-b" style={{ borderTop: "1px solid var(--line)" }}>
-          <h3 className="panel-title">{t("ipam.drift.handleTitle")}</h3>
-          <p className="note" style={{ margin: "4px 0 12px" }}>
-            {t("ipam.drift.handleNote")}
-          </p>
-          <div className="form-grid">
-            <Field label={t("ipam.fields.note")}>
-              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
-            </Field>
-            <Field label={t("ipam.drift.suppressUntil")}>
-              <input
-                className={inputClass}
-                type="date"
-                value={until}
-                onChange={(e) => setUntil(e.target.value)}
-              />
-              {/* THE DATE, READ BACK IN THE CONSOLE'S OWN FORMAT. A native
-                date input draws the USER AGENT'S mask, and no CSS reorders
-                it: this field reads `09/22/2026` to a US-locale browser on a
-                console that renders every other date `22 Sept 2026` and whose
-                /settings says day/month/year. The control stays -- it is the
-                one date widget every keyboard, screen reader and locale
-                already agrees on -- and says which date it holds beside
-                itself (design review M1, the idiom
-                `agent-push/PushAuthorizationsPage` already carried). */}
-            </Field>
-          </div>
-          {until !== "" ? (
-            <p className="note" style={{ marginTop: 14 }}>
-              {t("ipam.drift.silenced", { date: formatDate(toInstant(`${until}T00:00`, zone), zone) })}
-            </p>
-          ) : null}
-          <div className="form-actions">
-            <Btn
-              label={t("ipam.drift.acknowledge")}
-              icon="check"
-              variant="primary"
-              disabled={acknowledge.isPending}
-              onClick={() =>
-                acknowledge.mutate(
-                  { id: openId, note },
-                  {
-                    onSuccess: () => {
-                      setOpenId(null);
-                      setNote("");
-                    },
-                  },
-                )
-              }
-            />
-            <Btn
-              label={t("ipam.drift.suppress")}
-              icon="clock"
-              disabled={suppress.isPending || note.trim() === "" || until === ""}
-              onClick={() =>
-                suppress.mutate(
-                  {
-                    id: openId,
-                    // `new Date("2026-08-25").toISOString()` READ THE FIELD AS
-                    // UTC MIDNIGHT. For an operator at UTC-5 that is 19:00 on
-                    // the 24th local: the suppression lapses five hours
-                    // before the day they picked has even started. The field
-                    // is a wall clock with no zone; `toInstant` attaches the
-                    // operator's before it becomes an instant, so "until the
-                    // 25th" means midnight on the 25th where they are.
-                    until: toInstant(`${until}T00:00`, zone),
-                    note,
-                  },
-                  {
-                    onSuccess: () => {
-                      setOpenId(null);
-                      setNote("");
-                      setUntil("");
-                    },
-                  },
-                )
-              }
-            />
-            <Btn label={t("common.actions.cancel")} variant="ghost" onClick={() => setOpenId(null)} />
-          </div>
-          {(acknowledge.isError || suppress.isError) && (
-            <ErrorLine error={acknowledge.error ?? suppress.error} />
-          )}
-        </div>
-      )}
+      {finding ? <HandlePanel key={finding.id} finding={finding} onClose={handling.close} /> : null}
     </>
+  );
+}
+
+/**
+ * Acknowledge or suppress one finding: a note, and for a suppression a date.
+ * Mounted per finding (its `key`), so another finding starts with an empty
+ * note. A note or date typed and not sent asks before the finding is left
+ * (`?finding=` holds the form), and a sent one leaves without asking.
+ */
+function HandlePanel({ finding, onClose }: { finding: DriftOut; onClose: () => void }) {
+  const t = useT();
+  const acknowledge = useAcknowledgeIpamDriftMutation();
+  const suppress = useSuppressIpamDriftMutation();
+  const zone = useUserTimezone();
+  const [note, setNote] = useState("");
+  const [until, setUntil] = useState("");
+  const { guard, release } = useUnsavedGuard(note !== "" || until !== "", { search: ["finding"] });
+  // A disabled control says why on screen (coordinator's ruling 8).
+  const suppressBlocked = note.trim() === "" || until === "";
+
+  const done = () => {
+    release();
+    onClose();
+  };
+
+  return (
+    <div className="panel-b" style={{ borderTop: "1px solid var(--line)" }}>
+      {guard}
+      <h3 className="panel-title">
+        <span>{t("ipam.drift.handleTitle")}</span> <span className="mono">{finding.address}</span>
+      </h3>
+      <p className="note" style={{ margin: "4px 0 12px" }}>
+        {t("ipam.drift.handleNote")}
+      </p>
+      <div className="form-grid">
+        <Field label={t("ipam.fields.note")}>
+          <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <Field label={t("ipam.drift.suppressUntil")}>
+          <input
+            className={inputClass}
+            type="date"
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+          />
+          {/* THE DATE, READ BACK IN THE CONSOLE'S OWN FORMAT. A native
+            date input draws the USER AGENT'S mask, and no CSS reorders
+            it: this field reads `09/22/2026` to a US-locale browser on a
+            console that renders every other date `22 Sept 2026` and whose
+            /settings says day/month/year. The control stays -- it is the
+            one date widget every keyboard, screen reader and locale
+            already agrees on -- and says which date it holds beside
+            itself (design review M1, the idiom
+            `agent-push/PushAuthorizationsPage` already carried). */}
+        </Field>
+      </div>
+      {until !== "" ? (
+        <p className="note" style={{ marginTop: 14 }}>
+          {t("ipam.drift.silenced", { date: formatDate(toInstant(`${until}T00:00`, zone), zone) })}
+        </p>
+      ) : null}
+      <div className="form-actions">
+        <Btn
+          label={t("ipam.drift.acknowledge")}
+          icon="check"
+          variant="primary"
+          disabled={acknowledge.isPending}
+          onClick={() => {
+            // One outcome on screen, this act's (the coordinator's ruling 7).
+            suppress.reset();
+            acknowledge.mutate({ id: finding.id, note }, { onSuccess: done });
+          }}
+        />
+        <Btn
+          label={t("ipam.drift.suppress")}
+          icon="clock"
+          disabled={suppress.isPending || suppressBlocked}
+          onClick={() => {
+            acknowledge.reset();
+            suppress.mutate(
+              {
+                id: finding.id,
+                // `new Date("2026-08-25").toISOString()` READ THE FIELD AS
+                // UTC MIDNIGHT. For an operator at UTC-5 that is 19:00 on
+                // the 24th local: the suppression lapses five hours
+                // before the day they picked has even started. The field
+                // is a wall clock with no zone; `toInstant` attaches the
+                // operator's before it becomes an instant, so "until the
+                // 25th" means midnight on the 25th where they are.
+                until: toInstant(`${until}T00:00`, zone),
+                note,
+              },
+              { onSuccess: done },
+            );
+          }}
+        />
+        <Btn label={t("common.actions.cancel")} variant="ghost" onClick={onClose} />
+      </div>
+      {suppressBlocked ? (
+        <p className="note" style={{ marginTop: 8 }}>
+          {t("ipam.drift.suppressNeeds")}
+        </p>
+      ) : null}
+      {(acknowledge.isError || suppress.isError) && <ErrorLine error={acknowledge.error ?? suppress.error} />}
+    </div>
   );
 }
 
 // Orphans: their own tab, their own action. Registering the subnet is what
 // turns these observations into something the plan can be wrong about.
-function OrphansTab() {
+// `onClearChip` clears the one filter this view reads, the Client chip, and
+// keeps the view (review I4: it was a "Clear filters" that did nothing).
+function OrphansTab({ chip, onClearChip }: { chip: string; onClearChip: () => void }) {
   const t = useT();
-  const orphans = useIpamOrphans();
+  const orphans = useIpamOrphans(chip);
+  // Inside the page's one list panel (no panel within a panel): the sentence
+  // that says what these are, then the rows.
   return (
-    <Panel
-      title={t("ipam.fields.orphans")}
-      subtitle={t("ipam.drift.orphansSubtitle")}
-      bare
-    >
-      <QueryState
-        loading={orphans.isLoading}
-        error={orphans.error}
-        empty={(orphans.data ?? []).length === 0}
-        emptyLabel={t("ipam.drift.orphansEmpty")}
-        emptyIcon="eye"
-      >
-        <Table>
+    <>
+      <p className="note" style={{ padding: "12px 16px 0" }}>
+        {t("ipam.drift.orphansSubtitle")}
+      </p>
+      <QueryState loading={orphans.isPending} error={orphans.error} empty={false} emptyLabel="">
+        {(orphans.data ?? []).length === 0 ? (
+          <ListEmpty
+            filtered={chip !== ""}
+            onClear={onClearChip}
+            nothingYet={t("ipam.drift.orphansEmpty")}
+            icon="eye"
+          />
+        ) : (
+        <Table label={t("ipam.fields.orphans")}>
           <thead>
             <tr>
               <Th>{t("ipam.drift.colInferred")}</Th>
@@ -570,7 +650,8 @@ function OrphansTab() {
             ))}
           </tbody>
         </Table>
+        )}
       </QueryState>
-    </Panel>
+    </>
   );
 }
