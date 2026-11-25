@@ -132,12 +132,20 @@ export const ROUTES = [
   "/credentials",
   "/docs",
   "/security",
+  // THE STATES THE PAGE WAVES PUT IN THE URL (kit requests batch 1, item 8):
+  // a drawer or an editor opened from a query parameter is drawn on no plain
+  // route, so the gate measures it only as a variant. Each id is one the
+  // module's fixtures answer. On a base whose page ignores the parameter the
+  // variant draws the plain page, which still passes.
+  "/security?event=sec-1",
   "/jobs",
+  "/jobs?job=job-1",
   "/remote",
   "/remote/sess-1",
   "/remote/sess-1/recording",
   "/patch",
   "/patch/policies",
+  "/patch/policies?policy=pol-default",
   "/deploy",
   "/deploy/packages",
   "/deploy/scripts",
@@ -146,6 +154,9 @@ export const ROUTES = [
   "/backup/policies",
   "/backup/coverage",
   "/backup/offsite",
+  // The off-site storage editor (`?edit=<id>`), drawn with the fixture
+  // session's `backup.offsite.manage`.
+  "/backup/offsite?edit=offsite-wasabi",
   "/provisioning",
   "/provisioning/images",
   "/provisioning/profiles",
@@ -195,6 +206,7 @@ export const ROUTES = [
   "/health?view=settings",
   "/platform-status",
   "/error-monitor",
+  "/error-monitor?group=eg-1",
   "/assistant",
   "/assistant/settings",
   "/assistant/autonomy",
