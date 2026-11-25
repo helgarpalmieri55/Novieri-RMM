@@ -121,7 +121,7 @@ Choques al fusionar: **ninguno**, y no es una esperanza sino la consecuencia de 
 | `frontend/src/shell/title.tsx` (nuevo) | `documentTitle`, `useRecordTitle`, `useDocumentTitle` | 2 |
 | `frontend/src/test/no-itms.test.ts` (nuevo) | Guarda: «ITMS» fuera de `frontend/src` | 2 |
 | `frontend/src/shell/listKit.tsx`, `detailKit.tsx`, `formKit.tsx`, `kit.css` (nuevos) | El kit de patrones | 3 |
-| `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` (nuevos) | Una página bajo un router de datos, con el título de pestaña del armazón si se pide; un doble de la API que anota a qué cliente se estrechó cada lectura | 3 |
+| `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` (nuevos) | Una página bajo un router de datos, con el título de pestaña del armazón si se pide; un doble de la API que distingue una lectura estrechada de una sin estrechar y rechaza la segunda | 3 |
 | `frontend/src/lib/api.ts` (`forClient`), `frontend/src/fixtures/client.ts` | Lectura acotada a un cliente para el chip «Cliente» y la ficha 360 | 3 |
 | `frontend/src/App.tsx`, `frontend/src/shell/RouteError.tsx` (nuevo) | Router de datos (para avisar antes de salir) y su pantalla de error traducida | 3 |
 | `frontend/src/i18n/identical-ok.o1.ts` a `identical-ok.o8.ts` (nuevos) | Las entradas de `identical-ok.ts` de cada oleada, en su propio archivo | 3 |
@@ -248,17 +248,25 @@ it("keeps its search in the URL, so a reload finds the same rows", async () => {
 });
 ```
 
-Y la del chip «Cliente», en **toda** lista que lo lleve (`recordingNarrowing` es la ayuda de la Task 3, `src/test/narrowing.ts`; `ANDES` es `5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57`, el cliente de `src/fixtures/core.ts`):
+Y la del chip «Cliente», en **toda** lista que lo lleve (`recordingNarrowing` es la ayuda de la Task 3, `src/test/narrowing.ts`, **final tal como se construyó**; `ANDES` es `5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57`, el cliente de `src/fixtures/core.ts`):
 
 ```tsx
-it("reads the list narrowed to the Client chip's client (decision D6)", async () => {
-  const { api, narrowedTo } = recordingNarrowing(fixtureClient());
-  mockUseApi.mockReturnValue(api);
+it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+  const narrowing = recordingNarrowing(fixtureClient(), { console: ["getClientRecord"] }); // solo lo que la página lee sin estrechar
+  mockUseApi.mockReturnValue(narrowing.api);
   renderPage(`/<ruta>?client=${ANDES}`, <Page />);
   expect(await screen.findByRole("table", { name: "<título de la lista>" })).toBeInTheDocument();
-  expect(narrowedTo).toContain(ANDES);
+  expect(narrowing.client(ANDES).<lectura de la lista>).toHaveBeenCalledWith(/* los argumentos propios de la lectura */);
+  expect(narrowing.unnarrowed).toEqual([]);
 });
 ```
+
+La regla, que la prueba cumple en sus **dos** aserciones (la primera versión de la ayuda devolvía el mismo doble en cada `forClient`, y una prueba que solo miraba «`narrowedTo` contiene ANDES» pasaba mientras la lista leía por `useApi()`: no podía ponerse roja, hallazgo de la revisión de la Task 5):
+
+- **La lectura, en el doble de ese cliente:** `narrowing.client(<id>).<método>` con los argumentos propios de la lectura (`toHaveBeenCalledWith`), no un `toContain` sobre los clientes a los que se estrechó. `narrowing.client(id)` devuelve espías (`vi.fn`) por cliente y método, que llaman a la API envuelta.
+- **Ninguna lectura sin estrechar:** `expect(narrowing.unnarrowed).toEqual([])`. `narrowing.api` es la API de la consola tal como la da `useApi()`: contesta solo `me` y los nombres de `options.console`; **cualquier otra llamada se rechaza y se anota en `unnarrowed`**, así que la página dibuja su error y el espía estrechado no se llama.
+- **`console:` lista solo las lecturas de la consola que la página hace legítimamente sin estrechar** (por ejemplo `getClientRecord`, que es una ruta global, o las lecturas propias del selector de la barra superior, o una escritura que mantiene `useApi()`); nunca la lectura de la lista ni la de sus conteos. Cada nombre que se añade ahí es una lectura que la prueba deja de vigilar: la oleada lo justifica en un comentario de la prueba.
+- **Rojo una vez, y se restaura:** la oleada demuestra que la prueba falla cambiando una vez la lectura de la lista a `useApi()` (la prueba debe ponerse roja: la lectura queda en `unnarrowed` y el espía de `narrowing.client(<id>)` sin llamar), y la restaura. El informe de la oleada lo dice, página por página.
 
 `renderPage` es el harness de la Task 3, `src/test/renderPage.tsx`. La API se sigue inyectando como en todo el repositorio, con `vi.mock` del módulo `lib/ApiContext` (231 archivos de prueba lo hacen así):
 
@@ -2731,7 +2739,7 @@ Diseño §2 completo. Esta tarea **no cambia ninguna página** salvo `/__preview
 - Produces (`lib/api.ts`): `ApiClient.forClient(clientId: string): ApiClient`.
 - Produces (`App.tsx`): `appRoutes(): RouteObject[]` (exportada) y `App` sobre `createBrowserRouter` + `RouterProvider`.
 - Produces (`test/renderPage.tsx`): `renderPage(path: string, element: ReactElement, pattern?: string, options?: { page?: MessageKey }): RenderResult & { router; queryClient }` y `TitleShell({ page: MessageKey; children })`, la mitad del título de pestaña que pone `AppShell`, para una prueba que monta una ficha sin el armazón.
-- Produces (`test/narrowing.ts`): `recordingNarrowing<T extends object>(api: T): { api: T; narrowedTo: string[] }`, un doble de la API que anota el cliente de cada `forClient` y devuelve la misma API.
+- Produces (`test/narrowing.ts`, **final tras la ronda 1 de arreglos de la Task 5**): `recordingNarrowing<T extends object>(api: T, options?: { console?: readonly string[] }): Narrowing<T>` con `{ api: T; unnarrowed: string[]; narrowedTo: string[]; client(id: string): Spies<T> }`. `api` es la API de la consola: contesta solo `me` y los nombres de `options.console`; cualquier otra llamada se rechaza y se anota en `unnarrowed`. `api.forClient(id)` devuelve el doble propio de ese cliente (cada método, un espía `vi.fn` que llama a la API envuelta) y `client(id)` da esos mismos espías para que la prueba los inspeccione. Regla de prueba en la Receta L.
 - Produces (`shell/RouteError.tsx`): `RouteError()`, la pantalla de error del router de datos, traducida.
 - Produces (`modules/portal/PortalShell.tsx`): `PortalShell({ children: ReactNode; embedded?: boolean })`; `embedded` dibuja el marco como una región con el nombre del portal en lugar de un `<main>`, y sin efectos de sesión (no olvida el cliente guardado ni anota a la persona). La O2 conserva la prop.
 - Todo lo de `listKit`, `detailKit` y `formKit` se reexporta desde `shell/components.tsx`: las páginas importan de un solo sitio.
@@ -2803,31 +2811,17 @@ export function renderPage(
 }
 ```
 
-`frontend/src/test/narrowing.ts`:
+`frontend/src/test/narrowing.ts` y `frontend/src/test/narrowing.test.ts`: **hecho; ya existen** y son la fuente de verdad (el primer borrador, que devolvía el mismo doble en cada `forClient`, dejaba pasar una prueba de estrechado aunque la página leyera por `useApi()`; se reescribió en la ronda 1 de arreglos de la Task 5, commit `74d5e40`). Uso:
 
 ```ts
-/**
- * AN API DOUBLE THAT RECORDS WHICH CLIENT EACH READ WAS NARROWED TO (decision
- * D6): every `forClient(id)` is noted and answers with this same double, so a
- * page test can assert that a list behind the Client chip read through
- * `forClient(<the chip's client>)`. Anything else is the wrapped API's own.
- */
-export function recordingNarrowing<T extends object>(api: T): { api: T; narrowedTo: string[] } {
-  const narrowedTo: string[] = [];
-  const wrapped: T = new Proxy(api, {
-    get(target, prop, receiver) {
-      if (prop === "forClient") {
-        return (clientId: string) => {
-          narrowedTo.push(clientId);
-          return wrapped;
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
-  return { api: wrapped, narrowedTo };
-}
+const narrowing = recordingNarrowing(fixtureClient(), { console: ["getClientRecord"] });
+mockUseApi.mockReturnValue(narrowing.api);
+// montar la página y esperar la lista
+expect(narrowing.client(ANDES).listX).toHaveBeenCalledWith(/* los argumentos propios de la lectura */);
+expect(narrowing.unnarrowed).toEqual([]);
 ```
+
+La firma y la regla que cumple toda oleada están en la Interfaces de arriba y en la Receta L. Sus tres pruebas fijan: una lectura que `options.console` no permite se rechaza y se anota; `me` y lo permitido se contestan por la API envuelta; cada cliente tiene su propio doble, cuyos espías llaman a la API envuelta.
 
 `frontend/src/shell/listKit.test.tsx`: **hecho; ya existe** y es la fuente de verdad. Fija `useUrlFilters` y `FilterChips` (la URL manda; Atrás deshace un chip; una escritura que no cambia nada no escribe), `ShowingCount`, `ListEmpty`, `BulkBar`, `ClientFilter({ filters })` (chip con forma de chip, sin clientes ajenos, un cliente ajeno se quita en el sitio, no se dibuja con cliente elegido arriba), `useNarrowedApi` (estrecha con `X-Client-Id`; nunca manda un valor que no es un cliente de la persona; espera a `/me`: `ready` y `NarrowingPending`; vuelve a leer al cambiar el chip) y `useNewParam` (`?new=`; `close()` vuelve Atrás o sustituye según de dónde vino).
 
@@ -5607,6 +5601,8 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 
 ### Task 5: Clientes: la lista y la ficha 360 con pestañas en la URL
 
+> **HECHA** (rama `p3/base`: `0b255c8`, `8ed1bcd` y la ronda 1 de arreglos `74d5e40`). **El código construido es la fuente de verdad**; en particular las pruebas de estrechado de `client360.test.tsx` son las construidas (Step 1, abajo, las copia) y siguen la regla de la Receta L: la lectura en `narrowing.client(ANDES).<método>` con sus argumentos y `narrowing.unnarrowed` vacío, con `CONSOLE = ["getClientRecord"]`. Ninguna oleada rehace esta tarea.
+
 Diseño §1.3 («La ficha 360 de un cliente reúne sus datos en pestañas con URL propia: Resumen, Sedes, Contactos, Equipos, Tickets, Alertas, Activos y Módulos»; «Las pestañas son de una línea»). Es la primera página construida con el kit, y sirve de modelo a las oleadas.
 
 **Files:**
@@ -5628,24 +5624,49 @@ Diseño §1.3 («La ficha 360 de un cliente reúne sus datos en pestañas con UR
 - **D19.** La pestaña Alertas lista **las alertas activas** del cliente y dice, con el conteo del servidor, cuántas hay abiertas en total (resolución del coordinador del 2026-11-24). La lista de alertas toma un solo `state`, y «abierta» (activa, reconocida o silenciada) no se puede pedir (`types.ts`, `AlertSummary`); pedir sin `state` y quitar en el navegador las cerradas haría de una página de 200 un total que no lo es.
 - **D20. `?client=` significa «estrecha esta lista» en toda la consola** (resolución del coordinador del 2026-11-24, revisión previa W-I5). Hoy el recorrido de «Añadir un equipo» usa `?client=` para **cambiar el cliente de toda la consola** (`JOURNEY_CLIENT_PARAM = "client"`, `onboarding/journey.ts:46`; `useAdoptJourneyClient` llama a `select()` en `EnrollmentPage`, `SubnetTreePage`, `ScanAuthorizationsPage`, `AgentReleasesPage`, `OnboardPage` y `CandidatesPage`), y el chip «Cliente» usa la misma clave para estrechar una lista. El recorrido pasa a `journey_client` (y su sede a `journey_site`, para dejar `site` a los filtros de IPAM y de Equipos). Nadie más escribe ese parámetro: ni el backend ni un correo (`grep` del 2026-11-24: lo producen solo `journeyQuery` y `withJourney`, y los dos leen la constante).
 
-- [ ] **Step 1: Las pruebas de la ficha 360 (fallan)**
+- [x] **Step 1: Las pruebas de la ficha 360 (fallan)**
 
 `frontend/src/modules/clients/__tests__/client360.test.tsx`:
 
 ```tsx
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fixtureClient } from "../../../fixtures/client";
+import { fixtureClient, fixtureRegistry, type FixtureMap } from "../../../fixtures/client";
+import type { Me } from "../../../lib/api";
 import { recordingNarrowing } from "../../../test/narrowing";
 import { renderPage } from "../../../test/renderPage";
 import { ClientDetailPage } from "../ClientDetailPage";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
 
+/**
+ * What the 360 may read on the console's own API, un-narrowed: `/me` (always
+ * allowed by the double) and the client's own record (a global route). Every
+ * tab's read must go through `forClient(ANDES)`, or the double rejects it.
+ */
+const CONSOLE = ["getClientRecord"];
+
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+/** The fixture session, holding only `codes` in Andes Logistics. */
+function holding(codes: string[], extra: FixtureMap = {}) {
+  const registry = fixtureRegistry();
+  const me = registry.me as () => Me;
+  return fixtureClient({
+    ...registry,
+    me: () => {
+      const base = me();
+      return {
+        ...base,
+        clients: (base.clients ?? []).map((item) => (item.id === ANDES ? { ...item, permissions: codes } : item)),
+      };
+    },
+    ...extra,
+  });
+}
 
 function page(query = "") {
   return renderPage(`/clients/${ANDES}${query}`, <ClientDetailPage />, "/clients/:clientId");
@@ -5695,19 +5716,43 @@ describe("the client 360 (redesign design §1.3)", () => {
     expect(link).toHaveAttribute("href", `/devices?client=${ANDES}`);
   });
 
+  it("reads the devices tab only through the client's narrowed API (decision D6)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
+    page("?tab=devices");
+    expect(await screen.findByRole("link", { name: /See every computer of this client/ })).toBeInTheDocument();
+    expect(narrowing.client(ANDES).listDevices).toHaveBeenCalledWith({ clientId: ANDES, limit: 25 });
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("reads the tickets tab only through the client's narrowed API, its open tickets, and leads to the ticket list narrowed to it", async () => {
+    const narrowing = recordingNarrowing(
+      holding(["ticket.read", "ticket.write"], { listTickets: () => ({ items: [], total: 0 }) }),
+      { console: CONSOLE },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    page("?tab=tickets");
+    expect(await screen.findByText("This client has no open tickets.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See this client's tickets" })).toHaveAttribute("href", `/service-desk?client=${ANDES}`);
+    expect(narrowing.client(ANDES).listTickets).toHaveBeenCalledWith({ client_id: ANDES, scope: "open", limit: 25 });
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
   it("counts what is open for the client in the summary tiles, each leading to its tab", async () => {
     page();
     expect(await screen.findByRole("link", { name: /Open tickets/ })).toHaveAttribute("href", `/clients/${ANDES}?tab=tickets`);
     expect(screen.getByRole("link", { name: /Open alerts/ })).toHaveAttribute("href", `/clients/${ANDES}?tab=alerts`);
   });
 
-  it("reads the alerts tab narrowed to the client, the active ones, and leads to the alert list narrowed to it (D19)", async () => {
-    const { api, narrowedTo } = recordingNarrowing(fixtureClient());
-    mockUseApi.mockReturnValue(api);
+  it("reads the alerts tab only through the client's narrowed API, the active ones, and leads to the alert list narrowed to it (D19)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
     page("?tab=alerts");
     expect(await screen.findByRole("heading", { level: 2, name: "Active alerts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "See this client's alerts" })).toHaveAttribute("href", `/health?client=${ANDES}`);
-    expect(narrowedTo).toContain(ANDES);
+    expect(narrowing.client(ANDES).listHealthAlerts).toHaveBeenCalledWith({ state: "active" });
+    expect(narrowing.client(ANDES).getHealthAlertSummary).toHaveBeenCalled();
+    expect(narrowing.unnarrowed).toEqual([]);
   });
 
   it("shows the assets as three counts, each leading to its list with the Client chip set (D14)", async () => {
@@ -5715,6 +5760,19 @@ describe("the client 360 (redesign design §1.3)", () => {
     expect(await screen.findByRole("link", { name: /Licenses/ })).toHaveAttribute("href", `/licenses?client=${ANDES}`);
     expect(screen.getByRole("link", { name: /Subscriptions/ })).toHaveAttribute("href", `/subscriptions?client=${ANDES}`);
     expect(screen.getByRole("link", { name: /Networks/ })).toHaveAttribute("href", `/ipam?client=${ANDES}`);
+  });
+
+  it("counts the assets only through the client's narrowed API (decision D6)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
+    page("?tab=assets");
+    // Measured, not `n/a`: each count arrived through the narrowed double.
+    await waitFor(() => expect(screen.getByRole("link", { name: /Licenses/ })).not.toHaveTextContent("n/a"));
+    await waitFor(() => expect(screen.getByRole("link", { name: /Networks/ })).not.toHaveTextContent("n/a"));
+    expect(narrowing.client(ANDES).listLicenses).toHaveBeenCalled();
+    expect(narrowing.client(ANDES).listSubscriptions).toHaveBeenCalled();
+    expect(narrowing.client(ANDES).listIpamSubnets).toHaveBeenCalled();
+    expect(narrowing.unnarrowed).toEqual([]);
   });
 });
 ```
@@ -5736,12 +5794,12 @@ En `frontend/src/modules/clients/__tests__/clients.test.tsx` (medido el 2026-11-
 
 En `frontend/src/modules/clients/clients.es.test.tsx:99`, `expect(screen.getByRole("switch", { name: "Mostrar los clientes archivados" })).toBeInTheDocument();` pasa a `expect(screen.getByRole("button", { name: "Con archivados" })).toBeInTheDocument();` (el mismo filtro, ahora chip).
 
-- [ ] **Step 2: Ejecutarlas y verlas fallar**
+- [x] **Step 2: Ejecutarlas y verlas fallar**
 
 Run: `cd frontend && npx vitest run src/modules/clients`
 Expected: FAIL (no hay pestañas Computers, Tickets, Alerts ni Assets; la tira no tiene nombre; no hay chips).
 
-- [ ] **Step 3: Las acciones del cliente, en la cabecera**
+- [x] **Step 3: Las acciones del cliente, en la cabecera**
 
 Se mueven de `SummaryTab.tsx` a un componente propio, sin cambiar ninguna condición ni ninguna llamada: las mismas dos comprobaciones, la misma mutación, los mismos dos diálogos y el mismo párrafo de error.
 
@@ -5864,7 +5922,7 @@ export function SummaryTab({ client }: { client: ClientOut }) {
 
 (`HealthDefault`, debajo, no cambia: su enlace `/health#profiles` lo lleva la O3 a la pestaña de perfiles, decisión D21.)
 
-- [ ] **Step 3b: El recorrido de «Añadir un equipo» deja libre `?client=`** (decisión D20)
+- [x] **Step 3b: El recorrido de «Añadir un equipo» deja libre `?client=`** (decisión D20)
 
 `frontend/src/modules/onboarding/journey.ts:45-47`:
 
@@ -5901,7 +5959,7 @@ Expected: la última orden no imprime nada. `journey.test.ts:336` queda `/\?jour
 Run: `cd frontend && npx vitest run src/modules/onboarding src/modules/ipam/__tests__/clients.test.tsx src/modules/enrollment/clientSelection.test.tsx src/modules/agent-releases/clientSelection.test.tsx`
 Expected: PASS (7 archivos, 96 pruebas al 2026-11-24).
 
-- [ ] **Step 4: Las cuatro pestañas nuevas**
+- [x] **Step 4: Las cuatro pestañas nuevas**
 
 `frontend/src/modules/clients/DevicesTab.tsx`:
 
@@ -6206,7 +6264,7 @@ export function AssetsTab({ client, codes, enabled }: { client: ClientOut; codes
 
 (`StatCard` toma `value: string` y `pending`: con `pending` dibuja `n/a`, nunca un `0` inventado mientras carga o si la lectura falla; `shell/components.tsx:256-296`.)
 
-- [ ] **Step 5: La ficha 360**
+- [x] **Step 5: La ficha 360**
 
 `frontend/src/modules/clients/ClientDetailPage.tsx`, archivo completo:
 
@@ -6405,7 +6463,7 @@ export function ClientDetailPage() {
 
 (Ordenar las importaciones como el resto del módulo: la de `@tanstack/react-query` primero.)
 
-- [ ] **Step 6: La lista de clientes**
+- [x] **Step 6: La lista de clientes**
 
 `frontend/src/modules/clients/ClientsPage.tsx` aplica la receta L y es el modelo de las oleadas. Archivo completo (incluye lo que la Task 4 le añadió: `useNewParam("client")`, `useNewParam("contact")` y `ContactClientDialog`):
 
@@ -6615,7 +6673,7 @@ function ContactClientDialog({ onClose }: { onClose: () => void }) {
 
 (`SearchField`, `FilterChips`, `ListToolbar`, `ShowingCount`, `ListEmpty`, `useNewParam` y `useUrlFilters` llegan de `shell/components`, que reexporta el kit.)
 
-- [ ] **Step 7: Textos**
+- [x] **Step 7: Textos**
 
 `frontend/src/i18n/en/clients.ts`:
 - `detail.tabs`: añadir `devices: "Computers"`, `tickets: "Tickets"`, `alerts: "Alerts"`, `assets: "Assets"`;
@@ -6628,7 +6686,7 @@ function ContactClientDialog({ onClose }: { onClose: () => void }) {
 
 `frontend/src/i18n/es/clients.ts`, lo mismo: `devices: "Equipos"`, `tickets: "Tickets"` (en `IDENTICAL_OK_SHARED` de `identical-ok.ts`: `"clients.detail.tabs.tickets"`, y también `"clients.tickets.colTicket"`, con la razón del glosario: «"Ticket" is the glossary term for a ticket in Spanish too (a loanword).»), `alerts: "Alertas"`, `assets: "Activos"`; `tiles`: «Equipos», «Sedes», «Tickets abiertos», «Alertas abiertas»; `list`: «Buscar clientes», `archivedLabel: "Clientes archivados"`, «Activos», «Con archivados», «Aún no hay clientes. Añade el primero para dar un sitio a sus equipos, sedes y contactos.»; `devices`: «Equipos», «Ver todos los equipos de este cliente ({count})», «Este cliente aún no tiene equipos.», «Añadir un equipo», «Equipo», «Agente», «Visto por última vez», «Sin agente», «Nunca»; `tickets`: «Tickets abiertos», «Ver los tickets de este cliente», «Este cliente no tiene tickets abiertos.», «Nuevo ticket», «Ticket», «Prioridad», «Estado»; `alerts`: «Alertas activas», `openInAll: { one: "{count} alerta abierta en total, contando las reconocidas y las silenciadas", other: "{count} alertas abiertas en total, contando las reconocidas y las silenciadas" }`, «Ver las alertas de este cliente», «Este cliente no tiene alertas activas.», «Equipo», «Comprobación», «Gravedad», «Abierta»; `assets`: «Licencias», «Suscripciones», «Redes».
 
-- [ ] **Step 8: Verde, crítica y pulido**
+- [x] **Step 8: Verde, crítica y pulido**
 
 Run: `cd frontend && npx vitest run src/modules/clients src/shell/newDestinations.test.tsx && npx vitest run && npm run typecheck && npm run build`
 Expected: verde.
@@ -6657,7 +6715,7 @@ y después de `"/ipam/subnets/subnet-1",`, para la O5 (5.6, las pestañas de la 
 
 Aplicar «Cierre de cada oleada» (pasos 1 a 6) a `ClientsPage.tsx` y `ClientDetailPage.tsx` con las rutas `/clients,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=devices,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=tickets,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=alerts,/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=assets`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/src frontend/scripts/routes.mjs .impeccable/critique
@@ -6686,7 +6744,7 @@ Lo común a todas, para no repetirlo en cada página:
 - **El chip «Cliente»** (`<ClientFilter filters={filters} />` + `useNarrowedApi(filters.values.client)`, decisiones D6 y D17; `filters` es el `useUrlFilters` de la página y lleva la clave `"client"`, que el chip escribe él mismo: no hay `onChange`) va en las listas de cosas de un cliente: equipos, tickets, alertas, parches, despliegues, copias, sesiones remotas, trabajos, licencias, suscripciones, redes, documentación, credenciales, cambios y continuidad. **Presupuesto no**: trabaja con un cliente cada vez y, con «Todos mis clientes», pide elegir uno arriba (decisión de la fase 3), así que no hay lista de todos que estrechar. La oleada lo pone en las que nombra. **`?client=` solo estrecha la lista** (decisión D20): nunca cambia el cliente de toda la consola, que es lo que hace el selector de arriba; el recorrido de «Añadir un equipo» usa `journey_client` desde la Task 5.
 - **Las listas que leen por un hook de su módulo** cambian el hook como dice la Receta L, punto 7: toma el valor del chip, lee con `useNarrowedApi` y pone el `client` que devuelve en su clave, con `enabled: ready`. **No es cambiar una llamada a la API**: la misma función con los mismos argumentos. Cada oleada nombra, página por página, qué hook cambia. Las escrituras siguen con `useApi()`.
 - **Formularios** (Receta FO): `useDraft` da `markSent`, que la página llama con `markSent(draft)` al enviar y con `markSent(null)` cuando el guardado falla; `useUnsavedGuard(dirty, { search })` y `UnsavedGuard({ dirty, search })` toman `search` como `GuardedQuery` (`["new"]` en un diálogo `?new=`, `["tab"]` en un panel `?tab=`, `true` si toda la query es el formulario); `release()` solo tras un guardado correcto y justo antes de navegar; **una sola guarda con cambios por página** (dos sucias a la vez escriben `console.error` y hacen fallar la prueba); `SaveBar` lleva `label` solo donde una página dibuja más de una barra, y su `blockedReason` es un permiso o un estado del registro, nunca un dato que falta.
-- **Toda lista con chip «Cliente»** añade la prueba de la Receta L «reads the list narrowed to the Client chip's client», con `recordingNarrowing` (`src/test/narrowing.ts`).
+- **Toda lista con chip «Cliente»** añade la prueba de la Receta L «reads the list only through the narrowed API of the Client chip's client», con `recordingNarrowing` (`src/test/narrowing.ts`): aserta la lectura en `narrowing.client(<id>).<método>` con los argumentos propios de la lectura **y** `expect(narrowing.unnarrowed).toEqual([])`; en `console:` solo van las lecturas de la consola que la página hace legítimamente sin estrechar (`getClientRecord`, las del selector de la barra superior), nunca la de la lista; y la oleada **demuestra que la prueba se pone roja una vez** cambiando la lectura de la lista a `useApi()`, y la restaura (el informe de la oleada lo dice por página). Un `toContain` sobre `narrowedTo` no es una prueba de estrechado.
 - **Pruebas por página:** las de la receta (L: filtros en la URL y vacío con causa, o la variante de búsqueda, o solo el vacío para una lista sin filtros; F: pestañas en la URL y título; FO: barra de guardado y aviso al salir, y «leaves for what it saved» si se va al guardar) más lo que la página nombre. Las pruebas existentes de la página se conservan; se cambia la consulta, nunca la aserción, salvo donde el diseño cambia lo que se ve, y entonces el comentario cita el diseño.
 - **Textos:** las claves nuevas van en el catálogo del módulo (`src/i18n/{en,es}/<módulo>.ts`), en los dos idiomas; una que queda idéntica en los dos va en el `identical-ok.o<N>.ts` de la oleada, con su razón.
 - **Lo que un módulo exporta a otro conserva su firma** («Archivos compartidos»).
@@ -6725,7 +6783,7 @@ Atera: `Atera_recorrido_menus_UI_UX.md`, «Devices» (líneas 164-182) y captura
 - El vacío: `ListEmpty` con «Aún no hay equipos. Instala el agente en el primero.» y la acción «Añadir un equipo».
 - La columna «Cliente» se queda (con «Todos mis clientes» es lo que dice de quién es cada equipo).
 - Lectura (Receta L, 6): la lista lee hoy con `useQuery` directo (`DevicesPage.tsx:331`, clave `["devices", query]`); pasa a `const { api: narrowed, client, ready } = useNarrowedApi(filters.values.client);`, `queryKey: ["devices", query, client]`, `queryFn: () => narrowed.listDevices(query)` y `enabled: ready`. `invalidateQueries({ queryKey: ["devices"] })` (línea 394) sigue alcanzándola. Las tres acciones en lote siguen con `api` (`useApi()`).
-- Pruebas: `DevicesPage.test.tsx`, `DevicesPushSelection.test.tsx`, `DevicesApproveAll.test.tsx`, `DevicesReview.test.tsx` cambian `getByRole("tab", …)` por `getByRole("button", { name: /…/ })` con `aria-pressed`; nuevas: las dos de la receta L, «reads the list narrowed to the Client chip's client» (Receta L, con `recordingNarrowing`), y «puts Add a computer at the head of the page».
+- Pruebas: `DevicesPage.test.tsx`, `DevicesPushSelection.test.tsx`, `DevicesApproveAll.test.tsx`, `DevicesReview.test.tsx` cambian `getByRole("tab", …)` por `getByRole("button", { name: /…/ })` con `aria-pressed`; nuevas: las dos de la receta L, «reads the list only through the narrowed API of the Client chip's client» (Receta L, con `recordingNarrowing`, `narrowing.unnarrowed` vacío y su rojo demostrado una vez), y «puts Add a computer at the head of the page».
 - Acepta: la URL `/devices?state=offline&client=<id>` abre la vista filtrada y solo con equipos de ese cliente; sin selección no hay barra de lote; el vacío dice su causa.
 
 **1.2 `DeviceDetailPage.tsx` (`/devices/:deviceId`, F, captura «atera 8»).** Hoy: `PageHead`, `Tabs` en `?tab=` (11: overview, hardware, software, changes, jobs, docs, patch, deploy, backup, provisioning, health), acciones del equipo (`DeviceActions`), dos `FilterBar`, cuatro tablas; la pestaña Resumen es `DeviceOverview.tsx`, con cinco paneles: salud, actualizaciones, copia de seguridad, últimos trabajos y tickets abiertos, cada uno enlazando a su pestaña o página (`DeviceOverview.tsx:1-80`).
@@ -6769,7 +6827,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 ```
 
-**Criterios de aceptación de la oleada:** las 11 páginas usan el kit y cumplen su «Acepta:»; `/devices?client=<id>` (el enlace de la ficha 360) estrecha la lista y su prueba lo fija; harmony en verde en sus 13 rutas en los dos idiomas; cada página tiene su crítica persistida y cerrada (versionada en el commit); el informe lista las capturas de 1440 y 390 de cada ruta en los dos idiomas.
+**Criterios de aceptación de la oleada:** las 11 páginas usan el kit y cumplen su «Acepta:»; `/devices?client=<id>` (el enlace de la ficha 360) estrecha la lista y su prueba lo fija (lectura en `narrowing.client(<id>)`, `narrowing.unnarrowed` vacío, y roja una vez al volver la lectura a `useApi()`); harmony en verde en sus 13 rutas en los dos idiomas; cada página tiene su crítica persistida y cerrada (versionada en el commit); el informe lista las capturas de 1440 y 390 de cada ruta en los dos idiomas.
 
 ---
 
@@ -6832,7 +6890,7 @@ Atera: «Dashboard» (líneas 98-111), «Tickets» (112-135), «Admin › Suppor
 - [ ] **Step 5:** «Cierre de cada oleada», pasos 1 a 8, con las rutas de arriba.
 - [ ] **Step 6: Commit** (`git add frontend/src/modules/{dashboard,service-desk,sla,email-intake,notification,portal} frontend/src/i18n/en frontend/src/i18n/es frontend/src/i18n/identical-ok.o2.ts frontend/src/App.portal.test.tsx .impeccable/critique`; mensaje `feat(ui): wave 2, dashboard, tickets, service desk admin and the portal frame` con las dos líneas de atribución).
 
-**Criterios de aceptación:** cada página cumple su «Acepta:»; una sola forma de guardar en las páginas de configuración de la oleada; el ticket guarda sus propiedades con la barra, con la confirmación y el orden de hoy; enviar un ticket del portal lleva a él sin preguntar; `/service-desk?client=<id>` estrecha la cola (su prueba lo fija); el marco del portal lleva la marca y se mide en `/__preview`; harmony en verde en las 11 rutas en los dos idiomas.
+**Criterios de aceptación:** cada página cumple su «Acepta:»; una sola forma de guardar en las páginas de configuración de la oleada; el ticket guarda sus propiedades con la barra, con la confirmación y el orden de hoy; enviar un ticket del portal lleva a él sin preguntar; `/service-desk?client=<id>` estrecha la cola (su prueba lo fija, con `narrowing.unnarrowed` vacío y su rojo demostrado una vez); el marco del portal lleva la marca y se mide en `/__preview`; harmony en verde en las 11 rutas en los dos idiomas.
 
 ---
 
@@ -6933,7 +6991,7 @@ Atera: «Alerts» (184-198), «Patch Management» (199-215), «Admin › Monitor
 - [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 8.
 - [ ] **Step 5: Commit** (`git add frontend/src/modules/{health,patch,deploy,remote,jobs,error-monitor,platform-status,security,audit} frontend/src/i18n/en frontend/src/i18n/es frontend/src/i18n/identical-ok.o3.ts .impeccable/critique`; mensaje `feat(ui): wave 3, alerts, patching, software, remote sessions, jobs and logs`, con las dos líneas de atribución).
 
-**Criterios de aceptación:** cada página cumple su «Acepta:»; los conteos de los chips de Alertas salen del resumen del servidor; las anclas de antes de `/health` abren su vista; `/health?client=<id>` estrecha la cola; ninguna lista de la oleada tiene una tira de pestañas para filtrar; ningún trabajo firmado cambia de parámetros; harmony en verde en las 17 rutas.
+**Criterios de aceptación:** cada página cumple su «Acepta:»; los conteos de los chips de Alertas salen del resumen del servidor; las anclas de antes de `/health` abren su vista; `/health?client=<id>` estrecha la cola (su prueba lo fija, con `narrowing.unnarrowed` vacío y su rojo demostrado una vez); ninguna lista de la oleada tiene una tira de pestañas para filtrar; ningún trabajo firmado cambia de parámetros; harmony en verde en las 17 rutas.
 
 ---
 
@@ -6993,7 +7051,7 @@ Atera: no tiene copias ni continuidad; se aplican los patrones de «Patrones UI/
 - [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 8 (las críticas incluyen `BackupPolicyEditor.tsx`, `PlanDetail.tsx`, `TestRecorder.tsx` y `BcpReport.tsx`).
 - [ ] **Step 5: Commit** (`git add frontend/src/modules/{backup,bcp,provisioning,site-servers,enrollment} frontend/src/i18n/en frontend/src/i18n/es frontend/src/i18n/identical-ok.o4.ts .impeccable/critique`; mensaje `feat(ui): wave 4, backup, continuity, imaging, site servers and enrollment`, con las dos líneas de atribución).
 
-**Criterios de aceptación:** cada página cumple su «Acepta:»; el registro de una prueba de continuidad avisa antes de salir; ningún diálogo de alta queda sin URL; las listas con chip «Cliente» lo prueban; harmony en verde en las 16 rutas.
+**Criterios de aceptación:** cada página cumple su «Acepta:»; el registro de una prueba de continuidad avisa antes de salir; ningún diálogo de alta queda sin URL; las listas con chip «Cliente» lo prueban (lectura en `narrowing.client(<id>)`, `narrowing.unnarrowed` vacío, rojo demostrado una vez); harmony en verde en las 16 rutas.
 
 ---
 
@@ -7056,7 +7114,7 @@ Atera: «Asset Inventory» (216-229), «Network Discovery» (230-241), «Admin �
 - [ ] **Step 4:** «Cierre de cada oleada», pasos 1 a 8 (las críticas incluyen las siete pantallas extra).
 - [ ] **Step 5: Commit** (`git add frontend/src/modules/{licenses,subscriptions,ipam} frontend/src/i18n/en frontend/src/i18n/es frontend/src/i18n/identical-ok.o5.ts .impeccable/critique`; mensaje `feat(ui): wave 5, assets: licenses, subscriptions and IP addresses`, con las dos líneas de atribución).
 
-**Criterios de aceptación:** cada página cumple su «Acepta:»; `/licenses?client=<id>`, `/subscriptions?client=<id>` e `/ipam?client=<id>` (los enlaces de la ficha 360) abren la lista estrechada a ese cliente, cada una con su prueba; ninguna pestaña de la oleada vive en `useState`; harmony en verde en las 19 rutas.
+**Criterios de aceptación:** cada página cumple su «Acepta:»; `/licenses?client=<id>`, `/subscriptions?client=<id>` e `/ipam?client=<id>` (los enlaces de la ficha 360) abren la lista estrechada a ese cliente, cada una con su prueba (lectura en `narrowing.client(<id>)`, `narrowing.unnarrowed` vacío, rojo demostrado una vez); ninguna pestaña de la oleada vive en `useState`; harmony en verde en las 19 rutas.
 
 ---
 
@@ -7523,7 +7581,7 @@ Fuera de las dos listas, a propósito: `Landing` (la ruta `*`, en `App.tsx`, red
 | `frontend/src/shell/brand.test.tsx` | El símbolo y el logotipo son los del operador, trazo a trazo; el favicon y el `<title>` | 2 |
 | `frontend/src/test/no-itms.test.ts` | «ITMS» fuera de `frontend/src`, `scripts` e `index.html`, salvo las cabeceras `X-ITMS-*`, `ITMSRSP1` y los comentarios fechados (una cadena con fecha no se excusa); e «itms» en minúsculas fuera de lo que una persona lee (catálogos y JSX), salvo los identificadores que el proyecto 4 conserva, nombrados uno a uno | 2 |
 | `settings/__tests__/microsoft.test.tsx:128`, `settings/__tests__/email.test.tsx:287,292` | Las descargas `novieri-sign-in.cer` y `novieri-sign-in-new.cer`; la etiqueta `+novieri-test` del correo de prueba (Apéndice E, X10) | 2 |
-| `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` (ayudas) | Una página bajo un router de datos, con el título del armazón si se pide (`TitleShell`); un doble de la API que anota a qué cliente se estrechó cada lectura | 3 |
+| `frontend/src/test/renderPage.tsx`, `frontend/src/test/narrowing.ts` y `narrowing.test.ts` (ayudas) | Una página bajo un router de datos, con el título del armazón si se pide (`TitleShell`); un doble de la API que distingue una lectura estrechada de una sin estrechar y rechaza la segunda | 3 |
 | `frontend/src/shell/listKit.test.tsx` | Filtros en la URL (Atrás deshace un chip; teclear no llena el historial), conteos sin ceros inventados, «Mostrando x de y», vacío con causa, barra de lote, chip «Cliente» con forma de chip y sin clientes ajenos, `useNarrowedApi` (espera a `/me`: `ready` y `NarrowingPending`; vuelve a leer al cambiar), `useNewParam` (`?new=`; `close()` vuelve Atrás o sustituye), `ClientFilter({ filters })` que quita un cliente ajeno en el sitio, y una escritura que no cambia la query no escribe nada | 3 |
 | `frontend/src/shell/detailKit.test.tsx` | Cabecera de ficha, pestañas en la URL (una fila, historial, por defecto sin parámetro), `SectionNav` | 3 |
 | `frontend/src/shell/formKit.test.tsx` | Una barra de guardado, descartar, error, «Guardado.», razón para no guardar, Intro en un campo, aviso al salir (navegación y `beforeunload`), un guardado que se va no pregunta (`release()` caduca con el siguiente clic o tecla), la query sola no es salir salvo `search` (`GuardedQuery`: `["new"]`, `["tab"]`, `true`), `markSent` (la respuesta pasa a ser lo guardado; un guardado fallido no deja que un `refetch` pise el cambio), dos guardas sucias avisan con `console.error`, `SaveBar` con `label`, secciones plegables | 3 |
@@ -7535,7 +7593,7 @@ Fuera de las dos listas, a propósito: `Landing` (la ruta `*`, en `App.tsx`, red
 | `frontend/src/shell/NewMenu.test.tsx` | Botón de menú primario, foco, flechas, Escape | 4 |
 | `frontend/src/shell/AdminPanel.test.tsx` | Administración: botón, volver, búsqueda sin acentos, sección abierta | 4 |
 | `frontend/src/shell/newDestinations.test.tsx` | Cada entrada de «Nuevo» abre lo que promete | 4 |
-| `frontend/src/modules/clients/__tests__/client360.test.tsx` | Las ocho pestañas, la URL, el título de pestaña, los datos del cliente (estrechados), las alertas activas, los tres activos, los tiles | 5 |
+| `frontend/src/modules/clients/__tests__/client360.test.tsx` | Las ocho pestañas, la URL, el título de pestaña, las lecturas de cada pestaña (equipos, tickets, alertas, activos) solo por la API estrechada del cliente (`narrowing.client(ANDES)`, `narrowing.unnarrowed` vacío), las alertas activas, los tres activos, los tiles | 5 |
 | `frontend/src/modules/auth/__tests__/authCard.test.tsx` | El marco de acceso con la marca y su título | 13 |
 | En cada módulo de las oleadas | Las pruebas mínimas de su receta (L, F, FO) por página; la del chip en cada lista que lo lleva; la del título en cada ficha; y las que nombra cada bloque | 6 a 13 |
 
@@ -7659,8 +7717,8 @@ Lo que la revisión previa del 2026-11-24 cambió en el plan (informe: `.git/sdd
 
 - **Aislamiento de las copias de trabajo.** Cada worktree tiene su propio directorio `node_modules` de enlaces por paquete (Global Constraints), porque la caché de Vite vive dentro y su hash incluye la raíz: reproducido en una copia el 2026-11-24, dos servidores sobre un `node_modules` compartido se invalidan uno a otro y la puerta de armonía de hoy daba `ok` con una página sin dibujar. La puerta reforzada (Task 1 Step 12) falla con un 5xx o un módulo que no carga fuera de `/api`, y con una ruta de sesión que no dibuja la barra.
 - **Archivos compartidos** en tres clases (base, `identical-ok.oN.ts` por oleada, territorio de la oleada) y un procedimiento para pedir una pieza del kit; las oleadas no editan nada de la base.
-- **Estrechamiento por cliente** con su ayuda de pruebas (`recordingNarrowing`), y el parámetro del recorrido renombrado para que `?client=` signifique una sola cosa (D20).
-- **Firmas nuevas o cambiadas**, todas definidas en la Task 3 y usadas con el mismo nombre y tipo después: `useNarrowedApi(clientId): { api, client: string | null, ready: boolean }` (hasta `ready`, `api` rechaza con `NarrowingPending`), `ClientFilter({ filters })` (sin `onChange`), `UrlFilters.set(key, value, options?: { replace?: boolean })`, `SaveBar({ dirty, saving, error?, onDiscard, onSave?, submit?, saved?, savedMessage?, problems?, blockedReason?, label? })`, `useDraft(saved): { draft, setDraft, dirty, discard, markSent(sent | null) }`, `useUnsavedGuard(dirty, options?: { search?: GuardedQuery }): { guard, release }`, `UnsavedGuard({ dirty, search? })` con `GuardedQuery = boolean | readonly string[]`, `useNewParam(kind): { open, start, close }`, `renderPage(path, element, pattern?, options?: { page?: MessageKey })`, `TitleShell({ page, children })`, `recordingNarrowing(api): { api, narrowedTo }`, `RouteError()`, `PortalShell({ children, embedded? })`; cada hook de lectura de una oleada toma `chip` y lo pone en su clave.
+- **Estrechamiento por cliente** con su ayuda de pruebas (`recordingNarrowing`, reescrita en la ronda 1 de la Task 5 para que una lectura sin estrechar falle: `narrowing.client(<id>)` y `narrowing.unnarrowed`), y el parámetro del recorrido renombrado para que `?client=` signifique una sola cosa (D20).
+- **Firmas nuevas o cambiadas**, todas definidas en la Task 3 y usadas con el mismo nombre y tipo después: `useNarrowedApi(clientId): { api, client: string | null, ready: boolean }` (hasta `ready`, `api` rechaza con `NarrowingPending`), `ClientFilter({ filters })` (sin `onChange`), `UrlFilters.set(key, value, options?: { replace?: boolean })`, `SaveBar({ dirty, saving, error?, onDiscard, onSave?, submit?, saved?, savedMessage?, problems?, blockedReason?, label? })`, `useDraft(saved): { draft, setDraft, dirty, discard, markSent(sent | null) }`, `useUnsavedGuard(dirty, options?: { search?: GuardedQuery }): { guard, release }`, `UnsavedGuard({ dirty, search? })` con `GuardedQuery = boolean | readonly string[]`, `useNewParam(kind): { open, start, close }`, `renderPage(path, element, pattern?, options?: { page?: MessageKey })`, `TitleShell({ page, children })`, `recordingNarrowing(api, { console? }): { api, unnarrowed, narrowedTo, client(id) }`, `RouteError()`, `PortalShell({ children, embedded? })`; cada hook de lectura de una oleada toma `chip` y lo pone en su clave.
 
 Lo que la revisión de verificación del 2026-11-24 cambió (informe: `.git/sdd/preflight/p3-fix-report.md`, «Round 2»):
 
