@@ -16,7 +16,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setActiveLanguage } from "../../i18n/core";
+import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError, type MeClient } from "../../lib/api";
 import { AddressDialog } from "./AddressDialog";
@@ -1612,7 +1612,10 @@ describe("the import and export page in Spanish", () => {
     expect(spanish).toBeTruthy();
     expectNoEnglish(alert);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("alert").textContent).toBe("That service is unavailable right now. Nothing was changed — try again shortly.");
+    // Exactly the console's English sentence for a 503, read from its shared
+    // catalogue: the adoption pass rewrites that sentence's dash outside this
+    // module, and this test is about the switch, not the wording.
+    expect(screen.getByRole("alert").textContent).toBe(translate("validation.serviceUnavailable"));
     expect(screen.getByRole("alert").textContent).not.toBe(spanish);
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("alert").textContent).toBe(spanish);
