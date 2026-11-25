@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { RowMenu } from "../../components/rowmenu";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
@@ -8,15 +8,15 @@ import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../componen
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, FormSection, SaveBar, StatusPill, Toggle, UnsavedGuard, useDraft, useNewParam } from "../../shell/components";
+import { Btn, FormSection, StatusPill, Toggle, useNewParam } from "../../shell/components";
 import { SectionLead } from "../service-desk/SectionLead";
+import { useSwitches } from "./switches";
 import { useApi } from "../../lib/ApiContext";
 import {
   useCreateNotificationRuleMutation,
   useDeleteNotificationRuleMutation,
   useNotificationChannels,
   useNotificationRules,
-  useUpdateNotificationRuleMutation,
 } from "./api";
 import { eventTypeLabel, recipientKindLabel } from "./labels";
 import { channelKindLabel } from "./notificationState";
@@ -44,7 +44,6 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   const rules = useNotificationRules();
   const channels = useNotificationChannels();
   const create = useCreateNotificationRuleMutation();
-  const update = useUpdateNotificationRuleMutation();
   const del = useDeleteNotificationRuleMutation();
 
   // Ticket queues are a CROSS-MODULE read (service-desk's `ticket.read`),
@@ -108,40 +107,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
     );
   }
 
-  // THE PAGE'S SETTINGS (redesign plan, Task 7, 2.8; Receta FO): whether each
-  // rule routes, switched on the row and saved by the page's one save bar
-  // with the same `PATCH /notifications/rules/{id}` the switch used to send
-  // at once. One draft for every rule, so switching three and saving is one
-  // act, Discard puts them back, and leaving with a switch thrown asks.
-  const saved = useMemo(
-    () => (rules.data ? Object.fromEntries(rules.data.map((rule) => [rule.id, rule.active])) : undefined),
-    [rules.data],
-  );
-  const draft = useDraft<Readonly<Record<string, boolean>>>(saved);
-  const [saving, setSaving] = useState(false);
-  const activeOf = (rule: RuleOut): boolean => draft.draft?.[rule.id] ?? rule.active;
-
-  function toggleActive(id: string) {
-    if (!draft.draft) return;
-    draft.setDraft({ ...draft.draft, [id]: !draft.draft[id] });
-  }
-
-  async function saveActive() {
-    if (!draft.draft || !saved) return;
-    setSaving(true);
-    update.reset();
-    draft.markSent(draft.draft);
-    try {
-      for (const [id, active] of Object.entries(draft.draft)) {
-        if (saved[id] !== undefined && saved[id] !== active) await update.mutateAsync({ id, body: { active } });
-      }
-    } catch {
-      // Announced above, in the rule list's own words; the change stays unsaved.
-      draft.markSent(null);
-    } finally {
-      setSaving(false);
-    }
-  }
+  // A rule's on/off switch is one of the page's settings: held in the page's
+  // one draft (`switches.tsx`) and saved by its one save bar.
+  const switches = useSwitches();
+  const activeOf = (rule: RuleOut): boolean => switches.active("rule", rule.id, rule.active);
 
   function channelName(id: string): string {
     return channels.data?.find((c) => c.id === id)?.name ?? id;
@@ -232,9 +201,9 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
                     {canAdmin ? (
                       <Toggle
                         checked={activeOf(r)}
-                        onChange={() => toggleActive(r.id)}
+                        onChange={() => switches.toggle("rule", r.id)}
                         label={activeOf(r) ? t("notification.rules.on") : t("notification.rules.off")}
-                        disabled={saving}
+                        disabled={switches.saving}
                       />
                     ) : (
                       <StatusPill value={r.active ? "active" : "inactive"} />
@@ -283,9 +252,9 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
         {/* A refused switch keeps its own sentence here ("The rule was not
             changed."), the error text of today; the save bar stays up with
             the change still unsaved. */}
-        {(create.isError || update.isError || del.isError) && (
+        {(create.isError || switches.ruleError != null || del.isError) && (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
-            {t("notification.rules.notChanged", { reason: describeSubmitError(create.error ?? update.error ?? del.error) })}
+            {t("notification.rules.notChanged", { reason: describeSubmitError(create.error ?? switches.ruleError ?? del.error) })}
           </p>
         )}
 
@@ -381,20 +350,6 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             </Button>
           </div>
         </Dialog>
-      {canAdmin ? (
-        <>
-          <UnsavedGuard dirty={draft.dirty} />
-          <SaveBar
-            dirty={draft.dirty}
-            saving={saving}
-            onDiscard={() => {
-              draft.discard();
-              update.reset();
-            }}
-            onSave={() => void saveActive()}
-          />
-        </>
-      ) : null}
     </div>
   );
 }

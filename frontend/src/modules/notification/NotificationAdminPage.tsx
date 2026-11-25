@@ -17,7 +17,8 @@ import { NotificationPrerequisites } from "./NotificationPrerequisites";
 import { QueueMembersPanel } from "./QueueMembersPanel";
 import { RulesPanel } from "./RulesPanel";
 import type { ChannelKind } from "./types";
-import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { PageHead, SaveBar, StatCard, StatsGrid, UnsavedGuard } from "../../shell/components";
+import { SwitchesProvider, useSwitchDraft } from "./switches";
 import { intlLocale } from "../../lib/datetime";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
@@ -100,6 +101,8 @@ export function NotificationAdminPage() {
   const rules = useNotificationRules();
   const allowlist = useNotificationAllowlist();
   const deadCount = useNotificationDeadCount();
+  // Every rule's and channel's on/off switch, as one draft (`switches.tsx`).
+  const switchDraft = useSwitchDraft(rules.data, channels.data);
 
   const link = useStatLinks("/notifications");
 
@@ -245,6 +248,7 @@ export function NotificationAdminPage() {
       {/* One list per panel, full width, the way the design draws its rules
           panel: every row here names a destination or a person, and a
           half-width column truncates exactly the part that matters. */}
+      <SwitchesProvider value={switchDraft.switches}>
       <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
         <RulesPanel canAdmin={canAdmin} />
         <ChannelsPanel canAdmin={canAdmin} />
@@ -255,6 +259,20 @@ export function NotificationAdminPage() {
             permission gate, so nothing new is fetched. */}
         <DeliveriesPanel zone={me.data?.timezone} />
       </div>
+      </SwitchesProvider>
+      {/* THE ONE SAVE BAR AND THE ONE GUARD (Task 7, 2.8): the rules' and
+          channels' switches, saved or discarded together. */}
+      {canAdmin ? (
+        <>
+          <UnsavedGuard dirty={switchDraft.dirty} />
+          <SaveBar
+            dirty={switchDraft.dirty}
+            saving={switchDraft.saving}
+            onDiscard={switchDraft.discard}
+            onSave={switchDraft.save}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

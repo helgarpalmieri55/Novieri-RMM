@@ -375,6 +375,8 @@ describe("the channels in Spanish", () => {
     await user.click(within(row).getByRole("button", { name: "Probar" }));
     expect(await within(row).findByRole("alert")).toHaveTextContent("Ese servicio no está disponible en este momento.");
     await user.click(within(row).getByRole("switch", { name: "Activado" }));
+    // The switch is a setting saved by the page's one save bar now (Task 7, 2.8).
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     expect(await within(panel).findByText(/^No se cambió el canal\. Ese servicio no está disponible/)).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: "Más acciones para Mattermost de operaciones" }));
     await user.click(await screen.findByRole("menuitem", { name: "Eliminar" }));

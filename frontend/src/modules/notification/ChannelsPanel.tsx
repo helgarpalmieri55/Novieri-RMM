@@ -10,6 +10,7 @@ import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
 import { Btn, FormSection, StatusPill, Toggle } from "../../shell/components";
 import { SectionLead } from "../service-desk/SectionLead";
+import { useSwitches } from "./switches";
 import {
   useCreateNotificationChannelMutation,
   useDeleteNotificationChannelMutation,
@@ -317,9 +318,11 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
   // from a toggle nobody clicked. Disabling a channel is how an operator
   // stops a noisy or compromised webhook; believing it worked when it did
   // not is the failure mode that matters here.
-  function toggleActive(channel: ChannelOut) {
-    update.mutate({ id: channel.id, body: { active: !channel.active } });
-  }
+  //
+  // A channel's on/off switch is one of the page's settings now (Task 7,
+  // 2.8): held in the page's one draft (`switches.tsx`), saved by its one
+  // save bar with this same `{ active }` PATCH, its refusal said here.
+  const switches = useSwitches();
 
   function runTest(channelId: string) {
     setTestedChannelId(channelId);
@@ -412,10 +415,14 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
                         "Pending", "Sent" and "Dead-lettered". */}
                     {canAdmin ? (
                       <Toggle
-                        checked={c.active}
-                        onChange={() => toggleActive(c)}
-                        label={c.active ? t("notification.channels.on") : t("notification.channels.off")}
-                        disabled={update.isPending}
+                        checked={switches.active("channel", c.id, c.active)}
+                        onChange={() => switches.toggle("channel", c.id)}
+                        label={
+                          switches.active("channel", c.id, c.active)
+                            ? t("notification.channels.on")
+                            : t("notification.channels.off")
+                        }
+                        disabled={switches.saving}
                       />
                     ) : (
                       <StatusPill value={c.active ? "active" : "inactive"} />
@@ -508,9 +515,9 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
           </Table>
         )}
 
-        {update.isError && (
+        {(update.isError || switches.channelError != null) && (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
-            {t("notification.channels.notChanged", { reason: describeSubmitError(update.error) })}
+            {t("notification.channels.notChanged", { reason: describeSubmitError(switches.channelError ?? update.error) })}
           </p>
         )}
 

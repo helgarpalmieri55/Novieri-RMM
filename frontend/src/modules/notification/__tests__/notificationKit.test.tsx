@@ -78,6 +78,17 @@ describe("notifications on the form kit", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull());
   });
 
+  it("holds a channel's switch in the same draft as the rules', for the same one save bar", async () => {
+    renderPage("/notifications", <NotificationAdminPage />);
+    const rules = await rulesSection();
+    const channels = (await screen.findByRole("heading", { name: "Channels" })).closest("section") as HTMLElement;
+    await userEvent.click((await within(rules).findAllByRole("switch"))[0] as HTMLElement);
+    await userEvent.click((await within(channels).findAllByRole("switch"))[0] as HTMLElement);
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+
   it("draws its groups as sections, with no primary button in the body", async () => {
     renderPage("/notifications", <NotificationAdminPage />);
     for (const name of ["Rules", "Channels"]) {
