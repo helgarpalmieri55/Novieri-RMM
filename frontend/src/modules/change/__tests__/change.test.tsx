@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_DATE } from "../../../lib/datetime";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
 import { ClientNotChosen } from "../../../lib/clientSelection";
@@ -956,7 +957,7 @@ describe("change instants are rendered in the reader's profile zone", () => {
     expect(screen.queryByText(/2\/1\/2026/)).not.toBeInTheDocument();
   });
 
-  it("renders an absent window as an em dash, never Invalid Date", async () => {
+  it("renders an absent window as the absent date at both ends, never Invalid Date", async () => {
     api.listChanges = vi.fn().mockResolvedValue([
       { ...(CHANGES[0] as ChangeRequest), window_start: null, window_end: null },
     ]);
@@ -964,7 +965,8 @@ describe("change instants are rendered in the reader's profile zone", () => {
     renderWithProviders(<ChangesPage />);
 
     await screen.findByText("Upgrade switch firmware");
-    expect(screen.getByText(/—\s+–\s+—/)).toBeInTheDocument();
+    const absent = NO_DATE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    expect(screen.getByText(new RegExp(`${absent}\\s+–\\s+${absent}`))).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });
