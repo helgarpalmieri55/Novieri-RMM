@@ -43,6 +43,15 @@
         ],
         "createdAt": "2026-11-25T09:23:15.637Z",
         "reason": "the facts strip (Facts) is the design's summary row inside its panel, not a card"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/docs/DocumentViewer.tsx"
+        ],
+        "createdAt": "2026-11-25T09:26:09.505Z",
+        "reason": "False positive: the src is on the next line (DocumentViewer.tsx:256); the img is the document image viewer."
       }
     ]
   },

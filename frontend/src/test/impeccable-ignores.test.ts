@@ -67,4 +67,14 @@ describe("the detector's shared ignores", () => {
       expect(entries[0]?.reason).toMatch(reason);
     }
   });
+
+  it("ignores broken-image on the document viewer's image, and nowhere else (kit requests batch 3, B3-8)", () => {
+    // O6: the detector reads one line and misses the `src` on the next; the
+    // <img> is the document image viewer, with its security reasoning above it.
+    const broken = values.filter((item) => item.rule === "broken-image");
+    expect(broken).toHaveLength(1);
+    expect(broken[0]?.value).toBe("*");
+    expect(broken[0]?.files).toEqual(["frontend/src/modules/docs/DocumentViewer.tsx"]);
+    expect(broken[0]?.reason).toMatch(/the src is on the next line/);
+  });
 });
