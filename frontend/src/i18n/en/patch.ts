@@ -63,10 +63,10 @@ export const patch = {
       one: "{count} more update is outside the severity filter.",
       other: "{count} more updates are outside the severity filter.",
     },
-    scanNone: "Scan requested — no devices were eligible, so no jobs were dispatched.",
+    scanNone: "Scan requested: no devices were eligible, so no jobs were dispatched.",
     scanQueued: {
-      one: "Scan queued — {count} job dispatched.",
-      other: "Scan queued — {count} jobs dispatched.",
+      one: "Scan queued: {count} job dispatched.",
+      other: "Scan queued: {count} jobs dispatched.",
     },
     approved: {
       one: "{count} update approved for the {ring} ring.",
@@ -105,9 +105,9 @@ export const patch = {
       other: "all {count} devices of every client in the {ring} ring",
     },
     lens:
-      "You are choosing these from {hostname}, but an approval covers {reach} — not {hostname} alone.",
+      "You are choosing these from {hostname}, but an approval covers {reach}, not {hostname} alone.",
     hostLens:
-      "You are choosing these from {chosen}, but an approval covers {reach} — not {alone} alone.",
+      "You are choosing these from {chosen}, but an approval covers {reach}, not {alone} alone.",
     chosenTwo: "{first} and {second}",
     chosenMany: "{count} selected hosts",
     thoseHosts: "those hosts",
@@ -132,9 +132,9 @@ export const patch = {
       other: "Install queued on {count} hosts.",
     },
     applySkipped: {
-      one: "{count} host was skipped — either nothing on it is approved for its ring, or its maintenance window is shut right now.",
+      one: "{count} host was skipped: either nothing on it is approved for its ring, or its maintenance window is shut right now.",
       other:
-        "{count} hosts were skipped — either nothing on them is approved for their ring, or their maintenance window is shut right now.",
+        "{count} hosts were skipped: either nothing on them is approved for their ring, or their maintenance window is shut right now.",
     },
     hostSelection: {
       one: "{count} host selected of {matching}.",
@@ -191,11 +191,11 @@ export const patch = {
     stepWhole: "The {name} step of the window must be a whole number.",
     moreDash: "The {name} of the window has more than one \"-\" range.",
     namesNotSupported:
-      "The {name} of the window accepts numbers only — names like \"SAT\" are not supported. Sunday is 0 or 7, Saturday is 6.",
+      "The {name} of the window accepts numbers only: names like \"SAT\" are not supported. Sunday is 0 or 7, Saturday is 6.",
     numbersOnly: "The {name} of the window accepts numbers only.",
     between: "The {name} of the window must be between {lo} and {hi}.",
     fiveFields:
-      "The window must be a 5-field cron expression — minute hour day-of-month month day-of-week, {example}",
+      "The window must be a 5-field cron expression: minute hour day-of-month month day-of-week, {example}",
     sunday: "Sunday",
     monday: "Monday",
     tuesday: "Tuesday",
@@ -265,7 +265,7 @@ export const patch = {
     noReport: "No machine has reported on {manager} yet. App updates appear after the next scan.",
   },
   decision: {
-    changeAria: "Change this approval implements — {scope}",
+    changeAria: "Change this approval implements ({scope})",
     noChange: "No change request",
     approve: {
       one: "Approve {count} update",
@@ -282,10 +282,10 @@ export const patch = {
     clearSelection: "Clear selection",
     clearAria: "Clear the {scope} selection",
     selecting: "Selecting…",
-    selectAllAria: "{label} — {scope}",
+    selectAllAria: "{label} ({scope})",
     truncated: {
-      one: "{count} of {matching} matching updates are selected — the most one approval can carry.",
-      other: "{count} of {matching} matching updates are selected — the most one approval can carry.",
+      one: "{count} of {matching} matching updates are selected: the most one approval can carry.",
+      other: "{count} of {matching} matching updates are selected: the most one approval can carry.",
     },
     nothingSelected: "Nothing was selected.",
     confirmTitle: "Approve updates into a deployment ring",
@@ -319,7 +319,7 @@ export const patch = {
       "Ticked, these updates become installable on every client's machines in the {ring} ring. Unticked, only on the machines of {client}.",
     noChangeNote: "With no change request chosen, one is recorded for this approval automatically.",
     confirmLabel: "Approve",
-    ringAria: "Ring to approve into — {scope}",
+    ringAria: "Ring to approve into ({scope})",
     ringOption: {
       one: "{name}, {count} device",
       other: "{name}, {count} devices",
@@ -359,7 +359,7 @@ export const patch = {
     clearSelection: "Clear selection",
     clearAria: "Clear the {family} host selection",
     selecting: "Selecting…",
-    selectAllAria: "{label} needing updates — {family}",
+    selectAllAria: "{label} needing updates ({family})",
     note: "Approved updates install on their own at each host's next maintenance window. This sends the same install now, and only to hosts whose window is open right now.",
     truncated:
       "{count} of {matching} matching hosts are selected: the worst-affected first, and the most this console will install to in one act.",

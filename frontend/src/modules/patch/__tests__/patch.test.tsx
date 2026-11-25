@@ -850,7 +850,7 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("button", { name: "Scan" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Scan queued — 1 job dispatched.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Scan queued: 1 job dispatched.");
     expect(triggerPatchScan).toHaveBeenCalledTimes(1);
   });
 
@@ -2000,7 +2000,7 @@ describe("Scan cannot be dispatched twice while the first request is in flight",
     expect(triggerPatchScan).toHaveBeenCalledTimes(1);
 
     release?.({ job_ids: ["j1"] });
-    expect(await screen.findByRole("status")).toHaveTextContent("Scan queued — 1 job dispatched.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Scan queued: 1 job dispatched.");
   });
 });
 
@@ -2401,7 +2401,7 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
       await screen.findByRole("checkbox", { name: "Select openssl-3.0.11 on sentinel" }),
     );
     expect(
-      screen.getByRole("combobox", { name: "Ring to approve into — sentinel" }),
+      screen.getByRole("combobox", { name: "Ring to approve into (sentinel)" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Approve 1 update/ })).toBeInTheDocument();
   });
@@ -2445,7 +2445,7 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
     // On the page, beside the control, before anything is clicked.
     expect(
       screen.getByText(
-        /You are choosing these from sentinel, but an approval covers the 2 devices of your organisation's own client in the test ring — not sentinel alone\./,
+        /You are choosing these from sentinel, but an approval covers the 2 devices of your organisation's own client in the test ring, not sentinel alone\./,
       ),
     ).toBeInTheDocument();
 
@@ -2467,7 +2467,7 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
 
     await openSentinel(user);
     await user.selectOptions(
-      await screen.findByRole("combobox", { name: "Ring to approve into — sentinel" }),
+      await screen.findByRole("combobox", { name: "Ring to approve into (sentinel)" }),
       "broad",
     );
 
@@ -2621,7 +2621,7 @@ describe("FleetPatchPage — selecting everything the filter matches", () => {
     await user.click(select);
     expect(await screen.findByText("500 updates selected of 812 matching.")).toBeInTheDocument();
     expect(
-      screen.getByText(/500 of 812 matching updates are selected — the most one approval can carry/),
+      screen.getByText(/500 of 812 matching updates are selected: the most one approval can carry/),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Approve 500 updates/ }));
@@ -2900,7 +2900,7 @@ describe("the Linux tab decides by machine, and says what installing really does
 
     expect(
       await screen.findByText(
-        /Install queued on 1 host\. 1 host was skipped — either nothing on it is approved/,
+        /Install queued on 1 host\. 1 host was skipped: either nothing on it is approved/,
       ),
     ).toBeInTheDocument();
   });
@@ -3647,7 +3647,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
 
     expect(
       await screen.findByText(
-        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring — not sentinel alone.",
+        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring, not sentinel alone.",
       ),
     ).toBeInTheDocument();
     const confirm = await openApproval(user);
@@ -3695,7 +3695,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
       listClients: vi.fn().mockResolvedValue(CLIENTS),
     });
     await chooseOnSentinel(user);
-    const section = screen.getByRole("combobox", { name: "Ring to approve into — sentinel" })
+    const section = screen.getByRole("combobox", { name: "Ring to approve into (sentinel)" })
       .parentElement as HTMLElement;
     expect(
       (await within(section).findByRole("checkbox", { name: /For every client/ })).closest("label"),
@@ -3713,7 +3713,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
 
     expect(
       await screen.findByText(
-        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring — not sentinel alone.",
+        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring, not sentinel alone.",
       ),
     ).toBeInTheDocument();
     expect(listClients).not.toHaveBeenCalled();
@@ -3725,12 +3725,12 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     api = customerMachine({ bulkApprovePatches });
     await chooseOnSentinel(user);
 
-    const section = screen.getByRole("combobox", { name: "Ring to approve into — sentinel" })
+    const section = screen.getByRole("combobox", { name: "Ring to approve into (sentinel)" })
       .parentElement as HTMLElement;
     await user.click(within(section).getByRole("checkbox", { name: /For every client/ }));
     expect(
       screen.getByText(
-        "You are choosing these from sentinel, but an approval covers all 3 devices of every client in the test ring — not sentinel alone.",
+        "You are choosing these from sentinel, but an approval covers all 3 devices of every client in the test ring, not sentinel alone.",
       ),
     ).toBeInTheDocument();
     const confirm = await openApproval(user);
