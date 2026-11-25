@@ -145,3 +145,22 @@ describe("notes wrap without a straggler (kit requests batch 3, B3-4)", () => {
     expect(rule(COMPONENTS, ".note, .form-hint, .ph .sub")).toMatch(/text-wrap:\s*pretty/);
   });
 });
+
+describe("a KV value breaks instead of running past its panel (kit requests batch 3, B3-7)", () => {
+  // O6's K2: a long address or sign-in name in a KV beside a table ran past its
+  // panel and was clipped. The `1fr` track's automatic minimum is the value's
+  // min-content, so one long word set it; `overflow-wrap: anywhere` lowers that
+  // minimum, and `min-width: 0` lets the cell shrink to its track.
+  const COMPONENTS = read("./components.css");
+
+  it("lets a long value break anywhere, and its cell shrink", () => {
+    const dd = rule(COMPONENTS, ".kv dd");
+    expect(dd).toMatch(/min-width:\s*0/);
+    expect(dd).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("is on /__preview with a long value, so the browser's pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<KV\s+items=\{\[\s*\["Signed in as"/);
+  });
+});

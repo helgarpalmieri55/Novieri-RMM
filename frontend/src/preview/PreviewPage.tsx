@@ -1140,6 +1140,11 @@ function KitPreview() {
             aside={
               <Panel title="Activity">
                 <div style={{ padding: 14 }}>Patched on Saturday at 02:10. No open alerts.</div>
+                {/* A long value with no space to break at (kit requests batch
+                    3, B3-7): it wraps inside the narrow column. */}
+                <div style={{ padding: "0 14px 14px" }}>
+                  <KV items={[["Signed in as", "maria.fernanda.gonzalez-restrepo@andeslogistics.example.com"]]} />
+                </div>
               </Panel>
             }
           />

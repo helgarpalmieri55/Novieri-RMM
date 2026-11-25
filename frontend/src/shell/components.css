@@ -758,6 +758,13 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
 }
 .kv dt { color: var(--muted);
 }
+/* Kit addition (batch 3, B3-7): a long value (an address, a sign-in name)
+ * breaks instead of running past its panel. The `1fr` track's automatic
+ * minimum is the value's min-content, so one long word set it;
+ * `overflow-wrap: anywhere` lowers that minimum and `min-width: 0` lets the
+ * cell shrink to its track. */
+.kv dd { min-width: 0; overflow-wrap: anywhere;
+}
 
 /* ------------------------------------------------------------------- empty */
 
