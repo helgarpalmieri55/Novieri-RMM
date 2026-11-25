@@ -11,7 +11,7 @@ import { renderPage } from "../test/renderPage";
 import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
 import { useNewParam } from "./listKit";
 // Kit requests batch 1 through `components.tsx`, the kit's one door.
-import { FormSection as FormSectionFromKit } from "./components";
+import { FormSection as FormSectionFromKit, useEditParam } from "./components";
 
 interface Org {
   name: string;
@@ -415,6 +415,69 @@ describe("UnsavedGuard in a ?new= dialog (review fix round 1, item 5)", () => {
     await userEvent.type(screen.getByLabelText("Title"), "Printer");
     await act(() => router.navigate(-1));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+/**
+ * THE SAME PAIRING FOR AN EDITOR (batch 1 review, F4): `useEditParam` with
+ * `UnsavedGuard search={["edit"]}`, as `useEditParam`'s doc prescribes, pinned
+ * as the `?new=` dialog's is above.
+ */
+function EditDraft({ search, onClose }: { search?: boolean | readonly string[]; onClose: () => void }) {
+  const [name, setName] = useState("Pilot");
+  return (
+    <div role="dialog" aria-label="Edit policy">
+      <UnsavedGuard dirty={name !== "Pilot"} search={search} />
+      <input aria-label="Name" value={name} onChange={(event) => setName(event.target.value)} />
+      <Link to="?edit=pol-1&state=open">Open only</Link>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+function ListWithEdit({ search }: { search?: boolean | readonly string[] }) {
+  const edit = useEditParam("policy");
+  return (
+    <>
+      <button type="button" onClick={() => edit.start("pol-1")}>
+        Edit Pilot
+      </button>
+      {edit.id !== "" ? <EditDraft search={search} onClose={edit.close} /> : null}
+    </>
+  );
+}
+
+describe("UnsavedGuard in a ?edit= editor (batch 1 review, F4)", () => {
+  it("asks before Close drops an edit with a change in it, when the guard names the key, and keeps the draft", async () => {
+    const { router } = renderPage("/backup/policies", <ListWithEdit search={["edit"]} />, "/backup/policies");
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.type(screen.getByLabelText("Name"), " ring");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?edit=pol-1");
+    expect(screen.getByLabelText("Name")).toHaveValue("Pilot ring");
+  });
+
+  it("does not ask for a change of a key it does not name, a filter inside the editor", async () => {
+    const { router } = renderPage("/backup/policies", <ListWithEdit search={["edit"]} />, "/backup/policies");
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.type(screen.getByLabelText("Name"), " ring");
+    await userEvent.click(screen.getByRole("link", { name: "Open only" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(router.state.location.search).toBe("?edit=pol-1&state=open");
+    expect(screen.getByLabelText("Name")).toHaveValue("Pilot ring");
+  });
+
+  it("is not vacuous: without the key, Close drops the draft unasked", async () => {
+    const { router } = renderPage("/backup/policies", <ListWithEdit />, "/backup/policies");
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.type(screen.getByLabelText("Name"), " ring");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Edit policy" })).toBeNull();
+    expect(router.state.location.search).toBe("");
   });
 });
 
