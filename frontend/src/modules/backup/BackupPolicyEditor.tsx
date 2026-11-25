@@ -18,11 +18,19 @@
  * A group's policy is its group's client's; one with no group is a client's
  * default. The repository picker lists only that client's repositories
  * (`policyClient`, `repositoriesOfClient`), and the server refuses any other.
+ *
+ * ON THE KIT (redesign plan, Task 9; Recetas L and FO). The list is the list
+ * kit's: the enabled filter as chips in the URL (`?enabled=`, the address the
+ * tiles and the readiness check already link to), "Showing x of y", and an
+ * empty list that says its cause. The editor stays a dialog (Receta FO, 7: a
+ * small form is a dialog), opened from the URL -- `?new=policy` (decision D8)
+ * and `?edit=<id>` -- and it asks before a change in it is dropped by Cancel,
+ * Back or a link, and not after a save (`useUnsavedGuard`, `release()`).
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ClientField } from "../../components/ClientField";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Button, Dialog, Table, Td, Th } from "../../components/ui";
@@ -59,23 +67,34 @@ import { BackupPageNav } from "./backupNav";
 import { PolicyReadiness } from "./BackupReadiness";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatsGrid,
   StatCard,
   StatusPill,
+  useEditParam,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
 } from "../../shell/components";
 
 export function BackupPolicyEditor() {
   const t = useT();
   const api = useApi();
-  const [editing, setEditing] = useState<BackupPolicy | "new" | null>(null);
+  // New policy is `?new=policy`, and the policy being edited `?edit=<id>`:
+  // the dialog is a link, and a reload opens the same one. Closing either
+  // undoes its opening (Back from the entry `start` added).
+  const creating = useNewParam("policy");
+  const edit = useEditParam("policy");
   // In the URL, so the "Enabled" tile above can hand over the rows it counted
   // rather than linking to the page the reader is already on.
-  const [params, setParams] = useSearchParams();
-  const enabledFilter = params.get("enabled") ?? "";
+  const filters = useUrlFilters(["enabled"] as const);
+  const enabledFilter = filters.values.enabled;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -90,6 +109,9 @@ export function BackupPolicyEditor() {
   const repositories = useBackupRepositories();
   const groups = useDeviceGroups();
   const items = policies.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !policies.data;
   const enabledCount = items.filter((policy) => policy.enabled).length;
   // What the totals are made of, for the tiles' second lines: how many
   // distinct repositories these policies write into, and how many of the
@@ -106,6 +128,12 @@ export function BackupPolicyEditor() {
   // UUID: unreadable in exactly the column an operator scans.
   const repositoryOptions = repositoryPickerOptions(repositories.data ?? []);
   const groupOptions = groupPickerOptions(groups.data ?? []);
+  // What the dialog edits: a new policy, the one `?edit=` names (once the
+  // list has it), or nothing. Only for someone who may manage policies,
+  // whatever the URL asks: a courtesy, the server checks (invariant 6).
+  const edited = items.find((policy) => policy.id === edit.id);
+  const editing: BackupPolicy | "new" | null = !canManage ? null : creating.open ? "new" : (edited ?? null);
+  const closeEditor = creating.open ? creating.close : edit.close;
 
   return (
     <div>
@@ -114,7 +142,7 @@ export function BackupPolicyEditor() {
         description={t("backup.policies.description")}
         actions={
           canManage ? (
-            <Btn label={t("backup.policies.newPolicy")} icon="plus" variant="primary" onClick={() => setEditing("new")} />
+            <Btn label={t("backup.policies.newPolicy")} icon="plus" variant="primary" onClick={creating.start} />
           ) : undefined
         }
       />
@@ -137,6 +165,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tilePolicies")}
           value={String(items.length)}
+          pending={noData}
           icon="calendar-week"
           to="/backup/policies"
           tone="neutral"
@@ -150,6 +179,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/backup/policies?enabled=true"
           tone="green"
@@ -169,6 +199,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/backup/policies?enabled=false"
           tone="neutral"
@@ -184,36 +215,42 @@ export function BackupPolicyEditor() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={enabledFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              if (event.target.value === "") next.delete("enabled");
-              else next.set("enabled", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("backup.policies.filterAria")}
-          >
-            <option value="">{t("backup.policies.allPolicies")}</option>
-            <option value="true">{t("backup.policies.tileEnabled")}</option>
-            <option value="false">{t("backup.policies.tileDisabled")}</option>
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={policies.isLoading}
-          error={policies.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0
-              ? t("backup.policies.emptyNone")
-              : t("backup.policies.emptyFiltered")
+        <ListToolbar
+          chips={
+            // `GET /backup/policies` answers every policy at once: these are totals.
+            <FilterChips
+              label={t("backup.policies.filterAria")}
+              options={[
+                { value: "", label: t("backup.policies.allPolicies"), count: policies.data ? items.length : undefined },
+                { value: "true", label: t("backup.policies.tileEnabled"), count: policies.data ? enabledCount : undefined },
+                {
+                  value: "false",
+                  label: t("backup.policies.tileDisabled"),
+                  count: policies.data ? items.length - enabledCount : undefined,
+                },
+              ]}
+              value={enabledFilter}
+              onChange={(value) => filters.set("enabled", value)}
+            />
           }
-          emptyIcon="calendar-week"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={policies.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={policies.isLoading} error={policies.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("backup.policies.emptyNone")}
+              icon="calendar-week"
+              action={
+                canManage ? (
+                  <Btn label={t("backup.policies.newPolicy")} icon="plus" small onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("backup.policies.title")}>
             <thead>
               <tr>
                 <Th>{t("backup.policies.colScope")}</Th>
@@ -262,12 +299,13 @@ export function BackupPolicyEditor() {
                     />
                   </Td>
                   <Td>
-                    {canManage && <Btn label={t("backup.policies.edit")} icon="edit" small onClick={() => setEditing(policy)} />}
+                    {canManage && <Btn label={t("backup.policies.edit")} icon="edit" small onClick={() => edit.start(policy.id)} />}
                   </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -282,7 +320,7 @@ export function BackupPolicyEditor() {
       <PolicyDialog
         key={editing === "new" ? "new" : (editing?.id ?? "closed")}
         policy={editing}
-        onClose={() => setEditing(null)}
+        onClose={closeEditor}
       />
     </div>
   );
@@ -317,6 +355,17 @@ function PolicyDialog({
   const [repositoryId, setRepositoryId] = useState(existing?.repository_id ?? "");
   const [windowCron, setWindowCron] = useState(existing?.window_cron ?? "");
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
+  // A CHANGE IN THE DIALOG IS NOT DROPPED WITHOUT A QUESTION (Receta FO). The
+  // dialog lives in `?new=` or `?edit=`, so closing it is a change of those
+  // keys: Cancel, Back and a link all ask while something differs from what
+  // the dialog opened with. A save that succeeded closes it without asking.
+  const dirty =
+    policy != null &&
+    (deviceGroupId !== (existing?.device_group_id ?? "") ||
+      repositoryId !== (existing?.repository_id ?? "") ||
+      windowCron !== (existing?.window_cron ?? "") ||
+      enabled !== (existing?.enabled ?? true));
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new", "edit"] });
   // Populated ON SUBMIT, never while typing. Held as data (rules and values) so
   // a language switch re-words the sentences.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -371,6 +420,14 @@ function PolicyDialog({
   function submit() {
     // The previous outcome must not be readable as this one.
     upsert.reset();
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): Save on a policy nobody
+    // changed closes and sends nothing. A PUT with nothing in it would still
+    // write an audit entry saying the policy was edited.
+    if (existing && !dirty) {
+      setAttempt(null);
+      onClose();
+      return;
+    }
     // The Client first, as the form shows it: without it there is no list of
     // repositories to pick from, so "Repository is required" alone named the
     // wrong field.
@@ -404,6 +461,8 @@ function PolicyDialog({
       }),
       {
         onSuccess: () => {
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -411,6 +470,8 @@ function PolicyDialog({
   }
 
   return (
+    <>
+    {guard}
     <Dialog
       open={policy != null}
       onClose={onClose}
@@ -518,5 +579,6 @@ function PolicyDialog({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

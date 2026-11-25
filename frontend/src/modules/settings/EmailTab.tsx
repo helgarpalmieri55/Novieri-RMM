@@ -24,7 +24,7 @@
 // words when they are spent.
 //
 // THE TEST GOES WHERE THE OPERATOR SAYS, WITHIN THEIR OWN DOMAINS. The box is
-// pre-filled with the operator's own address tagged `+itms-test`, which lands
+// pre-filled with the operator's own address tagged `+novieri-test`, which lands
 // in the same inbox on Microsoft 365 and Gmail and is easy to find there. The
 // server refuses any address other than the sending address, the operator's
 // own mailbox, or the organization's sign-in domain (`app/core/mail.py`), so
@@ -55,7 +55,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { lazyFields } from "../../i18n/lazy";
 import { Field, inputClass } from "../../components/ui";
-import { Btn, FieldGroup, KIND_ICON, Panel } from "../../shell/components";
+import { Btn, FormSection, KIND_ICON, SaveBar, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
 import {
@@ -66,8 +66,8 @@ import {
 } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, parseIntegerField, sentenceProblem } from "./settingsState";
 import type { EmailEncryption, EmailSettingsOut, EmailSettingsUpdate } from "./types";
 
 /**
@@ -142,15 +142,24 @@ interface EmailForm {
   replyTo: string;
   encryption: EmailEncryption;
   username: string;
-  /** Always starts empty. What the operator types here, and only that, is sent. */
-  password: string;
   authType: EmailAuthType;
   tokenUrl: string;
   tokenScope: string;
   tokenClientId: string;
-  /** Always starts empty, for the same reason `password` does. */
+}
+
+/**
+ * THE TWO SECRETS ARE HELD APART FROM THE DRAFT. Both boxes always start empty,
+ * and what the operator types, and only that, is sent. Kept out of `useDraft`
+ * so a typed secret is never serialised into the draft's comparison state;
+ * typing one still counts as a change.
+ */
+interface EmailSecrets {
+  password: string;
   tokenClientSecret: string;
 }
+
+const NO_SECRETS: EmailSecrets = { password: "", tokenClientSecret: "" };
 
 function encryptionOf(data: EmailSettingsOut | undefined): EmailEncryption {
   return data?.encryption === "ssl" ? "ssl" : data?.encryption === "none" ? "none" : "starttls";
@@ -165,12 +174,10 @@ function seedFrom(data: EmailSettingsOut | undefined): EmailForm {
     replyTo: data?.reply_to ?? "",
     encryption: encryptionOf(data),
     username: data?.username ?? "",
-    password: "",
     authType: data?.auth_type === "token" ? "token" : "password",
     tokenUrl: data?.microsoft_sign_in_url ?? "",
     tokenScope: data?.microsoft_scope || MICROSOFT_SCOPE,
     tokenClientId: data?.microsoft_client_id ?? "",
-    tokenClientSecret: "",
   };
 }
 
@@ -190,17 +197,20 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
     setRecipient(suggestion);
   }, [suggestion]);
 
+  // THE KIT'S DRAFT (redesign, Receta FO): what the server holds is the saved
+  // state, and a save's answer becomes it (`markSent`).
   const seed = seedFrom(settings.data);
-  const [form, setForm] = useState<EmailForm>(seed);
-
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as EmailForm);
-  }, [seedSignature]);
+  const { draft, setDraft, dirty: fieldsDirty, discard, markSent } = useDraft<EmailForm>(
+    settings.data ? seed : undefined,
+  );
+  const form = draft ?? seed;
+  const [secrets, setSecrets] = useState<EmailSecrets>(NO_SECRETS);
+  const dirty = fieldsDirty || secrets.password !== "" || secrets.tokenClientSecret !== "";
+  // A save refused for what the form lacks, said in the bar until it is fixed.
+  const [tried, setTried] = useState(false);
 
   const forbidden = isForbidden(settings.error);
   const failed = settings.error != null && !forbidden;
-  const dirty = isDirty(form, seed);
   const port = parseIntegerField(form.port);
   const portValid = port != null && port >= 1 && port <= 65535;
   // A password with no username is REFUSED by the server rather than quietly
@@ -209,7 +219,7 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
   // rotated it. The console says so before the round trip instead of relaying
   // the refusal afterwards.
   const passwordWithoutUsername =
-    form.authType === "password" && form.password !== "" && form.username.trim() === "";
+    form.authType === "password" && secrets.password !== "" && form.username.trim() === "";
   // The server keeps a stored client secret only while the saved mode is
   // already Microsoft; on the first switch there is nothing to keep.
   const savedAsMicrosoft = settings.data?.auth_type === "token";
@@ -220,7 +230,7 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
       // Microsoft's own address, or nothing: a saved address that is not one
       // reads as no directory, and the server would refuse it.
       tenantOf(form.tokenUrl) === "" ||
-      (!savedAsMicrosoft && form.tokenClientSecret === ""));
+      (!savedAsMicrosoft && secrets.tokenClientSecret === ""));
   const complete =
     form.host.trim() !== "" &&
     form.fromAddress.trim() !== "" &&
@@ -229,12 +239,32 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
     !microsoftIncomplete;
   const passwordSaved = settings.data?.authenticated === true && !savedAsMicrosoft;
   const editable = canEdit && settings.data != null;
+  // WHAT THE FORM LACKS, SAID IN THE BAR ON SUBMIT (the kit's rule: Save stays
+  // enabled for missing input, and `blockedReason` is a permission only).
+  const problems =
+    !tried || complete
+      ? []
+      : [
+          sentenceProblem(
+            "email",
+            passwordWithoutUsername
+              ? t("settings.email.passwordNeedsUser")
+              : form.authType === "token"
+                ? t("settings.email.incompleteToken")
+                : t("settings.email.incompletePassword"),
+          ),
+        ];
 
   function set<K extends keyof EmailForm>(key: K, value: EmailForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setDraft({ ...form, [key]: value });
   }
 
   function submit() {
+    if (!complete) {
+      setTried(true);
+      return;
+    }
+    setTried(false);
     const body: EmailSettingsUpdate = {
       host: form.host.trim(),
       port: port as number,
@@ -251,325 +281,317 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
       body.token_url = form.tokenUrl.trim();
       body.token_scope = form.tokenScope.trim();
       body.token_client_id = form.tokenClientId.trim();
-      if (form.tokenClientSecret !== "") body.token_client_secret = form.tokenClientSecret;
-    } else if (form.password !== "") {
-      body.password = form.password;
+      if (secrets.tokenClientSecret !== "") body.token_client_secret = secrets.tokenClientSecret;
+    } else if (secrets.password !== "") {
+      body.password = secrets.password;
     }
+    markSent(form);
     update.mutate(body, {
-      onSuccess: () =>
-        setForm((current) => ({ ...current, password: "", tokenClientSecret: "" })),
+      onSuccess: () => setSecrets(NO_SECRETS),
+      onError: () => markSent(null),
     });
   }
 
-  // The panel, then the confirmation outside it and outside every form
-  // (`components/stepUp.tsx`).
-  const panel = (
-    <Panel
-      title={t("settings.email.title")}
-      subtitle={t("settings.email.subtitle")}
-    >
-      {settings.isLoading ? (
-        <p className="note">{t("settings.email.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">
-          {t("settings.email.forbidden", { code: EMAIL_MANAGE })}
-        </p>
-      ) : failed ? (
-        <LoadFailure error={settings.error} />
-      ) : (
-        <>
-          {settings.data && !settings.data.configured ? (
-            <p role="status" className="notice gold" style={{ marginBottom: 14 }}>
-              <Icon name={KIND_ICON.warn} size={16} />
-              <span>
-                {t("settings.email.notSetUp")}
-              </span>
-            </p>
-          ) : null}
+  if (settings.isLoading) return <p className="note">{t("settings.email.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.email.forbidden", { code: EMAIL_MANAGE })}</p>;
+  if (failed) return <LoadFailure error={settings.error} />;
 
-          <FieldGroup title={t("settings.email.groups.connection")} icon="network">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              <Field label={t("settings.email.mailServer")}>
-                <input
-                  className={inputClass}
-                  value={form.host}
-                  disabled={!editable}
-                  placeholder={t("settings.email.hostPlaceholder")}
-                  onChange={(event) => set("host", event.target.value)}
-                />
-              </Field>
-              <Field label={t("settings.email.port")}>
-                <input
-                  className={inputClass}
-                  value={form.port}
-                  disabled={!editable}
-                  inputMode="numeric"
-                  placeholder={t("settings.email.portPlaceholder")}
-                  onChange={(event) => set("port", event.target.value)}
-                />
-              </Field>
-              {/* A CHOICE OF THREE, NOT A MENU. `<select>` is the browser's
-                  own widget painted through the kit's box; the design draws a
-                  short, fixed enumeration as `Chips`. `ChipsField` closes
-                  this and the two other near-identical call sites
-                  (`BudgetTab`'s "Fiscal year starts in",
-                  `OrganizationTab`'s per-key choice fields) into one: a
-                  plain `.field` `div` rather than `Field`'s `<label>` (a
-                  chip button nested inside a `<label>` inherits that
-                  label's text as ITS OWN accessible name -- the same
-                  conflict `Toggle`'s own comment documents: "a button
-                  nested in a <label> is two things claiming the same
-                  click"), its caption named once through
-                  `aria-labelledby` rather than doubled by `Chips`' own
-                  `aria-label`, and `disabled={!editable}` standing in for
-                  the `<select disabled>` twin this used to need before
-                  `Chips` carried a disabled state of its own. */}
-              <ChipsField
-                caption={t("settings.email.encryption")}
-                items={ENCRYPTION_CHOICES.map((choice) => choice.label)}
-                active={ENCRYPTION_CHOICES.findIndex((choice) => choice.value === form.encryption)}
+  // The sections, the one bar, then the confirmation outside them and outside
+  // every form (`components/stepUp.tsx`).
+  return (
+    <>
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      <p className="note" style={{ marginBottom: 14 }}>
+        {t("settings.email.subtitle")}
+      </p>
+      {!canEdit ? <ReadOnlyNotice reason={reason} /> : null}
+      {settings.data && !settings.data.configured ? (
+        <p role="status" className="notice gold" style={{ marginBottom: 14 }}>
+          <Icon name={KIND_ICON.warn} size={16} />
+          <span>
+            {t("settings.email.notSetUp")}
+          </span>
+        </p>
+      ) : null}
+
+      <FormSection title={t("settings.email.groups.connection")} icon="network">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.email.mailServer")}>
+            <input
+              className={inputClass}
+              value={form.host}
+              disabled={!editable}
+              placeholder={t("settings.email.hostPlaceholder")}
+              onChange={(event) => set("host", event.target.value)}
+            />
+          </Field>
+          <Field label={t("settings.email.port")}>
+            <input
+              className={inputClass}
+              value={form.port}
+              disabled={!editable}
+              inputMode="numeric"
+              placeholder={t("settings.email.portPlaceholder")}
+              onChange={(event) => set("port", event.target.value)}
+            />
+          </Field>
+          {/* A CHOICE OF THREE, NOT A MENU. `<select>` is the browser's
+              own widget painted through the kit's box; the design draws a
+              short, fixed enumeration as `Chips`. `ChipsField` closes
+              this and the two other near-identical call sites
+              (`BudgetTab`'s "Fiscal year starts in",
+              `OrganizationTab`'s per-key choice fields) into one: a
+              plain `.field` `div` rather than `Field`'s `<label>` (a
+              chip button nested inside a `<label>` inherits that
+              label's text as ITS OWN accessible name -- the same
+              conflict `Toggle`'s own comment documents: "a button
+              nested in a <label> is two things claiming the same
+              click"), its caption named once through
+              `aria-labelledby` rather than doubled by `Chips`' own
+              `aria-label`, and `disabled={!editable}` standing in for
+              the `<select disabled>` twin this used to need before
+              `Chips` carried a disabled state of its own. */}
+          <ChipsField
+            caption={t("settings.email.encryption")}
+            items={ENCRYPTION_CHOICES.map((choice) => choice.label)}
+            active={ENCRYPTION_CHOICES.findIndex((choice) => choice.value === form.encryption)}
+            disabled={!editable}
+            onSelect={(at) => {
+              const choice = ENCRYPTION_CHOICES[at];
+              if (choice) set("encryption", choice.value);
+            }}
+          />
+        </div>
+      </FormSection>
+      <FormSection title={t("settings.email.groups.sender")} icon="mail">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.email.fromAddress")}>
+            <input
+              className={inputClass}
+              value={form.fromAddress}
+              disabled={!editable}
+              placeholder={t("settings.email.addressPlaceholder")}
+              onChange={(event) => set("fromAddress", event.target.value)}
+            />
+          </Field>
+          <Field label={t("settings.email.senderName")}>
+            <input
+              className={inputClass}
+              value={form.fromDisplayName}
+              disabled={!editable}
+              onChange={(event) => set("fromDisplayName", event.target.value)}
+            />
+          </Field>
+          <Field label={t("settings.email.replyTo")}>
+            <input
+              className={inputClass}
+              value={form.replyTo}
+              disabled={!editable}
+              onChange={(event) => set("replyTo", event.target.value)}
+            />
+          </Field>
+        </div>
+      </FormSection>
+      <FormSection title={t("settings.email.groups.authentication")} icon="key">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <ChipsField
+            caption={t("settings.email.signIn")}
+            items={AUTH_CHOICES.map((choice) => choice.label)}
+            active={AUTH_CHOICES.findIndex((choice) => choice.value === form.authType)}
+            disabled={!editable}
+            onSelect={(at) => {
+              const choice = AUTH_CHOICES[at];
+              if (choice) set("authType", choice.value);
+            }}
+          />
+          <Field
+            label={t("settings.email.username")}
+            help={form.authType === "token" ? t("settings.email.usernameHelp") : undefined}
+          >
+            <input
+              className={inputClass}
+              value={form.username}
+              disabled={!editable}
+              onChange={(event) => set("username", event.target.value)}
+              placeholder={
+                form.authType === "token"
+                  ? t("settings.email.addressPlaceholder")
+                  : t("settings.email.usernamePlaceholder")
+              }
+            />
+          </Field>
+          {form.authType === "password" ? (
+            <Field
+              label={t("settings.email.password")}
+              // THE PASSWORD LIVES IN THE VAULT, IN BOTH STATES (own
+              // authentication design §7, invariant 3): the server keeps
+              // it as a `Credential(type="account_mail")`, opens it only to
+              // send, and returns it on no read. That is true whether or not
+              // one is currently set, so both branches below say the same
+              // thing about custody, not opposite ones.
+              help={
+                passwordSaved
+                  ? t("settings.email.passwordHelpSet")
+                  : t("settings.email.passwordHelpNotSet")
+              }
+            >
+              <input
+                className={inputClass}
+                type="password"
+                value={secrets.password}
                 disabled={!editable}
-                onSelect={(at) => {
-                  const choice = ENCRYPTION_CHOICES[at];
-                  if (choice) set("encryption", choice.value);
-                }}
+                autoComplete="new-password"
+                onChange={(event) => setSecrets({ ...secrets, password: event.target.value })}
               />
-            </div>
-          </FieldGroup>
-          <FieldGroup title={t("settings.email.groups.sender")} icon="mail">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              <Field label={t("settings.email.fromAddress")}>
-                <input
-                  className={inputClass}
-                  value={form.fromAddress}
-                  disabled={!editable}
-                  placeholder={t("settings.email.addressPlaceholder")}
-                  onChange={(event) => set("fromAddress", event.target.value)}
-                />
-              </Field>
-              <Field label={t("settings.email.senderName")}>
-                <input
-                  className={inputClass}
-                  value={form.fromDisplayName}
-                  disabled={!editable}
-                  onChange={(event) => set("fromDisplayName", event.target.value)}
-                />
-              </Field>
-              <Field label={t("settings.email.replyTo")}>
-                <input
-                  className={inputClass}
-                  value={form.replyTo}
-                  disabled={!editable}
-                  onChange={(event) => set("replyTo", event.target.value)}
-                />
-              </Field>
-            </div>
-          </FieldGroup>
-          <FieldGroup title={t("settings.email.groups.authentication")} icon="key">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              <ChipsField
-                caption={t("settings.email.signIn")}
-                items={AUTH_CHOICES.map((choice) => choice.label)}
-                active={AUTH_CHOICES.findIndex((choice) => choice.value === form.authType)}
-                disabled={!editable}
-                onSelect={(at) => {
-                  const choice = AUTH_CHOICES[at];
-                  if (choice) set("authType", choice.value);
-                }}
-              />
+            </Field>
+          ) : (
+            <>
               <Field
-                label={t("settings.email.username")}
-                help={form.authType === "token" ? t("settings.email.usernameHelp") : undefined}
+                label={t("settings.email.tenant")}
+                help={t("settings.email.tenantHelp")}
               >
                 <input
                   className={inputClass}
-                  value={form.username}
+                  value={tenantOf(form.tokenUrl)}
                   disabled={!editable}
-                  onChange={(event) => set("username", event.target.value)}
-                  placeholder={
-                    form.authType === "token"
-                      ? t("settings.email.addressPlaceholder")
-                      : t("settings.email.usernamePlaceholder")
-                  }
+                  placeholder={t("settings.email.tenantPlaceholder")}
+                  onChange={(event) => set("tokenUrl", tokenUrlFor(event.target.value))}
                 />
               </Field>
-              {form.authType === "password" ? (
-                <Field
-                  label={t("settings.email.password")}
-                  // THE PASSWORD LIVES IN THE VAULT, IN BOTH STATES (own
-                  // authentication design §7, invariant 3): the server keeps
-                  // it as a `Credential(type="account_mail")`, opens it only to
-                  // send, and returns it on no read. That is true whether or not
-                  // one is currently set, so both branches below say the same
-                  // thing about custody, not opposite ones.
-                  help={
-                    passwordSaved
-                      ? t("settings.email.passwordHelpSet")
-                      : t("settings.email.passwordHelpNotSet")
-                  }
-                >
-                  <input
-                    className={inputClass}
-                    type="password"
-                    value={form.password}
-                    disabled={!editable}
-                    autoComplete="new-password"
-                    onChange={(event) => set("password", event.target.value)}
-                  />
-                </Field>
-              ) : (
-                <>
-                  <Field
-                    label={t("settings.email.tenant")}
-                    help={t("settings.email.tenantHelp")}
-                  >
-                    <input
-                      className={inputClass}
-                      value={tenantOf(form.tokenUrl)}
-                      disabled={!editable}
-                      placeholder={t("settings.email.tenantPlaceholder")}
-                      onChange={(event) => set("tokenUrl", tokenUrlFor(event.target.value))}
-                    />
-                  </Field>
-                  <Field label={t("settings.email.client")} help={t("settings.email.clientHelp")}>
-                    <input
-                      className={inputClass}
-                      value={form.tokenClientId}
-                      disabled={!editable}
-                      onChange={(event) => set("tokenClientId", event.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label={t("settings.email.secret")}
-                    help={
-                      savedAsMicrosoft
-                        ? t("settings.email.secretHelpSet")
-                        : t("settings.email.secretHelpNotSet")
-                    }
-                  >
-                    <input
-                      className={inputClass}
-                      type="password"
-                      value={form.tokenClientSecret}
-                      disabled={!editable}
-                      autoComplete="new-password"
-                      onChange={(event) => set("tokenClientSecret", event.target.value)}
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
-            {form.authType === "token" ? (
-              <details className="form-hint" style={{ marginTop: 10 }}>
-                <summary>{t("settings.email.advanced")}</summary>
-                <div className="form-grid" style={FOLDING_FORM_GRID}>
-                  <Field
-                    label={t("settings.email.scope")}
-                    help={t("settings.email.scopeHelp")}
-                  >
-                    <input
-                      className={inputClass}
-                      value={form.tokenScope}
-                      disabled={!editable}
-                      onChange={(event) => set("tokenScope", event.target.value)}
-                    />
-                  </Field>
-                </div>
-              </details>
-            ) : null}
-            {form.authType === "token" && !savedAsMicrosoft && settings.data?.authenticated ? (
-              // Said before the save: the vault holds one credential for the
-              // mail server, and choosing Microsoft replaces it.
-              <p role="status" className="notice gold" style={{ marginTop: 10 }}>
-                <Icon name={KIND_ICON.warn} size={16} />
-                <span>
-                  {t("settings.email.replaceNotice")}
-                </span>
-              </p>
-            ) : null}
-            {form.authType === "token" ? (
-              <p className="form-hint" style={{ marginTop: 10 }}>
-                {t("settings.email.microsoftRelay")}
-              </p>
-            ) : null}
-          </FieldGroup>
-
-          {!portValid && form.port !== "" ? (
-            <p className="form-error" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.crit} size={13} /> {t("settings.email.portInvalid")}
-            </p>
-          ) : null}
-
-          {passwordWithoutUsername ? (
-            <p className="form-error" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.crit} size={13} /> {t("settings.email.passwordNeedsUser")}
-            </p>
-          ) : null}
-
-          <SaveBar
-            label={t("common.actions.save")}
-            canEdit={editable && complete}
-            disabledReason={
-              canEdit
-                ? form.authType === "token"
-                  ? t("settings.email.incompleteToken")
-                  : t("settings.email.incompletePassword")
-                : reason
-            }
-            dirty={dirty}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess && !dirty}
-            onSave={submit}
-          />
-
-          <FieldGroup title={t("settings.email.groups.test")} icon="mail">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              <Field label={t("settings.email.testTo")}>
+              <Field label={t("settings.email.client")} help={t("settings.email.clientHelp")}>
                 <input
                   className={inputClass}
-                  type="email"
-                  value={recipient}
-                  disabled={!canEdit || !settings.data?.configured}
-                  onChange={(e) => setRecipient(e.target.value)}
+                  value={form.tokenClientId}
+                  disabled={!editable}
+                  onChange={(event) => set("tokenClientId", event.target.value)}
+                />
+              </Field>
+              <Field
+                label={t("settings.email.secret")}
+                help={
+                  savedAsMicrosoft
+                    ? t("settings.email.secretHelpSet")
+                    : t("settings.email.secretHelpNotSet")
+                }
+              >
+                <input
+                  className={inputClass}
+                  type="password"
+                  value={secrets.tokenClientSecret}
+                  disabled={!editable}
+                  autoComplete="new-password"
+                  onChange={(event) => setSecrets({ ...secrets, tokenClientSecret: event.target.value })}
+                />
+              </Field>
+            </>
+          )}
+        </div>
+        {form.authType === "token" ? (
+          <details className="form-hint" style={{ marginTop: 10 }}>
+            <summary>{t("settings.email.advanced")}</summary>
+            <div className="form-grid" style={FOLDING_FORM_GRID}>
+              <Field
+                label={t("settings.email.scope")}
+                help={t("settings.email.scopeHelp")}
+              >
+                <input
+                  className={inputClass}
+                  value={form.tokenScope}
+                  disabled={!editable}
+                  onChange={(event) => set("tokenScope", event.target.value)}
                 />
               </Field>
             </div>
-          </FieldGroup>
-          <div className="form-actions">
-            <Btn
-              label={test.isPending ? t("settings.email.sending") : t("settings.email.sendTest")}
-              icon="mail"
-              // Offered only once something is saved: a button that can only
-              // fail teaches an operator to ignore its result.
-              disabled={!canEdit || !settings.data?.configured || test.isPending}
-              onClick={() => test.mutate(recipient.trim() ? { recipient: recipient.trim() } : {})}
-            />
-            <span className="form-hint">
-              {t("settings.email.testHint")}
+          </details>
+        ) : null}
+        {form.authType === "token" && !savedAsMicrosoft && settings.data?.authenticated ? (
+          // Said before the save: the vault holds one credential for the
+          // mail server, and choosing Microsoft replaces it.
+          <p role="status" className="notice gold" style={{ marginTop: 10 }}>
+            <Icon name={KIND_ICON.warn} size={16} />
+            <span>
+              {t("settings.email.replaceNotice")}
             </span>
-            {test.error ? (
-              <span role="alert" className="form-error">
-                <Icon name={KIND_ICON.crit} size={13} />
-                {describeSendFailure(test.error)}
-              </span>
-            ) : null}
-            {test.isSuccess && !test.error ? (
-              // NOT a tick. Accepted is not delivered, and saying so is the
-              // whole difference between this button and a decorative one.
-              <span role="status" className="form-saved">
-                <Icon name={KIND_ICON.ok} size={13} />
-                {testSentMessage(test.data?.recipient)}
-              </span>
-            ) : null}
-          </div>
-        </>
-      )}
-    </Panel>
-  );
-  return (
-    <>
-      {panel}
+          </p>
+        ) : null}
+        {form.authType === "token" ? (
+          <p className="form-hint" style={{ marginTop: 10 }}>
+            {t("settings.email.microsoftRelay")}
+          </p>
+        ) : null}
+      </FormSection>
+
+      {!portValid && form.port !== "" ? (
+        <p className="form-error" style={{ marginTop: 10 }}>
+          <Icon name={KIND_ICON.crit} size={13} /> {t("settings.email.portInvalid")}
+        </p>
+      ) : null}
+
+      {/* Said as it is typed; once a save was refused, the bar says it. */}
+      {passwordWithoutUsername && !tried ? (
+        <p className="form-error" style={{ marginTop: 10 }}>
+          <Icon name={KIND_ICON.crit} size={13} /> {t("settings.email.passwordNeedsUser")}
+        </p>
+      ) : null}
+
+      {/* THE TEST IS AN ACT, NOT A SETTING: its own section and its own
+          button, outside the draft and the bar. */}
+      <FormSection title={t("settings.email.groups.test")} icon="mail">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.email.testTo")}>
+            <input
+              className={inputClass}
+              type="email"
+              value={recipient}
+              disabled={!canEdit || !settings.data?.configured}
+              onChange={(e) => setRecipient(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="form-actions">
+          <Btn
+            label={test.isPending ? t("settings.email.sending") : t("settings.email.sendTest")}
+            icon="mail"
+            // Offered only once something is saved: a button that can only
+            // fail teaches an operator to ignore its result.
+            disabled={!canEdit || !settings.data?.configured || test.isPending}
+            onClick={() => test.mutate(recipient.trim() ? { recipient: recipient.trim() } : {})}
+          />
+          {/* At the notices' measure: one ~1,100px line at 1440 otherwise. */}
+          <span className="form-hint" style={{ maxWidth: "76ch" }}>
+            {t("settings.email.testHint")}
+          </span>
+          {test.error ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {describeSendFailure(test.error)}
+            </span>
+          ) : null}
+          {test.isSuccess && !test.error ? (
+            // NOT a tick. Accepted is not delivered, and saying so is the
+            // whole difference between this button and a decorative one.
+            <span role="status" className="form-saved">
+              <Icon name={KIND_ICON.ok} size={13} />
+              {testSentMessage(test.data?.recipient)}
+            </span>
+          ) : null}
+        </div>
+      </FormSection>
+
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        problems={problems}
+        saved={update.isSuccess && !dirty}
+        onDiscard={() => {
+          discard();
+          setSecrets(NO_SECRETS);
+          setTried(false);
+          update.reset();
+        }}
+        onSave={submit}
+      />
       {stepUp.dialog}
     </>
   );

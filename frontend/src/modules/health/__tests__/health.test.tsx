@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
+import { NO_DATE } from "../../../lib/datetime";
 import { AlertConsole } from "../AlertConsole";
 import { AlertDetail } from "../AlertDetail";
 import { ApprovedActionList, decisionBody } from "../ApprovedActionList";
@@ -257,16 +258,17 @@ describe("AlertConsole", () => {
     expect(within(cleared).getByText("Cleared")).toBeInTheDocument();
 
     // The acknowledged and muted rows carry NO clear outcome -- they are open.
-    // The em-dash placeholder is what makes "open" visible rather than an empty
-    // cell that could equally mean "we did not load it".
-    expect(within(ack).getByText("—")).toBeInTheDocument();
-    expect(within(muted).getByText("—")).toBeInTheDocument();
+    // The placeholder (NoValue's absent mark, n/a since kit requests batch 3,
+    // B3-9) is what makes "open" visible rather than an empty cell that could
+    // equally mean "we did not load it".
+    expect(within(ack).getByText("n/a")).toBeInTheDocument();
+    expect(within(muted).getByText("n/a")).toBeInTheDocument();
     // ... and the muted row says WHEN the silence ends, so it cannot read as
     // permanently handled.
     expect(within(muted).getByText(/^until/)).toBeInTheDocument();
     // Only the cleared row names an outcome.
-    expect(within(cleared).getByText(/Cleared — Recovered/)).toBeInTheDocument();
-    expect(within(cleared).queryByText("—")).not.toBeInTheDocument();
+    expect(within(cleared).getByText(/Cleared · Recovered/)).toBeInTheDocument();
+    expect(within(cleared).queryByText("n/a")).not.toBeInTheDocument();
 
     // "1 open of 3 shown": the acknowledged and muted rows count as OPEN.
     expect(screen.getByText("2 open of 3 shown")).toBeInTheDocument();
@@ -430,7 +432,8 @@ describe("AlertConsole", () => {
     });
     renderWithProviders(<AlertConsole onSelect={() => {}} />, "/health?state=opne&resolution=nope");
     expect(await screen.findByText("WS-01")).toBeInTheDocument();
-    expect(screen.queryByText(/No alerts match this filter/)).toBeNull();
+    // The kit's empty sentences replaced "No alerts match this filter" (Receta L).
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet/)).toBeNull();
   });
 
   it("says so when the caller cannot read alerts, instead of showing an empty list", async () => {
@@ -441,7 +444,7 @@ describe("AlertConsole", () => {
     expect(
       await screen.findByText(/Alerts not available \(insufficient permissions\)/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/No alerts match this filter/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet/)).not.toBeInTheDocument();
   });
 
   // ------------------------------------------------------------------
@@ -1295,6 +1298,45 @@ describe("HealthReportPanel", () => {
     expect(caveat.textContent).toContain("not from the ticket history the specification");
     expect(document.body.textContent).not.toContain("no route exposes that history");
   });
+
+  // PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's `absent`
+  // form). A mean time to resolve and an auto-fix rate over NO resolution are
+  // reads that answered with no figure: nothing is loading, so neither tile
+  // is busy, and each keeps the line saying what it is over, which is why it
+  // has no figure. While the alerts are still on their way both are
+  // `pending`: busy, and no line yet.
+  const RATES: ReadonlyArray<readonly [string, string]> = [
+    ["Mean time to resolve", "Over resolved alerts only."],
+    ["Auto-fix rate", "Machine-resolved as a share of all resolutions."],
+  ];
+
+  it("calls the two rates over no resolution absent, not loading, and keeps what each is over", async () => {
+    stubApi({ listHealthAlerts: vi.fn().mockResolvedValue([alert({ id: "1", state: "active" })]) });
+    renderWithProviders(<HealthReportPanel />);
+
+    // Wait on a DERIVED number: every tile renders before the read answers.
+    const inView = (await screen.findByText("Alerts in view")).closest("a") as HTMLElement;
+    await waitFor(() => expect(inView.querySelector(".stat-value")?.textContent).toBe("1"));
+    for (const [label, foot] of RATES) {
+      const tile = screen.getByText(label).closest("a") as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(tile, label).not.toHaveAttribute("aria-busy");
+      expect(tile, label).toHaveTextContent(foot);
+    }
+  });
+
+  it("draws neither rate's line while the alerts are still on their way", async () => {
+    stubApi({ listHealthAlerts: vi.fn(() => new Promise<never>(() => {})) });
+    renderWithProviders(<HealthReportPanel />);
+
+    await screen.findByText("Alerts in view");
+    for (const [label, foot] of RATES) {
+      const tile = screen.getByText(label).closest("a") as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(tile, label).toHaveAttribute("aria-busy", "true");
+      expect(tile, label).not.toHaveTextContent(foot);
+    }
+  });
 });
 
 // --------------------------------------------------------------------------
@@ -1862,9 +1904,15 @@ describe("datetime rendering — the reader's zone, one format", () => {
 
     for (const label of ["Escalated", "Muted until", "Acknowledged"]) {
       const value = (await screen.findByText(label)).nextElementSibling as HTMLElement;
-      expect(value).toHaveTextContent("—");
+      expect(value).toHaveTextContent(NO_DATE);
       expect(value).not.toHaveTextContent(/Invalid Date|null|undefined|NaN/);
     }
+    // A missing ticket is the kit's absent mark beside its spoken name
+    // (NoValue), never a bare dash.
+    const ticket = (await screen.findByText("Ticket")).nextElementSibling as HTMLElement;
+    expect(within(ticket).getByText("n/a")).toHaveAttribute("aria-hidden", "true");
+    expect(within(ticket).getByText("No ticket")).toBeInTheDocument();
+    expect(ticket).not.toHaveTextContent("—");
   });
 
   it("renders a device's last contact and last report in the operator's zone", async () => {
@@ -1927,7 +1975,7 @@ describe("datetime rendering — the reader's zone, one format", () => {
 
   it("falls back to the browser zone when the profile carries no timezone", async () => {
     // `timezone` is nullable on /me and most operators never set it. The
-    // fallback must be a real rendering, not "—" and not "Invalid Date".
+    // fallback must be a real rendering, not NO_DATE and not "Invalid Date".
     stubApi({
       me: vi.fn().mockResolvedValue(me(null)),
       listHealthAlerts: vi
@@ -1939,7 +1987,8 @@ describe("datetime rendering — the reader's zone, one format", () => {
     const row = await waitFor(() => screen.getByText("WS-01").closest("tr") as HTMLElement);
     const seen = within(row).getByTitle(PRODUCT_FORMAT);
     expect(seen).toBeInTheDocument();
-    expect(seen.getAttribute("title")).not.toMatch(/Invalid Date|—/);
+    expect(seen.getAttribute("title")).not.toMatch(/Invalid Date/);
+    expect(seen.getAttribute("title")).not.toBe(NO_DATE);
   });
 });
 
@@ -1968,8 +2017,9 @@ describe("failures reach the operator — loads", () => {
     const failure = await screen.findByRole("alert");
     expect(failure).toHaveTextContent(/could not be loaded/);
     expect(failure).toHaveTextContent(/Nothing was changed/);
-    // THE POINT: the console must not say the fleet is quiet.
-    expect(screen.queryByText(/No alerts match this filter/)).toBeNull();
+    // THE POINT: the console must not say the fleet is quiet (in the kit's
+    // words now, Receta L: either of the empty list's two sentences).
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet|No computer reports/)).toBeNull();
     expect(screen.queryByText(/0 open of 0 shown/)).toBeNull();
   });
 

@@ -40,7 +40,7 @@ import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
 import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard } from "./AuthCard";
+import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
 import { describeMicrosoftError } from "./microsoft";
@@ -150,6 +150,8 @@ export function InvitePage() {
   };
 
   function submit(kind: "staff" | "contact", minimum: number) {
+    // On while empty: an empty press is refused with the rule it breaks
+    // (coordinator ruling 8a), and nothing is sent.
     const problem = checkNewPassword(password, again, minimum);
     if (problem) {
       setError(problem);
@@ -219,6 +221,7 @@ export function InvitePage() {
           </Field>
           <div className="form-actions">
             <Btn
+              wide
               variant="primary"
               icon="key"
               label={t("auth.invite.usePasskey")}
@@ -226,9 +229,7 @@ export function InvitePage() {
               onClick={withPasskey}
             />
           </div>
-          <p className="note" style={{ margin: 0 }}>
-            {t("auth.invite.or")}
-          </p>
+          <AuthOr />
         </>
       ) : null}
       {microsoft && kind === "contact" ? (
@@ -239,14 +240,14 @@ export function InvitePage() {
             labelKey="auth.microsoft.acceptInvite"
             variant={offerPasskey ? "secondary" : "primary"}
             guard={microsoftGuard}
+            wide
           />
-          <p className="note" style={{ margin: 0 }}>
-            {t("auth.invite.or")}
-          </p>
+          <AuthOr />
         </>
       ) : null}
       <Form onSubmit={() => submit(kind, password_minimum)}>
-        {/* For the password manager: the account the new password belongs to. */}
+        {/* For the password manager: the account the new password belongs to.
+            Read-only, so drawn on the sunken surface. */}
         <Field label={t("auth.common.email")}>
           <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
         </Field>
@@ -260,11 +261,12 @@ export function InvitePage() {
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant={offerPasskey ? "secondary" : "primary"}
             icon="arrow-right"
             label={busy ? t("auth.common.working") : t("auth.invite.submit")}
-            disabled={busy || !password || !again}
+            disabled={busy}
           />
         </div>
       </Form>
@@ -279,6 +281,7 @@ export function InvitePage() {
             labelKey="auth.microsoft.acceptInvite"
             check={() => checkNewPassword(password, again, password_minimum)}
             guard={technicianGuard}
+            wide
           />
         </>
       ) : null}

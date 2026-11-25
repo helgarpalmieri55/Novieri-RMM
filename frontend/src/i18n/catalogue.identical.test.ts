@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { en } from "./en";
 import { es } from "./es";
-import { IDENTICAL_OK } from "./identical-ok";
+import { IDENTICAL_OK, IDENTICAL_OK_SHARED, SHARED_NAMESPACES, WAVE_ENTRIES, WAVE_NAMESPACES } from "./identical-ok";
 import { identicalLeaves, leaves, SAME_IN_BOTH } from "./test-utils";
 
 /** expectNoEnglish skips a leaf that is identical in both catalogues, so an
@@ -26,6 +26,19 @@ describe("identical English and Spanish catalogue values", () => {
     const stale = Object.keys(IDENTICAL_OK).filter((path) => !identical.has(path));
     expect(stale, `IDENTICAL_OK entries no longer identical: ${stale.join(", ")}`).toEqual([]);
     for (const reason of Object.values(IDENTICAL_OK)) expect(reason.trim().length).toBeGreaterThan(10);
+  });
+
+  it("keeps each wave's entries in that wave's own file, and only the shared ones in identical-ok.ts (redesign plan, shared files)", () => {
+    const namespace = (path: string) => path.split(".")[0] as string;
+    for (const [wave, entries] of Object.entries(WAVE_ENTRIES)) {
+      const foreign = Object.keys(entries).filter((path) => !(WAVE_NAMESPACES[wave] ?? []).includes(namespace(path)));
+      expect(foreign, `identical-ok.${wave}.ts lists another wave's keys: ${foreign.join(", ")}`).toEqual([]);
+    }
+    const unshared = Object.keys(IDENTICAL_OK_SHARED).filter((path) => !SHARED_NAMESPACES.includes(namespace(path)));
+    expect(unshared, `identical-ok.ts lists a wave's keys: ${unshared.join(", ")}`).toEqual([]);
+    // Every catalogue has an owner, so a new identical key always has a file to go to.
+    const owned = new Set([...SHARED_NAMESPACES, ...Object.values(WAVE_NAMESPACES).flat()]);
+    expect(Object.keys(en).filter((name) => !owned.has(name))).toEqual([]);
   });
 
   it("the audit itself finds a pasted English value, and a plural form", () => {

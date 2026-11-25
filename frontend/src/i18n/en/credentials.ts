@@ -4,7 +4,6 @@ export const credentials = {
     title: "Credentials",
     description: "Passwords and keys for remote sessions and provisioning, stored encrypted.",
     newCredential: "New credential",
-    listHeading: "Credential list",
   },
   tabs: {
     all: "All credentials",
@@ -19,6 +18,10 @@ export const credentials = {
     neverUsedZeroEmpty: "No credential is stored yet",
     neverUsedZeroUsed: "Every credential has been used",
     neverUsedFoot: "Stored, and never decrypted since",
+    // The fourth tile (redesign Task 11, 6.9): the other half of "Never checked out".
+    used: "Checked out",
+    usedZero: "None has been checked out yet",
+    usedFoot: "Each one on the audit log",
     typesInUse: "Types in use",
     typesInUseZero: "No credential is stored yet",
     typesAvailable: { one: "{count} types available", other: "{count} types available" },
@@ -26,9 +29,10 @@ export const credentials = {
   list: {
     title: "Credential profiles",
     subtitle: "Names only: no password or key is ever shown in this list.",
+    // The state chips over ?state= (redesign Task 11, 6.9).
+    stateLabel: "State",
     emptyNone: "No credentials stored.",
     client: "Client",
-    emptyView: "No credential is in this view.",
     name: "Name",
     state: "State",
     lastUsed: "Last used",
@@ -43,7 +47,7 @@ export const credentials = {
     title: "Delete stored credential",
     body: "The stored secret is destroyed and cannot be recovered. Unattended sessions and provisioning runs that check out this {type} will fail until it is stored again.",
     confirm: "Delete credential",
-    failed: "That credential was not deleted — it is still stored.",
+    failed: "That credential was not deleted: it is still stored.",
   },
   protected: {
     title: "How secrets are protected",
@@ -58,7 +62,7 @@ export const credentials = {
     intro: "Every checkout is recorded in the audit log. State a reason.",
     reason: "Reason",
     reasonPlaceholder: "e.g. helpdesk ticket 4821",
-    tooShort: "Reason is written to the audit log — give at least a ticket reference",
+    tooShort: "Reason is written to the audit log: give at least a ticket reference",
     cancel: "Cancel",
     reveal: "Reveal",
   },
@@ -77,7 +81,7 @@ export const credentials = {
     account: "Account",
     accountField: "Account (user@domain)",
     accountInvalid: "Account must be user@domain, e.g. svc-push@corp.example.com",
-    realmHelp: "Realm: {realm} — confirm this is your Active Directory domain. The account is presented only to machines whose DNS name is in this domain.",
+    realmHelp: "Realm: {realm}. Confirm this is your Active Directory domain. The account is presented only to machines whose DNS name is in this domain.",
     accountHelp: "Enter the account as user@your.domain (for example svc-push@corp.example.com): the domain after the @ is the Active Directory domain a push signs in to.",
     domainAdminWarning: "<strong>Do not use a Domain Admin account.</strong> A site server compromised during a push holds this password, so a Domain Admin here means a compromised domain. Use an account that can install a service on workstations and nothing more.",
     controller: "Domain controller (optional, host or host:port)",
@@ -98,15 +102,15 @@ export const credentials = {
       noun: "ssh key",
     },
     domain_join: {
-      description: "An account permitted to join machines to the directory, used by provisioning — not by interactive remote sessions.",
+      description: "An account permitted to join machines to the directory, used by provisioning, not by interactive remote sessions.",
       noun: "domain join account",
     },
     push_install: {
-      description: "A dedicated account used ONLY to install the agent on machines that are not yet managed, from a site server on their own segment. Give it the minimum rights needed to install a service — not Domain Admin. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
+      description: "A dedicated account with one use only: installing the agent on machines that are not yet managed, from a site server on their own segment. Give it the minimum rights needed to install a service, not Domain Admin. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
       noun: "push install",
     },
     windows_domain: {
-      description: "A domain account used to push the agent onto Windows machines over WinRM, from a site server on their own segment. Authentication is Kerberos only. Give it just enough rights to install a service — NOT Domain Admin: a Domain Admin here means a site server compromised during a push is a compromised domain. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
+      description: "A domain account used to push the agent onto Windows machines over WinRM, from a site server on their own segment. Authentication is Kerberos only. Give it just enough rights to install a service. Never give it Domain Admin: a Domain Admin here means a site server compromised during a push is a compromised domain. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
       noun: "windows domain account",
     },
   },

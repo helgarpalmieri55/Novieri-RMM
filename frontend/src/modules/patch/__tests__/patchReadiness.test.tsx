@@ -166,7 +166,8 @@ describe("PatchPolicyEditor — a policy can be aimed at a device group", () => 
     renderPanel(<PatchPolicyEditor />);
 
     await user.click(await screen.findByRole("button", { name: "New policy" }));
-    const dialog = await screen.findByRole("dialog", { name: "New patch policy" });
+    // The policy is a form on the page now, not a dialog (redesign plan, Receta FO; O3 3.2).
+    const dialog = await screen.findByRole("region", { name: "New patch policy" });
     await user.selectOptions(await within(dialog).findByLabelText("Applies to"), "Pilot");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
@@ -182,7 +183,7 @@ describe("PatchPolicyEditor — a policy can be aimed at a device group", () => 
     renderPanel(<PatchPolicyEditor />);
 
     await user.click(await screen.findByRole("button", { name: "New policy" }));
-    const dialog = await screen.findByRole("dialog", { name: "New patch policy" });
+    const dialog = await screen.findByRole("region", { name: "New patch policy" });
     expect(await within(dialog).findByRole("link", { name: "Create a device group" })).toHaveAttribute(
       "href",
       "/device-groups",

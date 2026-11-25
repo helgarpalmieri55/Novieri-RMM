@@ -31,12 +31,15 @@ export function TicketTable({
   queueName,
   userOptions,
   now,
+  label,
 }: {
   tickets: readonly TicketOut[];
   queueName: (id: string) => string;
   /** The directory, so the requester and assignee are names rather than ids. */
   userOptions: readonly PickerOption[];
   now: number;
+  /** The table's accessible name: the list's title where it is the page's list. */
+  label?: string;
 }) {
   const t = useT();
   // THE CLIENT COLUMN (design §3.4, §4.5): while every client is shown, the
@@ -45,7 +48,7 @@ export function TicketTable({
   const clientName = useClientName();
   const showClient = selected === null;
   return (
-    <Table>
+    <Table label={label}>
       <thead>
         <tr>
           <Th>{t("serviceDesk.table.ticket")}</Th>

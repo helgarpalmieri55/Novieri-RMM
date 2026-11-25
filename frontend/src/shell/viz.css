@@ -111,7 +111,10 @@ svg.sp.sp-info { color: var(--accent);
 }
 .heat .h-mut { background: var(--sev-mut); opacity: 1;
 }
-.heat .h-info { background: var(--accent); opacity: 1;
+/* Information shares running's cobalt (DESIGN.md v4, D2), so its cell is a
+ * ring: a cobalt core inside a band of the surface. IPAM's address grid paints
+ * a DHCP address "info" and an assigned one "run". */
+.heat .h-info { background: var(--accent); opacity: 1; box-shadow: inset 0 0 0 2px var(--surface);
 }
 /* The console's column count, when a caller passes one: a fixed grid instead
  * of a wrapping row. */
@@ -129,7 +132,7 @@ svg.sp.sp-info { color: var(--accent);
 /* `fill: none` for the same reason `svg.sp` states: the UA's initial black
  * fill on the root is a stray value the arcs never override, because they
  * are strokes. */
-.don svg { width: 64px; height: 64px; transform: rotate(-90deg); margin: 0 auto; fill: none;
+.don > svg { width: 64px; height: 64px; transform: rotate(-90deg); margin: 0 auto; fill: none;
 }
 .don .trk { fill: none; stroke: var(--line); stroke-width: 7;
 }
@@ -139,7 +142,7 @@ svg.sp.sp-info { color: var(--accent);
 }
 .don-v small { font-size: var(--t-cap);
 }
-.don-k { font-weight: 600; margin-top: 4px;
+.don-k { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; margin-top: 4px;
 }
 .don-z { font-size: var(--t-sm); color: var(--muted);
 }

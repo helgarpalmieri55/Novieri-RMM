@@ -51,11 +51,11 @@ let email: EmailSettingsOut = {
   configured: true,
   host: "smtp.toeshee.example",
   port: "587",
-  from_address: "itms@toeshee.example",
-  from_display_name: "ITMS",
+  from_address: "rmm@novieri.example",
+  from_display_name: "Novieri RMM",
   reply_to: "it@toeshee.example",
   encryption: "starttls",
-  username: "itms",
+  username: "rmm",
   authenticated: true,
   auth_type: "password",
   microsoft_client_id: "",
@@ -210,7 +210,8 @@ const ROLE_SEEDS: RoleSeed[] = [
 const CLIENT_LOGISTICS = CUSTOMER_ID;
 const CLIENTS: ClientOut[] = [
   { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
-  { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
+  // 3: the machines `listDevices` gives this client (`fixtures/core.ts`, CUSTOMER_DEVICES), so its tile and its Devices tab agree.
+  { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 3, site_count: 2 },
   { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], microsoft_tenants: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
 ];
 
@@ -339,12 +340,12 @@ const inviteUser: FixtureMap["inviteUser"] = (body) => {
       : [];
   });
   GRANTS.set(id, grants);
-  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite#fixture-${invited}` };
+  return { user_id: id, invite_link: email.configured ? null : `https://rmm.novieri.example/invite#fixture-${invited}` };
 };
 
 const resendInvite: FixtureMap["resendInvite"] = (userId) => {
   if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
-  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite#fixture-again" };
+  return { invite_link: email.configured ? null : "https://rmm.novieri.example/invite#fixture-again" };
 };
 
 const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
@@ -407,7 +408,7 @@ let microsoftSettings: MicrosoftSettingsOut = {
   next_certificate: null,
   next_certificate_thumbprint: null,
   next_certificate_expires_at: null,
-  redirect_uri: "https://itms.example.test/sign-in/microsoft",
+  redirect_uri: "https://rmm.novieri.example/sign-in/microsoft",
   updated_at: null,
   updated_by: null,
 };
@@ -524,7 +525,7 @@ const MCP_APPS: McpAppOut[] = [
 
 const getMcpConnections: FixtureMap["getMcpConnections"] = () => ({
   enabled: false,
-  address: "https://itms.toeshee.example/mcp",
+  address: "https://rmm.novieri.example/mcp",
   apps: MCP_APPS.map((app) => ({ ...app })),
 });
 

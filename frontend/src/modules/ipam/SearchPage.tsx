@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { EmptyState } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
@@ -10,7 +10,8 @@ import { IpamNav } from "./IpamNav";
 import { searchKindMeaning } from "./ipamState";
 import { Icon } from "../../shell/icons";
 import { Facts } from "../../shell/viz";
-import { Btn, PageHead, Panel, SearchField, StatusPill } from "../../shell/components";
+import { Btn, PageHead, Panel, SearchField, ShowingCount, StatusPill, useUrlFilters } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // One box (spec §9). Operators do not know in advance whether the thing in
 // their hand is an IP, a CIDR, a MAC, a hostname or a device name, so there is
@@ -34,9 +35,22 @@ const SEARCH_KIND_WORD: Readonly<Record<string, MessageKey>> = {
 
 export function SearchPage() {
   const t = useT();
-  const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.search.title"));
+  // THE SENT SEARCH IS IN THE URL (Task 10, 5.8): `?q=` once Search is
+  // pressed, so a search is a link, a reload repeats it and Back returns to
+  // the one before (each search is its own history entry). What is typed stays
+  // a draft until then: the search goes to the server, and typing must not.
+  const filters = useUrlFilters(["q"] as const);
+  const query = filters.values.q;
+  const [draft, setDraft] = useState(query);
+  // Back and Forward change the sent search: the box shows the one on screen.
+  useEffect(() => setDraft(query), [query]);
   const results = useIpamSearch(query);
+  const found = results.data
+    ? results.data.subnets.length + results.data.addresses.length + results.data.devices.length
+    : 0;
 
   return (
     <div>
@@ -52,7 +66,7 @@ export function SearchPage() {
           role="search"
           onSubmit={(event) => {
             event.preventDefault();
-            setQuery(draft.trim());
+            filters.set("q", draft.trim(), { replace: false });
           }}
         >
           <div className="tb-l" style={{ flex: 1 }}>
@@ -117,6 +131,8 @@ export function SearchPage() {
                 })}
               />
               <span className="note">{searchKindMeaning(results.data.kind)}</span>
+              <span className="filter-spacer" />
+              <ShowingCount shown={found} total={found} />
             </div>
 
             <Facts
@@ -134,7 +150,7 @@ export function SearchPage() {
               ]}
             />
 
-            <Table>
+            <Table label={t("ipam.search.title")}>
               <thead>
                 <tr>
                   <Th>{t("ipam.search.colResult")}</Th>

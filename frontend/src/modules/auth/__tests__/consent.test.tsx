@@ -54,7 +54,7 @@ describe("approving an AI app", () => {
     expect(screen.getByText("You are signed in as dana@example.test.")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "If you approve, it can act as you in ITMS: everything your role allows, including running actions on managed computers.",
+        "If you approve, it can act as you in Novieri RMM: everything your role allows, including running actions on managed computers.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -66,6 +66,26 @@ describe("approving an AI app", () => {
     // A registered app publishes no document, and returns to an https site.
     expect(screen.queryByText(/Its description is published by/)).toBeNull();
     expect(screen.queryByText(/only answers on this computer/)).toBeNull();
+  });
+
+  it("puts what approving allows in a warning beside Approve", async () => {
+    // Plan Task 13 (8.11), invariant 1c: the claim that the app acts with the
+    // person's whole authority is the control's own warning, in the card, next
+    // to the button that grants it (copy voice: the security statement goes on
+    // the control, not trimmed).
+    renderAuth(PAGE);
+    await screen.findByRole("heading", { name: "Connect the app at claude.ai" });
+    const grants = screen.getByText(/everything your role allows/);
+    expect(grants).toHaveTextContent("act as you in Novieri RMM");
+    const note = grants.closest(".notice");
+    expect(note).toHaveClass("gold");
+    expect(grants.closest(".panel")).toContainElement(screen.getByRole("button", { name: "Approve" }));
+    // Its place, not only its card (fix round 1): the next thing after the
+    // warning is the row with Approve and Decline, and nothing comes between.
+    const approve = screen.getByRole("button", { name: "Approve" });
+    const actions = approve.parentElement as HTMLElement;
+    expect(actions).toContainElement(screen.getByRole("button", { name: "Decline" }));
+    expect(note?.nextElementSibling).toBe(actions);
   });
 
   it("names the host that publishes a client metadata document, and where it answers", async () => {

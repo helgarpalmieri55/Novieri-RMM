@@ -74,7 +74,7 @@ export const ipam: Shape<typeof en> = {
     days: { one: "en {count} día", other: "en {count} días" },
   },
   lastSeenMeaning:
-    "Cuán al día está esta documentación: la antigüedad de la evidencia más reciente (un resultado de inventario o un barrido de subred que incluyó esta dirección). NO es una señal de estar en línea o caído: nada aquí sondea una sola dirección, y el silencio no es prueba de ausencia.",
+    "Cuán al día está esta documentación: la antigüedad de la evidencia más reciente (un resultado de inventario o un barrido de subred que incluyó esta dirección). No es una señal de estar en línea o caído: nada aquí sondea una sola dirección, y el silencio no es prueba de ausencia.",
   unrecognized: {
     status: "Situación no reconocida.",
     state: "Estado no reconocido.",
@@ -124,17 +124,17 @@ export const ipam: Shape<typeof en> = {
     stale: {
       label: "Obsoleta",
       meaning:
-        "Documentada, no observada, Y ahora podríamos haberla visto: el segmento se examinó dentro de la ventana y el agente del titular es alcanzable. El silencio significa algo.",
+        "Documentada y no observada, aunque ahora podríamos haberla visto: el segmento se examinó dentro de la ventana y el agente del titular es alcanzable. El silencio significa algo.",
     },
     assigned: {
       label: "Asignada",
       meaning:
-        "Documentada, no observada, y NADIE HA examinado NUNCA este segmento: ningún barrido correcto, ninguna observación, jamás. No hay nada de lo que estar en reposo; el estado documentado es toda la información que existe.",
+        "Documentada, no observada, y nadie ha examinado nunca este segmento, ni una sola vez: ningún barrido correcto, ninguna observación, jamás. No hay nada de lo que estar en reposo; el estado documentado es toda la información que existe.",
     },
     dormant: {
       label: "En reposo",
       meaning:
-        "Documentada, no observada; algo la examinó antes, pero ahora nada puede hacerlo: el segmento no tenía ninguna fuente de evidencia dentro de la ventana, o el agente del titular lleva sin conexión más tiempo que eso. Un portátil apagado. NO es deriva y no se cuenta como tal.",
+        "Documentada, no observada; algo la examinó antes, pero ahora nada puede hacerlo: el segmento no tenía ninguna fuente de evidencia dentro de la ventana, o el agente del titular lleva sin conexión más tiempo que eso. Un portátil apagado. No es deriva, y no se cuenta como tal.",
     },
     reserved: {
       label: "Reservada",
@@ -240,7 +240,7 @@ export const ipam: Shape<typeof en> = {
       meaning:
         "El plan documenta esta dirección y nada ha respondido en ella, en un segmento que podíamos ver y con un titular cuyo agente es alcanzable. Se cumplieron las dos condiciones, así que la ausencia es significativa.",
       remedy:
-        "CANDIDATA A RECUPERAR, nunca una recuperación automática: nada en este módulo cambia de estado por sí solo. Libera la dirección si la reclamación está muerta, o déjala como está y reconoce el hallazgo.",
+        "Candidata a recuperar, nunca una recuperación automática: nada en este módulo cambia de estado por sí solo. Libera la dirección si la reclamación está muerta, o déjala como está y reconoce el hallazgo.",
     },
     present_undocumented: {
       label: "Presente, sin documentar",
@@ -253,34 +253,34 @@ export const ipam: Shape<typeof en> = {
       meaning:
         "La MAC documentada y una MAC observada con confianza al menos media no coinciden. La evidencia ICMP nunca puede producir esto: una observación ICMP no lleva MAC.",
       remedy:
-        "Una corrección de la DOCUMENTACIÓN: una dirección de hardware está obsoleta. Actualiza el registro con la MAC observada, o corrige el origen de la observación.",
+        "Una corrección de la documentación: una dirección de hardware está obsoleta. Actualiza el registro con la MAC observada, o corrige el origen de la observación.",
     },
     claimant_mismatch: {
       label: "Titular distinto",
       meaning:
         "El plan dice que el dispositivo X tiene esta dirección; un resultado de inventario del dispositivo Y dice que la tiene Y. La propia máquina contradice el plan.",
       remedy:
-        "Decide QUÉ DISPOSITIVO ES DUEÑO DE LA DIRECCIÓN y luego reasígnala. Es un hallazgo distinto de una MAC distinta: intervienen dos dispositivos, no dos direcciones de hardware.",
+        "Decide qué dispositivo es dueño de la dirección. Después, reasígnala. Es un hallazgo distinto de una MAC distinta: intervienen dos dispositivos, no dos direcciones de hardware.",
     },
     device_moved: {
       label: "Dispositivo movido",
       meaning:
         "El dispositivo documentado no está en su dirección documentada, y tiene una observación actual en otra dirección registrada. Dos hallazgos fundidos en uno para que nadie tenga que notar que son el mismo portátil.",
-      remedy: "MUEVE LA ASIGNACIÓN a la dirección en la que el dispositivo está realmente.",
+      remedy: "Mueve la asignación a la dirección en la que el dispositivo está realmente.",
     },
     conflict: {
       label: "Conflicto",
       meaning:
-        "Dos cosas usan UNA misma dirección: se observó más de una MAC en ella, hay un titular distinto, o dos filas de dirección de VRF distintas la reclaman a través de un segmento barrido compartido. Es una avería en curso, no un error de archivo.",
+        "Dos cosas usan una misma dirección: se observó más de una MAC en ella, hay un titular distinto, o dos filas de dirección de VRF distintas la reclaman a través de un segmento barrido compartido. Es una avería en curso, no un error de archivo.",
       remedy:
-        "PRIMERO UNA SOLUCIÓN OPERATIVA: saca a uno de los dos de la dirección. Corregir el registro no detiene el duplicado, y por eso esto no es una simple discrepancia.",
+        "Primero, una solución operativa: saca a uno de los dos de la dirección. Corregir el registro no detiene el duplicado, y por eso esto no es una simple discrepancia.",
     },
     dormant: {
       label: "En reposo",
       meaning:
-        "Documentada, no observada, y AHORA MISMO NO PODEMOS VERIFICARLA: el segmento no tenía ninguna fuente de evidencia dentro de la ventana, o el agente del titular lleva sin conexión más tiempo que eso. Algo la examinó antes; ahora nada puede hacerlo. Un portátil apagado es el caso normal.",
+        "Documentada, no observada, y ahora mismo no podemos verificarla: el segmento no tenía ninguna fuente de evidencia dentro de la ventana, o el agente del titular lleva sin conexión más tiempo que eso. Algo la examinó antes; ahora nada puede hacerlo. Un portátil apagado es el caso normal.",
       remedy:
-        "NADA. No es un problema y no se cuenta como deriva. Conviene saber que 37 direcciones no se pueden verificar; no es la misma información que saber que 37 están mal.",
+        "Nada. No es un problema y no se cuenta como deriva. Conviene saber que 37 direcciones no se pueden verificar; no es la misma información que saber que 37 están mal.",
     },
   },
   scopeStatus: {
@@ -313,7 +313,7 @@ export const ipam: Shape<typeof en> = {
     expires: "Caduca {when}",
     expired: "Caducó, {age}",
     notAuthorized:
-      "NO AUTORIZADA. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo, así que ningún barrido apuntará nunca a él: la autorización se deniega por defecto y documentar una subred no autoriza a sondearla. El envío se rechaza (403) antes de crear ninguna tarea.",
+      "No autorizada. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo, así que ningún barrido apuntará nunca a él: la autorización se deniega por defecto y documentar una subred no autoriza a sondearla. El envío se rechaza (403) antes de crear ninguna tarea.",
     sweepable: {
       one: "Se puede barrer con {count} autorización activa. Los destinos son {prefix} intersecado con {list}, menos los rangos excluidos de esta subred, sin salir nunca de la propia subred. El servidor lo recalcula al enviar; esto es una vista previa.",
       other:
@@ -330,12 +330,12 @@ export const ipam: Shape<typeof en> = {
     failed: {
       label: "Fallido",
       meaning:
-        "La ejecución falló, o su resultado se rechazó ENTERO: una dirección fuera del ámbito, un hash de ámbito que no coincide o una lista de hosts demasiado larga descarta todas las observaciones que contiene.",
+        "La ejecución falló, o su resultado se rechazó por completo: una dirección fuera del ámbito, un hash de ámbito que no coincide o una lista de hosts demasiado larga descarta todas las observaciones que contiene.",
     },
     refused: {
       label: "Rechazado, no autorizado",
       meaning:
-        "Ninguna autorización activa cubría los destinos, así que NO SE CREÓ NINGUNA TAREA: no se firmó nada y no llegó nada a ningún agente.",
+        "Ninguna autorización activa cubría los destinos, así que no llegó a crearse ninguna tarea: no se firmó nada y no llegó nada a ningún agente.",
     },
     no_agent: {
       label: "Ningún agente pudo barrer",
@@ -353,7 +353,7 @@ export const ipam: Shape<typeof en> = {
     dhcp_pool: {
       label: "Pool DHCP",
       meaning:
-        "Lo reparte un servidor DHCP. La asignación estática dentro de él se RECHAZA (409): una reserva DHCP se expresa sacándola del pool, no escribiendo una fila estática dentro de uno.",
+        "Lo reparte un servidor DHCP. La asignación estática dentro de él se rechaza (409): una reserva DHCP se expresa sacándola del pool, no escribiendo una fila estática dentro de uno.",
     },
     reserved: {
       label: "Rango reservado",
@@ -362,7 +362,7 @@ export const ipam: Shape<typeof en> = {
     excluded: {
       label: "Rango excluido",
       meaning:
-        "Lo salta el asignador Y se resta de todos los conjuntos de destinos de barrido: las direcciones de aquí nunca se sondean.",
+        "Lo salta el asignador y, además, se resta de todos los conjuntos de destinos de barrido: las direcciones de aquí nunca se sondean.",
     },
   },
   importBlock: {
@@ -382,7 +382,7 @@ export const ipam: Shape<typeof en> = {
     },
     error: {
       label: "Error",
-      meaning: "No se puede analizar. SE INFORMA, no se omite en silencio: cada fila de entrada recibe un veredicto.",
+      meaning: "No se puede analizar. Se informa, no se omite en silencio: cada fila de entrada recibe un veredicto.",
     },
   },
   searchKind: {
@@ -428,7 +428,7 @@ export const ipam: Shape<typeof en> = {
     driftCta: "Avisar a alguien de la deriva",
   },
   tree: {
-    title: "Administración de direcciones IP",
+    title: "Direcciones IP",
     description: "Subredes, lo que hay en ellas y lo que el parque vio realmente.",
     newSubnet: "Nueva subred",
     managed: "Subredes administradas",
@@ -454,11 +454,9 @@ export const ipam: Shape<typeof en> = {
     containsPlaceholder: "Contiene la dirección, p. ej. 10.4.7.9",
     containsAria: "Filtrar por dirección contenida",
     viewAria: "Filtrar por vista",
-    clear: "Limpiar",
     viewAll: "Todas las subredes",
     viewAssignable: "Solo asignables",
     viewNeverSwept: "Nunca barridas",
-    emptyFiltered: "Ninguna subred coincide con estos filtros.",
     emptyAll: "Todavía no hay subredes registradas.",
     emptyAssignable: "Ninguna subred es asignable.",
     emptyUnswept: "Ninguna subred está sin barrer.",
@@ -511,12 +509,13 @@ export const ipam: Shape<typeof en> = {
     deleteFailed: "No se pudo eliminar: {reason}",
   },
   subnet: {
+    titleFallback: "Subred",
+    tabsLabel: "Subred",
+    inVrf: "VRF {vrf}",
     tabAddresses: "Direcciones",
     tabRanges: "Rangos",
     tabSweeps: "Barridos",
     tabDrift: "Deriva",
-    gateway: "puerta de enlace {gateway}",
-    containerPrefix: "prefijo contenedor",
     allSubnets: "Todas las subredes",
     usable: "Utilizables",
     registered: "Registradas",
@@ -647,6 +646,10 @@ export const ipam: Shape<typeof en> = {
     truncated: "truncado",
   },
   drift: {
+    allDrift: "Toda la deriva",
+    subnetCaption: "Subred",
+    subnetAria: "Filtrar por subred",
+    suppressNeeds: "Para silenciar hacen falta una nota y una fecha.",
     title: "Deriva",
     description: "Dónde el plan registrado y el parque no coinciden sobre una dirección.",
     tileDriftFoot: "Hallazgos sin resolver. Las direcciones en reposo y las huérfanas no se cuentan aquí.",
@@ -656,10 +659,8 @@ export const ipam: Shape<typeof en> = {
     tileOrphansFoot: "Direcciones observadas dentro de ninguna subred registrada. El plan falta, no es erróneo.",
     tileOrphansZero: "Todas las direcciones observadas están dentro de una subred registrada",
     chipsLabel: "Clase de deriva",
-    chipAll: "Toda la deriva ({count})",
-    chip: "{label} ({count})",
     remedy: "Qué hacer: ",
-    empty: "No hay nada en esta vista.",
+    empty: "No hay deriva: lo registrado y lo visto coinciden.",
     colEvidence: "Evidencia",
     inSubnet: "En",
     confidence: {
@@ -689,10 +690,13 @@ export const ipam: Shape<typeof en> = {
     registerThis: "Registrar esta subred",
   },
   scans: {
+    revokedLabel: "Qué autorizaciones",
+    activeOnly: "Vigentes",
+    needsPrefix: "Escribe un prefijo o elige una subred para ver qué abriría.",
     title: "Autorizaciones de escaneo",
     description: "Los rangos de direcciones que un barrido de red puede sondear.",
     authorizeSubnet: "Autorizar una subred",
-    showRevoked: "Mostrar las autorizaciones revocadas y caducadas",
+    withRevoked: "También revocadas y vencidas",
     scopeManageNote:
       "Añadir y revocar autorizaciones requiere permiso para administrar los ámbitos de escaneo, que es distinto del permiso para ejecutar un barrido.",
     empty: "Ningún prefijo está autorizado para el barrido. Ningún barrido apuntará a nada.",
@@ -758,6 +762,8 @@ export const ipam: Shape<typeof en> = {
     kind: { address: "dirección", cidr: "CIDR", mac: "MAC", text: "texto" },
   },
   registry: {
+    newVrf: "Nuevo VRF",
+    newVlan: "Nueva VLAN",
     title: "Catálogo",
     description: "VRF, VLAN y las sedes del cliente: aquello por lo que se delimitan las subredes y las direcciones.",
     vrfsTitle: "VRF",
@@ -782,6 +788,10 @@ export const ipam: Shape<typeof en> = {
     addVlan: "Añadir VLAN",
   },
   importExport: {
+    stepMap: "Asocia sus columnas",
+    stepFile: "Elige el CSV",
+    stepPreviewApply: "Vista previa y aplicación",
+    mapAfterFile: "Elige primero un CSV: su primera línea nombra las columnas que hay que asociar.",
     title: "Importar y exportar",
     description: "Trae un plan de direcciones desde un CSV, o saca el actual.",
     needsManage:
@@ -833,7 +843,6 @@ export const ipam: Shape<typeof en> = {
       other: "Registros convertibles: {count}; omitidos: {skipped}.",
     },
     skipped: "se omitió {name}: {reason}",
-    exportTitle: "Exportar",
     exportSubtitle: "Las subredes, direcciones y hallazgos de deriva actuales, como CSV.",
     dormantNote: "<b>Las direcciones en reposo no están incluidas</b>: no son hallazgos.",
     subnetsCsv: "CSV de subredes",

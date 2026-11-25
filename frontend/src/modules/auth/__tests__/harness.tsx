@@ -70,7 +70,7 @@ export const TEN_CODES = [
 ];
 
 export const OTPAUTH =
-  "otpauth://totp/ITMS:dana%40example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=ITMS";
+  "otpauth://totp/Novieri%20RMM:dana%40example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Novieri%20RMM";
 
 /** What `POST /oauth/authorize/details` answers for a registered app (plan 2026-11-06, Appendix A.2). */
 export const CONSENT = {
@@ -103,7 +103,7 @@ export function installDefaults(): void {
   calls.passkeySignIn.mockResolvedValue({ state: "signed_in" });
   calls.enrollTotpStart.mockResolvedValue({ otpauth_uri: OTPAUTH });
   calls.enrollTotpConfirm.mockResolvedValue(undefined);
-  calls.enrollPasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
+  calls.enrollPasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "Novieri RMM" } });
   calls.enrollPasskey.mockResolvedValue(undefined);
   calls.enrollFinish.mockResolvedValue({ recovery_codes: TEN_CODES });
   calls.forgotPassword.mockResolvedValue(undefined);

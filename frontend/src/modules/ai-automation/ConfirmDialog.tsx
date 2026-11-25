@@ -53,7 +53,8 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { describeSubmitError } from "../../components/form";
-import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
+import { Btn, DetailHead, KIND_ICON, Panel } from "../../shell/components";
+import { outcomeOf } from "./outcome";
 import { Icon } from "../../shell/icons";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
 import { Chips } from "../../shell/viz";
@@ -136,6 +137,7 @@ export function ConfirmDialog({
   const failure = explainFailure(confirm.error ?? reject.error ?? null);
 
   const pending = preview.state === "previewed";
+  const outcome = outcomeOf(preview.state);
 
   const decision = pending ? (
     <>
@@ -163,9 +165,14 @@ export function ConfirmDialog({
 
   return (
     <>
-      <PageHead
+      {/* THE KIT'S RECORD HEAD (redesign plan, Task 12, 7.6; Receta F): the
+          way back to the list, the action's name, what became of it as a
+          pill, the device it was prepared for, and the decision on the right. */}
+      <DetailHead
+        back={{ to: "/assistant/actions", label: t("aiAutomation.list.title") }}
         title={preview.name}
-        description={t("aiAutomation.confirm.prepared", { host: preview.target_hostname })}
+        status={outcome ? { kind: outcome.kind, label: outcome.label } : undefined}
+        context={t("aiAutomation.confirm.prepared", { host: preview.target_hostname })}
         actions={decision}
       />
 

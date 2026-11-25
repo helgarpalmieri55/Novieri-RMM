@@ -158,7 +158,7 @@ describe("state and status are different columns", () => {
     }
     // The four statuses that share a NAME with a state must still carry the
     // derived meaning, not the documented one.
-    expect(statusPresentation("assigned").meaning).toContain("nothing has EVER looked");
+    expect(statusPresentation("assigned").meaning).toContain("nothing has ever looked at this segment, not once");
     expect(statePresentation("assigned").meaning).toContain("intent");
     expect(statusPresentation("assigned").meaning).not.toBe(
       statePresentation("assigned").meaning,
@@ -432,7 +432,7 @@ describe("effectiveSweepScope", () => {
   it("is DENY BY DEFAULT: no authorization means not sweepable", () => {
     const result = effectiveSweepScope(subnet(), [], now);
     expect(result.authorized).toBe(false);
-    expect(result.explanation).toContain("NOT AUTHORIZED");
+    expect(result.explanation).toMatch(/^Not authorized\. /);
   });
 
   it("does not treat a documented subnet as an authorized one", () => {

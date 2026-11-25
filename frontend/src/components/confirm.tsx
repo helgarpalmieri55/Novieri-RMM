@@ -110,7 +110,10 @@ export function ConfirmDialog({
           <h2 className="modal-title">{title}</h2>
         </div>
         <div className="modal-body">
-          <p className="confirm-subject">{subject}</p>
+          {/* No empty line for a question with no subject (the unsaved-changes
+              guard, shell/formKit.tsx): an empty paragraph is a stop for a
+              screen reader that says nothing. */}
+          {subject ? <p className="confirm-subject">{subject}</p> : null}
           <p className="confirm-body">{body}</p>
 
           {requireTyping ? (
@@ -131,7 +134,13 @@ export function ConfirmDialog({
             <Button ref={cancel} variant="outline" onClick={onCancel}>
               {t("common.actions.cancel")}
             </Button>
+            {/* DESTRUCTIVE IS THE SECONDARY SHAPE WITH THE CRITICAL EDGE AND
+                INK (DESIGN.md "Danger: critical edge and text"; components.css
+                `.btn.danger`), never the filled primary: `.btn.danger`'s ink on
+                `.btn.primary`'s accent fill read about 1.1:1 (kit requests
+                batch 2, K9). A reversible action keeps the filled primary. */}
             <Button
+              variant={destructive ? "outline" : "default"}
               className={destructive ? "danger" : undefined}
               disabled={blocked}
               onClick={onConfirm}

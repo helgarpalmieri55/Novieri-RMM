@@ -20,6 +20,7 @@ import type {
   Me,
   MeClient,
 } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import type { AssignmentOut } from "../../health/types";
 import { ClientDetailPage } from "../ClientDetailPage";
 import { ClientsPage } from "../ClientsPage";
@@ -238,8 +239,43 @@ describe("the Clients list", () => {
     renderAt("/clients");
     await screen.findByRole("link", { name: "Andes Logistics" });
     expect(listClients).toHaveBeenLastCalledWith({});
-    await user.click(screen.getByRole("switch", { name: "Show archived clients" }));
+    // Redesign design §2, Receta L: the archived filter is a chip now; the URL (?archived=1) and the read it makes are the same.
+    await user.click(screen.getByRole("button", { name: "Including archived" }));
     await waitFor(() => expect(listClients).toHaveBeenLastCalledWith({ include_archived: true }));
+  });
+
+  it("keeps the archived filter in the URL as a chip, and says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(api({ listClients: vi.fn().mockResolvedValue([]) }));
+    const user = userEvent.setup();
+    const { router } = renderPage("/clients?archived=1", <ClientsPage />);
+    expect(await screen.findByRole("button", { name: /Including archived/ })).toHaveAttribute("aria-pressed", "true");
+    // The chip is drawn before the list has answered; the empty state only after.
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("keeps its search in the URL, finding a client by name or e-mail domain, accents ignored", async () => {
+    mockUseApi.mockReturnValue(api());
+    const user = userEvent.setup();
+    const { router } = renderPage("/clients", <ClientsPage />);
+    await screen.findByRole("link", { name: "Andes Logistics" });
+    await user.type(screen.getByRole("textbox", { name: "Search clients" }), "ANDES.EXAMPLE");
+    expect(router.state.location.search).toBe("?q=ANDES.EXAMPLE");
+    expect(screen.getByRole("link", { name: "Andes Logistics" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Toeshee" })).toBeNull();
+    expect(screen.getByText("Showing 1 of 3")).toBeInTheDocument();
+    await act(() => router.navigate("/clients?q=t%C3%B6eshee"));
+    expect(screen.getByRole("link", { name: "Toeshee" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Andes Logistics" })).toBeNull();
+  });
+
+  it("counts nothing before the list has answered, rather than Showing 0 of 0", async () => {
+    mockUseApi.mockReturnValue(api({ listClients: vi.fn(() => new Promise<ClientOut[]>(() => {})) }));
+    renderAt("/clients");
+    expect(await screen.findByRole("button", { name: "Including archived" })).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).toBeNull();
   });
 
   it("offers New client only to a person holding clients.manage on every client", async () => {

@@ -218,7 +218,8 @@ describe("the ticket queue in Spanish", () => {
     expect(screen.getByRole("combobox", { name: "Prioridad" })).toHaveDisplayValue("Todas las prioridades");
     expect(screen.getByRole("combobox", { name: "Origen" })).toHaveDisplayValue("Cualquier origen");
     expect(screen.getByRole("combobox", { name: "Responsable" })).toHaveDisplayValue("Cualquiera");
-    expect(screen.getByText("3 mostrados")).toBeInTheDocument();
+    // The kit's count at the end of the toolbar (Receta L): "Mostrando x de y".
+    expect(screen.getByText("Mostrando 3 de 3")).toBeInTheDocument();
     // The table: the recorded words stay, the labels around them are Spanish.
     const row = screen.getByText("La impresora 2 atasca el papel").closest("tr") as HTMLElement;
     expect(within(row).getByText("Rosa Solicitante · Soporte general")).toBeInTheDocument();
@@ -294,7 +295,8 @@ describe("the ticket queue in Spanish", () => {
 
     baseApi({ listTickets: vi.fn().mockResolvedValue(listPage([])) });
     const { container } = renderAt(<TicketListPage />, "/service-desk");
-    expect(await screen.findByText("No se encontró ningún ticket.")).toBeInTheDocument();
+    // Fix round 1 (review): the default view is the open tickets, and the empty queue says so.
+    expect(await screen.findByText("No hay tickets abiertos.")).toBeInTheDocument();
     expect(screen.getByText("Ningún ticket coincide con estos filtros")).toBeInTheDocument();
     expectNoEnglish(container);
   });
@@ -394,7 +396,7 @@ describe("the ticket queue in Spanish", () => {
     expect(screen.getByText("2 incidents · 1 request")).toBeInTheDocument();
     expect(screen.getByText("1 high · 1 urgent")).toBeInTheDocument();
     expect(screen.getByText("1 still unassigned")).toBeInTheDocument();
-    expect(screen.getByText("3 shown")).toBeInTheDocument();
+    expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
     const row = screen.getByText("La impresora 2 atasca el papel").closest("tr") as HTMLElement;
     expect(within(row).getByText("Pending approval")).toBeInTheDocument();
     expect(within(row).getByText("Breached 1 h 30 min ago")).toBeInTheDocument();
@@ -516,7 +518,8 @@ describe("a ticket's page in Spanish", () => {
   it("words the header, the conversation and the reply box", async () => {
     detailApi(OPEN_TICKET);
     const { container } = renderTicket(OPEN_TICKET);
-    expect(await screen.findByRole("heading", { name: "INC-100: La impresora t1 atasca el papel" })).toBeInTheDocument();
+    // The record's head (redesign plan, Task 7, 2.3): "<number> <subject>".
+    expect(await screen.findByRole("heading", { name: "INC-100 La impresora t1 atasca el papel" })).toBeInTheDocument();
     expect(screen.getByText(/Abierto el .+ por Rosa Solicitante · Soporte general/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Responder" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Añadir nota interna" })).toBeInTheDocument();
@@ -582,7 +585,8 @@ describe("a ticket's page in Spanish", () => {
     expect(screen.getByLabelText("Categoría")).toHaveDisplayValue("Equipos");
     expect(screen.getByLabelText("Asunto")).toBeInTheDocument();
     expect(screen.getByLabelText("Descripción")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled();
+    // Nothing changed: the kit's save bar is not drawn (it replaced a disabled "Guardar cambios").
+    expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull();
     // Linked device.
     expect(await screen.findByText("Dispositivo vinculado")).toBeInTheDocument();
     expect(await screen.findByText("Resumen del inventario")).toBeInTheDocument();
@@ -662,7 +666,7 @@ describe("a ticket's page in Spanish", () => {
     await screen.findByText("Editar ticket");
     await user.selectOptions(screen.getByLabelText("Estado"), "cancelled");
     expect(await screen.findByLabelText("¿Por qué cambia el estado? (opcional)")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Pasar este ticket a «Cancelado»")).toBeInTheDocument();
     expect(within(dialog).getByText(/Nada sale del estado «Cancelado»\. Este ticket no se podrá reabrir, comentar ni editar nunca más\./)).toBeInTheDocument();
@@ -682,7 +686,7 @@ describe("a ticket's page in Spanish", () => {
     renderTicket(t);
     await screen.findByText("Editar ticket");
     await user.selectOptions(screen.getByLabelText("Estado"), "closed");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Cerrar este ticket")).toBeInTheDocument();
     expect(within(dialog).getByText(/No es definitivo: un ticket cerrado se puede reabrir desde este mismo panel\./)).toBeInTheDocument();
@@ -876,19 +880,22 @@ describe("the service desk settings in Spanish", () => {
     expectNoEnglish(container);
   });
 
-  it("edits a queue inline with Spanish controls", async () => {
+  // A row is edited in a dialog now, not in place (redesign plan, Task 7,
+  // 2.5: "la edición de una fila en diálogo"); the controls are the same.
+  it("edits a queue in its dialog with Spanish controls", async () => {
     vi.useRealTimers();
     baseApi();
     const user = userEvent.setup();
-    const { container } = renderAt(<ServiceDeskAdminPage />, "/service-desk/admin");
+    renderAt(<ServiceDeskAdminPage />, "/service-desk/admin");
     const row = (await screen.findByText("Soporte general")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Editar" }));
-    expect(within(row).getByLabelText("Nombre de la cola")).toBeInTheDocument();
-    expect(within(row).getByLabelText("Cola activa")).toBeInTheDocument();
-    expect(within(row).getByText("Activa")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
-    expectNoEnglish(container);
+    const dialog = screen.getByRole("dialog", { name: "Editar cola" });
+    expect(within(dialog).getByLabelText("Nombre de la cola")).toHaveValue("Soporte general");
+    expect(within(dialog).getByLabelText("Cola activa")).toBeInTheDocument();
+    expect(within(dialog).getByText("Activa")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+    expectNoEnglish(dialog);
   });
 
   it("refuses an empty queue, an empty category and an empty saved reply, and re-words each on a switch", async () => {
@@ -1016,7 +1023,8 @@ describe("labels and sentences built outside React", () => {
   it("words the picker hints and the sublabels of people and devices", () => {
     setActiveLanguage("es");
     expect(userPickerEmptyHint()).toMatch(/^No hay personas entre las que elegir/);
-    expect(devicePickerEmptyHint()).toMatch(/Dispositivos → Añadir un equipo/);
+    // The rail names the machine list "Equipos" (redesign design §1.1, decision D13).
+    expect(devicePickerEmptyHint()).toMatch(/Equipos → Añadir un equipo/);
     const users = userPickerOptions(USERS as never);
     expect(users.map((u) => u.sublabel)).toEqual(["t@example.com", "r@example.com", "o@example.com · deshabilitado"]);
     const devices = devicePickerOptions(DEVICES.items as unknown as Device[]);

@@ -1,13 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useScrollToHash } from "../../lib/useScrollToHash";
-import { NO_DATE, formatDate } from "../../lib/datetime";
-import { PageHead } from "../../shell/components";
+import { formatDate } from "../../lib/datetime";
+import { PageHead, UrlTabs, useNarrowedApi, useUrlFilters, useUrlTab, withClient } from "../../shell/components";
 import { Drawer } from "../../shell/Drawer";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON, Tile, type Kind } from "../../shell/viz";
@@ -26,9 +26,10 @@ import { checkLabel } from "./healthState";
 import type { AlertOut, AlertSummary } from "./types";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
-// The endpoint-health console (spec §13): v3's four tiles over the alert
-// list, then the detail, the reporting panel, profiles and their checks, the
-// approved-action registry and the org settings.
+// The endpoint-health console (spec §13), in four VIEWS on one route
+// (redesign decision D21): the alert queue with its tiles and its report;
+// the health profiles with their editor and assignments; the approved-action
+// registry; and the org settings. Each was a panel further down one long page.
 //
 // THE `canX` FLAGS BELOW DECIDE WHAT RENDERS AND NOTHING ELSE. Every route is
 // gated server-side by `require_permission` and that check is the only
@@ -46,6 +47,24 @@ const TREND_DAYS = 14;
 
 /** `GET /health/alerts` pages at 200 by the route's default (`lib/api.ts`). */
 const ALERT_PAGE_SIZE = 200;
+
+/** The page's views, in the URL as `?view=` (decision D21); the queue is the default and writes nothing. */
+const VIEWS = ["alerts", "profiles", "actions", "settings"] as const;
+type View = (typeof VIEWS)[number];
+
+const VIEW_LABEL: Readonly<Record<View, MessageKey>> = {
+  alerts: "health.views.alerts",
+  profiles: "health.views.profiles",
+  actions: "health.views.actions",
+  settings: "health.views.settings",
+};
+
+/** The anchors other modules link to, and the view that now holds each (decision D21). */
+const HASH_VIEW: Readonly<Record<string, "profiles" | "actions" | "settings">> = {
+  "#profiles": "profiles",
+  "#approved-actions": "actions",
+  "#health-settings": "settings",
+};
 
 /** What a check type's first segment is about, in words; an unknown one is shown as it came. */
 function subjectLabel(subject: string): string {
@@ -79,18 +98,120 @@ export function HealthPage() {
   const canRemediate = permissions.includes("health.remediate");
   const canActionAdmin = everywhere.has("health.action.admin");
 
-  /* THE TILES READ THE SUMMARY, NOT THE LIST. `/health/alerts/summary` counts
-     open alerts in SQL, by state and by severity; the list below is a page.
-     Same key as the shell's health glyph, so the rail badge and this row
-     cannot disagree. The list in hand supplies only what a count cannot: the
-     breakdown under each figure and the fourteen-day line on the warning tile,
-     and only when that list is complete rather than a page of a larger one. */
+  const [view, setView] = useUrlTab<View>(VIEWS, "alerts", "view");
+
+  // A LINK FROM BEFORE THE VIEWS (`/health#profiles`; three modules still
+  // write them) opens the view that holds its panel, keeping the fragment, so
+  // `useScrollToHash` below still lands on it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const redirecting = HASH_VIEW[location.hash] !== undefined && !new URLSearchParams(location.search).has("view");
+  useEffect(() => {
+    const target = HASH_VIEW[location.hash];
+    if (!target || new URLSearchParams(location.search).has("view")) return;
+    const next = new URLSearchParams(location.search);
+    next.set("view", target);
+    void navigate({ search: `?${next.toString()}`, hash: location.hash }, { replace: true });
+  }, [location.hash, location.search, navigate]);
+
+  // A deep link to a panel (`#profiles`, `#approved-actions`,
+  // `#health-settings`) scrolls once its view is the one drawn: each panel is
+  // the first thing in its view, so nothing above it fills in after.
+  useScrollToHash(me.isFetched && !redirecting);
+
+  return (
+    <div>
+      <PageHead title={t("health.page.title")} description={t("health.page.description")} />
+
+      {!canRead && (
+        <div className="notice">
+          <Icon name={KIND_ICON.info} size={17} />
+          <span>{t("health.page.noPermission")}</span>
+        </div>
+      )}
+
+      <UrlTabs
+        label={t("health.views.label")}
+        items={VIEWS.map((key) => ({ key, label: t(VIEW_LABEL[key]) }))}
+        active={view}
+        onSelect={setView}
+      >
+        {view === "alerts" ? (
+          <AlertsView
+            canRead={canRead}
+            canManageAlerts={canManageAlerts}
+            canRemediate={canRemediate}
+            timezone={me.data?.timezone}
+          />
+        ) : view === "profiles" ? (
+          <ProfilesView canAdmin={canAdmin} />
+        ) : view === "actions" ? (
+          // THE ANCHORS OTHER PAGES LINK TO (`/health#approved-actions`, and
+          // `#profiles`, `#health-settings` in the other views). `Panel`
+          // takes no id, so each anchor is a wrapper; `useScrollToHash` above
+          // makes arriving at one actually move the page.
+          <div id="approved-actions">
+            <ApprovedActionList canActionAdmin={canActionAdmin} />
+          </div>
+        ) : (
+          <div id="health-settings">
+            <HealthSettingsPanel canAdmin={canAdmin} />
+          </div>
+        )}
+      </UrlTabs>
+    </div>
+  );
+}
+
+/** The health profiles, with the selected one's checks and assignments (`#profiles`). */
+function ProfilesView({ canAdmin }: { canAdmin: boolean }) {
+  const [selectedProfileId, setSelectedProfileId] = useState<string | undefined>();
+  return (
+    <div id="profiles">
+      <ProfileList canAdmin={canAdmin} selectedProfileId={selectedProfileId} onSelect={setSelectedProfileId} />
+      {selectedProfileId && <ProfileEditor profileId={selectedProfileId} canAdmin={canAdmin} />}
+      {selectedProfileId && <ProfileAssignments profileId={selectedProfileId} canAdmin={canAdmin} />}
+    </div>
+  );
+}
+
+/**
+ * The queue: what has to be set up for alerts to reach anyone, v3's four
+ * tiles, the alert list with the open alert in its drawer, and the report of
+ * the alerts below it.
+ */
+function AlertsView({
+  canRead,
+  canManageAlerts,
+  canRemediate,
+  timezone,
+}: {
+  canRead: boolean;
+  canManageAlerts: boolean;
+  canRemediate: boolean;
+  timezone: string | null | undefined;
+}) {
+  const t = useT();
+  // The console's own filters, read here for the Client chip alone: the
+  // tiles, the chip counts and the report count the list's own client.
+  const filters = useUrlFilters(["client"] as const);
+  const chip = filters.values.client;
+  const { api: summaryApi, client: sent, ready } = useNarrowedApi(chip);
+
+  /* THE TILES AND THE CHIP COUNTS READ THE SUMMARY OF THE LIST'S OWN CLIENT
+     (redesign plan, O3 3.1, verification M-e). With no Client chip, the
+     shell's key, so the rail badge and this row cannot disagree; under a
+     chip, that client's counts and nobody else's. `/health/alerts/summary`
+     counts open alerts in SQL, by state and by severity; the list below is a
+     page. The list in hand supplies only what a count cannot: the breakdown
+     under each figure and the fourteen-day line on the warning tile, and
+     only when that list is complete rather than a page of a larger one. */
   const summary = useQuery<AlertSummary>({
-    queryKey: ["health-alert-summary"],
-    queryFn: () => api.getHealthAlertSummary(),
-    enabled: canRead,
+    queryKey: sent === null ? ["health-alert-summary"] : ["health-alert-summary", { client: sent }],
+    queryFn: () => summaryApi.getHealthAlertSummary(),
+    enabled: canRead && ready,
   });
-  const alerts = useHealthAlerts({});
+  const alerts = useHealthAlerts({}, chip);
   const rows = useMemo(() => alerts.data ?? [], [alerts.data]);
   const complete = alerts.data != null && rows.length < ALERT_PAGE_SIZE;
   const open = useMemo(() => rows.filter((alert) => alert.state !== "cleared"), [rows]);
@@ -123,15 +244,13 @@ export function HealthPage() {
     next.delete("alert");
     setParams(next, { replace: true });
   };
-  const [selectedProfileId, setSelectedProfileId] = useState<string | undefined>();
-
-  // A deep link to a panel below (`#profiles`, `#approved-actions`,
-  // `#health-settings`) scrolls once the alert list above it has settled, so
-  // the list filling in does not push the target back off screen.
-  useScrollToHash(me.isFetched && !alerts.isLoading);
 
   const counts = summary.data;
-  const figure = (value: number | undefined) => (value === undefined ? NO_DATE : String(value));
+  // NO NUMBER AND NO CLAIM WITHOUT THE SUMMARY (clarification 10a): while it
+  // is pending (under the chip, the wait for `/me` too) or after it failed,
+  // each tile is the kit's pending tile, the absent mark with no line under it.
+  const noData = !counts;
+  const figure = (value: number | undefined) => String(value ?? 0);
   const loud = (value: number | undefined, kind: Kind): Kind | undefined =>
     value !== undefined && value > 0 ? kind : undefined;
   const ackPeople = new Set(acknowledged.map((alert) => alert.acknowledged_by).filter(Boolean)).size;
@@ -139,22 +258,12 @@ export function HealthPage() {
     .map((alert) => alert.muted_until)
     .filter((at): at is string => at !== null)
     .sort()[0];
+  // A tile opens the rows it counted, under the same Client chip.
+  const to = (path: string) => withClient(path, sent);
 
   return (
-    <div>
-      <PageHead
-        title={t("health.page.title")}
-        description={t("health.page.description")}
-      />
-
+    <>
       <AlertReadiness />
-
-      {!canRead && (
-        <div className="notice">
-          <Icon name={KIND_ICON.info} size={17} />
-          <span>{t("health.page.noPermission")}</span>
-        </div>
-      )}
 
       {/* EVERY TILE OPENS THE ROWS IT COUNTED: the console below reads
           `severity` and `state` from the URL, so each figure lands on exactly
@@ -165,6 +274,7 @@ export function HealthPage() {
             label={t("health.page.tileCritical")}
             icon="alert-triangle"
             value={figure(counts?.by_severity.critical)}
+            pending={noData}
             kind={loud(counts?.by_severity.critical, "crit")}
             sub={
               counts === undefined
@@ -178,12 +288,13 @@ export function HealthPage() {
                       })
                     : undefined
             }
-            to="/health?severity=critical"
+            to={to("/health?severity=critical")}
           />
           <Tile
             label={t("health.page.tileWarning")}
             icon="clock-exclamation"
             value={figure(counts?.by_severity.warning)}
+            pending={noData}
             kind={loud(counts?.by_severity.warning, "warn")}
             sub={
               counts === undefined
@@ -193,12 +304,13 @@ export function HealthPage() {
                   : breakdown(warning)
             }
             spark={warningSpark}
-            to="/health?severity=warning"
+            to={to("/health?severity=warning")}
           />
           <Tile
             label={t("health.page.tileAcknowledged")}
             icon="check"
             value={figure(counts?.by_state.acknowledged)}
+            pending={noData}
             sub={
               counts === undefined
                 ? undefined
@@ -208,62 +320,37 @@ export function HealthPage() {
                     ? t("health.page.tileAckBy", { count: ackPeople })
                     : t("health.page.tileAckOwned")
             }
-            to="/health?state=acknowledged"
+            to={to("/health?state=acknowledged")}
           />
           <Tile
             label={t("health.page.tileMuted")}
             icon="bell"
             value={figure(counts?.by_state.muted)}
+            pending={noData}
             sub={
               counts === undefined
                 ? undefined
                 : counts.by_state.muted === 0
                   ? t("health.page.tileMutedNone")
                   : muteEnds
-                    ? t("health.page.tileMutedUntil", { date: formatDate(muteEnds, me.data?.timezone) })
+                    ? t("health.page.tileMutedUntil", { date: formatDate(muteEnds, timezone) })
                     : t("health.page.tileMutedOpen")
             }
-            to="/health?state=muted"
+            to={to("/health?state=muted")}
           />
         </div>
       )}
 
-      <AlertConsole onSelect={selectAlert} selectedId={selectedAlertId} />
+      <AlertConsole onSelect={selectAlert} selectedId={selectedAlertId} counts={counts} />
 
       <Drawer open={selectedAlertId !== undefined} onClose={closeAlert} title={t("health.page.drawerTitle")}>
         {selectedAlertId ? (
-          <AlertDetail
-            alertId={selectedAlertId}
-            canManageAlerts={canManageAlerts}
-            canRemediate={canRemediate}
-          />
+          <AlertDetail alertId={selectedAlertId} canManageAlerts={canManageAlerts} canRemediate={canRemediate} />
         ) : null}
       </Drawer>
 
-      <HealthReportPanel />
-
-      {/* THE ANCHORS OTHER PAGES LINK TO (`/health#profiles`,
-          `#approved-actions`, `#health-settings`). `Panel` takes no id, so
-          each anchor is a wrapper; `useScrollToHash` above makes arriving
-          at one actually move the page. */}
-      <div id="profiles">
-        <ProfileList
-          canAdmin={canAdmin}
-          selectedProfileId={selectedProfileId}
-          onSelect={setSelectedProfileId}
-        />
-
-        {selectedProfileId && <ProfileEditor profileId={selectedProfileId} canAdmin={canAdmin} />}
-        {selectedProfileId && <ProfileAssignments profileId={selectedProfileId} canAdmin={canAdmin} />}
-      </div>
-
-      <div id="approved-actions">
-        <ApprovedActionList canActionAdmin={canActionAdmin} />
-      </div>
-
-      <div id="health-settings">
-        <HealthSettingsPanel canAdmin={canAdmin} />
-      </div>
-    </div>
+      {/* The report of the alerts above: it is theirs, so it sits under the queue. */}
+      <HealthReportPanel chip={chip} />
+    </>
   );
 }

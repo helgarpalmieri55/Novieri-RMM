@@ -6,6 +6,7 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { useUnsavedGuard } from "../../shell/components";
 import { Pill } from "../../shell/viz";
 import { useCreateProvisionProfileMutation, useOsImages, useUpdateProvisionProfileMutation } from "./api";
 import { imagePickerEmptyHint, imagePickerOptions } from "./pickerOptions";
@@ -80,6 +81,14 @@ export function ProfileEditor({
   // Populated ON SUBMIT, never while typing. Held as data (rules and values) so
   // a language switch re-words the sentences. The values are names, never a password.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // ONE GUARD FOR THE FORM (general ruling 3): it lives in `?new=profile` or
+  // `?edit=<id>`. The editor is keyed per profile, so what it opened with is
+  // its first render's values. The two passwords are compared as "typed or
+  // not", never kept: they are not part of the snapshot.
+  const current = JSON.stringify([name, imageId, enabled, domain, domainUsername, localAdminUsername]);
+  const [opened] = useState(current);
+  const dirty = profile != null && (current !== opened || domainPassword !== "" || localAdminPassword !== "");
+  const { guard, release } = useUnsavedGuard(dirty, { search: [profile === "new" ? "new" : "edit"] });
 
   const mutation = existing ? update : create;
 
@@ -91,6 +100,15 @@ export function ProfileEditor({
   function submit() {
     // The previous outcome must not be readable as this one.
     mutation.reset();
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): Save on a profile nobody
+    // changed (no field, no password typed) closes and sends nothing. A PUT
+    // with nothing in it would still write an audit entry saying the profile
+    // was edited.
+    if (existing && !dirty) {
+      setAttempt(null);
+      onClose();
+      return;
+    }
     const next: Attempt = { rules: profileRules, values: { name, imageId } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -128,6 +146,8 @@ export function ProfileEditor({
     const onSuccess = () => {
       setDomainPassword("");
       setLocalAdminPassword("");
+      // Saved: the close that follows is not a change being dropped.
+      release();
       onClose();
     };
 
@@ -139,6 +159,8 @@ export function ProfileEditor({
   }
 
   return (
+    <>
+    {guard}
     <Dialog
       open={profile != null}
       onClose={onClose}
@@ -267,5 +289,6 @@ export function ProfileEditor({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

@@ -9,7 +9,7 @@ export const audit = {
     unknown: "unknown",
   },
   broken: {
-    title: "Hash-chain verification FAILED.",
+    title: "Hash-chain verification failed.",
     body: "The append-only chain does not verify from event <mono>{id}</mono> onward. Audit evidence after that link cannot be relied on. Treat this as a security incident.",
   },
   tiles: {
@@ -22,7 +22,7 @@ export const audit = {
       verifying: "Verifying…",
       unknown: "Unverified",
       intact: "Verified",
-      broken: "BROKEN",
+      broken: "Broken",
     },
     chainFoot: {
       verifying: "Walking the chain now",
@@ -48,9 +48,7 @@ export const audit = {
     searchAria: "Search the loaded page by action, actor or target",
     actionPlaceholder: "Exact action, e.g. job.dispatch",
     actionAria: "Filter by exact action, server-side",
-    emptyForAction: "No audit events recorded for action \"{action}\".",
     emptyNone: "No audit events recorded yet.",
-    emptyFiltered: "No loaded audit event matches that filter.",
     action: "Action",
     actor: "Actor",
     when: "When",
@@ -68,7 +66,7 @@ export const audit = {
     didNotRun: "Verification did not run.",
     didNotRunBody:
       "The request to verify the chain failed, so nothing is known about its state. This is <em>not</em> a statement that the chain is intact.",
-    brokenTitle: "The chain is BROKEN.",
+    brokenTitle: "The chain is broken.",
     brokenBody: {
       one: "Verification walked {count} events and stopped at <mono>{id}</mono>. Every event from that link onward is unproven.",
       other: "Verification walked {count} events and stopped at <mono>{id}</mono>. Every event from that link onward is unproven.",

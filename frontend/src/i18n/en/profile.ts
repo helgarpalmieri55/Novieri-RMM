@@ -10,7 +10,7 @@ export const profile = {
     timezone: "Timezone",
     timezonePlaceholder: "e.g. Europe/Lisbon",
     smsNote: "Nothing on this platform sends SMS. A phone number here is directory information, not a second factor.",
-    noChanges: "There are no unsaved changes",
+    details: "Your details",
   },
   security: {
     title: "Sign-in and security",
@@ -23,6 +23,7 @@ export const profile = {
     title: "Your security",
     description: "How you sign in, and where you are signed in now.",
     loading: "Loading…",
+    sections: { signIn: "How you sign in", signedIn: "Where you are signed in" },
     password: {
       title: "Password",
       subtitle: "At least 12 characters. A long phrase you can remember beats a short complicated one",

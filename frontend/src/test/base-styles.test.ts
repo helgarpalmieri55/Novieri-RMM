@@ -57,6 +57,23 @@ function declarations(css: string, selector: string): string[] {
     .sort();
 }
 
+/**
+ * RULES DESIGN.md v4 CHANGED ON PURPOSE (2026-11-23, the Novieri brand). The
+ * transcription tests below compare against v3 unless a selector is listed
+ * here, in which case they compare against these declarations, which are the
+ * brand's. Each entry names the reason. (Task 3 of the redesign left this map
+ * for the first rule that needed it; the rail is that rule.)
+ */
+const V4_OVERRIDES: Readonly<Record<string, readonly string[]>> = {
+  // DESIGN.md v4 "Navigation" (redesign §1.1): a folder or Admin page is
+  // indented by its padding, and its current state is the rail's own (no
+  // second rule for it).
+  ".nav-item.sub": ["padding-left: 40px"],
+  ".nav-item.sub.active": [],
+};
+const expectedFor = (design: string, selector: string): string[] =>
+  [...(V4_OVERRIDES[selector] ?? declarations(design, selector))];
+
 describe("element-level styles", () => {
   const css = readFileSync(BASE, "utf8");
 
@@ -839,10 +856,17 @@ describe("the rail's open area and the scrolling tab strip", () => {
   const components = readFileSync(COMPONENTS, "utf8");
   const design = readFileSync(DESIGN, "utf8");
 
-  it.each([".nav-item.sub", ".nav-item.sub.active"])("transcribes `%s` from the design", (selector) => {
+  it.each([".nav-item.sub", ".nav-item.sub.active"])("transcribes `%s` from the design, or from DESIGN.md v4 where it changed it", (selector) => {
+    // RE-POINTED (redesign design §1.1, DESIGN.md v4 "Navigation"): the
+    // rail's sub-items are no longer v3's, so they compare against
+    // V4_OVERRIDES. `.nav-item.sub.active` has no rule of its own now: the
+    // current sub-item is drawn by `.nav-item.active`, so its expected
+    // declarations are none.
     const ported = declarations(shell, selector);
-    expect(ported, `no \`${selector}\` rule in shell.css`).not.toEqual([]);
-    expect(ported).toEqual(declarations(design, selector));
+    expect(ported).toEqual(expectedFor(design, selector));
+    // NON-VACUITY: v3 still writes the rule the override replaces, so the
+    // override is about something.
+    expect(declarations(design, selector), `no \`${selector}\` rule in the design`).not.toEqual([]);
   });
 
   it.each([".tabs.scroll", ".tabs.scroll > .tab"])("transcribes `%s` from the design", (selector) => {

@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
 import { ClientNotChosen } from "../../../lib/clientSelection";
+import { renderPage } from "../../../test/renderPage";
 import { BudgetAdminPage } from "../BudgetAdminPage";
 import { BudgetDashboard } from "../BudgetDashboard";
 import { BudgetPlannerPage } from "../BudgetPlannerPage";
@@ -285,17 +286,18 @@ describe("BudgetDashboard navigation", () => {
   // The Phase-12 lesson: a page routed but unlinked is not reachable. All
   // five budget surfaces are linked from the same module nav rendered on
   // every budget page (BudgetPageNav, sourced from BUDGET_NAV_ITEMS).
+  // THE KIT'S `SectionNav` NOW (redesign Task 11; the waves' rule for module
+  // menus): a navigation of real links, the current page marked with
+  // `aria-current="page"`. These read `navigation` and `link` where they read
+  // `tablist` and `tab` (the plan: "Sus pruebas que buscaban role=tablist o
+  // role=tab buscan ahora navigation y link con aria-current=page").
   it("links to every budget surface from the module nav", async () => {
     renderWithProviders(<BudgetDashboard />);
 
-    await screen.findByText("Budget dashboard");
-    // `role="tab"` now, not "link": Auditor B, [MEDIUM] -- "role = null on
-    // every tab, aria-selected = null on every tab, and the container's role =
-    // null (no tablist) ... A screen reader user hears five unrelated buttons
-    // with no indication that they form a set". They are still anchors with a
-    // real `href`, which is the [LOW] beside it ("cannot be middle-clicked,
-    // opened in a new tab, or copied via right-click").
-    const tabs = within(await screen.findByRole("tablist", { name: "Budget" })).getAllByRole("tab");
+    await screen.findByRole("heading", { level: 1, name: "IT budget" });
+    // Still anchors with a real `href` (Auditor B's [LOW]: they could not be
+    // middle-clicked, opened in a new tab, or copied when they were buttons).
+    const tabs = within(await screen.findByRole("navigation", { name: "Budget" })).getAllByRole("link");
     expect(tabs.map((tab) => tab.getAttribute("href"))).toEqual([
       "/budget",
       "/budget/planner",
@@ -311,23 +313,19 @@ describe("BudgetDashboard navigation", () => {
       "Admin",
     ]);
     // A `<button>` nested inside an `<a>` was two interactive elements, one of
-    // them unreachable as a link.
-    expect(document.querySelector(".tabs button")).toBeNull();
+    // them unreachable as a link. Asked of the navigation itself (fix round 1,
+    // M8: `.tabs button` could no longer fail once the strip stopped being `.tabs`).
+    const nav = screen.getByRole("navigation", { name: "Budget" });
+    expect(within(nav).queryAllByRole("button")).toEqual([]);
+    expect(nav.querySelectorAll("a button, button a")).toHaveLength(0);
   });
 
-  it("says which tab is the current one, in both conventions", async () => {
+  it("says which page is the current one", async () => {
     renderWithProviders(<BudgetDashboard />, ["/budget"]);
 
-    await screen.findByText("Budget dashboard");
-    const tabs = within(await screen.findByRole("tablist", { name: "Budget" })).getAllByRole("tab");
-    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
-      "true",
-      "false",
-      "false",
-      "false",
-      "false",
-    ]);
-    expect(tabs[0]).toHaveAttribute("aria-current", "page");
+    await screen.findByRole("heading", { level: 1, name: "IT budget" });
+    const tabs = within(await screen.findByRole("navigation", { name: "Budget" })).getAllByRole("link");
+    expect(tabs.map((tab) => tab.getAttribute("aria-current"))).toEqual(["page", null, null, null, null]);
   });
 
   it("does not mark Dashboard active on the sibling budget routes", async () => {
@@ -335,10 +333,10 @@ describe("BudgetDashboard navigation", () => {
     // light the Dashboard tab on every page in the module.
     renderWithProviders(<BudgetDashboard />, ["/budget/expenses"]);
 
-    await screen.findByText("Budget dashboard");
-    const tabs = within(await screen.findByRole("tablist", { name: "Budget" })).getAllByRole("tab");
-    expect(tabs[0]).toHaveAttribute("aria-selected", "false");
-    expect(tabs[2]).toHaveAttribute("aria-selected", "true");
+    await screen.findByRole("heading", { level: 1, name: "IT budget" });
+    const tabs = within(await screen.findByRole("navigation", { name: "Budget" })).getAllByRole("link");
+    expect(tabs[0]).not.toHaveAttribute("aria-current");
+    expect(tabs[2]).toHaveAttribute("aria-current", "page");
   });
 
   it("hides budget navigation without budget.read", async () => {
@@ -348,7 +346,8 @@ describe("BudgetDashboard navigation", () => {
     });
     renderWithProviders(<BudgetDashboard />);
 
-    await screen.findByText("Budget dashboard");
+    // The h1 is the rail's label (coordinator ruling 1).
+    await screen.findByRole("heading", { level: 1, name: "IT budget" });
     expect(screen.queryByRole("link", { name: "Planner" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Expenses" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Confirm queue" })).not.toBeInTheDocument();
@@ -464,7 +463,8 @@ describe("ExpensesPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<ExpensesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    // The head's button: with no expenses, the empty ledger offers it too (Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New expense" }))[0]!);
 
     // The expense-date field keeps its pre-filled default (today, in
     // ISO/yyyy-mm-dd form) -- interacting with a native <input type="date">
@@ -743,7 +743,8 @@ describe("BudgetPlannerPage wiring", () => {
     const user = userEvent.setup();
     renderWithProviders(<BudgetPlannerPage />);
 
-    await user.click(await screen.findByRole("button", { name: "FY26 IT Budget" }));
+    // A budget's name is a link to `?budget=<id>` (redesign Task 11, 6.3), no longer a toggle button.
+    await user.click(await screen.findByRole("link", { name: "FY26 IT Budget" }));
     await screen.findByText("Budget details");
     await user.clear(screen.getByLabelText("Name"));
     await user.type(screen.getByLabelText("Name"), "FY26 Budget Renamed");
@@ -766,7 +767,8 @@ describe("BudgetPlannerPage wiring", () => {
     const user = userEvent.setup();
     renderWithProviders(<BudgetPlannerPage />);
 
-    await user.click(await screen.findByRole("button", { name: "FY26 IT Budget" }));
+    // A budget's name is a link to `?budget=<id>` (redesign Task 11, 6.3), no longer a toggle button.
+    await user.click(await screen.findByRole("link", { name: "FY26 IT Budget" }));
     await screen.findByText("Budget details");
     expect(screen.getByText(/Closing freezes all line edits/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close budget" }));
@@ -782,7 +784,8 @@ describe("BudgetPlannerPage wiring", () => {
     const user = userEvent.setup();
     renderWithProviders(<BudgetPlannerPage />);
 
-    await user.click(await screen.findByRole("button", { name: "FY26 IT Budget" }));
+    // A budget's name is a link to `?budget=<id>` (redesign Task 11, 6.3), no longer a toggle button.
+    await user.click(await screen.findByRole("link", { name: "FY26 IT Budget" }));
     await user.click(
       await screen.findByRole("button", { name: "Delete Software licenses period 1 line" }),
     );
@@ -898,7 +901,8 @@ describe("BudgetPlannerPage form validation", () => {
     const user = userEvent.setup();
     renderWithProviders(<BudgetPlannerPage />);
 
-    await user.click(await screen.findByRole("button", { name: "FY26 IT Budget" }));
+    // A budget's name is a link to `?budget=<id>` (redesign Task 11, 6.3), no longer a toggle button.
+    await user.click(await screen.findByRole("link", { name: "FY26 IT Budget" }));
     await screen.findByText("Budget details");
     await user.clear(screen.getByLabelText("Name"));
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -1011,6 +1015,24 @@ describe("BudgetAdminPage wiring", () => {
 
     expect(api.updateFxRate).toHaveBeenCalledWith("fx1", { rate: "1.25000000" });
   });
+
+  // GENERAL RULING 13: a Save on an untouched record sends nothing (an
+  // unchanged PATCH writes a false entry to the audit log); it closes.
+  it.each([
+    ["a category", { listBudgetCategories: vi.fn().mockResolvedValue(CATEGORIES) }, "Edit category", "updateBudgetCategory"],
+    ["a cost center", { listCostCenters: vi.fn().mockResolvedValue(COST_CENTER_ONE) }, "Edit cost center", "updateCostCenter"],
+    ["an FX rate", { listFxRates: vi.fn().mockResolvedValue(FX_RATE_ONE) }, /^Edit the exchange rate/, "updateFxRate"],
+  ] as const)("sends nothing when %s is saved untouched (ruling 13)", async (_what, reads, title, write) => {
+    const user = userEvent.setup();
+    const api = baseApi({ ...reads, [write]: vi.fn().mockResolvedValue({}) });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<BudgetAdminPage />);
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: title });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api[write]).not.toHaveBeenCalled();
+  });
 });
 
 describe("budget state vocabulary", () => {
@@ -1068,7 +1090,8 @@ describe("New expense: the empty-lookup blocked flow", () => {
   async function openDialog() {
     const user = userEvent.setup();
     renderWithProviders(<ExpensesPage />);
-    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    // The head's button: with no expenses, the empty ledger offers it too (Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New expense" }))[0]!);
     return user;
   }
 
@@ -1123,7 +1146,8 @@ describe("New expense: money that the server can actually parse", () => {
   async function openDialog() {
     const user = userEvent.setup();
     renderWithProviders(<ExpensesPage />);
-    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    // The head's button: with no expenses, the empty ledger offers it too (Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New expense" }))[0]!);
     return user;
   }
 
@@ -1299,7 +1323,8 @@ describe("BudgetPlannerPage: the irreversible controls ask first", () => {
   async function openBudget() {
     const user = userEvent.setup();
     renderWithProviders(<BudgetPlannerPage />);
-    await user.click(await screen.findByRole("button", { name: "FY26 IT Budget" }));
+    // A budget's name is a link to `?budget=<id>` (redesign Task 11, 6.3), no longer a toggle button.
+    await user.click(await screen.findByRole("link", { name: "FY26 IT Budget" }));
     await screen.findByText("Budget details");
     return user;
   }
@@ -1395,7 +1420,8 @@ describe("BudgetDashboard: the first run", () => {
   it("replaces the two dead ends with one state that says what to do", async () => {
     renderWithProviders(<BudgetDashboard />);
 
-    await screen.findByText("Budget dashboard");
+    // The h1 is the rail's label (coordinator ruling 1).
+    await screen.findByRole("heading", { level: 1, name: "IT budget" });
     expect(await screen.findByRole("link", { name: /Create a budget in the Planner/ })).toHaveAttribute(
       "href",
       "/budget/planner",
@@ -1464,7 +1490,8 @@ describe("BudgetAdminPage: changing the base currency", () => {
     // The settings have landed once the kit's key/value list names the base.
     await screen.findByText("Base currency");
     await user.type(screen.getByLabelText("New base currency"), "EUR");
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    // The page's one save bar (Receta FO, 4) in place of "Save settings".
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateBudgetSettings).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog", { name: /Change the budget base currency/i });
@@ -1483,7 +1510,8 @@ describe("BudgetAdminPage: changing the base currency", () => {
     // The settings have landed once the kit's key/value list names the base.
     await screen.findByText("Base currency");
     await user.type(screen.getByLabelText("New base currency"), "EUR");
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    // The page's one save bar (Receta FO, 4) in place of "Save settings".
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await confirmWith(user, "Change base currency");
 
     expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", {
@@ -1507,7 +1535,8 @@ describe("BudgetAdminPage: changing the base currency", () => {
     // The month is chosen by name now ("1 April"), not typed as `4`; the
     // value that travels is unchanged.
     await user.selectOptions(screen.getByLabelText("New fiscal year start month"), "4");
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    // The page's one save bar (Receta FO, 4) in place of "Save settings".
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", {
       base_currency: undefined,
@@ -1536,7 +1565,8 @@ describe("BudgetAdminPage: changing the base currency", () => {
     // The settings have landed once the kit's key/value list names the base.
     await screen.findByText("Base currency");
     await user.type(screen.getByLabelText("New base currency"), "EUR");
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    // The page's one save bar (Receta FO, 4) in place of "Save settings".
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await confirmWith(user, "Change base currency");
 
     const alert = await screen.findByRole("alert");
@@ -2180,7 +2210,8 @@ describe("budget belongs to a client", () => {
     mockUseApi.mockReturnValue(api as unknown as ApiClient);
     renderWithProviders(<ExpensesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    // The head's button: with no expenses, the empty ledger offers it too (Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New expense" }))[0]!);
     await user.clear(screen.getByLabelText("Amount"));
     await user.type(screen.getByLabelText("Amount"), "10.00");
     await pick(user, "Category", /Software licenses/);
@@ -2190,5 +2221,354 @@ describe("budget belongs to a client", () => {
       "this client does not use that module",
     );
     expect(api.createExpense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "o1" }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The budget pages on the kit (redesign Task 11, 6.3 to 6.6 and the dashboard)
+// ---------------------------------------------------------------------------
+
+function kitApi(overrides: Partial<ApiClient> = {}): Partial<ApiClient> {
+  return {
+    me: vi.fn().mockResolvedValue(ME_FULL),
+    listBudgets: vi.fn().mockResolvedValue(BUDGETS),
+    listBudgetCategories: vi.fn().mockResolvedValue(CATEGORIES),
+    listCostCenters: vi.fn().mockResolvedValue(COST_CENTER_ONE),
+    listFxRates: vi.fn().mockResolvedValue(FX_RATE_ONE),
+    listBudgetLines: vi.fn().mockResolvedValue(BUDGET_LINES),
+    listExpenses: vi.fn().mockResolvedValue([EXPENSE_EXPECTED]),
+    getBudgetSettings: vi.fn().mockResolvedValue({
+      base_currency: "USD",
+      fiscal_year_start_month: 1,
+      updated_by: null,
+      updated_at: "2026-01-01T00:00:00.000Z",
+    }),
+    getBudgetVariance: vi.fn().mockResolvedValue(EMPTY_VARIANCE),
+    getBudgetPosition: vi.fn().mockResolvedValue(POSITION_CLEAN),
+    putBudgetLines: vi.fn().mockResolvedValue(BUDGET_LINES),
+    updateBudget: vi.fn().mockResolvedValue(BUDGETS[0]),
+    createBudget: vi.fn().mockResolvedValue({ ...BUDGETS[0], id: "b2", name: "FY27 IT Budget", fiscal_year: 2027 }),
+    updateBudgetSettings: vi.fn().mockResolvedValue({
+      base_currency: "USD",
+      fiscal_year_start_month: 4,
+      updated_by: "u1",
+      updated_at: "2026-01-02T00:00:00.000Z",
+    }),
+    ...overrides,
+  };
+}
+
+describe("BudgetDashboard on the kit", () => {
+  it("leads each tile to the page that explains it", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget", <BudgetDashboard />, "/budget");
+    await screen.findByText("YTD actual");
+    const byLabel = Object.fromEntries(
+      [...document.querySelectorAll<HTMLElement>("a.stat-card")].map((tile) => [
+        tile.querySelector(".stat-label")?.textContent ?? "",
+        tile.getAttribute("href"),
+      ]),
+    );
+    // Recorded spend is explained by the ledger; a share of the plan by the plan.
+    expect(byLabel).toEqual({
+      "YTD actual": "/budget/expenses",
+      "% of plan": "/budget/planner",
+      "Avg monthly burn": "/budget/expenses",
+      "Projected year end": "/budget/expenses",
+    });
+  });
+
+  it("names the client its figures are for, under the rail's label", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget", <BudgetDashboard />, "/budget");
+    expect(await screen.findByRole("heading", { level: 1, name: "IT budget" })).toBeInTheDocument();
+    expect(screen.getByText(/by category for Novieri\./)).toBeInTheDocument();
+  });
+
+  it("keeps the budget it shows in the URL", async () => {
+    const second: BudgetOut = { ...(BUDGETS[0] as BudgetOut), id: "b2", name: "FY27 IT Budget", fiscal_year: 2027 };
+    const api = kitApi({ listBudgets: vi.fn().mockResolvedValue([BUDGETS[0], second]) });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget?budget=b2", <BudgetDashboard />, "/budget");
+    expect(await screen.findByRole("combobox", { name: "Budget" })).toHaveValue("b2");
+    await waitFor(() => expect(api.getBudgetPosition).toHaveBeenCalledWith("b2"));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Budget" }), "b1");
+    expect(router.state.location.search).toBe("?budget=b1");
+  });
+});
+
+// GENERAL RULING 1b (fix round 1): a sub-page with no rail entry of its own
+// names itself in the tab, agreeing with its h1; the rail's label follows.
+describe("the budget sub-pages name themselves in the tab", () => {
+  it.each([
+    ["the planner", () => <BudgetPlannerPage />, "/budget/planner", "Budget planner"],
+    ["the expenses", () => <ExpensesPage />, "/budget/expenses", "Expenses"],
+    ["the confirmation queue", () => <ConfirmationQueuePage />, "/budget/confirm", "Confirmation queue"],
+    ["the settings", () => <BudgetAdminPage />, "/budget/admin", "Budget settings"],
+  ] as const)("%s", async (_what, page, path, name) => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage(path, page(), path, { page: "shell.nav.item.itBudget" });
+    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${name} · IT budget · Novieri RMM`));
+  });
+});
+
+describe("BudgetPlannerPage on the form kit", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    const cell = await screen.findByLabelText("Software licenses period 2");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.type(cell, "75.00");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(cell).toHaveValue("");
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    const { router } = renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/budget/planner");
+  });
+
+  it("saves the grid with the same lines as before", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.putBudgetLines).toHaveBeenCalledWith("b1", [
+        { category_id: "cat1", period_index: 1, planned_amount: "500.00" },
+        { category_id: "cat1", period_index: 2, planned_amount: "75.00" },
+      ]),
+    );
+    // Only the grid changed, so the details are not sent.
+    expect(api.updateBudget).not.toHaveBeenCalled();
+  });
+
+  // GENERAL RULING 12: the budget is `?budget=`, a selection that changes
+  // without a route change. Leaving a budget with changes asks, and leaving
+  // drops them: nothing typed for one budget is saved onto the next.
+  it("drops an edit typed for one budget when the planner moves to another (ruling 12)", async () => {
+    const OTHER: BudgetOut = { ...BUDGETS[0]!, id: "b2", name: "FY27 IT Budget", fiscal_year: 2027 };
+    const api = kitApi({
+      listBudgets: vi.fn().mockResolvedValue([...BUDGETS, OTHER]),
+      listBudgetLines: vi.fn((id: string) => Promise.resolve(id === "b2" ? [] : BUDGET_LINES)),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Budget" }), "b2");
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Budget" })).toHaveValue("b2"));
+    // The second budget's own values, and no save bar: nothing of the first one's edit is left to send.
+    await waitFor(() => expect(screen.getByLabelText("Software licenses period 2")).toHaveValue(""));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(api.putBudgetLines).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, I3 (the reviewer's probe). Creating a budget while the open
+  // plan holds changes used to jump to the new budget and drop them, unasked.
+  // It keeps the open budget, and its edits, and does not switch.
+  it("keeps the open budget and its unsaved plan when a new budget is created", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.click(screen.getByRole("button", { name: "New budget" }));
+    const dialog = await screen.findByRole("dialog", { name: "New budget" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "FY27 IT Budget{Enter}");
+    await waitFor(() => expect(api.createBudget).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.search).toBe("?budget=b1"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Software licenses period 2")).toHaveValue("75.00");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    // It says so, on screen (fix round 2, N1): created, and where to find it.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "FY27 IT Budget was created. It is in the Budget chip above; this plan stays open with its changes.",
+    );
+    // And the plan is still guarded: the release was spent on the dialog, not on the plan.
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/budget/planner");
+  });
+
+  it("keeps the budget open in the URL, so a reload opens it again", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    expect(await screen.findByText("Budget details")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Budget" })).toHaveValue("b1");
+  });
+
+  it("opens New budget from ?new=budget, and opens the budget it created", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/planner?new=budget", <BudgetPlannerPage />, "/budget/planner");
+    const dialog = await screen.findByRole("dialog", { name: "New budget" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "FY27 IT Budget{Enter}");
+    await waitFor(() => expect(router.state.location.search).toBe("?budget=b2"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+});
+
+describe("ExpensesPage on the list kit", () => {
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/expenses?status=expected", <ExpensesPage />, "/budget/expenses");
+    const statuses = await screen.findByRole("group", { name: "Status" });
+    expect(within(statuses).getByRole("button", { name: /Expected/ })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(api.listExpenses).toHaveBeenCalledWith({ status: "expected" }, "o1"));
+    await userEvent.click(within(statuses).getByRole("button", { name: /Confirmed/ }));
+    expect(router.state.location.search).toContain("status=confirmed");
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(kitApi({ listExpenses: vi.fn().mockResolvedValue([]) }) as ApiClient);
+    renderPage("/budget/expenses?status=void", <ExpensesPage />, "/budget/expenses");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("keeps the date range in the URL", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/expenses?from=2026-07-01&to=2026-07-31", <ExpensesPage />, "/budget/expenses");
+    expect(await screen.findByLabelText("From")).toHaveValue("2026-07-01");
+    expect(screen.getByLabelText("To")).toHaveValue("2026-07-31");
+    await waitFor(() =>
+      expect(api.listExpenses).toHaveBeenCalledWith({ date_from: "2026-07-01", date_to: "2026-07-31" }, "o1"),
+    );
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-08-31" } });
+    expect(router.state.location.search).toBe("?from=2026-07-01&to=2026-08-31");
+  });
+
+  it("opens New expense from ?new=expense", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget/expenses?new=expense", <ExpensesPage />, "/budget/expenses");
+    expect(await screen.findByRole("dialog", { name: "New expense" })).toBeInTheDocument();
+  });
+
+  it("asks before New expense drops what was typed, and opens empty again", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    const { router } = renderPage("/budget/expenses", <ExpensesPage />, "/budget/expenses");
+    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    const dialog = await screen.findByRole("dialog", { name: "New expense" });
+    await user.type(within(dialog).getByLabelText("Description"), "Renewal");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await act(() => router.navigate("/budget/expenses?new=expense"));
+    const again = await screen.findByRole("dialog", { name: "New expense" });
+    expect(within(again).getByLabelText("Description")).toHaveValue("");
+  });
+
+  it("opens a row's edit from ?edit=<id>", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    const { router } = renderPage("/budget/expenses", <ExpensesPage />, "/budget/expenses");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(router.state.location.search).toBe("?edit=e1");
+    expect(await screen.findByRole("dialog", { name: "Edit expense" })).toBeInTheDocument();
+  });
+
+  // GENERAL RULING 12 (fix round 1, M5): `?edit=<id>` is a selection that
+  // changes without a route change. Moving to another row's edit with
+  // changes asks, and leaving drops them: nothing typed for one expense is
+  // saved onto the next.
+  it("drops an edit typed for one expense when the dialog moves to another (ruling 12)", async () => {
+    const SECOND: ExpenseOut = { ...EXPENSE_EXPECTED, id: "e2", description: "Second expense" };
+    const updateExpense = vi.fn().mockResolvedValue(SECOND);
+    mockUseApi.mockReturnValue(kitApi({ listExpenses: vi.fn().mockResolvedValue([EXPENSE_EXPECTED, SECOND]), updateExpense }) as ApiClient);
+    // The move as Forward would make it: a link to the other row's edit, beside
+    // the page (a bare router.navigate() held by the guard leaves a pending transition).
+    const { router } = renderPage(
+      "/budget/expenses?edit=e1",
+      <>
+        <ExpensesPage />
+        <Link to="/budget/expenses?edit=e2">Second</Link>
+      </>,
+      "/budget/expenses",
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
+    await userEvent.type(within(dialog).getByLabelText("Description"), "Typed for e1");
+    await userEvent.click(screen.getByRole("link", { name: "Second" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?edit=e2"));
+    const again = await screen.findByRole("dialog", { name: "Edit expense" });
+    await waitFor(() => expect(within(again).getByLabelText("Description")).toHaveValue("Second expense"));
+    await userEvent.click(within(again).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(updateExpense).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, M10: an `?edit=` whose row the ledger does not hold (outside
+  // the filter, voided, gone) opens nothing; once the list has answered it
+  // leaves the URL in place, rather than sitting there doing nothing.
+  it("drops an ?edit= the ledger does not hold, once the list has answered", async () => {
+    const listExpenses = vi.fn().mockResolvedValue([]);
+    mockUseApi.mockReturnValue(kitApi({ listExpenses }) as ApiClient);
+    const { router } = renderPage("/budget/expenses?status=confirmed&edit=e1", <ExpensesPage />, "/budget/expenses");
+    await waitFor(() => expect(listExpenses).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.search).toBe("?status=confirmed"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // In place: no extra history entry to go Back into.
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("sends nothing when an expense is saved untouched (ruling 13)", async () => {
+    const api = kitApi({ updateExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED) });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/expenses?edit=e1", <ExpensesPage />, "/budget/expenses");
+    const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(api.updateExpense).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConfirmationQueuePage on the list kit", () => {
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(kitApi({ listExpenses: vi.fn().mockResolvedValue([]) }) as ApiClient);
+    renderPage("/budget/confirm", <ConfirmationQueuePage />, "/budget/confirm");
+    expect(await screen.findByText("No expenses waiting for confirmation.")).toBeInTheDocument();
+  });
+});
+
+describe("BudgetAdminPage on the form kit", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget/admin", <BudgetAdminPage />, "/budget/admin");
+    const currency = await screen.findByLabelText("New base currency");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.type(currency, "E");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    const { router } = renderPage("/budget/admin", <BudgetAdminPage />, "/budget/admin");
+    await userEvent.selectOptions(await screen.findByLabelText("New fiscal year start month"), "4");
+    await userEvent.click(screen.getByRole("link", { name: "Planner" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/budget/admin");
+  });
+
+  it("opens New cost centre from ?new=costCenter", async () => {
+    mockUseApi.mockReturnValue(kitApi() as ApiClient);
+    renderPage("/budget/admin?new=costCenter", <BudgetAdminPage />, "/budget/admin");
+    expect(await screen.findByRole("dialog", { name: "New cost center" })).toBeInTheDocument();
   });
 });

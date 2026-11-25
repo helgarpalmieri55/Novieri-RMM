@@ -83,6 +83,27 @@ export function patternOf(route) {
  */
 export const OPEN_DISCLOSURES = new Set(["/settings?tab=users"]);
 
+/**
+ * THE ROUTES THAT DRAW NO CONSOLE SHELL: the pages reached without a session
+ * (own-auth Task 11), which have the sign-in frame instead. Every other route
+ * draws the top bar, and harmony fails one that does not (`missingShell`,
+ * redesign plan pre-flight C1): a page the dev server could not serve draws
+ * nothing, and an empty frame measures clean. Measured 2026-11-24: these ten
+ * are exactly the routes of a full walk with no `.topbar`.
+ */
+export const FRAMELESS = new Set([
+  "/sign-in",
+  "/sign-in/factor",
+  "/sign-in/enroll",
+  "/sign-in/recovery-codes",
+  "/sign-in/microsoft",
+  "/forgot-password",
+  "/reset-password",
+  "/invite",
+  "/recover",
+  "/portal/sign-in",
+]);
+
 export const ROUTES = [
   // The pages reached without a session (own-auth Task 11). No top bar, so
   // harmony measures their tokens, overflow and axe, and skips the bar.
@@ -105,16 +126,26 @@ export const ROUTES = [
   "/devices/push-runs",
   "/devices/push-runs/run-1",
   "/devices/dev-1",
+  "/devices/dev-1?tab=hardware",
+  "/devices/dev-1?tab=health",
   "/software",
   "/credentials",
   "/docs",
   "/security",
+  // THE STATES THE PAGE WAVES PUT IN THE URL (kit requests batch 1, item 8):
+  // a drawer or an editor opened from a query parameter is drawn on no plain
+  // route, so the gate measures it only as a variant. Each id is one the
+  // module's fixtures answer. On a base whose page ignores the parameter the
+  // variant draws the plain page, which still passes.
+  "/security?event=sec-1",
   "/jobs",
+  "/jobs?job=job-1",
   "/remote",
   "/remote/sess-1",
   "/remote/sess-1/recording",
   "/patch",
   "/patch/policies",
+  "/patch/policies?policy=pol-default",
   "/deploy",
   "/deploy/packages",
   "/deploy/scripts",
@@ -123,6 +154,9 @@ export const ROUTES = [
   "/backup/policies",
   "/backup/coverage",
   "/backup/offsite",
+  // The off-site storage editor (`?edit=<id>`), drawn with the fixture
+  // session's `backup.offsite.manage`.
+  "/backup/offsite?edit=offsite-wasabi",
   "/provisioning",
   "/provisioning/images",
   "/provisioning/profiles",
@@ -140,6 +174,9 @@ export const ROUTES = [
   "/licenses/compliance",
   "/licenses/review-queue",
   "/licenses/renewals",
+  // The register's "Renewals in 90 days" tile opens the calendar at its own
+  // window (P3 adoption pass, C's request R6).
+  "/licenses/renewals?within=90",
   "/licenses",
   "/licenses/lic-1",
   "/subscriptions/spend",
@@ -165,8 +202,14 @@ export const ROUTES = [
   "/site-servers/ss-1",
   "/sla",
   "/health",
+  // Alerts' configuration views (redesign decision D21): the profiles, the
+  // approved actions and the settings that /health alone no longer draws.
+  "/health?view=profiles",
+  "/health?view=actions",
+  "/health?view=settings",
   "/platform-status",
   "/error-monitor",
+  "/error-monitor?group=eg-1",
   "/assistant",
   "/assistant/settings",
   "/assistant/autonomy",
@@ -182,6 +225,7 @@ export const ROUTES = [
   "/ipam/scan-authorizations",
   "/ipam/import",
   "/ipam/subnets/subnet-1",
+  "/ipam/subnets/subnet-1?tab=sweeps",
   "/email-intake",
   "/portal",
   "/portal/new",
@@ -190,11 +234,19 @@ export const ROUTES = [
   "/dashboard",
   "/audit",
   "/enrollment",
+  // Enrollment -> Certificates (kit requests batch 2, K7): `/enrollment` opens
+  // Tokens, so the certificates' list and its revoked chip are walked only here.
+  "/enrollment?tab=certificates",
   "/device-groups",
   "/discovered",
   "/agent-packages",
   "/clients",
   "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
+  // The client 360's tabs that read other modules (redesign design §1.3).
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=devices",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=tickets",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=alerts",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57?tab=assets",
   "/settings",
   // A QUERY VARIANT: `/settings` opens Organization, so no other tab is ever
   // measured. A variant is `<a route listed here>?<query>`; the guard checks

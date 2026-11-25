@@ -319,8 +319,10 @@ beforeEach(() => mockUseApi.mockReset());
 describe("push install pages in Spanish", () => {
   it("words the authorizations page, its readiness panel and the grant form", async () => {
     stubApi();
-    const { container } = renderPage(<PushAuthorizationsPage />);
-    expect(await screen.findByRole("heading", { name: "Autorizaciones de instalación remota" })).toBeInTheDocument();
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    const { container } = renderPage(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Instalación remota" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
     expect(screen.getAllByText("Revocar").length).toBeGreaterThan(0);
@@ -352,12 +354,15 @@ describe("push install pages in Spanish", () => {
   it("words the credential scopes page and its bind form", async () => {
     const user = userEvent.setup();
     stubApi();
-    const { container } = renderPage(<PushCredentialScopesPage />);
-    expect(await screen.findByRole("heading", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
+    // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
+    const { container } = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Instalación remota" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByText("(credencial eliminada)")).toBeInTheDocument();
     expect(screen.getByText("Desvinculado")).toBeInTheDocument();
-    expect(screen.getByText("3 ámbitos")).toBeInTheDocument();
+    // The kit's count (redesign Receta L): "Mostrando x de y".
+    expect(screen.getByText("Mostrando 3 de 3")).toBeInTheDocument();
     expect(screen.getByText("1 dirección")).toBeInTheDocument();
     expectNoEnglish(container);
 
@@ -375,14 +380,15 @@ describe("push install pages in Spanish", () => {
 
   it("explains an empty credential picker, and one the account may not read", async () => {
     stubApi({ listCredentials: vi.fn().mockResolvedValue([]), listPushCredentialScopes: vi.fn().mockResolvedValue([]) });
-    const first = renderPage(<PushCredentialScopesPage />);
+    // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
+    const first = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/Todavía no existe ninguna credencial de instalación remota/)).toBeInTheDocument();
     expect(screen.getByText(/Ninguna credencial está vinculada a un prefijo/)).toBeInTheDocument();
     expectNoEnglish(first.container);
     first.unmount();
 
     stubApi({ listCredentials: vi.fn().mockRejectedValue(new ApiError(403, JSON.stringify({ detail: "no" }))) });
-    const second = renderPage(<PushCredentialScopesPage />);
+    const second = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/Esta cuenta no puede ver las credenciales, así que no se puede mostrar la lista/)).toBeInTheDocument();
     expectNoEnglish(second.container);
   });
@@ -635,7 +641,8 @@ describe("a live language switch on the push install pages", () => {
     renderPage(<PushAuthorizationsPage />);
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Push authorizations" })).toBeInTheDocument();
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(screen.getByRole("heading", { level: 1, name: "Push install" })).toBeInTheDocument();
     expect(screen.getByText(/WinRM answered on 1 of 2 Windows machines probed/)).toBeInTheDocument();
     expect(screen.getByText(/2 ranges are authorized\./)).toBeInTheDocument();
     // A grant's status label and its tooltip are catalogue lookups, not stored text.

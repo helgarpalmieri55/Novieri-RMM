@@ -89,6 +89,9 @@ beforeEach(() => {
   mockUseApi.mockReset();
 });
 
+// THE HEAD'S "New credential" (redesign Task 11, 6.9): an empty vault's list
+// offers the same action in its empty state (Receta L, 3), so the first of
+// the two is the head's.
 describe("the credentials page in Spanish", () => {
   it("words the list, tiles, tabs and prerequisites in Spanish and leaves stored names alone", async () => {
     const { container } = renderPage();
@@ -100,10 +103,12 @@ describe("the credentials page in Spanish", () => {
     expect(screen.getByText("1 retirada al menos una vez")).toBeInTheDocument();
     expect(screen.getByText("Tipos en uso")).toBeInTheDocument();
     expect(screen.getByText("5 tipos disponibles")).toBeInTheDocument();
-    // Tabs, with their counts.
-    expect(screen.getByRole("tab", { name: /Todas las credenciales/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Nunca retiradas/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /^Retiradas/ })).toBeInTheDocument();
+    // The state chips, with their counts (the tab strip became chips on the
+    // same `?state=`, redesign Task 11, 6.9).
+    const states = screen.getByRole("group", { name: "Estado" });
+    expect(within(states).getByRole("button", { name: /Todas las credenciales/ })).toBeInTheDocument();
+    expect(within(states).getByRole("button", { name: /Nunca retiradas/ })).toBeInTheDocument();
+    expect(within(states).getByRole("button", { name: /^Retiradas/ })).toBeInTheDocument();
     // The table.
     const table = screen.getByRole("table");
     for (const header of ["Nombre", "Estado", "Último uso", "Acciones"]) {
@@ -117,6 +122,7 @@ describe("the credentials page in Spanish", () => {
     expect(within(table).getAllByText("Nunca retirada")).toHaveLength(2);
     expect(within(table).getAllByRole("button", { name: "Retirar" })).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Nueva credencial" })).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 3 de 3")).toBeInTheDocument();
     expect(screen.getByText("Cómo se protegen los secretos")).toBeInTheDocument();
     expect(screen.getByText(/Retira cualquier credencial desde su fila/)).toBeInTheDocument();
     // The prerequisites panel for an unassigned push install credential.
@@ -130,9 +136,12 @@ describe("the credentials page in Spanish", () => {
   it("filters by tab and words the empty states", async () => {
     const user = userEvent.setup();
     const { container } = renderPage({ listCredentials: vi.fn().mockResolvedValue([credential()]) }, "/credentials?state=used");
-    expect(await screen.findByText("Ninguna credencial coincide con esta vista.")).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "Retiradas" })).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: /Todas las credenciales/ }));
+    // The kit's empty list for a view with nothing in it, and the pressed chip
+    // that names the view (redesign Task 11, 6.9).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    const states = screen.getByRole("group", { name: "Estado" });
+    expect(within(states).getByRole("button", { name: /^Retiradas/ })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(states).getByRole("button", { name: /Todas las credenciales/ }));
     expect(await screen.findByText("Domain support admin")).toBeInTheDocument();
     // "Domain" opens the recorded credential name.
     expectNoEnglish(container, ["Domain support admin", "Domain"]);
@@ -198,7 +207,7 @@ describe("the credentials page in Spanish", () => {
     const createCredential = vi.fn().mockResolvedValue(credential());
     renderPage({ createCredential });
     await screen.findByText("Domain support admin");
-    await user.click(screen.getByRole("button", { name: "Nueva credencial" }));
+    await user.click(screen.getAllByRole("button", { name: "Nueva credencial" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "Nueva credencial" });
     expect(within(dialog).getByLabelText("Tipo")).toBeInTheDocument();
     expect(within(dialog).getByRole("option", { name: "Cuenta de dominio de Windows" })).toBeInTheDocument();
@@ -238,7 +247,7 @@ describe("a live language switch", () => {
     expect(screen.getByRole("heading", { name: "Credenciales" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Credentials" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Never checked out/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "State" })).getByRole("button", { name: /Never checked out/ })).toBeInTheDocument();
     expect(screen.getByText("Windows administrator")).toBeInTheDocument();
     expect(screen.getByText("3 types available".replace("3", "5"))).toBeInTheDocument();
   });
@@ -249,7 +258,7 @@ describe("a refused form held across a language switch", () => {
     const user = userEvent.setup();
     renderPage({ createCredential: vi.fn() });
     await screen.findByText("Domain support admin");
-    await user.click(screen.getByRole("button", { name: "Nueva credencial" }));
+    await user.click(screen.getAllByRole("button", { name: "Nueva credencial" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "Nueva credencial" });
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("El campo Nombre es obligatorio");

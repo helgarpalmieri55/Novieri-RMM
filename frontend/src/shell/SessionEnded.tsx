@@ -44,7 +44,7 @@ export function SessionEnded({
         {t(kept.length > 0 ? "shell.sessionEnded.bodyKept" : "shell.sessionEnded.body")}
       </p>
       <div>
-        <Btn variant="primary" icon="arrow-right" label={t("shell.app.signInAgain")} onClick={onSignIn} />
+        <Btn wide variant="primary" icon="arrow-right" label={t("shell.app.signInAgain")} onClick={onSignIn} />
       </div>
       {kept.length > 0 ? (
         // A named section (`AuthSection`), so it is the region "What you were typing".

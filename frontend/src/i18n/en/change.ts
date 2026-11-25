@@ -14,8 +14,13 @@ export const change = {
     approve: "Approve",
     reject: "Reject",
   },
+  // The module's own pages as one row of links (changeNav.tsx).
+  nav: {
+    label: "Change management pages",
+    changes: "Changes",
+  },
   list: {
-    title: "Change management",
+    title: "Changes",
     // Shown with every client chosen at the top (design §3.4).
     client: "Client",
     description: "Planned changes, their risk, and what they touched.",
@@ -28,29 +33,32 @@ export const change = {
     nobodyWaiting: "Nobody is waiting on a decision",
     emergencyChanges: "Emergency changes",
     noneEmergency: "None was raised as an emergency",
-    filterOpen: "open changes",
-    filterState: "changes in state {state}",
-    filterType: "{type} changes",
-    showing: "Showing {shown} of {total}: {filters}.",
-    showAll: "Show all changes",
+    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type= (the states and types as chips with a list), and the fourth tile.
+    viewLabel: "Show",
+    stateLabel: "State",
+    anyState: "Any state",
+    typeLabel: "Type",
+    allStates: "All",
+    allTypes: "All types",
+    chipOpen: "Open",
+    implementing: "Implementing",
+    nothingImplementing: "Nothing is being carried out",
+    tableLabel: "Changes",
     emptyNone: "No changes yet.",
-    emptyView: "No change matches this view: {filters}.",
     created: "Created",
     recordedAutomatically: "Recorded automatically",
   },
   detail: {
+    tabs: "Sections of this change",
     fallbackTitle: "Change",
-    description: "Everything recorded about one change request.",
     exporting: "Exporting…",
     exportEvidence: "Export evidence",
-    tabTitle: "{title} · Change · ITMS",
     summary: "Summary",
     type: "Type",
     window: "Window",
     raised: "Raised",
     descriptionPanel: "Description",
     rollbackPlan: "Rollback plan",
-    lifecycle: "Lifecycle",
     decisionComment: "Decision comment (optional)",
     ownChange:
       "You raised this change, so you cannot decide it. Someone else with permission to approve changes has to approve or reject it.",
@@ -77,7 +85,7 @@ export const change = {
     provisionRun: "Provisioning run",
     searchDeployments: "Search deployments…",
     searchRuns: "Search provisioning runs…",
-    invalidActionId: "Action ID must be a UUID like {example} — \"{value}\" is not one",
+    invalidActionId: "Action ID must be a UUID like {example}; \"{value}\" is not one",
     patchRunNote:
       "Patch runs are listed on each computer's Patching tab, but this form cannot pick one yet, so paste its id here.",
     patchApprovalNote:
@@ -86,7 +94,7 @@ export const change = {
   approvals: {
     title: "Approval queue",
     description: "Change requests awaiting a decision.",
-    empty: "No changes awaiting approval.",
+    empty: "Nothing is waiting for your approval.",
     decisionHeader: "Decision",
     windowSub: "{type} · window {start}",
     commentPlaceholder: "Comment (optional)",
@@ -131,7 +139,7 @@ export const change = {
     cancel: "Cancel",
     save: "Save",
     windowOrder:
-      "Window end must be after Window start ({start}) — a maintenance window cannot end before it opens",
+      "Window end must be after Window start ({start}): a maintenance window cannot end before it opens",
   },
   gates: {
     title: "Require an approved change",
@@ -216,7 +224,7 @@ export const change = {
     rejectRetroConfirm: "Reject retrospectively",
     beginTitle: "Begin implementing this change",
     beginBody:
-      "This records that work on the environment has started. The change can then only be completed — it cannot be cancelled or sent back for approval.",
+      "This records that work on the environment has started. The change can then only be completed: it cannot be cancelled or sent back for approval.",
     beginConfirm: "Begin implementation",
     completeTitle: "Complete this change",
     completeBody:
@@ -224,12 +232,12 @@ export const change = {
     completeConfirm: "Mark complete",
     cancelTitle: "Cancel this change",
     cancelBody:
-      "The change is closed without being carried out. A cancelled change cannot be reopened — a new request has to be raised instead.",
+      "The change is closed without being carried out. A cancelled change cannot be reopened: a new request has to be raised instead.",
     cancelConfirm: "Cancel change",
     noneCompleted:
       "This change is completed. Completed changes are closed for good and cannot be reopened.",
     noneCancelled:
-      "This change was cancelled. Cancelled changes cannot be reopened — raise a new change request instead.",
+      "This change was cancelled. Cancelled changes cannot be reopened: raise a new change request instead.",
     noneOther: "No transition is available from \"{state}\".",
     permissionApprove: "change.approve",
     permissionRequest: "change.request",
@@ -240,8 +248,8 @@ export const change = {
   },
   picker: {
     deploymentEmptyHint:
-      "No deployments to link. They appear here once one is created under Fleet → Software deployment; you may also not have permission to list them.",
+      "No deployments to link. They appear here once one is created in Software; you may also not have permission to list them.",
     runEmptyHint:
-      "No provisioning runs to link. They appear here once a profile is run under Fleet → Provisioning; you may also not have permission to list them.",
+      "No provisioning runs to link. They appear here once a profile is run in Admin → Imaging; you may also not have permission to list them.",
   },
 } as const;

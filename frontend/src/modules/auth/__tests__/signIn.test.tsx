@@ -41,6 +41,28 @@ async function signIn(email = "dana@example.test", password = "correct horse bat
 }
 
 describe("signing in", () => {
+  it.each([
+    ["the password", "dana@example.test", "", "Enter your password."],
+    ["the address", "", "correct horse battery", "Enter your email address."],
+    ["both", "", "", "Enter your email address and your password."],
+  ])(
+    "keeps Continue on, and names what is missing when it is pressed without %s, sending nothing",
+    async (_, email, password, sentence) => {
+      // Coordinator ruling 8a (2026-11-25): only a single-field composer may
+      // keep its button off while empty; every other form keeps it on and
+      // reports the missing fields on submit, naming only those (fix round 1).
+      const user = userEvent.setup();
+      renderAuth("/sign-in");
+      if (email) await user.type(screen.getByLabelText("Email address"), email);
+      if (password) await user.type(screen.getByLabelText("Password"), password);
+      const go = screen.getByRole("button", { name: "Continue" });
+      expect(go).toBeEnabled();
+      await user.click(go);
+      expect(await screen.findByRole("alert")).toHaveTextContent(new RegExp(`^${sentence}$`));
+      expect(calls.login).not.toHaveBeenCalled();
+    },
+  );
+
   it("sends the address and password, and goes to the second factor with what the server said", async () => {
     renderAuth("/sign-in?next=%2Fdevices");
     await signIn("  dana@example.test ");

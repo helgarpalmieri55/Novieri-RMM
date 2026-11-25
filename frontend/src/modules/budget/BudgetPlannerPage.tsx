@@ -1,12 +1,28 @@
+/**
+ * Budget planner: one client's fiscal-year budgets and the amounts planned
+ * against each category and period.
+ *
+ * ON THE FORM KIT (redesign Task 11, 6.3; Receta FO). The budget open is in
+ * the URL (`?budget=<id>`, the head's chip), so a reload or a link opens the
+ * same one; with none chosen the page lists the budgets to choose from. The
+ * budget's details (name and status) and its grid of planned amounts are ONE
+ * draft (`useDraft`) with ONE `SaveBar`: Save sends the details if they
+ * changed (`PATCH /budget/budgets/{id}`) and the grid if it changed
+ * (`PUT .../lines`, the same lines as before), and the page asks before it is
+ * left with either unsaved -- another budget in the chip is leaving too
+ * (`search: ["budget"]`). The grid's old "Save grid" and the details' own
+ * Save are gone into the bar. Closing a budget keeps its typed-back
+ * confirmation. "New budget" opens from `?new=budget` (decision D8), starts
+ * empty however it opens, and opens the budget it created.
+ *
+ * ONE CLIENT AT A TIME (plan Task 11 D11.1; decision D25): no Client chip;
+ * with every client chosen at the top the page asks for one.
+ */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
-import {
-  Form,
-  FormActions,
-  attemptProblems,
-  describeSubmitError,
-} from "../../components/form";
+import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -25,8 +41,25 @@ import {
 } from "./api";
 import { humaniseEnum } from "../../lib/labels";
 import { BudgetPageNav, BudgetPickClient, budgetStatusKind, useBudgetNeedsClient } from "./budgetState";
-import type { BudgetLineInput, BudgetOut, BudgetUpdateStatus, Granularity } from "./types";
-import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { useReportDirty } from "./dialogParams";
+import type { BudgetLineInput, BudgetLineOut, BudgetOut, BudgetUpdateStatus, Granularity } from "./types";
+import {
+  Btn,
+  ChipSelect,
+  FormSection,
+  ListEmpty,
+  PageHead,
+  Panel,
+  QueryState,
+  SaveBar,
+  StatusPill,
+  useDraft,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  writeQuery,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { Icon } from "../../shell/icons";
 
 const GRANULARITIES: Granularity[] = ["month", "quarter"];
@@ -75,11 +108,37 @@ function invalidFiscalYear(value: string): string | null {
 // `status` is a select that always holds one of its two values.
 const budgetDetailRules = (): readonly FieldRule[] => [{ name: "name", label: translate("budget.planner.ruleName") }];
 
+/** What the planner edits of one budget: its details and every planned amount, as one draft. */
+interface PlanDraft {
+  name: string;
+  status: BudgetUpdateStatus;
+  /** Planned amounts by `cellKey`, as the STRINGS they travel as: money is never parsed here. */
+  cells: Record<string, string>;
+}
+
+/** The amounts the server holds, keyed by cell, and the line behind each (for its delete control). */
+function savedCells(lines: readonly BudgetLineOut[]): { cells: Record<string, string>; ids: Record<string, string> } {
+  const cells: Record<string, string> = {};
+  const ids: Record<string, string> = {};
+  for (const line of lines) {
+    if (line.cost_center_id == null) {
+      const key = cellKey(line.category_id, line.period_index);
+      cells[key] = line.planned_amount;
+      ids[key] = line.id;
+    }
+  }
+  return { cells, ids };
+}
+
 export function BudgetPlannerPage() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does (general ruling 1b).
+  useRecordTitle(t("budget.planner.title"));
   const api = useApi();
-  const [creating, setCreating] = useState(false);
-  const [selectedBudgetId, setSelectedBudgetId] = useState<string | undefined>(undefined);
+  // New → Budget (decision D8): `?new=budget` opens the new form.
+  const created = useNewParam("budget");
+  const filters = useUrlFilters(["budget"] as const);
+  const [params, setParams] = useSearchParams();
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -89,6 +148,26 @@ export function BudgetPlannerPage() {
 
   const budgets = useBudgets();
   const items = budgets.data ?? [];
+  const selected = items.find((budget) => budget.id === filters.values.budget);
+
+  // THE PAGE'S ONE GUARD (Receta FO, 4): the plan below and the New budget
+  // dialog each say whether they hold changes, and one guard asks for both.
+  // The plan is left by choosing another budget (`?budget=`); the dialog,
+  // which sits over the plan, also by closing it (`?new=`).
+  const [planDirty, setPlanDirty] = useState(false);
+  const [newDirty, setNewDirty] = useState(false);
+  // A BUDGET CREATED BESIDE AN UNSAVED PLAN (fix round 1, I3) is not opened,
+  // so the page says it exists and where to find it (fix round 2, N1). The
+  // line belongs to the budget open when it was said: another budget drops it.
+  const [createdAside, setCreatedAside] = useState<{ name: string; beside: string } | null>(null);
+  const shownAside = createdAside !== null && createdAside.beside === filters.values.budget ? createdAside : null;
+  const { guard, release } = useUnsavedGuard(planDirty || newDirty, {
+    search: newDirty ? ["budget", "new"] : ["budget"],
+  });
+
+  const newBudget = canManage ? (
+    <Btn label={t("budget.planner.newBudget")} icon="plus" variant="primary" onClick={created.start} />
+  ) : undefined;
 
   // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
   // is no base currency to add these figures in, so the page asks for one.
@@ -108,169 +187,163 @@ export function BudgetPlannerPage() {
         title={t("budget.planner.title")}
         description={t("budget.planner.description")}
         actions={
-          canManage ? (
-            <Button onClick={() => setCreating(true)}>
-              <Icon name="plus" size={14} />
-              {t("budget.planner.newBudget")}
-            </Button>
-          ) : undefined
+          <>
+            {/* THE BUDGET OPEN, AS A CHIP (the kit's `ChipSelect`): a person's
+                choice is a new history entry, so Back returns to the last one. */}
+            {items.length > 0 ? (
+              <ChipSelect
+                label={t("budget.planner.budgetChip")}
+                options={[
+                  { value: "", label: t("budget.planner.chooseBudget") },
+                  ...items.map((budget) => ({
+                    value: budget.id,
+                    label: t("budget.planner.budgetOption", { name: budget.name, year: budget.fiscal_year }),
+                  })),
+                ]}
+                value={selected?.id ?? ""}
+                onChange={(value) => filters.set("budget", value)}
+              />
+            ) : null}
+            {newBudget}
+          </>
         }
       />
 
       <BudgetPageNav canRead={canRead} />
 
-      {/* WHY THERE IS NO BUTTON, said where the button would be.
-          The copy pass cut `budget.manage` out of the dashboard's "No budget
-          yet" empty state, correctly -- an empty state is one sentence and an
-          action, not a permissions lesson. But the action it offers is a link
-          HERE, and this page renders "New budget" only for `budget.manage`, so
-          a reader without it followed the link into a page with no button and
-          nothing to explain it. A dead end is a worse defect than the long
-          sentence that was removed.
-
-          Conditional, and only on the page that actually withholds the
-          control: an operator who HAS the permission is told nothing, because
-          they can see the button. */}
-      {!canManage ? (
-        <p className="note">
-          {t("budget.planner.needsPermission")}
+      {shownAside ? (
+        <p role="status" className="notice">
+          <Icon name="circle-check" size={16} />
+          <span>{t("budget.planner.createdAside", { name: shownAside.name })}</span>
         </p>
       ) : null}
 
-      <Panel bare>
-        <QueryState
-          loading={budgets.isLoading}
-          error={budgets.error}
-          empty={items.length === 0}
-          emptyLabel={t("budget.planner.empty")}
-          emptyIcon="budget"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("budget.planner.colName")}</Th>
-                <Th>{t("budget.planner.colFiscalYear")}</Th>
-                <Th>{t("budget.planner.colGranularity")}</Th>
-                <Th>{t("budget.planner.colStatus")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((budget) => (
-                <tr key={budget.id}>
-                  <Td lead={<Icon name="wallet" size={18} />}>
-                    {/* DELIBERATELY NOT A `Btn`. This is the row's own name,
-                        and selecting it is what opens the budget below;
-                        thirty bordered 37px buttons down a name column would
-                        turn the table into a control panel. It is the row
-                        title, at the row title's size and weight -- but IN THE
-                        ACCENT, like every other row title that opens something
-                        (the subscription service names, the IPAM prefixes).
-                        `cell-title` used to be on this control too and won the
-                        colour off `panel-link` on source order, so the one
-                        control that opens a budget painted as plain ink and
-                        the page read as a static three-row list. The three
-                        focus-visible utilities restate base.css's universal
-                        `:focus-visible` ring (2px, offset 2px, accent) so the
-                        jsx-tokens guard, which reads source text and cannot
-                        see the cascade, finds the ring where the control is
-                        written. */}
-                    <button
-                      type="button"
-                      className="panel-link focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-                      style={{ fontSize: "var(--t-body)", fontWeight: 600, padding: 0 }}
-                      aria-pressed={selectedBudgetId === budget.id}
-                      onClick={() => setSelectedBudgetId(budget.id)}
-                    >
-                      {budget.name}
-                    </button>
-                  </Td>
-                  <Td>
-                    <span className="mono">{budget.fiscal_year}</span>
-                  </Td>
-                  <Td>{humaniseEnum(budget.granularity, "Granularity")}</Td>
-                  <Td>
-                    <StatusPill
-                      value={budget.status}
-                      label={humaniseEnum(budget.status, "BudgetStatus")}
-                      kind={budgetStatusKind(budget.status)}
-                    />
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </QueryState>
-      </Panel>
+      {/* WHY THERE IS NO BUTTON, said where the button would be. The
+          dashboard's "No budget yet" links HERE, and this page offers "New
+          budget" only with `budget.manage`: a reader without it would arrive
+          at a page with no button and nothing to explain it. Shown only to
+          that reader; one who has the permission can see the button. */}
+      {!canManage ? <p className="note">{t("budget.planner.needsPermission")}</p> : null}
 
-      {selectedBudgetId && (() => {
-        const selectedBudget = items.find((b) => b.id === selectedBudgetId);
-        if (selectedBudget == null) return null;
-        return (
-          <>
-            {/* `key` forces a remount on budget switch so the name/status
-                draft below always starts from the freshly-selected budget
-                instead of carrying over edits made to a different one. */}
-            <BudgetDetailCard key={selectedBudget.id} budget={selectedBudget} canManage={canManage} />
-            <LineGrid
-              budgetId={selectedBudget.id}
-              granularity={selectedBudget.granularity}
-              canManage={canManage}
-              closed={selectedBudget.status === "closed"}
-            />
-          </>
-        );
-      })()}
+      {selected ? (
+        // KEYED on the budget, so its draft always starts from the budget
+        // just chosen rather than carrying edits made to another one.
+        <BudgetPlan key={selected.id} budget={selected} canManage={canManage} onDirty={setPlanDirty} />
+      ) : (
+        <Panel bare>
+          <QueryState loading={budgets.isPending} error={budgets.error} empty={false} emptyLabel="">
+            {items.length === 0 ? (
+              <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("budget.planner.empty")} icon="budget" action={newBudget} />
+            ) : (
+              <Table label={t("budget.planner.listLabel")}>
+                <thead>
+                  <tr>
+                    <Th>{t("budget.planner.colName")}</Th>
+                    <Th>{t("budget.planner.colFiscalYear")}</Th>
+                    <Th>{t("budget.planner.colGranularity")}</Th>
+                    <Th>{t("budget.planner.colStatus")}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((budget) => (
+                    <tr key={budget.id}>
+                      <Td lead={<Icon name="wallet" size={18} />}>
+                        {/* The row's own name opens its plan: a link to
+                            `?budget=<id>`, so it can be opened in a new tab. */}
+                        <div className="cell-title">
+                          <Link to={`?budget=${encodeURIComponent(budget.id)}`}>{budget.name}</Link>
+                        </div>
+                      </Td>
+                      <Td>
+                        <span className="mono">{budget.fiscal_year}</span>
+                      </Td>
+                      <Td>{humaniseEnum(budget.granularity, "Granularity")}</Td>
+                      <Td>
+                        <StatusPill
+                          value={budget.status}
+                          label={humaniseEnum(budget.status, "BudgetStatus")}
+                          kind={budgetStatusKind(budget.status)}
+                        />
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+          </QueryState>
+        </Panel>
+      )}
 
-      <NewBudgetDialog open={creating} onClose={() => setCreating(false)} />
+      {/* Open only for someone who may create one; KEYED on being open, so
+          it starts empty however it opens (the button, a link, Back or Forward). */}
+      <NewBudgetDialog
+        key={created.open && canManage ? "open" : "closed"}
+        open={created.open && canManage}
+        onClose={created.close}
+        onDirty={setNewDirty}
+        onCreated={(budget) => {
+          // Saved: the dialog's own entry goes without asking, since what it held is stored.
+          release();
+          setNewDirty(false);
+          // In place of the dialog's entry: Back returns to where New was pressed.
+          const next = new URLSearchParams(params);
+          next.delete("new");
+          // THE OPEN PLAN'S CHANGES STAY (fix round 1, I3). With unsaved
+          // planned amounts the new budget is created and listed in the chip,
+          // but not opened: switching would drop the plan, and the release
+          // above is for closing the dialog, never for leaving the plan.
+          if (!planDirty) next.set("budget", budget.id);
+          setCreatedAside(planDirty ? { name: budget.name, beside: filters.values.budget } : null);
+          writeQuery(params, next, setParams, { replace: true });
+        }}
+      />
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
 }
 
-function NewBudgetDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function NewBudgetDialog({
+  open,
+  onClose,
+  onDirty,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+  onCreated: (budget: BudgetOut) => void;
+}) {
   const t = useT();
   const create = useCreateBudgetMutation();
 
-  const [fiscalYear, setFiscalYear] = useState(String(new Date().getFullYear()));
+  const thisYear = String(new Date().getFullYear());
+  const [fiscalYear, setFiscalYear] = useState(thisYear);
   const [name, setName] = useState("");
   const [granularity, setGranularity] = useState<Granularity>("month");
   // Filled ON SUBMIT, never while typing: a "Name is required" that appears
   // before the first keystroke has landed is its own kind of unhelpful. Held as
   // the rules and the values they were checked against, worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-
-  function reset() {
-    setFiscalYear(String(new Date().getFullYear()));
-    setName("");
-    setGranularity("month");
-    setAttempt(null);
-  }
-
-  // BudgetPlannerPage renders this component unconditionally, so it stays
-  // mounted with the dialog shut and mutation state OUTLIVES the dialog:
-  // without the resets a failed Save leaves `create.error` set and the next
-  // open announces the refusal of a request nobody has made yet.
-  function close() {
-    setAttempt(null);
-    create.reset();
-    onClose();
-  }
+  useReportDirty(open && (name !== "" || fiscalYear !== thisYear || granularity !== "month"), onDirty);
 
   function submit() {
     const next: Attempt = { rules: budgetRules, values: { name, fiscal_year: fiscalYear } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
-
+    // A new attempt starts without the last one's refusal.
+    create.reset();
     create.mutate(
       // Trimmed to match what was validated -- `requiredProblems` trims before
       // testing emptiness, so an untrimmed send could carry a name the checks
       // never saw.
       { fiscal_year: Number(fiscalYear), name: name.trim(), granularity },
-      { onSuccess: () => { reset(); onClose(); } },
+      { onSuccess: (budget) => onCreated(budget) },
     );
   }
 
   return (
-    <Dialog open={open} onClose={close} title={t("budget.planner.newTitle")}>
+    <Dialog open={open} onClose={onClose} title={t("budget.planner.newTitle")}>
       {/* A real <form>, so Enter in the Name field saves instead of doing
           nothing -- the other half of the same finding. */}
       <Form onSubmit={submit}>
@@ -279,13 +352,8 @@ function NewBudgetDialog({ open, onClose }: { open: boolean; onClose: () => void
             {/* `required` states the same fact for assistive tech. It blocks
                 nothing: <Form> is `noValidate`, because a native bubble that
                 vanishes on the next click is the silent no-op wearing a hat.
-                `BUDGET_RULES` is what the user reads. */}
-            <input
-              className={inputClass}
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+                `budgetRules` is what the user reads. */}
+            <input className={inputClass} required value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label={t("budget.planner.fiscalYear")}>
             {/* `min`/`max` are the server's range stated to the spinner; the
@@ -301,11 +369,7 @@ function NewBudgetDialog({ open, onClose }: { open: boolean; onClose: () => void
             />
           </Field>
           <Field label={t("budget.planner.granularity")}>
-            <select
-              className={inputClass}
-              value={granularity}
-              onChange={(e) => setGranularity(e.target.value as Granularity)}
-            >
+            <select className={inputClass} value={granularity} onChange={(e) => setGranularity(e.target.value as Granularity)}>
               {GRANULARITIES.map((g) => (
                 <option key={g} value={g}>
                   {humaniseEnum(g, "Granularity")}
@@ -315,17 +379,13 @@ function NewBudgetDialog({ open, onClose }: { open: boolean; onClose: () => void
           </Field>
         </div>
         <div className="flex justify-end gap-2">
-          {/* `type="button"` is load-bearing now that there is a form around
-              it: a button with no type inside a <form> IS a submit button, so
-              Cancel would save. */}
-          <Button type="button" variant="ghost" onClick={close}>
+          {/* `type="button"` is load-bearing: a button with no type inside a
+              <form> IS a submit button, so Cancel would save. */}
+          <Button type="button" variant="ghost" onClick={onClose}>
             {t("budget.common.cancel")}
           </Button>
           {/* Enabled with the fields empty ON PURPOSE -- the refusal is what
-              the user gets to read, and a control that will not move is not.
-              The server failure comes from here too, so a bodyless 503 still
-              produces a sentence and `role="alert"` announces it, replacing
-              the `{String(create.error)}` line that rendered a raw object. */}
+              the user gets to read, and a control that will not move is not. */}
           <FormActions
             label={t("budget.common.save")}
             pending={create.isPending}
@@ -338,123 +398,253 @@ function NewBudgetDialog({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-// Rename (name/status) via `PATCH /budget/budgets/{id}` and the dedicated
-// Close control via `POST /budget/budgets/{id}/close`. Kept as one panel so
-// the "closing is one-way" consequence sits right next to the button that
-// causes it, per the controller fix directive.
-function BudgetDetailCard({ budget, canManage }: { budget: BudgetOut; canManage: boolean }) {
+/**
+ * One budget's plan: its details (name and status, and the one-way Close) and
+ * the grid of planned amounts, one draft and one save bar.
+ */
+function BudgetPlan({
+  budget,
+  canManage,
+  onDirty,
+}: {
+  budget: BudgetOut;
+  canManage: boolean;
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useT();
+  const categories = useBudgetCategories();
+  const lines = useBudgetLines(budget.id);
   const update = useUpdateBudgetMutation();
+  const putLines = usePutBudgetLinesMutation();
   const close = useCloseBudgetMutation();
-
-  const [name, setName] = useState(budget.name);
-  const [status, setStatus] = useState<BudgetUpdateStatus>(
-    budget.status === "active" ? "active" : "draft",
-  );
-  const [attempt, setAttempt] = useState<Attempt | null>(null);
-  // Cycle 8. The consequence was already written next to the button -- "cannot
-  // be undone through any route, not even by reopening it" -- and the button
-  // still fired on one click. A sentence beside a control is not a
-  // confirmation: it is read once, on the visit where nobody presses it.
-  const [confirmingClose, setConfirmingClose] = useState(false);
+  const deleteLine = useDeleteBudgetLineMutation();
 
   const isClosed = budget.status === "closed";
+  const canEdit = canManage && !isClosed;
+  const server = useMemo(() => savedCells(lines.data ?? []), [lines.data]);
+  const saved: PlanDraft | undefined = lines.data
+    ? { name: budget.name, status: budget.status === "active" ? "active" : "draft", cells: server.cells }
+    : undefined;
+  const { draft, setDraft, dirty, discard, markSent } = useDraft(saved);
+  useReportDirty(dirty, onDirty);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // Cycle 8. Closing was one click; it asks now, the name typed back (below).
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  // Cycle 8. The `×` deleted a persisted planned amount on one click.
+  const [pendingDelete, setPendingDelete] = useState<
+    { key: string; categoryName: string; period: number; amount: string } | null
+  >(null);
 
-  // The same silent no-op as the New budget dialog, one panel down: the name
-  // could be cleared and the only response was a control that stopped working.
-  function saveDetails() {
-    const next: Attempt = { rules: budgetDetailRules, values: { name } };
-    setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+  const periods = Array.from({ length: periodCount(budget.granularity) }, (_, i) => i + 1);
+  const activeCategories = categories.data?.filter((c) => c.active) ?? [];
 
-    update.mutate({ id: budget.id, body: { name: name.trim(), status } });
+  const setCell = useCallback(
+    (key: string, value: string) => {
+      if (draft) setDraft({ ...draft, cells: { ...draft.cells, [key]: value } });
+    },
+    [draft, setDraft],
+  );
+
+  function save() {
+    if (!draft || !saved) return;
+    const detailsChanged = draft.name !== saved.name || draft.status !== saved.status;
+    const cellsChanged = JSON.stringify(draft.cells) !== JSON.stringify(saved.cells);
+    if (detailsChanged) {
+      // The same silent no-op as the New budget dialog, one panel down: the
+      // name could be cleared and the only response was a control that
+      // stopped working. The bar says which field is at fault.
+      const next: Attempt = { rules: budgetDetailRules, values: { name: draft.name } };
+      setAttempt(next);
+      if (attemptProblems(next).length > 0) return;
+    }
+    setAttempt(null);
+    // A new attempt starts without the last one's refusal.
+    update.reset();
+    putLines.reset();
+    markSent(draft);
+    const failed = () => markSent(null);
+    if (detailsChanged) {
+      update.mutate({ id: budget.id, body: { name: draft.name.trim(), status: draft.status } }, { onError: failed });
+    }
+    if (cellsChanged) {
+      // THE SAME LINES AS BEFORE: every active category and period with an
+      // amount typed in, as the string it was typed as.
+      const toSave: BudgetLineInput[] = [];
+      for (const category of activeCategories) {
+        for (const period of periods) {
+          const value = draft.cells[cellKey(category.id, period)];
+          if (value != null && value !== "") {
+            toSave.push({ category_id: category.id, period_index: period, planned_amount: value });
+          }
+        }
+      }
+      putLines.mutate({ budgetId: budget.id, lines: toSave }, { onError: failed });
+    }
   }
 
-  function closeBudget() {
-    close.mutate(budget.id);
+  function removeLine(key: string) {
+    const lineId = server.ids[key];
+    if (lineId == null) return;
+    deleteLine.mutate(
+      { budgetId: budget.id, lineId },
+      {
+        onSuccess: () => {
+          // The cell goes from the draft too, so the deleted amount does not
+          // stay on screen reading as an unsaved one.
+          if (!draft) return;
+          const cells = { ...draft.cells };
+          delete cells[key];
+          setDraft({ ...draft, cells });
+        },
+      },
+    );
   }
+
+  const saving = update.isPending || putLines.isPending;
+  const error = update.error ?? putLines.error;
 
   return (
-    <Panel title={t("budget.planner.detailsTitle")}>
-      {isClosed ? (
-        <p className="notice">
-          <Icon name="lock" size={16} />
-          <span>
-            {t("budget.planner.closedNotice")}
-          </span>
-        </p>
-      ) : (
-        canManage && (
-          <Form onSubmit={saveDetails}>
-            <Field label={t("budget.planner.name")}>
-              <input
-                className={inputClass}
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Field>
-            <Field label={t("budget.planner.status")}>
-              <select
-                className={inputClass}
-                value={status}
-                onChange={(e) => setStatus(e.target.value as BudgetUpdateStatus)}
-              >
-                <option value="draft">{humaniseEnum("draft", "BudgetStatus")}</option>
-                <option value="active">{humaniseEnum("active", "BudgetStatus")}</option>
-              </select>
-            </Field>
+    <>
+      <FormSection title={t("budget.planner.detailsTitle")} icon="wallet">
+        {isClosed ? (
+          <p className="notice">
+            <Icon name="lock" size={16} />
+            <span>{t("budget.planner.closedNotice")}</span>
+          </p>
+        ) : canManage && draft ? (
+          // A real <form>, so Enter in the Name field saves, as before.
+          <Form onSubmit={save}>
+            <div className="form-grid">
+              <Field label={t("budget.planner.name")}>
+                <input
+                  className={inputClass}
+                  required
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </Field>
+              <Field label={t("budget.planner.status")}>
+                <select
+                  className={inputClass}
+                  value={draft.status}
+                  onChange={(e) => setDraft({ ...draft, status: e.target.value as BudgetUpdateStatus })}
+                >
+                  <option value="draft">{humaniseEnum("draft", "BudgetStatus")}</option>
+                  <option value="active">{humaniseEnum("active", "BudgetStatus")}</option>
+                </select>
+              </Field>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
-              {/* "Save details" became "Save": `FormActions` builds its pending
-                  text from the label (`Save` → `Saving…`), and the panel this
-                  sits in is already titled "Budget details". */}
-              <FormActions
-                label={t("budget.common.save")}
-                pending={update.isPending}
-                error={update.error}
-                problems={attemptProblems(attempt)}
-              />
               {/* `type="button"`: Close budget is one-way and irreversible, and
                   a button with no type inside a <form> IS a submit button --
                   Enter in the Name field would have closed the budget. */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setConfirmingClose(true)}
-                disabled={close.isPending}
-              >
+              <Button type="button" variant="outline" onClick={() => setConfirmingClose(true)} disabled={close.isPending}>
                 {close.isPending ? t("budget.planner.closing") : t("budget.planner.close")}
               </Button>
+              <span className="note">{t("budget.planner.closeNote")}</span>
             </div>
-            <p className="note" style={{ marginTop: 8 }}>
-              {t("budget.planner.closeNote")}
-            </p>
-            {/* Close has no FormActions of its own, so it gets the same
-                treatment by hand: `String(close.error)` rendered "Error: " for
-                a bodyless 503 and was announced to nobody. */}
             {close.isError && (
               <p role="alert" className="notice red">
                 <Icon name="circle-x" size={16} />
                 <span>{describeSubmitError(close.error)}</span>
               </p>
             )}
-
           </Form>
-        )
-      )}
+        ) : (
+          <p className="note">{t("budget.planner.detailsReadOnly", { name: budget.name, year: budget.fiscal_year })}</p>
+        )}
+      </FormSection>
 
-      {/* OUTSIDE THE `<Form>`, deliberately. `ui.tsx`'s Button sets no `type`,
-          so a button rendered inside a form IS a submit button -- the same trap
-          the `type="button"` notes above this file guard against. Nested in the
-          form, this dialog's own Cancel would have saved the budget details.
+      <Panel title={t("budget.planner.gridTitle")} bare>
+        <QueryState
+          loading={lines.isPending || categories.isPending}
+          error={lines.error ?? categories.error}
+          empty={activeCategories.length === 0}
+          emptyLabel={t("budget.planner.gridEmpty")}
+          emptyIcon="tag"
+        >
+          <Table label={t("budget.planner.gridTitle")}>
+            <thead>
+              <tr>
+                <Th>{t("budget.planner.colCategory")}</Th>
+                {periods.map((p) => (
+                  <Th key={p}>{`P${p}`}</Th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {activeCategories.map((category) => (
+                <tr key={category.id}>
+                  <Td lead={<Icon name="tag" size={18} />}>
+                    <div className="cell-title">{category.name}</div>
+                  </Td>
+                  {periods.map((period) => {
+                    const key = cellKey(category.id, period);
+                    return (
+                      <Td key={key}>
+                        <div className="flex items-center gap-1">
+                          <input
+                            aria-label={t("budget.planner.cellAria", { category: category.name, period })}
+                            className={inputClass}
+                            style={{ minWidth: 96 }}
+                            value={draft?.cells[key] ?? ""}
+                            onChange={(e) => setCell(key, e.target.value)}
+                            disabled={!canEdit}
+                          />
+                          {canEdit && server.ids[key] != null && (
+                            /* A real button with a boundary and a name that
+                               says which cell (SC 1.4.11): a grid of these all
+                               reading "Delete" would be identical buttons. */
+                            <Btn
+                              small
+                              variant="ghost"
+                              icon="close"
+                              iconOnly
+                              label={t("budget.planner.deleteAria", { category: category.name, period })}
+                              onClick={() =>
+                                setPendingDelete({
+                                  key,
+                                  categoryName: category.name,
+                                  period,
+                                  amount: server.cells[key] ?? "",
+                                })
+                              }
+                            />
+                          )}
+                        </div>
+                      </Td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </QueryState>
+        {deleteLine.isError && (
+          <p role="alert" className="notice red" style={{ margin: 12 }}>
+            <Icon name="circle-x" size={16} />
+            <span>{describeSubmitError(deleteLine.error)}</span>
+          </p>
+        )}
+      </Panel>
 
-          The subject is the budget's name AND fiscal year, because a planner
-          holds several budgets whose names differ by a year that is easy to
-          miss ("IT operating", FY2025 and FY2026) and closing the wrong one
-          freezes the year people are still planning. `requireTyping` IS
-          justified here and almost nowhere else in this module: there is no
-          reopen -- not through the API, not through this console -- and the
-          blast radius is every line in the year, for everyone. */}
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        error={error}
+        problems={attemptProblems(attempt)}
+        saved={(update.isSuccess || putLines.isSuccess) && !dirty}
+        onDiscard={() => {
+          setAttempt(null);
+          discard();
+        }}
+        onSave={save}
+      />
+
+      {/* The subject is the budget's name AND fiscal year: names often differ
+          only by the year, and closing the wrong one freezes the year people
+          are still planning. `requireTyping` because there is no reopen --
+          not through the API, not through this console. */}
       <ConfirmDialog
         open={confirmingClose}
         title={t("budget.planner.close")}
@@ -466,187 +656,12 @@ function BudgetDetailCard({ budget, canManage }: { budget: BudgetOut; canManage:
         onCancel={() => setConfirmingClose(false)}
         onConfirm={() => {
           setConfirmingClose(false);
-          closeBudget();
+          close.reset();
+          close.mutate(budget.id);
         }}
       />
-    </Panel>
-  );
-}
-
-function LineGrid({
-  budgetId,
-  granularity,
-  canManage,
-  closed,
-}: {
-  budgetId: string;
-  granularity: string;
-  canManage: boolean;
-  closed: boolean;
-}) {
-  const t = useT();
-  const categories = useBudgetCategories();
-  const lines = useBudgetLines(budgetId);
-  const putLines = usePutBudgetLinesMutation();
-  const deleteLine = useDeleteBudgetLineMutation();
-
-  // `cells` holds every edited (or loaded) planned amount as a STRING --
-  // money is a Decimal server-side and travels as a string; this grid never
-  // parses a cell to a number. `lineIds` tracks which cell corresponds to an
-  // already-persisted `BudgetLine.id`, so a cell that was never saved has no
-  // delete control (there is nothing on the server to delete yet).
-  const [cells, setCells] = useState<Record<string, string>>({});
-  const [lineIds, setLineIds] = useState<Record<string, string>>({});
-  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined);
-  // Cycle 8. The `×` deleted a persisted planned amount on one click, from a
-  // grid of up to twelve identical cells per row, with no confirmation and no
-  // undo -- the "styled identically to the safe controls beside it" shape the
-  // audits found on /sla and /health, at grid density.
-  const [pendingDelete, setPendingDelete] = useState<
-    { key: string; categoryName: string; period: number; amount: string } | null
-  >(null);
-
-  if (lines.data && loadedFor !== budgetId) {
-    const initial: Record<string, string> = {};
-    const ids: Record<string, string> = {};
-    for (const line of lines.data) {
-      if (line.cost_center_id == null) {
-        const key = cellKey(line.category_id, line.period_index);
-        initial[key] = line.planned_amount;
-        ids[key] = line.id;
-      }
-    }
-    setCells(initial);
-    setLineIds(ids);
-    setLoadedFor(budgetId);
-  }
-
-  const periods = Array.from({ length: periodCount(granularity) }, (_, i) => i + 1);
-  const activeCategories = categories.data?.filter((c) => c.active) ?? [];
-  const canEdit = canManage && !closed;
-
-  function save() {
-    const toSave: BudgetLineInput[] = [];
-    for (const category of activeCategories) {
-      for (const period of periods) {
-        const value = cells[cellKey(category.id, period)];
-        if (value != null && value !== "") {
-          toSave.push({ category_id: category.id, period_index: period, planned_amount: value });
-        }
-      }
-    }
-    putLines.mutate({ budgetId, lines: toSave });
-  }
-
-  function removeLine(key: string) {
-    const lineId = lineIds[key];
-    if (lineId == null) return;
-    deleteLine.mutate(
-      { budgetId, lineId },
-      {
-        onSuccess: () => {
-          setCells((prev) => {
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
-          setLineIds((prev) => {
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
-        },
-      },
-    );
-  }
-
-  return (
-    <Panel
-      title={t("budget.planner.gridTitle")}
-      bare
-      actions={
-        canEdit ? (
-          <Button onClick={save} disabled={putLines.isPending}>
-            {putLines.isPending ? t("budget.common.saving") : t("budget.planner.saveGrid")}
-          </Button>
-        ) : undefined
-      }
-    >
-      <QueryState
-        loading={lines.isLoading}
-        error={lines.error}
-        empty={activeCategories.length === 0}
-        emptyLabel={t("budget.planner.gridEmpty")}
-        emptyIcon="tag"
-      >
-        <Table>
-          <thead>
-            <tr>
-              <Th>{t("budget.planner.colCategory")}</Th>
-              {periods.map((p) => (
-                <Th key={p}>{`P${p}`}</Th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {activeCategories.map((category) => (
-              <tr key={category.id}>
-                <Td lead={<Icon name="tag" size={18} />}>
-                  <div className="cell-title">{category.name}</div>
-                </Td>
-                {periods.map((period) => {
-                  const key = cellKey(category.id, period);
-                  return (
-                    <Td key={key}>
-                      <div className="flex items-center gap-1">
-                        <input
-                          aria-label={t("budget.planner.cellAria", { category: category.name, period })}
-                          className={inputClass}
-                          style={{ minWidth: 96 }}
-                          value={cells[key] ?? ""}
-                          onChange={(e) => setCells((prev) => ({ ...prev, [key]: e.target.value }))}
-                          disabled={!canEdit}
-                        />
-                        {canEdit && lineIds[key] != null && (
-                          /* THE ONE ICON-ONLY AFFORDANCE IN THIS PASS THAT IS
-                             GENUINELY A BUTTON. It was a bare `×` glyph with
-                             no boundary of any kind, which is what SC 1.4.11
-                             means by a component you cannot identify: the
-                             only thing saying "press me" was `--muted-2`
-                             text. `iconOnly` and `ariaLabel` are what it
-                             needed and neither existed, so it hand-rolled a
-                             ring instead. The name is unchanged, and it is
-                             the name that matters -- a grid of these all
-                             reading "Delete" would be a list of identical
-                             buttons to a screen reader. */
-                          <Btn
-                            small
-                            variant="ghost"
-                            icon="close"
-                            iconOnly
-                            label={t("budget.planner.deleteAria", { category: category.name, period })}
-                            onClick={() =>
-                              setPendingDelete({
-                                key,
-                                categoryName: category.name,
-                                period,
-                                amount: cells[key] ?? "",
-                              })
-                            }
-                          />
-                        )}
-                      </div>
-                    </Td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </QueryState>
       {/* The subject names the cell -- category and period -- and the amount
-          in it, because the grid's cells are indistinguishable at a glance and
-          the number is what makes one recognisable. */}
+          in it, because the grid's cells are indistinguishable at a glance. */}
       <ConfirmDialog
         open={pendingDelete != null}
         title={t("budget.planner.deleteTitle")}
@@ -666,27 +681,13 @@ function LineGrid({
         destructive
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {
-          if (pendingDelete) removeLine(pendingDelete.key);
+          if (pendingDelete) {
+            deleteLine.reset();
+            removeLine(pendingDelete.key);
+          }
           setPendingDelete(null);
         }}
       />
-
-      {/* `String(error)` on both: a bodyless 503 read "ApiError: " with nothing
-          after it, a 422 printed the raw Pydantic payload, and neither was
-          announced -- on the grid where a rejected Save leaves the typed
-          numbers on screen looking exactly like saved ones. */}
-      {putLines.isError && (
-        <p role="alert" className="notice red">
-          <Icon name="circle-x" size={16} />
-          <span>{describeSubmitError(putLines.error)}</span>
-        </p>
-      )}
-      {deleteLine.isError && (
-        <p role="alert" className="notice red">
-          <Icon name="circle-x" size={16} />
-          <span>{describeSubmitError(deleteLine.error)}</span>
-        </p>
-      )}
-    </Panel>
+    </>
   );
 }

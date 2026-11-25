@@ -27,6 +27,9 @@ import {
   type SiteWakeRequest,
 } from "./types";
 
+/** Where the wake form is: the head's Wake a machine brings it into view. One source for the page and its tests. */
+export const WAKE_FORM_ID = "site-server-wake";
+
 export function SiteServerDetail({
   server,
   device,
@@ -104,10 +107,13 @@ export function SiteServerDetail({
           },
           {
             k: t("siteServers.detail.device"),
+            // The machine and its address: what the page head's sentence used
+            // to carry, now that the head names the client alone.
             v: device ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <OsIcon os={device.os_family ?? ""} size={16} />
                 <span className="mono">{device.hostname ?? device.id}</span>
+                {device.primary_ip ? <span className="mono">{device.primary_ip}</span> : null}
               </span>
             ) : (
               <span className="mono">{server.device_id}</span>
@@ -137,6 +143,8 @@ export function SiteServerDetail({
       </Panel>
 
       {canWake ? (
+        // The head's Wake a machine brings this form into view (`WAKE_FORM_ID`).
+        <div id={WAKE_FORM_ID}>
         <Panel
           title={t("siteServers.detail.wakeTitle")}
           subtitle={t("siteServers.detail.wakeSubtitle")}
@@ -150,6 +158,7 @@ export function SiteServerDetail({
             zone={zone}
           />
         </Panel>
+        </div>
       ) : null}
     </article>
   );

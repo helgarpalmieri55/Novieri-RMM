@@ -104,6 +104,34 @@ describe("scripts/routes.mjs covers App.tsx", () => {
     expect(ROUTES).toContain("/settings?tab=roles");
   });
 
+  it("walks the drawer and editor states the page waves put in the URL (kit requests batch 1, item 8)", () => {
+    // A state behind a query parameter is drawn on no plain route, so the
+    // gate measures it only as a variant. Each id is one the fixtures answer.
+    const variants: [route: string, fixtures: string, id: string][] = [
+      ["/patch/policies?policy=pol-default", "../modules/patch/fixtures.ts", "pol-default"],
+      ["/jobs?job=job-1", "../modules/jobs/fixtures.ts", "job-1"],
+      ["/security?event=sec-1", "../modules/security/fixtures.ts", "sec-1"],
+      ["/error-monitor?group=eg-1", "../modules/error-monitor/fixtures.ts", "eg-1"],
+      ["/backup/offsite?edit=offsite-wasabi", "../modules/backup/fixtures.ts", "offsite-wasabi"],
+    ];
+    for (const [route, fixtures, id] of variants) {
+      expect(ROUTES).toContain(route);
+      expect(readFileSync(resolve(import.meta.dirname, fixtures), "utf8"), `${fixtures} has no ${id}`).toMatch(
+        new RegExp(`id: "${id}"`),
+      );
+    }
+  });
+
+  it("walks Enrollment -> Certificates, which /enrollment alone never opens (kit requests batch 2, K7)", () => {
+    expect(ROUTES).toContain("/enrollment?tab=certificates");
+  });
+
+  it("walks the license renewal calendar at the 90 days the register's tile opens (P3 adoption pass, C's request R6)", () => {
+    // The register's "Renewals in 90 days" tile links `?within=90`; the plain
+    // route draws the calendar's default window, so the tile's is a variant.
+    expect(ROUTES).toContain("/licenses/renewals?within=90");
+  });
+
   it("has no duplicates", () => {
     expect(new Set(ROUTES).size).toBe(ROUTES.length);
   });

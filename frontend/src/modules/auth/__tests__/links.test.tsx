@@ -54,6 +54,18 @@ describe("resetting the password from the emailed link", () => {
     expect(calls.resetPassword).not.toHaveBeenCalled();
   });
 
+  it("keeps Change password on, and says the rule when it is pressed empty, sending nothing", async () => {
+    // Coordinator ruling 8a (2026-11-25): two fields, so the button stays on
+    // and the press reports what is missing (the rule the password must meet).
+    const user = userEvent.setup();
+    renderAuth("/reset-password#tok");
+    const go = await screen.findByRole("button", { name: "Change password" });
+    expect(go).toBeEnabled();
+    await user.click(go);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use at least 12 characters.");
+    expect(calls.resetPassword).not.toHaveBeenCalled();
+  });
+
   it("counts each character once, emoji included: eleven are too few, twelve are enough", async () => {
     // A key emoji is two UTF-16 units: `.length` would call eleven of them 22.
     renderAuth("/reset-password#tok");
@@ -151,6 +163,18 @@ describe("accepting an invitation", () => {
 
     expect(calls.acceptInvite).toHaveBeenCalledWith({ token: "tok-invite-1", password: GOOD });
     await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+  });
+
+  it("keeps Set password and continue on, and says the rule when it is pressed empty, sending nothing", async () => {
+    // Coordinator ruling 8a (2026-11-25): two fields, so the button stays on
+    // and the press reports what is missing.
+    const user = userEvent.setup();
+    renderAuth("/invite#tok-invite-1");
+    const go = await screen.findByRole("button", { name: "Set password and continue" });
+    expect(go).toBeEnabled();
+    await user.click(go);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use at least 12 characters.");
+    expect(calls.acceptInvite).not.toHaveBeenCalled();
   });
 
   it("says an expired, used or cancelled invitation for what it is", async () => {

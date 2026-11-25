@@ -10,6 +10,7 @@
  */
 export const docs = {
   page: {
+    backToList: "All articles",
     title: "IT documentation",
     description: "Runbooks, records and files, linked to the devices they describe.",
     newArticle: "New article",
@@ -51,14 +52,14 @@ export const docs = {
       searchPlaceholder: "Search articles, hosts, IPs",
       clearSearch: "Clear search",
       clear: "Clear",
+      // The article table's name and the phone's way back to it (redesign Task 11, 6.1).
+      tableLabel: "Articles",
       filterByCategory: "Filter by category",
       all: "All",
-      count: { one: "{count} article", other: "{count} articles" },
       searchNote:
         "Searches titles, descriptions, categories and the current file's name. It does not search inside stored files, and it does not search older versions' filenames.",
       noMatch: "No documentation matches that search.",
       noArticles: "No articles yet.",
-      noneInCategory: "No article in {category}.",
       searchResults: "Search results",
       groupArticles: "Articles",
       groupRecords: "Records",
@@ -80,7 +81,6 @@ export const docs = {
     markdown: "Markdown",
     preview: "Preview",
     cancel: "Cancel",
-    save: "Save",
   },
   article: {
     updated: "updated {date}",
@@ -97,7 +97,7 @@ export const docs = {
       "The version history could not be loaded, so this is not a list of the edits to this article. {reason}",
     loading: "Loading…",
     noEarlier: "No earlier versions.",
-    version: "v{version} — {date}",
+    version: "v{version} · {date}",
     loadFailed: "The article could not be loaded. {reason}",
   },
   portal: {
@@ -154,7 +154,7 @@ export const docs = {
       "The document leaves the library and search. Its files stay downloadable, and only an administrator can restore it. Nothing is destroyed.",
     archiveConfirm: "Archive document",
     purgeTitle: "Destroy these bytes",
-    purgeSubject: "Version {version} — {filename}, {size}",
+    purgeSubject: "Version {version} ({filename}, {size})",
     purgeBody:
       "The file is deleted from storage and cannot be recovered: no undo, and no backup this console can reach. The filename, size, digest, and who did it survive in the version history and the audit log.",
     purgeConfirm: "Destroy the bytes",
@@ -215,7 +215,7 @@ export const docs = {
     auditNote:
       "Opening a document is recorded in the audit log as a download, the same as pressing Download.",
     destroyed:
-      "<b>These bytes were destroyed.</b> Version {version} ({filename}, {size}) was purged and cannot be recovered from this platform. The record of the destruction — who did it and when — is kept in the audit log.",
+      "<b>These bytes were destroyed.</b> Version {version} ({filename}, {size}) was purged and cannot be recovered from this platform. The record of the destruction, who did it and when, is kept in the audit log.",
     noPreview:
       "This console does not preview {type} files. Download {filename} to open it in an application that can.",
     loading: "Loading {filename}…",
@@ -224,6 +224,6 @@ export const docs = {
     noPreviewShort: "This console does not preview {type} files. Download {filename} to open it.",
   },
   markdown: {
-    linkRemoved: "Link removed — unsupported URL scheme.",
+    linkRemoved: "Link removed: unsupported URL scheme.",
   },
 } as const;

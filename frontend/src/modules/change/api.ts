@@ -7,6 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { Me } from "../../lib/api";
 import type {
   ApprovalDecisionRequest,
@@ -49,9 +50,17 @@ export function useUserTimezone(): string | null {
   return me.data?.timezone ?? null;
 }
 
-export function useChanges() {
-  const api = useApi();
-  return useQuery({ queryKey: ["changes"], queryFn: () => api.listChanges() });
+/**
+ * Every change this session may see, or, with the Client chip, one client's
+ * (redesign Task 11, 6.2; Receta L, 7). `chip` is `?client=` ("" without the
+ * chip): the same `listChanges()`, read through the narrowed API and keyed by
+ * the client it was narrowed to, and only once that is decided (`ready`).
+ * The approval queue calls it without a chip. The mutations below invalidate
+ * the `["changes"]` prefix, which reaches every client's copy.
+ */
+export function useChanges(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({ queryKey: ["changes", client], queryFn: () => api.listChanges(), enabled: ready });
 }
 
 export function useCreateChangeMutation() {

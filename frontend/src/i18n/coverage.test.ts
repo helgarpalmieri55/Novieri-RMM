@@ -112,7 +112,6 @@ export const TEXT_PROPS: ReadonlySet<string> = new Set([
  * at the site is the better tool.
  */
 export const ALLOWED_LITERALS: Readonly<Record<string, string>> = {
-  ITMS: "The product's own name, shown in the breadcrumb root and the sidebar wordmark.",
   Windows: "A platform brand, listed as an OS family option; Microsoft's name for it is the same in Spanish.",
   Linux: "A platform brand, listed as an OS family option.",
   macOS: "A platform brand, listed as an OS family option.",

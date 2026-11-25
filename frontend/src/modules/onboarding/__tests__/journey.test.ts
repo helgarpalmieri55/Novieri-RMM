@@ -229,6 +229,9 @@ describe("step 3 — swept, and the segment nothing could look at", () => {
     expect(blind.state).toBe("blocked");
     expect(blind.status).toMatch(/no enrolled agent/i);
     expect(blind.remedy).toMatch(/never probes/);
+    // The emphasis is in the wording, not in typed capitals (DESIGN.md: no
+    // uppercase copy); it was "performed BY an agent".
+    expect(blind.remedy).toMatch(/^A sweep is always performed by an agent inside the segment\./);
     // And it sends them somewhere that helps, rather than back to the button
     // that just failed.
     expect(blind.to).toBe("/agent-packages");
@@ -333,7 +336,7 @@ describe("the journey's client and site (MSP clients phase 3, design §4.4)", ()
     const steps = journeySteps(input({ linkQuery: journeyQuery("c-andes", "s-main") }));
     const destinations = steps.map((s) => s.to).filter((to): to is string => to !== null);
     expect(destinations.length).toBeGreaterThan(0);
-    for (const to of destinations) expect(to).toMatch(/\?client=c-andes&site=s-main$/);
+    for (const to of destinations) expect(to).toMatch(/\?journey_client=c-andes&journey_site=s-main$/);
   });
 
   it("leaves every destination alone until both are known", () => {
@@ -344,11 +347,11 @@ describe("the journey's client and site (MSP clients phase 3, design §4.4)", ()
   });
 
   it("builds the query, and keeps a fragment last", () => {
-    expect(journeyQuery("c 1", "s-main")).toBe("client=c+1&site=s-main");
-    expect(journeyQuery("c1", null)).toBe("client=c1");
-    expect(withJourney("/ipam", "client=c1&site=s1")).toBe("/ipam?client=c1&site=s1");
-    expect(withJourney("/x?a=1", "client=c1")).toBe("/x?a=1&client=c1");
-    expect(withJourney("/health#profiles", "client=c1")).toBe("/health?client=c1#profiles");
+    expect(journeyQuery("c 1", "s-main")).toBe("journey_client=c+1&journey_site=s-main");
+    expect(journeyQuery("c1", null)).toBe("journey_client=c1");
+    expect(withJourney("/ipam", "journey_client=c1&journey_site=s1")).toBe("/ipam?journey_client=c1&journey_site=s1");
+    expect(withJourney("/x?a=1", "journey_client=c1")).toBe("/x?a=1&journey_client=c1");
+    expect(withJourney("/health#profiles", "journey_client=c1")).toBe("/health?journey_client=c1#profiles");
     expect(withJourney("/ipam", "")).toBe("/ipam");
   });
 });

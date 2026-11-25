@@ -10,10 +10,19 @@
  * sealed server-side, and the recovery private key is made and kept offline.
  * The server gates every control here (`backup.offsite.manage`,
  * `backup.recovery.manage`); hiding a button is courtesy, not security.
+ *
+ * ON THE FORM KIT (redesign plan, Task 9, 4.4; Receta FO). Adding a storage
+ * is a dialog opened from `?new=target` (decision D8), the page head's one
+ * primary. Editing one is no longer a thirteen-field dialog: `?edit=<id>`
+ * opens that storage's settings as a section of the page, below the list,
+ * with the console's one save bar ("Unsaved changes · Discard · Save") and
+ * the question before leaving. One storage is edited at a time, so there is
+ * one bar and one guard holding changes. The bodies sent are the ones the
+ * dialog sent (`targetSettings`), and the recovery key's wizard is unchanged.
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -24,7 +33,20 @@ import { Trans } from "../../i18n/Trans";
 import { formatDateTime } from "../../lib/datetime";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  FormSection,
+  ListEmpty,
+  PageHead,
+  Panel,
+  QueryState,
+  SaveBar,
+  StatusPill,
+  useDraft,
+  useEditParam,
+  useNewParam,
+  useUnsavedGuard,
+} from "../../shell/components";
 import {
   useBackupRepositories,
   useCreateOffsiteTargetMutation,
@@ -60,17 +82,69 @@ export function OffsitePage() {
   const canManageStorage = permissions.includes("backup.offsite.manage");
   const canManageKey = permissions.includes("backup.recovery.manage");
   const zone = me.data?.timezone;
+  // Add off-site storage opens from `?new=target`; the storage being edited
+  // is `?edit=<id>`, so a reload or a link opens the same form. Closing
+  // either undoes its opening (Back from the entry `start` added).
+  const adding = useNewParam("target");
+  const editing = useEditParam("target");
+  const targets = useOffsiteTargets();
+  const edited = canManageStorage ? (targets.data ?? []).find((target) => target.id === editing.id) : undefined;
+  // ONE GUARD FOR THE PAGE (general ruling 3; formKit: one dirty guard per
+  // page), fed by the storage edited in `?edit=` and the one being added in
+  // `?new=target`. Each form's key is guarded only while that form holds a
+  // change, so opening Add over an edit with changes is not "leaving" it.
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [addDirty, setAddDirty] = useState(false);
+  const { guard, release } = useUnsavedGuard(editorDirty || addDirty, {
+    search: [...(editorDirty ? ["edit"] : []), ...(addDirty ? ["new"] : [])],
+  });
 
   return (
     <div>
       <PageHead
         title={t("backup.offsite.title")}
         description={t("backup.offsite.description")}
+        actions={
+          canManageStorage ? (
+            <Btn label={t("backup.offsite.storageAdd")} icon="plus" variant="primary" onClick={adding.start} />
+          ) : undefined
+        }
       />
       <BackupPageNav canRead={canRead} />
       <RecoveryKeyPanel canManage={canManageKey} zone={zone} />
-      <StoragePanel canManage={canManageStorage} zone={zone} />
+      <StoragePanel
+        canManage={canManageStorage}
+        zone={zone}
+        onEdit={(target) => editing.start(target.id)}
+        add={
+          canManageStorage ? <Btn label={t("backup.offsite.storageAdd")} icon="plus" small onClick={adding.start} /> : null
+        }
+      />
+      {/* KEYED by the storage, so another storage's form starts from its own
+          values rather than the last one's draft. */}
+      {guard}
+      {edited ? (
+        <TargetEditor
+          key={edited.id}
+          target={edited}
+          onClose={editing.close}
+          onDirty={setEditorDirty}
+        />
+      ) : null}
       <RepositoriesPanel canManage={canManageStorage} />
+      {/* KEYED so a refusal cannot outlive the dialog that produced it. Open
+          only for someone who may manage storage, whatever the URL asks. */}
+      <TargetDialog
+        key={adding.open && canManageStorage ? "open" : "closed"}
+        open={adding.open && canManageStorage}
+        onClose={adding.close}
+        onDirty={setAddDirty}
+        onSaved={() => {
+          // Saved: the close that follows is not a change being dropped.
+          release();
+          adding.close();
+        }}
+      />
     </div>
   );
 }
@@ -93,12 +167,9 @@ function RecoveryKeyPanel({ canManage, zone }: { canManage: boolean; zone?: stri
       subtitle={t("backup.offsite.keySubtitle")}
       actions={
         canManage && proven.length === 0 && unconfirmed.length === 0 ? (
-          <Btn
-            label={t("backup.offsite.keySetUp")}
-            icon="plus"
-            variant="primary"
-            onClick={() => setWizard({ open: true })}
-          />
+          // ONE PRIMARY PER PAGE (Receta FO; the head's Add off-site storage):
+          // the key's first step is this panel's own action, drawn plain.
+          <Btn label={t("backup.offsite.keySetUp")} icon="plus" onClick={() => setWizard({ open: true })} />
         ) : undefined
       }
     >
@@ -328,38 +399,38 @@ export function RecoveryKeyWizard({
 // Storage
 // --------------------------------------------------------------------------- //
 
-function StoragePanel({ canManage, zone }: { canManage: boolean; zone?: string | null }) {
+function StoragePanel({
+  canManage,
+  zone,
+  onEdit,
+  add,
+}: {
+  canManage: boolean;
+  zone?: string | null;
+  onEdit: (target: OffsiteTarget) => void;
+  /** The empty list's way forward: Add off-site storage, for someone who may. */
+  add: ReactNode;
+}) {
   const t = useT();
   const targets = useOffsiteTargets();
   const test = useTestOffsiteTargetMutation();
-  const [editing, setEditing] = useState<{ open: boolean; target?: OffsiteTarget }>({
-    open: false,
-  });
   const items = targets.data ?? [];
 
   return (
-    <Panel
-      title={t("backup.offsite.storageTitle")}
-      subtitle={t("backup.offsite.storageSubtitle")}
-      actions={
-        canManage ? (
-          <Btn
-            label={t("backup.offsite.storageAdd")}
-            icon="plus"
-            variant="primary"
-            onClick={() => setEditing({ open: true })}
+    <Panel bare title={t("backup.offsite.storageTitle")} subtitle={t("backup.offsite.storageSubtitle")}>
+      <QueryState loading={targets.isLoading} error={targets.error} empty={false} emptyLabel="">
+        {items.length === 0 ? (
+          // The kit's empty state (fix round 1, M4): nothing exists yet, with
+          // the way to add one. Nothing filters this list.
+          <ListEmpty
+            filtered={false}
+            onClear={() => {}}
+            nothingYet={t("backup.offsite.storageEmpty")}
+            icon="database"
+            action={add}
           />
-        ) : undefined
-      }
-    >
-      <QueryState
-        loading={targets.isLoading}
-        error={targets.error}
-        empty={items.length === 0}
-        emptyLabel={t("backup.offsite.storageEmpty")}
-        emptyIcon="database"
-      >
-        <Table>
+        ) : (
+        <Table label={t("backup.offsite.storageTitle")}>
           <thead>
             <tr>
               <Th>{t("backup.offsite.colName")}</Th>
@@ -417,7 +488,7 @@ function StoragePanel({ canManage, zone }: { canManage: boolean; zone?: string |
                       <Btn
                         label={t("backup.offsite.edit")}
                         small
-                        onClick={() => setEditing({ open: true, target })}
+                        onClick={() => onEdit(target)}
                       />
                     </span>
                   ) : null}
@@ -426,13 +497,8 @@ function StoragePanel({ canManage, zone }: { canManage: boolean; zone?: string |
             ))}
           </tbody>
         </Table>
+        )}
       </QueryState>
-      <TargetDialog
-        key={editing.open ? `open-${editing.target?.id ?? "new"}` : "closed"}
-        open={editing.open}
-        target={editing.target}
-        onClose={() => setEditing({ open: false })}
-      />
     </Panel>
   );
 }
@@ -467,14 +533,13 @@ const targetRules = (creating: boolean): readonly FieldRule[] => {
   return rules;
 };
 
-type TargetValues = {
+/** A storage's settings as the form holds them: everything but its two keys. */
+type TargetSettingsValues = {
   name: string;
   endpoint: string;
   region: string;
   bucket: string;
   prefix: string;
-  access_key_id: string;
-  secret_access_key: string;
   immutable_days: string;
   max_mbps: string;
   daily: string;
@@ -483,6 +548,17 @@ type TargetValues = {
   yearly: string;
 };
 
+/**
+ * The storage's two keys, held APART from its settings: they go in once and
+ * the server never returns them, so they are never part of what the editor
+ * compares with the server (`useDraft` keeps that as text) and never saved.
+ */
+type TargetKeys = { access_key_id: string; secret_access_key: string };
+
+type TargetValues = TargetSettingsValues & TargetKeys;
+
+const NO_KEYS: TargetKeys = { access_key_id: "", secret_access_key: "" };
+
 const GFS_FIELDS: ReadonlyArray<{ key: keyof RetentionGfs & keyof TargetValues; label: MessageKey }> = [
   { key: "daily", label: "backup.offsite.gfsDaily" },
   { key: "weekly", label: "backup.offsite.gfsWeekly" },
@@ -490,193 +566,305 @@ const GFS_FIELDS: ReadonlyArray<{ key: keyof RetentionGfs & keyof TargetValues; 
   { key: "yearly", label: "backup.offsite.gfsYearly" },
 ];
 
-export function TargetDialog({
-  open,
-  target,
-  onClose,
-}: {
-  open: boolean;
-  target?: OffsiteTarget;
-  onClose: () => void;
-}) {
-  const t = useT();
-  const create = useCreateOffsiteTargetMutation();
-  const update = useUpdateOffsiteTargetMutation();
-  const [values, setValues] = useState<TargetValues>({
+/** What the form shows for a storage: the server's values, or a new one's defaults. */
+function targetValues(target?: OffsiteTarget): TargetSettingsValues {
+  return {
     name: target?.name ?? "",
     endpoint: target?.endpoint ?? "",
     region: target?.region ?? "us-east-1",
     bucket: target?.bucket ?? "",
     prefix: target?.prefix ?? "itms",
-    access_key_id: "",
-    secret_access_key: "",
     immutable_days: String(target?.immutable_days ?? 30),
     max_mbps: target?.max_mbps != null ? String(target.max_mbps) : "",
     daily: String(target?.retention_gfs.daily ?? 14),
     weekly: String(target?.retention_gfs.weekly ?? 8),
     monthly: String(target?.retention_gfs.monthly ?? 12),
     yearly: String(target?.retention_gfs.yearly ?? 0),
-  });
-  // Held as data (rules and the values they judged), never as finished
-  // sentences, so a language switch re-words the refusal. The snapshot is
-  // checked and kept in memory only; the secret key is never written to a
-  // message.
+  };
+}
+
+/**
+ * The attempt the rules judge. The rules only ask whether the secret key was
+ * given, so the snapshot holds "set" or "", never a second copy of the secret
+ * itself. Trimmed, as the required rule trims: a blank secret is not a given
+ * one. Held as data (rules and the values they judged), never as finished
+ * sentences, so a language switch re-words the refusal.
+ */
+function targetAttempt(values: TargetValues, creating: boolean): Attempt {
+  const keyPair = !creating && (values.access_key_id === "") !== (values.secret_access_key === "");
+  return {
+    rules: () => targetRules(creating),
+    values: {
+      ...values,
+      secret_access_key: values.secret_access_key.trim() ? "set" : "",
+      keyPair: keyPair ? "mismatch" : "ok",
+    },
+  };
+}
+
+/** The settings half of the body, the same for a new storage and an edited one. */
+function targetSettings(values: TargetValues, target?: OffsiteTarget) {
+  const retention: RetentionGfs = {};
+  for (const f of GFS_FIELDS) {
+    const n = Number(values[f.key]);
+    if (Number.isInteger(n) && n > 0) retention[f.key] = n;
+  }
+  return {
+    name: values.name.trim(),
+    endpoint: values.endpoint.trim() === "" ? null : values.endpoint.trim(),
+    region: values.region.trim() || "us-east-1",
+    bucket: values.bucket.trim(),
+    prefix: values.prefix.trim(),
+    addressing: target?.addressing ?? ("path" as const),
+    lock_mode: target?.lock_mode ?? ("compliance" as const),
+    immutable_days: Number(values.immutable_days),
+    retention_gfs: retention,
+    max_mbps: values.max_mbps.trim() === "" ? null : Number(values.max_mbps),
+  };
+}
+
+/** The thirteen fields, for the Add dialog and for the editor on the page. */
+function TargetFields({
+  values,
+  set,
+  editing,
+}: {
+  values: TargetValues;
+  set: (name: keyof TargetValues, value: string) => void;
+  /** An existing storage: its keys may be left blank, to keep the current ones. */
+  editing: boolean;
+}) {
+  const t = useT();
+  const keyHelp = editing ? t("backup.offsite.keyHelp") : undefined;
+  return (
+    <div className="form-grid">
+      <Field label={t("backup.offsite.targetName")}>
+        <input className={inputClass} value={values.name} onChange={(e) => set("name", e.target.value)} />
+      </Field>
+      <Field label={t("backup.offsite.storageAddress")} help={t("backup.offsite.storageAddressHelp")}>
+        <input
+          className={inputClass}
+          value={values.endpoint}
+          // i18n-exempt: an example endpoint URL, an identifier written the same in every language
+          placeholder="https://s3.eu-central-1.wasabisys.com"
+          onChange={(e) => set("endpoint", e.target.value)}
+        />
+      </Field>
+      <Field label={t("backup.offsite.region")}>
+        <input className={inputClass} value={values.region} onChange={(e) => set("region", e.target.value)} />
+      </Field>
+      <Field label={t("backup.offsite.bucket")}>
+        <input className={inputClass} value={values.bucket} onChange={(e) => set("bucket", e.target.value)} />
+      </Field>
+      <Field label={t("backup.offsite.folder")}>
+        <input className={inputClass} value={values.prefix} onChange={(e) => set("prefix", e.target.value)} />
+      </Field>
+      <Field label={t("backup.offsite.accessKey")} help={keyHelp}>
+        <input
+          className={inputClass}
+          value={values.access_key_id}
+          autoComplete="off"
+          onChange={(e) => set("access_key_id", e.target.value)}
+        />
+      </Field>
+      <Field label={t("backup.offsite.secretKey")} help={keyHelp}>
+        <input
+          className={inputClass}
+          type="password"
+          value={values.secret_access_key}
+          autoComplete="new-password"
+          onChange={(e) => set("secret_access_key", e.target.value)}
+        />
+      </Field>
+      <Field label={t("backup.offsite.lockDays")} help={t("backup.offsite.lockDaysHelp")}>
+        <input
+          className={inputClass}
+          inputMode="numeric"
+          value={values.immutable_days}
+          onChange={(e) => set("immutable_days", e.target.value)}
+        />
+      </Field>
+      {GFS_FIELDS.map((f) => (
+        <Field key={f.key} label={t(f.label)}>
+          <input
+            className={inputClass}
+            inputMode="numeric"
+            value={values[f.key]}
+            onChange={(e) => set(f.key, e.target.value)}
+          />
+        </Field>
+      ))}
+      <Field label={t("backup.offsite.speedLimit")} help={t("backup.offsite.speedLimitHelp")}>
+        <input
+          className={inputClass}
+          inputMode="numeric"
+          value={values.max_mbps}
+          onChange={(e) => set("max_mbps", e.target.value)}
+        />
+      </Field>
+    </div>
+  );
+}
+
+/** Add off-site storage (`?new=target`). Editing one is `TargetEditor`, on the page. */
+export function TargetDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Tells the page's one guard whether the form holds a change (general ruling 3). */
+  onDirty?: (dirty: boolean) => void;
+  /** After the 2xx: the page releases its guard, then closes. Without it, the dialog just closes. */
+  onSaved?: () => void;
+}) {
+  const t = useT();
+  const create = useCreateOffsiteTargetMutation();
+  const [values, setValues] = useState<TargetValues>({ ...targetValues(), ...NO_KEYS });
+  // The snapshot is checked and kept in memory only; the secret key is never
+  // written to a message (`targetAttempt`).
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-  const mutation = target ? update : create;
+
+  const dirty = open && JSON.stringify(values) !== JSON.stringify({ ...targetValues(), ...NO_KEYS });
+  useEffect(() => {
+    onDirty?.(dirty);
+    return () => onDirty?.(false);
+  }, [dirty, onDirty]);
 
   function set(name: keyof TargetValues, value: string) {
     setValues((prev) => ({ ...prev, [name]: value }));
   }
 
   function submit() {
-    mutation.reset();
-    const creating = !target;
-    const keyPair = !creating && (values.access_key_id === "") !== (values.secret_access_key === "");
-    const next: Attempt = {
-      rules: () => targetRules(creating),
-      // The rules only ask whether the secret key was given, so the snapshot
-      // holds "set" or "", never a second copy of the secret itself. Trimmed,
-      // as the required rule trims: a blank secret is not a given one.
-      values: {
-        ...values,
-        secret_access_key: values.secret_access_key.trim() ? "set" : "",
-        keyPair: keyPair ? "mismatch" : "ok",
-      },
-    };
+    create.reset();
+    const next = targetAttempt(values, true);
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
-    const retention: RetentionGfs = {};
-    for (const f of GFS_FIELDS) {
-      const n = Number(values[f.key]);
-      if (Number.isInteger(n) && n > 0) retention[f.key] = n;
-    }
-    const settings = {
-      name: values.name.trim(),
-      endpoint: values.endpoint.trim() === "" ? null : values.endpoint.trim(),
-      region: values.region.trim() || "us-east-1",
-      bucket: values.bucket.trim(),
-      prefix: values.prefix.trim(),
-      addressing: target?.addressing ?? ("path" as const),
-      lock_mode: target?.lock_mode ?? ("compliance" as const),
-      immutable_days: Number(values.immutable_days),
-      retention_gfs: retention,
-      max_mbps: values.max_mbps.trim() === "" ? null : Number(values.max_mbps),
-    };
-    if (target) {
-      update.mutate(
-        {
-          id: target.id,
-          body: {
-            ...settings,
-            access_key_id: values.access_key_id || null,
-            secret_access_key: values.secret_access_key || null,
-          },
-        },
-        { onSuccess: onClose },
-      );
-    } else {
-      create.mutate(
-        {
-          ...settings,
-          access_key_id: values.access_key_id,
-          secret_access_key: values.secret_access_key,
-        },
-        { onSuccess: onClose },
-      );
-    }
+    create.mutate(
+      {
+        ...targetSettings(values),
+        access_key_id: values.access_key_id,
+        secret_access_key: values.secret_access_key,
+      },
+      { onSuccess: onSaved ?? onClose },
+    );
   }
 
-  const keyHelp = target ? t("backup.offsite.keyHelp") : undefined;
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={target ? t("backup.offsite.editStorage") : t("backup.offsite.storageAdd")}
-    >
+    <Dialog open={open} onClose={onClose} title={t("backup.offsite.storageAdd")}>
       <Form onSubmit={submit}>
         <p>{t("backup.offsite.targetIntro")}</p>
-        <div className="form-grid">
-          <Field label={t("backup.offsite.targetName")}>
-            <input className={inputClass} value={values.name} onChange={(e) => set("name", e.target.value)} />
-          </Field>
-          <Field label={t("backup.offsite.storageAddress")} help={t("backup.offsite.storageAddressHelp")}>
-            <input
-              className={inputClass}
-              value={values.endpoint}
-              // i18n-exempt: an example endpoint URL, an identifier written the same in every language
-              placeholder="https://s3.eu-central-1.wasabisys.com"
-              onChange={(e) => set("endpoint", e.target.value)}
-            />
-          </Field>
-          <Field label={t("backup.offsite.region")}>
-            <input className={inputClass} value={values.region} onChange={(e) => set("region", e.target.value)} />
-          </Field>
-          <Field label={t("backup.offsite.bucket")}>
-            <input className={inputClass} value={values.bucket} onChange={(e) => set("bucket", e.target.value)} />
-          </Field>
-          <Field label={t("backup.offsite.folder")}>
-            <input className={inputClass} value={values.prefix} onChange={(e) => set("prefix", e.target.value)} />
-          </Field>
-          <Field label={t("backup.offsite.accessKey")} help={keyHelp}>
-            <input
-              className={inputClass}
-              value={values.access_key_id}
-              autoComplete="off"
-              onChange={(e) => set("access_key_id", e.target.value)}
-            />
-          </Field>
-          <Field label={t("backup.offsite.secretKey")} help={keyHelp}>
-            <input
-              className={inputClass}
-              type="password"
-              value={values.secret_access_key}
-              autoComplete="new-password"
-              onChange={(e) => set("secret_access_key", e.target.value)}
-            />
-          </Field>
-          <Field
-            label={t("backup.offsite.lockDays")}
-            help={t("backup.offsite.lockDaysHelp")}
-          >
-            <input
-              className={inputClass}
-              inputMode="numeric"
-              value={values.immutable_days}
-              onChange={(e) => set("immutable_days", e.target.value)}
-            />
-          </Field>
-          {GFS_FIELDS.map((f) => (
-            <Field key={f.key} label={t(f.label)}>
-              <input
-                className={inputClass}
-                inputMode="numeric"
-                value={values[f.key]}
-                onChange={(e) => set(f.key, e.target.value)}
-              />
-            </Field>
-          ))}
-          <Field label={t("backup.offsite.speedLimit")} help={t("backup.offsite.speedLimitHelp")}>
-            <input
-              className={inputClass}
-              inputMode="numeric"
-              value={values.max_mbps}
-              onChange={(e) => set("max_mbps", e.target.value)}
-            />
-          </Field>
-        </div>
+        <TargetFields values={values} set={set} editing={false} />
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>
             {t("common.actions.cancel")}
           </Button>
           <FormActions
-            label={target ? t("backup.offsite.save") : t("backup.offsite.add")}
-            pending={mutation.isPending}
-            error={mutation.error}
+            label={t("backup.offsite.add")}
+            pending={create.isPending}
+            error={create.error}
             problems={attemptProblems(attempt)}
           />
         </div>
       </Form>
     </Dialog>
+  );
+}
+
+/**
+ * ONE STORAGE'S SETTINGS, EDITED ON THE PAGE (`?edit=<id>`; Receta FO). The
+ * draft is what the server has until somebody types (`useDraft`); the keys
+ * stay apart from it (`TargetKeys`), and typing either is a change too. The
+ * page's one save bar sends the same body the edit dialog sent; a refusal of
+ * the rules is said in the bar (`problems`), before anything is sent.
+ *
+ * Closing the editor, or leaving the page, with a change asks first: the form
+ * lives in `?edit=`, and it reports its changes to the page's one guard
+ * (`onDirty`), which guards `edit` while they last. Opening Add off-site
+ * storage over it (`?new=target`) is not leaving it.
+ */
+function TargetEditor({
+  target,
+  onClose,
+  onDirty,
+}: {
+  target: OffsiteTarget;
+  onClose: () => void;
+  /** Tells the page's one guard whether this storage's form holds a change. */
+  onDirty: (dirty: boolean) => void;
+}) {
+  const t = useT();
+  const update = useUpdateOffsiteTargetMutation();
+  const { draft, setDraft, dirty: settingsDirty, discard, markSent } = useDraft(targetValues(target));
+  const [keys, setKeys] = useState<TargetKeys>(NO_KEYS);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const keysTyped = keys.access_key_id !== "" || keys.secret_access_key !== "";
+  const dirty = settingsDirty || keysTyped;
+  const values: TargetValues = { ...(draft ?? targetValues(target)), ...keys };
+
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
+
+  function set(name: keyof TargetValues, value: string) {
+    if (name === "access_key_id" || name === "secret_access_key") {
+      setKeys((prev) => ({ ...prev, [name]: value }));
+      return;
+    }
+    if (draft) setDraft({ ...draft, [name]: value });
+  }
+
+  function save() {
+    if (!draft) return;
+    update.reset();
+    const next = targetAttempt(values, false);
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    // What is sent becomes what is saved when the server answers (useDraft).
+    markSent(draft);
+    update.mutate(
+      {
+        id: target.id,
+        body: {
+          ...targetSettings(values, target),
+          access_key_id: keys.access_key_id || null,
+          secret_access_key: keys.secret_access_key || null,
+        },
+      },
+      {
+        onSuccess: () => setKeys(NO_KEYS),
+        // The save failed: the change is still unsaved, and a refetch must not replace it.
+        onError: () => markSent(null),
+      },
+    );
+  }
+
+  return (
+    <>
+      <FormSection title={t("backup.offsite.editStorageNamed", { name: target.name })} icon="edit">
+        <TargetFields values={values} set={set} editing />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Btn label={t("common.actions.close")} variant="ghost" onClick={onClose} />
+        </div>
+      </FormSection>
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        saved={update.isSuccess && !dirty}
+        problems={dirty ? attemptProblems(attempt) : []}
+        onDiscard={() => {
+          discard();
+          setKeys(NO_KEYS);
+          setAttempt(null);
+          update.reset();
+        }}
+        onSave={save}
+      />
+    </>
   );
 }
 

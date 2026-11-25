@@ -120,13 +120,17 @@ export function fixtureClient(registry: FixtureMap = fixtureRegistry()): ApiClie
     return method;
   };
 
-  return new Proxy({} as ApiClient, {
+  const proxy: ApiClient = new Proxy({} as ApiClient, {
     get(_target, prop) {
       if (typeof prop !== "string" || prop === "then") return undefined;
+      // A narrowed client answers from the same fixtures: they are not
+      // per-client, and the harmony gate measures the page, not the scope.
+      if (prop === "forClient") return () => proxy;
       return methodFor(prop);
     },
     has(_target, prop) {
       return typeof prop === "string" && typeof table[prop] === "function";
     },
   });
+  return proxy;
 }

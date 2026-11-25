@@ -63,7 +63,26 @@ import {
   vendorPickerOptions,
 } from "./pickerOptions";
 import type { LicenseOut, LicenseType } from "./types";
-import { FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  withClient,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
 const LICENSE_TYPES: LicenseType[] = [
@@ -156,8 +175,12 @@ export function LicensesPage() {
   // The filter matches on worded labels, so it is rebuilt when the language changes.
   const { language } = useLanguage();
   const api = useApi();
-  const [creating, setCreating] = useState(false);
-  const [search, setSearch] = useState("");
+  // ON THE LIST KIT (redesign plan, Receta L; Task 10, 5.1): the search, the
+  // type chip and the Client chip live in the URL, so a filtered view is a
+  // link and the client 360's "/licenses?client=<id>" opens this client's
+  // licenses. `?new=license` opens New license (decision D8).
+  const filters = useUrlFilters(["q", "type", "client"] as const);
+  const newLicense = useNewParam("license");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -169,11 +192,21 @@ export function LicensesPage() {
   const clientName = useClientName();
   const showClient = selected === null;
 
-  const licenses = useLicenses();
+  // THE CHIP NARROWS EVERY PER-CLIENT READ ON THE PAGE (decision D6): the
+  // register and the two reports its tiles count, so a tile never counts
+  // another client's licenses above this client's rows. The product catalog
+  // and the vendors are the organisation's, shared by every client, and stay
+  // the console's reads.
+  const chip = filters.values.client;
+  // The client the chip narrowed to (`null` without one): a tile that counts
+  // that client's rows opens the page with the same `client=`, so it opens
+  // exactly the rows it counted (coordinator's ruling on the wave reviews).
+  const { client: narrowedTo } = useNarrowedApi(chip);
+  const licenses = useLicenses(chip);
   const products = useProducts();
   const vendors = useVendors();
-  const compliance = useCompliance();
-  const renewals = useRenewals(RENEWAL_WINDOW_DAYS);
+  const compliance = useCompliance(chip);
+  const renewals = useRenewals(RENEWAL_WINDOW_DAYS, chip);
   const productNameById = useMemo(
     () => new Map((products.data ?? []).map((p) => [p.id, p.name])),
     [products.data],
@@ -184,12 +217,31 @@ export function LicensesPage() {
   );
 
   const items = licenses.data ?? [];
+  const type = filters.values.type;
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return items.filter((license) =>
-      matchesSearch(license, productNameById.get(license.product_id) ?? license.product_id, needle),
+    const needle = filters.values.q.trim().toLowerCase();
+    return items.filter(
+      (license) =>
+        (type === "" || license.type === type) &&
+        matchesSearch(license, productNameById.get(license.product_id) ?? license.product_id, needle),
     );
-  }, [items, productNameById, search, language]);
+  }, [items, productNameById, filters.values.q, type, language]);
+  // THE TYPE CHIP'S COUNTS ARE THE REGISTER'S OWN: `GET /licenses` answers
+  // the whole register (no page), so a count over it is a total, never one
+  // over a visible page (Receta L, point 4). A type no license holds is not
+  // offered, unless the URL already names it; and a register of one type gets
+  // no chip row at all, since there is nothing it could narrow.
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const license of items) counts.set(license.type, (counts.get(license.type) ?? 0) + 1);
+    return counts;
+  }, [items]);
+  const typeOptions = [
+    { value: "", label: t("licenses.list.allTypes") },
+    ...[...LICENSE_TYPES, ...[...typeCounts.keys()].filter((key) => !(LICENSE_TYPES as string[]).includes(key))]
+      .filter((key) => typeCounts.has(key) || key === type)
+      .map((key) => ({ value: key, label: humaniseEnum(key, "LicenseType"), count: typeCounts.get(key) ?? 0 })),
+  ];
 
   // The Over-deployed, Compliant and "of 3 products reconciled" figures all
   // count PRODUCTS. The report is one row per (client, product) since MSP
@@ -240,21 +292,21 @@ export function LicensesPage() {
   // still looked successful after a failure. Each card falls back to NO_DATE
   // for its own query, and the reason is said once, announced.
   const statsError = products.error ?? compliance.error ?? renewals.error;
+  // ONE CONDITION PER TILE (the coordinator's ruling 10a): a tile with no data
+  // (pending, narrowing undecided, or failed) draws the kit's absent mark and
+  // no line under it.
+  const overNoData = !compliance.data;
+  const renewalsNoData = !renewals.data;
+  const productsNoData = !products.data;
+  const compliantNoData = !compliance.data;
+
+  const primary = canManage ? (
+    <Btn label={t("licenses.list.newLicense")} icon="plus" variant="primary" onClick={newLicense.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("licenses.list.title")}
-        description={t("licenses.list.description")}
-        actions={
-          canManage ? (
-            <Button onClick={() => setCreating(true)}>
-              <Icon name="plus" size={14} />
-              {t("licenses.list.newLicense")}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHead title={t("licenses.list.title")} description={t("licenses.list.description")} actions={primary} />
 
       <LicensePageNav canRead={canRead} />
 
@@ -269,65 +321,79 @@ export function LicensesPage() {
           critical wash; the renewal window is the warning; the compliant
           count colours its figure ok; the catalog count is plain.
 
-          The zero labels are safe against the failed-query case above them:
-          a failed query renders "n/a", not "0", so "nothing over-deployed"
-          can only appear when the compliance query actually returned and
-          found nothing.
+          NO DATA IS ABSENT, NEVER ZERO (the coordinator's ruling 10a, the
+          Absent Zero Rule): while a tile's read is pending, its narrowing is
+          not decided, or the read failed, the tile is `pending` -- the kit's
+          absent mark (`shell.viz.na`, "n/a" / "n/d"), muted, no wash -- and
+          draws no line under it (the alert below the row says why a read
+          failed). So "nothing over-deployed" can only appear when the
+          compliance query actually returned and found nothing. One named
+          condition per tile, for the kit's `Tile pending` to take over.
 
           The over-deployed tile carries v3's foot line: the names of the
           products that are over, which are already in the compliance result.
           The other three have no honest second figure on this page, so they
-          carry none rather than a made-up one. */}
+          carry none rather than a made-up one.
+
+          FOUR, NOT THE FIVE THE BRIEF COUNTS: the design's "Annual spend" and
+          "Unused seats" have no honest number here (module docstring), and a
+          tile with no list behind it is the dead tile the operator asked the
+          console to stop shipping. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("licenses.list.tileOver")}
-          value={compliance.error ? t("licenses.common.na") : String(breachCount)}
+          value={String(breachCount)}
           icon="alert-triangle"
-          to="/licenses/compliance"
+          to={withClient("/licenses/compliance", narrowedTo)}
           tone="red"
-          urgent={!compliance.error && breachCount > 0}
+          urgent={breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
+          pending={overNoData}
           foot={
             // One compliance row per (client, product): two clients over on
             // one product are one product over and one name.
-            !compliance.error && breachCount > 0
-              ? [
-                  ...new Set(
-                    (compliance.data ?? []).filter((row) => row.breach).map((row) => row.name),
-                  ),
-                ].join(", ")
+            !overNoData && breachCount > 0
+              ? [...new Set((compliance.data ?? []).filter((row) => row.breach).map((row) => row.name))].join(", ")
               : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
-          value={renewals.error ? t("licenses.common.na") : String((renewals.data ?? []).length)}
+          value={String((renewals.data ?? []).length)}
           icon="clock"
-          to="/licenses/renewals"
+          // It counts a 90-day window, so it opens the calendar on it (its
+          // default is the server's 30 days): the rows it opens are the rows
+          // it counted (adoption pass, O5 leftover 2).
+          to={withClient(`/licenses/renewals?within=${RENEWAL_WINDOW_DAYS}`, narrowedTo)}
           tone="gold"
           zeroLabel={t("licenses.list.tileRenewalsZero")}
-          foot={renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
+          pending={renewalsNoData}
+          foot={!renewalsNoData && renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
         />
         <StatCard
           label={t("licenses.list.tileProducts")}
-          value={products.error ? t("licenses.common.na") : String(products.data?.length ?? 0)}
+          value={String((products.data ?? []).length)}
           icon="license"
           to="/licenses/products"
           tone="blue"
           zeroLabel={t("licenses.list.tileProductsZero")}
+          pending={productsNoData}
           foot={
-            publisherCount > 0 ? t("licenses.list.publishers", { count: publisherCount }) : undefined
+            !productsNoData && publisherCount > 0
+              ? t("licenses.list.publishers", { count: publisherCount })
+              : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileCompliant")}
-          value={compliance.error ? t("licenses.common.na") : String(compliantCount)}
+          value={String(compliantCount)}
           icon="circle-check"
-          to="/licenses/compliance"
+          to={withClient("/licenses/compliance", narrowedTo)}
           tone="green"
           zeroLabel={t("licenses.list.tileCompliantZero")}
+          pending={compliantNoData}
           foot={
-            !compliance.error && compliantCount > 0
+            !compliantNoData && compliantCount > 0
               ? t("licenses.list.reconciled", { count: reconciledCount })
               : undefined
           }
@@ -341,25 +407,47 @@ export function LicensesPage() {
       ) : null}
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("licenses.list.searchPlaceholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("licenses.list.searchAria")}
-          />
-          <span className="filter-spacer" />
-          <span className="note">{t("licenses.list.range", { shown: filtered.length, total: items.length })}</span>
-        </FilterBar>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("licenses.list.searchPlaceholder")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+              aria-label={t("licenses.list.searchAria")}
+            />
+          }
+          chips={
+            <>
+              {typeCounts.size > 1 || type !== "" ? (
+                <FilterChips
+                  label={t("licenses.list.typeLabel")}
+                  options={typeOptions}
+                  value={type}
+                  onChange={(value) => filters.set("type", value)}
+                />
+              ) : null}
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={<ShowingCount shown={filtered.length} total={licenses.data ? items.length : null} />}
+        />
 
         <QueryState
-          loading={licenses.isLoading}
+          loading={licenses.isPending}
           error={licenses.error}
-          empty={filtered.length === 0}
-          emptyLabel={items.length === 0 ? t("licenses.list.emptyNone") : t("licenses.list.emptyFiltered")}
-          emptyIcon="license"
+          empty={false}
+          emptyLabel=""
         >
-          <Table>
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.list.emptyNone")}
+              action={primary}
+              icon="license"
+            />
+          ) : (
+          <Table label={t("licenses.list.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.list.colProduct")}</Th>
@@ -424,10 +512,16 @@ export function LicensesPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <NewLicenseDialog open={creating} onClose={() => setCreating(false)} />
+      {/* Mounted only while open: each opening starts from an empty form. Keyed
+          by the top bar's client, so a switch of client drops what was typed
+          instead of filing it under the new one (the coordinator's ruling 12). */}
+      {canManage && newLicense.open ? (
+        <NewLicenseDialog key={selected ?? ""} open onClose={newLicense.close} />
+      ) : null}
     </div>
   );
 }
@@ -473,6 +567,22 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   // key is NOT in the snapshot: it is not a rule's business and never copied.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews; formKit's "A FORM IN THE DIALOG"): Back, Cancel or Escape
+  // with something typed asks first, since `?new=license` is what holds the
+  // form. The dialog is mounted only while open, so every opening -- its
+  // button, a link, Back or Forward -- starts from an empty form.
+  const dirty =
+    productId !== "" ||
+    vendorId !== "" ||
+    type !== "perpetual" ||
+    entitlements !== "1" ||
+    key !== "" ||
+    cost !== "" ||
+    currency !== "" ||
+    clientField.picked !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
+
   function reset() {
     setProductId("");
     setVendorId("");
@@ -486,9 +596,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setAttempt(null);
   }
 
-  // This dialog is never unmounted -- LicensesPage keeps it rendered and
-  // toggles `open` -- so without clearing the mutation here a failure from
-  // one attempt sits in the form waiting to be read as the next one's.
+  // Clearing the mutation on close keeps a failure from one attempt off the
+  // next, should the dialog ever be kept mounted again.
   function close() {
     create.reset();
     setAttempt(null);
@@ -507,7 +616,12 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
       values,
     };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      create.reset();
+      return;
+    }
 
     // The server holds what may hold a license to its client.
     create.mutate(
@@ -529,6 +643,8 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
       }),
       {
         onSuccess: () => {
+          // Saved: closing leaves without asking (useUnsavedGuard's release).
+          release();
           reset();
           close();
         },
@@ -537,6 +653,7 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   return (
+    <>
     <Dialog open={open} onClose={close} title={t("licenses.new.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -683,5 +800,9 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
+    </>
   );
 }

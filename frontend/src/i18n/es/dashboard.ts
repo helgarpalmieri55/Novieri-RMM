@@ -3,13 +3,16 @@ import type { dashboard as en } from "../en/dashboard";
 
 export const dashboard: Shape<typeof en> = {
   page: {
-    title: "Panel",
     description: "Primero lo que requiere tu atención y después cómo va la flota.",
     done: "Listo",
-    customize: "Personalizar",
+    customize: "Editar",
+    saveFirst: "Guarda o descarta los cambios primero.",
     loading: "Cargando…",
     nothingTitle: "No hay nada que mostrar aquí",
     nothingBody: "Esta cuenta no tiene permisos de lectura de ningún módulo. Pide uno a un administrador.",
+  },
+  tile: {
+    failed: "No se pudo leer, así que no se cuenta nada.",
   },
   needs: {
     title: "Requiere tu atención",

@@ -208,15 +208,56 @@ export interface TileProps {
    * should need it.
    */
   parts?: { label?: string; value?: string; sub?: string };
+  /**
+   * THE TILE'S READ HAS NOT ANSWERED (kit requests batch 2, K3; general ruling
+   * 10a: no tile draws a number or a claim before its read answers). Pass it
+   * WHENEVER THERE IS NO DATA, pending or failed: `pending={!q.data}` (batch 2
+   * review, H2). `isPending` alone is wrong: after a failed read it is false,
+   * and the tile would draw its 0 and its claim over a request that never
+   * answered. Narrowing not `ready` is no data too. While `pending` the tile
+   * keeps its label, icon and destination and draws the kit's one absent mark
+   * (`n/a`, the Absent Zero Rule; StatCard's `pending` draws the same), with
+   * no unit, no sub-line ("Nothing has ever been deployed" is a claim), no
+   * sparkline and no wash, and says `aria-busy`. Once the read answers, the
+   * real figure and claim.
+   */
+  pending?: boolean;
+  /**
+   * THE READ ANSWERED AND THERE IS NO FIGURE (coordinator, P3 adoption pass):
+   * a success rate with no completed runs, an average of nothing. Not
+   * `pending`: nothing is on its way, so the tile is not `aria-busy`, and its
+   * `sub` is kept, because once the read has answered the sub-line is the
+   * reason there is no figure ("No completed runs yet"). It draws the kit's
+   * absent mark with no unit, no sparkline and no wash, which would be claims
+   * about a reading. `pending` wins when both are set.
+   */
+  absent?: boolean;
 }
 
 /**
  * v3 `tiles([...])`, one tile. The figure is `--t-kpi`, the one size outside
  * the five-step scale. `has-sp` makes room for the sparkline in the corner.
  */
-export function Tile({ label, value, unit, sub, kind, spark, to, icon, className, parts }: TileProps) {
-  const hasSpark = spark !== undefined && spark.length >= 2;
-  const cls = ["tile", kind ?? "", hasSpark ? "has-sp" : "", className].filter(Boolean).join(" ");
+export function Tile({
+  label,
+  value,
+  unit,
+  sub,
+  kind,
+  spark,
+  to,
+  icon,
+  className,
+  parts,
+  pending = false,
+  absent = false,
+}: TileProps) {
+  const t = useT();
+  // No figure, for either reason: the mark, and no unit, sparkline or wash.
+  const noFigure = pending || absent;
+  const hasSpark = !noFigure && spark !== undefined && spark.length >= 2;
+  const shownKind = noFigure ? "mut" : kind;
+  const cls = ["tile", shownKind ?? "", hasSpark ? "has-sp" : "", className].filter(Boolean).join(" ");
   const body = (
     <>
       <div className={["k", parts?.label].filter(Boolean).join(" ")}>
@@ -224,19 +265,22 @@ export function Tile({ label, value, unit, sub, kind, spark, to, icon, className
         {label}
       </div>
       <div className={["v", parts?.value].filter(Boolean).join(" ")}>
-        {value}
-        {unit ? <small>{unit}</small> : null}
+        {noFigure ? t("shell.viz.na") : value}
+        {unit && !noFigure ? <small>{unit}</small> : null}
       </div>
-      {sub ? <div className={["z", parts?.sub].filter(Boolean).join(" ")}>{sub}</div> : null}
+      {sub && !pending ? <div className={["z", parts?.sub].filter(Boolean).join(" ")}>{sub}</div> : null}
       {hasSpark ? <Sparkline values={spark} /> : null}
     </>
   );
+  const busy = pending ? true : undefined;
   return to ? (
-    <Link className={cls} to={to}>
+    <Link className={cls} to={to} aria-busy={busy}>
       {body}
     </Link>
   ) : (
-    <div className={cls}>{body}</div>
+    <div className={cls} aria-busy={busy}>
+      {body}
+    </div>
   );
 }
 
@@ -285,7 +329,12 @@ export function Donut({ pct, kind, label, sub }: { pct: number | null; kind: Kin
           t("shell.viz.na")
         )}
       </div>
-      <div className="don-k">{label}</div>
+      {/* THE KIND'S ICON BESIDE THE LABEL (D2): running and information are
+          one cobalt now, and a donut has no badge to carry the difference. */}
+      <div className="don-k">
+        <Icon name={KIND_ICON[shown]} size={13} />
+        {label}
+      </div>
       {sub ? <div className="don-z">{sub}</div> : null}
     </div>
   );

@@ -85,10 +85,10 @@
 // the avatar tone is chosen from the user's id so the same person is the same
 // colour on every page that draws them.
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -96,7 +96,21 @@ import { Trans } from "../../i18n/Trans";
 import { EntityPicker } from "../../components/picker";
 import { ShownOnceLink, type ShownOnceLinkText } from "../../components/shownOnce";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
-import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  FieldGroup,
+  FilterChips,
+  KIND_ICON,
+  ListEmpty,
+  ListToolbar,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Person } from "../../shell/viz";
 import { initialsOf, personIndex } from "../../lib/people";
@@ -124,6 +138,7 @@ import {
   grantClientIdFor,
   grantScopeOptions,
 } from "./pickerOptions";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
 import { isForbidden } from "./settingsState";
 import {
   annotateDuplicateGrants,
@@ -216,6 +231,44 @@ const UNDER_TABLE: CSSProperties = { padding: "12px 18px" };
  */
 const DANGER_SEPARATOR: CSSProperties = { borderLeft: "1px solid var(--line)", marginLeft: 2, paddingLeft: 10 };
 
+/**
+ * THE STATUS CHIPS (redesign, Receta L; `?status=`), in the words the rows'
+ * own pills use. Read from what the directory already answers: an invitation
+ * is an account with `invite_pending`, so "Invitation pending" is that flag
+ * and "Active" an account in use.
+ * The directory carries no per-status totals, so the chips carry no number
+ * (the Absent Zero Rule).
+ */
+const STATUS_FILTERS = ["active", "invited", "disabled", "deleted"] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
+
+const STATUS_FILTER_LABEL: Record<StatusFilter, MessageKey> = {
+  active: "settings.users.list.active",
+  invited: "settings.users.list.invited",
+  disabled: "settings.users.list.disabled",
+  deleted: "settings.users.list.deleted",
+};
+
+function matchesStatus(user: UserOut, status: string): boolean {
+  switch (status) {
+    case "active":
+      return user.status === "active" && user.invite_pending !== true;
+    case "invited":
+      return user.invite_pending === true;
+    case "disabled":
+    case "deleted":
+      return user.status === status;
+    default:
+      return true;
+  }
+}
+
+function matchesSearch(user: UserOut, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (needle === "") return true;
+  return user.email.toLowerCase().includes(needle) || user.display_name.toLowerCase().includes(needle);
+}
+
 export function UsersTab({
   canRead,
   canManage,
@@ -275,7 +328,17 @@ export function UsersTab({
   const [draftRoleId, setDraftRoleId] = useState("");
   const [draftClientId, setDraftClientId] = useState("");
   const [draftTyping, setDraftTyping] = useState(false);
+  // "Add this access" pressed with half a pair (coordinator ruling 8; O7
+  // review, S2), held as data and worded at render. It answers that press
+  // only (O7 re-review, N1): the next change to the pair, or sending the
+  // invitation, clears it.
+  const [grantAttempt, setGrantAttempt] = useState<Attempt | null>(null);
+  // The same for the roles panel's "Assign role" (O7 re-review, S3).
+  const [assignAttempt, setAssignAttempt] = useState<Attempt | null>(null);
   const [shownLink, setShownLink] = useState<ShownLink | null>(null);
+  // An invitation refused for a missing address, held as data and worded at render.
+  const [inviteAttempt, setInviteAttempt] = useState<Attempt | null>(null);
+  const inviteProblems = attemptProblems(inviteAttempt);
   const [done, setDone] = useState<Done | null>(null);
 
   const [rolesForId, setRolesForId] = useState<string | null>(null);
@@ -285,6 +348,18 @@ export function UsersTab({
   // client id. `grantScopeTyping`: the picker holds text that is not a choice.
   const [grantClientId, setGrantClientId] = useState("");
   const [grantScopeTyping, setGrantScopeTyping] = useState(false);
+  // Typing in either client box is a change to its pair, and clears what the
+  // last press said was missing. Stable callbacks: the picker reports through
+  // an effect keyed on the callback, and a new one each render would clear
+  // the sentence on the very render that draws it.
+  const draftTypingChanged = useCallback((typing: boolean) => {
+    setDraftTyping(typing);
+    if (typing) setGrantAttempt(null);
+  }, []);
+  const grantTypingChanged = useCallback((typing: boolean) => {
+    setGrantScopeTyping(typing);
+    if (typing) setAssignAttempt(null);
+  }, []);
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
 
   const effective = useEffectivePermissions(permissionsForId);
@@ -299,6 +374,40 @@ export function UsersTab({
   // A pair chosen and not added would not be sent; the send waits for it.
   const draftPending = draftRoleId !== "" || draftClientId !== "" || draftTyping;
 
+  // THE LIST (redesign, Receta L): its search and status chips live in the
+  // URL beside `?tab=users`, so a filtered directory is a link.
+  const filters = useUrlFilters(["q", "status"] as const);
+  const shown = listed.filter(
+    (person) => matchesStatus(person, filters.values.status) && matchesSearch(person, filters.values.q),
+  );
+
+  // INVITING IS A DIALOG WITH ITS OWN URL, `?new=user` (decision D8), so the
+  // New menu and a link can open it. It starts empty every time it opens,
+  // however it was opened (the button, a link, Back or Forward).
+  const newUser = useNewParam("user");
+  // BEFORE PAINT (O7 review, M4): a layout effect, so a reopened dialog never
+  // shows the last invitation's address for one frame before it empties.
+  useLayoutEffect(() => {
+    if (!newUser.open) return;
+    setEmail("");
+    setDisplayName("");
+    setInviteGrants([]);
+    setDraftRoleId("");
+    setDraftClientId("");
+    setDraftTyping(false);
+    setGrantAttempt(null);
+    setInviteAttempt(null);
+    invite.reset();
+    // `invite` is a new object each render; only the opening matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newUser.open]);
+  // ONE GUARD FOR THE TAB (decisions D16 and D8): a half-written invitation
+  // asks before the dialog is closed by Back, or the tab or page is left.
+  const inviteDirty =
+    newUser.open &&
+    (email.trim() !== "" || displayName.trim() !== "" || inviteGrants.length > 0 || draftPending);
+  const { guard, release } = useUnsavedGuard(inviteDirty, { search: ["tab", "new"] });
+
   if (forbidden) {
     return (
       <Panel title={t("settings.users.title")}>
@@ -311,9 +420,32 @@ export function UsersTab({
 
   const roleNameOf = (roleId: string): string => grantable.find((role) => role.id === roleId)?.name ?? roleId;
 
+  /**
+   * A (role, client) pair as a press found it, for "Add this access" and
+   * "Assign role" alike. Text typed into the client picker that is not one of
+   * its choices is no client (final review, T11R-I1).
+   */
+  function pairAttempt(roleId: string, clientId: string, typing: boolean): Attempt {
+    return {
+      rules: () => [
+        { name: "role", label: t("settings.users.role") },
+        { name: "client", label: t("settings.users.clientLabel") },
+      ],
+      values: { role: roleId, client: typing ? "" : clientId },
+    };
+  }
+
+  const grantMissing = attemptProblems(grantAttempt);
+  const assignMissing = attemptProblems(assignAttempt);
+
   /** The chosen pair joins the invitation; the same pair twice is one grant. */
   function addGrant() {
-    if (draftRoleId === "" || draftClientId === "" || draftTyping) return;
+    const found = pairAttempt(draftRoleId, draftClientId, draftTyping);
+    if (attemptProblems(found).length > 0) {
+      setGrantAttempt(found);
+      return;
+    }
+    setGrantAttempt(null);
     const grant: InviteGrant = { role_id: draftRoleId, client_id: grantClientIdFor(draftClientId) };
     setInviteGrants((current) =>
       current.some((held) => held.role_id === grant.role_id && held.client_id === grant.client_id)
@@ -334,6 +466,17 @@ export function UsersTab({
    * "Done" is what removes it.
    */
   function sendInvite() {
+    // Sent without an access: what "Add this access" said is no longer the
+    // answer to anything (O7 re-review, N1).
+    setGrantAttempt(null);
+    // A missing address is said on submit, never by a dead button (the kit's
+    // rule; coordinator ruling 8a keeps that for every form but a one-box composer).
+    const found: Attempt = {
+      rules: () => [{ name: "email", label: t("settings.users.invite.email") }],
+      values: { email },
+    };
+    setInviteAttempt(found);
+    if (attemptProblems(found).length > 0) return;
     const address = email.trim();
     invite.mutate(
       { email: address, display_name: displayName.trim(), grants: [...inviteGrants] },
@@ -351,6 +494,9 @@ export function UsersTab({
           setDraftRoleId("");
           setDraftClientId("");
           invite.reset();
+          // Sent: the dialog closes without asking about what it just sent.
+          release();
+          newUser.close();
         },
       },
     );
@@ -489,8 +635,21 @@ export function UsersTab({
 
   const emailMissing = emailSettings.data != null && !emailSettings.data.configured;
 
+  // The tab's one primary: inviting someone. Disabled for "you may not", with
+  // the reason in the notice above the list.
+  const inviteAction = (
+    <Btn
+      label={t("settings.users.invite.title")}
+      icon="mail"
+      variant="primary"
+      disabled={!canManage}
+      onClick={newUser.start}
+    />
+  );
+
   return (
     <>
+      {!canManage ? <ReadOnlyNotice reason={reason} /> : null}
       {emailMissing ? (
         // `role="alert"` and named, so it is announced rather than merely
         // coloured — and so a test can find it without matching on styling.
@@ -522,258 +681,290 @@ export function UsersTab({
       <Panel
         title={t("settings.users.title")}
         subtitle={t("settings.users.subtitle")}
+        actions={inviteAction}
         bare
       >
+        <ListToolbar
+          search={
+            <SearchField
+              type="search"
+              aria-label={t("settings.users.list.search")}
+              placeholder={t("settings.users.list.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          chips={
+            <FilterChips
+              label={t("settings.users.list.statusLabel")}
+              options={[
+                { value: "", label: t("settings.users.list.all") },
+                ...STATUS_FILTERS.map((status) => ({ value: status, label: t(STATUS_FILTER_LABEL[status]) })),
+              ]}
+              value={filters.values.status}
+              onChange={(value) => filters.set("status", value)}
+            />
+          }
+          end={users.data ? <ShowingCount shown={shown.length} total={listed.length} /> : null}
+        />
         <QueryState
-          loading={users.isLoading}
+          loading={users.isPending && canRead}
           error={users.error}
-          empty={listed.length === 0}
-          emptyLabel={t("settings.users.empty")}
-          emptyIcon="portal"
+          empty={false}
+          emptyLabel=""
         >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("settings.users.columns.person")}</Th>
-                <Th>{t("settings.users.columns.status")}</Th>
-                <Th>{t("settings.users.columns.roles")}</Th>
-                <Th>{t("settings.users.columns.actions")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {listed.map((user) => (
-                <tr key={user.id}>
-                  <Td>
-                    <div className="cell-title">
-                      <Person initials={userInitials(user)} index={personIndex(user.id)} name={user.display_name || user.email} />
-                    </div>
-                    <div className="cell-sub">{user.email}</div>
-                  </Td>
-                  <Td>
-                    <Badge variant={statusTone(user.status)}>{userStatusLabel(user.status)}</Badge>
-                    {user.invite_pending === true ? (
-                      <>
-                        {" "}
-                        <Badge variant="info">{t("settings.users.invitePending")}</Badge>
-                      </>
-                    ) : null}
-                  </Td>
-                  <Td>
-                    {user.roles.length === 0 ? (
-                      <span className="note">{t("settings.users.noRoles")}</span>
-                    ) : (
-                      // A CHIP PER (ROLE, SCOPE), NOT A LIST OF DATABASE
-                      // FIELDS JOINED BY AN EM DASH. `.chip`/`.chips` is v3's
-                      // STATIC treatment here -- not the `Chips` component
-                      // from `shell/viz.tsx`, which renders each option as a
-                      // real, `aria-pressed` button for a single-select
-                      // filter. This is a read-only list of what someone
-                      // holds, not a control to press, so it stays a plain,
-                      // non-interactive list item.
-                      // The scope is the quiet suffix (`.note`, same wash the
-                      // rest of the console uses for secondary text) -- and it
-                      // is what keeps a role held twice at TWO DIFFERENT
-                      // scopes on two visibly different chips, never folded
-                      // together. See the file-top comment before touching
-                      // this: `summariseRoleGrants` already keyed on (role,
-                      // scope), only the rendering changes here.
-                      <ul className="chips" style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                        {summariseRoleGrants(user.roles).map((grant) => (
-                          <li key={grant.key} className="chip">
-                            {roleDisplayName(grant.roleName)}
-                            <span className="note">{` · ${describeGrantScope(grant.clientId, clientNames)}`}</span>
-                            {grant.count > 1 ? (
-                              <span className="note">{` ×${grant.count}`}</span>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Td>
-                  <Td>
-                    {/* FOUR OF SIX ACTIONS SIT BEHIND A DISCLOSURE -- NOT SIX
-                        BUTTONS IN A ROW (design review at 390x844: row height
-                        262px, of which ~200px was blank, because ACTIONS was
-                        squeezed to 169px and six buttons stacked about five
-                        deep while the column itself sat off the edge of a
-                        360px scroller). Roles and Permissions stay inline,
-                        ordinary bordered buttons -- what most rows are worked
-                        on for, and narrow enough at two buttons to fit
-                        without wrapping the row tall.
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("settings.users.empty")}
+              icon="users"
+              action={canManage ? inviteAction : undefined}
+            />
+          ) : (
+            <Table label={t("settings.users.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("settings.users.columns.person")}</Th>
+                  <Th>{t("settings.users.columns.status")}</Th>
+                  <Th>{t("settings.users.columns.roles")}</Th>
+                  <Th>{t("settings.users.columns.actions")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((user) => (
+                  <tr key={user.id}>
+                    <Td>
+                      <div className="cell-title">
+                        <Person initials={userInitials(user)} index={personIndex(user.id)} name={user.display_name || user.email} />
+                      </div>
+                      <div className="cell-sub">{user.email}</div>
+                    </Td>
+                    <Td>
+                      <Badge variant={statusTone(user.status)}>{userStatusLabel(user.status)}</Badge>
+                      {user.invite_pending === true ? (
+                        <>
+                          {" "}
+                          <Badge variant="info">{t("settings.users.invitePending")}</Badge>
+                        </>
+                      ) : null}
+                    </Td>
+                    <Td>
+                      {user.roles.length === 0 ? (
+                        <span className="note">{t("settings.users.noRoles")}</span>
+                      ) : (
+                        // A CHIP PER (ROLE, SCOPE), NOT A LIST OF DATABASE
+                        // FIELDS JOINED BY AN EM DASH. `.chip`/`.chips` is v3's
+                        // STATIC treatment here -- not the `Chips` component
+                        // from `shell/viz.tsx`, which renders each option as a
+                        // real, `aria-pressed` button for a single-select
+                        // filter. This is a read-only list of what someone
+                        // holds, not a control to press, so it stays a plain,
+                        // non-interactive list item.
+                        // The scope is the quiet suffix (`.note`, same wash the
+                        // rest of the console uses for secondary text) -- and it
+                        // is what keeps a role held twice at TWO DIFFERENT
+                        // scopes on two visibly different chips, never folded
+                        // together. See the file-top comment before touching
+                        // this: `summariseRoleGrants` already keyed on (role,
+                        // scope), only the rendering changes here.
+                        <ul className="chips" style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                          {summariseRoleGrants(user.roles).map((grant) => (
+                            <li key={grant.key} className="chip">
+                              {roleDisplayName(grant.roleName)}
+                              <span className="note">{` · ${describeGrantScope(grant.clientId, clientNames)}`}</span>
+                              {grant.count > 1 ? (
+                                <span className="note">{` ×${grant.count}`}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </Td>
+                    <Td>
+                      {/* FOUR OF SIX ACTIONS SIT BEHIND A DISCLOSURE -- NOT SIX
+                          BUTTONS IN A ROW (design review at 390x844: row height
+                          262px, of which ~200px was blank, because ACTIONS was
+                          squeezed to 169px and six buttons stacked about five
+                          deep while the column itself sat off the edge of a
+                          360px scroller). Roles and Permissions stay inline,
+                          ordinary bordered buttons -- what most rows are worked
+                          on for, and narrow enough at two buttons to fit
+                          without wrapping the row tall.
 
-                        The lifecycle actions -- Disable, Reset second
-                        factors and Sign out everywhere for an account in use;
-                        Enable for a disabled one; Resend and Cancel for an
-                        invitation -- and Delete move inside a native `<details>`, closed by
-                        default. Not an invented overflow menu -- there is no
-                        menu or popover component in this kit -- a `<details>`
-                        needs no floating panel, no positioning and no focus
-                        trap: it is keyboard-operable and exposes its own
-                        open state for free, the same idiom this console
-                        already uses for a closed-by-default account
-                        (`AssistantTab.tsx`'s egress disclosure).
+                          The lifecycle actions -- Disable, Reset second
+                          factors and Sign out everywhere for an account in use;
+                          Enable for a disabled one; Resend and Cancel for an
+                          invitation -- and Delete move inside a native `<details>`, closed by
+                          default. Not an invented overflow menu -- there is no
+                          menu or popover component in this kit -- a `<details>`
+                          needs no floating panel, no positioning and no focus
+                          trap: it is keyboard-operable and exposes its own
+                          open state for free, the same idiom this console
+                          already uses for a closed-by-default account
+                          (`AssistantTab.tsx`'s egress disclosure).
 
-                        QUIETER MUST NOT MEAN EASIER TO HIT: closed is not
-                        hidden-forever, and nothing about what any of the four
-                        DO changed -- every one that takes something away
-                        opens the same named, confirming dialog; Enable and
-                        Resend fire without one. `DANGER_SEPARATOR`
-                        still sets Delete apart with a hairline inside the
-                        disclosure, so it is never mistaken for the ghost
-                        button beside it. */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        aria-label={t("settings.users.manageRolesAria", { email: user.email })}
-                        onClick={() =>
-                          setRolesForId((current) => (current === user.id ? null : user.id))
-                        }
-                      >
-                        {t("settings.users.manageRoles")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        aria-label={t("settings.users.permissionsAria", { email: user.email })}
-                        onClick={() =>
-                          setPermissionsForId((current) =>
-                            current === user.id ? null : user.id,
-                          )
-                        }
-                      >
-                        {t("settings.users.permissions")}
-                      </Button>
-                    </div>
-                    <details style={{ marginTop: 6 }}>
-                      <summary
-                        className="note cursor-pointer"
-                        aria-label={t("settings.users.moreActionsAria", { email: user.email })}
-                      >
-                        {t("settings.users.moreActions")}
-                      </summary>
-                      <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 6 }}>
-                        {user.invite_pending === true ? (
-                          <>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              aria-label={t("settings.users.resendAria", { email: user.email })}
-                              disabled={!canManage || resendInvite.isPending}
-                              title={canManage ? undefined : reason}
-                              onClick={() => resend(user)}
-                            >
-                              {t("settings.users.resend")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              aria-label={t("settings.users.cancelInviteAria", { email: user.email })}
-                              disabled={!canManage}
-                              title={canManage ? undefined : reason}
-                              onClick={() => openConfirm({ kind: "cancelInvite", user })}
-                            >
-                              {t("settings.users.cancelInvite")}
-                            </Button>
-                          </>
-                        ) : user.status === "active" ? (
-                          <>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              aria-label={t("settings.users.disableAria", { email: user.email })}
-                              disabled={!canManage}
-                              title={canManage ? undefined : reason}
-                              onClick={() => openConfirm({ kind: "disable", user })}
-                            >
-                              {t("settings.users.disable")}
-                            </Button>
-                            {/* NOT ON YOUR OWN ROW (final review D2, Minor 2).
-                                The server refuses it (`_refuse_self`) -- but
-                                only after the step-up, which may spend a
-                                single-use recovery code first. One's own
-                                factors are changed in Your security. */}
-                            {user.id === selfId ? (
-                              <>
+                          QUIETER MUST NOT MEAN EASIER TO HIT: closed is not
+                          hidden-forever, and nothing about what any of the four
+                          DO changed -- every one that takes something away
+                          opens the same named, confirming dialog; Enable and
+                          Resend fire without one. `DANGER_SEPARATOR`
+                          still sets Delete apart with a hairline inside the
+                          disclosure, so it is never mistaken for the ghost
+                          button beside it. */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          aria-label={t("settings.users.manageRolesAria", { email: user.email })}
+                          onClick={() => {
+                            // Another person's panel: the last press's sentence was about this one.
+                            setAssignAttempt(null);
+                            setRolesForId((current) => (current === user.id ? null : user.id));
+                          }}
+                        >
+                          {t("settings.users.manageRoles")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          aria-label={t("settings.users.permissionsAria", { email: user.email })}
+                          onClick={() =>
+                            setPermissionsForId((current) =>
+                              current === user.id ? null : user.id,
+                            )
+                          }
+                        >
+                          {t("settings.users.permissions")}
+                        </Button>
+                      </div>
+                      <details style={{ marginTop: 6 }}>
+                        <summary
+                          className="note cursor-pointer"
+                          aria-label={t("settings.users.moreActionsAria", { email: user.email })}
+                        >
+                          {t("settings.users.moreActions")}
+                        </summary>
+                        <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 6 }}>
+                          {user.invite_pending === true ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label={t("settings.users.resendAria", { email: user.email })}
+                                disabled={!canManage || resendInvite.isPending}
+                                title={canManage ? undefined : reason}
+                                onClick={() => resend(user)}
+                              >
+                                {t("settings.users.resend")}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label={t("settings.users.cancelInviteAria", { email: user.email })}
+                                disabled={!canManage}
+                                title={canManage ? undefined : reason}
+                                onClick={() => openConfirm({ kind: "cancelInvite", user })}
+                              >
+                                {t("settings.users.cancelInvite")}
+                              </Button>
+                            </>
+                          ) : user.status === "active" ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label={t("settings.users.disableAria", { email: user.email })}
+                                disabled={!canManage}
+                                title={canManage ? undefined : reason}
+                                onClick={() => openConfirm({ kind: "disable", user })}
+                              >
+                                {t("settings.users.disable")}
+                              </Button>
+                              {/* NOT ON YOUR OWN ROW (final review D2, Minor 2).
+                                  The server refuses it (`_refuse_self`) -- but
+                                  only after the step-up, which may spend a
+                                  single-use recovery code first. One's own
+                                  factors are changed in Your security. */}
+                              {user.id === selfId ? (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                    aria-describedby={`own-factors-${user.id}`}
+                                    disabled
+                                  >
+                                    {t("settings.users.resetFactors")}
+                                  </Button>
+                                  <span id={`own-factors-${user.id}`} className="note">
+                                    <Trans
+                                      k="settings.users.resetOwnFactors"
+                                      // Underlined: a link inside a sentence is told apart by more than its colour (SC 1.4.1).
+                                      components={{ link: <Link className="underline" to="/profile/security" /> }}
+                                    />
+                                  </span>
+                                </>
+                              ) : (
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
-                                  aria-describedby={`own-factors-${user.id}`}
-                                  disabled
+                                  disabled={!canManage}
+                                  title={canManage ? undefined : reason}
+                                  onClick={() => openConfirm({ kind: "resetFactors", user })}
                                 >
                                   {t("settings.users.resetFactors")}
                                 </Button>
-                                <span id={`own-factors-${user.id}`} className="note">
-                                  <Trans
-                                    k="settings.users.resetOwnFactors"
-                                    // Underlined: a link inside a sentence is told apart by more than its colour (SC 1.4.1).
-                                    components={{ link: <Link className="underline" to="/profile/security" /> }}
-                                  />
-                                </span>
-                              </>
-                            ) : (
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
-                                aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                aria-label={t("settings.users.endSessionsAria", { email: user.email })}
                                 disabled={!canManage}
                                 title={canManage ? undefined : reason}
-                                onClick={() => openConfirm({ kind: "resetFactors", user })}
+                                onClick={() => openConfirm({ kind: "endSessions", user })}
                               >
-                                {t("settings.users.resetFactors")}
+                                {t("settings.users.endSessions")}
                               </Button>
-                            )}
+                            </>
+                          ) : (
                             <Button
                               type="button"
                               variant="ghost"
-                              aria-label={t("settings.users.endSessionsAria", { email: user.email })}
+                              aria-label={t("settings.users.enableAria", { email: user.email })}
+                              disabled={!canManage || user.status === "deleted"}
+                              title={canManage ? undefined : reason}
+                              onClick={() =>
+                                setEnabled.mutate({ userId: user.id, enabled: true })
+                              }
+                            >
+                              {t("settings.users.enable")}
+                            </Button>
+                          )}
+                          <span style={DANGER_SEPARATOR}>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="danger"
+                              aria-label={t("settings.users.deleteAria", { email: user.email })}
                               disabled={!canManage}
                               title={canManage ? undefined : reason}
-                              onClick={() => openConfirm({ kind: "endSessions", user })}
+                              onClick={() => openConfirm({ kind: "delete", user })}
                             >
-                              {t("settings.users.endSessions")}
+                              {t("settings.users.delete")}
                             </Button>
-                          </>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            aria-label={t("settings.users.enableAria", { email: user.email })}
-                            disabled={!canManage || user.status === "deleted"}
-                            title={canManage ? undefined : reason}
-                            onClick={() =>
-                              setEnabled.mutate({ userId: user.id, enabled: true })
-                            }
-                          >
-                            {t("settings.users.enable")}
-                          </Button>
-                        )}
-                        <span style={DANGER_SEPARATOR}>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            className="danger"
-                            aria-label={t("settings.users.deleteAria", { email: user.email })}
-                            disabled={!canManage}
-                            title={canManage ? undefined : reason}
-                            onClick={() => openConfirm({ kind: "delete", user })}
-                          >
-                            {t("settings.users.delete")}
-                          </Button>
-                        </span>
-                      </div>
-                    </details>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+                          </span>
+                        </div>
+                      </details>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
 
-        {!canManage ? (
-          <p className="note" style={UNDER_TABLE}>{reason}</p>
-        ) : null}
         {setEnabled.error || resendInvite.error || deleteUser.error ? (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
             <Icon name={KIND_ICON.crit} size={16} />
@@ -866,7 +1057,10 @@ export function UsersTab({
                   className="select-field"
                   value={grantRoleId}
                   disabled={!canManage}
-                  onChange={(event) => setGrantRoleId(event.target.value)}
+                  onChange={(event) => {
+                    setGrantRoleId(event.target.value);
+                    setAssignAttempt(null);
+                  }}
                 >
                   <option value="">{t("settings.users.selectRole")}</option>
                   {grantable.map((role) => (
@@ -883,12 +1077,15 @@ export function UsersTab({
                 label={t("settings.users.clientLabel")}
                 options={clientOptions}
                 value={grantClientId}
-                onChange={setGrantClientId}
+                onChange={(id) => {
+                  setGrantClientId(id);
+                  setAssignAttempt(null);
+                }}
                 loading={clients.isLoading}
                 emptyHint={clientPickerEmptyHint()}
                 placeholder={t("settings.users.clientPlaceholder")}
                 disabled={!canManage}
-                onPendingChange={setGrantScopeTyping}
+                onPendingChange={grantTypingChanged}
               />
             </div>
 
@@ -897,32 +1094,39 @@ export function UsersTab({
                 // THE BUTTON NAMES THE SCOPE IT GRANTS (final review,
                 // T11R-I1): "Assign role on Warehouse", "... on every
                 // client". The click that sends a grant says where it
-                // applies, whatever the box above happens to show.
+                // applies, whatever the box above happens to show. While the
+                // box holds text that is not a choice it names no client (O7
+                // re-review, S3): the one it last held is not what the box
+                // says, and not what a press would send.
                 label={
                   assignRole.isPending
                     ? t("settings.users.assigning")
-                    : grantClientId === EVERY_CLIENT_CHOICE
-                      ? t("settings.users.assignEvery")
-                      : grantClientId !== ""
-                        ? t("settings.users.assignOn", {
+                    : grantScopeTyping || grantClientId === ""
+                      ? t("settings.users.assign")
+                      : grantClientId === EVERY_CLIENT_CHOICE
+                        ? t("settings.users.assignEvery")
+                        : t("settings.users.assignOn", {
                             client: clientNames.get(grantClientId) ?? grantClientId,
                           })
-                        : t("settings.users.assign")
                 }
                 icon="plus"
                 variant="primary"
-                // Disabled until a scope is CHOSEN, and while the picker
-                // holds typed text that is not a choice: "Ware" typed and
-                // never clicked is not Warehouse -- and it used to be every
-                // client.
-                disabled={
-                  !canManage ||
-                  grantRoleId === "" ||
-                  grantClientId === "" ||
-                  grantScopeTyping ||
-                  assignRole.isPending
-                }
-                onClick={() =>
+                // Pressable but for a reader and while sending (coordinator
+                // ruling 8; O7 re-review, S3). Pressed before a role and a
+                // scope are both CHOSEN -- or while the picker holds typed
+                // text that is not a choice: "Ware" typed and never clicked
+                // is not Warehouse, and it used to be every client -- it sends
+                // nothing and says which half is missing.
+                disabled={!canManage || assignRole.isPending}
+                onClick={() => {
+                  const found = pairAttempt(grantRoleId, grantClientId, grantScopeTyping);
+                  if (attemptProblems(found).length > 0) {
+                    // The last refusal from the server is not this one (ruling 7).
+                    assignRole.reset();
+                    setAssignAttempt(found);
+                    return;
+                  }
+                  setAssignAttempt(null);
                   assignRole.mutate(
                     {
                       userId: rolesTarget.id,
@@ -941,10 +1145,16 @@ export function UsersTab({
                         setGrantClientId("");
                       },
                     },
-                  )
-                }
+                  );
+                }}
               />
               {!canManage ? <span className="form-hint">{reason}</span> : null}
+              {assignMissing.length > 0 ? (
+                <span role="alert" className="form-error">
+                  <Icon name={KIND_ICON.crit} size={13} />
+                  {assignMissing.map((problem) => problem.message).join(". ")}.
+                </span>
+              ) : null}
               {roles.error ? (
                 <span className="form-hint">
                   {t("settings.users.catalogueFailed")}
@@ -1016,132 +1226,163 @@ export function UsersTab({
         </section>
       ) : null}
 
-      <section aria-label={t("settings.users.invite.title")}>
-        <Panel
-          title={t("settings.users.invite.title")}
-          subtitle={t("settings.users.invite.subtitle")}
-        >
-          <div className="form-grid" style={FOLDING_FORM_GRID}>
-            <Field label={t("settings.users.invite.email")}>
-              <input
-                className={inputClass}
-                type="email"
-                value={email}
-                disabled={!canManage}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </Field>
-            <Field label={t("settings.users.invite.displayName")}>
-              <input
-                className={inputClass}
-                value={displayName}
-                disabled={!canManage}
-                onChange={(event) => setDisplayName(event.target.value)}
-              />
-            </Field>
-          </div>
+      {/* THE INVITATION, IN ITS DIALOG (`?new=user`). The person chooses
+          their own password and second factor from the link; nothing here
+          sets either. */}
+      <Dialog
+        open={newUser.open}
+        onClose={newUser.close}
+        title={t("settings.users.invite.title")}
+        // The recent confirmation can stand over it: Escape answers that one.
+        dismissible={!stepUp.open}
+      >
+        <p className="note" style={{ marginBottom: 12 }}>
+          {t("settings.users.invite.subtitle")}
+        </p>
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.users.invite.email")}>
+            <input
+              className={inputClass}
+              type="email"
+              value={email}
+              disabled={!canManage}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </Field>
+          <Field label={t("settings.users.invite.displayName")}>
+            <input
+              className={inputClass}
+              value={displayName}
+              disabled={!canManage}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          </Field>
+        </div>
 
-          <fieldset style={GROUP}>
-            <legend style={GROUP_LEGEND}>{t("settings.users.invite.access")}</legend>
-            {inviteGrants.length === 0 ? (
-              <p className="note">{t("settings.users.invite.noGrants")}</p>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
-                {inviteGrants.map((grant, index) => (
-                  <li key={`${grant.role_id}:${grant.client_id ?? "every"}`} className="flex items-center gap-3">
-                    {/* The roles panel's own `·` suffix and the same two
-                        transforms: a pair reads the same before and after it
-                        is granted. */}
-                    <span>
-                      {roleDisplayName(roleNameOf(grant.role_id))}
-                      <span className="note">{` · ${describeGrantScope(grant.client_id, clientNames)}`}</span>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-label={t("settings.users.invite.removeGrantAria", {
-                        role: roleDisplayName(roleNameOf(grant.role_id)),
-                        scope: describeGrantScope(grant.client_id, clientNames),
-                      })}
-                      disabled={!canManage}
-                      onClick={() => removeGrant(index)}
-                    >
-                      {t("settings.users.remove")}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {grantable.length === 0 ? (
-              <p className="note" style={{ marginTop: 10 }}>{t("settings.users.invite.noRoles")}</p>
-            ) : (
-              <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 10 }}>
-                <Field label={t("settings.users.role")}>
-                  <select
-                    className="select-field"
-                    value={draftRoleId}
+        <fieldset style={GROUP}>
+          <legend style={GROUP_LEGEND}>{t("settings.users.invite.access")}</legend>
+          {inviteGrants.length === 0 ? (
+            <p className="note">{t("settings.users.invite.noGrants")}</p>
+          ) : (
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+              {inviteGrants.map((grant, index) => (
+                <li key={`${grant.role_id}:${grant.client_id ?? "every"}`} className="flex items-center gap-3">
+                  {/* The roles panel's own `·` suffix and the same two
+                      transforms: a pair reads the same before and after it
+                      is granted. */}
+                  <span>
+                    {roleDisplayName(roleNameOf(grant.role_id))}
+                    <span className="note">{` · ${describeGrantScope(grant.client_id, clientNames)}`}</span>
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-label={t("settings.users.invite.removeGrantAria", {
+                      role: roleDisplayName(roleNameOf(grant.role_id)),
+                      scope: describeGrantScope(grant.client_id, clientNames),
+                    })}
                     disabled={!canManage}
-                    onChange={(event) => setDraftRoleId(event.target.value)}
+                    onClick={() => removeGrant(index)}
                   >
-                    <option value="">{t("settings.users.selectRole")}</option>
-                    {grantable.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {roleDisplayName(role.name)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <EntityPicker
-                  label={t("settings.users.clientLabel")}
-                  options={clientOptions}
-                  value={draftClientId}
-                  onChange={setDraftClientId}
-                  loading={clients.isLoading}
-                  emptyHint={clientPickerEmptyHint()}
-                  placeholder={t("settings.users.clientPlaceholder")}
+                    {t("settings.users.remove")}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {grantable.length === 0 ? (
+            <p className="note" style={{ marginTop: 10 }}>{t("settings.users.invite.noRoles")}</p>
+          ) : (
+            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 10 }}>
+              <Field label={t("settings.users.role")}>
+                <select
+                  className="select-field"
+                  value={draftRoleId}
                   disabled={!canManage}
-                  onPendingChange={setDraftTyping}
-                />
-              </div>
-            )}
-            <div className="form-actions">
-              {/* Disabled until a role and a scope are CHOSEN, and while the
-                  picker holds typed text that is not a choice -- the same rule
-                  as "Assign role" (final review, T11R-I1). */}
-              <Btn
-                label={t("settings.users.invite.addGrant")}
-                icon="plus"
-                disabled={!canManage || draftRoleId === "" || draftClientId === "" || draftTyping}
-                onClick={addGrant}
+                  onChange={(event) => {
+                    setDraftRoleId(event.target.value);
+                    setGrantAttempt(null);
+                  }}
+                >
+                  <option value="">{t("settings.users.selectRole")}</option>
+                  {grantable.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {roleDisplayName(role.name)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <EntityPicker
+                label={t("settings.users.clientLabel")}
+                options={clientOptions}
+                value={draftClientId}
+                onChange={(id) => {
+                  setDraftClientId(id);
+                  setGrantAttempt(null);
+                }}
+                loading={clients.isLoading}
+                emptyHint={clientPickerEmptyHint()}
+                placeholder={t("settings.users.clientPlaceholder")}
+                disabled={!canManage}
+                onPendingChange={draftTypingChanged}
               />
             </div>
-          </fieldset>
-
-          <p className="note" style={{ marginTop: 10 }}>
-            {t("settings.users.invite.noPassword")}
-          </p>
-
+          )}
           <div className="form-actions">
+            {/* Pressable whatever is chosen (coordinator ruling 8; O7 review,
+                S2): pressed before a role and a client are both CHOSEN -- or
+                while the picker holds typed text that is not a choice, the
+                rule "Assign role" keeps (final review, T11R-I1) -- it adds
+                nothing and says which half is missing. */}
             <Btn
-              label={invite.isPending ? t("settings.users.invite.sending") : t("settings.users.invite.submit")}
-              icon="mail"
-              variant="primary"
-              disabled={!canManage || email.trim() === "" || draftPending || invite.isPending}
-              onClick={sendInvite}
+              label={t("settings.users.invite.addGrant")}
+              icon="plus"
+              disabled={!canManage}
+              onClick={addGrant}
             />
-            {!canManage ? <span className="form-hint">{reason}</span> : null}
-            {canManage && draftPending ? (
-              <span className="form-hint">{t("settings.users.invite.draftPending")}</span>
-            ) : null}
-            {invite.error ? (
+            {grantMissing.length > 0 ? (
               <span role="alert" className="form-error">
                 <Icon name={KIND_ICON.crit} size={13} />
-                {describeSubmitError(invite.error)}
+                {grantMissing.map((problem) => problem.message).join(". ")}.
               </span>
             ) : null}
           </div>
-        </Panel>
-      </section>
+        </fieldset>
+
+        <p className="note" style={{ marginTop: 10 }}>
+          {t("settings.users.invite.noPassword")}
+        </p>
+
+        <div className="form-actions">
+          <Btn
+            label={invite.isPending ? t("settings.users.invite.sending") : t("settings.users.invite.submit")}
+            icon="mail"
+            variant="primary"
+            disabled={!canManage || draftPending || invite.isPending}
+            onClick={sendInvite}
+          />
+          {!canManage ? <span className="form-hint">{reason}</span> : null}
+          {canManage && draftPending ? (
+            <span className="form-hint">{t("settings.users.invite.draftPending")}</span>
+          ) : null}
+          {invite.error ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {describeSubmitError(invite.error)}
+            </span>
+          ) : inviteProblems.length > 0 && email.trim() === "" ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {inviteProblems.map((problem) => problem.message).join(". ")}.
+            </span>
+          ) : null}
+          <Btn label={t("common.actions.cancel")} onClick={newUser.close} />
+        </div>
+      </Dialog>
+      {/* AFTER the dialog it guards (coordinator clarification 3a): the two
+          share the modal's stacking, so the question must come later in the
+          DOM to paint over the form. */}
+      {guard}
 
       <Dialog
         open={confirming != null}

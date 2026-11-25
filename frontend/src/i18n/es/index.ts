@@ -5,7 +5,7 @@
  *   push install → instalación remota     tenant/organization → organización
  *   job → tarea     ticket → ticket     rollout → despliegue
  *   approve → aprobar     review → revisión     subnet → subred
- *   computer → equipo     (a machine on the list, "Add a computer"; "device" stays dispositivo)
+ *   computer → equipo     (a machine on the list, "Add a computer"; "device" stays dispositivo; the machine list, /devices, is "Equipos" in the rail and on its page (redesign 2026-11-23))
  *   manage → administrar     alert → alerta     patch → parche
  *   backup → copia de seguridad     credential → credencial
  *   sweep → barrido     audit log → registro de auditoría

@@ -1,7 +1,8 @@
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
 // The module's two surfaces, in one place so `App.tsx`'s routes and the
@@ -43,28 +44,21 @@ const PUSH_NAV_ITEMS: ReadonlyArray<{ to: string; label: MessageKey }> = [
 export function PushNav() {
   const t = useT();
   const location = useLocation();
+  // THE KIT'S SECTION NAV (redesign plan, the waves' common rules): the same
+  // two links, the current one `aria-current="page"`. `/agent-push` itself
+  // renders the authorizations page (App.tsx), so on that path the first entry
+  // points at it -- the same page -- and is the current one: a two-entry nav
+  // with nothing current reads as "you are on neither of these".
+  const bare = location.pathname === "/agent-push";
   return (
-    <nav aria-label={t("agentPush.nav.label")} className="tabs">
-      {PUSH_NAV_ITEMS.map((item) => {
-        // `/agent-push` itself renders the authorizations page (App.tsx), so
-        // it marks the same entry. Without this the bare path drew a strip
-        // with nothing current on it -- the one state a two-entry nav must
-        // never be in, since it reads as "you are on neither of these".
-        const active =
-          location.pathname.startsWith(item.to) ||
-          (item.to === "/agent-push/authorizations" && location.pathname === "/agent-push");
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={`tab ${active ? "active" : ""}`.trim()}
-            aria-current={active ? "page" : undefined}
-          >
-            {t(item.label)}
-          </Link>
-        );
-      })}
-    </nav>
+    <SectionNav
+      label={t("agentPush.nav.label")}
+      items={PUSH_NAV_ITEMS.map((item, at) => ({
+        to: bare && at === 0 ? "/agent-push" : item.to,
+        label: t(item.label),
+        end: bare && at === 0,
+      }))}
+    />
   );
 }
 

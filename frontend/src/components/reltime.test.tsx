@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { setActiveLanguage } from "../i18n/core";
 import { formatDateTime, NO_DATE } from "../lib/datetime";
 import { RelTime } from "./reltime";
 
@@ -21,5 +22,23 @@ describe("RelTime", () => {
     const dash = screen.getByText(NO_DATE);
     expect(dash.tagName).toBe("SPAN");
     expect(dash).not.toHaveAttribute("title");
+  });
+
+  // The kit's absent mark (P3 adoption pass): "n/a", never the em dash it was.
+  it("draws the absent mark, n/a, for an absent time", () => {
+    const { container } = render(<RelTime iso={null} now={NOW} />);
+    expect(container.textContent).toBe("n/a");
+  });
+
+  it("draws n/d in Spanish, and follows a switch back", () => {
+    setActiveLanguage("es");
+    try {
+      const { container } = render(<RelTime iso={undefined} now={NOW} />);
+      expect(container.textContent).toBe("n/d");
+      act(() => setActiveLanguage("en"));
+      expect(container.textContent).toBe("n/a");
+    } finally {
+      setActiveLanguage("en");
+    }
   });
 });

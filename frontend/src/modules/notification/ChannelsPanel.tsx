@@ -8,7 +8,9 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel, StatusPill, Toggle } from "../../shell/components";
+import { Btn, FormSection, StatusPill, Toggle } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
+import { useSwitches } from "./switches";
 import {
   useCreateNotificationChannelMutation,
   useDeleteNotificationChannelMutation,
@@ -246,7 +248,31 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
     editingChannel.has_credential &&
     emailAuthOf(editingChannel.config) === signIn.auth;
 
+  // The edit form as it opens on a channel (`openEdit`), and as it stands:
+  // what "untouched" is measured against.
+  function editFormOf(channel: ChannelOut) {
+    const email = channel.kind !== "webhook";
+    return {
+      kind: channel.kind,
+      name: channel.name,
+      url: email ? "" : String(channel.config.url ?? ""),
+      host: email ? String(channel.config.host ?? "") : "",
+      port: email ? String(channel.config.port ?? 587) : "587",
+      fromAddress: email ? String(channel.config.from_address ?? "") : "",
+      useTls: email ? channel.config.use_tls !== false : true,
+      secret: "",
+      signIn: email ? { ...EMPTY_SIGN_IN, auth: emailAuthOf(channel.config) } : EMPTY_SIGN_IN,
+    };
+  }
+
   function submit() {
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    const now = { kind, name, url, host, port, fromAddress, useTls, secret, signIn };
+    if (editingChannel && JSON.stringify(now) === JSON.stringify(editFormOf(editingChannel))) {
+      resetForm();
+      setDialog(null);
+      return;
+    }
     const base = kind === "webhook" ? webhookRules : microsoft ? microsoftRules : emailRules;
     const withSignIn = kind === "email";
     const next: Attempt = {
@@ -316,9 +342,11 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
   // from a toggle nobody clicked. Disabling a channel is how an operator
   // stops a noisy or compromised webhook; believing it worked when it did
   // not is the failure mode that matters here.
-  function toggleActive(channel: ChannelOut) {
-    update.mutate({ id: channel.id, body: { active: !channel.active } });
-  }
+  //
+  // A channel's on/off switch is one of the page's settings now (Task 7,
+  // 2.8): held in the page's one draft (`switches.tsx`), saved by its one
+  // save bar with this same `{ active }` PATCH, its refusal said here.
+  const switches = useSwitches();
 
   function runTest(channelId: string) {
     setTestedChannelId(channelId);
@@ -351,16 +379,12 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
     // `id` is a stat tile's destination: the Channels tile on this page
     // links to `/notifications#channels`.
     <div id="channels">
-      <Panel
-        title={t("notification.channels.title")}
-        subtitle={t("notification.channels.subtitle")}
-        bare
-        actions={canAdmin ? <Btn label={t("notification.channels.add")} icon="plus" onClick={openCreate} /> : undefined}
-      >
+      <FormSection title={t("notification.channels.title")} icon="link">
+        <SectionLead text={t("notification.channels.subtitle")} action={canAdmin ? <Btn label={t("notification.channels.add")} icon="plus" onClick={openCreate} /> : undefined} />
         {channels.isLoading ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.common.loading")}</p>
+          <p className="note">{t("notification.common.loading")}</p>
         ) : forbidden ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.channels.forbidden")}</p>
+          <p className="note">{t("notification.channels.forbidden")}</p>
         ) : failed ? (
           // `role="alert"` and the reason, through the one translation
           // (components/form.tsx): red text with no live region is not
@@ -415,10 +439,14 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
                         "Pending", "Sent" and "Dead-lettered". */}
                     {canAdmin ? (
                       <Toggle
-                        checked={c.active}
-                        onChange={() => toggleActive(c)}
-                        label={c.active ? t("notification.channels.on") : t("notification.channels.off")}
-                        disabled={update.isPending}
+                        checked={switches.active("channel", c.id, c.active)}
+                        onChange={() => switches.toggle("channel", c.id)}
+                        label={
+                          switches.active("channel", c.id, c.active)
+                            ? t("notification.channels.on")
+                            : t("notification.channels.off")
+                        }
+                        disabled={switches.saving}
                       />
                     ) : (
                       <StatusPill value={c.active ? "active" : "inactive"} />
@@ -511,9 +539,9 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
           </Table>
         )}
 
-        {update.isError && (
+        {(update.isError || switches.channelError != null) && (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
-            {t("notification.channels.notChanged", { reason: describeSubmitError(update.error) })}
+            {t("notification.channels.notChanged", { reason: describeSubmitError(switches.channelError ?? update.error) })}
           </p>
         )}
 
@@ -668,7 +696,7 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
             </div>
           </Form>
         </Dialog>
-      </Panel>
+      </FormSection>
     </div>
   );
 }

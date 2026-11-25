@@ -123,9 +123,10 @@ export function EnrollPage() {
         <AuthAlert text={alert} />
         <div className="form-actions">
           {signedIn ? (
-            <Btn variant="primary" icon="arrow-right" label={t("auth.codes.continue")} onClick={() => enterConsole(next)} />
+            <Btn wide variant="primary" icon="arrow-right" label={t("auth.codes.continue")} onClick={() => enterConsole(next)} />
           ) : deadEnd === null ? (
             <Btn
+              wide
               variant="primary"
               label={busy ? t("auth.common.working") : t("auth.enroll.retryFinish")}
               disabled={busy}
@@ -161,6 +162,7 @@ export function EnrollPage() {
             </Field>
             <div className="form-actions">
               <Btn
+                wide
                 type="submit"
                 variant="primary"
                 icon="key"
@@ -180,6 +182,7 @@ export function EnrollPage() {
         {otpauthUri === null ? (
           <div>
             <Btn
+              wide
               icon="device-mobile"
               label={t("auth.enroll.startTotp")}
               disabled={busy}
@@ -221,6 +224,7 @@ export function EnrollPage() {
             </Field>
             <div className="form-actions">
               <Btn
+                wide
                 type="submit"
                 variant="primary"
                 label={busy ? t("auth.common.working") : t("auth.enroll.confirmTotp")}

@@ -31,3 +31,12 @@ export declare function chromeProblems(probe: ChromeProbe, vp?: Viewport): strin
 export declare function parseColor(text: string): Rgba | null;
 export declare function readTokens(css: string): Map<string, string>;
 export declare function buildAllowlist(css: string): Allowlist;
+
+/** `"the dev server answered 504 for /node_modules/.vite/deps/x.js"` for a 5xx on a page file; null otherwise and for `/api/`. */
+export declare function servedError(status: number, url: string): string | null;
+/** `"/src/x.tsx never loaded (net::ERR_ABORTED)"` for a page file that got no answer; null for `/api/`. */
+export declare function failedLoad(url: string, errorText: string): string | null;
+/** A console route (not in `FRAMELESS`) whose probe found no top bar. */
+export declare function missingShell(route: string, probe: ChromeProbe | null): boolean;
+/** True when `served` already holds a `servedError` entry for this URL. */
+export declare function alreadyServed(served: string[], url: string): boolean;

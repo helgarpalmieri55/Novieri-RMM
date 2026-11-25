@@ -88,14 +88,14 @@ describe("MsiDownload", () => {
     const blob = new Blob(["MSI"]);
     const downloadInstallLinkMsi = vi
       .fn()
-      .mockResolvedValue({ blob, filename: "ITMS-Agent-itms.example.com-arm64.msi", sha256: SHA });
+      .mockResolvedValue({ blob, filename: "NovieriRMM-Agent-itms.example.com-arm64.msi", sha256: SHA });
     renderBlock({ downloadInstallLinkMsi }, { linkOn: true, revealed: LINK });
     expect(screen.getByLabelText("Install link")).toHaveValue(LINK);
     await userEvent.click(screen.getByRole("button", { name: "Download MSI for Group Policy (ARM)" }));
     expect(downloadInstallLinkMsi).toHaveBeenCalledWith(SITE, { code: CODE, arch: "arm64" });
     expect(await screen.findByText(SHA)).toBeInTheDocument();
-    expect(saveBlob).toHaveBeenCalledWith(blob, "ITMS-Agent-itms.example.com-arm64.msi");
-    expect(screen.getByRole("status")).toHaveTextContent("ITMS-Agent-itms.example.com-arm64.msi");
+    expect(saveBlob).toHaveBeenCalledWith(blob, "NovieriRMM-Agent-itms.example.com-arm64.msi");
+    expect(screen.getByRole("status")).toHaveTextContent("NovieriRMM-Agent-itms.example.com-arm64.msi");
   });
 
   it("takes a pasted link when none is on screen, and refuses a paste that is not one", async () => {
@@ -127,14 +127,14 @@ describe("MsiDownload", () => {
     const blob = new Blob(["MSI bytes"]);
     const downloadInstallLinkMsi = vi
       .fn()
-      .mockResolvedValue({ blob, filename: "ITMS-Agent-itms.example.com-amd64.msi", sha256: SHA });
+      .mockResolvedValue({ blob, filename: "NovieriRMM-Agent-itms.example.com-amd64.msi", sha256: SHA });
     renderBlock({ downloadInstallLinkMsi }, { linkOn: true, revealed: LINK });
     await userEvent.click(screen.getByRole("button", { name: "Download MSI for Group Policy (64-bit Intel or AMD)" }));
     expect(await screen.findByText(SHA)).toBeInTheDocument();
-    expect(saveBlob).toHaveBeenCalledWith(blob, "ITMS-Agent-itms.example.com-amd64.msi");
+    expect(saveBlob).toHaveBeenCalledWith(blob, "NovieriRMM-Agent-itms.example.com-amd64.msi");
     // The mutation's result is what React Query keeps: the name and the digest only.
     const [mutation] = lastQueryClient.getMutationCache().getAll();
-    expect(mutation?.state.data).toEqual({ filename: "ITMS-Agent-itms.example.com-amd64.msi", sha256: SHA });
+    expect(mutation?.state.data).toEqual({ filename: "NovieriRMM-Agent-itms.example.com-amd64.msi", sha256: SHA });
     expect(Object.values(mutation?.state.data ?? {}).some((value) => value instanceof Blob)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { describeSubmitError } from "../../components/form";
+import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { Badge, Button, Table, Td, Th } from "../../components/ui";
@@ -339,7 +340,7 @@ export function CheckTypeMatrix({ types }: { types: readonly CheckTypeOut[] }) {
                     ? t("health.editor.cadencePosture")
                     : t("health.editor.cadenceLive")}
               </Td>
-              <Td>{type.selector_meaning || "—"}</Td>
+              <Td>{type.selector_meaning || <NoValue label={t("health.editor.matrixSelectorNone")} />}</Td>
             </tr>
           ))}
         </tbody>

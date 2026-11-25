@@ -11,10 +11,9 @@ export const shell = {
   // one-line hints an area's landing page shows under each page.
   nav: {
     group: {
-      daily: "Daily",
-      governance: "Governance",
-      assetsSpend: "Assets & Spend",
-      configure: "Configure",
+      // One caption for the whole rail now (redesign design §1.1: no group
+      // captions are drawn); it names the main and the anchored groups.
+      main: "Main menu",
       help: "Help",
     },
     item: {
@@ -55,11 +54,13 @@ export const shell = {
       errorMonitor: "Error monitor",
       settings: "Settings",
       clients: "Clients",
+      // The rail's two folders (decision D9).
+      assets: "Assets",
+      more: "More",
       myTickets: "My tickets",
       newTicket: "New ticket",
     },
     section: {
-      organization: "Organization",
       serviceDesk: "Service desk",
       computers: "Computers",
       automation: "Automation",
@@ -110,7 +111,22 @@ export const shell = {
     expand: "Expand sidebar",
     collapse: "Collapse sidebar",
     main: "Main",
+    // The rail's foot (redesign design §1.1) and the Admin panel (decision D10).
+    anchored: "Assistant and Admin",
+    backToMenu: "Back to the menu",
+    adminSearch: "Search Admin",
+    adminNoMatch: "No Admin page matches that.",
     plan: "Self-hosted enterprise",
+  },
+  // The top bar's New menu (redesign design §1.2; shell/NewMenu.tsx).
+  newMenu: {
+    label: "New",
+    ticket: "Ticket",
+    client: "Client",
+    contact: "Contact",
+    device: "Computer",
+    document: "Document",
+    change: "Change",
   },
   app: {
     skipToMain: "Skip to main content",
@@ -119,9 +135,8 @@ export const shell = {
     openNavigation: "Open navigation",
     // The drawer toggle on a phone while a client is chosen: it carries the
     // client's initials, and its name says the client in full.
-    openNavigationClient: "Open navigation — client: {client}",
-    closeNavigationClient: "Close navigation — client: {client}",
-    addComputer: "Add a computer",
+    openNavigationClient: "Open navigation. Client: {client}",
+    closeNavigationClient: "Close navigation. Client: {client}",
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",
@@ -190,9 +205,6 @@ export const shell = {
   },
   areaPage: {
     empty: "Nothing in this area is open to your account. Ask an administrator for access.",
-    page: "Page",
-    open: "Open",
-    openPage: "Open {label}",
   },
   viz: {
     kindCritical: "critical",
@@ -230,6 +242,32 @@ export const shell = {
     next: "Next",
     pageOf: "Page {page} of {count}",
     pageOfScope: "{label} page of {scope}",
+  },
+  // The pattern kit (shell/listKit.tsx, detailKit.tsx, formKit.tsx; design §2).
+  kit: {
+    showing: "Showing {shown} of {total}",
+    showingSome: "Showing {shown}",
+    nothingMatches: "Nothing matches these filters.",
+    clearFilters: "Clear filters",
+    client: "Client",
+    allClients: "All clients",
+    bulkActions: "Bulk actions",
+    selected: { one: "{count} selected", other: "{count} selected" },
+    clearSelection: "Clear selection",
+    unsaved: "Unsaved changes",
+    saving: "Saving…",
+    discard: "Discard",
+    save: "Save",
+    saved: "Saved.",
+    leaveTitle: "Leave without saving?",
+    leaveBody: "The changes on this page have not been saved. If you leave, they are lost.",
+    leave: "Leave without saving",
+  },
+  // The data router's error page (shell/RouteError.tsx; decision D18).
+  routeError: {
+    title: "This page could not be shown",
+    body: "Something on this page failed while it was being drawn. Nothing was changed. Reload the page, or go back to the dashboard.",
+    home: "Go to the dashboard",
   },
   toaster: { dismiss: "Dismiss" },
   // The top bar's client selector (shell/ClientSelector.tsx, phase 3 design §1.1).

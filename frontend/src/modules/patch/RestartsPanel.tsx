@@ -13,9 +13,10 @@ import { restartLabel, restartSentence } from "./restartCopy";
  * signed-in user on a laptop gets the policy's deferral as warning. This list
  * is where an operator sees which machines are half-patched until then.
  */
-export function RestartsPanel({ zone }: { zone: string | null }) {
+export function RestartsPanel({ zone, chip = "" }: { zone: string | null; chip?: string }) {
   const t = useT();
-  const restarts = usePatchRestarts();
+  // Under the Client chip, that client's machines (O3 3.2).
+  const restarts = usePatchRestarts(true, chip);
   const items = restarts.data?.items ?? [];
   return (
     <Panel
@@ -24,7 +25,7 @@ export function RestartsPanel({ zone }: { zone: string | null }) {
       bare
     >
       <QueryState
-        loading={restarts.isLoading}
+        loading={restarts.isPending}
         error={restarts.error}
         empty={restarts.data != null && items.length === 0}
         emptyIcon="refresh"

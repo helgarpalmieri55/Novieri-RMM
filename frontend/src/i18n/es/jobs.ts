@@ -50,9 +50,7 @@ export const jobs: Shape<typeof en> = {
     stuck: "Esperando demasiado",
     searchPlaceholder: "Tipo de tarea, id de la tarea, dispositivo",
     searchAria: "Buscar tareas",
-    count: { one: "{count} tarea", other: "{count} tareas" },
     emptyNone: "Aún no se ha enviado ninguna tarea.",
-    emptyFiltered: "Ninguna tarea coincide con ese filtro.",
   },
   table: {
     name: "Nombre",
@@ -119,8 +117,8 @@ export const jobs: Shape<typeof en> = {
   },
   retry: {
     title: "Ejecutar esta tarea de nuevo",
-    body: "Esto no vuelve a enviar la tarea original. La plataforma crea una tarea NUEVA para el mismo dispositivo, la firma de nuevo y la envía; el registro de este intento se queda exactamente como está.",
-    bodyCancelled: "Alguien canceló esta tarea. Esto no vuelve a enviar la tarea original. La plataforma crea una tarea NUEVA para el mismo dispositivo, la firma de nuevo y la envía; el registro de este intento se queda exactamente como está.",
+    body: "Esto no vuelve a enviar la tarea original. La plataforma crea otra tarea, nueva, para el mismo dispositivo, la firma de nuevo y la envía; el registro de este intento se queda exactamente como está.",
+    bodyCancelled: "Alguien canceló esta tarea. Esto no vuelve a enviar la tarea original. La plataforma crea otra tarea, nueva, para el mismo dispositivo, la firma de nuevo y la envía; el registro de este intento se queda exactamente como está.",
     succeeded: "Esta tarea se completó correctamente. Volver a hacer el mismo trabajo es una tarea nueva y no un reintento, y se envía desde donde ese trabajo se inicia normalmente.",
     notFinished: "Esta tarea no ha terminado, así que todavía no hay nada que volver a ejecutar. Una tarea que nunca llega a su dispositivo se reenvía automáticamente; una tarea en ejecución informará de su propio resultado.",
   },

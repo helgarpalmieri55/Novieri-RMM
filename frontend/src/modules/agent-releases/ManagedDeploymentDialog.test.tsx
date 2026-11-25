@@ -77,19 +77,19 @@ function pkg(over: Partial<AgentDeploymentPackage> = {}): AgentDeploymentPackage
   return {
     release: RELEASE,
     channel: "gpo",
-    download_url: "https://minio.test/agent-releases/873d666/its-agent-windows-amd64.exe?sig=x",
+    download_url: "https://minio.test/agent-releases/873d666/novieri-agent-windows-amd64.exe?sig=x",
     download_expires_in_s: 900,
     sha256: "b".repeat(64),
     staging: [
-      { title: "Download the artefact once", detail: "On your own workstation.", command: "curl -fL -o its-agent.exe '…'" },
+      { title: "Download the artefact once", detail: "On your own workstation.", command: "curl -fL -o novieri-agent.exe '…'" },
       { title: "Stage it on a distribution point", detail: "Readable by machine accounts.", command: "" },
     ],
-    install_command: "powershell.exe -File \\\\dfs\\its-agent\\install.ps1 -NoStart",
+    install_command: "powershell.exe -File \\\\dfs\\novieri-agent\\install.ps1 -NoStart",
     enrol_command:
-      "$env:ITS_AGENT_ENROLL_TOKEN = <read from your secret store>; .\\its-agent-enroll.ps1 -Url https://console",
+      "$env:ITS_AGENT_ENROLL_TOKEN = <read from your secret store>; .\\novieri-agent-enroll.ps1 -Url https://console",
     integrity: {
       sha256: "b".repeat(64),
-      verify_command: "if ((Get-FileHash 'its-agent.exe' -Algorithm SHA256).Hash -ne '…') { throw }",
+      verify_command: "if ((Get-FileHash 'novieri-agent.exe' -Algorithm SHA256).Hash -ne '…') { throw }",
       verified_at_install: false,
       notes: ["The endpoint does not verify anything.", "This binary is unsigned."],
     },

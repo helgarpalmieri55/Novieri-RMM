@@ -46,13 +46,23 @@ const inDays = (days: number): string => new Date(Date.now() + days * DAY).toISO
  * see every control a page can draw, and the frontend gates nothing
  * (invariant 6), so a permission the server would refuse costs a screenshot
  * nothing.
+ *
+ * `clients.manage` was added on 2026-11-24 (redesign Task 4): the catalogue
+ * predates MSP clients, so the fixture session could not see New client or a
+ * client's Add contact, the two creates the New menu leads to (`rbac.py`
+ * lists it beside `clients.read`).
+ *
+ * `backup.offsite.manage` and `backup.recovery.manage` were added on
+ * 2026-11-25 (kit requests batch 1, item 7): without them /backup/offsite's
+ * storage editor and the recovery key's controls were drawn in no capture
+ * (`rbac.py` lists both beside `backup.policy.manage`).
  */
 const CATALOGUE = [
   "agent.push.run", "agent.push.scope.manage", "agent.release.manage", "agent.release.read",
   "ai.act.confirm", "ai.act.propose", "ai.admin", "ai.use", "assets.manage", "audit.read",
-  "backup.policy.manage", "backup.read", "backup.restore", "backup.run",
+  "backup.offsite.manage", "backup.policy.manage", "backup.read", "backup.recovery.manage", "backup.restore", "backup.run",
   "bcp.approve", "bcp.manage", "bcp.read", "budget.manage", "budget.read",
-  "change.approve", "change.manage", "change.read", "change.request",
+  "change.approve", "change.manage", "change.read", "change.request", "clients.manage",
   "credentials.checkout", "credentials.manage", "credentials.read",
   "deploy.create", "deploy.execute", "deploy.package.manage", "deploy.read",
   "deploy.script.manage", "deploy.script.run", "devices.manage", "devices.read", "devices.review",
@@ -294,6 +304,17 @@ const matchesQuery = (d: Device, q: string) => {
     .some((v) => v.toLowerCase().includes(needle));
 };
 
+/**
+ * WHOSE MACHINE EACH IS, for a read narrowed to one client (`?client_id=`):
+ * the Porto office's machines are the fixture customer's (Andes Logistics),
+ * every other one the internal client's (Task 5 review, fix round 1). Before,
+ * every machine was the internal client's, so the client 360's Devices tab
+ * drew "no devices yet" under a non-zero tile. The records carry no
+ * `client_id` of their own: the Devices list reads as it did.
+ */
+const CUSTOMER_DEVICES: ReadonlySet<string> = new Set(["dev-4", "dev-8", "dev-14"]);
+const clientOfDevice = (id: string): string => (CUSTOMER_DEVICES.has(id) ? CUSTOMER_ID : ORG_ID);
+
 const listDevices: FixtureMap["listDevices"] = (params = {}) => {
   const all = devices();
   const filtered = (rows: Device[]) =>
@@ -302,8 +323,7 @@ const listDevices: FixtureMap["listDevices"] = (params = {}) => {
         matchesQuery(d, params.q ?? "") &&
         (!params.provenance || d.provenance === params.provenance) &&
         (!params.osFamily || d.os_family === params.osFamily) &&
-        // Every fixture machine is the internal client's (id = the org's).
-        (!params.clientId || params.clientId === ORG_ID),
+        (!params.clientId || params.clientId === clientOfDevice(d.id)),
     );
   const searched = filtered(all);
   // In the review tab and its count, and nowhere else -- as on the server.
@@ -434,7 +454,7 @@ export const fixtures: FixtureMap = {
       { name: "database", status: "ok", duration_ms: 3, reason: null, detail: { rls: "enforced" } },
       { name: "redis", status: "ok", duration_ms: 1, reason: null, detail: null },
       { name: "vault", status: "ok", duration_ms: 11, reason: null, detail: { sealed: false } },
-      { name: "object_store", status: "ok", duration_ms: 24, reason: null, detail: { bucket: "itms-backups" } },
+      { name: "object_store", status: "ok", duration_ms: 24, reason: null, detail: { bucket: "it-suite-backups" } },
       { name: "identity", status: "ok", duration_ms: 42, reason: null, detail: null },
     ],
     processes: [

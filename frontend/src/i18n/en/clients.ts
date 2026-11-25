@@ -19,16 +19,22 @@ export const clients = {
   },
   list: {
     title: "Clients",
-    description: "The companies you serve, with their sites, their contacts and the optional modules each one uses.",
+    description: "The companies you serve, with their sites, contacts and modules.",
     newClient: "New client",
-    showArchived: "Show archived clients",
+    search: "Search clients",
+    archivedLabel: "Archived clients",
+    chipActive: "Active",
+    chipArchived: "Including archived",
     tableLabel: "Clients",
     colClient: "Client",
     colKind: "Kind",
     colDevices: "Devices",
     colSites: "Sites",
     colStatus: "Status",
-    empty: "No clients to show.",
+    emptyYet: "No clients yet. Add the first one to give its machines, sites and contacts a home.",
+    // New → Contact with every client shown (redesign design §1.2): which client first.
+    newContactTitle: "New contact",
+    newContactContinue: "Continue",
   },
   form: {
     createTitle: "New client",
@@ -58,7 +64,18 @@ export const clients = {
       summary: "Summary",
       sites: "Sites",
       contacts: "Contacts",
+      devices: "Devices",
+      tickets: "Tickets",
+      alerts: "Alerts",
+      assets: "Assets",
       modules: "Modules",
+    },
+    // The 360's summary tiles (redesign design §1.3), each leading to its tab.
+    tiles: {
+      devices: "Devices",
+      sites: "Sites",
+      openTickets: "Open tickets",
+      openAlerts: "Open alerts",
     },
     otherSelected: "The console is working on {selected}, so this client's records cannot be read from here.",
     workOnThis: "Work on this client",
@@ -69,15 +86,11 @@ export const clients = {
     title: "Details",
     edit: "Edit",
     archive: "Archive client",
-    kind: "Kind",
-    status: "Status",
     emailDomains: "Email domains",
     phone: "Phone",
     address: "Address",
     website: "Website",
     notes: "Notes",
-    devices: "Devices",
-    sites: "Sites",
     notSet: "Not set",
     archiveTitle: "Archive this client",
     archiveBody:
@@ -183,6 +196,54 @@ export const clients = {
       copyFailed: "This browser would not copy it. Select the link and copy it by hand.",
       done: "Done, I have passed it on",
     },
+  },
+  // The 360's tabs that read other modules (redesign design §1.3).
+  // English keeps the rail's word, "Devices" (coordinator, Task 5 fix round 1);
+  // "Add a computer" is the journey's own name.
+  devices: {
+    title: "Devices",
+    seeAll: {
+      one: "See every device of this client ({count})",
+      other: "See every device of this client ({count})",
+    },
+    // Before the list has answered: no count rather than an invented 0.
+    seeAllUncounted: "See every device of this client",
+    empty: "This client has no devices yet.",
+    add: "Add a computer",
+    colComputer: "Device",
+    colAgent: "Agent",
+    colLastSeen: "Last seen",
+    noAgent: "No agent",
+    never: "Never",
+  },
+  tickets: {
+    title: "Open tickets",
+    seeAll: "See this client's tickets",
+    empty: "This client has no open tickets.",
+    add: "New ticket",
+    colTicket: "Ticket",
+    colPriority: "Priority",
+    colStatus: "Status",
+  },
+  // Decision D19: the active ones, and the server's count of every open one.
+  alerts: {
+    title: "Active alerts",
+    openInAll: {
+      one: "{count} open alert in all, counting acknowledged and muted ones",
+      other: "{count} open alerts in all, counting acknowledged and muted ones",
+    },
+    seeAll: "See this client's alerts",
+    empty: "No alert is active for this client.",
+    colComputer: "Device",
+    colCheck: "Check",
+    colSeverity: "Severity",
+    colOpened: "Opened",
+  },
+  // Decision D14: the rail's assets (design §1.1), counted for this client.
+  assets: {
+    licenses: "Licenses",
+    subscriptions: "Subscriptions",
+    networks: "Networks",
   },
   modules: {
     title: "Optional modules",

@@ -38,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient, Job, Me } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { JobsPage } from "./JobsPage";
 
 const mockUseApi = vi.fn();
@@ -123,6 +124,13 @@ function tile(label: string): HTMLElement {
   return card;
 }
 
+
+/**
+ * A confirmation, not the drawer it opens over: the open job lives in a
+ * `Drawer` (redesign plan, O3 3.7), which is a dialog too, named "Job detail".
+ */
+const notTheDrawer = (name: string): boolean => name !== "Job detail";
+
 describe("JobsPage", () => {
   let api: Partial<ApiClient>;
 
@@ -174,7 +182,7 @@ describe("JobsPage", () => {
 
     await screen.findByText("Collect inventory");
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(NO_DATE).length).toBeGreaterThan(0);
   });
 
   // DESIGN REVIEW M8. A job issued inside the window that never started has
@@ -341,8 +349,9 @@ describe("JobsPage", () => {
 
     await user.clear(screen.getByLabelText("Search jobs"));
     await user.type(screen.getByLabelText("Search jobs"), "nothing-like-this");
-    // "No jobs dispatched yet." would be a lie — there are two.
-    expect(screen.getByText("No jobs match that filter.")).toBeInTheDocument();
+    // "No jobs dispatched yet." would be a lie — there are two. The kit's
+    // filtered sentence now (redesign plan, Receta L).
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 
   it("puts the selected job in the URL and opens it from there", async () => {
@@ -383,7 +392,7 @@ describe("JobsPage", () => {
     api.getJob = vi.fn().mockResolvedValue({ ...STALE, result: null, params: {} });
     renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
-    expect(await screen.findByText("No result yet — this job has not run.")).toBeInTheDocument();
+    expect(await screen.findByText("No result yet: this job has not run.")).toBeInTheDocument();
     expect(screen.queryByText("{}")).not.toBeInTheDocument();
   });
 
@@ -426,7 +435,7 @@ describe("JobsPage", () => {
       renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
       await user.click(await screen.findByRole("button", { name: /cancel this job/i }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = await screen.findByRole("dialog", { name: notTheDrawer });
       expect(within(dialog).getByText(STALE.id)).toBeInTheDocument();
       expect(api.cancelJob).not.toHaveBeenCalled();
 
@@ -480,7 +489,7 @@ describe("JobsPage", () => {
       await user.click(
         await screen.findByRole("button", { name: /ask the device to stop this job/i }),
       );
-      const dialog = await screen.findByRole("dialog");
+      const dialog = await screen.findByRole("dialog", { name: notTheDrawer });
       expect(within(dialog).getByText(/asks the device to stop/i)).toBeInTheDocument();
       expect(within(dialog).getByText(/half-done/i)).toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: /send the stop instruction/i }));
@@ -541,7 +550,7 @@ describe("JobsPage", () => {
 
       await user.click(await screen.findByRole("button", { name: /cancel this job/i }));
       await user.click(
-        within(await screen.findByRole("dialog")).getByRole("button", {
+        within(await screen.findByRole("dialog", { name: notTheDrawer })).getByRole("button", {
           name: /withdraw the job/i,
         }),
       );
@@ -578,7 +587,7 @@ describe("JobsPage", () => {
       renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
       await user.click(await screen.findByRole("button", { name: /run this job again/i }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = await screen.findByRole("dialog", { name: notTheDrawer });
       // The dialog says what actually happens: this row is left alone and a
       // fresh job is created. Implying the row would come back to life would
       // be describing a replay, which is not what the platform does.
@@ -600,7 +609,7 @@ describe("JobsPage", () => {
       renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
       await user.click(await screen.findByRole("button", { name: /run this job again/i }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = await screen.findByRole("dialog", { name: notTheDrawer });
       expect(within(dialog).getByText(/somebody cancelled this job/i)).toBeInTheDocument();
     });
 
@@ -622,7 +631,7 @@ describe("JobsPage", () => {
 
       await user.click(await screen.findByRole("button", { name: /run this job again/i }));
       await user.click(
-        within(await screen.findByRole("dialog")).getByRole("button", {
+        within(await screen.findByRole("dialog", { name: notTheDrawer })).getByRole("button", {
           name: /create the new job/i,
         }),
       );

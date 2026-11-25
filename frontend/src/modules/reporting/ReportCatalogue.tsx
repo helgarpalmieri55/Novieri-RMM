@@ -12,16 +12,30 @@
 // The greying is COSMETIC. `entitled` comes from the server and the server
 // refuses regardless; the frontend gates nothing (invariant #6).
 
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { permissionsSentence } from "../../lib/permissions";
 import { useReportCatalogue } from "./api";
 import { ReportReadiness } from "./ReportReadiness";
 import { reportName, reportProse } from "./reportText";
 import type { CatalogueEntry } from "./types";
-import { PageHead, Panel, QueryState, StatCard, StatsGrid } from "../../shell/components";
+import type { MessageKey } from "../../i18n/core";
+import {
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 
@@ -131,22 +145,96 @@ type Access = "" | "runnable" | "blocked";
 
 /** The URL is untrusted input: anything that is not one of the two known
  *  values is the unfiltered catalogue, never an empty page. */
-function readAccess(raw: string | null): Access {
+function readAccess(raw: string): Access {
   return raw === "runnable" || raw === "blocked" ? raw : "";
 }
 
+/**
+ * A REPORT'S FAMILY IS THE MODULE IT IS ABOUT (redesign Task 11,
+ * "ReportCatalogue"; coordinator's decision, fix round 1). The catalogue
+ * publishes no family of its own; what it publishes is `requires`, every
+ * module read permission a report needs, sorted, derived on the server from
+ * the tables it reads (`registry.py`, TABLE_PERMISSIONS). A family is the
+ * FIRST of those modules that is not context-only, so a report is in exactly
+ * one: devices and jobs are what a report reads to say which machine and when
+ * it last ran, not what it is about (patch compliance reads both, and is a
+ * Patching report). Every module the server can name a family by has its
+ * label here, as the rail names it, in both languages; a module this console
+ * has no name for is dropped, and the report then appears under All only. It
+ * is never turned into a word from its code.
+ */
+const CONTEXT_ONLY: ReadonlySet<string> = new Set(["devices", "jobs"]);
+
+const FAMILY_LABEL: Readonly<Record<string, MessageKey>> = {
+  patch: "shell.nav.item.patching",
+  backup: "shell.nav.item.backup",
+  health: "shell.nav.item.alerts",
+  sla: "shell.nav.item.serviceLevels",
+  ticket: "shell.nav.item.tickets",
+};
+
+/** The report's one family, or `null` when its first non-context module has no name here. */
+function familyOf(entry: CatalogueEntry): string | null {
+  for (const code of [...entry.requires].sort()) {
+    const module = code.split(".").slice(0, -1).join(".");
+    if (CONTEXT_ONLY.has(module)) continue;
+    // The label's OWN key: `in` would also find what every object inherits (`toString`) (fix round 2, N2).
+    return Object.hasOwn(FAMILY_LABEL, module) ? module : null;
+  }
+  return null;
+}
+
+function familyLabel(family: string): string {
+  const key = Object.hasOwn(FAMILY_LABEL, family) ? FAMILY_LABEL[family] : undefined;
+  return key ? translate(key) : "";
+}
+
+/** For the search: case and accents do not count, the Admin panel's rule. */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
+/**
+ * ON THE LIST KIT (redesign Task 11, "ReportCatalogue"; Receta L): a search
+ * (`?q=`, over the report's name, summary and description) and the family
+ * chips (`?family=`, each counting the reports of the whole catalogue that read
+ * that module), beside the `?access=` the tiles open, which stays. The h1 is
+ * the rail's label.
+ */
 export function ReportCataloguePage() {
   const t = useT();
-  const [params] = useSearchParams();
-  const access = readAccess(params.get(ACCESS_PARAM));
+  const filters = useUrlFilters(["q", "family", ACCESS_PARAM] as const);
+  const access = readAccess(filters.values[ACCESS_PARAM]);
   const catalogue = useReportCatalogue();
   const reports = catalogue.data?.reports ?? [];
+  // No data, pending or failed: the tiles read n/a and say nothing under them (ruling 10a).
+  const noData = catalogue.data === undefined;
   const entitledCount = reports.filter((entry) => entry.entitled).length;
   const blockedCount = reports.length - entitledCount;
-  const shown =
+  const byAccess =
     access === ""
       ? reports
       : reports.filter((entry) => (access === "runnable" ? entry.entitled : !entry.entitled));
+  const wanted = fold(filters.values.q);
+  const family = filters.values.family;
+  const shown = byAccess.filter(
+    (entry) =>
+      (family === "" || familyOf(entry) === family) &&
+      (wanted === "" ||
+        [reportName(entry.key), reportProse(entry.summary), reportProse(entry.description)].some((text) =>
+          fold(text).includes(wanted),
+        )),
+  );
+  // Each family once, the most-read first; counted over the whole catalogue.
+  const familyCounts = new Map<string, number>();
+  for (const entry of reports) {
+    const name = familyOf(entry);
+    if (name !== null) familyCounts.set(name, (familyCounts.get(name) ?? 0) + 1);
+  }
+  const families = [...familyCounts.entries()].sort(
+    (a, b) => b[1] - a[1] || familyLabel(a[0]).localeCompare(familyLabel(b[0])),
+  );
+  const searched = filters.values.q !== "" || family !== "";
 
   return (
     <div>
@@ -161,9 +249,13 @@ export function ReportCataloguePage() {
           capability you have; what you cannot is the one number on this page a
           person can act on (ask for the codes), so it is the only one carrying
           weight. */}
+      {/* Before the catalogue answers, or when it fails, no tile says a
+          number or its zero's claim ("you can run none of them"): the kit's
+          absent mark, n/a (ruling 10a). */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("reporting.catalogue.tiles.templates")}
+          pending={noData}
           value={String(reports.length)}
           icon="chart-bar"
           to="/reports"
@@ -172,6 +264,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.runnable")}
+          pending={noData}
           value={String(entitledCount)}
           icon="circle-check"
           to={`/reports?${ACCESS_PARAM}=runnable`}
@@ -180,6 +273,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.blocked")}
+          pending={noData}
           value={String(blockedCount)}
           icon="lock"
           to={`/reports?${ACCESS_PARAM}=blocked`}
@@ -193,7 +287,7 @@ export function ReportCataloguePage() {
         <p className="note mb-3" role="status">
           <Trans
             k={access === "runnable" ? "reporting.catalogue.showingRunnable" : "reporting.catalogue.showingBlocked"}
-            vars={{ hidden: reports.length - shown.length, count: reports.length }}
+            vars={{ hidden: reports.length - byAccess.length, count: reports.length }}
             components={{ link: <Link to="/reports" /> }}
           />
         </p>
@@ -204,37 +298,69 @@ export function ReportCataloguePage() {
           outline only. */}
       <h2 className="sr-only">{t("reporting.catalogue.heading")}</h2>
       <Panel bare>
-        <QueryState
-          loading={catalogue.isLoading}
-          error={catalogue.error}
-          empty={catalogue.data != null && shown.length === 0}
-          // WHICH EMPTY IT IS. "No reports exist", "you can run none of them"
-          // and "you are blocked from none of them" are three different facts,
-          // and the third is good news; one sentence for all three is the
-          // zero-that-means-nothing defect in prose form.
-          emptyLabel={
-            access === "runnable"
-              ? t("reporting.catalogue.emptyRunnable")
-              : access === "blocked"
-                ? t("reporting.catalogue.emptyBlocked")
-                : t("reporting.catalogue.empty")
+        <ListToolbar
+          search={
+            <SearchField
+              type="search"
+              aria-label={t("reporting.catalogue.search")}
+              placeholder={t("reporting.catalogue.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
           }
-          emptyIcon="chart-bar"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("reporting.catalogue.name")}</Th>
-                <Th>{t("reporting.catalogue.access")}</Th>
-                <Th>{""}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((entry) => (
-                <EntryRow key={entry.key} entry={entry} />
-              ))}
-            </tbody>
-          </Table>
+          chips={
+            families.length > 0 ? (
+              <FilterChips
+                label={t("reporting.catalogue.familyLabel")}
+                options={[
+                  { value: "", label: t("reporting.catalogue.allFamilies") },
+                  ...families.map(([name, count]) => ({ value: name, label: familyLabel(name), count })),
+                ]}
+                value={family}
+                onChange={(value) => filters.set("family", value)}
+              />
+            ) : null
+          }
+          end={catalogue.data ? <ShowingCount shown={shown.length} total={reports.length} /> : null}
+        />
+        <QueryState loading={catalogue.isLoading} error={catalogue.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            searched ? (
+              <ListEmpty filtered onClear={filters.clear} nothingYet="" icon="chart-bar" />
+            ) : (
+              // WHICH EMPTY IT IS. "No reports exist", "you can run none of
+              // them" and "you are blocked from none of them" are three
+              // different facts, and the third is good news; one sentence for
+              // all three is the zero-that-means-nothing defect in prose form.
+              <ListEmpty
+                filtered={false}
+                onClear={filters.clear}
+                nothingYet={
+                  access === "runnable"
+                    ? t("reporting.catalogue.emptyRunnable")
+                    : access === "blocked"
+                      ? t("reporting.catalogue.emptyBlocked")
+                      : t("reporting.catalogue.empty")
+                }
+                icon="chart-bar"
+              />
+            )
+          ) : (
+            <Table label={t("reporting.catalogue.heading")}>
+              <thead>
+                <tr>
+                  <Th>{t("reporting.catalogue.name")}</Th>
+                  <Th>{t("reporting.catalogue.access")}</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((entry) => (
+                  <EntryRow key={entry.key} entry={entry} />
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
       </Panel>
 

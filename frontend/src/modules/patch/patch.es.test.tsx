@@ -243,7 +243,8 @@ describe("the fleet patch page in Spanish", () => {
   it("words the head, the platform strip, the tiles, both lists and the records below", async () => {
     mockUseApi.mockReturnValue({});
     const { container } = renderPage(<FleetPatchPage />);
-    expect(await screen.findByRole("heading", { name: "Gestión de parches" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Parches», shell.nav.item.patching).
+    expect(await screen.findByRole("heading", { name: "Parches", level: 1 })).toBeInTheDocument();
     await screen.findByText("Acumulativa de octubre");
     await screen.findAllByText("sentinel");
     expect(screen.getByText("Actualizaciones de toda la flota, aprobadas en anillos de despliegue.")).toBeInTheDocument();
@@ -251,7 +252,8 @@ describe("the fleet patch page in Spanish", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByRole("tab", { name: /Windows/ })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "Parches de Windows" })).toBeInTheDocument();
+    // The kit's UrlTabs names its panel by the tab (redesign plan, O3 3.2).
+    expect(screen.getByRole("tabpanel", { name: "Windows" })).toBeInTheDocument();
     const labels = [...document.querySelectorAll(".stat-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Actualizaciones pendientes", "Críticas", "Importantes", "Equipos que necesitan actualizaciones"]);
     // The updates list.
@@ -262,8 +264,10 @@ describe("the fleet patch page in Spanish", () => {
     expect(within(updates).getByText("Crítica")).toBeInTheDocument();
     expect(screen.getByText("No autorizada para ningún anillo")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar actualizaciones de Windows")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filtrar actualizaciones de Windows por gravedad")).toBeInTheDocument();
-    expect(screen.getAllByRole("option", { name: "Solo críticas e importantes" }).length).toBeGreaterThan(0);
+    // One chip per severity (redesign plan, O3 3.2), worded in Spanish.
+    const severity = screen.getByRole("group", { name: "Filtrar actualizaciones de Windows por gravedad" });
+    expect(within(severity).getByRole("button", { name: /^Todas las gravedades/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(severity).getByRole("button", { name: /^Crítica/ })).toBeInTheDocument();
     expect(screen.getByText(/Mostrando 1–2 de 2 actualizaciones\./)).toBeInTheDocument();
     expect(screen.getByText(/Aquí la gravedad es la valoración MSRC de Microsoft/)).toBeInTheDocument();
     // The machines list.
@@ -312,10 +316,10 @@ describe("the fleet patch page in Spanish", () => {
     mockUseApi.mockReturnValue({});
     renderPage(<FleetPatchPage />);
     await screen.findByText("Acumulativa de octubre");
-    expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones — actualizaciones de Windows" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones (actualizaciones de Windows)" })).toBeInTheDocument();
     // The reach of THIS approval, the internal client's 2 of the ring's 3.
     expect(screen.getByText("Una aprobación aquí abarca los 2 dispositivos del cliente propio de tu organización en el anillo test.")).toBeInTheDocument();
-    const ring = screen.getByLabelText("Anillo en el que aprobar — actualizaciones de Windows");
+    const ring = screen.getByLabelText("Anillo en el que aprobar (actualizaciones de Windows)");
     expect(within(ring).getByRole("option", { name: "pilot, 1 dispositivo" })).toBeInTheDocument();
     expect(within(ring).getByRole("option", { name: "broad, 220 dispositivos" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar KB5031354"));
@@ -324,7 +328,7 @@ describe("the fleet patch page in Spanish", () => {
     expect(screen.getByRole("checkbox", { name: /Para todos los clientes/ }).closest("label")).toHaveTextContent(
       "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo test. Sin marcar, solo en los del cliente propio de tu organización.",
     );
-    expect(screen.getByLabelText("Cambio que implementa esta aprobación — actualizaciones de Windows")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cambio que implementa esta aprobación (actualizaciones de Windows)")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sin solicitud de cambio" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Aprobar 1 actualización en el anillo test/ }));
     const dialog = await screen.findByRole("dialog", { name: "Aprobar actualizaciones en un anillo de despliegue" });
@@ -374,7 +378,7 @@ describe("the fleet patch page in Spanish", () => {
     expect(screen.getByText("Lo que les falta a estos equipos")).toBeInTheDocument();
     expect(screen.getByText(/En apt, «importante» significa que la versión viene del repositorio de seguridad/)).toBeInTheDocument();
     expect(screen.getByText(/Las actualizaciones aprobadas se instalan solas en la próxima ventana de mantenimiento de cada equipo\./)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Seleccionar 1 equipo con actualizaciones pendientes — Linux" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seleccionar 1 equipo con actualizaciones pendientes (Linux)" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar ubuntu-01"));
     expect(screen.getByText("1 equipo seleccionado de 1.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Instalar las actualizaciones aprobadas en ubuntu-01" }));
@@ -509,7 +513,8 @@ describe("the patch policies page in Spanish", () => {
     });
     const { baseElement } = renderPage(<PatchPolicyEditor />, "/patch/policies");
     await user.click(await screen.findByRole("button", { name: "Nueva política" }));
-    const dialog = await screen.findByRole("dialog", { name: "Nueva política de parches" });
+    // The policy is a form on the page now, not a dialog (redesign plan, Receta FO; O3 3.2).
+    const dialog = await screen.findByRole("region", { name: "Nueva política de parches" });
     for (const label of ["Se aplica a", "Nombre del anillo", "Orden del anillo", "Reinicio", "Avisar a un usuario con sesión iniciada durante (horas)", "Intervalo de escaneo (horas)"]) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
@@ -544,12 +549,12 @@ describe("the patch policies page in Spanish", () => {
     });
     renderPage(<PatchPolicyEditor />, "/patch/policies");
     await user.click(await screen.findByRole("button", { name: "Nueva política" }));
-    const dialog = await screen.findByRole("dialog", { name: "Nueva política de parches" });
+    const dialog = await screen.findByRole("region", { name: "Nueva política de parches" });
     await user.clear(within(dialog).getByLabelText("Nombre del anillo"));
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Nombre del anillo");
     act(() => setActiveLanguage("en"));
-    expect(within(screen.getByRole("dialog", { name: "New patch policy" })).getByRole("alert")).toHaveTextContent("Ring name is required");
+    expect(within(screen.getByRole("region", { name: "New patch policy" })).getByRole("alert")).toHaveTextContent("Ring name is required");
   });
 
   it("words a window the painter cannot draw, and a mistyped one", async () => {
@@ -562,7 +567,7 @@ describe("the patch policies page in Spanish", () => {
     renderPage(<PatchPolicyEditor />, "/patch/policies");
     expect(await screen.findByText("Expresión personalizada")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Editar la política broad" }));
-    expect(await screen.findByRole("dialog", { name: "Editar política de parches" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Editar política de parches" })).toBeInTheDocument();
     expect(screen.getByText("Se aplica a: Valor predeterminado de la organización.")).toBeInTheDocument();
   });
 });
@@ -745,13 +750,14 @@ describe("a live language switch on the patch pages", () => {
   it("re-words a mounted fleet page, its record tables and its decision bar", async () => {
     mockUseApi.mockReturnValue({});
     renderPage(<FleetPatchPage />);
-    expect(await screen.findByRole("heading", { name: "Gestión de parches" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Parches», shell.nav.item.patching).
+    expect(await screen.findByRole("heading", { name: "Parches", level: 1 })).toBeInTheDocument();
     await screen.findByText("Acumulativa de octubre");
     expect(screen.getByText(/Mostrando 1–2 de 2 actualizaciones\./)).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Patch management" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Patching", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–2 of 2 updates.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select all 2 updates — Windows updates" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select all 2 updates (Windows updates)" })).toBeInTheDocument();
     expect(screen.getByText("An approval here covers the 2 devices of your organisation's own client in the test ring.")).toBeInTheDocument();
     expect(screen.getByText("Policy auto-approval")).toBeInTheDocument();
     expect(screen.getByText("Restart booked")).toBeInTheDocument();
@@ -775,7 +781,7 @@ describe("a live language switch on the patch pages", () => {
     await user.click(screen.getByRole("button", { name: "Escanear" }));
     expect(await screen.findByText("Escaneo en cola: se enviaron 2 tareas.")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("Scan queued — 2 jobs dispatched.")).toBeInTheDocument();
+    expect(screen.getByText("Scan queued: 2 jobs dispatched.")).toBeInTheDocument();
   });
 
   it("re-words an export failure already on screen", async () => {

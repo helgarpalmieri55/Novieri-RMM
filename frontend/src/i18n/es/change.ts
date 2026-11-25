@@ -10,8 +10,13 @@ export const change: Shape<typeof en> = {
     approve: "Aprobar",
     reject: "Rechazar",
   },
+  // The module's own pages as one row of links (changeNav.tsx).
+  nav: {
+    label: "Páginas de gestión de cambios",
+    changes: "Cambios",
+  },
   list: {
-    title: "Gestión de cambios",
+    title: "Cambios",
     client: "Cliente",
     description: "Cambios planificados, su riesgo y lo que afectaron.",
     approvalQueue: "Cola de aprobación",
@@ -23,29 +28,32 @@ export const change: Shape<typeof en> = {
     nobodyWaiting: "Nadie espera una decisión",
     emergencyChanges: "Cambios de emergencia",
     noneEmergency: "Ninguno se registró como emergencia",
-    filterOpen: "cambios abiertos",
-    filterState: "cambios en estado {state}",
-    filterType: "cambios de tipo {type}",
-    showing: "Mostrando {shown} de {total}: {filters}.",
-    showAll: "Mostrar todos los cambios",
+    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type= (the states and types as chips with a list), and the fourth tile.
+    viewLabel: "Mostrar",
+    stateLabel: "Estado",
+    anyState: "Cualquier estado",
+    typeLabel: "Tipo",
+    allStates: "Todos",
+    allTypes: "Todos los tipos",
+    chipOpen: "Abiertos",
+    implementing: "En implementación",
+    nothingImplementing: "No se está llevando a cabo ninguno",
+    tableLabel: "Cambios",
     emptyNone: "Aún no hay cambios.",
-    emptyView: "Ningún cambio coincide con esta vista: {filters}.",
     created: "Creado",
     recordedAutomatically: "Registrado automáticamente",
   },
   detail: {
+    tabs: "Secciones de este cambio",
     fallbackTitle: "Cambio",
-    description: "Todo lo registrado sobre una solicitud de cambio.",
     exporting: "Exportando…",
     exportEvidence: "Exportar evidencias",
-    tabTitle: "{title} · Cambio · ITMS",
     summary: "Resumen",
     type: "Tipo",
     window: "Ventana",
     raised: "Registrado",
     descriptionPanel: "Descripción",
     rollbackPlan: "Plan de reversión",
-    lifecycle: "Ciclo de vida",
     decisionComment: "Comentario de la decisión (opcional)",
     ownChange:
       "Solicitaste este cambio, así que no puedes decidir sobre él. Otra persona con permiso para aprobar cambios tiene que aprobarlo o rechazarlo.",
@@ -81,7 +89,7 @@ export const change: Shape<typeof en> = {
   approvals: {
     title: "Cola de aprobación",
     description: "Solicitudes de cambio a la espera de una decisión.",
-    empty: "No hay cambios pendientes de aprobación.",
+    empty: "Nada espera tu aprobación.",
     decisionHeader: "Decisión",
     windowSub: "{type} · ventana {start}",
     commentPlaceholder: "Comentario (opcional)",
@@ -236,8 +244,8 @@ export const change: Shape<typeof en> = {
   },
   picker: {
     deploymentEmptyHint:
-      "No hay despliegues que vincular. Aparecen aquí cuando se crea uno en Flota → Despliegue de software; también puede que no tengas permiso para listarlos.",
+      "No hay despliegues que vincular. Aparecen aquí cuando se crea uno en Software; también puede que no tengas permiso para listarlos.",
     runEmptyHint:
-      "No hay ejecuciones de aprovisionamiento que vincular. Aparecen aquí cuando se ejecuta un perfil en Flota → Aprovisionamiento; también puede que no tengas permiso para listarlas.",
+      "No hay ejecuciones de aprovisionamiento que vincular. Aparecen aquí cuando se ejecuta un perfil en Administración → Imágenes de sistema; también puede que no tengas permiso para listarlas.",
   },
 };

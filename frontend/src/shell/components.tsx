@@ -16,6 +16,7 @@
  * caller needs one import.
  */
 
+import { useLayoutEffect, useRef } from "react";
 import type {
   CSSProperties,
   InputHTMLAttributes,
@@ -99,6 +100,7 @@ export function Btn({
   iconOnly = false,
   pressed,
   title,
+  wide = false,
 }: {
   label: string;
   icon?: string;
@@ -133,9 +135,14 @@ export function Btn({
    *  cannot be used because of what its own row is, not because of anything
    *  the operator can do about it, needs a place to say so. */
   title?: string;
+  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): every
+   *  step action of a card in the sign-in frame (P3 adoption pass), which drew
+   *  the markup by hand (`AuthWideBtn`, gone) because `.btn` is `inline-flex`
+   *  with its content at the start. */
+  wide?: boolean;
 }) {
   const tone = variant === "secondary" || variant === "gold" ? "" : variant;
-  const cls = ["btn", tone, small ? "small" : "", iconOnly ? "icon-only" : "", pressed ? "on" : ""]
+  const cls = ["btn", tone, small ? "small" : "", iconOnly ? "icon-only" : "", pressed ? "on" : "", wide ? "wide" : ""]
     .filter(Boolean)
     .join(" ");
   return (
@@ -265,6 +272,7 @@ export function StatCard({
   foot,
   spark,
   pending = false,
+  absent = false,
 }: {
   label: string;
   value: string;
@@ -292,21 +300,40 @@ export function StatCard({
    * unmeasured renders `n/a`, never `0`. This is that rule, in the one place
    * every page inherits it from; the label, the tone and the destination are
    * unchanged, because the tile is still about the same thing.
+   *
+   * IT IS `Tile`'s `pending` (coordinator, P3 adoption pass; ruling 10a): the
+   * card hands it to the Tile it renders, so it says `aria-busy` and draws
+   * nothing under the mark: no zero label, no trend, no sparkline and no
+   * `foot`, which can be a claim about the data it does not have yet. Pass it
+   * whenever there is no data, pending or failed (`pending={!q.data}`).
    */
   pending?: boolean;
+  /**
+   * THE READ ANSWERED AND THERE IS NO FIGURE (coordinator, P3 adoption pass):
+   * `Tile`'s `absent`. The mark, not busy, and the `foot` KEPT, because once
+   * the read has answered the foot says why there is no figure ("No completed
+   * runs yet"). Not a zero (no zero label), not urgent, no trend. Keep it out
+   * of `pending`, which would hide that reason while claiming a read is on its
+   * way. `pending` wins when both are set.
+   */
+  absent?: boolean;
 }) {
   // A measured zero is not urgent, whatever the caller said. Neither is an
   // unmeasured one, and an unmeasured one is not a zero at all.
   const t = useT();
-  const isZero = !pending && value.trim() === "0";
-  const loud = urgent && !isZero && !pending;
-  const kind = pending ? "mut" : tileKind(tone, loud);
+  const noFigure = pending || absent;
+  const isZero = !noFigure && value.trim() === "0";
+  const loud = urgent && !isZero && !noFigure;
+  const kind = noFigure ? "mut" : tileKind(tone, loud);
 
+  // Nothing under the mark while pending: `Tile` draws no sub then. With an
+  // absent figure only the foot, the reason, is drawn.
+  const showTrend = trend !== undefined && !isZero && !noFigure;
   const sub =
-    (isZero && zeroLabel) || (trend && !isZero && !pending) || foot ? (
+    !pending && ((isZero && zeroLabel) || showTrend || foot) ? (
       <>
         {isZero && zeroLabel ? <span className="stat-zero">{zeroLabel}</span> : null}
-        {trend && !isZero && !pending ? (
+        {trend && showTrend ? (
           <span className={`trend stat-trend ${trend.direction}`}>
             <Icon name={trend.direction === "up" ? "arrow-up" : "arrow-down"} size={12} />
             <span className="sr-only">{trend.direction === "up" ? t("shell.ui.statUp") : t("shell.ui.statDown")}</span>
@@ -322,12 +349,14 @@ export function StatCard({
       className={`stat-card tone-${tone}${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={pending ? t("shell.viz.na") : value}
+      value={value}
       icon={icon}
       to={to}
       kind={kind}
-      spark={pending ? undefined : spark}
+      spark={spark}
       sub={sub}
+      pending={pending}
+      absent={absent}
     />
   );
 }
@@ -338,6 +367,13 @@ export interface TabItem {
   key: string;
   label: string;
   count?: number;
+  /**
+   * A STATE BESIDE THE TAB'S NAME (kit requests batch 3, B3-1; O7's K1):
+   * Settings' "Set up" / "Not set up". Drawn after the label (and its count)
+   * in `.tab-note`, muted and regular weight, so the state is not folded into
+   * the label ("Email · Set up"). It is part of the tab's accessible name.
+   */
+  note?: string;
 }
 
 /**
@@ -353,6 +389,7 @@ export function Tabs({
   onSelect,
   panelId,
   scroll = false,
+  label,
 }: {
   items: readonly TabItem[];
   active: string;
@@ -363,7 +400,43 @@ export function Tabs({
   /** One row that scrolls sideways instead of folding into several, for a
    *  strip too long for a phone. */
   scroll?: boolean;
+  /** The tablist's name (`UrlTabs`, redesign Task 3): what the strip switches
+   *  between, for assistive technology. Omitted, the list is unnamed as before. */
+  label?: string;
 }) {
+  const strip = useRef<HTMLDivElement>(null);
+  // THE SELECTED TAB IS ON SCREEN (Task 5 review, fix round 1). A strip that
+  // scrolls opened at its start, so `/clients/<id>?tab=alerts` on a phone
+  // showed Summary to Tickets and no selected tab at all. Sideways only:
+  // `scrollIntoView` would also scroll the page down to a strip below the
+  // fold. Before paint, so the strip never draws at its start first.
+  //
+  // AND AGAIN WHEN THE TABS' TEXT CHANGES (kit requests batch 3, B3-3; O7's
+  // K3): a label, a count or a note arriving after the strip scrolled widens
+  // the tabs before the selected one and pushes it past the edge, as Settings'
+  // "Set up" did on a phone. Their text is the layout's input, so it is the
+  // effect's.
+  //
+  // ONLY THE SELECTED TAB'S TEXT AND THE TEXT BEFORE IT (P3 adoption pass;
+  // batch 3 review, Minor 2): a tab after the selected one cannot move it, so
+  // a count refetched there must not undo a person's sideways look along the
+  // strip.
+  const through = items.findIndex((item) => item.key === active);
+  const text = items
+    .slice(0, through + 1)
+    .map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000"))
+    .join("\u0001");
+  useLayoutEffect(() => {
+    const list = strip.current;
+    if (!scroll || !list) return;
+    const tab = Array.from(list.children).find((child) => child.getAttribute("data-tab") === active);
+    if (!(tab instanceof HTMLElement)) return;
+    const box = list.getBoundingClientRect();
+    const own = tab.getBoundingClientRect();
+    const margin = 16;
+    if (own.left < box.left) list.scrollLeft -= box.left - own.left + margin;
+    else if (own.right > box.right) list.scrollLeft += own.right - box.right + margin;
+  }, [scroll, active, text]);
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     const jump = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
@@ -381,7 +454,7 @@ export function Tabs({
   };
 
   return (
-    <div className={scroll ? "tabs scroll" : "tabs"} role="tablist" onKeyDown={move}>
+    <div ref={strip} className={scroll ? "tabs scroll" : "tabs"} role="tablist" aria-label={label} onKeyDown={move}>
       {items.map((item) => (
         <button
           type="button"
@@ -396,6 +469,14 @@ export function Tabs({
         >
           {item.label}
           {item.count === undefined ? null : <span className="tab-count"> {item.count}</span>}
+          {/* The space OUTSIDE the span, so the tab's name reads "Email Set
+              up": a space inside it is trimmed when its name is computed. */}
+          {item.note ? (
+            <>
+              {" "}
+              <span className="tab-note">{item.note}</span>
+            </>
+          ) : null}
         </button>
       ))}
     </div>
@@ -833,3 +914,12 @@ export function Toggle({
     </button>
   );
 }
+
+/* ------------------------------------------------------------- pattern kit */
+
+// The list, record and form patterns (redesign design §2): pages import every
+// piece from this one module. The cycle is safe -- each kit file uses what it
+// imports from here only inside functions, never while it is evaluated.
+export * from "./listKit";
+export * from "./detailKit";
+export * from "./formKit";

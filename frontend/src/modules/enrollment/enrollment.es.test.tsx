@@ -315,7 +315,7 @@ describe("the enrollment page in Spanish", () => {
     expect(within(dialog).getByText(/El token deja de funcionar de inmediato/)).toBeInTheDocument();
     expectNoEnglish(dialog, STORED);
     await user.click(within(dialog).getByRole("button", { name: "Revocar token" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("El token NO se revocó y todavía puede inscribir un dispositivo.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("El token no se revocó: todavía puede inscribir un dispositivo.");
     expectNoEnglish(container, STORED);
   });
 
@@ -365,7 +365,8 @@ describe("the enrollment page in Spanish", () => {
     expect(within(table).getByText("Nada que revocar")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Buscar dispositivo, FQDN o estado del certificado")).toBeInTheDocument();
     expect(screen.getByText("Mostrar los certificados revocados (1 oculto)")).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox"));
+    // The toggle is a chip now (Receta L), in the URL as `?revoked=1`.
+    await user.click(screen.getByRole("button", { name: /Mostrar los certificados revocados/ }));
     expect(screen.getByText("Mostrar los certificados revocados (1 visible)")).toBeInTheDocument();
     expect(within(screen.getByRole("table")).getByText("Revocado")).toBeInTheDocument();
     await user.click(within(screen.getByRole("table")).getAllByRole("button", { name: "Revocar agente" })[0]!);

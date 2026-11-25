@@ -303,4 +303,14 @@ describe("The Microsoft return page", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/start it again/);
   });
+
+  // Inside the console's frame (redesign plan, Task 7, 2.7): the page's own
+  // head, with the way back to Email intake, around the same panel.
+  it("names itself in its head and leads back to Email intake", async () => {
+    renderCallback(api(), "?code=abc&state=xyz");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Microsoft 365 sign-in" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Email intake" })).toHaveAttribute("href", "/email-intake");
+    expect(await screen.findByText(/Connected/)).toBeInTheDocument();
+  });
 });

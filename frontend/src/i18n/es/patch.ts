@@ -260,7 +260,7 @@ export const patch: Shape<typeof en> = {
     noReport: "Ningún equipo ha informado todavía sobre {manager}. Las actualizaciones de aplicaciones aparecen tras el próximo escaneo.",
   },
   decision: {
-    changeAria: "Cambio que implementa esta aprobación — {scope}",
+    changeAria: "Cambio que implementa esta aprobación ({scope})",
     noChange: "Sin solicitud de cambio",
     approve: {
       one: "Aprobar {count} actualización",
@@ -277,7 +277,7 @@ export const patch: Shape<typeof en> = {
     clearSelection: "Borrar selección",
     clearAria: "Borrar la selección de {scope}",
     selecting: "Seleccionando…",
-    selectAllAria: "{label} — {scope}",
+    selectAllAria: "{label} ({scope})",
     truncated: {
       one: "{count} de {matching} actualizaciones coincidentes seleccionadas: lo máximo que puede incluir una aprobación.",
       other: "{count} de {matching} actualizaciones coincidentes seleccionadas: lo máximo que puede incluir una aprobación.",
@@ -310,7 +310,7 @@ export const patch: Shape<typeof en> = {
       "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo {ring}. Sin marcar, solo en los del cliente {client}.",
     noChangeNote: "Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.",
     confirmLabel: "Aprobar",
-    ringAria: "Anillo en el que aprobar — {scope}",
+    ringAria: "Anillo en el que aprobar ({scope})",
     ringOption: {
       one: "{name}, {count} dispositivo",
       other: "{name}, {count} dispositivos",
@@ -350,7 +350,7 @@ export const patch: Shape<typeof en> = {
     clearSelection: "Borrar selección",
     clearAria: "Borrar la selección de equipos {family}",
     selecting: "Seleccionando…",
-    selectAllAria: "{label} con actualizaciones pendientes — {family}",
+    selectAllAria: "{label} con actualizaciones pendientes ({family})",
     note: "Las actualizaciones aprobadas se instalan solas en la próxima ventana de mantenimiento de cada equipo. Esto envía la misma instalación ahora, y solo a los equipos cuya ventana está abierta en este momento.",
     truncated:
       "{count} de {matching} equipos coincidentes seleccionados: los más afectados primero, y el máximo al que esta consola instalará en una sola acción.",
@@ -421,8 +421,6 @@ export const patch: Shape<typeof en> = {
     searchPlaceholder: "Buscar por identificador o título",
     searchAria: "Buscar {scope}",
     filterAria: "Filtrar {scope} por gravedad",
-    optCriticalImportant: "Solo críticas e importantes",
-    optCritical: "Solo críticas",
     optAll: "Todas las gravedades",
     showAll: "Mostrar las {count} actualizaciones",
     emptyNever: "Todavía no se ha completado ningún escaneo, así que ningún dispositivo ha informado de una actualización pendiente.",
@@ -479,16 +477,19 @@ export const patch: Shape<typeof en> = {
     open: "<link>Abrir {hostname}</link> para ver su estado de reinicio, su historial de tareas y su inventario.",
   },
   fleet: {
-    title: "Gestión de parches",
+    title: "Parches",
     description: "Actualizaciones de toda la flota, aprobadas en anillos de despliegue.",
     policies: "Políticas",
     exportEvidence: "Exportar evidencias",
     scan: "Escanear",
     scanning: "Escaneando…",
-    tabAria: "Parches de {family}",
+    platforms: "Plataforma",
     acrossEvery: "En todas las plataformas",
   },
   policy: {
+    back: "Parches",
+    listTitle: "Anillos",
+    approvalSection: "Aprobación y reinicio",
     wholeNumber: "debe ser un número entero",
     betweenNumbers: "debe estar entre {lo} y {hi}",
     ringName: "Nombre del anillo",
@@ -529,7 +530,6 @@ export const patch: Shape<typeof en> = {
     warnHelp:
       "Un portátil con alguien con la sesión iniciada se reinicia este tiempo después de instalar las actualizaciones. Los servidores y los equipos vacíos se reinician dentro de la ventana de mantenimiento a los cinco minutos.",
     autoApproveToggle: "Aprobar automáticamente los parches de seguridad",
-    cancel: "Cancelar",
     save: "Guardar",
     replaceOrgTitle: "Reemplazar la política de parches de toda la organización",
     replaceGroupTitle: "Reemplazar la política de parches de {group}",

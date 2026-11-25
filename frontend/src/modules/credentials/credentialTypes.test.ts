@@ -54,7 +54,8 @@ describe("credentialTypeDescription", () => {
 
   it("labels windows_domain and carries the standing Domain-Admin warning", () => {
     expect(credentialTypeLabel("windows_domain")).toBe("Windows domain account");
-    expect(credentialTypeDescription("windows_domain")).toMatch(/NOT Domain Admin/);
+    // The warning stands in its own sentence, in plain words (no typed capitals, DESIGN.md).
+    expect(credentialTypeDescription("windows_domain")).toMatch(/Never give it Domain Admin: a Domain Admin here means a site server compromised during a push is a compromised domain/);
   });
 });
 

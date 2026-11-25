@@ -27,9 +27,11 @@ import { formatBytes } from "../lib/format";
 import { humaniseKey, humaniseStatus } from "../lib/labels";
 import { NoValue } from "./emptystate";
 
-/** One scalar, as a person reads it. */
+/** One scalar, as a person reads it. An absent one is the kit's one absent
+ *  mark (`shell.viz.na`, "n/a" / "n/d"), as `NoValue` draws it: no em dash in
+ *  UI text (DESIGN.md; P3 adoption pass). */
 export function describeValue(key: string, value: unknown): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return translate("shell.viz.na");
   if (typeof value === "number") {
     return /_bytes$/.test(key) ? formatBytes(value) : String(value);
   }
@@ -46,7 +48,7 @@ export function describeValue(key: string, value: unknown): string {
 
 /** A nested object, flattened to its most useful single line. */
 function describeItem(value: unknown): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return translate("shell.viz.na");
   if (typeof value !== "object") return String(value);
   if (Array.isArray(value)) return value.map(describeItem).join(", ");
 

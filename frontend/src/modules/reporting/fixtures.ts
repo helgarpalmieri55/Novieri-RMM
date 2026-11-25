@@ -103,7 +103,9 @@ const PATCH_ENTRY = {
   description:
     "By OS family and group. A device is compliant when nothing approved is outstanding; one that has never been scanned is counted separately and never as compliant. Timestamps are those of each device's last scan.",
   params_schema: PATCH_SCHEMA,
-  requires: ["devices.read", "patch.read"],
+  // The server's own, sorted: the report reads `jobs` for each device's last scan
+  // (`definitions/patch_compliance.py` sources; `registry.py` TABLE_PERMISSIONS).
+  requires: ["devices.read", "jobs.read", "patch.read"],
   entitled: true,
   missing_permissions: [],
 };

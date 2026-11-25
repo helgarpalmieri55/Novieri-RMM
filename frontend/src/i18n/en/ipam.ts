@@ -81,7 +81,7 @@ export const ipam = {
     days: { one: "in {count} day", other: "in {count} days" },
   },
   lastSeenMeaning:
-    "How current this documentation is: the age of the most recent evidence (an inventory result or a subnet sweep that listed this address). It is NOT an up/down signal: nothing here probes a single address, and silence is not evidence of absence.",
+    "How current this documentation is: the age of the most recent evidence (an inventory result or a subnet sweep that listed this address). It is not an up/down signal: nothing here probes a single address, and silence is not evidence of absence.",
   unrecognized: {
     status: "Unrecognized status.",
     state: "Unrecognized state.",
@@ -131,17 +131,17 @@ export const ipam = {
     stale: {
       label: "Stale",
       meaning:
-        "Documented, not observed, AND we could currently have seen it: the segment was looked at inside the window and the claimant's agent is reachable. The silence means something.",
+        "Documented and not observed, although we could have seen it now: the segment was looked at inside the window and the claimant's agent is reachable. The silence means something.",
     },
     assigned: {
       label: "Assigned",
       meaning:
-        "Documented, not observed, and nothing has EVER looked at this segment: no successful sweep, no observation, ever. There is nothing to be dormant about; the documented state is all the information that exists.",
+        "Documented, not observed, and nothing has ever looked at this segment, not once: no successful sweep, no observation, ever. There is nothing to be dormant about; the documented state is all the information that exists.",
     },
     dormant: {
       label: "Dormant",
       meaning:
-        "Documented, not observed, something looked before but nothing can look now: the segment had no evidence source in the window, or the claimant's agent has been offline past it. A switched-off laptop. NOT drift, and not counted as any.",
+        "Documented, not observed, something looked before but nothing can look now: the segment had no evidence source in the window, or the claimant's agent has been offline past it. A switched-off laptop. This is not drift, and it is not counted as any.",
     },
     reserved: {
       label: "Reserved",
@@ -250,7 +250,7 @@ export const ipam = {
       meaning:
         "The plan documents this address and nothing has answered at it, in a segment we could see and with a claimant whose agent is reachable. Both gates passed, so the absence is informative.",
       remedy:
-        "A RECLAIM CANDIDATE, never an automatic reclaim: nothing in this module changes state by itself. Release the address if the claim is dead, or leave it and acknowledge.",
+        "A candidate for reclaim, never an automatic reclaim: nothing in this module changes state by itself. Release the address if the claim is dead, or leave it and acknowledge.",
     },
     present_undocumented: {
       label: "Present, undocumented",
@@ -263,34 +263,34 @@ export const ipam = {
       meaning:
         "The documented MAC and an observed MAC of at least medium confidence disagree. ICMP evidence can never produce this: an ICMP observation carries no MAC.",
       remedy:
-        "A DOCUMENTATION correction: one hardware address is stale. Update the record to the observed MAC, or correct the observation's source.",
+        "A correction to the documentation: one hardware address is stale. Update the record to the observed MAC, or correct the observation's source.",
     },
     claimant_mismatch: {
       label: "Claimant mismatch",
       meaning:
         "The plan says device X holds this address; an inventory result from device Y says Y does. The machine itself contradicts the plan.",
       remedy:
-        "Decide WHICH DEVICE OWNS THE ADDRESS, then reassign. This is a different finding from a MAC mismatch: two devices are involved, not two hardware addresses.",
+        "Decide which device owns the address. Then reassign it. This is a different finding from a MAC mismatch: two devices are involved, not two hardware addresses.",
     },
     device_moved: {
       label: "Device moved",
       meaning:
         "The documented device is not at its documented address, and it has a current observation at a different registered address. Two findings collapsed into one so nobody has to notice they are the same laptop.",
-      remedy: "MOVE THE ASSIGNMENT to the address the device is actually at.",
+      remedy: "Move the assignment to the address the device is actually at.",
     },
     conflict: {
       label: "Conflict",
       meaning:
-        "Two things are using ONE address: more than one MAC observed at it, a claimant mismatch, or two address rows in different VRFs claiming it across a shared swept segment. This is an outage in progress, not a filing error.",
+        "Two things are using the same address: more than one MAC observed at it, a claimant mismatch, or two address rows in different VRFs claiming it across a shared swept segment. This is an outage in progress, not a filing error.",
       remedy:
-        "AN OPERATIONAL FIX FIRST: get one of them off the address. Correcting the record does not stop the duplicate, which is why this is not a mismatch.",
+        "First, an operational fix: get one of them off the address. Correcting the record does not stop the duplicate, which is why this is not a mismatch.",
     },
     dormant: {
       label: "Dormant",
       meaning:
-        "Documented, unobserved, and we CANNOT CURRENTLY VERIFY IT: the segment had no evidence source inside the window, or the claimant's agent has been offline past it. Something looked before; nothing can look now. A switched-off laptop is the ordinary case.",
+        "Documented, unobserved, and right now we cannot verify it: the segment had no evidence source inside the window, or the claimant's agent has been offline past it. Something looked before; nothing can look now. A switched-off laptop is the ordinary case.",
       remedy:
-        "NOTHING. This is not a problem and is not counted as drift. It is worth knowing that 37 addresses cannot be verified; it is not the same information as 37 being wrong.",
+        "Nothing. This is not a problem and is not counted as drift. It is worth knowing that 37 addresses cannot be verified; it is not the same information as 37 being wrong.",
     },
   },
   scopeStatus: {
@@ -323,7 +323,7 @@ export const ipam = {
     expires: "Expires {when}",
     expired: "Expired, {age}",
     notAuthorized:
-      "NOT AUTHORIZED. No active scan authorization in this VRF covers this prefix, so no sweep will ever target it: authorization is deny-by-default and documenting a subnet does not authorize probing it. Dispatch is refused (403) before any job is created.",
+      "Not authorized. No active scan authorization in this VRF covers this prefix, so no sweep will ever target it: authorization is deny-by-default and documenting a subnet does not authorize probing it. Dispatch is refused (403) before any job is created.",
     sweepable: {
       one: "Sweepable under {count} active authorization. Targets are {prefix} intersected with {list}, minus this subnet's excluded ranges, never wider than the subnet itself. The server recomputes this at dispatch; this is a preview.",
       other:
@@ -340,12 +340,12 @@ export const ipam = {
     failed: {
       label: "Failed",
       meaning:
-        "The run failed, or its result was rejected WHOLE: an out-of-scope address, a mismatched scope digest or an over-long host list discards every observation in it.",
+        "The run failed, or its result was rejected as a whole: an out-of-scope address, a mismatched scope digest or an over-long host list discards every observation in it.",
     },
     refused: {
       label: "Refused, not authorized",
       meaning:
-        "No active authorization covered the targets, so NO JOB WAS EVER CREATED: nothing was signed and nothing reached an agent.",
+        "No active authorization covered the targets, so no job was ever created: nothing was signed and nothing reached an agent.",
     },
     no_agent: {
       label: "No agent could sweep",
@@ -363,7 +363,7 @@ export const ipam = {
     dhcp_pool: {
       label: "DHCP pool",
       meaning:
-        "Handed out by a DHCP server. Static assignment inside it is REFUSED (409): a DHCP reservation is expressed by carving it out of the pool, not by writing a static row inside one.",
+        "Handed out by a DHCP server. Static assignment inside it is refused (409): a DHCP reservation is expressed by carving it out of the pool, not by writing a static row inside one.",
     },
     reserved: {
       label: "Reserved range",
@@ -372,7 +372,7 @@ export const ipam = {
     excluded: {
       label: "Excluded range",
       meaning:
-        "Skipped by the allocator AND subtracted from every sweep target set: addresses in here are never probed.",
+        "Skipped by the allocator, and also subtracted from every sweep target set: addresses in here are never probed.",
     },
   },
   importBlock: {
@@ -392,7 +392,7 @@ export const ipam = {
     },
     error: {
       label: "Error",
-      meaning: "Unparseable. REPORTED, not silently skipped: every input row gets a verdict.",
+      meaning: "Unparseable. It is reported, not silently skipped: every input row gets a verdict.",
     },
   },
   searchKind: {
@@ -437,7 +437,7 @@ export const ipam = {
     driftCta: "Tell someone about drift",
   },
   tree: {
-    title: "IP address management",
+    title: "IP addresses",
     description: "Subnets, what is on them, and what the fleet actually saw.",
     newSubnet: "New subnet",
     managed: "Managed subnets",
@@ -463,11 +463,9 @@ export const ipam = {
     containsPlaceholder: "Contains address, e.g. 10.4.7.9",
     containsAria: "Filter by contained address",
     viewAria: "Filter by view",
-    clear: "Clear",
     viewAll: "All subnets",
     viewAssignable: "Assignable only",
     viewNeverSwept: "Never swept",
-    emptyFiltered: "No subnets match these filters.",
     emptyAll: "No subnets registered yet.",
     emptyAssignable: "No subnet is assignable.",
     emptyUnswept: "No subnet is unswept.",
@@ -520,12 +518,13 @@ export const ipam = {
     deleteFailed: "Delete failed: {reason}",
   },
   subnet: {
+    titleFallback: "Subnet",
+    tabsLabel: "Subnet",
+    inVrf: "VRF {vrf}",
     tabAddresses: "Addresses",
     tabRanges: "Ranges",
     tabSweeps: "Sweeps",
     tabDrift: "Drift",
-    gateway: "gateway {gateway}",
-    containerPrefix: "container prefix",
     allSubnets: "All subnets",
     usable: "Usable",
     registered: "Registered",
@@ -656,6 +655,10 @@ export const ipam = {
     truncated: "truncated",
   },
   drift: {
+    allDrift: "All drift",
+    subnetCaption: "Subnet",
+    subnetAria: "Filter by subnet",
+    suppressNeeds: "Suppressing needs a note and a date.",
     title: "Drift",
     description: "Where the registry and the fleet disagree about an address.",
     tileDriftFoot: "Unresolved findings. Dormant addresses and orphans are not counted here.",
@@ -665,10 +668,8 @@ export const ipam = {
     tileOrphansFoot: "Observed addresses inside no registered subnet. The plan is absent, not wrong.",
     tileOrphansZero: "Every observed address is inside a registered subnet",
     chipsLabel: "Drift class",
-    chipAll: "All drift ({count})",
-    chip: "{label} ({count})",
     remedy: "Remedy: ",
-    empty: "Nothing in this view.",
+    empty: "No drift: what is registered and what was seen agree.",
     colEvidence: "Evidence",
     inSubnet: "In",
     confidence: {
@@ -698,10 +699,13 @@ export const ipam = {
     registerThis: "Register this subnet",
   },
   scans: {
+    revokedLabel: "Which authorizations",
+    activeOnly: "In force",
+    needsPrefix: "Type a prefix or pick a subnet to see what it would open.",
     title: "Scan authorizations",
     description: "The address ranges a network sweep is allowed to probe.",
     authorizeSubnet: "Authorize a subnet",
-    showRevoked: "Show revoked and expired authorizations",
+    withRevoked: "Revoked and expired too",
     scopeManageNote:
       "Adding and revoking authorizations needs permission to manage scan scopes, which is separate from permission to run a sweep.",
     empty: "No prefix is authorized for sweeping. No sweep will target anything.",
@@ -767,6 +771,8 @@ export const ipam = {
     kind: { address: "address", cidr: "cidr", mac: "mac", text: "text" },
   },
   registry: {
+    newVrf: "New VRF",
+    newVlan: "New VLAN",
     title: "Registry",
     description: "VRFs, VLANs and the client's sites: what subnets and addresses are scoped by.",
     vrfsTitle: "VRFs",
@@ -791,6 +797,10 @@ export const ipam = {
     addVlan: "Add VLAN",
   },
   importExport: {
+    stepMap: "Map its columns",
+    stepFile: "Choose the CSV",
+    stepPreviewApply: "Preview and apply",
+    mapAfterFile: "Choose a CSV first: its first line names the columns to map.",
     title: "Import and export",
     description: "Bring an address plan in from CSV, or take the current one out.",
     needsManage:
@@ -841,7 +851,6 @@ export const ipam = {
       other: "{count} records convertible, {skipped} skipped.",
     },
     skipped: "skipped {name}: {reason}",
-    exportTitle: "Export",
     exportSubtitle: "The current subnets, addresses and drift findings, as CSV.",
     dormantNote: "<b>Dormant addresses are not in it</b>: they are not findings.",
     subnetsCsv: "Subnets CSV",

@@ -96,7 +96,7 @@ describe("Clientes, en español", () => {
     expect(await screen.findByRole("heading", { name: "Clientes", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("TI propia")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Nuevo cliente" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Mostrar los clientes archivados" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Con archivados" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
 

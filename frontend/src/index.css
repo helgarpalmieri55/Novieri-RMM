@@ -1,53 +1,36 @@
 @import "tailwindcss";
 @import "./fonts.css";
 
-/* ITMS design tokens.
+/* Novieri RMM design tokens.
  *
- * TRANSCRIBED, NOT CHOSEN. Every value in the FIRST `:root` block below is
- * copied verbatim from the `:root` block of `docs/design/itms-prototype-v3.html`
- * -- the operator's approved design (2026-09-07), which this application
- * reproduces rather than reinterprets. `src/test/tokens.test.ts` parses BOTH
- * files and fails on any difference, so this block cannot drift from the
- * reference by accident, and a deliberate change has to be made in the design
- * first. The design file's own `:root` comment records every edit made to it
- * during the port and the measured ratio behind each one; the numbers are not
- * repeated here because a quoted number rots and the comment there is beside
- * the value it describes.
+ * TRANSCRIBED, NOT CHOSEN. Every value in the FIRST `:root` below is copied
+ * from the frontmatter of `DESIGN.md` v4 ("Novieri", 2026-11-23), which names
+ * each token after this property, and the brand subset of it from
+ * `docs/design/marca/novieri-tokens.json` (direction A, "Cordillera", chosen
+ * by the operator on 2026-11-23). `src/test/tokens.test.ts` reads all three
+ * files and fails on any difference, so a deliberate change starts in
+ * DESIGN.md. The ratios live in DESIGN.md and are computed by
+ * `src/test/contrast.test.ts`; none is quoted here, because a quoted number
+ * rots.
  *
- * THE SHAPE OF v3. Five type sizes (`--t-h1..--t-cap`) plus one, `--t-kpi`,
- * for the KPI figure; three radii (`--r-ctl`, `--r-panel`, `--r-pill`); one
- * palette: a light page (`--bg`, `--surface`, `--surface-2`), three inks
- * (`--ink`, `--ink-2`, `--muted`), two decorative hairlines (`--line`,
- * `--line-2`) and one control boundary (`--line-control`), a dark rail with its
- * own two grounds and two text tones, ONE accent, and five severities each with
- * a wash. Anything the console paints is one of these or it is a stray, and
- * the harmony gate (`scripts/harmony.mjs`) reads this block at runtime as its
- * allowlist.
+ * THE SHAPE. Five type sizes and the KPI figure; four radii (badge, control,
+ * panel, and the pill kept for the switch and the progress bar); one palette:
+ * a light page (`--bg`, `--surface`, `--surface-2`), two inks (`--ink`,
+ * `--muted`), one decorative line (`--line`) and one control boundary
+ * (`--line-control`), a night-blue rail with its two grounds, two text tones
+ * and its own mark, ONE accent with its hover, pressed and wash, and four
+ * severity pairs (information shares the accent). The harmony gate
+ * (`scripts/harmony.mjs`) reads this file at runtime as its allowlist.
  *
- * `--line-control` IS THE BOUNDARY THAT IDENTIFIES A CONTROL -- the border of
- * a text input, a select, a search field, a secondary or ghost button, an icon
- * button, the track of a toggle. WCAG 2.2 SC 1.4.11 asks 3:1 of that boundary
- * against the colour beside it, and `docs/product.md` §11 makes 2.2 AA a
- * product requirement. A control must clear the floor on every surface it can
- * land on, and `--bg` is the darkest of the three, so it is the one that
- * binds. `--line` AND `--line-2` ARE NOT AFFECTED, and that is the point of a
- * third token rather than a darker second one: separating table rows, closing
- * a panel, ruling off a tab strip -- 1.4.11 exempts all of it as decoration.
- * `src/test/contrast.test.ts` computes the ratios and asserts that neither
- * decorative hairline ever draws a control.
+ * `--line-control` IS THE BOUNDARY THAT IDENTIFIES A CONTROL (WCAG 2.2 SC
+ * 1.4.11, 3:1 against every surface a control can land on); `--line` is
+ * decoration only, and `contrast.test.ts` asserts it never draws a control.
  *
- * LIGHT ONLY, DELIBERATELY. The design has no dark palette, no
- * `prefers-color-scheme` block and no `[data-theme]` hook. Declaring
- * `light dark` here with no dark palette does not give you dark mode; it tells
- * the browser to render form controls, scrollbars and spell-check underlines
- * dark against a light page. See the 2026-08-16 UI port spec §3.1.
+ * LIGHT ONLY, DELIBERATELY: no `prefers-color-scheme`, no `[data-theme]`
+ * (2026-08-16 UI port spec §3.1; `no-dark-variants.test.ts`).
  *
- * INTER IS SELF-HOSTED (see `./fonts.css`, imported above). `--sans` names
- * Inter first; the woff2 files ship in this bundle and are served same-origin
- * -- no console load ever reaches a third party for them, per the product
- * property that this platform does not phone home (`docs/product.md` §5) and
- * the fact that deployments frequently have no egress at all. The system
- * stack after it remains the fallback if those files are ever missing.
+ * INTER IS SELF-HOSTED (`./fonts.css`): nothing is fetched off-origin
+ * (`docs/product.md` §5).
  */
 :root {
   --t-h1: 22px;
@@ -56,46 +39,44 @@
   --t-sm: 12px;
   --t-cap: 10.5px;
   --t-kpi: 26px;
+  --r-badge: 4px;
   --r-ctl: 6px;
   --r-panel: 10px;
   --r-pill: 999px;
-  --bg: #f5f6f9;
+  --bg: #f3f5f8;
   --surface: #ffffff;
-  --surface-2: #f9fafc;
-  --ink: #141619;
-  --ink-2: #3b4048;
-  --muted: #606a7a;
-  --line: #e5e8ee;
-  --line-2: #cfd4dc;
-  --line-control: #828895;
-  --rail: #0f1a20;
-  --rail-2: #182730;
-  --rail-ink: #9db0b8;
-  --rail-dim: #7f939c;
-  --rail-hot: #ff8d9a;
-  --accent: #1f5fd1;
-  --accent-2: #1a4fae;
-  --accent-s: #e8effd;
+  --surface-2: #f7f9fc;
+  --ink: #111a2b;
+  --muted: #536077;
+  --line: #e1e6ee;
+  --line-control: #7b8599;
+  --rail: #101b30;
+  --rail-2: #1b2945;
+  --rail-ink: #a9b6cc;
+  --rail-dim: #8592ab;
+  --rail-mark: #8fa6ff;
+  --accent: #2747c9;
+  --accent-2: #203cac;
+  --accent-3: #1a3190;
+  --accent-s: #e9edfc;
   --accent-ink: #ffffff;
-  --sev-crit: #c1182f;
-  --sev-crit-s: #fdecee;
-  --sev-warn: #9a6100;
-  --sev-warn-s: #fdf3e2;
+  --sev-crit: #b8172c;
+  --sev-crit-s: #fcebed;
+  --sev-warn: #8d5a00;
+  --sev-warn-s: #fcf1dc;
   --sev-ok: #17703f;
-  --sev-ok-s: #e6f6ed;
-  --sev-run: #0f5f95;
-  --sev-run-s: #e7f1fa;
-  --sev-mut: #606a7a;
-  --sev-mut-s: #eef0f4;
+  --sev-ok-s: #e5f4ea;
+  --sev-mut: #586274;
+  --sev-mut-s: #edf0f4;
   --av-1: #5b3fb0;
   --av-2: #0f5f95;
   --av-3: #17703f;
   --av-4: #9a6100;
   --av-5: #b03a5b;
   --av-6: #0f7a80;
-  --scrim: rgba(15,26,32,.38);
+  --scrim: rgba(16,27,48,.38);
   --hatch-ink: rgba(255,255,255,.55);
-  --shadow: 0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);
+  --shadow: 0 1px 2px rgba(16,27,48,.05),0 6px 20px rgba(16,27,48,.06);
   --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
   --sans: Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   color-scheme: light;
@@ -121,6 +102,13 @@
  * that read "the first `:root` block" see only the design's tokens, and the
  * harmony gate's allowlist is not widened by an alias. */
 :root {
+  /* RETIRED BY THE BRAND (DESIGN.md v4, decision D2): Novieri has two text
+     tones, one line and information in the accent's hue. The four names stay
+     so the ~70 rules and modules that read them keep resolving. */
+  --ink-2: var(--ink);
+  --line-2: var(--line);
+  --sev-run: var(--accent);
+  --sev-run-s: var(--accent-s);
   --canvas: var(--bg);
   --sidebar: var(--rail);
   --sidebar-2: var(--rail-2);
@@ -192,7 +180,7 @@
   --color-rail-2: var(--rail-2);
   --color-rail-ink: var(--rail-ink);
   --color-rail-dim: var(--rail-dim);
-  --color-rail-hot: var(--rail-hot);
+  --color-rail-mark: var(--rail-mark);
   --color-accent: var(--accent);
   --color-accent-s: var(--accent-s);
   --color-accent-ink: var(--accent-ink);
@@ -273,10 +261,11 @@
   --font-weight-extrabold: 600;
   /* TAILWIND'S RADIUS SCALE, REMAPPED ONTO THE LADDER. Stock `rounded-sm` is
      2px, `rounded-md` 6px, `rounded-lg` 8px, `rounded-xl` 12px and
-     `rounded-2xl` 16px; the ladder is 6 / 10 / 999 and nothing else (heat
+     `rounded-2xl` 16px; the ladder is 4 / 6 / 10 / 999 and nothing else (heat
      cells at 2px and 3px, and avatars at 50%, are the two exceptions and are
      written as literals where they occur). The small rungs are controls, the
      large ones are panels. */
+  --radius-xs: var(--r-badge);
   --radius-sm: var(--r-ctl);
   --radius-md: var(--r-ctl);
   --radius-lg: var(--r-panel);

@@ -35,7 +35,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
@@ -70,13 +70,22 @@ import { BackupPageNav } from "./backupNav";
 import { BackupReadiness } from "./BackupReadiness";
 import {
   Btn,
-  FilterBar,
+  ChipSelect,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  type UrlFilters,
 } from "../../shell/components";
 
 /**
@@ -105,20 +114,26 @@ export function BackupPointsPage() {
   const t = useT();
   const api = useApi();
   /**
-   * THE FILTER LIVES IN THE URL, because the tile above it is a link.
+   * THE FILTERS LIVE IN THE URL, because the tile above them is a link.
    * "Needs verification 3" is a promise that somewhere there is a list of
    * those three, and the only list of them in the product is the table on
    * this page. Held in `useState` the tile would have been an anchor to the
    * page the reader is already standing on, the dead tile the instruction
-   * named. `verify=pending` is read here and written by the tile; the select
-   * below is the same vocabulary, so an operator who arrives by link can see
+   * named. `verify=pending` is read here and written by the tile; the chips
+   * below are the same vocabulary, so an operator who arrives by link can see
    * why the table is short and clear it.
+   *
+   * ON THE LIST KIT (redesign plan, Task 9, 4.1): `?verify=` keeps its
+   * address, `?device=` narrows the points to one computer (and is the
+   * computer Run backup opens with), and `?client=` is the Client chip, which
+   * narrows the READ of the points (decision D6) and nothing else.
    */
-  const [params, setParams] = useSearchParams();
-  const verifyFilter = params.get("verify") ?? "";
-  // The run form lives in a dialog now (see the page head), so the field and
-  // its refusals belong to that dialog rather than to the page.
-  const [runOpen, setRunOpen] = useState(false);
+  const filters = useUrlFilters(["verify", "device", "client"] as const);
+  const verifyFilter = filters.values.verify;
+  const deviceFilter = filters.values.device;
+  // The run form lives in a dialog (see the page head), opened from
+  // `?new=run` so New and a link can reach it (decision D8).
+  const run = useNewParam("run");
   // THE POINT, NOT ITS ID. The restore confirmation has to name the device and
   // the moment the point was taken (cycle 8: the subject is what lets somebody
   // notice they have the wrong row), and neither is recoverable from a UUID.
@@ -135,7 +150,11 @@ export function BackupPointsPage() {
   // timezone falls the helper back to the browser zone.
   const zone = me.data?.timezone;
 
-  const points = useBackupPoints();
+  // The list, and only the list, reads through the Client chip's narrowed API
+  // (Receta L, 7). The tiles, the names and the run dialog's picker keep the
+  // console's own reads: they are the page's summary and a write's targets,
+  // under the top bar's choice.
+  const points = useBackupPoints(filters.values.client);
   const report = useBackupReport();
   const devices = useDevices();
   const repositories = useBackupRepositories();
@@ -157,7 +176,14 @@ export function BackupPointsPage() {
    */
   const needsVerificationRow = (point: BackupPoint) =>
     point.state === "complete" && point.verified_at == null;
-  const visible = verifyFilter === "pending" ? items.filter(needsVerificationRow) : items;
+  const ofDevice = deviceFilter === "" ? items : items.filter((point) => point.device_id === deviceFilter);
+  const visible = verifyFilter === "pending" ? ofDevice.filter(needsVerificationRow) : ofDevice;
+  // The computers that have a point in the list, by name, for the Device chip:
+  // only those, so choosing one never empties the table by itself -- and the
+  // one in force, when a link named a computer the list has no point for.
+  const pointDevices = [...new Set([...items.map((point) => point.device_id), ...(deviceFilter ? [deviceFilter] : [])])]
+    .map((id) => ({ id, name: nameForOption(deviceOptions, id) ?? id }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const failedRuns = report.data?.run_counts_by_state["failed"] ?? 0;
   const needsVerification = report.data?.points_needing_verification ?? 0;
 
@@ -178,11 +204,16 @@ export function BackupPointsPage() {
   // as an alert state rather than a neutral statistic". `gold` is the
   // attention treatment the Failed-jobs card beside it already uses.
   const unprotected = report.data ? report.data.devices_total - report.data.devices_covered : 0;
+  // The tiles count the report: until it answers, or once it failed, each is
+  // the kit's pending tile, the absent mark (clarification 10a).
+  const noReport = !report.data;
 
   return (
     <div>
       <PageHead
-        title={t("backup.points.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.backup")}
         // Auditor A (HIGH): "Production page copy tells the user to read the
         // page source to find out what works." The removed sentence pointed
         // an auditor at view-source; the caveat itself is true and stays
@@ -204,7 +235,7 @@ export function BackupPointsPage() {
               label={t("backup.points.runBackup")}
               icon="player-play"
               variant="primary"
-              onClick={() => setRunOpen(true)}
+              onClick={run.start}
             />
           ) : undefined
         }
@@ -233,19 +264,19 @@ export function BackupPointsPage() {
         <StatCard
           label={t("backup.points.tileSuccess")}
           value={
-            report.data
-              ? totalRuns === 0
-                ? t("backup.points.neverRun")
-                : t("backup.points.percent", { percent: Math.round(report.data.success_rate * 100) })
-              : "—"
+            totalRuns === 0
+              ? t("backup.points.neverRun")
+              : t("backup.points.percent", { percent: Math.round((report.data?.success_rate ?? 0) * 100) })
           }
+          pending={noReport}
           icon="circle-check"
           to="/jobs?q=backup"
           tone="green"
         />
         <StatCard
           label={t("backup.points.tileProtected")}
-          value={report.data ? `${report.data.devices_covered} / ${report.data.devices_total}` : "—"}
+          value={`${report.data?.devices_covered ?? 0} / ${report.data?.devices_total ?? 0}`}
+          pending={noReport}
           icon="shield-check"
           to="/devices"
           /* GOLD IS THE COVERAGE GAP, and it stays gold when the gap is
@@ -259,7 +290,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileFailed")}
-          value={report.data ? String(failedRuns) : "—"}
+          value={String(failedRuns)}
+          pending={noReport}
           icon="circle-x"
           to="/jobs?status=failed&q=backup"
           tone="red"
@@ -270,7 +302,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileNeedsVerification")}
-          value={report.data ? String(needsVerification) : "—"}
+          value={String(needsVerification)}
+          pending={noReport}
           icon="clock-exclamation"
           to="/backup?verify=pending"
           tone="gold"
@@ -283,37 +316,50 @@ export function BackupPointsPage() {
       </StatsGrid>
 
       <Panel bare title={t("backup.points.panelTitle")} subtitle={t("backup.points.panelSubtitle")}>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={verifyFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              // An empty value is ABSENT, not `?verify=`: a URL carrying an
-              // empty filter reads as a filter set to nothing.
-              if (event.target.value === "") next.delete("verify");
-              else next.set("verify", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("backup.points.filterAria")}
-          >
-            <option value="">{t("backup.points.allPoints")}</option>
-            <option value="pending">{t("backup.points.awaitingVerification")}</option>
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={points.isLoading}
-          error={points.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0
-              ? t("backup.points.emptyNone")
-              : t("backup.points.emptyFiltered")
+        <ListToolbar
+          chips={
+            <>
+              {/* The two counts are the whole list's: `GET /backup/points`
+                  answers every point at once (no page), so they are totals,
+                  never a count of what happens to be on screen. */}
+              <FilterChips
+                label={t("backup.points.filterAria")}
+                options={[
+                  { value: "", label: t("backup.points.allPoints"), count: points.data ? ofDevice.length : undefined },
+                  {
+                    value: "pending",
+                    label: t("backup.points.awaitingVerification"),
+                    count: points.data ? ofDevice.filter(needsVerificationRow).length : undefined,
+                  },
+                ]}
+                value={verifyFilter}
+                onChange={(value) => filters.set("verify", value)}
+              />
+              <DeviceFilter filters={filters} devices={pointDevices} />
+              <ClientFilter filters={filters} />
+            </>
           }
-          emptyIcon="backup"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={points.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        {/* `isPending`, not `isLoading` (general ruling 10): while the Client
+            chip's client is not decided the read is disabled, and a disabled
+            query is not "loading" -- the empty state would show before any read. */}
+        <QueryState loading={points.isPending} error={points.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("backup.points.emptyNone")}
+              icon="backup"
+              action={
+                canRun ? (
+                  <Btn label={t("backup.points.runBackup")} icon="player-play" small onClick={run.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("backup.points.panelTitle")}>
             <thead>
               <tr>
                 <Th>{t("backup.points.colDevice")}</Th>
@@ -379,7 +425,10 @@ export function BackupPointsPage() {
                       {point.size == null || point.size < 0 ? (
                         <NoValue label={t("backup.points.noSize")} />
                       ) : (
-                        <span className="mono">{formatBytes(point.size)}</span>
+                        // One line: a size broken over two is a number to reassemble (critique, wave O4).
+                        <span className="mono" style={{ whiteSpace: "nowrap" }}>
+                          {formatBytes(point.size)}
+                        </span>
                       )}
                     </Td>
                     <Td>
@@ -421,20 +470,32 @@ export function BackupPointsPage() {
                           (recognition over recall for why the row cannot be
                           restored) but says why it cannot be pressed. */}
                       {canRestore && (
-                        <Btn
-                          label={t("backup.points.restore")}
-                          icon="history"
-                          small
-                          disabled={point.state === "failed" || point.state === "pruned"}
-                          title={
-                            point.state === "failed"
-                              ? t("backup.points.restoreFailedHint")
-                              : point.state === "pruned"
-                                ? t("backup.points.restorePrunedHint")
-                                : undefined
-                          }
-                          onClick={() => setRestoreTarget(point)}
-                        />
+                        <>
+                          <Btn
+                            label={t("backup.points.restore")}
+                            icon="history"
+                            small
+                            disabled={point.state === "failed" || point.state === "pruned"}
+                            title={
+                              point.state === "failed"
+                                ? t("backup.points.restoreFailedHint")
+                                : point.state === "pruned"
+                                  ? t("backup.points.restorePrunedHint")
+                                  : undefined
+                            }
+                            onClick={() => setRestoreTarget(point)}
+                          />
+                          {/* THE REASON ON SCREEN, under the control it
+                              explains (general ruling 8): it was a tooltip,
+                              which a touch screen and a keyboard never show. */}
+                          {point.state === "failed" || point.state === "pruned" ? (
+                            <div className="cell-sub" style={{ maxWidth: "26ch", whiteSpace: "normal" }}>
+                              {point.state === "failed"
+                                ? t("backup.points.restoreFailedHint")
+                                : t("backup.points.restorePrunedHint")}
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </Td>
                   </tr>
@@ -442,6 +503,7 @@ export function BackupPointsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -470,9 +532,12 @@ export function BackupPointsPage() {
         /* The key is namespaced because `RestoreDialog` above is its sibling
            and keys "closed" twice in one parent is two children with the same
            key -- React warns, and one of them is a dialog. */
-        key={runOpen ? "run-open" : "run-closed"}
-        open={runOpen}
-        onClose={() => setRunOpen(false)}
+        key={run.open && canRun ? "run-open" : "run-closed"}
+        // Open only for someone who may run one, whatever the URL asks: a
+        // courtesy, since the server checks `backup.run` (invariant 6).
+        open={run.open && canRun}
+        onClose={run.close}
+        initialDevice={deviceFilter}
       />
     </div>
   );
@@ -491,11 +556,24 @@ export function BackupPointsPage() {
  * sentence saying what happened with it -- the operator dismisses it having
  * read what was dispatched.
  */
-function RunBackupDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function RunBackupDialog({
+  open,
+  onClose,
+  initialDevice = "",
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** The computer the list is narrowed to (`?device=`), picked when the dialog opens. */
+  initialDevice?: string;
+}) {
   const t = useT();
   const devices = useDevices();
   const run = useRunBackupMutation();
-  const [deviceId, setDeviceId] = useState("");
+  const [deviceId, setDeviceId] = useState(initialDevice);
+  // ONE GUARD FOR THE FORM IN `?new=run` (general ruling 3): a computer picked
+  // and not run is asked about before Cancel, Back or a link drops it.
+  const dirty = open && deviceId !== "" && deviceId !== initialDevice;
+  const { guard } = useUnsavedGuard(dirty, { search: ["new"] });
   // Held as the rules and the values they were checked against, so a language
   // switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -521,6 +599,8 @@ function RunBackupDialog({ open, onClose }: { open: boolean; onClose: () => void
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={dismiss} title={t("backup.runDialog.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -570,5 +650,36 @@ function RunBackupDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
       </Form>
     </Dialog>
+    </>
+  );
+}
+
+/**
+ * THE DEVICE CHIP: the points of one computer. The kit's `ChipSelect` (the
+ * Client chip's shape), because a fleet has too many computers for a row of
+ * toggles. It offers only the computers the list has points for, and draws
+ * nothing while there is fewer than two to choose between, unless one is
+ * already chosen (so it can be cleared).
+ */
+function DeviceFilter({
+  filters,
+  devices,
+}: {
+  filters: UrlFilters<"device">;
+  devices: readonly { id: string; name: string }[];
+}) {
+  const t = useT();
+  const value = filters.values.device;
+  if (devices.length < 2 && value === "") return null;
+  return (
+    <ChipSelect
+      label={t("backup.points.deviceChip")}
+      options={[
+        { value: "", label: t("backup.points.allDevices") },
+        ...devices.map((item) => ({ value: item.id, label: item.name })),
+      ]}
+      value={value}
+      onChange={(next) => filters.set("device", next)}
+    />
   );
 }

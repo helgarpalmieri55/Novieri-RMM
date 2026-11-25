@@ -12,9 +12,23 @@ import { useApi } from "../../lib/ApiContext";
 import { useCompliance, useCreateProductMutation, useProducts, useUpdateProductMutation } from "./api";
 import { LicensePageNav } from "./licenseNav";
 import type { MatchRule, ProductOut } from "./types";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useEditParam,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 const MATCH_RULE_TYPES: MatchRule["type"][] = ["exact", "prefix", "regex"];
 
@@ -35,10 +49,24 @@ const MATCH_RULE_LABEL: Readonly<Record<MatchRule["type"], string>> = lazyLabels
 
 const productRules = (): readonly FieldRule[] => [{ name: "name", label: translate("licenses.common.name") }];
 
+function matchesProduct(product: ProductOut, needle: string): boolean {
+  if (needle === "") return true;
+  return `${product.name} ${product.publisher}`.toLowerCase().includes(needle);
+}
+
 export function ProductsPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.products.title"));
   const api = useApi();
-  const [editing, setEditing] = useState<ProductOut | "new" | null>(null);
+  // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.2): the
+  // search in `?q=`, New product from `?new=product` and an edit from
+  // `?edit=<id>`, each a link. The catalog is the organisation's, shared by
+  // every client: no Client chip.
+  const filters = useUrlFilters(["q"] as const);
+  const newProduct = useNewParam("product");
+  const edit = useEditParam("product");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -64,33 +92,45 @@ export function ProductsPage() {
     return totals;
   }, [compliance.data]);
   const items = products.data ?? [];
+  const needle = filters.values.q.trim().toLowerCase();
+  const shown = items.filter((product) => matchesProduct(product, needle));
+  // The editor opens only for a product that is in the catalog, and only for
+  // someone who may change it: a stale `?edit=` opens nothing.
+  const editing = canManage ? items.find((product) => product.id === edit.id) : undefined;
+
+  const primary = canManage ? (
+    <Btn label={t("licenses.products.newProduct")} icon="plus" variant="primary" onClick={newProduct.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("licenses.products.title")}
-        description={t("licenses.products.description")}
-        actions={
-          canManage ? (
-            <Button onClick={() => setEditing("new")}>
-              <Icon name="plus" size={14} />
-              {t("licenses.products.newProduct")}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHead title={t("licenses.products.title")} description={t("licenses.products.description")} actions={primary} />
 
       <LicensePageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={products.isLoading}
-          error={products.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.products.empty")}
-          emptyIcon="license"
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("licenses.products.searchPlaceholder")}
+              aria-label={t("licenses.products.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          end={products.data ? <ShowingCount shown={shown.length} total={items.length} /> : null}
+        />
+        <QueryState loading={products.isLoading} error={products.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.products.empty")}
+              action={primary}
+              icon="package"
+            />
+          ) : (
+          <Table label={t("licenses.products.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.products.colName")}</Th>
@@ -101,7 +141,7 @@ export function ProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((product) => {
+              {shown.map((product) => {
                 const installed = installedByProduct.get(product.id);
                 const rules = product.match_rules.length;
                 return (
@@ -127,18 +167,22 @@ export function ProductsPage() {
                         ))
                       )}
                     </Td>
+                    {/* NO RULE, NO COUNT (The Absent Zero Rule): a product
+                        with no match rule cannot be detected, so the report's
+                        0 is "nothing looked", said as such, as on the
+                        compliance page. */}
                     <Td>
                       {installed === undefined ? (
                         t("licenses.common.na")
+                      ) : rules === 0 ? (
+                        <span className="note">{t("licenses.compliance.noUsage")}</span>
                       ) : (
                         <span className="mono">{t("licenses.products.installs", { count: installed })}</span>
                       )}
                     </Td>
                     <Td>
                       {canManage && (
-                        <Button variant="outline" onClick={() => setEditing(product)}>
-                          {t("licenses.common.edit")}
-                        </Button>
+                        <Btn label={t("licenses.common.edit")} onClick={() => edit.start(product.id)} />
                       )}
                     </Td>
                   </tr>
@@ -146,10 +190,19 @@ export function ProductsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <ProductEditor product={editing} onClose={() => setEditing(null)} />
+      {/* Mounted per product (its `key`), so the editor's fields start from
+          the product it opens; one mounted for "new" starts empty. One editor
+          at a time: a URL carrying both `?new=` and `?edit=` opens the new one
+          (review M6), so two guards never hold the page at once. */}
+      {canManage && newProduct.open ? (
+        <ProductEditor key="new" product="new" onClose={newProduct.close} />
+      ) : editing ? (
+        <ProductEditor key={editing.id} product={editing} onClose={edit.close} />
+      ) : null}
     </div>
   );
 }
@@ -177,6 +230,16 @@ function ProductEditor({
 
   const mutation = existing ? update : create;
 
+  // A CHANGE IN THE EDITOR ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews): `?new=product` or `?edit=<id>` is what holds the form, so
+  // Back, Cancel or Escape with a change asks first. The page mounts the
+  // editor per opening (its `key`), so each one starts from what it opens.
+  const dirty =
+    name !== (existing?.name ?? "") ||
+    publisher !== (existing?.publisher ?? "") ||
+    JSON.stringify(matchRules) !== JSON.stringify(existing?.match_rules ?? []);
+  const { guard, release } = useUnsavedGuard(dirty, { search: [product === "new" ? "new" : "edit"] });
+
   function reset() {
     setName("");
     setPublisher("");
@@ -184,9 +247,7 @@ function ProductEditor({
     setAttempt(null);
   }
 
-  // ProductsPage keeps this editor mounted and toggles `product`, so without
-  // clearing the mutation here a failure from one attempt sits in the form
-  // waiting to be read as the next one's.
+  // Clearing the mutations on close keeps a failure from one attempt off the next.
   function close() {
     create.reset();
     update.reset();
@@ -207,12 +268,25 @@ function ProductEditor({
   }
 
   function submit() {
+    // An untouched product sends nothing: Save closes as a save would, and no
+    // PATCH writes a change that is not one (the coordinator's ruling 13).
+    if (existing && !dirty) {
+      close();
+      return;
+    }
     const next: Attempt = { rules: productRules, values: { name } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      mutation.reset();
+      return;
+    }
 
     const body = { name: name.trim(), publisher, match_rules: matchRules };
     const onSuccess = () => {
+      // Saved: closing leaves without asking (useUnsavedGuard's release).
+      release();
       reset();
       close();
     };
@@ -224,6 +298,7 @@ function ProductEditor({
   }
 
   return (
+    <>
     <Dialog
       open={product != null}
       onClose={close}
@@ -307,5 +382,9 @@ function ProductEditor({
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
+    </>
   );
 }

@@ -160,10 +160,11 @@ describe("the audit log in Spanish", () => {
       verify: () => Promise.resolve({ ok: false, count: 1, broken_at: "evt-9" }),
     });
     const banners = await screen.findAllByRole("alert");
-    expect(banners[0]).toHaveTextContent("Ha FALLADO la verificación de la cadena de hashes.");
+    // No typed capitals (DESIGN.md; P3 adoption pass): same banner, same meaning.
+    expect(banners[0]).toHaveTextContent("La verificación de la cadena de hashes ha fallado.");
     expect(banners[0]).toHaveTextContent("a partir del evento evt-9.");
     expect(banners[1]).toHaveTextContent("La verificación recorrió 1 evento y se detuvo en evt-9.");
-    expect(screen.getByText("ROTA")).toBeInTheDocument();
+    expect(screen.getByText("Rota")).toBeInTheDocument();
     expectNoEnglish(broken.container);
     broken.unmount();
 
@@ -350,7 +351,8 @@ describe("the audit vocabulary in Spanish", () => {
     expect(within(table).queryByText("jobs.dispatched")).not.toBeInTheDocument();
     // ...and after a switch it matches the new language's label, not a cached one.
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("No loaded audit event matches that filter.")).toBeInTheDocument();
+    // The kit's filtered empty list now (redesign plan, Receta L); "Showing 0 of N" says the page was loaded.
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(within(await screen.findByRole("table")).getByText("Barrido rechazado")).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Buscar en la página cargada por acción, actor o destino"));

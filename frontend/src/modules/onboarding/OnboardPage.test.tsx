@@ -335,14 +335,14 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     expect(screen.queryByRole("combobox", { name: "Site" })).toBeNull();
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Open IP Address Management/i }).getAttribute("href")).toBe(
-        "/ipam?client=c-andes&site=s-main",
+        "/ipam?journey_client=c-andes&journey_site=s-main",
       ),
     );
     expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
-      "/agent-packages?client=c-andes&site=s-main",
+      "/agent-packages?journey_client=c-andes&journey_site=s-main",
     );
     expect(screen.getByRole("link", { name: /Enrollment tokens/i }).getAttribute("href")).toBe(
-      "/enrollment?client=c-andes&site=s-main",
+      "/enrollment?journey_client=c-andes&journey_site=s-main",
     );
   });
 
@@ -357,8 +357,27 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     await user.selectOptions(site, "s-north");
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
-        "/agent-packages?client=c-andes&site=s-north",
+        "/agent-packages?journey_client=c-andes&journey_site=s-north",
       ),
     );
+  });
+});
+
+/* --- the kit's form shape (redesign plan Task 6, 1.6) ------------------------------- */
+
+describe("the page on the form kit", () => {
+  it("leads back to the computers", async () => {
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "Add a computer" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Devices" })).toHaveAttribute("href", "/devices");
+  });
+
+  it("draws each block as a section that folds, and no save bar: it keeps nothing", async () => {
+    renderPage();
+    await screen.findByRole("heading", { level: 1, name: "Add a computer" });
+    for (const name of ["One computer", "Many computers on a network"]) {
+      expect(screen.getByRole("button", { name, expanded: true })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
   });
 });

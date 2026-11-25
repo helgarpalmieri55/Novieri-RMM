@@ -10,12 +10,48 @@
           "frontend/src/modules/docs/markdown.ts"
         ],
         "createdAt": "2026-08-21T12:45:25.934Z",
-        "reason": "Claude: false positive by the rule's own preconditions. L59 is a <blockquote> left rule, not a card side-tab, and its colour is var(--line-strong) = #d9d7df \u2014 11% saturation at 86% lightness, i.e. the neutral hairline token, which the rule's 'non-neutral color' precondition excludes. The browser path filters it; the source path cannot resolve the var() and flagged conservatively. The treatment is the canonical HTML blockquote rule and was added to close auditor B's finding 'Markdown article headings, lists and links are rendered with no typographic styling', whose fix note asks for a styled blockquote by name. File-scoped because the finding carries no extractable value; markdown.ts holds only the sanitizer's tag-style map."
+        "reason": "Claude: false positive by the rule's own preconditions. L59 is a <blockquote> left rule, not a card side-tab, and its colour is var(--line-strong) = #d9d7df — 11% saturation at 86% lightness, i.e. the neutral hairline token, which the rule's 'non-neutral color' precondition excludes. The browser path filters it; the source path cannot resolve the var() and flagged conservatively. The treatment is the canonical HTML blockquote rule and was added to close auditor B's finding 'Markdown article headings, lists and links are rendered with no typographic styling', whose fix note asks for a styled blockquote by name. File-scoped because the finding carries no extractable value; markdown.ts holds only the sanitizer's tag-style map."
       },
       {
         "rule": "overused-font",
         "value": "inter",
         "createdAt": "2026-08-21T21:02:33.956Z"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/auth/ConsentPage.tsx"
+        ],
+        "createdAt": "2026-11-25T08:14:48.893Z",
+        "reason": "the .notice.gold is the design's inline warning (role note), placed in the card beside Approve by plan Task 13 8.11 and invariant 1c; a notice is a message, not a card"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/settings/SessionsTab.tsx"
+        ],
+        "createdAt": "2026-11-25T09:23:15.620Z",
+        "reason": "the .notice.gold (remember-device risk) is the design's inline warning inside its form section; a notice is a message, not a card"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/ai-automation/ActionPreview.tsx"
+        ],
+        "createdAt": "2026-11-25T09:23:15.637Z",
+        "reason": "the facts strip (Facts) is the design's summary row inside its panel, not a card"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/docs/DocumentViewer.tsx"
+        ],
+        "createdAt": "2026-11-25T09:26:09.505Z",
+        "reason": "False positive: the src is on the next line, after the <img tag; the img is the document image viewer."
       }
     ]
   },

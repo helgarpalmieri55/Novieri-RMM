@@ -23,7 +23,7 @@ import type { ClientOut, ContactInviteOut, ContactOut } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
 import { formatDateTime } from "../../lib/datetime";
 import { useOrgZone } from "../../lib/zone";
-import { Btn, KIND_ICON, Panel, QueryState, StatusPill } from "../../shell/components";
+import { Btn, KIND_ICON, Panel, QueryState, StatusPill, useNewParam } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import {
   useCancelContactInviteMutation,
@@ -58,6 +58,11 @@ export function ContactsTab({ client }: { client: ClientOut }) {
   const contacts = useClientContacts(client.id);
   const change = useUpdateContactMutation(client.id);
   const [editing, setEditing] = useState<ContactOut | "new" | null>(null);
+  // New → Contact for a chosen client (redesign decision D8): `?new=contact`
+  // on this tab opens Add a contact, for someone who may manage contacts here.
+  const newContact = useNewParam("contact");
+  const adding = editing === "new" || (canManage && newContact.open);
+  const editingContact = editing !== null && editing !== "new" ? editing : null;
   const [turningOff, setTurningOff] = useState<ContactOut | null>(null);
   const stepUp = useStepUp();
   const zone = useOrgZone();
@@ -275,11 +280,14 @@ export function ContactsTab({ client }: { client: ClientOut }) {
         />
       ) : null}
 
-      {editing !== null ? (
+      {adding || editingContact ? (
         <ContactFormDialog
           clientId={client.id}
-          contact={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
+          contact={editingContact}
+          onClose={() => {
+            setEditing(null);
+            newContact.close();
+          }}
         />
       ) : null}
       <ConfirmDialog

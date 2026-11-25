@@ -7,11 +7,23 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { SeatAssignCreate, SubscriptionCreate, SubscriptionUpdate } from "./types";
 
-export function useSubscriptions() {
-  const api = useApi();
-  return useQuery({ queryKey: ["subscriptions"], queryFn: () => api.listSubscriptions() });
+/**
+ * THE REGISTRY, NARROWED BY THE CLIENT CHIP (decision D6; redesign plan,
+ * Receta L, point 7). `chip` is `?client=` ("" without one): the same call
+ * with the same arguments, read through `useNarrowedApi` and keyed by the
+ * client it narrowed to. Mutations still invalidate the `["subscriptions"]`
+ * prefix, which reaches every client's key.
+ */
+export function useSubscriptions(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: ["subscriptions", client],
+    queryFn: () => api.listSubscriptions(),
+    enabled: ready,
+  });
 }
 
 /**
@@ -200,24 +212,34 @@ export function useReleaseSeatMutation() {
   });
 }
 
-export function useSpend() {
-  const api = useApi();
-  return useQuery({ queryKey: ["subscription-spend"], queryFn: () => api.spend() });
+/** Narrowed like `useSubscriptions`: the registry's run-rate tile reads the client its chip chose. */
+export function useSpend(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({ queryKey: ["subscription-spend", client], queryFn: () => api.spend(), enabled: ready });
 }
 
 // `withinDays` is part of the query key so widening the window refetches
 // instead of serving the cached default-window result. The mutations above
 // invalidate the bare `["subscription-renewals"]` prefix, which TanStack
 // Query matches against every windowed key beneath it.
-export function useSubscriptionRenewals(withinDays?: number) {
-  const api = useApi();
+//
+// Narrowed like `useSubscriptions`: the registry's renewal and notice tiles
+// count the client its chip chose.
+export function useSubscriptionRenewals(withinDays?: number, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: ["subscription-renewals", withinDays],
+    queryKey: ["subscription-renewals", withinDays, client],
     queryFn: () => api.renewals(withinDays),
+    enabled: ready,
   });
 }
 
-export function useIdleSeats() {
-  const api = useApi();
-  return useQuery({ queryKey: ["subscription-idle-seats"], queryFn: () => api.idleSeats() });
+/** Narrowed like `useSubscriptions`: the spend page reads the client its chip chose. */
+export function useIdleSeats(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: ["subscription-idle-seats", client],
+    queryFn: () => api.idleSeats(),
+    enabled: ready,
+  });
 }

@@ -12,10 +12,12 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import type { ReactElement } from "react";
 import type { RenderResult } from "@testing-library/react";
-import { MemoryRouter, useLocation, type Location } from "react-router-dom";
+import { createMemoryRouter, Link, RouterProvider, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
+import { useT } from "../../../i18n/context";
 import { ApiError, type ApiClient } from "../../../lib/api";
 import { ProfilePage } from "../../profile/ProfilePage";
 import { SecurityPage } from "../../profile/SecurityPage";
@@ -180,7 +182,7 @@ export const EMAIL_SETTINGS_FIXTURE = {
   host: "smtp.internal",
   port: "587",
   from_address: "itms@toeshee.com",
-  from_display_name: "ITMS",
+  from_display_name: "Novieri RMM",
   reply_to: "support@toeshee.com",
   encryption: "starttls",
   username: "itms",
@@ -719,21 +721,9 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
  * URL, and a tab held in React state is not one), but it still talks to the
  * same `/me` endpoint through the same client, so it keeps using this harness
  * rather than growing a second one to maintain in step. */
-export function renderProfilePage(): RenderResult {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <ProfilePage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+export function renderProfilePage(): HarnessRender {
+  return renderUnderDataRouter("/profile", <ProfilePage />);
 }
-
-/** A render, and the QueryClient it ran against, for asserting what the caches still hold. */
-export type HarnessRender = RenderResult & { queryClient: QueryClient };
 
 /**
  * Everything TanStack's mutation cache still holds -- each mutation's answer
@@ -753,20 +743,7 @@ export function mutationCacheText(queryClient: QueryClient): string {
 
 /** Your security (`/profile/security`), with the same mocked API surface. */
 export function renderSecurityPage(): HarnessRender {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return {
-    ...render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/profile/security"]}>
-          <SecurityPage />
-          <LocationProbe />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    ),
-    queryClient,
-  };
+  return renderUnderDataRouter("/profile/security", <SecurityPage />);
 }
 
 /**
@@ -784,20 +761,71 @@ function LocationProbe() {
  * The Settings page under a router, at `/settings` unless `path` says
  * otherwise (`/settings?tab=users`): the active tab lives in `?tab=`.
  */
-export function renderSettings(path = "/settings"): HarnessRender {
+export function renderSettings(path = "/settings", options: { rail?: boolean } = {}): HarnessRender {
+  return renderUnderDataRouter(
+    path,
+    options.rail ? (
+      <>
+        <RailStandIn />
+        <SettingsPage />
+      </>
+    ) : (
+      <SettingsPage />
+    ),
+  );
+}
+
+/**
+ * THE SHELL'S RAIL, AS ONE OF ITS LINKS (O7 review, M2). The page is rendered
+ * without the shell, and the Organization tab has no link out of Settings of
+ * its own: a person leaves it through the rail. A test that asks about leaving
+ * passes `{ rail: true }` and clicks this link, so the leave is the same
+ * `<Link>` click a person makes rather than a bare `router.navigate`. Its
+ * label is the rail's own catalogue value.
+ */
+function RailStandIn(): ReactElement {
+  const t = useT();
+  return <Link to="/devices">{t("shell.nav.item.devices")}</Link>;
+}
+
+/** A render, its QueryClient, and the data router it ran under. */
+export type HarnessRender = RenderResult & {
+  queryClient: QueryClient;
+  router: ReturnType<typeof createMemoryRouter>;
+};
+
+/**
+ * A page under a DATA router (redesign, Receta FO): the kit's `UnsavedGuard`
+ * blocks a navigation only under one, so "switching tab with an unsaved change
+ * asks first" can be tested at all. Every path renders the page; any other
+ * path (`/elsewhere`, where a test leaves to) renders a line of text.
+ */
+function renderUnderDataRouter(path: string, page: ReactElement): HarnessRender {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  const pathname = path.split("?")[0] ?? path;
+  const element = (
+    <>
+      {page}
+      <LocationProbe />
+    </>
+  );
+  const router = createMemoryRouter(
+    [
+      { path: pathname, element },
+      { path: "*", element: <p data-route="elsewhere" /> },
+    ],
+    { initialEntries: [path] },
+  );
   return {
     ...render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[path]}>
-          <SettingsPage />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </QueryClientProvider>,
     ),
     queryClient,
+    router,
   };
 }
 

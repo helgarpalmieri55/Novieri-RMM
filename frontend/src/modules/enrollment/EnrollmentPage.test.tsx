@@ -23,7 +23,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient, ClientSiteOut, Device, MeClient } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { ENROLLMENT_TOKENS_PAGE_SIZE } from "./api";
 import { EnrollmentPage } from "./EnrollmentPage";
 import type { EnrollmentTokenListItem, EnrollmentTokenPage } from "./types";
@@ -307,7 +308,7 @@ describe("EnrollmentPage", () => {
     // were never withdrawn by anybody, and the operator's complaint was about
     // revocations.
     expect(screen.queryByText("Revoked")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("Revoked")).toBeInTheDocument();
   });
 
@@ -400,6 +401,29 @@ describe("EnrollmentPage", () => {
     expect(await screen.findByText(/Token name is required/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(createEnrollmentToken).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, I1 (wave O4 review). Create token in the head works from
+  // any tab, and the one-time plaintext must be on screen after the issue
+  // whichever tab it started from: closing the form used to go Back to
+  // `?tab=certificates`, which hid the token on a tab nobody was looking at.
+  it("shows the issued token on the Tokens tab, whichever tab the issue started from", async () => {
+    createEnrollmentToken.mockResolvedValue({
+      id: "new",
+      token: "ENR-ISSUED-FROM-CERTIFICATES",
+      name: "Bogota rollout",
+      expires_at: FUTURE,
+      max_uses: 1,
+    });
+    renderPage({ entry: "/enrollment?tab=certificates" });
+    expect(await screen.findByRole("tab", { name: /Certificates/ })).toHaveAttribute("aria-selected", "true");
+    await issueToken({ name: "Bogota rollout" });
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    expect(await screen.findByText("ENR-ISSUED-FROM-CERTIFICATES")).toBeInTheDocument();
+    // Still there once the form's close has landed (a Back is a later task).
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByText("ENR-ISSUED-FROM-CERTIFICATES")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Enrollment tokens/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("asks for confirmation, naming the token and its limit, before issuing anything", async () => {
@@ -817,7 +841,7 @@ describe("EnrollmentPage", () => {
     expect(await screen.findByText("12 Mar 2027")).toBeInTheDocument();
   });
 
-  it("renders an absent certificate expiry as an em dash, never Invalid Date", async () => {
+  it("renders an absent certificate expiry as NO_DATE, never Invalid Date", async () => {
     renderPage({
       devices: () =>
         Promise.resolve({
@@ -827,13 +851,13 @@ describe("EnrollmentPage", () => {
     });
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
     const row = (await screen.findByText("ws-alpha")).closest("tr") as HTMLElement;
-    // THE CELLS, not the row. `row.textContent` is satisfied by the em dash in
+    // THE CELLS, not the row. `row.textContent` is satisfied by the NO_DATE in
     // any OTHER column, which is how the first version of this test passed
     // against `new Date(null)` -- an expression that is not "Invalid Date" at
     // all but the EPOCH: a certificate that reads as having expired in 1970.
     const cells = [...row.querySelectorAll("td")].map((cell) => cell.textContent?.trim());
-    expect(cells[2]).toBe("—");
-    expect(cells[3]).toBe("—");
+    expect(cells[2]).toBe(NO_DATE);
+    expect(cells[3]).toBe(NO_DATE);
     expect(row.textContent).not.toMatch(/1970|Invalid Date/);
   });
 
@@ -876,7 +900,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/unavailable right now/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
     // The row is still there to try again on, and the token still reads active.
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
@@ -911,7 +935,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/do not have permission/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
   });
 
   it("shows no column or panel the API cannot fill", async () => {
@@ -1034,7 +1058,7 @@ describe("EnrollmentPage", () => {
       offset: 0,
     });
 
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("withdrawn")).toBeInTheDocument();
     expect(listEnrollmentTokens).toHaveBeenCalledWith(expect.anything(), {
       include_revoked: true,
@@ -1117,7 +1141,7 @@ describe("EnrollmentPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Next tokens" }));
     await screen.findByText(`token-${ENROLLMENT_TOKENS_PAGE_SIZE}`);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("token-0")).toBeInTheDocument();
     expect(listEnrollmentTokens).toHaveBeenCalledWith(expect.anything(), {
       include_revoked: true,
@@ -1185,7 +1209,7 @@ describe("EnrollmentPage", () => {
     expect(screen.getByText("Show revoked certificates (1 hidden)")).toBeInTheDocument();
 
     // And it stops saying "hidden" once it is not.
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked certificates/ }));
     expect(await screen.findByText("ws-retired")).toBeInTheDocument();
     expect(screen.getByText("Show revoked certificates (1 shown)")).toBeInTheDocument();
   });
@@ -1199,7 +1223,7 @@ describe("EnrollmentPage", () => {
         }),
     });
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked certificates/ }));
 
     const row = (await screen.findByText("ws-retired")).closest("tr") as HTMLElement;
     // `ok` is what this row said before, and it was wrong rather than merely
@@ -1223,7 +1247,8 @@ describe("EnrollmentPage", () => {
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
     await userEvent.type(screen.getByLabelText("Search certificates"), "ws-retired");
     expect(screen.queryByText("ws-retired")).not.toBeInTheDocument();
-    expect(await screen.findByText("No certificate matches that filter.")).toBeInTheDocument();
+    // The list kit's sentence for a search that found nothing (Receta L, 3).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 
   it("does not claim 'none have been revoked' before it has been told", async () => {
@@ -1235,11 +1260,11 @@ describe("EnrollmentPage", () => {
       devices: () => Promise.reject(new Error("boom")),
     });
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: /Show revoked tokens/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show revoked tokens/ })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Certificates/ }));
     expect(
-      screen.queryByRole("checkbox", { name: /Show revoked certificates/ }),
+      screen.queryByRole("button", { name: /Show revoked certificates/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -1273,15 +1298,17 @@ describe("EnrollmentPage", () => {
           total: 1,
         }),
     });
-    await screen.findByRole("checkbox", { name: /Show revoked tokens/ });
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await screen.findByRole("button", { name: /Show revoked tokens/ });
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     await screen.findByText("Bogota HQ workstations");
     for (const label of [/delete/i, /remove/i, /purge/i, /forget/i]) {
       expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
     }
 
     await userEvent.click(screen.getByRole("tab", { name: /Certificates/ }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    // ONE `?revoked=1` FOR BOTH TABS (redesign plan, Task 9, 4.11): turned on
+    // over the tokens, it is already on over the certificates.
+    expect(screen.getByRole("button", { name: /Show revoked certificates/ })).toHaveAttribute("aria-pressed", "true");
     await screen.findByText("ws-alpha");
     for (const label of [/delete/i, /remove/i, /purge/i, /forget/i]) {
       expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
@@ -1344,8 +1371,9 @@ describe("EnrollmentPage", () => {
     renderPage();
     await screen.findByText("Bogota HQ workstations");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // The filter is a chip (a button) now, not a checkbox (Receta L).
     expect(
-      screen.queryByRole("checkbox", { name: /no use limit/ }),
+      screen.queryByRole("button", { name: /no use limit/ }),
     ).not.toBeInTheDocument();
   });
 });

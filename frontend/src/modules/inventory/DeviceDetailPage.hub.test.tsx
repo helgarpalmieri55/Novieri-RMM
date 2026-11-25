@@ -129,6 +129,15 @@ function renderHub(
   return api;
 }
 
+/**
+ * A titled panel of the record, by its heading (redesign Task 6, 1.2): the
+ * alert and patch cards above the tabs, and the Overview's panels. The chip
+ * line "Device status" they replace said the same things in one row.
+ */
+async function section(name: string): Promise<HTMLElement> {
+  return (await screen.findByRole("heading", { level: 2, name })).closest("section") as HTMLElement;
+}
+
 beforeEach(() => {
   mockUseApi.mockReset();
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -139,14 +148,14 @@ beforeEach(() => {
 describe("the header says whether the machine is all right", () => {
   it("counts the open alerts and links to them", async () => {
     renderHub();
-    const status = await screen.findByRole("group", { name: "Device status" });
+    const status = await section("Alert status");
     const alerts = await within(status).findByText("2 open alerts");
     expect(alerts.closest("a")).toHaveAttribute("href", "/health?device=d1&state=open");
   });
 
   it("links to the device's own Health tab for an operator who cannot open the alert list", async () => {
     renderHub(EVERYTHING.filter((code) => code !== "health.read"));
-    const status = await screen.findByRole("group", { name: "Device status" });
+    const status = await section("Alert status");
     expect((await within(status).findByText("2 open alerts")).closest("a")).toHaveAttribute(
       "href",
       "/devices/d1?tab=health",
@@ -155,26 +164,30 @@ describe("the header says whether the machine is all right", () => {
 
   it("shows the certificate, updates and backup state", async () => {
     renderHub();
-    const status = await screen.findByRole("group", { name: "Device status" });
-    expect(within(status).getByText("Certificate expiring")).toBeInTheDocument();
-    expect((await within(status).findByText("4 updates missing")).closest("a")).toHaveAttribute(
+    // Each where the record keeps it now: the certificate in the Overview's
+    // information, the updates on the patch card, the backup in its panel.
+    expect(within(await section("Device information")).getByText("Certificate expiring")).toBeInTheDocument();
+    expect((await within(await section("Patch status")).findByText("4 updates missing")).closest("a")).toHaveAttribute(
       "href",
       "/devices/d1?tab=patch",
     );
-    expect(await within(status).findByText("2 days ago")).toBeInTheDocument();
+    expect(await within(await section("Backup")).findByText("2 days ago")).toBeInTheDocument();
   });
 
   it("leaves out what the operator cannot read, rather than showing it unknown", async () => {
     renderHub([]);
-    const status = await screen.findByRole("group", { name: "Device status" });
+    const status = await section("Alert status");
     await within(status).findByText("2 open alerts");
-    expect(within(status).queryByText(/updates/)).toBeNull();
-    expect(within(status).queryByText(/Backed up|Never backed up/)).toBeNull();
+    // No patch card and no backup panel, rather than either one unknown.
+    expect(screen.queryByRole("heading", { name: "Patch status" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Backup" })).toBeNull();
+    expect(screen.queryByText(/updates missing|Never backed up/)).toBeNull();
   });
 
   it("shows the last contact as relative time, with the instant on hover", async () => {
     renderHub();
-    const time = await screen.findByText("5 minutes ago", { selector: ".sub time" });
+    // In the Overview's information, beside "Agent last seen".
+    const time = await within(await section("Device information")).findByText("5 minutes ago", { selector: "time" });
     expect(time).toHaveAttribute("title", "23 Sept 2026, 11:55");
   });
 });
@@ -187,8 +200,9 @@ describe("the Overview is the default tab", () => {
 
   it("lists open alerts worst first, in words", async () => {
     renderHub();
-    const panel = await screen.findByRole("tabpanel", { name: "Overview" });
-    await within(panel).findByText("2 open");
+    // On the alert card above the tabs (the Overview's Health panel, moved up).
+    const panel = await section("Alert status");
+    await within(panel).findByText("2 open alerts");
     const links = within(panel)
       .getAllByRole("link")
       .filter((link) => link.getAttribute("href")?.startsWith("/health?alert="));

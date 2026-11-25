@@ -179,7 +179,7 @@ let oauthApp: OAuthAppOut = {
   tenant_id: "toeshee.onmicrosoft.com",
   client_id: "00000000-0000-4000-8000-000000000001",
   has_secret: true,
-  redirect_uri: "https://itms.toeshee.example/settings/email-intake/oauth/callback",
+  redirect_uri: "https://rmm.novieri.example/settings/email-intake/oauth/callback",
 };
 
 const getEmailOAuthApp: FixtureMap["getEmailOAuthApp"] = () => oauthApp;

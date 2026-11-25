@@ -45,8 +45,8 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { Device, Job, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { NO_DATE, formatDate, formatDateTime } from "../../lib/datetime";
-import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { formatDate, formatDateTime } from "../../lib/datetime";
+import { Btn, PageHead, Panel, QueryState, SaveBar, StatusPill, UnsavedGuard } from "../../shell/components";
 import { DashboardReadiness } from "./DashboardReadiness";
 import { Icon } from "../../shell/icons";
 import {
@@ -137,7 +137,16 @@ function pct(value: number): number {
  *
  * ZERO IS A MEASUREMENT, NOT AN ABSENCE. A zero tile drops out of the urgent
  * treatment and says which zero it is; "0 open" wearing an alarm wash reads as
- * a perfect score. An unresolved query reads `NO_DATE`, never `0`.
+ * a perfect score. An unresolved query reads the kit's absent mark
+ * (`shell.viz.na`, n/a or n/d; ruling 10a), never `0`, and wears no colour.
+ *
+ * THE KIT'S TWO FORMS OF NO FIGURE (coordinator, P3 adoption pass). A read
+ * still on its way is `Tile pending`: busy, and no line under the mark, since
+ * there is no reason to give yet. A read that failed has answered: `Tile
+ * absent`, not busy, and its line is the REASON there is no figure ("Could
+ * not be read, so nothing is counted."), which ruling 10a keeps and the brief
+ * (Task 7, 2.1) requires. Not `StatCard`, whose foot is the `.stat-foot` hook
+ * the page's "no trend delta" test reads.
  *
  * THE `.stat-card` / `.stat-label` / `.stat-value` / `.urgent` HOOKS STAY, as
  * the class names the page's tests locate tiles by.
@@ -152,6 +161,7 @@ function KpiTile({
   sub,
   zeroLabel,
   spark,
+  failed = false,
 }: {
   label: string;
   value: number | null;
@@ -164,7 +174,16 @@ function KpiTile({
   sub?: string;
   zeroLabel: string;
   spark?: readonly number[];
+  /**
+   * The read behind the figure failed. A tile with nothing measured once its
+   * read has answered SAYS WHY in a sentence (redesign plan, Task 7, 2.1;
+   * Atera's flaw: "Los widgets vacíos quedan en blanco, sin mensaje ni paso
+   * siguiente"): could not be read. Before it answers the tile is the kit's
+   * pending tile, busy, with no sentence yet.
+   */
+  failed?: boolean;
 }) {
+  const t = useT();
   const measured = value !== null;
   const isZero = value === 0;
   const loud = urgent && measured && !isZero;
@@ -173,12 +192,14 @@ function KpiTile({
       className={`stat-card${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={measured ? String(value) : NO_DATE}
+      value={measured ? String(value) : ""}
       icon={icon}
       to={to}
       kind={loud || kind === "ok" ? kind : undefined}
-      sub={isZero ? zeroLabel : measured ? sub : undefined}
+      sub={isZero ? zeroLabel : measured ? sub : failed ? t("dashboard.tile.failed") : undefined}
       spark={spark}
+      pending={!measured && !failed}
+      absent={!measured && failed}
     />
   );
 }
@@ -472,6 +493,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.jobsAttention.title")}
           value={jobs.data ? needAttention : null}
+          failed={jobs.isError}
           icon="jobs"
           to="/jobs"
           kind="crit"
@@ -495,6 +517,7 @@ export function DashboardPage() {
              headed "Active alerts" and still lists exactly those -- two
              different questions, each labelled with the one it answers. */
           value={alertSummary.data ? alertSummary.data.open : null}
+          failed={alertSummary.isError}
           icon="health"
           to="/health"
           kind="warn"
@@ -524,6 +547,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.managed.title")}
           value={fleet ? fleet.managed : null}
+          failed={devices.isError}
           icon="devices"
           to="/devices"
           sub={fleet ? t("dashboard.managed.sub", { total: fleet.total }) : undefined}
@@ -540,6 +564,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.online.title")}
           value={fleet ? fleet.online : null}
+          failed={devices.isError}
           icon="activity"
           /* `state` is the param /devices already filters on
              (DevicesPage's `useSearchParams`), so this lands on the online
@@ -561,6 +586,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.openTickets.title")}
           value={tickets.data ? openTickets : null}
+          failed={tickets.isError}
           icon="ticket"
           to="/service-desk"
           sub={t("dashboard.openTickets.sub", { count: untriagedTickets })}
@@ -577,6 +603,7 @@ export function DashboardPage() {
         <KpiTile
           label={t("dashboard.remote.title")}
           value={remote.data ? remote.data.total : null}
+          failed={remote.isError}
           icon="remote"
           to="/remote"
           sub={
@@ -1070,22 +1097,30 @@ export function DashboardPage() {
   return (
     <>
       <PageHead
-        title={t("dashboard.page.title")}
+        title={t("shell.nav.item.dashboard")}
         description={t("dashboard.page.description")}
         actions={
           arrangement.visible.length > 0 ? (
-            <Btn
-              label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
-              icon={editing ? "check" : "adjustments"}
-              variant={editing ? "primary" : "secondary"}
-              // It is a toggle, so it says so. `Btn` has carried `pressed`
-              // since the kit closed that gap; this caller never passed it,
-              // and a screen reader heard "Customize" then "Done" with no
-              // indication that one control had changed state.
-              pressed={editing}
-              disabled={arrangement.loading}
-              onClick={() => setEditing((current) => !current)}
-            />
+            <>
+              {/* EDIT IS A SECONDARY ACTION (redesign plan, Task 7, 2.1): the
+                  page is read far more than it is arranged. While editing, a
+                  change is saved or discarded from the save bar, which also
+                  ends edit mode; Done ends it when nothing changed. DISABLED
+                  WITH ITS REASON SHOWN (components/form.tsx, Rule 1; fix round
+                  1): while something is unsaved, the reason stands beside it. */}
+              {editing && arrangement.dirty ? <span className="note">{t("dashboard.page.saveFirst")}</span> : null}
+              <Btn
+                label={editing ? t("dashboard.page.done") : t("dashboard.page.customize")}
+                icon={editing ? "check" : "adjustments"}
+                // It is a toggle, so it says so. `Btn` has carried `pressed`
+                // since the kit closed that gap; this caller never passed it,
+                // and a screen reader heard "Edit" then "Done" with no
+                // indication that one control had changed state.
+                pressed={editing}
+                disabled={arrangement.loading || (editing && arrangement.dirty)}
+                onClick={() => setEditing((current) => !current)}
+              />
+            </>
           ) : undefined
         }
       />
@@ -1102,6 +1137,25 @@ export function DashboardPage() {
       <DashboardReadiness />
 
       <DashboardCanvas arrangement={arrangement} editing={editing} />
+
+      {/* THE ONE SAVE BAR, IN EDIT MODE ONLY: the arrangement is a draft until
+          Save, and Discard puts it back without a call (undoing what Atera
+          cannot undo). Its failure is the canvas's own announced line, so the
+          bar does not say it a second time. */}
+      {editing ? (
+        <>
+          <UnsavedGuard dirty={arrangement.dirty} />
+          <SaveBar
+            dirty={arrangement.dirty}
+            saving={arrangement.saving}
+            onDiscard={() => {
+              arrangement.discard();
+              setEditing(false);
+            }}
+            onSave={() => arrangement.commit(() => setEditing(false))}
+          />
+        </>
+      ) : null}
 
       {/* An operator who holds none of the read codes above would otherwise see
           a page head over nothing at all. */}

@@ -24,7 +24,6 @@ export const emailIntake: Shape<typeof en> = {
     senderCta: "Añadir a estos remitentes como usuarios",
   },
   admin: {
-    title: "Entrada de correo",
     description: "El correo enviado a la dirección de soporte se convierte en ticket; las respuestas se añaden al mismo ticket.",
     mailboxesLabel: "Buzones configurados",
     mailboxesZero: "ninguno configurado, así que no se comprueba ningún correo",
@@ -171,6 +170,12 @@ export const emailIntake: Shape<typeof en> = {
     openTicketAria: "Abrir el ticket de {subject}",
     noTicket: "Sin ticket",
     empty: "No hay mensajes registrados.",
+  },
+  settings: {
+    title: "Cómo crea tickets {address}",
+    categoryMissing: "{address} necesita una categoría para sus tickets",
+    reopenHint: "Una respuesta dentro de estos días reabre el ticket al que contesta en lugar de abrir uno nuevo.",
+    unlisted: "Una categoría que no está en la lista ({id})",
   },
   oauth: {
     title: "Inicio de sesión de Microsoft 365",

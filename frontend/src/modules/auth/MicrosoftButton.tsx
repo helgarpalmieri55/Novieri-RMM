@@ -23,6 +23,10 @@
  * `guard`: a page with other ways in (`/invite`) runs this through ITS OWN
  * guard, so one action is in flight at a time and a dead invitation is that
  * page's own state. The button then says nothing itself: the page does.
+ *
+ * `wide`: across the sign-in frame's card, under the form it is the other way
+ * through (redesign design §4, plan Task 13). Optional, so the profile's
+ * Sign-in and security page draws it as it always has.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -70,6 +74,7 @@ export function MicrosoftButton({
   check,
   guard,
   variant = "secondary",
+  wide = false,
 }: {
   start: MicrosoftStartIn;
   back: string;
@@ -78,6 +83,7 @@ export function MicrosoftButton({
   check?: () => string | null;
   guard?: MicrosoftGuard;
   variant?: "primary" | "secondary";
+  wide?: boolean;
 }) {
   const t = useT();
   const api = useApi();
@@ -119,19 +125,24 @@ export function MicrosoftButton({
   }
 
   const off = guard ? guard.busy : busy;
+  // `key`, not a vendor's mark: the console's icon set has none, and the
+  // label says whose sign-in it is.
+  const button = {
+    variant,
+    icon: "key",
+    label: !guard && busy ? t("auth.common.working") : t(labelKey),
+    disabled: off,
+    onClick: () => (guard ? guard.run(leave) : void go()),
+  } as const;
   return (
     <>
-      <div className="form-actions">
-        {/* `key`, not a vendor's mark: the console's icon set has none, and
-            the label says whose sign-in it is. */}
-        <Btn
-          variant={variant}
-          icon="key"
-          label={!guard && busy ? t("auth.common.working") : t(labelKey)}
-          disabled={off}
-          onClick={() => (guard ? guard.run(leave) : void go())}
-        />
-      </div>
+      {wide ? (
+        <Btn {...button} wide />
+      ) : (
+        <div className="form-actions">
+          <Btn {...button} />
+        </div>
+      )}
       {guard ? null : <AuthAlert text={error} />}
     </>
   );

@@ -372,13 +372,14 @@ export function PlatformStatusPage() {
           A PENDING PROBE IS NOT A PASSING PROBE: `probes` defaults to `[]`, so
           before the first read every one of these rendered "0" and the row read
           as a clean bill of health for a platform nothing had measured. That is
-          the exact shape the audit filed nine times over. Undefined data gets an
-          em dash; a zero here is now always a measured zero, and its
-          `zeroLabel` always true. */}
+          the exact shape the audit filed nine times over. Undefined data is
+          the kit's `pending` (the absent mark, ruling 10a); a zero here is now
+          always a measured zero, and its `zeroLabel` always true. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("platformStatus.tiles.probes")}
-          value={data ? String(probes.length) : "—"}
+          value={String(probes.length)}
+          pending={!data}
           icon="status"
           to="/platform-status#dependencies"
           tone="neutral"
@@ -394,7 +395,8 @@ export function PlatformStatusPage() {
         />
         <StatCard
           label={t("platformStatus.tiles.probesNotOk")}
-          value={data ? String(downProbes) : "—"}
+          value={String(downProbes)}
+          pending={!data}
           icon="warning"
           to="/platform-status#dependencies"
           tone="red"
@@ -404,7 +406,8 @@ export function PlatformStatusPage() {
         />
         <StatCard
           label={t("platformStatus.tiles.short")}
-          value={data ? String(shortfallProcesses) : "—"}
+          value={String(shortfallProcesses)}
+          pending={!data}
           icon="server"
           to="/platform-status#processes"
           tone="orange"
@@ -418,7 +421,8 @@ export function PlatformStatusPage() {
         />
         <StatCard
           label={t("platformStatus.tiles.modules")}
-          value={data ? String(data.modules.length) : "—"}
+          value={String(data?.modules.length ?? 0)}
+          pending={!data}
           icon="package"
           to="/platform-status#modules"
           tone="neutral"
@@ -442,7 +446,7 @@ export function PlatformStatusPage() {
             tile that happens to have an href. */}
         <div id="dependencies">
           <Panel title={t("platformStatus.dependencies.title")} bare>
-            <Table>
+            <Table label={t("platformStatus.dependencies.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.dependencies.probe")}</Th>
@@ -463,7 +467,7 @@ export function PlatformStatusPage() {
 
         <div id="processes">
           <Panel title={t("platformStatus.processes.title")} bare>
-            <Table>
+            <Table label={t("platformStatus.processes.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.processes.process")}</Th>
@@ -488,7 +492,7 @@ export function PlatformStatusPage() {
             subtitle={t("platformStatus.modules.subtitle")}
             bare
           >
-            <Table>
+            <Table label={t("platformStatus.modules.title")}>
               <thead>
                 <tr>
                   <Th>{t("platformStatus.modules.module")}</Th>

@@ -256,12 +256,14 @@ describe("the deployments page, in Spanish", () => {
 
   it("words the head, the tiles, the filter, the table and the row actions", async () => {
     const { container } = renderPage(<DeployPage />);
-    expect(await screen.findByRole("heading", { name: "Despliegue de software" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Software», shell.nav.item.software).
+    expect(await screen.findByRole("heading", { name: "Software", level: 1 })).toBeInTheDocument();
     await screen.findByText("dep1");
     expect(screen.getByRole("button", { name: "Nuevo despliegue" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Despliegues" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Paquetes" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Scripts" })).toBeInTheDocument();
+    // The section nav is a row of links now (redesign plan, SectionNav).
+    expect(screen.getByRole("link", { name: "Despliegues" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Paquetes" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Scripts" })).toBeInTheDocument();
     // The tiles and their sub-lines.
     expect(screen.getByText("Desplegados esta semana")).toBeInTheDocument();
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
@@ -270,10 +272,11 @@ describe("the deployments page, in Spanish", () => {
     expect(screen.getByText("1 de 2 completada")).toBeInTheDocument();
     expect(screen.getByText("2 ejecuciones han finalizado")).toBeInTheDocument();
     // The filter.
-    const filter = screen.getByRole("combobox", { name: "Filtrar por estado" });
-    expect(within(filter).getByRole("option", { name: "Todos los despliegues" })).toBeInTheDocument();
-    expect(within(filter).getByRole("option", { name: "Desplegados en los últimos 7 días" })).toBeInTheDocument();
-    expect(within(filter).getByRole("option", { name: "En envío" })).toBeInTheDocument();
+    // The state select is chips now (redesign plan, Receta L), one per option.
+    const filter = screen.getByRole("group", { name: "Filtrar por estado" });
+    expect(within(filter).getByRole("button", { name: "Todos los despliegues" })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: "Desplegados en los últimos 7 días" })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: "En envío" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Buscar despliegues" })).toHaveAttribute(
       "placeholder",
       "Buscar por despliegue, paquete, acción, destino o estado",
@@ -311,7 +314,9 @@ describe("the deployments page, in Spanish", () => {
     expect(screen.getByText("Aún no hay ejecuciones completadas")).toBeInTheDocument();
     expectNoEnglish(container);
     baseApi();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filtrar por estado" }), "week");
+    await user.click(within(screen.getByRole("group", { name: "Filtrar por estado" })).getByRole("button", { name: "Desplegados en los últimos 7 días" }));
+    // The kit's empty list, with filters on (Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
   it("asks before executing, naming the package, the target and the window", async () => {
@@ -361,14 +366,15 @@ describe("the deployments page, in Spanish", () => {
     renderPage(<DeployPage />);
     await screen.findByText("dep2");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Software deployment" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label.
+    expect(screen.getByRole("heading", { name: "Software", level: 1 })).toBeInTheDocument();
     const row = screen.getByText("dep2").closest("tr") as HTMLElement;
     expect(within(row).getByText("Dispatching")).toBeInTheDocument();
     expect(within(row).getByText("Update")).toBeInTheDocument();
     expect(within(row).getByText("Weekdays, 22:00 to 24:00")).toBeInTheDocument();
     expect(screen.getByText("2 still to run")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 completed")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Packages" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Packages" })).toBeInTheDocument();
   });
 });
 
@@ -493,7 +499,8 @@ describe("the packages page, in Spanish", () => {
   it("words the empty page", async () => {
     baseApi({ listPackages: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<PackagesPage />, "/deploy/packages");
-    expect(await screen.findByText("No hay paquetes registrados.")).toBeInTheDocument();
+    // Redesign plan, O3 3.4: «Aún no hay paquetes.», as the brief words it.
+    expect(await screen.findByText("Aún no hay paquetes.")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -527,7 +534,8 @@ describe("the scripts page, in Spanish", () => {
     for (const header of ["Nombre", "Plataforma", "Intérprete", "Versión"]) {
       expect(screen.getAllByRole("columnheader", { name: header }).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText("Bash")).toBeInTheDocument();
+    // In the row; the Interpreter chips (redesign plan, O3 3.5) carry the same word.
+    expect(within(screen.getByRole("table", { name: "Scripts" })).getByText("Bash")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Editar" }).length).toBe(2);
     expect(screen.getAllByRole("button", { name: "Ejecutar" }).length).toBe(2);
     // The schedules panel.
@@ -687,8 +695,11 @@ describe("a device's Deploy tab, in Spanish", () => {
     baseApi({ getDeviceDeployments: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<DeviceDeployTab deviceId="dev1" />);
     expect(await screen.findByText("No hay despliegues registrados")).toBeInTheDocument();
-    expect(screen.getByText("Crea uno desde Despliegue de software para enviar un paquete a este dispositivo.")).toBeInTheDocument();
+    // The page it names is the rail's "Software" (fix round 2, Minor 1; ruling 1).
+    expect(screen.getByText("Crea uno desde Software para enviar un paquete a este dispositivo.")).toBeInTheDocument();
     expectNoEnglish(container);
+    act(() => setActiveLanguage("en"));
+    expect(screen.getByText("Create one from Software to push a package here.")).toBeInTheDocument();
   });
 });
 
@@ -804,7 +815,8 @@ describe("the deploy sentences built outside React, in Spanish", () => {
     expect(devicePickerOptions(DEVICES).map((o) => o.sublabel)).toEqual(["windows · en línea", "linux · sin conexión", "linux · sin agente"]);
     expect(groupPickerOptions([GROUP, SOLO_GROUP]).map((o) => o.sublabel)).toEqual(["3 dispositivos", "1 dispositivo"]);
     expect(packagePickerOptions(PACKAGES).map((o) => o.sublabel)).toEqual(["windows · msi", "linux · deb · sin archivo"]);
-    expect(devicePickerEmptyHint()).toContain("Dispositivos → Añadir un equipo");
+    // The rail names the machine list "Equipos" (redesign design §1.1, decision D13).
+    expect(devicePickerEmptyHint()).toContain("Equipos → Añadir un equipo");
     expect(groupPickerEmptyHint()).toContain("Administración → Grupos de dispositivos");
     expect(scriptOptions(SCRIPTS, "windows").map((o) => o.sublabel)).toEqual([
       "PowerShell · Windows",

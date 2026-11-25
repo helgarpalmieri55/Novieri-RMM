@@ -271,10 +271,10 @@ export function AddressGrid({
                     )}
                   </Td>
                   <Td>
-                    {/* `allocationMethodPresentation` answers "nobody has said" with a
-                        bare dash label; on screen that is the NoValue defect, so the
-                        absence is drawn as one and its meaning stays on the cell. */}
-                    {allocation.label === "—" ? (
+                    {/* `allocationMethodPresentation` answers "nobody has said" with
+                        no label: the absence is drawn as the kit's NoValue and its
+                        meaning stays on the cell. */}
+                    {allocation.label === null ? (
                       <span title={allocation.meaning}>
                         <NoValue label={t("ipam.grid.allocationNotStated")} />
                       </span>

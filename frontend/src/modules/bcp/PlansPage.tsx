@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Button, Table, Td, Th } from "../../components/ui";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
@@ -21,12 +21,22 @@ import {
 } from "./reviewState";
 import type { PlanOut, PlanStatusOut } from "./types";
 import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  SearchField,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -41,6 +51,11 @@ import { Icon } from "../../shell/icons";
 const STATE_PARAM = "state";
 const REVIEW_PARAM = "review";
 const OVERDUE_VIEW = "overdue";
+
+/** For the search: case and accents do not count ("oporto" finds "Oporto"). */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
 
 /** "RTO 30 min · RPO 15 min", with an unset objective drawn as absent. */
 function objectives(plan: PlanOut): string {
@@ -80,7 +95,12 @@ function LastTest({ status }: { status: PlanStatusOut | undefined }) {
 export function PlansPage() {
   const t = useT();
   const api = useApi();
-  const [editing, setEditing] = useState<PlanOut | "new" | null>(null);
+  // ON THE LIST KIT (redesign plan, Task 9, 4.5; Receta L): the search
+  // (`?q=`), the state and review views the tiles already link to (`?state=`,
+  // `?review=`) as chips, and the Client chip (`?client=`), which narrows the
+  // READS of the list (decision D6). New plan opens from `?new=plan` (D8).
+  const filters = useUrlFilters(["q", STATE_PARAM, REVIEW_PARAM, "client"] as const);
+  const creating = useNewParam("plan");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canManage = (me.data?.permissions ?? []).includes("bcp.manage");
@@ -93,7 +113,7 @@ export function PlansPage() {
   const clientName = useClientName();
   const showClient = selected === null;
 
-  const plans = usePlans();
+  const plans = usePlans(filters.values.client);
   // `review_overdue` lives on PlanStatusOut (backend/app/modules/bcp/reporting.py
   // bcp_plan_status), not PlanOut — this joins the two by plan id so each row
   // can carry its review standing alongside the plan's own fields.
@@ -106,7 +126,7 @@ export function PlansPage() {
   // know" was a green badge. `planReviewStandings` is now the ONE expression
   // behind both the column and the KPI; they were two before, which is how a
   // plan could read "up to date" while the KPI counted it.
-  const status = usePlanStatus();
+  const status = usePlanStatus(filters.values.client);
   const items = plans.data ?? [];
   const standings = planReviewStandings(items, status.data);
   const statusById = useMemo(
@@ -133,16 +153,18 @@ export function PlansPage() {
   const plansWithFindings = (status.data ?? []).filter((row) => row.open_findings > 0).length;
   // "The plans list answered" and "there are no plans" are different facts, and
   // a tile must not print 0 for the first: an unmeasured 0 and a measured 0
-  // look identical on screen and mean opposite things.
+  // look identical on screen and mean opposite things. Without it the tiles
+  // are the kit's pending tiles, the absent mark (clarification 10a).
   const measured = plans.data !== undefined;
 
-  const [params] = useSearchParams();
-  const stateFilter = params.get(STATE_PARAM) ?? "";
-  const reviewFilter = params.get(REVIEW_PARAM) ?? "";
+  const stateFilter = filters.values[STATE_PARAM];
+  const reviewFilter = filters.values[REVIEW_PARAM];
+  const wanted = fold(filters.values.q);
 
   const visible = useMemo(
     () =>
       items.filter((plan) => {
+        if (wanted !== "" && !fold(plan.name).includes(wanted)) return false;
         if (stateFilter !== "" && plan.state !== stateFilter) return false;
         // The KPI's own predicate, over the KPI's own map. Two expressions is
         // the defect this module already paid for once.
@@ -150,19 +172,9 @@ export function PlansPage() {
           return false;
         return true;
       }),
-    [items, stateFilter, reviewFilter, standings],
+    [items, wanted, stateFilter, reviewFilter, standings],
   );
-
-  const stateWords =
-    stateFilter === "active"
-      ? t("bcp.plans.wordsActive")
-      : stateFilter === "archived"
-        ? t("bcp.plans.wordsArchived")
-        : t("bcp.plans.wordsOtherState", { state: planStateLabel(stateFilter).toLowerCase() });
-  const filterWords = [
-    stateFilter !== "" ? stateWords : null,
-    reviewFilter === OVERDUE_VIEW ? t("bcp.plans.wordsOverdue") : null,
-  ].filter((part): part is string => part !== null);
+  const archivedCount = items.filter((plan) => plan.state === "archived").length;
   // The design's "Passed" stat card needs an exercise outcome, which lives on
   // TestOut, not PlanStatusOut — this list carries neither, so a pass/fail
   // count for the fleet of plans is omitted rather than approximated.
@@ -171,14 +183,13 @@ export function PlansPage() {
   return (
     <div>
       <PageHead
-        title={t("bcp.plans.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.continuityTests")}
         description={t("bcp.plans.description")}
         actions={
           canManage ? (
-            <Button onClick={() => setEditing("new")}>
-              <Icon name="plus" size={14} />
-              {t("bcp.plans.newPlan")}
-            </Button>
+            <Btn label={t("bcp.plans.newPlan")} icon="plus" variant="primary" onClick={creating.start} />
           ) : undefined
         }
       />
@@ -191,18 +202,20 @@ export function PlansPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("bcp.plans.tileActive")}
-          value={measured ? String(activeCount) : "—"}
+          value={String(activeCount)}
+          pending={!measured}
           icon="shield-check"
-          to={`/bcp?${STATE_PARAM}=active`}
+          to={withClient(`/bcp?${STATE_PARAM}=active`, filters.values.client)}
           tone="blue"
           zeroLabel={t("bcp.plans.noneActive")}
           foot={measured && activeCount > 0 ? t("bcp.plans.ofOnRecord", { count: items.length }) : undefined}
         />
         <StatCard
           label={t("bcp.plans.tileOverdue")}
-          value={measured ? String(overdueCount) : "—"}
+          value={String(overdueCount)}
+          pending={!measured}
           icon="clock"
-          to={`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`}
+          to={withClient(`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`, filters.values.client)}
           tone="gold"
           urgent
           /* WHICH zero this is, and the two are not the same claim: with the
@@ -220,10 +233,12 @@ export function PlansPage() {
         />
         <StatCard
           label={t("bcp.plans.tileFindings")}
-          // The count is a sum over the STATUS rows, so it is "—" until they
-          // arrive: `(status.data ?? []).reduce(...)` reads 0 for a response
-          // that never came, which is the reassuring version of "unknown".
-          value={status.data ? String(openFindings) : "—"}
+          // The count is a sum over the STATUS rows, so it is the kit's
+          // pending tile (the absent mark) until they arrive:
+          // `(status.data ?? []).reduce(...)` reads 0 for a response that never
+          // came, which is the reassuring version of "unknown".
+          value={String(openFindings)}
+          pending={!status.data}
           icon="alert-triangle"
           /* The period report is the only surface that lists findings across
              plans (`GET /bcp/report/period` — "Open findings by severity");
@@ -239,26 +254,66 @@ export function PlansPage() {
         />
       </StatsGrid>
 
-      {filterWords.length > 0 ? (
-        <p className="note mb-3">
-          {t("bcp.plans.showing", { shown: visible.length, total: items.length, words: filterWords.join(", ") })}{" "}
-          <Link to="/bcp">{t("bcp.plans.showAll")}</Link>
-        </p>
-      ) : null}
-
       <Panel bare>
-        <QueryState
-          loading={plans.isLoading}
-          error={plans.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0
-              ? t("bcp.plans.emptyNone")
-              : t("bcp.plans.emptyFiltered", { words: filterWords.join(", ") })
+        <ListToolbar
+          search={
+            <SearchField
+              aria-label={t("bcp.plans.search")}
+              placeholder={t("bcp.plans.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
           }
-          emptyIcon="shield-check"
-        >
-          <Table>
+          chips={
+            <>
+              {/* `GET /bcp/plans` answers every plan at once, so these counts
+                  are totals; the review count waits for the status rows it is
+                  made of, as its tile does. */}
+              <FilterChips
+                label={t("bcp.plans.stateLabel")}
+                options={[
+                  { value: "", label: t("bcp.plans.allPlans"), count: measured ? items.length : undefined },
+                  { value: "active", label: planStateLabel("active"), count: measured ? activeCount : undefined },
+                  { value: "archived", label: planStateLabel("archived"), count: measured ? archivedCount : undefined },
+                ]}
+                value={stateFilter}
+                onChange={(value) => filters.set(STATE_PARAM, value)}
+              />
+              {/* One chip that turns the review view on and off. */}
+              <FilterChips
+                label={t("bcp.plans.reviewLabel")}
+                options={[
+                  {
+                    value: OVERDUE_VIEW,
+                    label: t("bcp.plans.tileOverdue"),
+                    count: measured && status.data ? overdueCount : undefined,
+                  },
+                ]}
+                value={reviewFilter}
+                onChange={(value) => filters.set(REVIEW_PARAM, value === reviewFilter ? "" : value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={measured ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        {/* `isPending`, not `isLoading` (general ruling 10): while the Client
+            chip's client is not decided the read is disabled, and a disabled
+            query is not "loading" -- the empty state would show before any read. */}
+        <QueryState loading={plans.isPending} error={plans.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("bcp.plans.emptyNone")}
+              icon="shield-check"
+              action={
+                canManage ? <Btn label={t("bcp.plans.newPlan")} icon="plus" small onClick={creating.start} /> : undefined
+              }
+            />
+          ) : (
+          <Table label={t("shell.nav.item.continuityTests")}>
             <thead>
               <tr>
                 <Th>{t("bcp.plans.colName")}</Th>
@@ -345,10 +400,19 @@ export function PlansPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <PlanEditor plan={editing} onClose={() => setEditing(null)} />
+      {/* Open only for someone who may manage plans, whatever the URL asks:
+          a courtesy, the server checks `bcp.manage` (invariant 6). */}
+      {/* KEYED, so every opening starts empty however it was opened (general
+          ruling 4): the editor's fields are its own state. */}
+      <PlanEditor
+        key={creating.open && canManage ? "new" : "closed"}
+        plan={creating.open && canManage ? "new" : null}
+        onClose={creating.close}
+      />
     </div>
   );
 }

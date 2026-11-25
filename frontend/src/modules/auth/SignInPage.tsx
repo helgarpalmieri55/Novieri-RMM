@@ -19,6 +19,11 @@
  * SIGN IN WITH MICROSOFT (own-auth phase 2) is offered below the form,
  * always: no anonymous route says whether it is set up here, and a click
  * where it is not gets one sentence (Task 12, decision 1).
+ *
+ * IN THE NOVIERI FRAME (redesign design §4, plan Task 13, 8.1): "Continue"
+ * is the one primary, across the card; Microsoft is the secondary below it,
+ * after an "or"; the forgotten password is a text link. The tab is "Sign in ·
+ * Novieri RMM", from the headline (`./AuthCard.tsx`).
  */
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -29,9 +34,9 @@ import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { safeNext } from "../../lib/session";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard } from "./AuthCard";
+import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { afterLogin, carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
 
 export function SignInPage() {
@@ -48,7 +53,13 @@ export function SignInPage() {
   const inFlight = useRef(false);
 
   async function submit() {
-    if (inFlight.current || !email.trim() || !password) return;
+    if (inFlight.current) return;
+    // ON WHILE EMPTY, AND A PRESS SAYS WHAT IS MISSING (coordinator ruling 8a):
+    // it was disabled until both fields held something, with no reason given.
+    if (!email.trim() || !password) {
+      setError(t(missingKey(email, password)));
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setError(null);
@@ -89,15 +100,17 @@ export function SignInPage() {
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant="primary"
             icon="lock"
             label={busy ? t("auth.common.working") : t("auth.signIn.submit")}
-            disabled={busy || !email.trim() || !password}
+            disabled={busy}
           />
         </div>
       </Form>
-      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" />
+      <AuthOr />
+      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" wide />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/forgot-password", next)}>{t("auth.signIn.forgot")}</Link>
       </p>

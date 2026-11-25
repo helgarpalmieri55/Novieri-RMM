@@ -4,13 +4,14 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import type { ApiClient, SoftwareAggregate, SoftwareDevice } from "../../lib/api";
+import { renderPage as renderAt } from "../../test/renderPage";
 import { SoftwarePage } from "./SoftwarePage";
 
 const mockUseApi = vi.fn();
@@ -71,17 +72,17 @@ describe("SoftwarePage", () => {
     // destination was the table directly beneath it. It moved to the filter
     // bar, next to the box that changes it. The assertion that mattered is
     // unchanged -- the figure comes from the response, not a constant.
-    expect(screen.getByTestId("software-count")).toHaveTextContent("2 titles");
+    // The kit's count (redesign Receta L, 8): "Showing x of y", y the server's total.
+    expect(screen.getByText("Showing 2 of 2")).toBeInTheDocument();
     expect(document.querySelectorAll(".stat-card")).toHaveLength(0);
   });
 
   it("counts one title in the singular", async () => {
     renderPage({ searchSoftware: () => Promise.resolve({ items: [aggregate()], total: 1 }) });
-    // The count renders "…" until the query resolves; asserting before that
-    // would pass against a page that never counted anything.
-    await waitFor(() =>
-      expect(screen.getByTestId("software-count")).toHaveTextContent("1 title"),
-    );
+    // The count renders nothing until the query resolves; asserting before
+    // that would pass against a page that never counted anything. The kit's
+    // sentence (redesign Receta L, 8) carries no noun to agree with the number.
+    await waitFor(() => expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument());
   });
 
   it("shows devices for a selected title, and a prompt before any selection", async () => {
@@ -94,29 +95,18 @@ describe("SoftwarePage", () => {
       softwareDevices,
     });
 
-    // The prompt is the kit's `EmptyState`: a glyph in `.empty-icon`, a
-    // heading naming what is missing, and the sentence saying why the panel is
-    // empty. The hand-rolled `<div class="empty">` it replaced had a bare
-    // `<svg>` (flush left under Tailwind preflight, beside centred text) and no
-    // "why" line at all.
-    const prompt = await screen.findByRole("heading", { name: "No software selected" });
-    const empty = prompt.closest(".empty") as HTMLElement;
-    expect(empty.querySelector(".empty-icon svg")).not.toBeNull();
-    // AND THE SENTENCE NAMES NO DIRECTION (design review I6). It used to say
-    // "in the list to the left", which is a fact about 1440 only: below the
-    // kit's 640px fold the two panes stack and the list is above. The copy
-    // must be true at every width, so it names the list rather than a side --
-    // any of "left", "right", "above" or "below" in this body is the bug.
-    const body = within(empty).getByText(/Choose a title from the software inventory/);
-    expect(body).toBeInTheDocument();
-    expect(body.textContent ?? "").not.toMatch(/\b(left|right|above|below|beside)\b/i);
+    // NO PROMPT BEFORE A SELECTION (redesign Task 6, 1.3): the chosen title's
+    // computers open in a panel under the list, so with nothing chosen there
+    // is no second pane to explain -- the list is the whole page, and nothing
+    // asks for the devices of a title nobody chose.
+    await screen.findByText("Google Chrome");
+    expect(screen.queryByRole("heading", { level: 2, name: "Google Chrome" })).toBeNull();
+    expect(softwareDevices).not.toHaveBeenCalled();
 
     await user.click(await screen.findByText("Google Chrome"));
     expect(softwareDevices).toHaveBeenCalledWith("Google Chrome");
     expect(await screen.findByText("ws-alpha")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "No software selected" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Google Chrome" })).toBeInTheDocument();
   });
 
   /* --- getting the catalogue out of the console ------------------------- */
@@ -149,5 +139,51 @@ describe("SoftwarePage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /You do not have permission to do that/i,
     );
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.3; Receta L, a list that only searches) --- */
+
+describe("Software on the list kit", () => {
+  function under(path: string, overrides: Partial<ApiClient> = {}) {
+    mockUseApi.mockReturnValue({
+      searchSoftware: vi.fn(async (name: string) =>
+        name === "" || "google chrome".includes(name.toLowerCase())
+          ? { items: [aggregate()], total: 1 }
+          : { items: [], total: 0 },
+      ),
+      softwareDevices: vi.fn().mockResolvedValue([{ device_id: "d1", hostname: "ws-alpha", version: "140.0" } as SoftwareDevice]),
+      ...overrides,
+    } as unknown as ApiClient);
+    return renderAt(path, <SoftwarePage />);
+  }
+
+  it("keeps its search in the URL, so a reload finds the same rows", async () => {
+    const { router } = under("/software");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Search software" }), "chrome");
+    expect(router.state.location.search).toBe("?q=chrome");
+    await act(() => router.navigate("/software?q=chrome"));
+    expect(screen.getByRole("textbox", { name: "Search software" })).toHaveValue("chrome");
+    expect(await screen.findByRole("link", { name: "Google Chrome" })).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    under("/software?q=nothing-is-called-this");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("opens a title's computers from ?title= and Quitar takes it away", async () => {
+    const { router } = under("/software?q=chrome&title=Google%20Chrome");
+    const panel = (await screen.findByRole("heading", { level: 2, name: "Google Chrome" })).closest("section") as HTMLElement;
+    expect(await within(panel).findByRole("link", { name: "ws-alpha" })).toHaveAttribute("href", "/devices/d1");
+    await userEvent.click(within(panel).getByRole("link", { name: /^Close/ }));
+    expect(router.state.location.search).toBe("?q=chrome");
+    expect(screen.queryByRole("heading", { level: 2, name: "Google Chrome" })).toBeNull();
+  });
+
+  it("counts what it shows against the server's total", async () => {
+    under("/software");
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
   });
 });

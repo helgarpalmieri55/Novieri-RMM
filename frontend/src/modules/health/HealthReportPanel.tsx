@@ -3,7 +3,7 @@ import { describeSubmitError } from "../../components/form";
 import { Badge } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
-import { Panel, StatCard, StatsGrid } from "../../shell/components";
+import { Panel, StatCard, StatsGrid, useNarrowedApi, withClient } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 import { useHealthAlerts } from "./api";
@@ -64,11 +64,17 @@ const MACHINE_RESOLVED_ALERTS = "/health?state=cleared&resolution=machine";
 const HUMAN_CLOSED_ALERTS = "/health?state=cleared&resolution=human";
 const EXCLUDED_ALERTS = "/health?state=cleared&resolution=excluded";
 
-export function HealthReportPanel() {
+export function HealthReportPanel({ chip = "" }: { chip?: string }) {
   const t = useT();
   // The console's own list, unfiltered: `summariseAlerts` needs cleared rows,
-  // and the default filter shows them.
-  const alerts = useHealthAlerts({});
+  // and the default filter shows them. Under the Client chip, that client's
+  // list and no other (O3 3.1: no number on the page counts another client).
+  const alerts = useHealthAlerts({}, chip);
+  const { client } = useNarrowedApi(chip);
+  // A figure's destination under the Client chip keeps the chip (redesign
+  // plan, O3 3.1): the figure counted that client's alerts, so the rows it
+  // opens are that client's too.
+  const to = (path: string) => withClient(path, client);
   const forbidden = alerts.error instanceof ApiError && alerts.error.status === 403;
 
   if (forbidden) {
@@ -101,6 +107,13 @@ export function HealthReportPanel() {
   const summary = summariseAlerts(alerts.data ?? []);
   const autoRate =
     summary.resolved > 0 ? Math.round((summary.machineResolved / summary.resolved) * 100) : null;
+  const mttr = summary.meanTimeToResolveS;
+  // NO NUMBER BEFORE THE LIST ANSWERS (clarification 10a): until then every
+  // tile is the kit's pending tile, the absent mark, not the zeroes of an
+  // empty list. A failed read never reaches here (the alert above). The two
+  // rates over no resolution are unmeasured once the list has answered: the
+  // kit's absent tile, not busy, its foot saying what the rate is over.
+  const noData = !alerts.data;
 
   return (
     <Panel
@@ -111,16 +124,18 @@ export function HealthReportPanel() {
         <StatCard
           label={t("health.report.inView")}
           value={String(summary.total)}
+          pending={noData}
           icon="bell"
-          to={ALERTS}
+          to={to(ALERTS)}
           tone="neutral"
           zeroLabel={t("health.report.inViewZero")}
         />
         <StatCard
           label={t("health.report.stillOpen")}
           value={String(summary.open)}
+          pending={noData}
           icon="warning"
-          to={OPEN_ALERTS}
+          to={to(OPEN_ALERTS)}
           tone="red"
           urgent
           // ACKNOWLEDGED AND MUTED ARE OPEN. The destination is the console's
@@ -131,21 +146,20 @@ export function HealthReportPanel() {
         />
         <StatCard
           label={t("health.report.mttr")}
-          value={
-            summary.meanTimeToResolveS === null
-              ? "—"
-              : formatSeconds(Math.round(summary.meanTimeToResolveS))
-          }
+          value={mttr === null ? "" : formatSeconds(Math.round(mttr))}
+          pending={noData}
+          absent={mttr === null}
           icon="clock"
-          to={RESOLVED_ALERTS}
+          to={to(RESOLVED_ALERTS)}
           tone="blue"
           foot={t("health.report.mttrFoot")}
         />
         <StatCard
           label={t("health.report.machine")}
           value={String(summary.machineResolved)}
+          pending={noData}
           icon="automation"
-          to={MACHINE_RESOLVED_ALERTS}
+          to={to(MACHINE_RESOLVED_ALERTS)}
           tone="green"
           zeroLabel={t("health.report.machineZero")}
           foot={t("health.report.machineFoot")}
@@ -153,17 +167,20 @@ export function HealthReportPanel() {
         <StatCard
           label={t("health.report.human")}
           value={String(summary.humanClosed)}
+          pending={noData}
           icon="user"
-          to={HUMAN_CLOSED_ALERTS}
+          to={to(HUMAN_CLOSED_ALERTS)}
           tone="gold"
           zeroLabel={t("health.report.humanZero")}
           foot={t("health.report.humanFoot")}
         />
         <StatCard
           label={t("health.report.autoRate")}
-          value={autoRate === null ? "—" : `${autoRate}%`}
+          value={autoRate === null ? "" : `${autoRate}%`}
+          pending={noData}
+          absent={autoRate === null}
           icon="activity"
-          to={RESOLVED_ALERTS}
+          to={to(RESOLVED_ALERTS)}
           tone="green"
           foot={t("health.report.autoRateFoot")}
         />
@@ -173,7 +190,7 @@ export function HealthReportPanel() {
         {/* A NUMBER, SO IT GOES SOMEWHERE TOO. It is a badge rather than a
             seventh tile because the sentence beside it is what makes it
             readable, and that sentence does not fit in a tile. */}
-        <Link to={EXCLUDED_ALERTS}>
+        <Link to={to(EXCLUDED_ALERTS)}>
           <Badge variant={summary.excludedFromResolution > 0 ? "warning" : "muted"}>
             {t("health.report.excluded", { count: summary.excludedFromResolution })}
           </Badge>

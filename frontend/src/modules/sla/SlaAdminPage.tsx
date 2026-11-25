@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
@@ -10,7 +9,7 @@ import { PoliciesPanel } from "./PoliciesPanel";
 import { PolicyResolverPanel } from "./PolicyResolverPanel";
 import { SlaPrerequisites } from "./SlaPrerequisites";
 import { SlaSettingsPanel } from "./SlaSettingsPanel";
-import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { PageHead, StatCard, StatsGrid, useNewParam, useUrlFilters, withClient } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §9.1's admin surface: business calendars (with the weekly window grid
@@ -56,14 +55,16 @@ export function SlaAdminPage() {
 
   // Each of these is the SAME query a panel below already issues, served from
   // the same cache entry rather than doubling the request count.
+  // With the Client chip on the policies, the count is of what the list shows.
+  const filters = useUrlFilters(["client"] as const);
   const calendars = useSlaCalendars();
-  const policies = useSlaPolicies();
+  const policies = useSlaPolicies(filters.values.client);
   const settings = useSlaSettings();
   // The policy form's escape hatch out of the first-run dead end (cycle 7):
-  // "Add a business calendar" inside the Add-policy dialog bumps this, and the
-  // calendars panel below opens its own create dialog. A COUNTER, not a flag,
-  // so a user who dismisses the calendar dialog and asks again gets it back.
-  const [calendarCreateNonce, setCalendarCreateNonce] = useState(0);
+  // "Add a business calendar" inside the Add-policy dialog opens the
+  // calendars' own create dialog, through the URL (`?new=calendar` in place
+  // of `?new=policy`); Back reopens Add policy, with an empty form (ruling 4).
+  const calendarCreate = useNewParam("calendar");
   const activePolicyCount = (policies.data ?? []).filter((policy) => policy.active).length;
   // WHAT THE TWO CONFIGURATION FIGURES ARE MADE OF. The two consequence tiles
   // beside them carry a sentence at a non-zero count and these carried
@@ -97,16 +98,18 @@ export function SlaAdminPage() {
    * "0 tickets with no SLA" while `GET /sla/settings` is still in flight, or
    * has failed, or was refused -- the audit's finding of nine cards reading 0
    * on a page where nothing had been measured, on the page whose whole
-   * subject is unkept promises. An em dash says "no answer yet"; the
-   * `zeroLabel` on each card below says what a real 0 means.
+   * subject is unkept promises. A tile with no data is `pending` (ruling
+   * 10a): StatCard draws the kit's absent mark, "no answer yet", and no wash;
+   * the `zeroLabel` on each card below says what a real 0 means.
    */
-  const count = (loaded: boolean, value: number): string => (loaded ? String(value) : "\u2014");
+  const noCalendars = calendars.data === undefined;
+  const noPolicies = policies.data === undefined;
   const settingsLoaded = settings.data !== undefined;
 
   return (
     <div>
       <PageHead
-        title={t("sla.admin.title")}
+        title={t("shell.nav.item.serviceLevels")}
         description={t("sla.admin.description")}
       />
 
@@ -131,7 +134,8 @@ export function SlaAdminPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("sla.admin.calendarsLabel")}
-          value={count(calendars.data !== undefined, calendars.data?.length ?? 0)}
+          value={String(calendars.data?.length ?? "")}
+          pending={noCalendars}
           icon="calendar"
           to="/sla"
           tone="neutral"
@@ -140,22 +144,26 @@ export function SlaAdminPage() {
         />
         <StatCard
           label={t("sla.admin.policiesLabel")}
-          value={count(policies.data !== undefined, activePolicyCount)}
+          value={String(activePolicyCount)}
+          pending={noPolicies}
           icon="shield-check"
-          to="/sla"
+          // Counted on the chip's narrowed read, it opens that client's (general ruling 2).
+          to={withClient("/sla", filters.values.client)}
           tone="blue"
           foot={policyFoot}
           zeroLabel={t("sla.admin.policiesZero")}
         />
         <StatCard
           label={t("sla.admin.noSlaLabel")}
-          value={count(settingsLoaded, ticketsWithoutSla)}
+          value={String(ticketsWithoutSla)}
+          pending={!settingsLoaded}
           icon="alert-triangle"
           to="/service-desk"
           tone="gold"
-          // Never loud on an em dash: an alarm colour over "no answer yet"
-          // is the same lie as a 0 over it, pointing the other way.
-          urgent={settingsLoaded}
+          // Never loud while pending (StatCard drops the wash): an alarm
+          // colour over "no answer yet" is the same lie as a 0 over it,
+          // pointing the other way.
+          urgent
           // WHY, ON THE TILE THAT STATES THE NUMBER. The SLA settings panel
           // below used to restate both of these counts as pills within 200px
           // of the tiles that already carried them, purely to have somewhere
@@ -170,7 +178,8 @@ export function SlaAdminPage() {
         />
         <StatCard
           label={t("sla.admin.staleLabel")}
-          value={count(settingsLoaded, staleTicketSla)}
+          value={String(staleTicketSla)}
+          pending={!settingsLoaded}
           icon="clock-exclamation"
           to="/service-desk"
           tone="orange"
@@ -187,13 +196,13 @@ export function SlaAdminPage() {
         <SlaSettingsPanel canAdmin={canConfigure} />
         <PolicyResolverPanel />
       </div>
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+      <div>
         <PoliciesPanel
           canAdmin={canAdmin}
           queueName={queueName}
-          onCreateCalendar={canConfigure ? () => setCalendarCreateNonce((n) => n + 1) : undefined}
+          onCreateCalendar={canConfigure ? calendarCreate.start : undefined}
         />
-        <CalendarsPanel canAdmin={canConfigure} openCreateNonce={calendarCreateNonce} />
+        <CalendarsPanel canAdmin={canConfigure} />
       </div>
     </div>
   );

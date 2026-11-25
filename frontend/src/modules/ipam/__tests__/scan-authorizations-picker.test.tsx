@@ -7,6 +7,9 @@ import type { ApiClient, MeClient } from "../../../lib/api";
 import { ScanAuthorizationsPage } from "../ScanAuthorizationsPage";
 import type { SubnetOut } from "../types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 // Authorising a registered subnet for scanning WITHOUT re-typing its prefix
 // (operator, 2026-08-26: the scan-authorizations page "not showing the subnet i
 // already created… double work there").
@@ -90,7 +93,7 @@ async function renderScopes(api: ApiClient) {
     </QueryClientProvider>,
   );
   // The grant form lives in the dialog the head's primary action opens.
-  await userEvent.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+  await userEvent.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
   return rendered;
 }
 

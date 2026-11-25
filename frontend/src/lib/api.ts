@@ -895,7 +895,7 @@ export interface Me {
    */
   roles?: string[];
   /**
-   * The three profile fields ITMS owns (spec §7.3).
+   * The three profile fields the platform owns (spec §7.3).
    *
    * OPTIONAL, THOUGH `MeResponse` ALWAYS SENDS THEM, and the reason is worth
    * recording rather than being read as sloppiness. `?` here is a superset of
@@ -1469,7 +1469,7 @@ export interface InstallLinkUpdate {
  */
 export interface InstallLinkMsi {
   blob: Blob;
-  /** `ITMS-Agent-<host>[@<port>]-<arch>.msi`, from `Content-Disposition`. */
+  /** `NovieriRMM-Agent-<host>[@<port>]-<arch>.msi`, from `Content-Disposition`. */
   filename: string;
   /** Hex SHA-256 of these bytes, from `X-Content-SHA256`. */
   sha256: string;
@@ -1819,6 +1819,18 @@ export class ApiClient {
      */
     private readonly getClient: () => string | null = () => null,
   ) {}
+
+  /**
+   * THIS CLIENT, NARROWED TO ONE CLIENT for every request it makes
+   * (`X-Client-Id`), whatever the top bar says: a list's "Client" chip and the
+   * client 360 page (redesign design §1.3, §2; decision D6). It narrows and
+   * never widens -- the server answers with the session's scope intersected
+   * with this id, and RLS enforces it (invariant 5a). Global routes still go
+   * without the header (`requestHeaders`).
+   */
+  forClient(clientId: string): ApiClient {
+    return new ApiClient(this.onUnauthorized, this.base, () => clientId);
+  }
 
   /**
    * What `requestHeaders` needs to know about one request to this API.
@@ -4341,7 +4353,7 @@ export class ApiClient {
       throw new ApiError(response.status, await response.text());
     }
     const disposition = response.headers.get("Content-Disposition") ?? "";
-    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `ITMS-Agent-${body.arch}.msi`;
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `NovieriRMM-Agent-${body.arch}.msi`;
     return {
       blob: await response.blob(),
       filename,

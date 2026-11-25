@@ -97,8 +97,9 @@ describe("Waiting for review", () => {
     // The row first: the strip renders before the list answers, with every
     // count at 0, so the tab's count is only the server's once a row is in.
     const row = (await screen.findByText("DESKTOP-7Q2M4KD")).closest("tr")!;
-    const tab = screen.getByRole("tab", { name: /Waiting for review/ });
-    expect(tab).toHaveAttribute("aria-selected", "true");
+    // The tab is a state chip on the same `?state=` (redesign Receta L, 5).
+    const tab = screen.getByRole("button", { name: /Waiting for review/ });
+    expect(tab).toHaveAttribute("aria-pressed", "true");
     expect(tab).toHaveTextContent("1");
     expect(row).toHaveTextContent("Joined through the install link from 10.50.0.9");
     expect(row).toHaveTextContent("Install link");
@@ -150,9 +151,9 @@ describe("Waiting for review", () => {
 });
 
 const DID_NOT_CONFIRM =
-  "Rejected — the agent didn't confirm it removed itself. Uninstall it on the computer by hand.";
+  "Rejected: the agent didn't confirm it removed itself. Uninstall it on the computer by hand.";
 const TOO_OLD =
-  "Rejected — this agent is too old to remove itself. Uninstall it on the computer by hand.";
+  "Rejected: this agent is too old to remove itself. Uninstall it on the computer by hand.";
 
 function leftBehind(outcome: NonNullable<Device["rejection_outcome"]>): Device {
   return device({
@@ -192,7 +193,7 @@ describe("A rejection that left the agent behind", () => {
     // The device page would answer 404: the name is not a link to it.
     expect(within(row).queryByRole("link", { name: "DESKTOP-J3K9P2L" })).not.toBeInTheDocument();
     // It counts in the tab's badge beside the machine still waiting.
-    expect(screen.getByRole("tab", { name: /Waiting for review/ })).toHaveTextContent("2");
+    expect(screen.getByRole("button", { name: /Waiting for review/ })).toHaveTextContent("2");
   });
 
   it("\"I removed it\" calls the acknowledge route and the row leaves the list", async () => {

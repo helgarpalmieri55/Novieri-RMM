@@ -213,9 +213,9 @@ const TEXT_ON_BACKGROUND: ReadonlyArray<readonly [string, string, string]> = [
   ["--ink", "--surface", "body copy, .lrow .ttl b, .tile .v"],
   ["--ink", "--surface-2", "the same, in a hovered row"],
   ["--ink", "--bg", "an h1 on the page, .empty b"],
-  ["--ink-2", "--surface", ".lrow .cell, .chip, the top bar's icon buttons"],
-  ["--ink-2", "--surface-2", ".lrow .cell in a hovered row"],
-  ["--ink-2", "--bg", "a value drawn straight onto the page"],
+  ["--ink-2", "--surface", ".lrow .cell, .chip, the top bar's icon buttons, now --ink (DESIGN.md v4, D2)"],
+  ["--ink-2", "--surface-2", ".lrow .cell in a hovered row, now --ink (DESIGN.md v4, D2)"],
+  ["--ink-2", "--bg", "a value drawn straight onto the page, now --ink (DESIGN.md v4, D2)"],
   ["--muted", "--surface", ".tile .k, .tile .z, .lhead, .panel-h p, .inp .ph, .note"],
   ["--muted", "--surface-2", ".ttl small inside a hovered row"],
   ["--muted", "--bg", ".crumb, .ph .sub, .empty, page-level metadata"],
@@ -227,8 +227,8 @@ const TEXT_ON_BACKGROUND: ReadonlyArray<readonly [string, string, string]> = [
   ["--sev-warn", "--surface", "an amber value in a cell"],
   ["--sev-ok", "--sev-ok-s", ".pill.p-ok"],
   ["--sev-ok", "--surface", ".tile.ok .v"],
-  ["--sev-run", "--sev-run-s", ".pill.p-run"],
-  ["--sev-run", "--surface", "a running job's count"],
+  ["--sev-run", "--sev-run-s", ".pill.p-run, information's hue with the progress icon (D2)"],
+  ["--sev-run", "--surface", "a running job's count, information's hue with the progress icon (D2)"],
   ["--sev-mut", "--sev-mut-s", ".pill.p-mut"],
   ["--sev-mut", "--surface", "the same tone as a standalone value"],
   // The secondary ink on a tinted tile's wash: `.tile .z` keeps --muted when
@@ -247,6 +247,12 @@ const TEXT_ON_BACKGROUND: ReadonlyArray<readonly [string, string, string]> = [
   ["--accent-2", "--surface", ".nav-toggle:hover .client-mark"],
   // Ink on the accent fill: the primary button's label, the brand chip.
   ["--accent-ink", "--accent", ".btn.pri, .brand i"],
+  // DESIGN.md v4: the alert count, white on the critical badge (the rail's
+  // `.ct.hot` and the top bar's `.counter-dot`), and the primary button's
+  // label on its hover and pressed grounds.
+  ["--accent-ink", "--sev-crit", ".sidebar .ct.hot, .counter-dot"],
+  ["--accent-ink", "--accent-2", ".btn.primary:hover"],
+  ["--accent-ink", "--accent-3", ".btn.primary:active"],
 ];
 
 /**
@@ -263,8 +269,8 @@ const TEXT_ON_RAIL: ReadonlyArray<readonly [string, string, string]> = [
   ["--rail-ink", "--rail-2", "the same, hovered"],
   ["--rail-dim", "--rail", ".rail .grp, the 10.5px uppercase group caption; .rail .ct"],
   ["--rail-dim", "--rail-2", ".rail .ct inside a hovered or active link"],
-  ["--rail-hot", "--rail", ".rail .ct.hot, the alert count"],
-  ["--rail-hot", "--rail-2", "the same, hovered"],
+  ["--rail-mark", "--rail-2", ".nav-item.active svg and .nav-dot: the current item's mark"],
+  ["--rail-mark", "--rail", "the same mark on a folder heading that holds the current page"],
   ["--accent-ink", "--rail", ".brand, an active link's label"],
   ["--accent-ink", "--rail-2", "an active link's label on its own ground"],
 ];
@@ -349,6 +355,10 @@ describe("WCAG 1.4.3 contrast, computed from the shipped tokens", () => {
     }
     // And the mirror image: the accent is a 2px edge on the rail, never text.
     expect(contrast(colour("--accent"), colour("--rail-2"))).toBeLessThan(4.5);
+    // DESIGN.md v4, "The Two Grounds Rule": cobalt is not even a mark on the
+    // rail (2.32:1 on --rail, 1.95:1 lifted); --rail-mark is.
+    expect(contrast(colour("--accent"), colour("--rail"))).toBeLessThan(3);
+    expect(contrast(colour("--accent"), colour("--rail-2"))).toBeLessThan(3);
     expect(TEXT_ON_RAIL.map(([fg]) => fg)).not.toContain("--accent");
   });
 
@@ -514,8 +524,10 @@ const NON_TEXT: ReadonlyArray<readonly [string, string]> = [
   ["--line-control", "the resting border of every input, select, chip and bordered button; the toggle's track"],
   ["--muted", "the hover border those same controls may lift to"],
   ["--ink-2", "a pressed or emphasised control edge"],
+  ["--ink", "the same edge: --ink-2 resolves to --ink since DESIGN.md v4 (D2)"],
   ["--accent", "the focus ring; the checked fill of every checkbox and radio; the active tab's edge; the toggle's on-track"],
   ["--accent-2", "the deeper accent a FILLED button steps its ground and edge to on hover"],
+  ["--accent-3", "a pressed primary button's ground and edge"],
   ["--sev-crit", "the danger button's edge"],
   ["--sev-warn", "a warning-toned control's edge"],
   ["--sev-ok", "a confirming control's edge"],

@@ -10,9 +10,20 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import { TicketDetailPage } from "../TicketDetailPage";
 import type { CannedResponseOut, QueueOut, TicketOut, TicketSlaSummary } from "../types";
+
+/**
+ * The ticket's properties save through the kit's one save bar (redesign plan,
+ * Task 7, 2.3): its "Save" stands where the panel's "Save changes" was, and
+ * the bar is there only while something changed.
+ */
+function saveBarSave(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" });
+}
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -141,7 +152,8 @@ function renderTicket(overrides: Partial<ApiClient> = {}) {
 }
 
 const header = async () => {
-  await screen.findByText("INC-1: Printer jams on tray 2");
+  // The record's head (redesign plan, Task 7, 2.3): "<number> <subject>".
+  await screen.findByRole("heading", { level: 1, name: "INC-1 Printer jams on tray 2" });
   return document.querySelector(".facts") as HTMLElement;
 };
 
@@ -256,6 +268,7 @@ describe("quick actions", () => {
     }
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
   });
 
   it("switches the reply box to an internal note from the header", async () => {
@@ -392,13 +405,13 @@ describe("one edit form", () => {
     });
     await header();
 
-    const save = screen.getByRole("button", { name: "Save changes" });
-    expect(save).toBeDisabled();
+    // Nothing changed: no bar (it replaced a disabled "Save changes").
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
 
     await user.selectOptions(screen.getByLabelText("Priority"), "high");
     await user.selectOptions(screen.getByLabelText("Queue"), "q2");
     await user.selectOptions(screen.getByLabelText("Status"), "pending");
-    await user.click(save);
+    await user.click(saveBarSave());
 
     await waitFor(() => expect(order).toEqual(["fields", "assign", "status"]));
     expect(api.updateTicket).toHaveBeenCalledWith("t1", { priority: "high" });
@@ -426,7 +439,7 @@ describe("one edit form", () => {
     expect(screen.getByLabelText("Priority")).toBeDisabled();
     await user.selectOptions(screen.getByLabelText("Status"), "open");
     await user.selectOptions(screen.getByLabelText("Queue"), "q2");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     await waitFor(() => expect(order).toEqual(["status", "assign"]));
   });
@@ -437,5 +450,123 @@ describe("one edit form", () => {
     await header();
 
     expect(screen.queryByRole("button", { name: "Remote in" })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The record kit and the one save bar (redesign plan, Task 7, 2.3; Recetas F
+// and FO): the properties save through `SaveBar`, with the confirmation and
+// the order of the three writes of today, and leaving with a change asks.
+// ---------------------------------------------------------------------------
+
+describe("the ticket on the record kit", () => {
+  function page(options: { page?: "shell.nav.item.tickets" } = {}) {
+    mockUseApi.mockReturnValue(api as ApiClient);
+    return renderPage("/service-desk/tickets/t1", <TicketDetailPage />, "/service-desk/tickets/:ticketId", options);
+  }
+
+  it("asks before leaving with an unsaved property", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { router } = page();
+    await header();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.click(screen.getByRole("link", { name: "Tickets" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/service-desk/tickets/t1");
+  });
+
+  it("leaves without asking when nothing changed", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { router } = page();
+    await header();
+    await user.click(screen.getByRole("link", { name: "Tickets" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/service-desk"));
+  });
+
+  it("keeps the confirmation and the save order of today", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const order: string[] = [];
+    api = {
+      ...api,
+      updateTicket: vi.fn(async () => {
+        order.push("fields");
+        return TICKET;
+      }),
+      assignTicket: vi.fn(async () => {
+        order.push("assign");
+        return TICKET;
+      }),
+      changeTicketStatus: vi.fn(async () => {
+        order.push("status");
+        return TICKET;
+      }),
+    };
+    page();
+    await header();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Queue"), "q2");
+    await user.selectOptions(screen.getByLabelText("Status"), "closed");
+    await user.click(saveBarSave());
+    // Closing asks first, as "Save changes" did; nothing is written before the answer.
+    const dialog = await screen.findByRole("dialog", { name: "Close this ticket" });
+    expect(order).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: "Close ticket" }));
+    await waitFor(() => expect(order).toEqual(["fields", "assign", "status"]));
+    expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", { to_status: "closed", reason: "" });
+  });
+
+  it("saves nothing without a subject, and the bar says why until one is typed", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    page();
+    await header();
+    await user.clear(screen.getByLabelText("Subject"));
+    await user.click(saveBarSave());
+    expect(api.updateTicket).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("alert")).toHaveTextContent(
+      "Write a subject for the ticket.",
+    );
+    await user.type(screen.getByLabelText("Subject"), "Printer jams");
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).queryByRole("alert")).toBeNull();
+  });
+
+  it("says the missing subject even after a refused save (fix round 1)", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    api = { ...api, updateTicket: vi.fn().mockRejectedValue(new ApiError(503, "")) };
+    page();
+    await header();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.click(saveBarSave());
+    expect(await within(screen.getByRole("region", { name: "Unsaved changes" })).findByRole("alert")).toHaveTextContent(/unavailable/i);
+    await user.clear(screen.getByLabelText("Subject"));
+    await user.click(saveBarSave());
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("alert")).toHaveTextContent(
+      "Write a subject for the ticket.",
+    );
+  });
+
+  it("discards every change back to what the ticket says", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    page();
+    await header();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.selectOptions(screen.getByLabelText("Status"), "pending");
+    expect(screen.getByLabelText("Why is the status changing? (optional)")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("Priority")).toHaveValue(TICKET.priority);
+    expect(screen.getByLabelText("Status")).toHaveValue(TICKET.status);
+    expect(api.updateTicket).not.toHaveBeenCalled();
+  });
+
+  it("names the record in the browser tab", async () => {
+    page({ page: "shell.nav.item.tickets" });
+    await header();
+    await waitFor(() => expect(document.title).toBe("INC-1 · Tickets · Novieri RMM"));
+  });
+
+  it("goes back to the queue from its head", async () => {
+    page();
+    await header();
+    expect(screen.getByRole("link", { name: "Tickets" })).toHaveAttribute("href", "/service-desk");
   });
 });

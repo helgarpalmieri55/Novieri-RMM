@@ -1,21 +1,28 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
-import { Button, Field, Td, Th, inputClass } from "../../components/ui";
+import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
 import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDate, toInstant } from "../../lib/datetime";
 import {
-  FilterBar,
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatusPill,
   TableWrap,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
   type Kind,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -81,14 +88,18 @@ const KIND_OF_VARIANT: Record<BadgeVariant, Kind> = {
 // and it is the only thing that refuses.
 //
 // v3 draws this as one list -- prefix, who authorized it and when, state,
-// expiry -- and one note under it. The grant form the design opens from its
-// "New authorization" button is inline below the list here, so the head
-// carries no button that would only scroll to it.
+// expiry -- and one note under it, and opens the grant form from its "New
+// authorization" button. ON THE LIST KIT (redesign plan Task 6, 1.9): that
+// button opens the form in a dialog from `?new=authorization` (decision D8),
+// with every sentence of the form's safety text (invariant 2a) still beside
+// its controls; "include inactive" is the `?inactive=1` chip.
 export function PushAuthorizationsPage() {
   const t = useT();
   const permissions = usePushPermissions();
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const filters = useUrlFilters(["inactive"] as const);
+  const includeInactive = filters.values.inactive === "1";
   const grants = usePushAuthorizations(includeInactive);
+  const creating = useNewParam("authorization");
   const revoke = useRevokePushAuthorizationMutation();
   // With every client chosen, each grant says whose network it opens.
   const { selected } = useClientScope();
@@ -103,8 +114,15 @@ export function PushAuthorizationsPage() {
           other tabbed screen in the console keeps: crumb, title, description,
           then the strip that switches what follows. */}
       <PageHead
-        title={t("agentPush.authorizations.title")}
+        // The area's name in the navigation (coordinator ruling, fix round 1: a
+        // page's h1 is its rail label); the section nav under it says which page.
+        title={t("shell.nav.item.pushInstall")}
         description={t("agentPush.authorizations.description")}
+        actions={
+          permissions.scopeManage ? (
+            <Btn label={t("agentPush.authorizations.new")} icon="plus" variant="primary" onClick={creating.start} />
+          ) : undefined
+        }
       />
 
       <PushNav />
@@ -118,29 +136,41 @@ export function PushAuthorizationsPage() {
         subtitle={t("agentPush.authorizations.panelSubtitle")}
         bare
       >
-        <FilterBar>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(e) => setIncludeInactive(e.target.checked)}
+        <ListToolbar
+          chips={
+            /* Asks the server for revoked and expired grants too, as the checkbox did. */
+            <FilterChips
+              label={t("agentPush.authorizations.showRevoked")}
+              options={[
+                { value: "", label: t("agentPush.authorizations.chipInForce") },
+                { value: "1", label: t("agentPush.authorizations.chipInactive") },
+              ]}
+              value={filters.values.inactive}
+              onChange={(value) => filters.set("inactive", value)}
             />
-            <span>{t("agentPush.authorizations.showRevoked")}</span>
-          </label>
-          <span className="filter-spacer" />
-          <span className="note mono">
-            {grants.data ? t("agentPush.authorizations.count", { count: grants.data.length }) : "…"}
-          </span>
-        </FilterBar>
-        <QueryState
-          loading={grants.isLoading}
-          error={grants.error}
-          empty={(grants.data ?? []).length === 0}
-          emptyLabel={t("agentPush.authorizations.empty")}
-          emptyIcon="shield"
-        >
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={grants.data ? <ShowingCount shown={grants.data.length} total={grants.data.length} /> : null}
+        />
+        <QueryState loading={grants.isLoading} error={grants.error} empty={false} emptyLabel="">
+          {(grants.data ?? []).length === 0 ? (
+            /* NEVER "NOTHING MATCHES": the chip only ever adds rows (the
+               revoked and expired ones), so an empty list is the real cause --
+               nothing authorized, and every push refused -- with or without it. */
+            <ListEmpty
+              filtered={false}
+              onClear={filters.clear}
+              nothingYet={t("agentPush.authorizations.empty")}
+              icon="shield"
+              action={
+                permissions.scopeManage ? (
+                  <Btn label={t("agentPush.authorizations.new")} icon="plus" onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("agentPush.authorizations.title")}>
               <thead>
                 <tr>
                   <th scope="col">{t("agentPush.shared.prefix")}</th>
@@ -168,6 +198,7 @@ export function PushAuthorizationsPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
         {revoke.isError && (
           <p role="alert" className="form-error" style={{ margin: "12px 18px" }}>
@@ -182,7 +213,11 @@ export function PushAuthorizationsPage() {
           this page does not name is one an operator will assume away. */}
       <p className="note mb-4">{t("agentPush.authorizations.fourBounds")}</p>
 
-      {permissions.scopeManage && <GrantForm />}
+      {/* Only for a holder of the scope code, whatever the URL asks: the
+          server refuses the write either way (invariant 6). Mounted only while
+          `?new=authorization` is set, so each opening starts empty (ruling 4);
+          the form draws its own dialog, with the leave question after it. */}
+      {creating.open && permissions.scopeManage ? <GrantForm onClose={creating.close} /> : null}
     </div>
   );
 }
@@ -271,7 +306,7 @@ function GrantRow({
   );
 }
 
-function GrantForm() {
+function GrantForm({ onClose }: { onClose: () => void }) {
   const t = useT();
   const create = useCreatePushAuthorizationMutation();
   // A prefix is one client's network (MSP clients phase 2, Task 12): the
@@ -286,6 +321,28 @@ function GrantForm() {
   // Client field with every client chosen, named rather than sent without.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const problems = attemptProblems(attempt);
+  /**
+   * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
+   * form lives in the `?new=authorization` dialog, so Back, Close and Escape
+   * are all a change of `new`: with anything typed in it, each asks first.
+   * A grant that was made lets its own close through (`release`).
+   */
+  const { guard, release } = useUnsavedGuard(
+    prefix !== "" || note !== "" || expiresAt !== "" || client.picked !== "",
+    { search: ["new"] },
+  );
+  /**
+   * The dialog, and the leave question AFTER it: the two share the `.modal`
+   * z-index, so DOM order decides which paints on top (coordinator ruling 3a).
+   */
+  const frame = (body: ReactNode) => (
+    <>
+      <Dialog open onClose={onClose} title={t("agentPush.authorizations.form.title")}>
+        {body}
+      </Dialog>
+      {guard}
+    </>
+  );
 
   const parsed = parsePrefix(prefix);
 
@@ -293,25 +350,17 @@ function GrantForm() {
   // one client's network, and Unassigned files nothing): the panel says so
   // instead of a form whose Authorize can only fail.
   if (client.refused === "unassigned") {
-    return (
-      <div id="authorize">
-        <Panel
-          title={t("agentPush.authorizations.form.title")}
-          subtitle={t("agentPush.authorizations.form.subtitle")}
-        >
-          <UnassignedRefusal />
-        </Panel>
-      </div>
+    return frame(
+      <>
+        <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
+        <UnassignedRefusal />
+      </>,
     );
   }
 
-  return (
-    // `id` is the target of the readiness panel's "Authorize a range".
-    <div id="authorize">
-    <Panel
-      title={t("agentPush.authorizations.form.title")}
-      subtitle={t("agentPush.authorizations.form.subtitle")}
-    >
+  return frame(
+    <>
+      <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
       <div className="form-grid">
         {client.needsField ? <ClientField field={client} /> : null}
         <Field label={t("agentPush.shared.prefix")}>
@@ -395,10 +444,19 @@ function GrantForm() {
       <div className="mt-3">
         <Button
           onClick={() => {
+            // ENABLED, AND SAYS WHAT IS MISSING ON SUBMIT (coordinator
+            // clarification 8a): this form has several inputs, so Authorize
+            // never waits disabled on one of them.
             const next: Attempt = {
-              rules: () =>
-                client.needsField ? [{ name: "client", label: translate("components.clientField.label") }] : [],
-              values: { client: grantClient },
+              rules: () => [
+                ...(client.needsField ? [{ name: "client", label: translate("components.clientField.label") }] : []),
+                {
+                  name: "prefix",
+                  label: translate("agentPush.shared.prefix"),
+                  validate: (value: string) => (parsePrefix(value) ? null : translate("agentPush.shared.notAPrefix")),
+                },
+              ],
+              values: { client: grantClient, prefix },
             };
             setAttempt(next);
             if (attemptProblems(next).length > 0) {
@@ -426,11 +484,14 @@ function GrantForm() {
                   setPrefix("");
                   setNote("");
                   setExpiresAt("");
+                  // The grant is made: its own close is not a lost change.
+                  release();
+                  onClose();
                 },
               },
             );
           }}
-          disabled={create.isPending || parsed === null}
+          disabled={create.isPending}
         >
           {t("agentPush.authorizations.form.submit")}
         </Button>
@@ -450,7 +511,6 @@ function GrantForm() {
           {problems.map((problem) => problem.message).join(". ")}.
         </p>
       ) : null}
-    </Panel>
-    </div>
+    </>,
   );
 }

@@ -3,8 +3,10 @@ import type { docs as en } from "../en/docs";
 
 export const docs: Shape<typeof en> = {
   page: {
-    title: "Documentación de TI",
-    description: "Manuales de procedimiento, registros y archivos, vinculados a los dispositivos que describen.",
+    backToList: "Todos los artículos",
+    // The rail's label (coordinator ruling 1).
+    title: "Documentación",
+    description: "Procedimientos, registros y archivos, con los equipos que describen.",
     newArticle: "Artículo nuevo",
     tiles: {
       articles: "Artículos",
@@ -44,14 +46,14 @@ export const docs: Shape<typeof en> = {
       searchPlaceholder: "Buscar artículos, hosts, IP",
       clearSearch: "Borrar la búsqueda",
       clear: "Borrar",
+      // The article table's name and the phone's way back to it (redesign Task 11, 6.1).
+      tableLabel: "Artículos",
       filterByCategory: "Filtrar por categoría",
       all: "Todas",
-      count: { one: "{count} artículo", other: "{count} artículos" },
       searchNote:
         "Busca en títulos, descripciones, categorías y en el nombre del archivo actual. No busca dentro de los archivos almacenados ni en los nombres de archivo de versiones anteriores.",
       noMatch: "Ninguna documentación coincide con esa búsqueda.",
       noArticles: "Todavía no hay artículos.",
-      noneInCategory: "No hay ningún artículo en {category}.",
       searchResults: "Resultados de la búsqueda",
       groupArticles: "Artículos",
       groupRecords: "Registros",
@@ -73,7 +75,6 @@ export const docs: Shape<typeof en> = {
     markdown: "Markdown",
     preview: "Vista previa",
     cancel: "Cancelar",
-    save: "Guardar",
   },
   article: {
     updated: "actualizado {date}",
@@ -90,7 +91,7 @@ export const docs: Shape<typeof en> = {
       "No se pudo cargar el historial de versiones, así que esto no es una lista de las ediciones de este artículo. {reason}",
     loading: "Cargando…",
     noEarlier: "No hay versiones anteriores.",
-    version: "v{version} — {date}",
+    version: "v{version} · {date}",
     loadFailed: "No se pudo cargar el artículo. {reason}",
   },
   portal: {
@@ -147,7 +148,7 @@ export const docs: Shape<typeof en> = {
       "El documento sale de la biblioteca y de la búsqueda. Sus archivos se pueden seguir descargando y solo un administrador puede restaurarlo. No se destruye nada.",
     archiveConfirm: "Archivar documento",
     purgeTitle: "Destruir estos bytes",
-    purgeSubject: "Versión {version} — {filename}, {size}",
+    purgeSubject: "Versión {version} ({filename}, {size})",
     purgeBody:
       "El archivo se elimina del almacenamiento y no se puede recuperar: sin deshacer y sin ninguna copia de seguridad a la que llegue esta consola. El nombre del archivo, el tamaño, el hash y quién lo hizo se conservan en el historial de versiones y en el registro de auditoría.",
     purgeConfirm: "Destruir los bytes",

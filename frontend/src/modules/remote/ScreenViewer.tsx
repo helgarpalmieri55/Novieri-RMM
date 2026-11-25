@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
@@ -11,7 +11,10 @@ import { translate, type MessageKey } from "../../i18n/core";
 import { lazyLabels } from "../../i18n/lazy";
 import { useApi } from "../../lib/ApiContext";
 import { isSessionEnded, subscribeSessionEnd } from "../../lib/sessionEnd";
-import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
+import { Btn, ClientContext, DetailHead, Panel, StatusPill } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
+import { humaniseEnum } from "../../lib/labels";
+import { useSessionDevice } from "./useSessionDevice";
 import { Facts, type Kind } from "../../shell/viz";
 import {
   agentToViewer,
@@ -33,7 +36,7 @@ import {
 import { CanvasRenderer } from "./screenCanvas";
 import { SHORTCUTS, HeldKeys, buttonsMask, sendableCode, textChunks, toRemote, wheelUnits } from "./screenInput";
 import { Assembler, INITIAL_STATUS, nextStatus, type Phase, type ScreenEvent } from "./screenModel";
-import { consentModeLabel } from "./sessionState";
+import { consentModeLabel, sessionKind } from "./sessionState";
 import { screenUrl } from "./tunnel";
 
 // Accessors over the catalogue: the label is read when it is shown, so a
@@ -119,14 +122,9 @@ export function ScreenViewer() {
   // does. Defence in depth: the server stays authoritative.
   const ended = useSyncExternalStore(subscribeSessionEnd, isSessionEnded, isSessionEnded);
 
-  const session = useQuery({
-    queryKey: ["remote-sessions", sessionId],
-    queryFn: () => api.getRemoteSession(sessionId as string),
-    enabled: sessionId != null,
-  });
-  const devices = useQuery({ queryKey: ["devices"], queryFn: () => api.listDevices() });
-  const device = devices.data?.items.find((item) => item.id === session.data?.device_id);
-  const deviceName = device?.hostname ?? device?.fqdn ?? null;
+  const { session, device, deviceName } = useSessionDevice(sessionId);
+  // The tab says which machine: "<device> · Remote sessions · Novieri RMM".
+  useRecordTitle(deviceName ?? undefined);
 
   const stop = useMutation({
     mutationFn: () => api.stopRemoteSession(sessionId as string),
@@ -363,9 +361,19 @@ export function ScreenViewer() {
 
   return (
     <>
-      <PageHead
+      {/* THE RECORD HEAD (redesign plan, Receta F; O3 3.6): back to the
+          sessions, the machine, the session's state, its client, and End
+          session as the action, which still asks first. The canvas below is
+          unchanged. */}
+      <DetailHead
+        back={{ to: "/remote", label: t("remote.screen.back") }}
         title={deviceName ?? t("remote.screen.titleFallback")}
-        description={t("remote.screen.description")}
+        status={
+          session.data
+            ? { kind: sessionKind(session.data), label: humaniseEnum(session.data.state, "RemoteSessionState") }
+            : undefined
+        }
+        context={<ClientContext clientId={device?.client_id ?? null} />}
         actions={
           <Btn
             label={stop.isPending ? t("remote.screen.ending") : t("remote.screen.end")}

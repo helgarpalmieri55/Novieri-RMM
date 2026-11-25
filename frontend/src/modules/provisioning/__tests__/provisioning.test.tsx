@@ -219,7 +219,7 @@ describe("ProvisioningRunsPage", () => {
     expect(within(row as HTMLElement).getByText("Awaiting enrollment")).toBeInTheDocument();
   });
 
-  it("hides the Provision control when the caller lacks provisioning.run", async () => {
+  it("hides the Build a computer control when the caller lacks provisioning.run", async () => {
     api.me = vi.fn().mockResolvedValue({
       ...ME,
       permissions: ME.permissions.filter((p) => p !== "provisioning.run"),
@@ -227,7 +227,7 @@ describe("ProvisioningRunsPage", () => {
     renderWithProviders(<ProvisioningRunsPage />);
 
     await screen.findByText("run1");
-    expect(screen.queryByRole("button", { name: "Provision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Build a computer" })).not.toBeInTheDocument();
   });
 
   // THE THREE STATES A MOCK NEVER HAS — mirrors DevicesPage.test.tsx.
@@ -247,7 +247,8 @@ describe("ProvisioningRunsPage", () => {
   it("says there are no runs when there genuinely are none", async () => {
     api.listProvisionRuns = vi.fn().mockResolvedValue([]);
     renderWithProviders(<ProvisioningRunsPage />);
-    expect(await screen.findByText("No provisioning runs yet.")).toBeInTheDocument();
+    // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
+    expect(await screen.findByText("No computer has been built yet.")).toBeInTheDocument();
   });
 });
 
@@ -408,10 +409,10 @@ describe("provisioning state vocabulary", () => {
 });
 
 // --------------------------------------------------------------------------
-// The "Provision a device" modal — the form kernel
+// The "Build a computer" modal (once "Provision a device") — the form kernel
 // --------------------------------------------------------------------------
 
-describe("the Provision a device modal", () => {
+describe("the Build a computer modal", () => {
   // Auditor A (MEDIUM): "'Provision a device' is the same shared modal —
   // fourth confirmation": `{"form":false,...}`, no `required` on either
   // control, and a Start disabled until a profile was picked that never said
@@ -434,13 +435,27 @@ describe("the Provision a device modal", () => {
   async function openDialog() {
     const user = userEvent.setup();
     renderWithProviders(<ProvisioningRunsPage />);
-    await user.click(await screen.findByRole("button", { name: "Provision" }));
+    await user.click(await screen.findByRole("button", { name: "Build a computer" }));
     return user;
+  }
+
+  /**
+   * The cycle-8 confirmation. It names the act as the button and the form do
+   * (fix round 2: one name for one act), so it is the second dialog of that
+   * name, drawn over the form's.
+   */
+  async function confirmation(): Promise<HTMLElement> {
+    let dialogs: HTMLElement[] = [];
+    await waitFor(() => {
+      dialogs = screen.getAllByRole("dialog", { name: "Build a computer" });
+      expect(dialogs).toHaveLength(2);
+    });
+    return dialogs[1] as HTMLElement;
   }
 
   /** Get past the cycle-8 confirmation, which every start now goes through. */
   async function confirmStart(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(await screen.findByRole("button", { name: "Start build" }));
+    await user.click(within(await confirmation()).getByRole("button", { name: "Build a computer" }));
   }
 
   it("names the unpicked Profile on submit rather than leaving Start disabled", async () => {
@@ -525,8 +540,9 @@ describe("the Provision a device modal", () => {
     await pickEntity(user, "Profile", /standard-workstation/);
     await user.click(screen.getByRole("button", { name: "Start" }));
 
-    const confirm = await screen.findByRole("dialog", { name: "Start provisioning run" });
+    const confirm = await confirmation();
     expect(within(confirm).getByText("standard-workstation")).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Build a computer" })).toBeInTheDocument();
     expect(within(confirm).getByText(/replaces the endpoint's disk contents/)).toBeInTheDocument();
     expect(api.startProvisionRun).not.toHaveBeenCalled();
 
@@ -570,7 +586,7 @@ describe("the Provision a device modal", () => {
     await screen.findByRole("alert");
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(screen.getByRole("button", { name: "Provision" }));
+    await user.click(screen.getByRole("button", { name: "Build a computer" }));
 
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
@@ -699,7 +715,8 @@ describe("provisioning failure paths say what went wrong", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -784,20 +801,46 @@ describe("the profile editor opens on the profile being edited", () => {
   });
 
   it("saves the profile's own domain and enabled flag, not the defaults of a blank form", async () => {
-    // The consequence, asserted on the wire: an operator who opens Edit and
-    // presses Save must not silently strip `domain_join` or flip `enabled`.
+    // The consequence, asserted on the wire: an operator who opens Edit,
+    // changes one field and presses Save must not silently strip
+    // `domain_join` or flip `enabled`. (A Save with nothing changed sends
+    // nothing at all: general ruling 13, the next test.)
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
     await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "standard-workstation-v2");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(api.updateProvisionProfile).toHaveBeenCalled());
-    const [, sent] = (api.updateProvisionProfile as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [id, sent] = (api.updateProvisionProfile as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(id).toBe("profile1");
+    expect(sent.name).toBe("standard-workstation-v2");
+    expect(sent.image_id).toBe("image1");
     expect(sent.enabled).toBe(false);
     expect(sent.post_config).toEqual({
       domain_join: { domain: "corp.local", username: "svc-join" },
     });
+    expect(sent.target_scope).toEqual({});
+    expect(Object.keys(sent).sort()).toEqual(["enabled", "image_id", "name", "post_config", "target_scope"]);
+  });
+
+  // GENERAL RULING 13: no write without a change. A PUT with nothing in it
+  // would still write an audit entry saying the profile was edited.
+  it("sends nothing when Save is pressed on an untouched profile, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ProfilesPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit profile" });
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit profile" })).not.toBeInTheDocument());
+    expect(api.updateProvisionProfile).not.toHaveBeenCalled();
   });
 
   it("opens New profile empty even after an existing profile was edited", async () => {
@@ -926,7 +969,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     const create = screen.getByRole("button", { name: "Create" });
     expect(create).not.toBeDisabled();
     await user.click(create);
@@ -939,7 +983,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard");
     await user.clear(screen.getByLabelText("Kind"));
     await user.click(screen.getByRole("button", { name: "Create" }));
@@ -953,7 +998,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard{Enter}");
 
     await waitFor(() =>
@@ -1121,8 +1167,9 @@ describe("every provisioning tile opens the rows it counted", () => {
   it("distinguishes a filter that matched nothing from having no runs", async () => {
     renderWithProviders(<ProvisioningRunsPage />, "/provisioning?state=enrolled");
 
-    expect(await screen.findByText("No run matches that filter.")).toBeInTheDocument();
-    expect(screen.queryByText("No provisioning runs yet.")).not.toBeInTheDocument();
+    // The list kit's filtered-empty sentence (redesign plan, Receta L, 3).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.queryByText("No computer has been built yet.")).not.toBeInTheDocument();
   });
 
   it("links every images tile at a route the application has", async () => {

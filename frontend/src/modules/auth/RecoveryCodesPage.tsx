@@ -50,7 +50,7 @@ export function RecoveryCodesPage() {
           {t("auth.codes.none")}
         </p>
         <div className="form-actions">
-          <Btn variant="primary" icon="arrow-right" label={t("auth.codes.continue")} onClick={() => enterConsole(next)} />
+          <Btn wide variant="primary" icon="arrow-right" label={t("auth.codes.continue")} onClick={() => enterConsole(next)} />
         </div>
       </AuthCard>
     );
@@ -82,6 +82,7 @@ export function RecoveryCodesPage() {
       </label>
       <div className="form-actions">
         <Btn
+          wide
           variant="primary"
           icon="arrow-right"
           label={t("auth.codes.continue")}

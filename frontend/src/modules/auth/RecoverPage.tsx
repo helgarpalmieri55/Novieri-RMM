@@ -55,6 +55,9 @@ import type { RecoveryAccept } from "./types";
 /** The accept's 409 while an emailed link set the password and none was sent (`flows.RECOVERY_NEEDS_PASSWORD`). */
 const NEEDS_PASSWORD = "recovery_needs_password";
 
+/** A sentence that leads a group of fields: `.field`'s own 16px below it. */
+const LEAD = { margin: "0 0 16px" } as const;
+
 export function RecoverPage() {
   const t = useT();
   const api = useApi();
@@ -89,6 +92,8 @@ export function RecoverPage() {
   async function recover(required: boolean) {
     if (inFlight.current) return;
     // Optional and left empty: only the token, and the password stays.
+    // Required and left empty: refused here with the rule it breaks, and the
+    // button stays on to say so (coordinator ruling 8a).
     const withPassword = required || password !== "" || again !== "";
     if (withPassword) {
       const problem = checkNewPassword(password, again);
@@ -153,16 +158,20 @@ export function RecoverPage() {
         {t("auth.recover.what")}
       </p>
       <Form onSubmit={() => void recover(required)}>
+        {/* The sentence heads the fields it is about, with a field's own space
+            below it: flush on the address label it read as the address's
+            caption (critique of 2026-11-25, P1). */}
         {password_required ? (
-          <p className="note" style={{ margin: 0 }}>
+          <p className="note" style={LEAD}>
             {t("auth.recover.newPassword")}
           </p>
         ) : raced ? null : (
-          <p className="note" style={{ margin: 0 }}>
+          <p className="note" style={LEAD}>
             {t("auth.recover.optionalPassword")}
           </p>
         )}
-        {/* For the password manager: the account the new password belongs to. */}
+        {/* For the password manager: the account the new password belongs to.
+            Read-only, so drawn on the sunken surface. */}
         <Field label={t("auth.common.email")}>
           <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
         </Field>
@@ -170,11 +179,12 @@ export function RecoverPage() {
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant="primary"
             icon="key"
             label={busy ? t("auth.common.working") : t("auth.recover.submit")}
-            disabled={busy || (required && (!password || !again))}
+            disabled={busy}
           />
         </div>
       </Form>

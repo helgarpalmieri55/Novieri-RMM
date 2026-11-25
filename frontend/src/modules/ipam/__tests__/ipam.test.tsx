@@ -26,6 +26,9 @@ import type {
   UtilizationOut,
 } from "../types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 // Component tests against RENDERED OUTPUT. The auth-backed API client is mocked
 // so nothing here touches fetch — mirrors modules/health/__tests__/health.test.tsx.
 //
@@ -657,15 +660,17 @@ describe("the drift page", () => {
     expect(driftCard).toHaveAttribute("href", "/ipam/drift");
     expect(await within(driftCard).findByText("2")).toBeInTheDocument();
 
-    const dormantCard = screen
-      .getByText(/Cannot currently be verified\./)
-      .closest("a") as HTMLElement;
+    // A card draws its line once its own list has answered (coordinator's
+    // ruling 10a), so each is awaited.
+    const dormantCard = (
+      await screen.findByText(/Cannot currently be verified\./)
+    ).closest("a") as HTMLElement;
     expect(dormantCard).toHaveAttribute("href", "/ipam/drift?class=dormant");
     expect(await within(dormantCard).findByText("3")).toBeInTheDocument();
 
-    const orphanCard = screen
-      .getByText(/Observed addresses inside no registered subnet\./)
-      .closest("a") as HTMLElement;
+    const orphanCard = (
+      await screen.findByText(/Observed addresses inside no registered subnet\./)
+    ).closest("a") as HTMLElement;
     expect(orphanCard).toHaveAttribute("href", "/ipam/drift?class=orphans");
     expect(await within(orphanCard).findByText("24")).toBeInTheDocument();
 
@@ -692,10 +697,11 @@ describe("the drift page", () => {
     const mismatchRow = screen.getByText("10.4.7.10").closest("tr") as HTMLElement;
     const remedyOf = (row: HTMLElement, pillLabel: string) =>
       within(row).getByText(pillLabel).closest("[title]")?.getAttribute("title") ?? "";
-    expect(remedyOf(conflictRow, "Conflict")).toMatch(/operational fix first/i);
-    expect(remedyOf(mismatchRow, "MAC mismatch")).toMatch(/documentation correction/i);
+    // The copy carries its emphasis in plain words now (no typed capitals, DESIGN.md).
+    expect(remedyOf(conflictRow, "Conflict")).toMatch(/^First, an operational fix:/);
+    expect(remedyOf(mismatchRow, "MAC mismatch")).toMatch(/correction to the documentation/i);
     // The two must not carry the same instruction.
-    expect(remedyOf(mismatchRow, "MAC mismatch")).not.toMatch(/operational fix first/i);
+    expect(remedyOf(mismatchRow, "MAC mismatch")).not.toMatch(/operational fix/i);
   });
 
   it("shows the evidence for each finding as facts, not as JSON", async () => {
@@ -762,7 +768,7 @@ describe("the drift page", () => {
     stubDrift([], [drift({ id: "c", drift_class: "dormant", address: "10.4.7.99" })], []);
     renderWithProviders(<DriftPage />);
 
-    await user.click(await screen.findByRole("button", { name: /^Dormant \(1\)$/ }));
+    await user.click(await screen.findByRole("button", { name: /^Dormant\s*1$/ }));
     expect(await screen.findByText("10.4.7.99")).toBeInTheDocument();
     expect(screen.getByText(/switched-off laptop/i)).toBeInTheDocument();
   });
@@ -788,9 +794,10 @@ describe("the drift page", () => {
     const driftCard = (await screen.findByText(/Unresolved findings\./)).closest(
       "a",
     ) as HTMLElement;
-    expect(within(driftCard).getByText("0")).toBeInTheDocument();
+    // Counted once the drift list answered (n/a until then, never a zero nobody measured).
+    expect(await within(driftCard).findByText("0")).toBeInTheDocument();
 
-    await user.click(await screen.findByRole("button", { name: /^Dormant \(1\)$/ }));
+    await user.click(await screen.findByRole("button", { name: /^Dormant\s*1$/ }));
     const row = (await screen.findByText("10.4.7.99")).closest("tr") as HTMLElement;
     // WHY it cannot be verified — which is the difference between "we cannot
     // see it" and "it is wrong".
@@ -809,7 +816,7 @@ describe("the drift page", () => {
     ]);
     renderWithProviders(<DriftPage />);
 
-    await user.click(await screen.findByRole("button", { name: /^Orphans \(24\)$/ }));
+    await user.click(await screen.findByRole("button", { name: /^Orphans\s*24$/ }));
     expect(await screen.findByText("10.7.3.0/24")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Register this subnet" })).toHaveAttribute(
       "href",
@@ -1500,7 +1507,8 @@ describe("the IPAM strip is announced as the navigation it is", () => {
     stubApi({});
     renderWithProviders(<SubnetTreePage />);
 
-    const heading = await screen.findByRole("heading", { name: "IP address management" });
+    // The h1 is the rail's label (coordinator's ruling 1).
+    const heading = await screen.findByRole("heading", { name: "IP addresses" });
     const nav = screen.getByRole("navigation", { name: "IPAM" });
     // `DOCUMENT_POSITION_FOLLOWING` on the h1 => the nav comes after it.
     expect(heading.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1527,7 +1535,7 @@ describe("registering a subnet", () => {
     renderWithProviders(<SubnetTreePage />);
     // The form lives in the dialog the head's primary action opens (v3 draws
     // "New subnet" there); the fields and the button are what they were.
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const register = await screen.findByRole("button", { name: "Register" });
     return { user, register };
   }

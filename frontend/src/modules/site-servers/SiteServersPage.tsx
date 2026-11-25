@@ -26,9 +26,15 @@
 // site server. Neither is served: there is no per-server sweep aggregate (a
 // sweep run belongs to a subnet, in IPAM) and the list is of servers, not of
 // segments. Both are OMITTED rather than faked.
+//
+// ON THE LIST KIT (redesign plan, Task 9, 4.9; Receta L): the state filter as
+// chips with the address it always had (`?state=`), the Client chip
+// (`?client=`, which narrows the list's READ, decision D6), "Showing x of y",
+// an empty list that says its cause, and Promote device from `?new=promote`
+// (decision D8). Promoting stays a person's act, RBAC-checked and audited on
+// the server: a site server is the only originator of a push (invariant 2a(a)).
 
-import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
 
 import { useT } from "../../i18n/context";
 
@@ -41,26 +47,56 @@ import {
 import { SiteServerList } from "./SiteServerList";
 import { PromoteDialog } from "./PromoteDialog";
 import { SiteServerPrerequisites } from "./SiteServerPrerequisites";
-import { EmptyState } from "../../components/emptystate";
 import { Dialog } from "../../components/ui";
-import { Btn, FilterBar, PageHead, Panel, StatCard, StatsGrid } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  withClient,
+} from "../../shell/components";
 
 export function SiteServersPage() {
   const t = useT();
   const { manage } = useSiteServerPermissions();
-  const { data, isLoading, error } = useSiteServers();
-  const [promoteOpen, setPromoteOpen] = useState(false);
   // THE FILTER IS IN THE URL because the "Enabled" tile links into it. A
   // demoted-but-not-deleted server is the distinction this whole list exists
   // to make (see SiteServerList), so "Enabled 1 of 2" is a number an operator
   // will want to click, and it has to land on the one row it counted.
-  const [params, setParams] = useSearchParams();
-  const stateFilter = params.get("state") ?? "";
+  const filters = useUrlFilters(["state", "client"] as const);
+  const stateFilter = filters.values.state;
+  // `isPending`, not `isLoading` (general ruling 10): while the Client chip's
+  // client is not decided the read is disabled, and `SiteServerList` would
+  // draw "No site servers" before anything was read.
+  const { data, isPending, error } = useSiteServers({}, { chip: filters.values.client });
+  const promoteDialog = useNewParam("promote");
+  // ONE GUARD FOR THE FORM IN `?new=promote` (general ruling 3), fed by the
+  // form; and a failure of the last attempt is not this opening's (general
+  // rulings 4 and 7): the mutation lives on the page, so it is reset each time
+  // the dialog opens, however it was opened.
+  const [promoteDirty, setPromoteDirty] = useState(false);
+  const { guard: promoteGuard, release: releasePromote } = useUnsavedGuard(promoteDirty, { search: ["new"] });
 
   const devices = usePromotableDevices();
   const promote = usePromoteSiteServerMutation();
+  const { reset: resetPromote } = promote;
+  useEffect(() => {
+    if (promoteDialog.open) resetPromote();
+  }, [promoteDialog.open, resetPromote]);
 
   const servers = data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !data;
   const enabledCount = servers.filter((server) => server.enabled).length;
   const segmentCount = new Set(servers.flatMap((server) => server.segments)).size;
   const visible =
@@ -69,11 +105,21 @@ export function SiteServersPage() {
       : stateFilter === "disabled"
         ? servers.filter((server) => !server.enabled)
         : servers;
-  // "No site servers. Promote a device to add one." is the WRONG sentence for
-  // a filter that matched none of several: it says the estate is empty when
-  // it is not. `SiteServerList` cannot tell the two apart (it takes an array),
-  // so the page that owns the filter answers for it.
-  const filteredToNothing = stateFilter !== "" && servers.length > 0 && visible.length === 0;
+  // "No site servers yet" is the WRONG sentence for a filter that matched none
+  // of several: it says the estate is empty when it is not. And the RIGHT one
+  // for an estate (or the chip's client) with none at all, whatever the
+  // filter: there is nothing to clear a filter towards.
+  const filteredToNothing = filters.active && servers.length > 0 && visible.length === 0;
+  const promoteButton = (small: boolean) =>
+    manage ? (
+      <Btn
+        label={t("siteServers.page.promote")}
+        icon="plus"
+        variant={small ? "secondary" : "primary"}
+        small={small}
+        onClick={promoteDialog.start}
+      />
+    ) : undefined;
 
   return (
     <section>
@@ -85,14 +131,7 @@ export function SiteServersPage() {
           // gates nothing. Every route carries its own `require_permission` and
           // the server re-checks on every request (invariant #6). Hiding the
           // button saves an operator a 403; it prevents nothing.
-          manage ? (
-            <Btn
-              label={t("siteServers.page.promote")}
-              icon="plus"
-              variant="primary"
-              onClick={() => setPromoteOpen(true)}
-            />
-          ) : undefined
+          promoteButton(false)
         }
       />
 
@@ -109,8 +148,9 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.registered")}
           value={String(servers.length)}
+          pending={noData}
           icon="server"
-          to="/site-servers"
+          to={withClient("/site-servers", filters.values.client)}
           tone="neutral"
           zeroLabel={t("siteServers.page.registeredZero")}
           foot={<span>{t("siteServers.page.registeredFoot")}</span>}
@@ -118,8 +158,9 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.enabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="check"
-          to="/site-servers?state=enabled"
+          to={withClient("/site-servers?state=enabled", filters.values.client)}
           tone="green"
           zeroLabel={
             servers.length === 0
@@ -141,8 +182,9 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.segments")}
           value={String(segmentCount)}
+          pending={noData}
           icon="network"
-          to="/site-servers"
+          to={withClient("/site-servers", filters.values.client)}
           tone="blue"
           zeroLabel={t("siteServers.page.segmentsZero")}
           /* WHAT IT DOES NOT COUNT, because the number invites the opposite
@@ -154,24 +196,27 @@ export function SiteServersPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              // An empty value is ABSENT, not `?state=`.
-              if (event.target.value === "") next.delete("state");
-              else next.set("state", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("siteServers.page.filterLabel")}
-          >
-            <option value="">{t("siteServers.page.filterAll")}</option>
-            <option value="enabled">{t("siteServers.page.filterEnabled")}</option>
-            <option value="disabled">{t("siteServers.page.filterDisabled")}</option>
-          </select>
-        </FilterBar>
+        <ListToolbar
+          chips={
+            <>
+              {/* No counts on the chips (redesign plan, Task 9, 4.9): the
+                  tiles above carry them. */}
+              <FilterChips
+                label={t("siteServers.page.filterLabel")}
+                options={[
+                  { value: "", label: t("siteServers.page.filterAll") },
+                  { value: "enabled", label: t("siteServers.page.filterEnabled") },
+                  { value: "disabled", label: t("siteServers.page.filterDisabled") },
+                ]}
+                value={stateFilter}
+                onChange={(value) => filters.set("state", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={data ? <ShowingCount shown={visible.length} total={servers.length} /> : null}
+        />
         {/* WHAT THE ROLES COLUMN CANNOT SELL. Auditor A (HIGH): "Internal spec
             reference shipped in production UI copy" -- the limitation is still
             disclosed, in words a buyer can act on, beside the Roles column it
@@ -179,34 +224,46 @@ export function SiteServersPage() {
         <p className="note" style={{ padding: "12px 18px 0", margin: 0 }}>
           {t("siteServers.page.rolesNote")}
         </p>
-        {filteredToNothing ? (
-          <EmptyState
-            icon="filter"
-            title={t("siteServers.page.noMatchTitle")}
-            body={t("siteServers.page.noMatchBody")}
-          />
+        {data && visible.length === 0 ? (
+          filteredToNothing ? (
+            <ListEmpty filtered onClear={filters.clear} nothingYet="" />
+          ) : (
+            <div data-testid="no-site-servers">
+              <ListEmpty
+                filtered={false}
+                onClear={filters.clear}
+                nothingYet={t("siteServers.page.emptyYet")}
+                icon="server"
+                action={promoteButton(true)}
+              />
+            </div>
+          )
         ) : (
-          <SiteServerList
-            servers={data && stateFilter ? visible : data}
-            isLoading={isLoading}
-            error={error}
-          />
+          <SiteServerList servers={data ? visible : undefined} isLoading={isPending} error={error} />
         )}
       </Panel>
 
+      {promoteGuard}
       {manage ? (
         <Dialog
-          open={promoteOpen}
-          onClose={() => setPromoteOpen(false)}
+          open={promoteDialog.open}
+          onClose={promoteDialog.close}
           title={t("siteServers.page.promoteTitle")}
         >
           <PromoteDialog
             devices={devices.data?.items ?? []}
             promotedDeviceIds={servers.map((server) => server.device_id)}
             error={promote.error}
-            onCancel={() => setPromoteOpen(false)}
+            onCancel={promoteDialog.close}
+            onDirty={setPromoteDirty}
             onSubmit={(body) =>
-              promote.mutate(body, { onSuccess: () => setPromoteOpen(false) })
+              promote.mutate(body, {
+                onSuccess: () => {
+                  // Saved: the close that follows is not a change being dropped.
+                  releasePromote();
+                  promoteDialog.close();
+                },
+              })
             }
           />
         </Dialog>

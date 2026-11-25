@@ -14,14 +14,15 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Credential, type Me, type MeClient } from "../../lib/api";
 import { ClientNotChosen } from "../../lib/clientSelection";
-import { NO_DATE } from "../../lib/datetime";
+import { recordingNarrowing } from "../../test/narrowing";
+import { renderPage as renderKitPage } from "../../test/renderPage";
 import { CredentialsPage } from "./CredentialsPage";
 
 const mockUseApi = vi.fn();
@@ -119,6 +120,9 @@ beforeEach(() => {
   mockUseApi.mockReset();
 });
 
+// THE HEAD'S "New credential" (redesign Task 11, 6.9): an empty vault's list
+// offers the same action in its empty state (Receta L, 3), so the first of
+// the two is the head's.
 describe("CredentialsPage", () => {
   it("says it is loading rather than showing an empty vault", async () => {
     renderPage({ listCredentials: () => new Promise<never>(() => {}) });
@@ -152,8 +156,9 @@ describe("CredentialsPage", () => {
     const stats = document.querySelectorAll(".stat-card");
     const values = [...stats].map((card) => card.querySelector(".stat-value")?.textContent);
     // Stored credentials: 2. Never checked out: 1 (only the first has no
-    // last_used_at). Credential types: 2 distinct (windows_admin, ssh_key).
-    expect(values).toEqual(["2", "1", "2"]);
+    // last_used_at). Checked out: 1 (the fourth tile, redesign Task 11, 6.9).
+    // Credential types: 2 distinct (windows_admin, ssh_key).
+    expect(values).toEqual(["2", "1", "1", "2"]);
   });
 
   // "All tiles and all numbers or KPIs need to be clickable and direct the user
@@ -165,7 +170,8 @@ describe("CredentialsPage", () => {
     renderPage({ listCredentials: () => Promise.resolve([credential()]) });
     await screen.findByText("Domain support admin");
 
-    expectTileLinks(["/credentials", "/credentials?state=never-used", "/credentials"]);
+    // Four tiles (redesign Task 11, 6.9): the fourth opens the checked-out rows.
+    expectTileLinks(["/credentials", "/credentials?state=never-used", "/credentials?state=used", "/credentials"]);
   });
 
   it("opens the never-checked-out rows at the destination that tile names", async () => {
@@ -270,7 +276,7 @@ describe("CredentialsPage opened from Push install", () => {
 
   it("ignores a type it does not know", async () => {
     renderPage({ listCredentials: () => Promise.resolve([]) }, "/credentials?new=root_password");
-    await screen.findByRole("button", { name: /new credential/i });
+    await screen.findAllByRole("button", { name: /new credential/i });
     expect(screen.queryByRole("dialog", { name: "New credential" })).toBeNull();
   });
 });
@@ -284,7 +290,7 @@ describe("CredentialsPage's New credential form", () => {
       createCredential,
       ...overrides,
     });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
     return { user, createCredential, ...rendered };
   }
 
@@ -474,14 +480,15 @@ describe("CredentialsPage — last used", () => {
   // BREAKS AGAINST: `new Date(null).toLocaleString()` -- "Invalid Date" --
   // and against the bespoke word "never" this column used, which no other
   // absent date in the product uses.
-  it("renders a credential never checked out as NO_DATE, never Invalid Date", async () => {
+  it("renders a credential never checked out as the absent mark, never Invalid Date", async () => {
     renderPage({
       me: vi.fn().mockResolvedValue(ME_ZONED),
       listCredentials: () => Promise.resolve([credential({ last_used_at: null })]),
     });
 
     await screen.findByText("Domain support admin");
-    expect(screen.getByText(NO_DATE)).toBeInTheDocument();
+    // The cell is a NoValue: the kit's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(screen.getByText("n/a")).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });
@@ -506,7 +513,7 @@ describe("CredentialsPage — a refused delete", () => {
 
     await waitFor(() => expect(deleteCredential).toHaveBeenCalled());
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/That credential was not deleted — it is still stored/);
+    expect(alert).toHaveTextContent(/That credential was not deleted: it is still stored/);
     expect(alert).toHaveTextContent(/That service is unavailable right now/);
   });
 
@@ -651,7 +658,7 @@ describe("CredentialsPage — the vault form is not a login form", () => {
   it("tells password managers to keep out of the Secret field", async () => {
     const user = userEvent.setup();
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential: vi.fn() });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     const secret = screen.getByLabelText("Secret");
     expect(secret).toHaveAttribute("type", "password");
@@ -667,7 +674,7 @@ describe("CredentialsPage — the vault form is not a login form", () => {
     // a manager treat the pair as a login.
     const user = userEvent.setup();
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential: vi.fn() });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     expect(screen.getByLabelText("Name")).toHaveAttribute("autocomplete", "off");
   });
@@ -701,20 +708,20 @@ describe("CredentialsPage — credential types as a person reads them", () => {
   it("says what the selected type means for how its secret is used", async () => {
     const user = userEvent.setup();
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential: vi.fn() });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     expect(screen.getByText(/checked out for unattended remote-control sessions/i)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Type"), "domain_join");
 
-    expect(screen.getByText(/used by provisioning — not by interactive remote sessions/i)).toBeInTheDocument();
+    expect(screen.getByText(/used by provisioning, not by interactive remote sessions/i)).toBeInTheDocument();
   });
 
   it("still submits the wire value, not the label", async () => {
     const user = userEvent.setup();
     const createCredential = vi.fn().mockResolvedValue(credential());
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     await user.selectOptions(screen.getByLabelText("Type"), "ssh_key");
     await user.type(screen.getByLabelText("Name"), "Linux support key");
@@ -738,7 +745,7 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     const user = userEvent.setup();
     const createCredential = vi.fn().mockResolvedValue(credential({ type: "push_install" }));
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
-    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+    await user.click((await screen.findAllByRole("button", { name: /new credential/i }))[0]!);
 
     await user.selectOptions(screen.getByLabelText("Type"), "push_install");
     await user.type(screen.getByLabelText("Name"), "Branch installer");
@@ -761,14 +768,15 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     await screen.findByText("Domain support admin");
 
     const cards = [...document.querySelectorAll(".stat-card")].map((card) => card.textContent);
-    expect(cards[2]).toMatch(/Types in use/);
+    // The fourth card since the Checked out tile (redesign Task 11, 6.9).
+    expect(cards[3]).toMatch(/Types in use/);
     // FIVE SINCE `windows_domain` (WinRM push, design §2.5); four since
     // `push_install` (`CLAUDE.md` invariant 2a, cycle B1). The number is
     // deliberately read off `CREDENTIAL_TYPES` on the card and asserted as a
     // literal here: a card that said "4" while the dropdown offered five is
     // the exact misstatement this test was written for.
-    expect(cards[2]).toMatch(/5 types available/);
-    expect(cards[2]).not.toMatch(/Credential types/);
+    expect(cards[3]).toMatch(/5 types available/);
+    expect(cards[3]).not.toMatch(/Credential types/);
   });
 
   // v3 draws a supporting line under every tile. Two of these three carried
@@ -790,7 +798,8 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     const cards = [...document.querySelectorAll(".stat-card")].map((card) => card.textContent);
     expect(cards[0]).toMatch(/1 checked out at least once/);
     expect(cards[1]).toMatch(/Stored, and never decrypted since/);
-    expect(cards[2]).toMatch(/5 types available/);
+    expect(cards[2]).toMatch(/Each one on the audit log/);
+    expect(cards[3]).toMatch(/5 types available/);
   });
 
   it("invents no supporting line for an empty vault", async () => {
@@ -917,7 +926,9 @@ describe("CredentialsPage — a Windows domain account", () => {
 
     await user.clear(account);
     await user.type(account, "CORP\\svc-push");
-    expect(within(dialog).queryByText(/Realm: CORP\b(?!\.)/)).toBeNull();
+    // "Realm: CORP" ends at a full stop now ("Realm: {realm}. Confirm…", no
+    // dash in the copy), so only a dot that carries on the name is excluded.
+    expect(within(dialog).queryByText(/Realm: CORP\b(?!\.\w)/)).toBeNull();
     // The old hint -- "each target's DNS domain" -- described the rule review
     // I1 removed. A NetBIOS account is now simply not accepted.
     expect(within(dialog).queryByText(/each target's DNS domain/i)).toBeNull();
@@ -1128,5 +1139,156 @@ describe("CredentialsPage — a revealed secret is in no cache", () => {
 
     expect(await screen.findByText("sup3r-s3cr3t-value")).toBeInTheDocument();
     await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("sup3r-s3cr3t-value"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The list kit (redesign Task 11, 6.9; Receta L; decision D23)
+// ---------------------------------------------------------------------------
+
+describe("CredentialsPage on the list kit", () => {
+  const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+  const ANDES_CLIENT: MeClient = { id: ANDES, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: [] };
+  const TWO = [credential(), credential({ id: "2", name: "Linux support key", type: "ssh_key", last_used_at: "2026-08-15T09:00:00Z" })];
+
+  function consoleApi(overrides: Partial<ApiClient> = {}): ApiClient {
+    const api: Record<string, unknown> = {
+      forClient: (): unknown => api,
+      me: vi.fn().mockResolvedValue(ME),
+      listCredentials: vi.fn().mockResolvedValue(TWO),
+      listPushCredentialScopes: vi.fn().mockResolvedValue([]),
+      ...overrides,
+    };
+    return api as unknown as ApiClient;
+  }
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    mockUseApi.mockReturnValue(consoleApi());
+    const { router } = renderKitPage("/credentials?state=never-used", <CredentialsPage />, "/credentials");
+    expect(await screen.findByText("Domain support admin")).toBeInTheDocument();
+    const states = screen.getByRole("group", { name: "State" });
+    expect(within(states).getByRole("button", { name: /Never checked out/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Linux support key")).toBeNull();
+    await userEvent.click(within(states).getByRole("button", { name: /^Checked out/ }));
+    expect(router.state.location.search).toBe("?state=used");
+    expect(await screen.findByText("Linux support key")).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(consoleApi({ listCredentials: vi.fn().mockResolvedValue([credential()]) }));
+    renderKitPage("/credentials?state=used", <CredentialsPage />, "/credentials");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("New credential puts ?new=credential in the URL and opens with no type chosen", async () => {
+    mockUseApi.mockReturnValue(consoleApi());
+    const { router } = renderKitPage("/credentials", <CredentialsPage />, "/credentials");
+    await userEvent.click(await screen.findByRole("button", { name: "New credential" }));
+    expect(router.state.location.search).toBe("?new=credential");
+    const dialog = await screen.findByRole("dialog", { name: "New credential" });
+    // The form's own default, as when the button opened it before.
+    expect(within(dialog).getByLabelText("Type")).toHaveValue("windows_admin");
+  });
+
+  // FIX ROUND 1, M1: `?new=credential` is this wave's own link, gated as the
+  // button is (the courtesy every other `?new=` dialog has); a push page's
+  // `?new=<type>` still opens for whoever follows it, as on the base (D23).
+  it("opens ?new=credential only for someone who may store one, and ?new=<type> as before", async () => {
+    mockUseApi.mockReturnValue(consoleApi({ me: vi.fn().mockResolvedValue({ permissions: [], org_id: "o1" } as unknown as Me) }));
+    const { unmount } = renderKitPage("/credentials?new=credential", <CredentialsPage />, "/credentials");
+    await screen.findByText("Domain support admin");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByRole("dialog", { name: "New credential" })).toBeNull();
+    unmount();
+    renderKitPage("/credentials?new=push_install", <CredentialsPage />, "/credentials");
+    expect(await screen.findByRole("dialog", { name: "New credential" })).toBeInTheDocument();
+  });
+
+  it("asks before closing New credential with something typed, and opens empty again", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(consoleApi());
+    const { router } = renderKitPage("/credentials", <CredentialsPage />, "/credentials");
+    await user.click(await screen.findByRole("button", { name: "New credential" }));
+    const dialog = await screen.findByRole("dialog", { name: "New credential" });
+    await user.type(within(dialog).getByLabelText("Name"), "Branch admin");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await act(() => router.navigate("/credentials?new=credential"));
+    const again = await screen.findByRole("dialog", { name: "New credential" });
+    expect(within(again).getByLabelText("Name")).toHaveValue("");
+  });
+
+  describe("behind the Client chip (decisions D6, D17)", () => {
+    beforeEach(() => selectClient(null, [SCOPE_INTERNAL, ANDES_CLIENT]));
+
+    it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+      // What the page reads un-narrowed, legitimately: the push install
+      // ranges the prerequisites panel checks (`CredentialPrerequisites`,
+      // configuration across clients) and the organisation's time zone the
+      // "last used" column is written in (`useOrgZone`). Not the list.
+      const narrowing = recordingNarrowing(consoleApi({ getCurrentOrg: vi.fn().mockResolvedValue({ settings: { timezone: "UTC" } }) }), {
+        console: ["listPushCredentialScopes", "getCurrentOrg"],
+      });
+      mockUseApi.mockReturnValue(narrowing.api);
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      expect(await screen.findByRole("table", { name: "Credential profiles" })).toBeInTheDocument();
+      expect(narrowing.client(ANDES).listCredentials).toHaveBeenCalledWith();
+      expect(narrowing.unnarrowed).toEqual([]);
+    });
+
+    it("draws no empty state while the chip's client is not yet known (general ruling 10)", async () => {
+      mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+      const api = consoleApi({ me: vi.fn(() => new Promise<Me>(() => {})), listCredentials: vi.fn().mockResolvedValue([]) });
+      mockUseApi.mockReturnValue(api);
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      expect(await screen.findByText("Loading…")).toBeInTheDocument();
+      // Long enough for a read that was not waiting to have answered and drawn its empty list.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(api.listCredentials).not.toHaveBeenCalled();
+      expect(screen.queryByText("No credentials stored.")).toBeNull();
+      expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+      expect(screen.getByText("Loading…")).toBeInTheDocument();
+    });
+
+    it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
+      mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+      mockUseApi.mockReturnValue(
+        consoleApi({ me: vi.fn(() => new Promise<Me>(() => {})), listCredentials: vi.fn().mockResolvedValue([]) }),
+      );
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      expect(await screen.findByText("Loading…")).toBeInTheDocument();
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+      expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+      // Not even "5 types available": a tile says nothing before its read answers.
+      expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+    });
+
+    it("draws no number and no claim on a tile when the list fails to load (ruling 10a)", async () => {
+      mockUseApi.mockReturnValue(consoleApi({ listCredentials: vi.fn().mockRejectedValue(new ApiError(503, "")) }));
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      // The list says the error; the tiles say nothing.
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+      expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+      expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+    });
+
+    it("leads each tile to exactly the rows it counted, the chip included", async () => {
+      mockUseApi.mockReturnValue(consoleApi());
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      await screen.findByText("Domain support admin");
+      expectTileLinks([
+        `/credentials?client=${ANDES}`,
+        `/credentials?state=never-used&client=${ANDES}`,
+        `/credentials?state=used&client=${ANDES}`,
+        `/credentials?client=${ANDES}`,
+      ]);
+    });
   });
 });

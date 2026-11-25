@@ -145,18 +145,18 @@ const LINK_URL = "https://consola.example/i/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 const PACKAGE = {
   release: RELEASES[0],
   channel: "gpo",
-  download_url: "https://consola.example/artifacts/its-agent-linux-amd64",
+  download_url: "https://consola.example/artifacts/novieri-agent-linux-amd64",
   download_expires_in_s: 900,
   sha256: SHA,
   staging: [
-    { title: "Descargar el artefacto", detail: "Descárgalo una vez, en el equipo del administrador.", command: "curl -fsSL -o its-agent https://consola.example/a" },
+    { title: "Descargar el artefacto", detail: "Descárgalo una vez, en el equipo del administrador.", command: "curl -fsSL -o novieri-agent https://consola.example/a" },
     { title: "Copiar al recurso compartido", detail: "Cópialo al recurso compartido SYSVOL.", command: "" },
   ],
-  install_command: "its-agent install --server consola.example",
-  enrol_command: "its-agent enroll --server consola.example --token-from-env ITS_ENROLL_TOKEN",
+  install_command: "novieri-agent install --server consola.example",
+  enrol_command: "novieri-agent enroll --server consola.example --token-from-env ITS_ENROLL_TOKEN",
   integrity: {
     sha256: SHA,
-    verify_command: `echo "${SHA}  its-agent" | sha256sum -c`,
+    verify_command: `echo "${SHA}  novieri-agent" | sha256sum -c`,
     verified_at_install: false,
     notes: ["El punto de distribución copia el archivo y lo ejecuta; no comprueba ningún resumen."],
   },
@@ -174,10 +174,10 @@ function stubApi(overrides: Record<string, unknown> = {}, permissions: string[] 
       release: RELEASES[0],
       token: "ENR-ficticio-de-un-solo-uso",
       token_expires_at: "2026-10-01T13:00:00Z",
-      download_url: "https://consola.example/artifacts/its-agent-linux-amd64",
+      download_url: "https://consola.example/artifacts/novieri-agent-linux-amd64",
       download_expires_in_s: 900,
       sha256: SHA,
-      command: "curl -fsSL https://consola.example/a -o its-agent && sudo ./its-agent enroll --token ENR-ficticio-de-un-solo-uso",
+      command: "curl -fsSL https://consola.example/a -o novieri-agent && sudo ./novieri-agent enroll --token ENR-ficticio-de-un-solo-uso",
     }),
     getAgentDeploymentPackage: vi.fn().mockResolvedValue(PACKAGE),
     mintAgentDeploymentToken: vi.fn().mockResolvedValue({
@@ -191,7 +191,7 @@ function stubApi(overrides: Record<string, unknown> = {}, permissions: string[] 
     getInstallLink: vi.fn().mockResolvedValue(LINK),
     saveInstallLink: vi.fn().mockResolvedValue({ ...LINK, url: null }),
     regenerateInstallLink: vi.fn().mockResolvedValue({ ...LINK, url: LINK_URL }),
-    downloadInstallLinkMsi: vi.fn().mockResolvedValue({ blob: new Blob(["msi"]), filename: "ITMS-Agent.msi", sha256: "9c".repeat(32) }),
+    downloadInstallLinkMsi: vi.fn().mockResolvedValue({ blob: new Blob(["msi"]), filename: "NovieriRMM-Agent.msi", sha256: "9c".repeat(32) }),
     getFleetVersions: vi.fn().mockResolvedValue(FLEET),
     listUpdateRollouts: vi.fn().mockResolvedValue([rollout(), rollout({ id: "r2", state: "paused", is_rollback: true, pause_reason: "failure_threshold", target_version: "1.8.1" })]),
     listUpdateTargets: vi.fn().mockResolvedValue(TARGETS),
@@ -217,7 +217,7 @@ function stubApi(overrides: Record<string, unknown> = {}, permissions: string[] 
     updateRolloutAction: vi.fn().mockResolvedValue(rollout()),
     closeUpdateRing: vi.fn().mockResolvedValue(rollout()),
     promoteAgentReleaseVersion: vi.fn().mockResolvedValue({ version: "1.8.1", channel: "stable", rows: 1 }),
-    deleteAgentReleaseVersion: vi.fn().mockResolvedValue({ version: "1.8.1", removed: 1, files_not_removed: ["its-agent-linux-amd64"] }),
+    deleteAgentReleaseVersion: vi.fn().mockResolvedValue({ version: "1.8.1", removed: 1, files_not_removed: ["novieri-agent-linux-amd64"] }),
     createAgentRelease: vi.fn(),
     uploadAgentReleaseArtifact: vi.fn(),
     setAgentReleaseSignature: vi.fn(),
@@ -282,13 +282,14 @@ describe("agent packages in Spanish", () => {
     stubApi();
     const { container } = renderPage();
     expect(await screen.findByRole("heading", { name: "Paquetes del agente" })).toBeInTheDocument();
-    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. Las versiones anteriores están plegadas más abajo.")).toBeInTheDocument();
+    // The older versions are a chip on the list's toolbar now (redesign Task 6, 1.11), and the subtitle says so.
+    expect(await screen.findByText("Versión 1.8.2, 3 paquetes. Las versiones anteriores se ven con su filtro.")).toBeInTheDocument();
     expect(screen.getAllByText(/Aún sin probar en un equipo Windows real/).length).toBeGreaterThan(0);
     expect(screen.getByText("No se ha subido ningún archivo")).toBeInTheDocument();
     await screen.findByText("3 agentes · última estable 1.8.2 · 2 pueden actualizarse");
     expectNoEnglish(container);
-    await user.click(screen.getByRole("button", { name: "Mostrar las versiones anteriores (1.8.2-rc1, 1.8.1)" }));
-    expect(screen.getByRole("button", { name: "Ocultar las versiones anteriores" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Con las versiones anteriores (1.8.2-rc1, 1.8.1)" }));
+    expect(screen.getByRole("button", { name: "La versión más reciente" })).toBeInTheDocument();
     expect(screen.getByText("5 paquetes en 3 plataformas")).toBeInTheDocument();
     expectNoEnglish(container);
   });
@@ -412,6 +413,8 @@ describe("agent packages in Spanish", () => {
     expect(await screen.findByText("Desactivado. Aún no se ha generado ningún enlace.")).toBeInTheDocument();
     expect(screen.getByText("Activa el enlace para descargar el MSI: los equipos se unen a través de él.")).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Aceptar equipos nuevos a través del enlace" }));
+    // Said on submit, not while typing (coordinator clarification 8a).
+    await user.click(screen.getByRole("button", { name: "Guardar el enlace de instalación" }));
     expect(await screen.findByText("Indica al menos una red antes de activar el enlace.")).toBeInTheDocument();
     expectNoEnglish(container);
     await user.type(screen.getByLabelText("Redes a las que responde el enlace"), "10.20.0.0/16");
@@ -606,7 +609,7 @@ describe("agent packages in Spanish", () => {
     const sigLinux = `${"L".repeat(86)}==`;
     const shaLinux = "1".repeat(64);
     const signatures =
-      `${shaLinux}  its-agent-linux-amd64  linux/amd64  ${sigLinux}\n` +
+      `${shaLinux}  novieri-agent-linux-amd64  linux/amd64  ${sigLinux}\n` +
       "una línea ilegible\n" +
       `${"2".repeat(64)}  a  windows/amd64  ${"W".repeat(86)}==\n` +
       `${"3".repeat(64)}  b  windows/amd64  ${"V".repeat(86)}==\n`;
@@ -634,8 +637,8 @@ describe("agent packages in Spanish", () => {
 
     await user.type(within(dialog).getByLabelText("Versión"), "v1.4");
     const files = [
-      new File(["x"], "its-agent-linux-amd64"),
-      new File(["x"], "its-agent-windows-amd64.exe"),
+      new File(["x"], "novieri-agent-linux-amd64"),
+      new File(["x"], "novieri-agent-windows-amd64.exe"),
       new File(["x"], "descarga (1)"),
       new File(["x"], "SHA256SUMS"),
       new File([signatures], "SIGNATURES"),
@@ -670,9 +673,9 @@ describe("agent packages in Spanish", () => {
     const user = userEvent.setup();
     const sig = `${"L".repeat(86)}==`;
     const signatures =
-      `${"1".repeat(64)}  its-agent-linux-amd64  linux/amd64  ${sig}\n` +
-      `${"2".repeat(64)}  its-agent-linux-arm64  linux/arm64  ${sig}\n` +
-      `${"3".repeat(64)}  its-agent-windows-amd64.exe  windows/amd64  ${sig}\n`;
+      `${"1".repeat(64)}  novieri-agent-linux-amd64  linux/amd64  ${sig}\n` +
+      `${"2".repeat(64)}  novieri-agent-linux-arm64  linux/arm64  ${sig}\n` +
+      `${"3".repeat(64)}  novieri-agent-windows-amd64.exe  windows/amd64  ${sig}\n`;
     const rows = new Map<string, AgentRelease>();
     stubApi({
       createAgentRelease: vi.fn().mockImplementation((body: { version: string; os: string; arch: string }) => {
@@ -691,9 +694,9 @@ describe("agent packages in Spanish", () => {
     const dialog = await screen.findByRole("dialog", { name: "Publicar una versión" });
     await user.type(within(dialog).getByLabelText("Versión"), "1.4.0");
     await user.upload(within(dialog).getByLabelText("Binarios del agente"), [
-      new File(["x"], "its-agent-linux-amd64"),
-      new File(["x"], "its-agent-linux-arm64"),
-      new File(["x"], "its-agent-windows-amd64.exe"),
+      new File(["x"], "novieri-agent-linux-amd64"),
+      new File(["x"], "novieri-agent-linux-arm64"),
+      new File(["x"], "novieri-agent-windows-amd64.exe"),
       new File([signatures], "SIGNATURES"),
     ]);
     await user.click(within(dialog).getByRole("button", { name: "Publicar" }));
@@ -709,7 +712,7 @@ describe("a live language switch on the agent packages page", () => {
   it("re-words a publish failure already on screen", async () => {
     const user = userEvent.setup();
     const sig = `${"L".repeat(86)}==`;
-    const signatures = `${"1".repeat(64)}  its-agent-linux-amd64  linux/amd64  ${sig}\nbasura\n`;
+    const signatures = `${"1".repeat(64)}  novieri-agent-linux-amd64  linux/amd64  ${sig}\nbasura\n`;
     stubApi({
       createAgentRelease: vi.fn().mockImplementation((body: { version: string; os: string; arch: string }) =>
         Promise.resolve(release({ id: "id-1", version: body.version, os: body.os, arch: body.arch, sha256: "", has_artifact: false })),
@@ -719,7 +722,7 @@ describe("a live language switch on the agent packages page", () => {
     renderUi(<PublishReleaseDialog onClose={() => {}} />);
     const dialog = await screen.findByRole("dialog", { name: "Publicar una versión" });
     await user.type(within(dialog).getByLabelText("Versión"), "1.4.0");
-    await user.upload(within(dialog).getByLabelText("Binarios del agente"), [new File(["x"], "its-agent-linux-amd64"), new File([signatures], "SIGNATURES")]);
+    await user.upload(within(dialog).getByLabelText("Binarios del agente"), [new File(["x"], "novieri-agent-linux-amd64"), new File([signatures], "SIGNATURES")]);
     expect(await within(dialog).findByText("La línea 2 del archivo de firmas no tiene el formato esperado.")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Publicar" }));
     expect(await within(dialog).findByText(/Este no es el archivo para el que se escribió el archivo de firmas/)).toBeInTheDocument();
@@ -747,8 +750,9 @@ describe("a live language switch on the agent packages page", () => {
     expect(screen.getAllByText("Rolled back").length).toBeGreaterThan(0);
     expect(screen.getByText("1.8.1 (rollback)")).toBeInTheDocument();
     // A folded version's button word follows too.
-    expect(screen.getByRole("button", { name: /Show older versions/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Show older versions/ }));
-    expect(screen.getByRole("button", { name: "Hide older versions" })).toBeInTheDocument();
+    // The older versions are a chip on `?older=1` (redesign Task 6, 1.11).
+    expect(screen.getByRole("button", { name: /With older versions/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /With older versions/ }));
+    expect(screen.getByRole("button", { name: /With older versions/ })).toHaveAttribute("aria-pressed", "true");
   });
 });

@@ -6,13 +6,13 @@ import { NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
 import { Trans } from "../../i18n/Trans";
 import { useT } from "../../i18n/context";
-import { useApi } from "../../lib/ApiContext";
 import {
   Btn,
   Pager,
   Panel,
   QueryState,
   StatusPill,
+  useNarrowedApi,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon, Pill } from "../../shell/viz";
@@ -63,6 +63,7 @@ export function DevicesPanel({
   canApprove,
   ringOptions,
   fleetDeviceTotal,
+  chip = "",
   title,
   subtitle,
   platformLabel = null,
@@ -80,6 +81,8 @@ export function DevicesPanel({
   canApprove: boolean;
   ringOptions: RingOption[];
   fleetDeviceTotal: number | null;
+  /** The Client chip's value (`?client=`), so a drill-down reads the same client as the list. */
+  chip?: string;
   title?: string;
   subtitle?: string;
   /**
@@ -192,7 +195,7 @@ export function DevicesPanel({
       )}
       {hostBar}
       <QueryState
-        loading={query.isLoading}
+        loading={query.isPending}
         error={query.error}
         empty={query.data != null && items.length === 0}
         emptyIcon="devices"
@@ -245,6 +248,7 @@ export function DevicesPanel({
                 canApprove={canApprove}
                 ringOptions={ringOptions}
                 fleetDeviceTotal={fleetDeviceTotal}
+                chip={chip}
                 selected={selectable ? selectedSet.has(device.device_id) : null}
                 onSelect={() =>
                   toggleOne({ id: device.device_id, hostname: device.hostname })
@@ -291,6 +295,7 @@ function FragmentRows({
   canApprove,
   ringOptions,
   fleetDeviceTotal,
+  chip = "",
   selected,
   onSelect,
   expanded,
@@ -310,6 +315,8 @@ function FragmentRows({
   canApprove: boolean;
   ringOptions: RingOption[];
   fleetDeviceTotal: number | null;
+  /** The Client chip's value (`?client=`), so a drill-down reads the same client as the list. */
+  chip?: string;
   /** `null` when the table has no selection column at all. */
   selected: boolean | null;
   onSelect: () => void;
@@ -409,6 +416,7 @@ function FragmentRows({
           canApprove={canApprove}
           ringOptions={ringOptions}
           fleetDeviceTotal={fleetDeviceTotal}
+          chip={chip}
         />
       )}
     </>
@@ -443,6 +451,7 @@ function DeviceUpdates({
   canApprove,
   ringOptions,
   fleetDeviceTotal,
+  chip = "",
 }: {
   deviceId: string;
   clientId: string;
@@ -451,16 +460,19 @@ function DeviceUpdates({
   canApprove: boolean;
   ringOptions: RingOption[];
   fleetDeviceTotal: number | null;
+  /** The Client chip's value (`?client=`), so a drill-down reads the same client as the list. */
+  chip?: string;
 }) {
   const t = useT();
-  const api = useApi();
   const [offset, setOffset] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // NEVER SEVERITY FILTERED. This is the machine's own list, and the fleet
   // view's default narrowing must not follow the reader down into it.
   const criterion = useMemo(() => ({ device_id: deviceId, severity: [] as string[] }), [deviceId]);
-  const query = usePatchUpdates({ ...criterion, offset: offset || undefined });
+  const query = usePatchUpdates({ ...criterion, offset: offset || undefined }, chip);
+  // "Select all N matching" resolves against the same client as the rows.
+  const { api: readApi } = useNarrowedApi(chip);
   const items = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
   const lastPage = Math.max(0, Math.ceil(total / PATCH_ROLLUP_PAGE_SIZE) - 1);
@@ -503,7 +515,7 @@ function DeviceUpdates({
               matchingTotal={total}
               resolveMatching={() =>
                 resolveMatchingUpdateIds(
-                  (params) => api.listPatchUpdates(params),
+                  (params) => readApi.listPatchUpdates(params),
                   criterion,
                 )
               }
@@ -518,7 +530,7 @@ function DeviceUpdates({
           )}
 
           <QueryState
-            loading={query.isLoading}
+            loading={query.isPending}
             error={query.error}
             empty={query.data != null && items.length === 0}
             emptyIcon="patch"

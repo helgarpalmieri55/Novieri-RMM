@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
+import { translate } from "../../i18n/core";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { describeSubmitError } from "../../components/form";
@@ -15,7 +16,20 @@ import { formatDateTime, intlLocale } from "../../lib/datetime";
 import { ClientField } from "../../components/ClientField";
 import { SiteField } from "../../components/SiteField";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
-import { PageHead, Panel, QueryState, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  FilterChips,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
 import { AgentUpdatePrerequisites } from "./AgentUpdatePrerequisites";
@@ -60,7 +74,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "—";
+  // Unmeasured is the kit's absent mark, never a dash (DESIGN.md, Absent Zero Rule).
+  if (bytes <= 0) return translate("shell.viz.na");
   const units = ["B", "KiB", "MiB", "GiB"];
   let value = bytes;
   let unit = 0;
@@ -187,8 +202,12 @@ export function AgentReleasesPage() {
    */
   const [managedRelease, setManagedRelease] = useState<AgentRelease | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
-  const [publishing, setPublishing] = useState(false);
-  const [showOlder, setShowOlder] = useState(false);
+  // ON THE KIT (redesign plan Task 6, 1.11): "Publish a release…" opens from
+  // `?new=release` (decision D8), and the older versions are a chip on
+  // `?older=1`, so both are links and survive a reload.
+  const publishParam = useNewParam("release");
+  const filters = useUrlFilters(["older"] as const);
+  const showOlder = filters.values.older === "1";
 
   // THE SAME `["me"]` QUERY THE SHELL ALREADY HOLDS, read here only for the
   // profile timezone (cycle 5). It is a cache hit in the running app; it is
@@ -264,6 +283,9 @@ export function AgentReleasesPage() {
   // a console that kept them would be wrong on every deployment.
   const withArtifact = allItems.filter((release) => release.has_artifact).length;
   const platforms = new Set(allItems.map((release) => release.os)).size;
+  // The tiles' one condition (ruling 10a): no catalogue, pending or failed.
+  // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
+  const noCatalogue = releases.data == null;
 
   useScrollToCatalogue(releases.data != null);
 
@@ -272,14 +294,12 @@ export function AgentReleasesPage() {
       {/* THE PAGE'S ONE PRIMARY, and only for the one person who can use it.
           v3 keeps a page's primary in the head; the rows below stay plain. */}
       <PageHead
-        title={t("agentReleases.page.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.item.agentPackages")}
         description={t("agentReleases.page.description")}
         actions={
           canPublish ? (
-            <Button onClick={() => setPublishing(true)}>
-              <Icon name="upload" size={14} />
-              <span>{t("agentReleases.page.publish")}</span>
-            </Button>
+            <Btn label={t("agentReleases.page.publish")} icon="upload" variant="primary" onClick={publishParam.start} />
           ) : undefined
         }
       />
@@ -309,7 +329,8 @@ export function AgentReleasesPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("agentReleases.page.releases")}
-          value={releases.data ? String(allItems.length) : "—"}
+          value={noCatalogue ? "" : String(allItems.length)}
+          pending={noCatalogue}
           icon="package"
           to="/agent-packages#releases"
           tone="neutral"
@@ -317,7 +338,8 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.ready")}
-          value={releases.data ? String(withArtifact) : "—"}
+          value={noCatalogue ? "" : String(withArtifact)}
+          pending={noCatalogue}
           icon="check"
           to="/agent-packages#releases"
           tone="green"
@@ -328,7 +350,8 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.platforms")}
-          value={releases.data ? String(platforms) : "—"}
+          value={noCatalogue ? "" : String(platforms)}
+          pending={noCatalogue}
           icon="devices"
           to="/agent-packages#releases"
           tone="blue"
@@ -350,12 +373,6 @@ export function AgentReleasesPage() {
           </div>
         )}
       </Panel>
-
-      {/* The install link (spec 2026-09-28 §1.1): one shared link per site,
-          off by default, for technicians setting up machines by hand. */}
-      {canManageLink && siteId !== "" && client.refused === null && (
-        <InstallLinkPanel zone={zone} siteId={siteId} />
-      )}
 
       {/* THE FRAGMENT TARGET IS A REAL ELEMENT. `Panel` takes no id, so the
           anchor is the wrapper; `#releases` pointing at nothing scrolls
@@ -381,6 +398,27 @@ export function AgentReleasesPage() {
               `QueryState`, because "did not load" and "nobody has published"
               are the two states an operator must never confuse, and only the
               shared component distinguishes them consistently. */}
+          {/* The kit's list head: the older versions as a chip, and the count
+              of rows shown against every published one. Only once something
+              is published: an empty catalogue explains itself below. */}
+          {allItems.length > 0 ? (
+            <ListToolbar
+              chips={
+                olderVersions.length > 0 ? (
+                  <FilterChips
+                    label={t("agentReleases.page.versionsShown")}
+                    options={[
+                      { value: "", label: t("agentReleases.page.chipNewest") },
+                      { value: "1", label: t("agentReleases.page.chipOlder", { versions: olderVersions.join(", ") }) },
+                    ]}
+                    value={filters.values.older}
+                    onChange={(value) => filters.set("older", value)}
+                  />
+                ) : undefined
+              }
+              end={<ShowingCount shown={items.length} total={allItems.length} />}
+            />
+          ) : null}
           <QueryState
             loading={releases.isLoading}
             error={releases.error}
@@ -391,7 +429,7 @@ export function AgentReleasesPage() {
             {allItems.length === 0 ? (
               <EmptyCatalogue canPublish={canPublish} />
             ) : (
-            <Table>
+            <Table label={t("agentReleases.page.catalogue")}>
               <thead>
                 <tr>
                   <Th>{t("agentReleases.table.platform")}</Th>
@@ -528,15 +566,6 @@ export function AgentReleasesPage() {
               </tbody>
             </Table>
             )}
-            {olderVersions.length > 0 && (
-              <div className="panel-b" style={{ borderTop: "1px solid var(--line)" }}>
-                <Button variant="ghost" onClick={() => setShowOlder((open) => !open)}>
-                  {showOlder
-                    ? t("agentReleases.page.hideOlder")
-                    : t("agentReleases.page.showOlder", { versions: olderVersions.join(", ") })}
-                </Button>
-              </div>
-            )}
           </QueryState>
         </Panel>
       </div>
@@ -547,6 +576,17 @@ export function AgentReleasesPage() {
         <div id="channels">
           <ReleaseChannels releases={releases.data} />
         </div>
+      )}
+
+      {/* The install link (spec 2026-09-28 §1.1): one shared link per site,
+          off by default, for technicians setting up machines by hand. After
+          the versions and their channels, in the design's order (redesign
+          Task 6, 1.11); it still waits for the site chosen above. */}
+      {canManageLink && siteId !== "" && client.refused === null && (
+        // The site is chosen on this page without a change of route; the
+        // panel keys itself by it, so nothing of one site's panel reaches
+        // another's (coordinator ruling 12).
+        <InstallLinkPanel zone={zone} siteId={siteId} />
       )}
 
       {/* Self-update (spec-self-update.md §8.6), for holders of the read code;
@@ -647,7 +687,9 @@ export function AgentReleasesPage() {
           and the token is single-use and four hours long, so spending the red
           here would spend it on the mildest privileged action in the product
           and leave nothing for revoke and erase. */}
-      {publishing && <PublishReleaseDialog onClose={() => setPublishing(false)} />}
+      {/* Only for a publisher, whatever the URL asks: every publishing route
+          checks `agent.release.manage` itself (invariant 6). */}
+      {publishParam.open && canPublish && <PublishReleaseDialog onClose={publishParam.close} />}
 
       <ManagedDeploymentDialog
         release={managedRelease}

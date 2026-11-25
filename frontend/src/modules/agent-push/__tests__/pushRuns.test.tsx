@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, MeClient } from "../../../lib/api";
+import { renderPage as renderRouted } from "../../../test/renderPage";
 import { PushRunPage } from "../PushRunPage";
 import { PushRunsPage } from "../PushRunsPage";
 import type { PushRunOut, PushRunState, PushRunTargetOut } from "../types";
@@ -164,5 +165,70 @@ describe("Push runs", () => {
     for (const name of ["Pause", "Resume", "Cancel run"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.7; Receta L) ------------------------------ */
+
+describe("Push runs on the list kit", () => {
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    stubApi("running");
+    const { router } = renderRouted("/devices/push-runs?state=running", <PushRunsPage />);
+    expect(await screen.findByRole("button", { name: "Running" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Paused" }));
+    expect(router.state.location.search).toContain("state=paused");
+  });
+
+  it("says why the list is empty", async () => {
+    stubApi("running");
+    renderRouted("/devices/push-runs?state=cancelled", <PushRunsPage />);
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("says there is no run yet, with the way to start one, and leads back to the computers", async () => {
+    const api = stubApi();
+    api.listPushRuns.mockResolvedValue([]);
+    renderRouted("/devices/push-runs", <PushRunsPage />);
+    expect(await screen.findByText("No subnet push has been started.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Install on many" })).toHaveAttribute("href", "/devices?new=push");
+    expect(screen.getByRole("link", { name: "Devices" })).toHaveAttribute("href", "/devices");
+  });
+
+  it("counts the runs it shows", async () => {
+    stubApi();
+    renderRouted("/devices/push-runs", <PushRunsPage />);
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+});
+
+/* --- the record kit (redesign plan Task 6, 1.8; Receta F without tabs) ------------- */
+
+describe("a push run on the record kit", () => {
+  it("names the record in the browser tab", async () => {
+    stubApi();
+    renderRouted("/devices/push-runs/run-1", <PushRunPage />, "/devices/push-runs/:runId", { page: "shell.nav.item.devices" });
+    await screen.findByRole("heading", { level: 1, name: "Push run on 10.20.4.0/24" });
+    await waitFor(() => expect(document.title).toBe("Push run on 10.20.4.0/24 · Devices · Novieri RMM"));
+  });
+
+  it("heads the run with its way back, its state and its client, and counts its machines", async () => {
+    stubApi("paused");
+    renderRouted("/devices/push-runs/run-1", <PushRunPage />, "/devices/push-runs/:runId");
+    const head = (await screen.findByRole("heading", { level: 1, name: "Push run on 10.20.4.0/24" })).closest("section") as HTMLElement;
+    expect(within(head).getByRole("link", { name: "All push runs" })).toHaveAttribute("href", "/devices/push-runs");
+    expect(within(head).getByText("Paused")).toBeInTheDocument();
+    expect(within(head).getByRole("link", { name: "Novieri" })).toHaveAttribute("href", "/clients/o1");
+    expect(within(head).getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll(".tile")].map((tile) => [
+      tile.querySelector(".k")?.textContent,
+      tile.querySelector(".v")?.textContent,
+    ]);
+    expect(tiles).toEqual([
+      ["Machines", "4"],
+      ["Installing now", "1"],
+      ["Installed", "1"],
+      ["Failed", "0"],
+    ]);
   });
 });

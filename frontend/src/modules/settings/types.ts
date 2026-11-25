@@ -747,7 +747,7 @@ export interface EmailSettingsOut {
   /** What the Microsoft sign-in asks for. Not a secret. */
   microsoft_scope?: string;
   /**
-   * The caller's own address with `+itms-test` before the @ — where the
+   * The caller's own address with `+novieri-test` before the @ — where the
    * console proposes sending a test; a tagged address reaches the same inbox.
    * Empty or absent when there is nothing to suggest.
    */

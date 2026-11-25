@@ -21,14 +21,25 @@ import { useApi } from "../../lib/ApiContext";
 import { Btn } from "../../shell/components";
 import { useSitesOf } from "../devices/siteNames";
 
-export function DeviceSite({ device, canMove }: { device: Device; canMove: boolean }) {
+export function DeviceSite({
+  device,
+  canMove,
+  labelled = true,
+}: {
+  device: Device;
+  canMove: boolean;
+  /** `false` where a term beside it already says "Site" (the record's Relations list). */
+  labelled?: boolean;
+}) {
   const t = useT();
   const sites = useSitesOf(device.client_id ? [device.client_id] : []);
   const [open, setOpen] = useState(false);
   const name = sites.siteName(device.site_id);
   return (
     <>
-      {name ? <span className="cell-sub">{t("inventory.site.label", { site: name })}</span> : null}
+      {name ? (
+        labelled ? <span className="cell-sub">{t("inventory.site.label", { site: name })}</span> : <span>{name}</span>
+      ) : null}
       {canMove ? <Btn small label={t("inventory.site.change")} onClick={() => setOpen(true)} /> : null}
       {/* MOUNTED ONLY WHILE OPEN, so every opening starts from the device's
           own site rather than from a choice an earlier opening left behind. */}

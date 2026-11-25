@@ -39,6 +39,8 @@ describe("empty states and dialogs in Spanish", () => {
       </div>,
     );
     expect(screen.getByRole("heading", { name: "Aún no hay dispositivos" })).toBeInTheDocument();
+    // NoValue's absent mark is the kit's, in Spanish (kit requests batch 3, B3-9).
+    expect(container.querySelector('.no-value [aria-hidden="true"]')?.textContent).toBe("n/d");
     expectNoEnglish(container);
   });
 
@@ -344,6 +346,25 @@ describe("inputs and displays in Spanish", () => {
     expect(screen.getByText("Ver sin formato")).toBeInTheDocument();
     expect(screen.getByText("hace 5 minutos")).toBeInTheDocument();
     expectNoEnglish(container);
+  });
+
+  // The kit's absent mark in Spanish, "n/d", for an absent attribute and an
+  // absent time (P3 adoption pass): never "n/a", never an em dash.
+  it("writes an absent attribute and an absent time as n/d", () => {
+    const { container } = renderInSpanish(
+      <div>
+        <div data-testid="attrs">
+          <Attributes value={{ estado: null }} empty="Sin atributos" raw={false} />
+        </div>
+        <div data-testid="when">
+          <RelTime iso={null} />
+        </div>
+      </div>,
+    );
+    expect(screen.getByTestId("attrs").textContent).toContain("n/d");
+    expect(screen.getByTestId("when").textContent).toBe("n/d");
+    expect(container).not.toHaveTextContent("—");
+    expect(container).not.toHaveTextContent("n/a");
   });
 });
 

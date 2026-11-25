@@ -11,13 +11,13 @@ export const remote: Shape<typeof en> = {
   duration: "{minutes} min {seconds} s",
   picker: {
     deviceEmptyHint:
-      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
+      "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Equipos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     credentialEmptyHint:
       "No hay credenciales en la bóveda. Guarda una en Flota → Credenciales y podrás elegirla aquí; también puede que no tengas permiso para listarlas.",
-    unreachableNoAgent: "no tiene agente — una sesión remota necesita uno, así que no se puede establecer la conexión",
-    unreachableOffline: "está sin conexión — el agente no responde, así que la conexión no se completará",
+    unreachableNoAgent: "no tiene agente: una sesión remota necesita uno, así que no se puede establecer la conexión",
+    unreachableOffline: "está sin conexión: el agente no responde, así que la conexión no se completará",
     unreachableTooOld:
-      "tiene un agente demasiado antiguo para compartir su pantalla — la sesión se rechaza hasta que se actualice el agente",
+      "tiene un agente demasiado antiguo para compartir su pantalla: la sesión se rechaza hasta que se actualice el agente",
     statusOnline: "en línea",
     statusOnlineTooOld: "en línea · agente demasiado antiguo para compartir su pantalla",
     statusNoAgent: "sin agente · no se puede conectar",
@@ -47,7 +47,7 @@ export const remote: Shape<typeof en> = {
     searchPlaceholder: "Buscar por dispositivo, protocolo o estado",
     searchLabel: "Buscar sesiones",
     emptyNone: "Aún no hay sesiones remotas.",
-    emptyFiltered: "Ninguna sesión coincide con ese filtro.",
+    stateLabel: "Sesiones",
     colDevice: "Dispositivo",
     colConsent: "Consentimiento",
     colState: "Estado",
@@ -62,13 +62,13 @@ export const remote: Shape<typeof en> = {
     updateAgent: "Actualizar el agente",
     fieldDevice: "Dispositivo",
     fieldReason: "Motivo",
-    reasonShort: "El motivo se escribe en el registro de auditoría — indica al menos una referencia de ticket",
+    reasonShort: "El motivo se escribe en el registro de auditoría: indica al menos una referencia de ticket",
     unreachableLine: "{device} {reason}.",
     confirmTitleUnattended: "Iniciar una sesión desatendida",
     confirmTitleTooOld: "Iniciar una sesión que el agente no puede compartir",
     confirmTitleOffline: "Iniciar una sesión en un dispositivo que no puede responder",
     confirmUnattended:
-      "El modo desatendido se conecta SIN pedir consentimiento a la persona que está en ese dispositivo. Queda grabado, y el registro de auditoría te nombra como el técnico que lo eligió.",
+      "El modo desatendido se conecta sin pedir nunca consentimiento a la persona que está en ese dispositivo. Queda grabado, y el registro de auditoría te nombra como el técnico que lo eligió.",
     confirmReason: "El motivo que has indicado se escribe en el registro de auditoría inmutable junto con esta sesión.",
     dialogTitle: "Iniciar sesión remota",
     devicePlaceholder: "Buscar dispositivos inscritos…",
@@ -97,7 +97,7 @@ export const remote: Shape<typeof en> = {
     noCredential:
       "Tu sesión en esta consola terminó, así que no se abrió la pantalla y no se pidió nada al dispositivo. Volver a iniciar sesión lo restablece.",
     titleFallback: "Sesión remota",
-    description: "La pantalla del dispositivo, en directo.",
+    back: "Sesiones remotas",
     ending: "Finalizando…",
     end: "Finalizar sesión",
     factConnection: "Conexión",
@@ -108,7 +108,7 @@ export const remote: Shape<typeof en> = {
     controlTaken: "Recuperado por el usuario",
     controlYou: "Tienes el control",
     controlViewOnly: "Solo visualización",
-    stopFailed: "Esa sesión sigue en marcha — no se finalizó. {detail}",
+    stopFailed: "Esa sesión sigue en marcha: no se finalizó. {detail}",
     controlTakenNote:
       "La persona que está en el dispositivo recuperó el control. Aún puedes mirar; para volver a controlar, inicia una sesión nueva, que se lo pedirá de nuevo.",
     panelTitle: "Pantalla",

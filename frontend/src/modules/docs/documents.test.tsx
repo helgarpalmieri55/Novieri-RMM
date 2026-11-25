@@ -253,7 +253,7 @@ describe("purge, the only irreversible act (§6.3, §9)", () => {
     renderView({}, ["docs.read", "docs.manage", "docs.document.purge"]);
     await userEvent.click(await screen.findByRole("button", { name: "Purge v2" }));
     const dialog = await screen.findByRole("dialog", { name: "Destroy these bytes" });
-    expect(dialog).toHaveTextContent("Version 2 — vendor-contract-2026.pdf, 2.1 MiB");
+    expect(dialog).toHaveTextContent("Version 2 (vendor-contract-2026.pdf, 2.1 MiB)");
     // Both halves of the sentence: what is destroyed, and what survives.
     expect(dialog).toHaveTextContent(/cannot be recovered/);
     expect(dialog).toHaveTextContent(/survive in the version history and the audit log/);
@@ -289,7 +289,7 @@ describe("purge, the only irreversible act (§6.3, §9)", () => {
     const dialog = await screen.findByRole("dialog", { name: "Destroy these bytes" });
     await userEvent.type(
       within(dialog).getByRole("textbox"),
-      "Version 2 — vendor-contract-2026.pdf, 2.1 MiB",
+      "Version 2 (vendor-contract-2026.pdf, 2.1 MiB)",
     );
     await userEvent.click(within(dialog).getByRole("button", { name: "Destroy the bytes" }));
     // A purge that cannot reach the store changes NOTHING -- no tombstone, no
