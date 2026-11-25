@@ -82,7 +82,11 @@ describe("no tile figure before its read (coordinator's ruling 10a)", () => {
     // A failed read: the allocations list beside the tiles says why.
     if (fails) expect(await screen.findByRole("alert")).toBeInTheDocument();
     expectNoFigure(inUse);
-    expectNoFigure(screen.getByText("Free", { selector: ".k" }).closest(".tile") as HTMLElement);
+    const free = screen.getByText("Free", { selector: ".k" }).closest(".tile") as HTMLElement;
+    expectNoFigure(free);
+    // The kit's `Tile pending` (adoption pass): the absent mark, and the tile says it has no figure yet.
+    expect(inUse).toHaveAttribute("aria-busy", "true");
+    expect(free).toHaveAttribute("aria-busy", "true");
   });
 });
 
