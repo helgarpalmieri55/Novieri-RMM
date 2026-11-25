@@ -62,6 +62,7 @@
  */
 
 import { spawnGroup } from "./devServer.mjs";
+import { isEntryPoint } from "./entryPoint.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
@@ -1082,8 +1083,9 @@ async function main() {
   process.exit(0);
 }
 
-// Only run when executed directly, so the pure helpers above can be imported by a test.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Only run when executed directly (by any path to it, a symlink included:
+// ./entryPoint.mjs), so the pure helpers above can be imported by a test.
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   main().catch((err) => {
     console.error(err instanceof Error ? err.stack || err.message : String(err));
     process.exit(1);
