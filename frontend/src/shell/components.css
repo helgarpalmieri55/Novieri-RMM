@@ -775,6 +775,11 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
 }
 .note { font-size: var(--t-sm); color: var(--muted);
 }
+/* Kit addition (batch 3, B3-4): a note, a form hint or a page's description
+ * ends without one word alone on its last line (the detector's stragglers at
+ * 390). `pretty` for paragraphs; headings balance (`.ph h1`, kit.css). */
+.note, .form-hint, .ph .sub { text-wrap: pretty;
+}
 /* The caption rung, UNSCOPED (design additions wave 2). `.tile .k` and
  * `.facts .k` each add a layout on top of this and win on specificity; a
  * caption over a plain card had nothing before this and pages used `.note`,

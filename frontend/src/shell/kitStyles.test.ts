@@ -134,3 +134,14 @@ describe("a read-only field looks read-only (kit requests batch 2, K5)", () => {
     expect(preview).toMatch(/<input className=\{inputClass\}[^>]*\breadOnly\b/);
   });
 });
+
+describe("notes wrap without a straggler (kit requests batch 3, B3-4)", () => {
+  // O7's K4: the detector reported one word alone on a note's last line at
+  // 390, in notes and page descriptions. `pretty` evens the last lines of a
+  // paragraph; `balance` is for headings (`.ph h1`, above).
+  const COMPONENTS = read("./components.css");
+
+  it("evens the last lines of a note, a form hint and a page's description", () => {
+    expect(rule(COMPONENTS, ".note, .form-hint, .ph .sub")).toMatch(/text-wrap:\s*pretty/);
+  });
+});
