@@ -41,18 +41,21 @@ export function PushDetailsDialog({
   const queryClient = useQueryClient();
   const [details, setDetails] = useState<PushDetails>(() => initial(device));
 
-  /** Only what changed: the server is sent nothing it already holds. */
-  function changes(): AssetInput {
-    const was = initial(device);
-    const body: AssetInput = {};
-    if (details.fqdn.trim() !== was.fqdn) body.fqdn = details.fqdn.trim() || null;
-    if (details.os !== was.os) body.os_family = details.os || null;
-    if (details.arch !== was.arch) body.architecture = details.arch || null;
-    return body;
-  }
+  // Whether the form differs from the device as it started: with no
+  // difference there is nothing to send (coordinator ruling 13).
+  const started = initial(device);
+  const changed =
+    details.fqdn.trim() !== started.fqdn || details.os !== started.os || details.arch !== started.arch;
 
   const save = useMutation({
-    mutationFn: (body: AssetInput) => api.updateAsset(device.id, body),
+    mutationFn: () => {
+      const was = initial(device);
+      const body: AssetInput = {};
+      if (details.fqdn.trim() !== was.fqdn) body.fqdn = details.fqdn.trim() || null;
+      if (details.os !== was.os) body.os_family = details.os || null;
+      if (details.arch !== was.arch) body.architecture = details.arch || null;
+      return api.updateAsset(device.id, body);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
       void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
@@ -72,12 +75,11 @@ export function PushDetailsDialog({
         onSubmit={() => {
           // NO WRITE WITHOUT A CHANGE (coordinator ruling 13): Save on details
           // nobody changed closes and sends nothing.
-          const body = changes();
-          if (Object.keys(body).length === 0) {
+          if (!changed) {
             close();
             return;
           }
-          save.mutate(body);
+          save.mutate();
         }}
       >
         <p className="note mb-3">
