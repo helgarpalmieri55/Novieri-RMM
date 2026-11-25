@@ -507,6 +507,8 @@ describe("BackupPointsPage", () => {
     const restoreButton = screen.getByRole("button", { name: "Restore" });
     expect(restoreButton).toBeDisabled();
     expect(restoreButton).toHaveAttribute("title", expect.stringMatching(/failed/i));
+    // And on screen, under the control (general ruling 8).
+    expect(screen.getByText("This run failed, so no complete point was captured to restore from.")).toBeInTheDocument();
   });
 
   it("disables Restore, with a reason, on a pruned backup point", async () => {
@@ -517,6 +519,8 @@ describe("BackupPointsPage", () => {
     const restoreButton = screen.getByRole("button", { name: "Restore" });
     expect(restoreButton).toBeDisabled();
     expect(restoreButton).toHaveAttribute("title", expect.stringMatching(/retention/i));
+    // And on screen, under the control (general ruling 8).
+    expect(screen.getByText("This point has aged out of the repository's retention and is no longer stored.")).toBeInTheDocument();
   });
 
   it("keeps Restore enabled on a complete backup point", async () => {

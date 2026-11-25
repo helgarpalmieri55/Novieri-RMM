@@ -44,7 +44,6 @@ export const provisioning: Shape<typeof en> = {
     enrolled: "Inscrito",
   },
   runs: {
-    title: "Aprovisionamiento e imágenes de disco",
     description: "Equipos en construcción, desde un disco en blanco hasta un dispositivo administrado.",
     provision: "Aprovisionar",
     successRate: "Tasa de éxito",

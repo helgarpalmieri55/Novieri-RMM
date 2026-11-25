@@ -78,7 +78,7 @@ describe("the plans list on the list kit (4.5)", () => {
     const narrowing = recordingNarrowing(api(), { console: CONSOLE });
     mockUseApi.mockReturnValue(narrowing.api);
     renderPage(`/bcp?client=${ANDES}`, <PlansPage />);
-    expect(await screen.findByRole("table", { name: "BCP / DR tests" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "Continuity tests" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).listPlans).toHaveBeenCalledWith();
     // The Review, Last test and Findings columns are the status rows, joined by plan.
     expect(narrowing.client(ANDES).planStatus).toHaveBeenCalledWith();
@@ -104,7 +104,7 @@ describe("the plans list on the list kit (4.5)", () => {
 
   it("links the plan tiles with the chip's client, so a tile opens the rows it counted (general ruling 2)", async () => {
     renderPage(`/bcp?client=${ANDES}`, <PlansPage />);
-    await screen.findByRole("table", { name: "BCP / DR tests" });
+    await screen.findByRole("table", { name: "Continuity tests" });
     const hrefs = [...document.querySelectorAll(".stat-card")].map((tile) => tile.getAttribute("href"));
     expect(hrefs).toContain(`/bcp?state=active&client=${ANDES}`);
     expect(hrefs).toContain(`/bcp?review=overdue&client=${ANDES}`);

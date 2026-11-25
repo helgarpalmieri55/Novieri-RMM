@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/backup/BackupPolicyEditor.tsx"
+target_identity: "file:frontend/src/modules/backup/BackupPolicyEditor.tsx"
 target_fingerprint: "sha256:c0275afe0cc317b7ef5e5fed12f6501b126d2a395599445e7588414daf9656c9"
-target_path: /home/user/rmm-w4/frontend/src/modules/backup/BackupPolicyEditor.tsx
+target_path: frontend/src/modules/backup/BackupPolicyEditor.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-backup-backuppolicyeditor-tsx
 closed: true

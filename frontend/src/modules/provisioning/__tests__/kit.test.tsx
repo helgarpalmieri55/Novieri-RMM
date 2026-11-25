@@ -82,7 +82,7 @@ describe("provisioning runs on the list kit (4.6)", () => {
   it("opens nothing from ?new=run for someone who may not start a run", async () => {
     mockUseApi.mockReturnValue(api({ me: lacking(["provisioning.run"]) }));
     renderPage("/provisioning?new=run", <ProvisioningRunsPage />);
-    expect(await screen.findByRole("table", { name: "Provisioning & Imaging" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "Imaging" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Provision a device" })).toBeNull();
   });
 });

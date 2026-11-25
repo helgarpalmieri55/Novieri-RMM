@@ -190,7 +190,9 @@ export function PlansPage() {
   return (
     <div>
       <PageHead
-        title={t("bcp.plans.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.continuityTests")}
         description={t("bcp.plans.description")}
         actions={
           canManage ? (
@@ -314,7 +316,7 @@ export function PlansPage() {
               }
             />
           ) : (
-          <Table label={t("bcp.plans.title")}>
+          <Table label={t("shell.nav.item.continuityTests")}>
             <thead>
               <tr>
                 <Th>{t("bcp.plans.colName")}</Th>

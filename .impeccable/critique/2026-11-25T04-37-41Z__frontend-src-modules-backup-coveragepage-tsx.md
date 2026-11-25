@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/backup/CoveragePage.tsx"
+target_identity: "file:frontend/src/modules/backup/CoveragePage.tsx"
 target_fingerprint: "sha256:e69a9e95726ee469729f55d7e12b60a276f5d00eb6381d98d28bf26021bb96d2"
-target_path: /home/user/rmm-w4/frontend/src/modules/backup/CoveragePage.tsx
+target_path: frontend/src/modules/backup/CoveragePage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-backup-coveragepage-tsx
 closed: true

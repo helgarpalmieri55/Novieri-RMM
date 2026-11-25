@@ -129,7 +129,6 @@ export const backup = {
     offsiteSubtitle: "A second, locked copy needs a recovery key and working off-site storage.",
   },
   points: {
-    title: "Backup & Restore",
     description: "Backup coverage, restore points, and verification.",
     runBackup: "Run backup",
     tileSuccess: "Backup success",
@@ -396,7 +395,6 @@ export const backup = {
     lockDaysHelp: "Nobody can delete or change a locked backup, including someone who takes over this server.",
     speedLimit: "Upload speed limit (Mbit/s)",
     speedLimitHelp: "Leave blank for no limit.",
-    save: "Save",
     add: "Add",
     copyTitle: "Copy these repositories off-site",
     copyEmpty: "No repositories yet.",

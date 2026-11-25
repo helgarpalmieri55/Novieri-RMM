@@ -48,7 +48,6 @@ export const provisioning = {
     enrolled: "Enrolled",
   },
   runs: {
-    title: "Provisioning & Imaging",
     description: "Machines being built, from a blank disk to a managed device.",
     provision: "Provision",
     successRate: "Success rate",

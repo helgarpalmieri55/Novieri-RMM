@@ -173,7 +173,8 @@ beforeEach(() => {
 describe("the provisioning runs page, in Spanish", () => {
   it("words the head, the tabs, the tiles, the filter and the table", async () => {
     const { container } = renderPage(<ProvisioningRunsPage />);
-    expect(await screen.findByRole("heading", { name: "Aprovisionamiento e imágenes de disco" })).toBeInTheDocument();
+    // The h1 is the rail's label (general ruling 1).
+    expect(await screen.findByRole("heading", { name: "Imágenes de sistema" })).toBeInTheDocument();
     await screen.findByText("run1");
     expect(screen.getByRole("button", { name: "Aprovisionar" })).toBeInTheDocument();
     // The section menu is a navigation of links now (redesign plan, waves'
@@ -255,7 +256,7 @@ describe("the provisioning runs page, in Spanish", () => {
     await screen.findByText("run1");
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Provisioning & Imaging" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Imaging" })).toBeInTheDocument();
     expect(screen.getByText("Success rate")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("12m")).toBeInTheDocument();

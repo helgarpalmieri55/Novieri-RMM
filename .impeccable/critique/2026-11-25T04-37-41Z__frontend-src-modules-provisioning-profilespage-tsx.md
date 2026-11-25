@@ -5,9 +5,9 @@ max_score: 36
 na_heuristics: 10
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/provisioning/ProfilesPage.tsx"
+target_identity: "file:frontend/src/modules/provisioning/ProfilesPage.tsx"
 target_fingerprint: "sha256:f476ef31b5ea9fdc1f6517daabae4aaa601f9fdbc2987ca3465d492ce5ae2556"
-target_path: /home/user/rmm-w4/frontend/src/modules/provisioning/ProfilesPage.tsx
+target_path: frontend/src/modules/provisioning/ProfilesPage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-provisioning-profilespage-tsx
 closed: true

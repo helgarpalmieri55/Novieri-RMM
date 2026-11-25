@@ -277,7 +277,8 @@ beforeEach(() => {
 describe("the plans page, in Spanish", () => {
   it("words the head, the tiles, the table, the pills and the readiness panel", async () => {
     const { container } = renderPage(<PlansPage />);
-    expect(await screen.findByRole("heading", { name: "Pruebas de continuidad y recuperación (BCP / DR)" })).toBeInTheDocument();
+    // The h1 is the rail's label (general ruling 1).
+    expect(await screen.findByRole("heading", { name: "Pruebas de continuidad" })).toBeInTheDocument();
     await screen.findByText("Conmutación del centro de datos");
     expect(screen.getByText("Planes de continuidad y recuperación, sus objetivos y sus pruebas.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Nuevo plan" })).toBeInTheDocument();
@@ -353,7 +354,7 @@ describe("the plans page, in Spanish", () => {
     renderPage(<PlansPage />);
     await screen.findByText("Conmutación del centro de datos");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "BCP / DR tests" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Continuity tests" })).toBeInTheDocument();
     const row = screen.getByText("Plan antiguo").closest("tr") as HTMLElement;
     expect(within(row).getByText("Archived")).toBeInTheDocument();
     expect(within(row).getByText("Review overdue")).toBeInTheDocument();

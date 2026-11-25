@@ -356,7 +356,8 @@ const SERVER_TEXT = ["El bucket no tiene Object Lock activado."];
 describe("the backup points page, in Spanish", () => {
   it("words the head, the tabs, the tiles, the filter, the table and the pills", async () => {
     const { container } = renderPage(<BackupPointsPage />);
-    expect(await screen.findByRole("heading", { name: "Copia de seguridad y restauración" })).toBeInTheDocument();
+    // The h1 is the rail's label (general ruling 1).
+    expect(await screen.findByRole("heading", { name: "Copias de seguridad" })).toBeInTheDocument();
     await screen.findByText("pt1");
     expect(screen.getByRole("button", { name: "Ejecutar copia de seguridad" })).toBeInTheDocument();
     // The section menu is a navigation of links now (redesign plan, waves'
@@ -454,7 +455,7 @@ describe("the backup points page, in Spanish", () => {
     renderPage(<BackupPointsPage />);
     await screen.findByText("pt1");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Backup & Restore" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Backup" })).toBeInTheDocument();
     expect(screen.getByText("75%")).toBeInTheDocument();
     const row = screen.getByText("pt3").closest("tr") as HTMLElement;
     expect(within(row).getByText("Pruned")).toBeInTheDocument();

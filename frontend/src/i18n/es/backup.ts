@@ -132,7 +132,6 @@ export const backup: Shape<typeof en> = {
       "Una segunda copia bloqueada necesita una clave de recuperación y un almacenamiento externo que funcione.",
   },
   points: {
-    title: "Copia de seguridad y restauración",
     description: "Cobertura de las copias de seguridad, puntos de restauración y verificación.",
     runBackup: "Ejecutar copia de seguridad",
     tileSuccess: "Éxito de las copias",
@@ -406,7 +405,6 @@ export const backup: Shape<typeof en> = {
       "Nadie puede borrar ni modificar una copia bloqueada, ni siquiera quien tome el control de este servidor.",
     speedLimit: "Límite de velocidad de subida (Mbit/s)",
     speedLimitHelp: "Déjalo en blanco para no poner límite.",
-    save: "Guardar",
     add: "Añadir",
     copyTitle: "Copia externa de estos repositorios",
     copyEmpty: "Todavía no hay repositorios.",

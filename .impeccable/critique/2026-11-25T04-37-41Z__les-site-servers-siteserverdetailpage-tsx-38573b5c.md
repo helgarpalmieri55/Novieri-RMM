@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/site-servers/SiteServerDetailPage.tsx"
+target_identity: "file:frontend/src/modules/site-servers/SiteServerDetailPage.tsx"
 target_fingerprint: "sha256:53c0554f3e6a8a72852c7272d29cb9c7065683aa60abc27ca83bc67cb371776e"
-target_path: /home/user/rmm-w4/frontend/src/modules/site-servers/SiteServerDetailPage.tsx
+target_path: frontend/src/modules/site-servers/SiteServerDetailPage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: les-site-servers-siteserverdetailpage-tsx-38573b5c
 closed: true

@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/backup/RepositoriesPage.tsx"
+target_identity: "file:frontend/src/modules/backup/RepositoriesPage.tsx"
 target_fingerprint: "sha256:76c00b801eafa1b37382b97fabe9303353877c6b11dca2487ecf9dbe5c5f4133"
-target_path: /home/user/rmm-w4/frontend/src/modules/backup/RepositoriesPage.tsx
+target_path: frontend/src/modules/backup/RepositoriesPage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-backup-repositoriespage-tsx
 closed: true

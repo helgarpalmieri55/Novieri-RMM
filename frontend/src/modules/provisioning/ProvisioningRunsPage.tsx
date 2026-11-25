@@ -158,7 +158,9 @@ export function ProvisioningRunsPage() {
   return (
     <div>
       <PageHead
-        title={t("provisioning.runs.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.imaging")}
         description={t("provisioning.runs.description")}
         actions={
           canRun ? (
@@ -260,7 +262,7 @@ export function ProvisioningRunsPage() {
               }
             />
           ) : (
-          <Table label={t("provisioning.runs.title")}>
+          <Table label={t("shell.nav.item.imaging")}>
             <thead>
               <tr>
                 <Th>{t("provisioning.runs.colTarget")}</Th>

@@ -50,7 +50,6 @@ export const bcp: Shape<typeof en> = {
     reviewerCta: "Dar a alguien la revisión de planes",
   },
   plans: {
-    title: "Pruebas de continuidad y recuperación (BCP / DR)",
     colClient: "Cliente",
     description: "Planes de continuidad y recuperación, sus objetivos y sus pruebas.",
     newPlan: "Nuevo plan",
@@ -142,7 +141,6 @@ export const bcp: Shape<typeof en> = {
       "El plan deja de formar parte de la cobertura de recuperación activa y de la situación de continuidad. Se conservan sus pruebas, hallazgos y evidencia, y se puede desarchivar.",
     archiveConfirm: "Archivar plan",
     summary: "Resumen",
-    state: "Estado",
     rto: "RTO",
     rpo: "RPO",
     minutes: "{minutes} min",

@@ -207,7 +207,9 @@ export function BackupPointsPage() {
   return (
     <div>
       <PageHead
-        title={t("backup.points.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.backup")}
         // Auditor A (HIGH): "Production page copy tells the user to read the
         // page source to find out what works." The removed sentence pointed
         // an auditor at view-source; the caveat itself is true and stays
@@ -462,20 +464,32 @@ export function BackupPointsPage() {
                           (recognition over recall for why the row cannot be
                           restored) but says why it cannot be pressed. */}
                       {canRestore && (
-                        <Btn
-                          label={t("backup.points.restore")}
-                          icon="history"
-                          small
-                          disabled={point.state === "failed" || point.state === "pruned"}
-                          title={
-                            point.state === "failed"
-                              ? t("backup.points.restoreFailedHint")
-                              : point.state === "pruned"
-                                ? t("backup.points.restorePrunedHint")
-                                : undefined
-                          }
-                          onClick={() => setRestoreTarget(point)}
-                        />
+                        <>
+                          <Btn
+                            label={t("backup.points.restore")}
+                            icon="history"
+                            small
+                            disabled={point.state === "failed" || point.state === "pruned"}
+                            title={
+                              point.state === "failed"
+                                ? t("backup.points.restoreFailedHint")
+                                : point.state === "pruned"
+                                  ? t("backup.points.restorePrunedHint")
+                                  : undefined
+                            }
+                            onClick={() => setRestoreTarget(point)}
+                          />
+                          {/* THE REASON ON SCREEN, under the control it
+                              explains (general ruling 8): it was a tooltip,
+                              which a touch screen and a keyboard never show. */}
+                          {point.state === "failed" || point.state === "pruned" ? (
+                            <div className="cell-sub" style={{ maxWidth: "26ch", whiteSpace: "normal" }}>
+                              {point.state === "failed"
+                                ? t("backup.points.restoreFailedHint")
+                                : t("backup.points.restorePrunedHint")}
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </Td>
                   </tr>

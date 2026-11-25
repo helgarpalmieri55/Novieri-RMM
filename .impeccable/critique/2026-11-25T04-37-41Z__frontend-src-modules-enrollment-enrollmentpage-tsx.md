@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/enrollment/EnrollmentPage.tsx"
+target_identity: "file:frontend/src/modules/enrollment/EnrollmentPage.tsx"
 target_fingerprint: "sha256:6a0550079d1d6144d37db2fdda85cfd43fad5ecf983754cce03138faa4a764a8"
-target_path: /home/user/rmm-w4/frontend/src/modules/enrollment/EnrollmentPage.tsx
+target_path: frontend/src/modules/enrollment/EnrollmentPage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-enrollment-enrollmentpage-tsx
 closed: true

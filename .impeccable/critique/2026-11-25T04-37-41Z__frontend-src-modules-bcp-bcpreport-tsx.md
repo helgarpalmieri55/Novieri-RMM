@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/bcp/BcpReport.tsx"
+target_identity: "file:frontend/src/modules/bcp/BcpReport.tsx"
 target_fingerprint: "sha256:e29818a94567a31700526e50533b777de6b3bf957d152bb17d5ad864ca774676"
-target_path: /home/user/rmm-w4/frontend/src/modules/bcp/BcpReport.tsx
+target_path: frontend/src/modules/bcp/BcpReport.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-bcp-bcpreport-tsx
 closed: true

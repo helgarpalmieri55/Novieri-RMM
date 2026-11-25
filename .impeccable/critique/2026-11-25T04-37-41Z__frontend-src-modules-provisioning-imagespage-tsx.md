@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/provisioning/ImagesPage.tsx"
+target_identity: "file:frontend/src/modules/provisioning/ImagesPage.tsx"
 target_fingerprint: "sha256:b737d707d55b658baf480af9d4ccf3e5925d55e57e812c7cfbf230a38b77f424"
-target_path: /home/user/rmm-w4/frontend/src/modules/provisioning/ImagesPage.tsx
+target_path: frontend/src/modules/provisioning/ImagesPage.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-provisioning-imagespage-tsx
 closed: true

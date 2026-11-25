@@ -5,9 +5,9 @@ max_score: 36
 na_heuristics: 10
 p0_count: 0
 p1_count: 0
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/bcp/PlanDetail.tsx"
+target_identity: "file:frontend/src/modules/bcp/PlanDetail.tsx"
 target_fingerprint: "sha256:20e834a340605d441188b3d7e68ea8fa8b61788442bcdbbe9ed6fa6f6c543941"
-target_path: /home/user/rmm-w4/frontend/src/modules/bcp/PlanDetail.tsx
+target_path: frontend/src/modules/bcp/PlanDetail.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-bcp-plandetail-tsx
 closed: true

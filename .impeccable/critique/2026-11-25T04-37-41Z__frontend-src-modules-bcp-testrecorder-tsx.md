@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 1
-target_identity: "file:/home/user/rmm-w4/frontend/src/modules/bcp/TestRecorder.tsx"
+target_identity: "file:frontend/src/modules/bcp/TestRecorder.tsx"
 target_fingerprint: "sha256:958ed8e836ac7cbad3b97ac0aaf12dc99c457696eca1e68946650a2c51c2afa4"
-target_path: /home/user/rmm-w4/frontend/src/modules/bcp/TestRecorder.tsx
+target_path: frontend/src/modules/bcp/TestRecorder.tsx
 timestamp: 2026-11-25T04-37-41Z
 slug: frontend-src-modules-bcp-testrecorder-tsx
 closed: true

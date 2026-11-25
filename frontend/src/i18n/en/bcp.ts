@@ -51,7 +51,6 @@ export const bcp = {
     reviewerCta: "Give someone plan review",
   },
   plans: {
-    title: "BCP / DR tests",
     // Shown with every client chosen at the top (design §3.4).
     colClient: "Client",
     description: "Continuity and DR plans, their objectives and their tests.",
@@ -144,7 +143,6 @@ export const bcp = {
       "The plan drops out of active DR coverage and the continuity posture. Its tests, findings and evidence are kept, and it can be unarchived.",
     archiveConfirm: "Archive plan",
     summary: "Summary",
-    state: "State",
     rto: "RTO",
     rpo: "RPO",
     minutes: "{minutes} min",
