@@ -324,6 +324,11 @@ export const agentPush = {
       other: "A list someone confirmed, installed at most {count} machines at a time.",
     },
     all: "All push runs",
+    // The run's four counts (redesign Task 6, 1.8).
+    tileTotal: "Machines",
+    tileInFlight: "Installing now",
+    tileInstalled: "Installed",
+    tileFailed: "Failed",
     pause: "Pause",
     resume: "Resume",
     cancelRun: "Cancel run",

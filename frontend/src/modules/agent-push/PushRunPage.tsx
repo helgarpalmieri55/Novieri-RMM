@@ -2,6 +2,12 @@
 // each confirmed machine and why, and the controls its state allows. Pause,
 // Resume and Cancel are a person's acts; the server checks the permission on
 // each, and Cancel is final.
+//
+// ON THE RECORD KIT (redesign plan Task 6, 1.8; Receta F without tabs): a head
+// with the way back to every run, the run's state, its client and the acts its
+// state allows; four counts of its machines; the paged machines under them.
+// The browser tab names the run (`useRecordTitle`), under Devices. None of the
+// acts is offered to the platform's pacer: each is a person's (2a(e)).
 
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -13,16 +19,22 @@ import { translate } from "../../i18n/core";
 import { Td, Th } from "../../components/ui";
 import {
   Btn,
-  PageHead,
+  ClientContext,
+  DetailHead,
   Pager,
   Panel,
   Progress,
   QueryState,
+  StatsGrid,
   StatusPill,
   TableWrap,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
+import { Tile } from "../../shell/viz";
 import { usePushPermissions, usePushRun, usePushRunControl, usePushRunTargets } from "./api";
 import {
+  RUN_STATE_KIND,
+  RUN_STATE_LABELS,
   TARGET_STATE_KIND,
   TARGET_STATE_LABELS,
   countsSentence,
@@ -66,12 +78,11 @@ export function PushRunPage() {
   const control = usePushRunControl();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const total = targets.data?.total ?? 0;
+  const title = data ? t("agentPush.run.title", { prefix: data.prefix }) : t("agentPush.run.titleBare");
+  useRecordTitle(data ? title : undefined);
 
   const actions = (
     <>
-      <Link className="btn" to="/devices/push-runs">
-        {t("agentPush.run.all")}
-      </Link>
       {data && permissions.run ? (
         <>
           {data.state === "running" ? (
@@ -99,9 +110,11 @@ export function PushRunPage() {
 
   return (
     <>
-      <PageHead
-        title={data ? t("agentPush.run.title", { prefix: data.prefix }) : t("agentPush.run.titleBare")}
-        description={t("agentPush.run.description", { count: data?.concurrency ?? 50 })}
+      <DetailHead
+        back={{ to: "/devices/push-runs", label: t("agentPush.run.all") }}
+        title={title}
+        status={data ? { kind: RUN_STATE_KIND[data.state], label: RUN_STATE_LABELS[data.state] } : undefined}
+        context={data ? <ClientContext clientId={data.client_id} /> : undefined}
         actions={actions}
       />
       {control.isError ? (
@@ -112,6 +125,30 @@ export function PushRunPage() {
       <QueryState loading={run.isLoading} error={run.error} empty={false} emptyLabel="">
         {data ? (
           <>
+            {/* WHERE ITS MACHINES STAND, counted by the server (`counts`). Not
+                links: the machines are the table below, which has no filter
+                to open at one state. */}
+            <StatsGrid columns={4}>
+              <Tile label={t("agentPush.run.tileTotal")} value={String(data.target_count)} icon="devices" />
+              <Tile
+                label={t("agentPush.run.tileInFlight")}
+                value={String(data.counts.in_flight)}
+                icon="activity"
+                kind={data.counts.in_flight > 0 ? "run" : undefined}
+              />
+              <Tile
+                label={t("agentPush.run.tileInstalled")}
+                value={String(data.counts.installed)}
+                icon="circle-check"
+                kind={data.counts.installed > 0 ? "ok" : undefined}
+              />
+              <Tile
+                label={t("agentPush.run.tileFailed")}
+                value={String(data.counts.failed)}
+                icon="circle-x"
+                kind={data.counts.failed > 0 ? "crit" : undefined}
+              />
+            </StatsGrid>
             <Panel
               title={t("agentPush.run.progressTitle")}
               subtitle={t("agentPush.run.progressSubtitle", {
@@ -119,6 +156,7 @@ export function PushRunPage() {
                 name: data.credential_name || t("agentPush.run.noCredential"),
               })}
             >
+              <p className="note mb-2">{t("agentPush.run.description", { count: data.concurrency })}</p>
               <Progress value={runProgress(data.counts, data.target_count)} label={t("agentPush.run.progressLabel")} />
               <p className="note mt-2">
                 {t("agentPush.run.installingNow", { counts: countsSentence(data.counts), count: data.counts.in_flight })}

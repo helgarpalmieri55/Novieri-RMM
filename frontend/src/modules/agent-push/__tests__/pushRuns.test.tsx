@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -199,5 +199,36 @@ describe("Push runs on the list kit", () => {
     stubApi();
     renderRouted("/devices/push-runs", <PushRunsPage />);
     expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+});
+
+/* --- the record kit (redesign plan Task 6, 1.8; Receta F without tabs) ------------- */
+
+describe("a push run on the record kit", () => {
+  it("names the record in the browser tab", async () => {
+    stubApi();
+    renderRouted("/devices/push-runs/run-1", <PushRunPage />, "/devices/push-runs/:runId", { page: "shell.nav.item.devices" });
+    await screen.findByRole("heading", { level: 1, name: "Push run on 10.20.4.0/24" });
+    await waitFor(() => expect(document.title).toBe("Push run on 10.20.4.0/24 · Devices · Novieri RMM"));
+  });
+
+  it("heads the run with its way back, its state and its client, and counts its machines", async () => {
+    stubApi("paused");
+    renderRouted("/devices/push-runs/run-1", <PushRunPage />, "/devices/push-runs/:runId");
+    const head = (await screen.findByRole("heading", { level: 1, name: "Push run on 10.20.4.0/24" })).closest("section") as HTMLElement;
+    expect(within(head).getByRole("link", { name: "All push runs" })).toHaveAttribute("href", "/devices/push-runs");
+    expect(within(head).getByText("Paused")).toBeInTheDocument();
+    expect(within(head).getByRole("link", { name: "Novieri" })).toHaveAttribute("href", "/clients/o1");
+    expect(within(head).getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll(".tile")].map((tile) => [
+      tile.querySelector(".k")?.textContent,
+      tile.querySelector(".v")?.textContent,
+    ]);
+    expect(tiles).toEqual([
+      ["Machines", "4"],
+      ["Installing now", "1"],
+      ["Installed", "1"],
+      ["Failed", "0"],
+    ]);
   });
 });
