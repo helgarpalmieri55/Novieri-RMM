@@ -39,6 +39,20 @@ export const people = {
     retired: "Retired",
   },
   person: {
+    /** Back to the list this page lives under in the rail (redesign Task 11, 6.7). */
+    back: "Devices",
+    tabs: {
+      label: "What they hold",
+      equipment: "Computers",
+      licenses: "Licences and subscriptions",
+      tickets: "Tickets",
+      history: "History",
+    },
+    tiles: {
+      computers: "Computers",
+      licences: "Licences",
+      seats: "Subscription seats",
+    },
     notFound: "Person not found.",
     edit: "Edit",
     startStarter: "Start new starter",
@@ -62,6 +76,7 @@ export const people = {
       loginsLearned: "Learned when someone links a computer to them",
     },
     past: {
+      none: "No checklist has finished yet.",
       title: "Past checklists",
       finished: "{kind}: finished {date}",
       cancelled: "{kind}: cancelled {date}",
@@ -185,9 +200,19 @@ export const people = {
   },
   unmatched: {
     title: "Needs a person",
-    description:
-      "These name someone, but we couldn't match them to a person by email. Link each one, or add them as a new person.",
+    // One sentence of 40 to 70 characters (Receta L, 1); the actions are on each row.
+    description: "These name someone we couldn't match to a person by email.",
     empty: "Everything is linked to a person.",
+    /** One type per chip (redesign Task 11, 6.8): what the list under it holds. */
+    kindLabel: "Type",
+    kind: {
+      devices: "Computers",
+      licences: "Licences",
+      seats: "Subscription seats",
+    },
+    emptyDevices: "Every computer has a person.",
+    emptyLicences: "Every licence has a person.",
+    emptySeats: "Every subscription seat has a person.",
     seats: {
       title: "Subscription seats",
       service: "Service",

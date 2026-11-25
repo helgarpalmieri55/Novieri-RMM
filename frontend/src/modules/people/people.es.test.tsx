@@ -248,9 +248,15 @@ describe("the person page in Spanish", () => {
     const { container } = mount(<PersonPage />, "/people/:personId", "/people/p1");
     expect(await screen.findByRole("heading", { name: "Maria Garcia" })).toBeInTheDocument();
     expect(screen.getByText("Trabaja aquí")).toBeInTheDocument();
-    for (const title of ["Detalles", "Inicio de sesión", "Equipos", "Licencias", "Suscripciones", "Tickets abiertos"]) {
-      expect(screen.getByText(title, { selector: ".panel-title, .panel-head *, h2, h3" })).toBeInTheDocument();
-    }
+    // IN TABS (redesign Task 11, 6.7; Receta F): what the person holds is
+    // grouped by tab, so each panel is read on the tab that shows it.
+    const user = userEvent.setup();
+    const titles = (...names: string[]) => {
+      for (const title of names) {
+        expect(screen.getByText(title, { selector: ".panel-title, .panel-head *, h2, h3" })).toBeInTheDocument();
+      }
+    };
+    titles("Detalles", "Inicio de sesión", "Equipos");
     expect(screen.getByText("Correo electrónico")).toBeInTheDocument();
     expect(screen.getByText("Inicia sesión en un equipo como")).toBeInTheDocument();
     expect(screen.getByText("Puede iniciar sesión")).toBeInTheDocument();
@@ -259,14 +265,23 @@ describe("the person page in Spanish", () => {
     // The account's role is the seeded `requester`: it reads in Spanish.
     expect(screen.getByText("Solicitante")).toBeInTheDocument();
     expect(screen.getByText("En uso")).toBeInTheDocument();
+    // The department and job title are recorded; the lines around them are Spanish.
+    expectNoEnglish(container, [...RECORDED, "Pro"]);
+    await user.click(screen.getByRole("tab", { name: "Licencias y suscripciones" }));
+    titles("Licencias", "Suscripciones");
     expect(screen.getByText("A través de su equipo")).toBeInTheDocument();
-    expect(screen.getByText("Pendiente")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Licencias" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Asignada" })).toBeInTheDocument();
+    expectNoEnglish(container, [...RECORDED, "Pro"]);
+    await user.click(screen.getByRole("tab", { name: "Tickets" }));
+    titles("Tickets abiertos");
+    expect(screen.getByText("Pendiente")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Creado" })).toBeInTheDocument();
     // Read-only: no checklist or release controls.
     expect(screen.queryByRole("button", { name: /Empezar/ })).toBeNull();
-    // The department and job title are recorded; the lines around them are Spanish.
+    expectNoEnglish(container, [...RECORDED, "Pro"]);
+    await user.click(screen.getByRole("tab", { name: "Historial" }));
+    expect(screen.getByText("Aún no ha terminado ninguna lista de verificación.")).toBeInTheDocument();
     expectNoEnglish(container, [...RECORDED, "Pro"]);
   });
 
@@ -286,10 +301,15 @@ describe("the person page in Spanish", () => {
     expect(screen.getByText(/^No tiene inicio de sesión\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Crea una cuenta en Configuración" })).toHaveAttribute("href", "/settings");
     expect(screen.getByText(/^No hay ningún equipo vinculado a la persona\./)).toBeInTheDocument();
+    expect(screen.getByText("Se aprende cuando alguien vincula un equipo a la persona")).toBeInTheDocument();
+    expectNoEnglish(container, RECORDED);
+    // The other sections are on their own tabs (redesign Task 11, 6.7).
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Licencias y suscripciones" }));
     expect(screen.getByText("Oculto: no tienes permiso para ver las licencias.")).toBeInTheDocument();
     expect(screen.getByText("Sin suscripciones.")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Tickets" }));
     expect(screen.getByText("Oculto: no tienes permiso para ver los tickets.")).toBeInTheDocument();
-    expect(screen.getByText("Se aprende cuando alguien vincula un equipo a la persona")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 
@@ -441,7 +461,8 @@ describe("the person page in Spanish", () => {
         ["people.read"],
       ),
     );
-    const { container } = mount(<PersonPage />, "/people/:personId", "/people/p1");
+    // The finished checklists are the History tab (redesign Task 11, 6.7).
+    const { container } = mount(<PersonPage />, "/people/:personId", "/people/p1?tab=history");
     expect(await screen.findByText("Listas de verificación anteriores")).toBeInTheDocument();
     const items = [...container.querySelectorAll("li")].map((li) => li.textContent ?? "");
     expect(items[0]).toMatch(/^Nueva incorporación: terminada el /);
@@ -460,7 +481,8 @@ describe("the person page in Spanish", () => {
         ["people.read", "subscriptions.manage", "licenses.manage", "users.manage"],
       ),
     );
-    mount(<PersonPage />, "/people/:personId", "/people/p1");
+    // Licences and seats are their tab; the sign-in is on the default one (redesign Task 11, 6.7).
+    mount(<PersonPage />, "/people/:personId", "/people/p1?tab=licenses");
     const buttons = await screen.findAllByRole("button", { name: "Liberar" });
     expect(buttons).toHaveLength(2);
     expect(screen.getAllByRole("columnheader", { name: "Recuperar" })).toHaveLength(2);
@@ -477,6 +499,7 @@ describe("the person page in Spanish", () => {
     expect(within(dialog).getByRole("heading", { name: "Liberar esta licencia" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
 
+    await user.click(screen.getByRole("tab", { name: "Equipos" }));
     await user.click(screen.getByRole("button", { name: "Desactivar el inicio de sesión" }));
     dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Desactivar su inicio de sesión" })).toBeInTheDocument();
@@ -512,7 +535,8 @@ describe("the person page in Spanish", () => {
     mockUseApi.mockReturnValue(
       api({ getPerson: vi.fn().mockResolvedValue(detail({ licences: [] })), releaseSeat }, ["people.read", "subscriptions.manage"]),
     );
-    mount(<PersonPage />, "/people/:personId", "/people/p1");
+    // The seats are on the Licences tab (redesign Task 11, 6.7).
+    mount(<PersonPage />, "/people/:personId", "/people/p1?tab=licenses");
     await user.click(await screen.findByRole("button", { name: "Liberar" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Liberar" }));
     const alert = await screen.findByRole("alert");
@@ -579,16 +603,24 @@ describe("the unmatched list in Spanish", () => {
     const { container } = mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched");
     expect(await screen.findByRole("heading", { name: "Necesita una persona" })).toBeInTheDocument();
     expect(screen.getByText(/^Estos elementos nombran a alguien/)).toBeInTheDocument();
-    for (const title of ["Puestos de suscripción", "Equipos", "Licencias asignadas a una cuenta"]) {
-      expect(await screen.findByRole("table", { name: title })).toBeInTheDocument();
-    }
-    expect(screen.getByRole("button", { name: "Vincular a…" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Añadir como persona nueva" })).toBeInTheDocument();
+    // ONE TYPE AT A TIME (redesign Task 11, 6.8): the three groups are the
+    // three "Tipo" chips, computers first, and each draws its own table.
+    const user = userEvent.setup();
+    expect(await screen.findByRole("table", { name: "Equipos" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Tipo" })).toBeInTheDocument();
     expect(screen.getByText("No se ha visto a nadie")).toBeInTheDocument();
     expect(screen.getByText("Equipo sin nombre")).toBeInTheDocument();
     expect(screen.getByText("Vacío")).toBeInTheDocument();
-    expect(screen.getByText("Registrado como")).toBeInTheDocument();
     expect(screen.getByText("Sesión iniciada como")).toBeInTheDocument();
+    expectNoEnglish(container, [...RECORDED, "Ana", "CORP\\ana"]);
+    await user.click(screen.getByRole("button", { name: /^Licencias/ }));
+    expect(await screen.findByRole("table", { name: "Licencias asignadas a una cuenta" })).toBeInTheDocument();
+    expectNoEnglish(container, [...RECORDED, "Ana", "CORP\\ana"]);
+    await user.click(screen.getByRole("button", { name: /^Puestos de suscripción/ }));
+    expect(await screen.findByRole("table", { name: "Puestos de suscripción" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vincular a…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Añadir como persona nueva" })).toBeInTheDocument();
+    expect(screen.getByText("Registrado como")).toBeInTheDocument();
     expectNoEnglish(container, [...RECORDED, "Ana", "CORP\\ana"]);
   });
 
@@ -598,7 +630,8 @@ describe("the unmatched list in Spanish", () => {
     mockUseApi.mockReturnValue(
       api({ listUnmatched: vi.fn().mockResolvedValue(FILLED), listPeople }, ["people.read", "people.manage"]),
     );
-    mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched");
+    // The seats are their own type now (redesign Task 11, 6.8).
+    mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched?kind=seats");
     await user.click(await screen.findByRole("button", { name: "Vincular a…" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Vincular este puesto a" })).toBeInTheDocument();
@@ -697,7 +730,8 @@ describe("the pieces other pages use, in Spanish", () => {
   it("explains an empty list of people when no one can be added", async () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(api({ listUnmatched: vi.fn().mockResolvedValue({ ...NOTHING_UNMATCHED, seats: [{ seat_id: "s9", subscription_id: "sub1", service_name: "Zoom", assignee_name: "Pat Doe", assignee_email: "pat@corp.example" }] }), listPeople: vi.fn().mockResolvedValue([]) }, ["people.read", "people.manage"]));
-    mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched");
+    // The seats are their own type now (redesign Task 11, 6.8).
+    mount(<UnmatchedPage />, "/people/unmatched", "/people/unmatched?kind=seats");
     await user.click(await screen.findByRole("button", { name: "Vincular a…" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("combobox", { name: "Persona" }));
