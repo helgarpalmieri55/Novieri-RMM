@@ -12,6 +12,7 @@ import type { MessageKey } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
 import type { Me, SecurityEventFilters } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { saveBlob } from "../../lib/download";
 import { RESYNC_KIND } from "../../lib/resync";
 import { useLiveEvents } from "../../lib/ws";
@@ -19,7 +20,23 @@ import { Icon } from "../../shell/icons";
 import { variantKind } from "../jobs/jobState";
 import { eventBadgeVariant, securityEventLabel } from "./eventBadges";
 import { SecurityPrerequisites } from "./SecurityPrerequisites";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useUrlFilters,
+} from "../../shell/components";
+import { Drawer } from "../../shell/Drawer";
 
 // Corresponds to the design's "Security logs" screen (`P['security']` in
 // docs/design/itms-prototype-v3.html): tiles, then one bare panel of rows
@@ -88,9 +105,14 @@ export function SecurityPage() {
   // `location.href` stayed `/security` whatever was typed, and a reload
   // discarded all three. `useSearchParams` is the whole mechanism -- state
   // that is READ from the URL cannot drift out of step with it.
+  //
+  // ON THE LIST KIT (redesign plan, O3 3.10): the same three keys every link
+  // into this page already carries (`username`, `event_type`, `hours`), plus
+  // the Client chip's `client`; the event open in its drawer is `?event=`.
   const [params, setParams] = useSearchParams();
-  const username = params.get(USERNAME_PARAM) ?? "";
-  const eventType = params.get(EVENT_TYPE_PARAM) ?? "";
+  const filtersUrl = useUrlFilters([USERNAME_PARAM, EVENT_TYPE_PARAM, "client"] as const);
+  const username = filtersUrl.values.username;
+  const eventType = filtersUrl.values.event_type;
   // A hand-edited `?hours=9999` must not invent a fourth range: an unknown
   // value falls back to the default rather than requesting a window no button
   // on the page can express.
@@ -101,7 +123,10 @@ export function SecurityPage() {
   const preset = presetFor(presetHours);
   const windowWords = t(preset.words);
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const opened = useUrlFilters(["event"] as const);
+  const selected = opened.values.event === "" ? null : opened.values.event;
+  const setSelected = (id: string) => opened.set("event", id);
+  const closeEvent = () => opened.set("event", "", { replace: true });
   const [copied, setCopied] = useState(false);
 
   // `replace` on every write: typing eight characters into the username box is
@@ -170,9 +195,15 @@ export function SecurityPage() {
     [username, eventType, fromTs],
   );
 
+  // UNDER THE CLIENT CHIP (decisions D6, D20): the events are a client's on
+  // the server (`security_logs/api.py`), so the search reads that client's,
+  // through `useNarrowedApi`, under its key. The evidence export and the one
+  // event opened by id keep `useApi()`, as before.
+  const { api: readApi, client, ready } = useNarrowedApi(filtersUrl.values.client);
   const events = useQuery({
-    queryKey: ["security-events", filters],
-    queryFn: () => api.listSecurityEvents(filters),
+    queryKey: ["security-events", filters, client],
+    queryFn: () => readApi.listSecurityEvents(filters),
+    enabled: ready,
   });
   const detail = useQuery({
     queryKey: ["security-event", selected],
@@ -223,6 +254,12 @@ export function SecurityPage() {
   const failedInWindow = items.filter((event) => event.event_type === "logon_failure").length;
   const distinctPrincipals = new Set(items.map((event) => event.username).filter(Boolean)).size;
   const filtered = username !== "" || eventType !== "";
+  // The Client chip empties a list as surely as a filter does, and the empty
+  // state names it with the others (it is not in the evidence CSV's note:
+  // the export is today's, every client's).
+  const { clients } = useClientScope();
+  const chipClient = client === null ? null : (clients.find((item) => item.id === client)?.name ?? null);
+  const listFiltered = filtered || chipClient !== null;
 
   // "across the 250 events loaded so far" -- the auditor's own words for what
   // "(loaded)" was trying and failing to say. One qualifier style on all three
@@ -359,68 +396,79 @@ export function SecurityPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("security.page.filters.usernamePlaceholder")}
-            value={username}
-            onChange={(event) => setFilters({ [USERNAME_PARAM]: event.target.value })}
-            aria-label={t("security.page.filters.usernameLabel")}
-            maxLength={200}
-          />
-          <select
-            className="select-field"
-            value={eventType}
-            onChange={(event) => setFilters({ [EVENT_TYPE_PARAM]: event.target.value })}
-            aria-label={t("security.page.filters.eventTypeLabel")}
-          >
-            <option value="">{t("security.page.filters.allEventTypes")}</option>
-            {EVENT_TYPES.map((name) => (
-              <option key={name} value={name}>
-                {securityEventLabel(name)}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-          {/* COLOUR WAS THE ONLY SIGNAL (cycle 12, auditor A, HIGH). Three bare
-              <button>s, the selected one distinguished by a purple fill and
-              nothing else: no `aria-pressed`, no role, no group, so a screen
-              reader heard "24h, button. 7d, button. 30d, button." and the stat
-              cards above described a window nobody had been told about. The
-              WAI-ARIA radio-group pattern says it in structure; the ✓ says it
-              without colour; the arrow keys make the one tab stop navigable. */}
-          <div
-            role="radiogroup"
-            aria-label={t("security.page.filters.timeRange")}
-            onKeyDown={moveRange}
-            style={{ display: "flex", gap: 4 }}
-          >
-            {PRESETS.map((option) => {
-              const active = presetHours === option.hours;
-              return (
-                <button
-                  key={option.label}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  data-range={option.label}
-                  tabIndex={active ? 0 : -1}
-                  className={`btn small ${active ? "primary" : ""}`}
-                  onClick={() => setFilters({ [HOURS_PARAM]: String(option.hours) })}
-                >
-                  {active ? <span aria-hidden="true">✓ </span> : null}
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-        </FilterBar>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("security.page.filters.usernamePlaceholder")}
+              value={username}
+              // Typing is one intent, not one history entry per character.
+              onChange={(event) => {
+                setCopied(false);
+                filtersUrl.set(USERNAME_PARAM, event.target.value, { replace: true });
+              }}
+              aria-label={t("security.page.filters.usernameLabel")}
+              maxLength={200}
+            />
+          }
+          chips={
+            <>
+              {/* THE EVENT TYPE AS THE KIT'S CHIPS, one per type the log
+                  carries, in words; no counts, since the search answers a
+                  total and no count by type. */}
+              <FilterChips
+                label={t("security.page.filters.eventTypeLabel")}
+                options={[
+                  { value: "", label: t("security.page.filters.allEventTypes") },
+                  ...EVENT_TYPES.map((name) => ({ value: name, label: securityEventLabel(name) })),
+                ]}
+                value={eventType}
+                onChange={(value) => {
+                  setCopied(false);
+                  filtersUrl.set(EVENT_TYPE_PARAM, value);
+                }}
+              />
+              <ClientFilter filters={filtersUrl} />
+              {/* COLOUR WAS THE ONLY SIGNAL (cycle 12, auditor A, HIGH). Three
+                  bare <button>s, the selected one distinguished by a purple
+                  fill and nothing else. The WAI-ARIA radio-group pattern says
+                  it in structure; the ✓ says it without colour; the arrow keys
+                  make the one tab stop navigable. */}
+              <div
+                role="radiogroup"
+                aria-label={t("security.page.filters.timeRange")}
+                onKeyDown={moveRange}
+                style={{ display: "flex", gap: 4 }}
+              >
+                {PRESETS.map((option) => {
+                  const active = presetHours === option.hours;
+                  return (
+                    <button
+                      key={option.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      data-range={option.label}
+                      tabIndex={active ? 0 : -1}
+                      className={`btn small ${active ? "primary" : ""}`}
+                      onClick={() => setFilters({ [HOURS_PARAM]: String(option.hours) })}
+                    >
+                      {active ? <span aria-hidden="true">✓ </span> : null}
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          }
+          end={events.data ? <ShowingCount shown={items.length} total={events.data.total} /> : null}
+        />
 
         {/* `empty` is handled below rather than by `QueryState`, whose empty
             slot takes a sentence and no way out of it. Loading and error still
             belong to it, so all three states stay the console's. */}
-        <QueryState loading={events.isLoading} error={events.error} empty={false} emptyLabel="">
+        <QueryState loading={events.isPending} error={events.error} empty={false} emptyLabel="">
           {items.length === 0 ? (
-            filtered ? (
+            listFiltered ? (
               // NAME THE FILTERS THAT PRODUCED THE EMPTINESS, and offer the two
               // ways out (cycle 12, auditor A, MEDIUM). "The user is left to
               // guess whether there genuinely are no security events, whether
@@ -437,6 +485,7 @@ export function SecurityPage() {
                       username && t("security.page.emptyFiltered.filterUsername", { username }),
                       eventType &&
                         t("security.page.emptyFiltered.filterEventType", { eventType: securityEventLabel(eventType) }),
+                      chipClient === null ? "" : t("security.page.emptyFiltered.filterClient", { client: chipClient }),
                     ].filter(Boolean),
                   ),
                 })}
@@ -451,9 +500,7 @@ export function SecurityPage() {
                     <Btn
                       variant="primary"
                       label={t("security.page.emptyFiltered.clear")}
-                      onClick={() =>
-                        setFilters({ [USERNAME_PARAM]: "", [EVENT_TYPE_PARAM]: "" })
-                      }
+                      onClick={filtersUrl.clear}
                     />
                   </div>
                 }
@@ -474,7 +521,7 @@ export function SecurityPage() {
               />
             )
           ) : (
-            <Table>
+            <Table label={t("security.page.title")}>
               <thead>
                 <tr>
                   <Th>{t("security.page.columns.event")}</Th>
@@ -534,7 +581,15 @@ export function SecurityPage() {
         </QueryState>
       </Panel>
 
-      <Panel title={t("security.page.raw.title")} subtitle={t("security.page.raw.subtitle")}>
+      {/* THE EVENT OPEN, IN ITS DRAWER (redesign plan, O3 3.10), from
+          `?event=`, so a row is a link and Back closes it. It was a panel
+          under the list that waited, empty, for a choice. */}
+      <Drawer
+        open={selected != null}
+        onClose={closeEvent}
+        title={t("security.page.raw.title")}
+        subtitle={t("security.page.raw.subtitle")}
+      >
         {/* THE FETCH USED TO FAIL INTO "Select an event.". `detail.error` was
             read nowhere, so a 403 or a 503 on `GET /security-events/{id}` put
             the panel back into the state it is in before anything is selected
@@ -557,27 +612,8 @@ export function SecurityPage() {
             value={detail.data.raw}
             empty={t("security.page.raw.noFields")}
           />
-        ) : (
-          /* THE CONSOLE'S ONE WAY OF SAYING "NOTHING HERE". This was a bare
-             sentence in `.cell-sub` -- no glyph, no emphasis -- while every
-             sibling resting state draws the kit's `EmptyState` (/software,
-             /changes/chg-1, /remote/sess-1, and /ipam/search since the same
-             review). A design review of all 87 routes filed the three
-             treatments as one finding; this was the middle one.
-
-             `headingLevel` is left at its default 3, which is correct HERE and
-             is not a detail to copy blindly: this panel is titled, so it
-             renders an `h2` for the `h3` to sit under. An UNTITLED panel needs
-             `headingLevel={2}` or the heading skips a level, and the harmony
-             gate will not catch it -- axe scores `heading-order` `moderate`
-             and the gate fails on `serious`. */
-          <EmptyState
-            icon="search"
-            title={t("security.page.raw.noneTitle")}
-            body={t("security.page.raw.noneBody")}
-          />
-        )}
-      </Panel>
+        ) : null}
+      </Drawer>
     </>
   );
 }

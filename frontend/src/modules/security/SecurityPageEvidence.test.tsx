@@ -109,7 +109,10 @@ describe("the evidence view is addressable (A62)", () => {
       ),
     );
     expect(screen.getByLabelText("Search by username")).toHaveValue("opsadmin");
-    expect(screen.getByLabelText("Filter by event type")).toHaveValue("logon_failure");
+    // The event type is chips now (redesign plan, O3 3.10): the one in force is pressed.
+    expect(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("radio", { name: /24h/ })).toHaveAttribute("aria-checked", "true");
   });
 
@@ -119,7 +122,9 @@ describe("the evidence view is addressable (A62)", () => {
     await screen.findByRole("heading", { name: "Security logs" });
 
     await user.type(screen.getByLabelText("Search by username"), "opsadmin");
-    await user.selectOptions(screen.getByLabelText("Filter by event type"), "logon_failure");
+    await user.click(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    );
     await user.click(screen.getByRole("radio", { name: /24h/ }));
 
     expect(currentUrl).toContain("username=opsadmin");
@@ -461,7 +466,10 @@ describe("the stat tiles open the search behind them", () => {
         expect.objectContaining({ event_type: "logon_failure" }),
       ),
     );
-    expect(screen.getByLabelText("Filter by event type")).toHaveValue("logon_failure");
+    // The event type is chips now (redesign plan, O3 3.10): the one in force is pressed.
+    expect(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("says WHICH zero a zero is", async () => {

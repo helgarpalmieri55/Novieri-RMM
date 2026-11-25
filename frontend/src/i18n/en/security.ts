@@ -43,6 +43,7 @@ export const security = {
       body: "Nothing in {window} matches {filters}. The filter may be narrower than the evidence, or spelled differently from the name the endpoint reported.",
       filterUsername: "username “{username}”",
       filterEventType: "event type “{eventType}”",
+      filterClient: "client “{client}”",
       widen: "Widen to {range}",
       clear: "Clear filters",
     },
@@ -62,8 +63,6 @@ export const security = {
       subtitle: "Selected row's stored fields",
       loading: "Loading…",
       noFields: "This event carries no stored fields.",
-      noneTitle: "No event selected",
-      noneBody: "Choose a row in the event list to see the fields stored with it.",
     },
   },
   prerequisites: {
