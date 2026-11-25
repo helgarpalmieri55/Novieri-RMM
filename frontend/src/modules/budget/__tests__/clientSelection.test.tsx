@@ -67,6 +67,8 @@ describe("budget follows the client chosen at the top", () => {
     const api = stubApi();
     renderAt(<BudgetDashboard />, "/budget");
     expect(await screen.findByText("Choose a client at the top of the page")).toBeInTheDocument();
+    // The page's one section under its h1, so an h2 (axe `heading-order`).
+    expect(screen.getByRole("heading", { level: 2, name: "Choose a client at the top of the page" })).toBeInTheDocument();
     expect(api.getBudgetSettings).not.toHaveBeenCalled();
     expect(api.listBudgets).not.toHaveBeenCalled();
   });

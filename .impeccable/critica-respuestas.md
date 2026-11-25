@@ -191,3 +191,63 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
   computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
 - **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
   desplazar la página) y antes de pintar.
+
+## Oleada 6: documentación, cambios, presupuesto, personas, credenciales e informes, Task 11
+
+Quince críticas de 2026-11-25T06-58-35Z (`.impeccable/critique/2026-11-25T06-58-35Z__…`), de 28/40 a 30/40,
+todas en modo `⚠️ DEGRADED: single-context`. Solo tres tienen tres asuntos prioritarios o más y por eso
+preguntas: la documentación (`DocsPage.tsx`), la lista de cambios (`ChangesPage.tsx`) y el resumen del
+presupuesto (`BudgetDashboard.tsx`); las otras doce escriben `Questions skipped: <n> priority issues`. Las
+respuestas que zanjan las fuentes van aquí; las dos que no, al coordinador en el informe de la Task 11.
+
+### 1. Documentación: ¿el lector junto a la lista es el `DetailGrid` del kit?
+
+- **Sin respuesta en las fuentes.** El encargo pide `DetailGrid` con la lista a la izquierda y el lector a la
+  derecha; el `DetailGrid` del kit pone su columna estrecha (1fr) a la derecha, así que la biblioteca quedaría
+  a la derecha del lector. La página conserva su rejilla de dos columnas (lista a la izquierda, como la dibujan
+  Atera y el encargo) y pide al kit una opción para poner la columna estrecha primero. Sube al coordinador.
+
+### 2. Documentación: la nota bajo la búsqueda, ¿merece su línea?
+
+- **Respuesta: sí, se queda.** Dice qué no busca la búsqueda.
+- **Regla.** La especificación del módulo, §11.6, pide que la página lo diga.
+
+### 3. Documentación: en un teléfono, las cuatro tarjetas antes de la biblioteca
+
+- **Respuesta: sin cambio en la página.** El kit pliega todas las páginas igual.
+- **Regla.** `PRODUCT.md`, principio 1 (las páginas se parecen a propósito); `StatsGrid` es del kit.
+
+### 4. Cambios: ¿una lista de estados rompe «los filtros de estado como chips»?
+
+- **Respuesta: no; se aplica en el pulido.** «Todos» y «Abiertos» (las vistas que abren las tarjetas) siguen
+  siendo chips; los siete estados y los tres tipos pasan a dos chips con lista (`.chip-select`, como el chip
+  «Cliente»), sobre las mismas claves `?state=` y `?type=`, cada opción con su número.
+- **Por qué.** Trece chips eran dos filas a 1440 y siete a 390 antes del primer cambio (P1 de la crítica).
+- **Regla.** `DESIGN.md` (una decisión con pocas opciones a la vista); el chip con lista es un chip del kit
+  (`shell/listKit.tsx`, `chip chip-select`).
+
+### 5. Cambios: ¿se esconde un estado que abriría una vista vacía?
+
+- **Respuesta: no.** Esconderlo haría que un enlace a ese estado pareciera roto; su número ya dice que está
+  vacío, y el vacío dice por qué con «Quitar filtros».
+- **Regla.** Receta L, punto 8 (el vacío dice su causa).
+
+### 6. Cambios: el panel de requisitos ocupa la primera pantalla
+
+- **Respuesta: sin cambio.** Es el panel compartido del módulo y se pliega cuando no falta nada.
+
+### 7. Presupuesto: ¿la tabla de desviación sigue al periodo del gráfico?
+
+- **Sin respuesta en las fuentes.** Lista los doce periodos bajo un gráfico de uno. La regla de la oleada es que
+  lo que una página muestra no cambia: se deja como está y sube al coordinador.
+
+### 8. Presupuesto: «Elige un cliente arriba» es un h3 bajo el h1
+
+- **Respuesta: h2.** Es la única sección de la página con «Todos mis clientes»; `BudgetPickClient` dibuja su
+  título con `headingLevel={2}`.
+- **Regla.** axe `heading-order` (moderado) en las cinco páginas del presupuesto; la escala de `DESIGN.md`.
+
+### 9. Presupuesto: el chip del presupuesto es ancho en la cabecera
+
+- **Respuesta: se queda.** Nombra el presupuesto que se ve.
+- **Regla.** El encargo, 6.3: el presupuesto elegido como `.chip-select` en la cabecera.

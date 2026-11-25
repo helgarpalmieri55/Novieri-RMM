@@ -289,7 +289,10 @@ function QueueRow({
       </Td>
       {/* A calendar date rendered in the product's one format and pinned to
           UTC -- see ExpensesPage's row for why the day must not move. */}
-      <Td>{formatDate(expense.expense_date, "UTC")}</Td>
+      {/* One line, as the ledger's date (it wrapped to three at 641). */}
+      <Td>
+        <span style={{ whiteSpace: "nowrap" }}>{formatDate(expense.expense_date, "UTC")}</span>
+      </Td>
       <Td>
         <StatusPill value={expense.status} label={humaniseEnum(expense.status, "ExpenseStatus")} kind={kind} />
       </Td>

@@ -447,6 +447,19 @@ describe("UnmatchedPage", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  // The default type can be empty while another waits (the wave's critique,
+  // P2): the empty state offers the first type that has rows.
+  it("offers the type that has rows when the one shown is empty", async () => {
+    mockUseApi.mockReturnValue(
+      api({ listUnmatched: vi.fn().mockResolvedValue({ ...FILLED, devices: [] }) }, ["people.read"]),
+    );
+    const { router } = renderPage("/people/unmatched", <UnmatchedPage />);
+    expect(await screen.findByText("Every computer has a person.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See the subscription seats" }));
+    expect(router.state.location.search).toBe("?kind=seats");
+    expect(await screen.findByRole("table", { name: "Subscription seats" })).toBeInTheDocument();
+  });
+
   it("assigns a seat to a person as today", async () => {
     const user = userEvent.setup();
     const linkSeatToPerson = vi.fn().mockResolvedValue({ ...MARIA });

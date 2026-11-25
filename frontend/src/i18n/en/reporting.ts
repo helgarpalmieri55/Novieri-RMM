@@ -13,7 +13,7 @@ export const reporting = {
   catalogue: {
     // The rail's label (coordinator ruling 1).
     title: "Reports",
-    description: "Reports on your devices, service desk and spend, each exportable as CSV.",
+    description: "Device, service desk and spend reports, each exportable as CSV.",
     tiles: {
       templates: "Report templates",
       templatesZero: "this deployment publishes none",

@@ -798,7 +798,7 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     const cards = [...document.querySelectorAll(".stat-card")].map((card) => card.textContent);
     expect(cards[0]).toMatch(/1 checked out at least once/);
     expect(cards[1]).toMatch(/Stored, and never decrypted since/);
-    expect(cards[2]).toMatch(/Decrypted for someone, on the audit log/);
+    expect(cards[2]).toMatch(/Each one on the audit log/);
     expect(cards[3]).toMatch(/5 types available/);
   });
 

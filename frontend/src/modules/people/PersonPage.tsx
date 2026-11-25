@@ -15,7 +15,7 @@
  * The tab says "<name> · Person · Novieri RMM" (`useRecordTitle`): the page
  * lives under Devices in the rail, as `shell.nav.page.person`.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
@@ -215,6 +215,20 @@ function HoldingTiles({ data, here }: { data: PersonDetailOut; here: string }) {
   );
 }
 
+/**
+ * A value that may be one long word (an address, a sign-in name): it breaks
+ * where it must rather than run past the narrow column beside the computers,
+ * where the panel clipped it (the wave's critique, P1). `anywhere` and not
+ * `break-word`, because only `anywhere` lets the column's grid track shrink.
+ */
+function LongValue({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
+  return (
+    <span className={mono ? "mono" : undefined} style={{ overflowWrap: "anywhere" }}>
+      {children}
+    </span>
+  );
+}
+
 /** The details of the person: who they are, beside what they hold. */
 function DetailsPanel({ data }: { data: PersonDetailOut }) {
   const t = useT();
@@ -222,7 +236,10 @@ function DetailsPanel({ data }: { data: PersonDetailOut }) {
     <Panel title={t("people.person.details.title")}>
       <KV
         items={[
-          [t("people.person.details.email"), data.person.email ?? <NoValue label={t("people.person.details.noEmail")} />],
+          [
+            t("people.person.details.email"),
+            data.person.email ? <LongValue>{data.person.email}</LongValue> : <NoValue label={t("people.person.details.noEmail")} />,
+          ],
           [
             t("people.person.details.department"),
             data.person.department ?? <NoValue label={t("people.person.details.notRecorded")} />,
@@ -236,7 +253,7 @@ function DetailsPanel({ data }: { data: PersonDetailOut }) {
           [
             t("people.person.details.signsInAs"),
             data.logins.length ? (
-              <span className="mono">{data.logins.map((l) => l.login).join(", ")}</span>
+              <LongValue mono>{data.logins.map((l) => l.login).join(", ")}</LongValue>
             ) : (
               <NoValue label={t("people.person.details.loginsLearned")} />
             ),
@@ -319,7 +336,7 @@ function Holdings({ data, zone, tab }: { data: PersonDetailOut; zone: string | n
       {data.account ? (
         <KV
           items={[
-            [t("people.holdings.signIn.account"), data.account.email],
+            [t("people.holdings.signIn.account"), <LongValue>{data.account.email}</LongValue>],
             [t("people.holdings.signIn.status"), accountStatusLabel(data.account.status)],
             [t("people.holdings.signIn.lastSignedIn"), formatDateTime(data.account.last_login_at, zone)],
             [

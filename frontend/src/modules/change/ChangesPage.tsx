@@ -3,9 +3,13 @@
  *
  * ON THE LIST KIT (redesign Task 11, 6.2; Receta L). The state and the type
  * the tiles open were already in the URL (`?state=`, `?type=`), read by the
- * table and named in a sentence above it; they are now two rows of chips on
- * the same keys, so the subset a tile opened is the chip that is pressed and
- * "All" is the way back. The Client chip narrows the read (`?client=`,
+ * table and named in a sentence above it; they are now chips on the same
+ * keys, so the subset a tile opened is the chip that is pressed and "All" is
+ * the way back. "All" and "Open" (the tiles' views) are plain chips; the seven
+ * states and the three types are the kit's chip with a list (`.chip-select`,
+ * as the Client chip), each option with its count: as thirteen chips they were
+ * two rows at 1440 and seven at 390 before the first change (the wave's
+ * critique, P1). The Client chip narrows the read (`?client=`,
  * decisions D6, D17) through `useChanges(chip)`; writes keep `useApi()`.
  * "New change" opens from `?new=change` (decision D8). The list, the approval
  * queue and the calendar are one `SectionNav`.
@@ -96,6 +100,41 @@ function inState(change: ChangeRequest, state: string): boolean {
 
 function ofType(change: ChangeRequest, type: string): boolean {
   return type === "" || change.type === type;
+}
+
+/**
+ * One filter as the kit's chip with a list (`.chip-select`, as the Client
+ * chip): the visible word is the filter's name, the list its values, each
+ * with its count once the list has answered.
+ */
+function ChipList({
+  label,
+  every,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  /** The first option, `""`: no value of this filter chosen. */
+  every: string;
+  value: string;
+  options: readonly { value: string; label: string; count?: number }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
+      <span aria-hidden="true">{label}</span>
+      {/* A person's choice is a new entry, so Back undoes it, as for any chip. */}
+      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{every}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.count === undefined ? option.label : `${option.label} (${option.count})`}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
 }
 
 export function ChangesPage() {
@@ -219,23 +258,31 @@ export function ChangesPage() {
         <ListToolbar
           chips={
             <>
+              {/* The two views the tiles open. With one state chosen in the
+                  list beside them, neither is pressed. */}
               <FilterChips
-                label={t("change.list.stateLabel")}
+                label={t("change.list.viewLabel")}
                 options={[
                   { value: "", label: t("change.list.allStates") },
                   { value: OPEN_VIEW, label: t("change.list.chipOpen"), count: stateCount(OPEN_VIEW) },
-                  ...STATES.map((state) => ({ value: state, label: changeStateLabel(state), count: stateCount(state) })),
                 ]}
                 value={stateFilter}
                 onChange={(value) => filters.set("state", value)}
               />
-              <FilterChips
+              <ChipList
+                label={t("change.list.stateLabel")}
+                every={t("change.list.anyState")}
+                // "Open" is every open state at once, not one of them; an
+                // unknown state matches nothing and the empty state says so.
+                value={(STATES as readonly string[]).includes(stateFilter) ? stateFilter : ""}
+                options={STATES.map((state) => ({ value: state, label: changeStateLabel(state), count: stateCount(state) }))}
+                onChange={(value) => filters.set("state", value)}
+              />
+              <ChipList
                 label={t("change.list.typeLabel")}
-                options={[
-                  { value: "", label: t("change.list.allTypes") },
-                  ...TYPES.map((type) => ({ value: type, label: changeTypeLabel(type), count: typeCount(type) })),
-                ]}
-                value={typeFilter}
+                every={t("change.list.allTypes")}
+                value={(TYPES as readonly string[]).includes(typeFilter) ? typeFilter : ""}
+                options={TYPES.map((type) => ({ value: type, label: changeTypeLabel(type), count: typeCount(type) }))}
                 onChange={(value) => filters.set("type", value)}
               />
               <ClientFilter filters={filters} />

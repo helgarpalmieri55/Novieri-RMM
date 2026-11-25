@@ -151,5 +151,9 @@ export function useBudgetNeedsClient(): boolean {
 /** What a budget page says instead of its figures with every client chosen. */
 export function BudgetPickClient() {
   const t = useT();
-  return <EmptyState icon="building" title={t("budget.pickClient.title")} body={t("budget.pickClient.body")} />;
+  // An h2: with every client chosen it is the page's only section under the h1
+  // (axe `heading-order`; the wave's critique).
+  return (
+    <EmptyState icon="building" title={t("budget.pickClient.title")} body={t("budget.pickClient.body")} headingLevel={2} />
+  );
 }

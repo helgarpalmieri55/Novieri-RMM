@@ -23,7 +23,7 @@ export const credentials: Shape<typeof en> = {
     // The fourth tile (redesign Task 11, 6.9): the other half of "Never checked out".
     used: "Retiradas",
     usedZero: "Aún no se ha retirado ninguna",
-    usedFoot: "Descifradas para alguien, en el registro de auditoría",
+    usedFoot: "Cada una, en el registro de auditoría",
     typesInUse: "Tipos en uso",
     typesInUseZero: "Aún no hay ninguna credencial guardada",
     typesAvailable: { one: "{count} tipo disponible", other: "{count} tipos disponibles" },

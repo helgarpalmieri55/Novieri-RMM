@@ -33,8 +33,10 @@ export const change = {
     nobodyWaiting: "Nobody is waiting on a decision",
     emergencyChanges: "Emergency changes",
     noneEmergency: "None was raised as an emergency",
-    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type=, and the fourth tile.
+    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type= (the states and types as chips with a list), and the fourth tile.
+    viewLabel: "Show",
     stateLabel: "State",
+    anyState: "Any state",
     typeLabel: "Type",
     allStates: "All",
     allTypes: "All types",

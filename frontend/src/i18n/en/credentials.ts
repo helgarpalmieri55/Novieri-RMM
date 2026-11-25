@@ -21,7 +21,7 @@ export const credentials = {
     // The fourth tile (redesign Task 11, 6.9): the other half of "Never checked out".
     used: "Checked out",
     usedZero: "None has been checked out yet",
-    usedFoot: "Decrypted for someone, on the audit log",
+    usedFoot: "Each one on the audit log",
     typesInUse: "Types in use",
     typesInUseZero: "No credential is stored yet",
     typesAvailable: { one: "{count} types available", other: "{count} types available" },

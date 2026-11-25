@@ -169,15 +169,21 @@ describe("ChangesPage in Spanish", () => {
   it("names the subset a tile opened, and a switch re-words it", async () => {
     const { container } = mount(<ChangesPage />, "/changes?type=emergency");
     await screen.findByText("Reiniciar el nodo caído del clúster");
-    const types = screen.getByRole("group", { name: "Tipo" });
-    expect(within(types).getByRole("button", { name: /^Emergencia/ })).toHaveAttribute("aria-pressed", "true");
+    const types = screen.getByRole("combobox", { name: "Tipo" });
+    expect(types).toHaveValue("emergency");
+    expect(within(types).getByRole("option", { name: "Emergencia (1)" })).toBeInTheDocument();
     expect(screen.getByText("Mostrando 1 de 4")).toBeInTheDocument();
-    expect(within(types).getByRole("button", { name: "Todos los tipos" })).toBeInTheDocument();
+    expect(within(types).getByRole("option", { name: "Todos los tipos" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Mostrar" })).getByRole("button", { name: "Todos" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.queryByText("Actualizar firmware del conmutador")).not.toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));
     expect(screen.getByText("Showing 1 of 4")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Emergency/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("combobox", { name: "Type" })).toHaveValue("emergency");
+    expect(screen.getByRole("option", { name: "Emergency (1)" })).toBeInTheDocument();
   });
 
   it("words the open view, a state view and an empty view", async () => {
@@ -190,7 +196,9 @@ describe("ChangesPage in Spanish", () => {
   it("words a state view with the state as the page words it, and the empty view", async () => {
     const { container } = mount(<ChangesPage />, "/changes?state=submitted&type=emergency");
     expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Enviado/ })).toHaveAttribute("aria-pressed", "true");
+    // The state is the chip with a list now, its option with its count (0 under this type).
+    expect(screen.getByRole("combobox", { name: "Estado" })).toHaveValue("submitted");
+    expect(screen.getByRole("option", { name: "Enviado (0)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));

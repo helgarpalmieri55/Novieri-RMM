@@ -5,7 +5,7 @@ export const reporting: Shape<typeof en> = {
   catalogue: {
     // The rail's label (coordinator ruling 1).
     title: "Informes",
-    description: "Informes sobre tus dispositivos, la mesa de ayuda y el gasto, cada uno exportable como CSV.",
+    description: "Informes de equipos, mesa de ayuda y gasto, exportables en CSV.",
     tiles: {
       templates: "Plantillas de informe",
       templatesZero: "esta instalación no publica ninguna",

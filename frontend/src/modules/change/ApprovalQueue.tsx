@@ -121,7 +121,11 @@ function ApprovalRow({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
             />
+            {/* Outline, as Reject beside it: a queue of twenty rows would be
+                twenty primaries, and the page may carry one (DESIGN.md; the
+                budget's confirmation queue does the same). */}
             <Button
+              variant="outline"
               disabled={approve.isPending || isOwnChange}
               title={isOwnChange ? t("change.approvals.ownChangeTitle") : undefined}
               onClick={() => approve.mutate({ id: change.id, body: { comment: comment || null } })}

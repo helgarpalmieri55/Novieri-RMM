@@ -165,10 +165,13 @@ describe("ChangesPage", () => {
     api.listChanges = vi.fn().mockResolvedValue([CHANGES[0], SUBMITTED_CHANGE]);
     const { router } = renderPage("/changes?state=submitted", <ChangesPage />);
     expect(await screen.findByRole("table", { name: "Changes" })).toBeInTheDocument();
-    const states = screen.getByRole("group", { name: "State" });
-    expect(within(states).getByRole("button", { name: /^Submitted/ })).toHaveAttribute("aria-pressed", "true");
+    // The seven states are the kit's chip with a list (critique P1: thirteen
+    // chips buried the list); each option carries its count.
+    const state = screen.getByRole("combobox", { name: "State" });
+    expect(state).toHaveValue("submitted");
+    expect(within(state).getByRole("option", { name: "Draft (1)" })).toBeInTheDocument();
     expect(screen.queryByText("Upgrade switch firmware")).toBeNull();
-    await userEvent.click(within(states).getByRole("button", { name: /^Draft/ }));
+    await userEvent.selectOptions(state, "draft");
     expect(router.state.location.search).toContain("state=draft");
     expect(await screen.findByText("Upgrade switch firmware")).toBeInTheDocument();
   });
@@ -352,9 +355,11 @@ describe("the KPI tiles are links to the rows behind them", () => {
     // list that lost its rows: the pressed chip names the view, "Showing 3 of
     // 4" says rows are hidden, and "All" is the way out (the list kit,
     // redesign Task 11, 6.2, in place of the "Show all changes" sentence).
-    const states = screen.getByRole("group", { name: "State" });
-    expect(within(states).getByRole("button", { name: /^Open/ })).toHaveAttribute("aria-pressed", "true");
-    expect(within(states).getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+    const views = screen.getByRole("group", { name: "Show" });
+    expect(within(views).getByRole("button", { name: /^Open/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(views).getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+    // Every open state at once is not one state: the list reads "Any state".
+    expect(screen.getByRole("combobox", { name: "State" })).toHaveValue("");
     expect(screen.getByText("Showing 3 of 4")).toBeInTheDocument();
   });
 

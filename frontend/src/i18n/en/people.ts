@@ -213,6 +213,12 @@ export const people = {
     emptyDevices: "Every computer has a person.",
     emptyLicences: "Every licence has a person.",
     emptySeats: "Every subscription seat has a person.",
+    // From a type's empty state to the first type with rows.
+    see: {
+      devices: "See the computers",
+      licences: "See the licences",
+      seats: "See the subscription seats",
+    },
     seats: {
       title: "Subscription seats",
       service: "Service",

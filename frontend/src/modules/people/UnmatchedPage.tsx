@@ -11,8 +11,10 @@
  *
  * A type with nothing in it says so for that type ("Every licence has a
  * person."): the chip is the kind of thing listed, not a filter over it, so
- * "Nothing matches these filters" would not be its cause. With nothing in any
- * of them, the page says everything is linked.
+ * "Nothing matches these filters" would not be its cause. It offers the first
+ * type that has rows, since the default type can be empty while seats wait
+ * (the wave's critique, P2). With nothing in any of them, the page says
+ * everything is linked.
  *
  * Linking a seat is `people.manage`, as before, and the server checks it
  * (invariant 6): the buttons are a courtesy.
@@ -24,6 +26,7 @@ import { Button, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import {
+  Btn,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -53,6 +56,13 @@ const KIND_EMPTY: Record<Kind, MessageKey> = {
   seats: "people.unmatched.emptySeats",
 };
 
+/** The way to a type from another type's empty state. */
+const KIND_SEE: Record<Kind, MessageKey> = {
+  "": "people.unmatched.see.devices",
+  licenses: "people.unmatched.see.licences",
+  seats: "people.unmatched.see.seats",
+};
+
 function sizeOf(data: UnmatchedOut, kind: Kind): number {
   if (kind === "licenses") return data.allocations.length;
   if (kind === "seats") return data.seats.length;
@@ -74,6 +84,8 @@ export function UnmatchedPage() {
   const data = unmatched.data;
   const total = data ? data.seats.length + data.devices.length + data.allocations.length : 0;
   const shown = data ? sizeOf(data, kind) : 0;
+  // The first other type with something in it, for this type's empty state.
+  const elsewhere = data ? KINDS.find((other) => other !== kind && sizeOf(data, other) > 0) : undefined;
 
   return (
     <div>
@@ -104,7 +116,17 @@ export function UnmatchedPage() {
           {!data ? null : total === 0 ? (
             <ListEmpty filtered={false} onClear={filters.clear} nothingYet={t("people.unmatched.empty")} icon="users" />
           ) : shown === 0 ? (
-            <ListEmpty filtered={false} onClear={filters.clear} nothingYet={t(KIND_EMPTY[kind])} icon="users" />
+            <ListEmpty
+              filtered={false}
+              onClear={filters.clear}
+              nothingYet={t(KIND_EMPTY[kind])}
+              icon="users"
+              action={
+                elsewhere === undefined ? undefined : (
+                  <Btn label={t(KIND_SEE[elsewhere])} small onClick={() => filters.set("kind", elsewhere)} />
+                )
+              }
+            />
           ) : kind === "seats" ? (
             <Table label={t("people.unmatched.seats.title")}>
               <thead>

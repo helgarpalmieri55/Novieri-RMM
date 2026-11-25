@@ -6,7 +6,7 @@ export const docs: Shape<typeof en> = {
     backToList: "Todos los artículos",
     // The rail's label (coordinator ruling 1).
     title: "Documentación",
-    description: "Manuales de procedimiento, registros y archivos, vinculados a los dispositivos que describen.",
+    description: "Procedimientos, registros y archivos, con los equipos que describen.",
     newArticle: "Artículo nuevo",
     tiles: {
       articles: "Artículos",

@@ -209,6 +209,12 @@ export const people: Shape<typeof en> = {
     emptyDevices: "Todos los equipos tienen persona.",
     emptyLicences: "Todas las licencias tienen persona.",
     emptySeats: "Todos los puestos de suscripción tienen persona.",
+    // From a type's empty state to the first type with rows.
+    see: {
+      devices: "Ver los equipos",
+      licences: "Ver las licencias",
+      seats: "Ver los puestos de suscripción",
+    },
     seats: {
       title: "Puestos de suscripción",
       service: "Servicio",

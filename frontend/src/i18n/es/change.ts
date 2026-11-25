@@ -28,8 +28,10 @@ export const change: Shape<typeof en> = {
     nobodyWaiting: "Nadie espera una decisión",
     emergencyChanges: "Cambios de emergencia",
     noneEmergency: "Ninguno se registró como emergencia",
-    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type=, and the fourth tile.
+    // The list on the kit (redesign Task 11, 6.2): chips over ?state= and ?type= (the states and types as chips with a list), and the fourth tile.
+    viewLabel: "Mostrar",
     stateLabel: "Estado",
+    anyState: "Cualquier estado",
     typeLabel: "Tipo",
     allStates: "Todos",
     allTypes: "Todos los tipos",
