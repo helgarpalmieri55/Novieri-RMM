@@ -4,7 +4,7 @@
  * from `?new=session`, and under the Client chip the sessions are read for
  * that client alone. Over the fixture session, with the real client scope.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -117,6 +117,27 @@ describe("Remote sessions on the list kit", () => {
     await userEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(within(await screen.findByRole("dialog", { name: title })).getByLabelText("Reason")).toHaveValue("");
     // Two dialogs, a week grid and typing: slow on a busy machine, not stuck.
+  }, 20_000);
+
+  it("starts a session from ?new=session onto its viewer, replacing the dialog's entry (fix round 2, I2)", async () => {
+    // Closing first stepped Back (`useNewParam`'s close) and pushed the viewer
+    // after it; a browser runs that Back later, and landed on the list again.
+    // The start now replaces the `?new=session` entry with the viewer.
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/remote", <SessionsPage />, "/remote");
+    await userEvent.click(await screen.findByRole("button", { name: "Start session" }));
+    const dialog = await screen.findByRole("dialog", { name: "Start remote session" });
+    expect(router.state.location.search).toBe("?new=session");
+    await userEvent.click(within(dialog).getByRole("combobox", { name: "Device" }));
+    await userEvent.click(await screen.findByRole("option", { name: /lis-ws-041/ }));
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "ticket 4821");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start session" }));
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/remote\/sess-new-\d+$/));
+    expect(router.state.historyAction).toBe("REPLACE");
+    // Back returns to the list as it was before the dialog: no `?new=session` left behind.
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/remote");
+    expect(router.state.location.search).toBe("");
   }, 20_000);
 
   it("opens Start remote session from ?new=session", async () => {

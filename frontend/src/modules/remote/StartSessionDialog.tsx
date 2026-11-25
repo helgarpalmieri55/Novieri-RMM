@@ -131,8 +131,18 @@ export function StartSessionDialog({
       }),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["remote-sessions"] });
-      // Started: leaving for the viewer does not ask.
-      release();
+      if (guardNew) {
+        // FROM `?new=session` THE VIEWER REPLACES THE DIALOG'S ENTRY (fix
+        // round 2, I2). Closing first is `useNewParam`'s Back, which a browser
+        // runs after the push below and so returned to the list, with the
+        // consent request out and nobody on the viewer. Replacing leaves the
+        // list one Back away, without the dialog. Released: leaving for the
+        // viewer does not ask.
+        release();
+        navigate(`/remote/${data.session_id}`, { replace: true });
+        return;
+      }
+      // From a device's or a ticket's page, as before: close, then the viewer.
       reset();
       onClose();
       navigate(`/remote/${data.session_id}`);
