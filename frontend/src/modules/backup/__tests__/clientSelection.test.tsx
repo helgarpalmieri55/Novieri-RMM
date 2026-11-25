@@ -126,7 +126,8 @@ describe("a new client-default policy", () => {
     const api = stubApi();
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByLabelText("Client")).toBeNull();
     await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
@@ -142,7 +143,8 @@ describe("a new client-default policy", () => {
     const api = stubApi();
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(within(dialog).getByLabelText("Client"), "c-acme");
     await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
@@ -158,7 +160,8 @@ describe("a new client-default policy", () => {
     stubApi();
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
@@ -171,7 +174,8 @@ describe("a new client-default policy", () => {
     stubApi();
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
     const list = await within(dialog).findByRole("listbox", { name: /Repository/ });
@@ -188,7 +192,8 @@ describe("a new client-default policy", () => {
     const api = stubApi();
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
@@ -203,7 +208,8 @@ describe("a new client-default policy", () => {
     stubApi({ listBackupRepositories: vi.fn().mockResolvedValue([repository({})]) });
     const user = userEvent.setup();
     renderIt(<BackupPolicyEditor />);
-    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    // The page head's New policy (the empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(within(dialog).getByLabelText("Client"), "c-acme");
 

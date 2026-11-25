@@ -1944,9 +1944,12 @@ describe("every backup tile opens the rows it counted", () => {
     api.listBackupPoints = vi.fn().mockResolvedValue([VERIFY_POINTS[1] as BackupPoint]);
     renderWithProviders(<BackupPointsPage />, "/backup?verify=pending");
 
-    expect(
-      await screen.findByText("No backup point is awaiting verification."),
-    ).toBeInTheDocument();
+    // The filtered-empty sentence is the list kit's now, with its way out
+    // (redesign plan, Receta L, 3: "nada con estos filtros" with "Quitar
+    // filtros", never the "nothing yet" sentence).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.queryByText("No backup points recorded yet.")).not.toBeInTheDocument();
   });
 
   it("links every repositories tile at a route the application has", async () => {

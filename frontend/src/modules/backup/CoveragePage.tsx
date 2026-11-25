@@ -9,20 +9,24 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { formatDateTime } from "../../lib/datetime";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import {
-  FilterBar,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useUrlFilters,
 } from "../../shell/components";
 import { useBackupCoverage } from "./api";
 import {
@@ -46,11 +50,18 @@ export function CoveragePage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("backup.read");
   const zone = me.data?.timezone;
-  const [params, setParams] = useSearchParams();
-  const filter = params.get("coverage") ?? "";
-  const coverage = useBackupCoverage(filter);
+  // ON THE LIST KIT (redesign plan, Task 9, 4.3): `?coverage=` keeps its
+  // address (the tiles link to it) as a row of chips, and `?client=` is the
+  // Client chip, which narrows the report's read (decision D6).
+  const filters = useUrlFilters(["coverage", "client"] as const);
+  const filter = filters.values.coverage;
+  const coverage = useBackupCoverage(filter, filters.values.client);
   const totals = coverage.data?.totals ?? {};
   const rows = coverage.data?.rows ?? [];
+  // The report's totals are the server's, over every device of the answer
+  // (not the rows shown, which `limit` may cut), so the chips' counts are
+  // totals and "All" is their sum.
+  const everyDevice = VERDICTS.reduce((sum, verdict) => sum + (totals[verdict] ?? 0), 0);
 
   const when = (value: unknown) => {
     const stamp = text(value);
@@ -103,35 +114,38 @@ export function CoveragePage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={filter}
-            aria-label={t("backup.coverage.filterAria")}
-            onChange={(e) => {
-              const next = new URLSearchParams(params);
-              if (e.target.value === "") next.delete("coverage");
-              else next.set("coverage", e.target.value);
-              setParams(next);
-            }}
-          >
-            <option value="">{t("backup.coverage.allDevices")}</option>
-            {VERDICTS.map((v) => (
-              <option key={v} value={v}>
-                {COVERAGE_LABEL[v]}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={coverage.isLoading}
-          error={coverage.error}
-          empty={rows.length === 0}
-          emptyLabel={filter ? t("backup.coverage.emptyFiltered") : t("backup.coverage.emptyNone")}
-          emptyIcon="backup"
-        >
-          <Table>
+        <ListToolbar
+          chips={
+            <>
+              <FilterChips
+                label={t("backup.coverage.filterAria")}
+                options={[
+                  { value: "", label: t("backup.coverage.allDevices"), count: coverage.data ? everyDevice : undefined },
+                  ...VERDICTS.map((verdict) => ({
+                    value: verdict,
+                    label: COVERAGE_LABEL[verdict] ?? verdict,
+                    count: coverage.data ? (totals[verdict] ?? 0) : undefined,
+                  })),
+                ]}
+                value={filter}
+                onChange={(value) => filters.set("coverage", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          // No count before the report has answered: "Showing 0 of 0" would be an invented zero.
+          end={coverage.data ? <ShowingCount shown={rows.length} total={everyDevice} /> : null}
+        />
+        <QueryState loading={coverage.isLoading} error={coverage.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("backup.coverage.emptyNone")}
+              icon="backup"
+            />
+          ) : (
+          <Table label={t("backup.coverage.title")}>
             <thead>
               <tr>
                 <Th>{t("backup.coverage.colDevice")}</Th>
@@ -176,6 +190,7 @@ export function CoveragePage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
     </div>

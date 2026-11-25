@@ -359,10 +359,14 @@ describe("the backup points page, in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Copia de seguridad y restauración" })).toBeInTheDocument();
     await screen.findByText("pt1");
     expect(screen.getByRole("button", { name: "Ejecutar copia de seguridad" })).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "Copia de seguridad" })).toBeInTheDocument();
+    // The section menu is a navigation of links now (redesign plan, waves'
+    // common rules: `SectionNav`), not a tablist: the current page is the
+    // link marked `aria-current="page"`.
+    const nav = screen.getByRole("navigation", { name: "Copia de seguridad" });
     for (const tab of ["Puntos de copia", "Cobertura", "Repositorios", "Políticas", "Copia externa"]) {
-      expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: tab })).toBeInTheDocument();
     }
+    expect(within(nav).getByRole("link", { name: "Puntos de copia" })).toHaveAttribute("aria-current", "page");
     // The tiles.
     expect(screen.getByText("Éxito de las copias")).toBeInTheDocument();
     expect(screen.getByText("75 %")).toBeInTheDocument();
@@ -373,9 +377,12 @@ describe("the backup points page, in Spanish", () => {
     // The filter and the panel.
     expect(screen.getByText("Puntos de restauración")).toBeInTheDocument();
     expect(screen.getByText("Un punto solo queda demostrado cuando se ha probado su restauración.")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar los puntos de copia" });
-    expect(within(filter).getByRole("option", { name: "Todos los puntos de copia" })).toBeInTheDocument();
-    expect(within(filter).getByRole("option", { name: "Pendientes de verificación" })).toBeInTheDocument();
+    // The filter is a row of chips now (Receta L: `FilterChips`), with the same
+    // two values and their words.
+    const filter = screen.getByRole("group", { name: "Filtrar los puntos de copia" });
+    expect(within(filter).getByRole("button", { name: /Todos los puntos de copia/ })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: /Pendientes de verificación/ })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Dispositivo" })).toBeInTheDocument();
     for (const header of ["Dispositivo", "Repositorio", "Tomado", "Tamaño", "Estado", "Datos comprobados", "Restauración probada"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
@@ -431,8 +438,15 @@ describe("the backup points page, in Spanish", () => {
     await screen.findByText("pt4");
     expect(screen.getByText("Ninguna copia de seguridad ha fallado")).toBeInTheDocument();
     expect(screen.getByText("Todos los puntos completados están verificados")).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filtrar los puntos de copia" }), "pending");
-    expect(await screen.findByText("Ningún punto de copia está pendiente de verificación.")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("group", { name: "Filtrar los puntos de copia" })).getByRole("button", {
+        name: /Pendientes de verificación/,
+      }),
+    );
+    // A filter that found nothing says so in the kit's words, with its way
+    // out (Receta L, 3: `ListEmpty`).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(container, ["WKS-042"]);
   });
 
@@ -446,7 +460,7 @@ describe("the backup points page, in Spanish", () => {
     expect(within(row).getByText("Pruned")).toBeInTheDocument();
     expect(within(row).getByText("Tested (sample)")).toBeInTheDocument();
     expect(within(screen.getByText("pt1").closest("tr") as HTMLElement).getByText("Some files changed while they were being copied.")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Off-site copy" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Off-site copy" })).toBeInTheDocument();
   });
 });
 
@@ -475,11 +489,12 @@ describe("the Run backup dialog, in Spanish", () => {
     const api = baseApi();
     const dialog = await open(user);
     await user.click(within(dialog).getByRole("combobox", { name: "Dispositivo" }));
-    expect(await screen.findByRole("option", { name: /WKS-042.*windows · en línea/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /SRV-02.*linux · sin conexión/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /SW-CORE-1.*sin agente/ })).toBeInTheDocument();
+    // Within the dialog: the list's Device chip offers the same computers.
+    expect(await within(dialog).findByRole("option", { name: /WKS-042.*windows · en línea/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("option", { name: /SRV-02.*linux · sin conexión/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("option", { name: /SW-CORE-1.*sin agente/ })).toBeInTheDocument();
     expectNoEnglish(dialog, ["WKS-042", "SRV-02", "SW-CORE-1"]);
-    await user.click(screen.getByRole("option", { name: /WKS-042/ }));
+    await user.click(within(dialog).getByRole("option", { name: /WKS-042/ }));
     await user.click(within(dialog).getByRole("button", { name: "Ejecutar" }));
     expect(await within(dialog).findByRole("status")).toHaveTextContent("Copia de seguridad en cola: 1 tarea enviada.");
     expect(api.runBackup).toHaveBeenCalledWith("dev1");
@@ -494,7 +509,7 @@ describe("the Run backup dialog, in Spanish", () => {
     baseApi({ runBackup: vi.fn().mockResolvedValue({ job_ids: [] }) });
     const dialog = await open(user);
     await user.click(within(dialog).getByRole("combobox", { name: "Dispositivo" }));
-    await user.click(await screen.findByRole("option", { name: /WKS-042/ }));
+    await user.click(await within(dialog).findByRole("option", { name: /WKS-042/ }));
     await user.click(within(dialog).getByRole("button", { name: "Ejecutar" }));
     expect(await within(dialog).findByRole("status")).toHaveTextContent(
       "No se envió nada: no se creó ninguna tarea de copia de seguridad para ese dispositivo.",
@@ -609,9 +624,10 @@ describe("the backup policies page, in Spanish", () => {
     expect(screen.getByText("Escriben en 1 repositorio")).toBeInTheDocument();
     expect(screen.getByText("1 sujeta a una ventana de mantenimiento")).toBeInTheDocument();
     expect(screen.getByText("Configuradas pero sin programar nada")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar las políticas por estado" });
+    // The filter is a row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar las políticas por estado" });
     for (const option of ["Todas las políticas", "Habilitadas", "Deshabilitadas"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: new RegExp(`^${option}`) })).toBeInTheDocument();
     }
     for (const header of ["Ámbito", "Repositorio", "Ventana", "Estado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
@@ -698,9 +714,10 @@ describe("the coverage page, in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Cobertura" })).toBeInTheDocument();
     await screen.findByText("FS-01");
     expect(screen.getByText("Qué dispositivos tienen una copia de seguridad reciente que se puede restaurar, y cuáles no.")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Mostrar dispositivos" });
+    // The filter is a row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Mostrar dispositivos" });
     for (const option of ["Todos los dispositivos", "Protegido", "Desactualizado", "Con fallos", "Sin protección"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: new RegExp(`^${option}`) })).toBeInTheDocument();
     }
     for (const header of ["Dispositivo", "Protección", "Última copia", "Copia externa", "Última restauración de prueba"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
@@ -730,7 +747,9 @@ describe("the coverage page, in Spanish", () => {
     expectNoEnglish(first.container);
     first.unmount();
     const second = renderPage(<CoveragePage />, "/backup/coverage?coverage=stale");
-    expect(await screen.findByText("Ningún dispositivo coincide con ese filtro.")).toBeInTheDocument();
+    // The filtered-empty sentence is the list kit's (Receta L, 3), with its way out.
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(second.container);
   });
 });
@@ -745,9 +764,10 @@ describe("the repositories page, in Spanish", () => {
     await screen.findByText("bóveda-principal");
     expect(screen.getByText("Almacenes de objetos donde llegan las copias de seguridad de este parque.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Nuevo repositorio" })).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar los repositorios por estado" });
+    // The filter is a row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar los repositorios por estado" });
     for (const option of ["Todos los repositorios", "Activos", "Retirados"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: new RegExp(`^${option}`) })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Estado", "Registrado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
@@ -965,22 +985,27 @@ describe("the off-site storage dialog, in Spanish", () => {
     expect(within(screen.getByRole("dialog", { name: "Add off-site storage" })).getByRole("alert")).toHaveTextContent("Secret key is required");
   });
 
+  // AN EDITED STORAGE IS A SECTION OF THE PAGE NOW, not a dialog (redesign
+  // plan, Task 9, 4.4: Receta FO, `?edit=<id>` with the page's one save bar).
+  // The same rules refuse the same values in the same words; the refusal is
+  // said in the save bar, which is where Save is.
   it("words the lock range and the both-or-neither rule for an edited storage", async () => {
     const user = userEvent.setup();
-    renderPage(<TargetDialog open target={TARGET} onClose={() => {}} />, "/backup/offsite");
-    const dialog = await screen.findByRole("dialog", { name: "Editar almacenamiento externo" });
-    expect(within(dialog).getAllByText("Déjala en blanco para conservar la actual.")).toHaveLength(2);
-    const lock = within(dialog).getByLabelText("Bloquear cada copia durante (días)");
+    renderPage(<OffsitePage />, "/backup/offsite?edit=t1");
+    const editor = (await screen.findByRole("button", { name: "Editar Wasabi UE" })).closest("section") as HTMLElement;
+    expect(within(editor).getAllByText("Déjala en blanco para conservar la actual.")).toHaveLength(2);
+    const lock = within(editor).getByLabelText("Bloquear cada copia durante (días)");
     await user.clear(lock);
     await user.type(lock, "120");
-    await user.type(within(dialog).getByLabelText("Clave de acceso"), "AKIA-FIXTURE");
-    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
-    const alert = await within(dialog).findByRole("alert");
+    await user.type(within(editor).getByLabelText("Clave de acceso"), "AKIA-FIXTURE");
+    const bar = screen.getByRole("region", { name: "Cambios sin guardar" });
+    await user.click(within(bar).getByRole("button", { name: "Guardar" }));
+    const alert = await within(bar).findByRole("alert");
     expect(alert).toHaveTextContent("Entre 1 y 90 días.");
     expect(alert).toHaveTextContent("Indica tanto la clave de acceso como la clave secreta, o deja ambas en blanco.");
-    expectNoEnglish(dialog, ["acme-externo", "https://s3.eu-central-1.wasabisys.com", "eu-central-1"]);
+    expectNoEnglish(editor, ["acme-externo", "https://s3.eu-central-1.wasabisys.com", "eu-central-1", "Wasabi UE"]);
     act(() => setActiveLanguage("en"));
-    expect(within(screen.getByRole("dialog", { name: "Edit off-site storage" })).getByRole("alert")).toHaveTextContent("Between 1 and 90 days.");
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("alert")).toHaveTextContent("Between 1 and 90 days.");
   });
 });
 
@@ -988,11 +1013,13 @@ describe("the off-site storage dialog keeps the secret out of its refusal snapsh
   it("still judges a secret given without its access key, and a complete new storage", async () => {
     const user = userEvent.setup();
     const api = baseApi();
-    renderPage(<TargetDialog open target={TARGET} onClose={() => {}} />, "/backup/offsite");
-    const dialog = await screen.findByRole("dialog", { name: "Editar almacenamiento externo" });
-    await user.type(within(dialog).getByLabelText("Clave secreta"), "fixture-secret-not-real");
-    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
-    const alert = await within(dialog).findByRole("alert");
+    // The edited storage is on the page (`?edit=`), with the same rules.
+    renderPage(<OffsitePage />, "/backup/offsite?edit=t1");
+    const editor = (await screen.findByRole("button", { name: "Editar Wasabi UE" })).closest("section") as HTMLElement;
+    await user.type(within(editor).getByLabelText("Clave secreta"), "fixture-secret-not-real");
+    const bar = screen.getByRole("region", { name: "Cambios sin guardar" });
+    await user.click(within(bar).getByRole("button", { name: "Guardar" }));
+    const alert = await within(bar).findByRole("alert");
     expect(alert).toHaveTextContent("Indica tanto la clave de acceso como la clave secreta, o deja ambas en blanco.");
     expect(alert).not.toHaveTextContent("fixture-secret-not-real");
     expect(api.updateOffsiteTarget).not.toHaveBeenCalled();
