@@ -88,7 +88,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -329,6 +329,9 @@ export function UsersTab({
   const [draftClientId, setDraftClientId] = useState("");
   const [draftTyping, setDraftTyping] = useState(false);
   const [shownLink, setShownLink] = useState<ShownLink | null>(null);
+  // An invitation refused for a missing address, held as data and worded at render.
+  const [inviteAttempt, setInviteAttempt] = useState<Attempt | null>(null);
+  const inviteProblems = attemptProblems(inviteAttempt);
   const [done, setDone] = useState<Done | null>(null);
 
   const [rolesForId, setRolesForId] = useState<string | null>(null);
@@ -371,6 +374,7 @@ export function UsersTab({
     setDraftRoleId("");
     setDraftClientId("");
     setDraftTyping(false);
+    setInviteAttempt(null);
     invite.reset();
     // `invite` is a new object each render; only the opening matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -417,6 +421,14 @@ export function UsersTab({
    * "Done" is what removes it.
    */
   function sendInvite() {
+    // A missing address is said on submit, never by a dead button (the kit's
+    // rule; coordinator ruling 8a keeps that for every form but a one-box composer).
+    const found: Attempt = {
+      rules: () => [{ name: "email", label: t("settings.users.invite.email") }],
+      values: { email },
+    };
+    setInviteAttempt(found);
+    if (attemptProblems(found).length > 0) return;
     const address = email.trim();
     invite.mutate(
       { email: address, display_name: displayName.trim(), grants: [...inviteGrants] },
@@ -1264,7 +1276,7 @@ export function UsersTab({
             label={invite.isPending ? t("settings.users.invite.sending") : t("settings.users.invite.submit")}
             icon="mail"
             variant="primary"
-            disabled={!canManage || email.trim() === "" || draftPending || invite.isPending}
+            disabled={!canManage || draftPending || invite.isPending}
             onClick={sendInvite}
           />
           {!canManage ? <span className="form-hint">{reason}</span> : null}
@@ -1275,6 +1287,11 @@ export function UsersTab({
             <span role="alert" className="form-error">
               <Icon name={KIND_ICON.crit} size={13} />
               {describeSubmitError(invite.error)}
+            </span>
+          ) : inviteProblems.length > 0 && email.trim() === "" ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {inviteProblems.map((problem) => problem.message).join(". ")}.
             </span>
           ) : null}
           <Btn label={t("common.actions.cancel")} onClick={newUser.close} />

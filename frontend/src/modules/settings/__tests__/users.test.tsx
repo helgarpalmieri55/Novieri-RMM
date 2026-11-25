@@ -1254,3 +1254,17 @@ describe("Settings — Users on the list pattern", () => {
     expect(router.state.location.search).toBe("?tab=users&new=user");
   });
 });
+
+// Coordinator ruling 8a (2026-11-25): a form with more than one box keeps its
+// send enabled and says what is missing on submit; it is never a dead button.
+describe("Settings — Users, the invitation's missing address", () => {
+  it("says the address is required on submit, and sends nothing", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const send = within(invite).getByRole("button", { name: "Send invitation" });
+    expect(send).toBeEnabled();
+    await user.click(send);
+    expect(await within(invite).findByRole("alert")).toHaveTextContent("Email is required");
+    expect(calls.inviteUser).not.toHaveBeenCalled();
+  });
+});
