@@ -373,6 +373,15 @@ function EditScriptDialog({
     // saving now would PUT an empty string over a script that runs as
     // SYSTEM. The control says so rather than refusing silently.
     if (!bodyReady) return;
+    // NO WRITE WITHOUT A CHANGE (general ruling 13). The PUT replaces the
+    // whole body of a script that runs as SYSTEM, and every one is an audit
+    // entry: a Save on the body exactly as it was loaded is a close, and
+    // sends nothing. Compared untrimmed, as it is sent -- a changed blank line
+    // is a changed script.
+    if (body === detail.data.body) {
+      dismiss();
+      return;
+    }
     const next: Attempt = { rules: editRules, values: { body } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

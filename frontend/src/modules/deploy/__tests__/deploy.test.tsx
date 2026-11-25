@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -720,6 +720,45 @@ describe("ScriptsPage", () => {
     expect(textarea).toBeInTheDocument();
   });
 
+  // GENERAL RULING 13: no write without a change. Edit replaces the whole body
+  // of a script that runs as SYSTEM, and every PUT is an audit entry; a Save on
+  // the body as it was loaded is a close, not a write.
+  it("sends nothing when Save is pressed on an untouched script, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ScriptsPage />);
+
+    await screen.findByText("cleanup-temp");
+    const row = screen.getByText("cleanup-temp").closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit cleanup-temp" });
+    await within(dialog).findByDisplayValue(SCRIPT_DETAIL.body);
+    // Save stays enabled: pressing it untouched is allowed, and answers by closing.
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit cleanup-temp" })).toBeNull());
+    expect(api.editScript).not.toHaveBeenCalled();
+  });
+
+  it("sends the whole changed body when Save is pressed on a changed script", async () => {
+    api.editScript = vi.fn().mockResolvedValue({ ...SCRIPT_DETAIL, body: `${SCRIPT_DETAIL.body}\n# done` });
+    const user = userEvent.setup();
+    renderWithProviders(<ScriptsPage />);
+
+    await screen.findByText("cleanup-temp");
+    const row = screen.getByText("cleanup-temp").closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit cleanup-temp" });
+    const textarea = await within(dialog).findByDisplayValue(SCRIPT_DETAIL.body);
+    await user.type(textarea, "{Enter}# done");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.editScript).toHaveBeenCalledWith("scr1", { body: `${SCRIPT_DETAIL.body}\n# done` }),
+    );
+    expect(api.editScript).toHaveBeenCalledTimes(1);
+  });
+
   it("calls the run mutation with the target the operator picked and confirmed", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ScriptsPage />);
@@ -1127,7 +1166,9 @@ describe("deploy failure paths say what went wrong", () => {
 
     await screen.findByText("cleanup-temp");
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByDisplayValue(SCRIPT_DETAIL.body);
+    // A change first: an untouched Save sends nothing, so it cannot fail
+    // (general ruling 13).
+    await user.type(await screen.findByDisplayValue(SCRIPT_DETAIL.body), "{Enter}# done");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/unavailable right now/);
