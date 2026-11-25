@@ -54,7 +54,6 @@ export const aiAdmin = {
     checking: "Checking whether the assistant is available…",
     unavailable: "the assistant is not available here",
     settingsLink: "Assistant settings",
-    openSettings: "Open assistant settings",
     turnedOnBy:
       "The assistant is turned on by whoever runs this server, not from the console. Someone with permission to manage the assistant can see how it is set up.",
     invitation: "What would you like to know?",

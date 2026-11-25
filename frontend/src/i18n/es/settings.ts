@@ -24,12 +24,6 @@ export const settings: Shape<typeof en> = {
       budget: "Presupuesto",
     },
   },
-  saveBar: {
-    save: "Guardar cambios",
-    saving: "Guardando…",
-    saved: "Guardado. Los valores de abajo son los que devolvió el servidor.",
-    noChanges: "No hay cambios sin guardar",
-  },
   loadFailure: "No se pudo cargar. {reason} Vuelve a intentarlo o consulta la página de estado de la plataforma.",
   readOnly: "Solo lectura: este cambio requiere el permiso {code}. Lo aplica el servidor; esta consola solo lo refleja.",
   readOnlyEveryClient: "Solo lectura: este cambio requiere el permiso {code} en todos los clientes, porque todos los clientes comparten esta configuración. Lo aplica el servidor; esta consola solo lo refleja.",
@@ -50,12 +44,9 @@ export const settings: Shape<typeof en> = {
     missingTitle: "El perfil de la organización no está disponible en este servidor.",
     missingBody: "GET /api/v1/orgs/current respondió 404. El formulario de abajo queda deshabilitado hasta que la ruta responda.",
     forbidden: "Perfil de la organización no disponible (permisos insuficientes: {code}).",
-    blockedMissing: "Este servidor no ofrece el perfil de la organización, así que no hay dónde guardar.",
-    blockedWaiting: "Esperando los valores actuales; guardar ahora enviaría un formulario vacío.",
     name: "Nombre de la organización",
     noKeys: "Este servidor no admite más claves de configuración de la organización que el nombre. Las claves que se añadan a su lista de permitidos aparecerán aquí sin cambiar la consola.",
     unrenderable: "No se pueden editar aquí: {keys}. Son valores estructurados que necesitan un control diseñado para su forma, o claves cuyo nombre parece una credencial. Nunca se muestran, nunca se rellenan de antemano y nunca se envían de vuelta (invariante 3). Se nombran en lugar de omitirlas en silencio, porque un formulario que descarta parte de lo que guarda el servidor es el defecto que esta página existe para eliminar.",
-    unsaved: "Cambios sin guardar en esta pestaña. No se escribe nada hasta que pulses Guardar.",
     numberInvalid: "{key} debe ser un número, y «{value}» no lo es",
     numberNegative: "{key} no puede ser negativo, y {value} lo es",
     rename: {
@@ -87,7 +78,6 @@ export const settings: Shape<typeof en> = {
     },
   },
   email: {
-    title: "Correo electrónico",
     subtitle: "El servidor de correo para invitaciones, restablecimientos de contraseña y notificaciones",
     loading: "Cargando…",
     forbidden: "La configuración del correo no está disponible (permisos insuficientes: {code}).",
@@ -174,7 +164,6 @@ export const settings: Shape<typeof en> = {
       other: "{count} usuarios tienen {name} y se verán afectados por este cambio.",
     },
     globalNote: "{name} es de toda la plataforma. Al guardar se edita una copia para esta organización; no se toca ninguna otra organización.",
-    savePermissions: "Guardar permisos",
     create: {
       title: "Crear un rol",
       subtitle: "Se crea sin permisos. Dales acceso en la matriz de arriba.",
@@ -201,7 +190,16 @@ export const settings: Shape<typeof en> = {
     emailMissing: "El correo no está configurado, así que las invitaciones no se envían por correo (cada enlace se te muestra una sola vez para que lo entregues tú) y nadie puede restablecer una contraseña olvidada.",
     emailSetUp: "Configurar el correo",
     subtitle: "Todas las personas que pueden iniciar sesión en esta organización y lo que tiene cada una",
-    empty: "Todavía no hay usuarios en esta organización. Invita a alguien abajo.",
+    empty: "Todavía no hay usuarios en esta organización.",
+    list: {
+      search: "Buscar personas",
+      statusLabel: "Estado",
+      all: "Todos",
+      active: "Activo",
+      invited: "Invitación pendiente",
+      disabled: "Deshabilitado",
+      deleted: "Eliminado",
+    },
     columns: {
       person: "Persona",
       status: "Estado",
@@ -325,7 +323,6 @@ export const settings: Shape<typeof en> = {
     },
   },
   sessions: {
-    title: "Sesiones",
     subtitle: "Cuánto dura un inicio de sesión antes de volver a pedirlo",
     loading: "Cargando…",
     forbidden: "La configuración de las sesiones no está disponible (permisos insuficientes: {code}).",
@@ -348,10 +345,8 @@ export const settings: Shape<typeof en> = {
     rangeHours: "Entre {min} y {max} horas.",
     rangeDays: "Entre {min} y {max} días.",
     outOfRange: "Cada valor tiene que estar dentro del intervalo indicado debajo.",
-    correct: "Corrige los valores fuera de su intervalo antes de guardar.",
   },
   microsoft: {
-    title: "Entrar con Microsoft",
     subtitle: "Una aplicación registrada en Microsoft Entra ID, para técnicos y para los contactos de los clientes",
     loading: "Cargando…",
     forbidden: "Para leer esto hace falta {code}.",
@@ -392,10 +387,8 @@ export const settings: Shape<typeof en> = {
     contactsNote:
       "Los contactos de un cliente entran desde las organizaciones que lista su cliente (Clientes, Editar). El administrador de cada organización puede tener que aprobar la aplicación una vez.",
     badId: "Cada identificador es un GUID, como lo muestra Microsoft: 8-4-4-4-12 dígitos hexadecimales.",
-    correct: "Corrige los identificadores para guardar.",
   },
   assistant: {
-    title: "Asistente",
     subtitle: "Cuánto tiempo se conservan las conversaciones, los límites de frecuencia y el límite diario de uso",
     loading: "Cargando…",
     forbidden: "La configuración del asistente no está disponible (permisos insuficientes: {code}).",
@@ -416,7 +409,6 @@ export const settings: Shape<typeof en> = {
     dailyLimit: "Límite diario de uso",
     noLimit: "Déjalo en blanco para no poner límite",
     serverNote: "Que el asistente funcione y qué modelo use son configuración del servidor (ITS_AI_*) y son iguales para todas las organizaciones de este despliegue. Las claves de API del proveedor y las URL base nunca las devuelve la API, nunca se muestran aquí y nunca se introducen aquí.",
-    save: "Guardar configuración del asistente",
   },
   aiConnections: {
     title: "Conexiones de IA",
@@ -489,6 +481,10 @@ export const settings: Shape<typeof en> = {
       active: "activo",
       inactive: "inactivo",
       tokenAria: "Token nuevo de {name}",
+      edit: "Editar",
+      editAria: "Editar {name}",
+      editTitle: "Editar {name}",
+      saving: "Guardando…",
       tokenPlaceholder: "Déjalo en blanco para conservar el actual",
       mailHint: "Cambia el inicio de sesión del correo en Notificaciones → Canales.",
       sendTest: "Enviar una prueba",
@@ -558,11 +554,8 @@ export const settings: Shape<typeof en> = {
     autoClose: "Cerrar automáticamente los tickets resueltos tras",
     days: "Días",
     invalid: "Debe ser un número entero entre 1 y {max}. El servidor lo vuelve a comprobar; el campo es una ayuda, no la validación.",
-    save: "Guardar niveles de servicio",
-    correct: "Corrige el valor de arriba antes de guardar.",
   },
   health: {
-    title: "Salud de los equipos",
     subtitle: "Comportamiento de alertas, escalado y tickets en toda la organización",
     loading: "Cargando…",
     forbidden: "La configuración de salud no está disponible (permisos insuficientes: {code}).",
@@ -596,8 +589,6 @@ export const settings: Shape<typeof en> = {
     blankForNone: "En blanco para ninguna",
     autoResolve: "Resolver automáticamente los tickets de alerta cuando la alerta se recupera",
     invalid: "No es un número entero: {keys}. No se guarda nada mientras un campo numérico esté en blanco o no sea numérico; un campo en blanco no es cero.",
-    save: "Guardar configuración de salud",
-    correct: "Corrige los campos numéricos de arriba antes de guardar.",
   },
   budget: {
     title: "Presupuesto",
@@ -626,7 +617,5 @@ export const settings: Shape<typeof en> = {
     by: "por",
     acknowledge: "Entiendo que los gastos que ya se convirtieron con la base anterior conservan los importes base con los que se registraron. El servidor rechaza este cambio sin esta confirmación en cuanto algún gasto no anulado tiene un importe base.",
     monthInvalid: "El inicio del año fiscal debe ser un mes entre 1 y 12.",
-    save: "Guardar configuración del presupuesto",
-    correct: "Corrige los campos de arriba antes de guardar.",
   },
 };

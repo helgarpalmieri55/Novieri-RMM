@@ -33,11 +33,10 @@
 // `ITS_AI_*` into `.env` — server-side, by the operator, and reviewable.
 // Invariant 6 is untouched: the frontend still gates nothing.
 
-import { useEffect, useState } from "react";
 
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import { FieldGroup, KIND_ICON, Panel } from "../../shell/components";
+import { FormSection, KIND_ICON, SaveBar, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
 import { EGRESS_DISCLOSURE } from "../ai-admin/egress";
@@ -51,13 +50,13 @@ import type { AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import { useAiProviders, useAiSettings, useUpdateAiSettingsMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, parseIntegerField } from "./settingsState";
 
 export const AI_ADMIN = "ai.admin";
 
 
-/** The disclosure's own head: the body rung at 600, under the panel's `h2`. */
+/** The disclosure's own head: the body rung at 600, under the section's `h2`. */
 const SUBHEAD = { fontSize: "var(--t-body)", fontWeight: 600, margin: "14px 0 4px" } as const;
 /**
  * The head of ONE LIST inside that section, as a caption.
@@ -104,17 +103,17 @@ export function AssistantTab({ canAdmin, canEdit = canAdmin }: { canAdmin: boole
   const update = useUpdateAiSettingsMutation();
 
   const provider = describeProvider(providers.data);
+  // THE KIT'S DRAFT (redesign, Receta FO): the server's values are the saved
+  // state, and a save's answer becomes it (`markSent`).
   const seed = seedFrom(settings.data);
-  const [form, setForm] = useState<AssistantForm>(seed);
-
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as AssistantForm);
-  }, [seedSignature]);
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<AssistantForm>(
+    settings.data ? seed : undefined,
+  );
+  const form = draft ?? seed;
+  const setForm = (change: (current: AssistantForm) => AssistantForm) => setDraft(change(form));
 
   const forbidden = isForbidden(settings.error) || isForbidden(providers.error);
   const failed = (settings.error != null || providers.error != null) && !forbidden;
-  const dirty = isDirty(form, seed);
   const editable = canEdit && settings.data != null;
 
   function submit() {
@@ -127,211 +126,206 @@ export function AssistantTab({ canAdmin, canEdit = canAdmin }: { canAdmin: boole
     if (perOrg != null) body.max_turns_per_org_per_hour = perOrg;
     // A cleared budget box is an explicit "no budget" (null), not a dropped field.
     body.daily_token_budget = parseIntegerField(form.dailyTokenBudget);
-    update.mutate(body);
+    markSent(form);
+    update.mutate(body, { onError: () => markSent(null) });
   }
 
+  if (settings.isLoading || providers.isLoading) return <p className="note">{t("settings.assistant.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.assistant.forbidden", { code: AI_ADMIN })}</p>;
+  if (failed) return <LoadFailure error={settings.error ?? providers.error} />;
+
   return (
-    <Panel
-      title={t("settings.assistant.title")}
-      subtitle={t("settings.assistant.subtitle")}
-    >
-      {settings.isLoading || providers.isLoading ? (
-        <p className="note">{t("settings.assistant.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">
-          {t("settings.assistant.forbidden", { code: AI_ADMIN })}
-        </p>
-      ) : failed ? (
-        <LoadFailure error={settings.error ?? providers.error} />
-      ) : (
-        <>
-          {/* THE SUMMARY IS ABOVE THE FOLD; THE ELEVEN BULLETS ARE NOT GONE,
-              THEY ARE BEHIND A DISCLOSURE (language pass, 2026-09-11). The
-              content is security-critical and stays verbatim -- only its
-              weight changes: a reader meets one sentence, then the controls,
-              and opens the disclosure for the full account this platform owes
-              an administrator of what leaves their network. Reuses the h3/h4
-              structure this file already had for the list rather than
-              inventing a second idiom for it -- only now inside a native
-              `<details>`, which is keyboard-operable and exposes its own
-              expanded state for free. */}
-          {/* The one-line version of `EGRESS_DISCLOSURE`, for above the fold. The full,
-              security-critical list stays verbatim in the disclosure below; this is
-              only what sits ABOVE it, so the controls are what a reader meets first. */}
-          <p className="note" style={{ marginTop: 0 }}>{t("settings.assistant.egressSummary")}</p>
-          <details style={{ marginTop: 8 }}>
-            <summary className="note cursor-pointer">
-              {t("settings.assistant.egressFull")}
-            </summary>
-            <h3 style={SUBHEAD}>{EGRESS_DISCLOSURE.heading}</h3>
-            <h4 className="k" style={{ ...LIST_HEAD, marginTop: 6 }}>
-              {t("settings.assistant.whatLeaves")}
-            </h4>
-            <ul className="note" style={LIST}>
-              {EGRESS_DISCLOSURE.leaves.map((line) => (
-                <li key={line} style={LIST_ITEM}>
-                  {line}
-                </li>
-              ))}
-            </ul>
-            <h4 className="k" style={LIST_HEAD}>
-              {t("settings.assistant.whatNeverLeaves")}
-            </h4>
-            <ul className="note" style={LIST}>
-              {EGRESS_DISCLOSURE.neverLeaves.map((line) => (
-                <li key={line} style={LIST_ITEM}>
-                  {line}
-                </li>
-              ))}
-            </ul>
-            <p className="note" style={{ marginTop: 12 }}>{EGRESS_DISCLOSURE.selfHosted}</p>
-            <p className="note" style={{ marginTop: 4 }}>{EGRESS_DISCLOSURE.contractual}</p>
-          </details>
+    <>
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      <p className="note" style={{ marginBottom: 14 }}>
+        {t("settings.assistant.subtitle")}
+      </p>
+      {!canEdit ? <ReadOnlyNotice reason={reason} /> : null}
+      <FormSection title={t("settings.assistant.provider")} icon="sparkles">
+        {/* THE SUMMARY IS ABOVE THE FOLD; THE ELEVEN BULLETS ARE NOT GONE,
+            THEY ARE BEHIND A DISCLOSURE (language pass, 2026-09-11). The
+            content is security-critical and stays verbatim -- only its
+            weight changes: a reader meets one sentence, then the controls,
+            and opens the disclosure for the full account this platform owes
+            an administrator of what leaves their network. Reuses the h3/h4
+            structure this file already had for the list rather than
+            inventing a second idiom for it -- only now inside a native
+            `<details>`, which is keyboard-operable and exposes its own
+            expanded state for free. */}
+        {/* The one-line version of `EGRESS_DISCLOSURE`, for above the fold. The full,
+            security-critical list stays verbatim in the disclosure below; this is
+            only what sits ABOVE it, so the controls are what a reader meets first. */}
+        <p className="note" style={{ marginTop: 0 }}>{t("settings.assistant.egressSummary")}</p>
+        <details style={{ marginTop: 8 }}>
+          <summary className="note cursor-pointer">
+            {t("settings.assistant.egressFull")}
+          </summary>
+          <h3 style={SUBHEAD}>{EGRESS_DISCLOSURE.heading}</h3>
+          <h4 className="k" style={{ ...LIST_HEAD, marginTop: 6 }}>
+            {t("settings.assistant.whatLeaves")}
+          </h4>
+          <ul className="note" style={LIST}>
+            {EGRESS_DISCLOSURE.leaves.map((line) => (
+              <li key={line} style={LIST_ITEM}>
+                {line}
+              </li>
+            ))}
+          </ul>
+          <h4 className="k" style={LIST_HEAD}>
+            {t("settings.assistant.whatNeverLeaves")}
+          </h4>
+          <ul className="note" style={LIST}>
+            {EGRESS_DISCLOSURE.neverLeaves.map((line) => (
+              <li key={line} style={LIST_ITEM}>
+                {line}
+              </li>
+            ))}
+          </ul>
+          <p className="note" style={{ marginTop: 12 }}>{EGRESS_DISCLOSURE.selfHosted}</p>
+          <p className="note" style={{ marginTop: 4 }}>{EGRESS_DISCLOSURE.contractual}</p>
+        </details>
 
-          {/* THE PROVIDER — a STATEMENT, not a control (§0.14). This was an
-              `EntityPicker` over `GET /ai/providers`; the route still feeds it
-              and the value it feeds is now read-only, because the deployment's
-              `ITS_AI_*` names one provider for every organization on it. A
-              `kv` list rather than a labelled field: a `<label>` promises an
-              input, and there is none.
+        {/* THE PROVIDER — a STATEMENT, not a control (§0.14). This was an
+            `EntityPicker` over `GET /ai/providers`; the route still feeds it
+            and the value it feeds is now read-only, because the deployment's
+            `ITS_AI_*` names one provider for every organization on it. A
+            `kv` list rather than a labelled field: a `<label>` promises an
+            input, and there is none.
 
-              The unconfigured case keeps the audit's fix ([HIGH],
-              /assistant/settings → "Model provider": "the assistant cannot be
-              enabled and the UI never says why"). Same dead end, same shared
-              constant, so the two screens cannot explain it differently — only
-              the consequence sentence changed, because there is no longer an
-              enable for it to block.
+            The unconfigured case keeps the audit's fix ([HIGH],
+            /assistant/settings → "Model provider": "the assistant cannot be
+            enabled and the UI never says why"). Same dead end, same shared
+            constant, so the two screens cannot explain it differently — only
+            the consequence sentence changed, because there is no longer an
+            enable for it to block.
 
-              HEADED "Provider", NOT "Where it goes" ANY MORE. Design review,
-              2026-09-11: that exact phrase is the glossary's own replacement
-              for "channel" on Settings → Notifications, a tab one click away
-              — same phrase, two referents. The KV row two lines down is
-              already labelled "Model provider"; the heading now names the
-              same thing instead of colliding with what Notifications needs
-              the phrase for. */}
-          <h3 style={SUBHEAD}>{t("settings.assistant.provider")}</h3>
-          {provider === null ? (
-            <>
-              <p role="status" className="notice gold">
-                <Icon name={KIND_ICON.warn} size={16} />
-                <span>{providerOffSummary()}</span>
-              </p>
-              {/* The variable names are for whoever can act on them, which is
-                  never the reader of the sentence above -- see `provider.ts`'s
-                  own comment on `PROVIDER_OFF_SUMMARY`. Same disclosure, same
-                  constant, as `/assistant/settings`. */}
-              <details style={{ marginTop: 8 }}>
-                <summary className="note cursor-pointer">{serverAdminHeading()}</summary>
-                <p className="note" style={{ marginTop: 6 }}>{serverAdminDetail()}</p>
-              </details>
-            </>
-          ) : (
-            <KV
-              items={[
-                [
-                  t("settings.assistant.modelProvider"),
-                  <>
-                    {/* "Local · openai-compatible · gpt-oss-120b", the way the
-                        design writes it and the way /assistant/settings does.
-                        Two surfaces, one line, one shape. */}
-                    <b>{provider.key}</b>{" "}
-                    <span className="note">{`· ${provider.detail}`}</span>
-                  </>,
-                ],
-              ]}
-            />
-          )}
-
-          {/* Retention answers "how long is it kept"; the ceilings answer "how
-              much can be spent". One grid asked both at once. The wrapper keeps
-              the 16px the grid used to carry away from the disclosure above. */}
-          <div style={{ marginTop: 16 }}>
-            <FieldGroup title={t("settings.assistant.groups.retention")} icon="history">
-              <div className="form-grid" style={FOLDING_FORM_GRID}>
-                <Field label={t("settings.assistant.keepFor")} help={t("settings.assistant.days")}>
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min={1}
-                    value={form.transcriptRetentionDays}
-                    disabled={!editable}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        transcriptRetentionDays: event.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-              </div>
-            </FieldGroup>
-            <FieldGroup title={t("settings.assistant.groups.rateLimits")} icon="clock">
-              <div className="form-grid" style={FOLDING_FORM_GRID}>
-                <Field label={t("settings.assistant.perUser")}>
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min={1}
-                    value={form.maxTurnsPerUserPerMinute}
-                    disabled={!editable}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        maxTurnsPerUserPerMinute: event.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-                <Field label={t("settings.assistant.perOrg")}>
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min={1}
-                    value={form.maxTurnsPerOrgPerHour}
-                    disabled={!editable}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        maxTurnsPerOrgPerHour: event.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-                <Field label={t("settings.assistant.dailyLimit")} help={t("settings.assistant.noLimit")}>
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min={0}
-                    value={form.dailyTokenBudget}
-                    disabled={!editable}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        dailyTokenBudget: event.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-              </div>
-            </FieldGroup>
-          </div>
-
-          <p className="note" style={{ marginTop: 12 }}>
-            {t("settings.assistant.serverNote")}
-          </p>
-
-          <SaveBar
-            label={t("settings.assistant.save")}
-            canEdit={editable}
-            disabledReason={reason}
-            dirty={dirty}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess && !dirty}
-            onSave={submit}
+            HEADED "Provider", NOT "Where it goes" ANY MORE. Design review,
+            2026-09-11: that exact phrase is the glossary's own replacement
+            for "channel" on Settings → Notifications, a tab one click away
+            — same phrase, two referents. The KV row two lines down is
+            already labelled "Model provider"; the heading now names the
+            same thing instead of colliding with what Notifications needs
+            the phrase for. */}
+        {provider === null ? (
+          <>
+            <p role="status" className="notice gold">
+              <Icon name={KIND_ICON.warn} size={16} />
+              <span>{providerOffSummary()}</span>
+            </p>
+            {/* The variable names are for whoever can act on them, which is
+                never the reader of the sentence above -- see `provider.ts`'s
+                own comment on `PROVIDER_OFF_SUMMARY`. Same disclosure, same
+                constant, as `/assistant/settings`. */}
+            <details style={{ marginTop: 8 }}>
+              <summary className="note cursor-pointer">{serverAdminHeading()}</summary>
+              <p className="note" style={{ marginTop: 6 }}>{serverAdminDetail()}</p>
+            </details>
+          </>
+        ) : (
+          <KV
+            items={[
+              [
+                t("settings.assistant.modelProvider"),
+                <>
+                  {/* "Local · openai-compatible · gpt-oss-120b", the way the
+                      design writes it and the way /assistant/settings does.
+                      Two surfaces, one line, one shape. */}
+                  <b>{provider.key}</b>{" "}
+                  <span className="note">{`· ${provider.detail}`}</span>
+                </>,
+              ],
+            ]}
           />
-        </>
-      )}
-    </Panel>
+        )}
+
+      </FormSection>
+
+      {/* Retention answers "how long is it kept"; the ceilings answer "how
+          much can be spent". One grid asked both at once. */}
+      <FormSection title={t("settings.assistant.groups.retention")} icon="history">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.assistant.keepFor")} help={t("settings.assistant.days")}>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              value={form.transcriptRetentionDays}
+              disabled={!editable}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  transcriptRetentionDays: event.target.value,
+                }))
+              }
+            />
+          </Field>
+        </div>
+      </FormSection>
+      <FormSection title={t("settings.assistant.groups.rateLimits")} icon="clock">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.assistant.perUser")}>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              value={form.maxTurnsPerUserPerMinute}
+              disabled={!editable}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  maxTurnsPerUserPerMinute: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label={t("settings.assistant.perOrg")}>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              value={form.maxTurnsPerOrgPerHour}
+              disabled={!editable}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  maxTurnsPerOrgPerHour: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label={t("settings.assistant.dailyLimit")} help={t("settings.assistant.noLimit")}>
+            <input
+              className={inputClass}
+              type="number"
+              min={0}
+              value={form.dailyTokenBudget}
+              disabled={!editable}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  dailyTokenBudget: event.target.value,
+                }))
+              }
+            />
+          </Field>
+        </div>
+      </FormSection>
+
+      <p className="note" style={{ marginTop: 12 }}>
+        {t("settings.assistant.serverNote")}
+      </p>
+
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        saved={update.isSuccess && !dirty}
+        onDiscard={() => {
+          discard();
+          update.reset();
+        }}
+        onSave={submit}
+      />
+    </>
   );
 }

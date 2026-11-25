@@ -21,7 +21,7 @@ describe("Your profile: language", () => {
     const select = await screen.findByLabelText<HTMLSelectElement>("Language");
     expect([...select.options].map((o) => o.value)).toEqual(["en", "es"]);
     await userEvent.selectOptions(select, "es");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(getLanguage()).toBe("es"));
     expect(calls.updateMe).toHaveBeenCalledTimes(1);
     expect(calls.updateMe).toHaveBeenCalledWith(expect.objectContaining({ locale: "es" }));
@@ -40,7 +40,7 @@ describe("Your profile: language", () => {
     const phone = await screen.findByLabelText("Teléfono");
     await userEvent.clear(phone);
     await userEvent.type(phone, "+57 1");
-    await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await userEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls.updateMe).toHaveBeenCalledTimes(1));
     expect(calls.updateMe.mock.calls[0]![0]).toMatchObject({ phone: "+57 1", locale: null });
     expect(getLanguage()).toBe("es");
@@ -67,7 +67,7 @@ describe("Your profile: language", () => {
     renderProfilePage();
     const select = await screen.findByLabelText<HTMLSelectElement>("Language");
     await userEvent.selectOptions(select, "es");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     // The save went through and the console switched, in Spanish.
     await waitFor(() => expect(getLanguage()).toBe("es"));
     await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
@@ -88,7 +88,7 @@ describe("Your profile: language", () => {
     renderProfilePage();
     const select = await screen.findByLabelText<HTMLSelectElement>("Idioma");
     await userEvent.selectOptions(select, "en");
-    await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await userEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(getLanguage()).toBe("en"));
     await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
     expect(screen.queryByText(/sign-in pages could not be switched/)).toBeNull();
@@ -105,7 +105,7 @@ describe("Your profile: language", () => {
     });
     renderProfilePage();
     await userEvent.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Language"), "es");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(getLanguage()).toBe("es"));
     await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
     expect(screen.queryByText(/sign-in pages could not be switched/)).toBeNull();

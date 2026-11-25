@@ -98,7 +98,7 @@ describe("Settings — Assistant tab", () => {
       max_turns_per_org_per_hour: 100,
       daily_token_budget: null,
     });
-    await user.click(screen.getByRole("button", { name: "Save assistant settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateAiSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateAiSettings).toHaveBeenCalledWith({
@@ -129,7 +129,7 @@ describe("Settings — Assistant tab", () => {
       ),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save assistant settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("transcript_retention_days must be between 1 and 365");
@@ -179,7 +179,7 @@ describe("Settings — Assistant tab", () => {
     await user.clear(retention);
     await user.type(retention, "45");
 
-    const save = screen.getByRole("button", { name: "Save assistant settings" });
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeEnabled();
     expect(screen.queryByText(/acknowledgement/i)).not.toBeInTheDocument();
     await user.click(save);
@@ -279,7 +279,9 @@ describe("Settings — Assistant tab", () => {
     renderSettings();
     await openTab();
     await screen.findByText("Primary");
-    expect(screen.getByRole("heading", { name: "Provider", level: 3 })).toBeInTheDocument();
+    // RE-POINTED (redesign, Receta FO): "Provider" is a `FormSection` now, an
+    // `h2` under the page's `h1` (it was an `h3` under the panel's `h2`).
+    expect(screen.getByRole("heading", { name: "Provider", level: 2 })).toBeInTheDocument();
     expect(screen.queryByText("Where it goes")).not.toBeInTheDocument();
   });
 
@@ -341,21 +343,22 @@ describe("Settings — Assistant tab, the egress account", () => {
 
 /**
  * Retention answers "how long is it kept", the ceilings answer "how much can
- * be spent". They are different questions and now say so. Both `h3`, under
- * the panel's "Assistant" `h2` and alongside the disclosure's own `h3`s.
+ * be spent". They are different questions and now say so. RE-POINTED
+ * (redesign, Receta FO): both are `FormSection`s, `h2` under the page's `h1`
+ * (they were `h3` under the panel's "Assistant" `h2`).
  */
 describe("Settings — Assistant tab, grouped", () => {
   it("separates retention from the rate ceilings", async () => {
     renderSettings();
     await openTab();
 
-    const retention = (await screen.findByRole("heading", { name: "Retention", level: 3 })).closest(
+    const retention = (await screen.findByRole("heading", { name: "Retention", level: 2 })).closest(
       "section",
     ) as HTMLElement;
     expect(within(retention).getByLabelText("Keep conversations for")).toBeInTheDocument();
 
     const limits = (
-      await screen.findByRole("heading", { name: "Rate limits", level: 3 })
+      await screen.findByRole("heading", { name: "Rate limits", level: 2 })
     ).closest("section") as HTMLElement;
     for (const field of [
       "Questions per person, per minute",
@@ -375,7 +378,9 @@ describe("Settings — Assistant tab, grouped", () => {
    * enumerated — which is exactly how `HealthTab` shipped grouped 3-of-11
    * elsewhere in this cycle. So this queries every labelled control the tab
    * actually rendered and asserts each one sits inside a
-   * `section.field-group`. It goes red on the next field nobody grouped.
+   * `section.form-section` (a `section.field-group` until the redesign's
+   * Receta FO made each group a `FormSection`). It goes red on the next field
+   * nobody grouped.
    */
   it("keeps every labelled control of the tab inside a group", async () => {
     renderSettings();
@@ -393,8 +398,8 @@ describe("Settings — Assistant tab, grouped", () => {
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
       expect(
-        control.closest("section.field-group"),
-        `${describeControl(control)} is not inside any field-group`,
+        control.closest("section.form-section"),
+        `${describeControl(control)} is not inside any form section`,
       ).not.toBeNull();
     }
 
@@ -410,8 +415,8 @@ describe("Settings — Assistant tab, grouped", () => {
     expect(wrapped.length).toBeGreaterThan(0);
     for (const el of wrapped) {
       expect(
-        el.closest("section.field-group"),
-        `${describeControl(el)} is not inside any field-group`,
+        el.closest("section.form-section"),
+        `${describeControl(el)} is not inside any form section`,
       ).not.toBeNull();
     }
   });

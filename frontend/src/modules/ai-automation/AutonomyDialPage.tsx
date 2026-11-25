@@ -58,7 +58,16 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { lazyLabels } from "../../i18n/lazy";
 import { formatDateTime } from "../../lib/datetime";
-import { Btn, KIND_ICON, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  KIND_ICON,
+  PageHead,
+  Panel,
+  QueryState,
+  SaveBar,
+  StatusPill,
+  UnsavedGuard,
+  useDraft,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Chips, KV } from "../../shell/viz";
 import { useProfileZone } from "../ai-admin/api";
@@ -108,6 +117,9 @@ interface PendingChange {
   from: AiCeilingLevel;
   to: AiCeilingLevel;
 }
+
+/** The saved state of the dial's draft: no edits. One object, so the draft compares by value against it. */
+const NO_EDITS: Readonly<Record<string, AiCeilingLevel>> = {};
 
 function cellKey(persona: AiPersona, risk: AiRiskClass): string {
   return `${persona}:${risk}`;
@@ -164,10 +176,25 @@ export function AutonomyDialPage(): ReactElement {
   const canSet = everywhere.has("ai.admin");
   const readOnly = everywhere.lacks("ai.admin");
 
-  /** Edits not yet sent. Keyed `persona:risk`; absent means "as stored". */
-  const [draft, setDraft] = useState<Readonly<Record<string, AiCeilingLevel>>>({});
+  /**
+   * Edits not yet sent, as the kit's draft (redesign plan, Task 12, 7.5;
+   * decision D22). Keyed `persona:risk`; absent means "as stored", so the
+   * saved state is no edits at all, and a cell set back to its stored level
+   * leaves the draft. Each cell that lands leaves it too, which is what keeps
+   * a refusal halfway through honest: the grid still shows what has not been
+   * applied.
+   */
+  const { draft, setDraft, discard: discardDraft } = useDraft<Readonly<Record<string, AiCeilingLevel>>>(
+    ceilings.data ? NO_EDITS : undefined,
+  );
+  const edits = draft ?? NO_EDITS;
   const [confirming, setConfirming] = useState(false);
   const [saved, setSaved] = useState(false);
+  // A save of several cells is running (O7 review, M1). Held for the whole
+  // loop, not read from `setCeiling.isPending`, which drops for a moment
+  // between one cell's answer and the next cell's request: a chip pressed in
+  // that moment would edit a draft the loop is narrowing from its snapshot.
+  const [applying, setApplying] = useState(false);
 
   const stored = new Map<string, string>();
   for (const row of ceilings.data ?? []) {
@@ -179,7 +206,7 @@ export function AutonomyDialPage(): ReactElement {
   }
 
   function shownLevel(persona: AiPersona, risk: AiRiskClass): AiCeilingLevel {
-    return draft[cellKey(persona, risk)] ?? storedLevel(persona, risk);
+    return edits[cellKey(persona, risk)] ?? storedLevel(persona, risk);
   }
 
   const changes: PendingChange[] = [];
@@ -195,15 +222,19 @@ export function AutonomyDialPage(): ReactElement {
 
   function edit(persona: AiPersona, risk: AiRiskClass, level: AiCeilingLevel) {
     // A "Saved." from the previous write must not sit above an unsent edit —
-    // the rule `settings/SaveBar.tsx` already holds. The FAILURE is left
-    // standing on purpose: "technician / high was not changed" stays true.
+    // the rule the kit's `SaveBar` holds. The FAILURE is left standing on
+    // purpose: "technician / high was not changed" stays true.
     setSaved(false);
-    setDraft((current) => ({ ...current, [cellKey(persona, risk)]: level }));
+    const next = { ...edits };
+    if (level === storedLevel(persona, risk)) delete next[cellKey(persona, risk)];
+    else next[cellKey(persona, risk)] = level;
+    setDraft(next);
   }
 
   function discard() {
     setSaved(false);
-    setDraft({});
+    discardDraft();
+    setCeiling.reset();
   }
 
   /**
@@ -218,26 +249,31 @@ export function AutonomyDialPage(): ReactElement {
   async function applyChanges(pending: readonly PendingChange[]): Promise<void> {
     setConfirming(false);
     setSaved(false);
-    for (const change of pending) {
-      try {
-        await setCeiling.mutateAsync({
-          persona: change.persona,
-          risk_class: change.risk,
-          level: change.to,
-        });
-      } catch {
-        // Deliberately swallowed HERE and rendered BELOW: `setCeiling.error`
-        // holds the refusal and `setCeiling.variables` names the cell, which is
-        // more than a rethrow into an unhandled rejection would give anyone.
-        return;
+    setApplying(true);
+    // What is left to apply, narrowed as each cell lands (read from this
+    // closure, not from a render that has not happened yet).
+    const landed: Record<string, AiCeilingLevel> = { ...edits };
+    try {
+      for (const change of pending) {
+        try {
+          await setCeiling.mutateAsync({
+            persona: change.persona,
+            risk_class: change.risk,
+            level: change.to,
+          });
+        } catch {
+          // Deliberately swallowed HERE and rendered BELOW: `setCeiling.error`
+          // holds the refusal and `setCeiling.variables` names the cell, which
+          // is more than a rethrow into an unhandled rejection would give anyone.
+          return;
+        }
+        delete landed[cellKey(change.persona, change.risk)];
+        setDraft({ ...landed });
       }
-      setDraft((current) => {
-        const next = { ...current };
-        delete next[cellKey(change.persona, change.risk)];
-        return next;
-      });
+      setSaved(true);
+    } finally {
+      setApplying(false);
     }
-    setSaved(true);
   }
 
   return (
@@ -255,6 +291,14 @@ export function AutonomyDialPage(): ReactElement {
         bare
       >
         <div style={{ padding: "14px 18px 4px" }}>
+          {/* Read-only, said above the grid: with no change there is no bar to
+              say it in (decision D22). Never while `/me` loads. */}
+          {readOnly ? (
+            <p className="notice" style={{ marginBottom: 12 }}>
+              <Icon name={KIND_ICON.info} size={16} />
+              <span>{t("aiAutomation.dial.everyClientOnly")}</span>
+            </p>
+          ) : null}
           <p className="note">
             {t("aiAutomation.dial.emptyNote")}
           </p>
@@ -392,7 +436,7 @@ export function AutonomyDialPage(): ReactElement {
                             <Chips
                               items={AI_CEILING_LEVELS.map(ceilingLabel)}
                               active={AI_CEILING_LEVELS.indexOf(shownLevel(persona, risk))}
-                              disabled={!canSet}
+                              disabled={!canSet || applying}
                               onSelect={(at) => {
                                 const level = AI_CEILING_LEVELS[at];
                                 if (level !== undefined) edit(persona, risk, level);
@@ -400,7 +444,7 @@ export function AutonomyDialPage(): ReactElement {
                               label={t("aiAutomation.dial.cellLabel", { persona: personaLabel(persona), risk: riskWord(risk) })}
                             />
                           </div>
-                          {draft[cellKey(persona, risk)] != null &&
+                          {edits[cellKey(persona, risk)] != null &&
                           shownLevel(persona, risk) !== storedLevel(persona, risk) ? (
                             <div className="form-hint" style={{ marginTop: 4 }}>
                               {t("aiAutomation.dial.unsaved", { level: ceilingLabel(storedLevel(persona, risk)) })}
@@ -416,41 +460,33 @@ export function AutonomyDialPage(): ReactElement {
           </Table>
         </QueryState>
 
-        {canSet ? (
-          <div className="form-actions" style={{ margin: 0, padding: "14px 18px 16px", borderTop: "1px solid var(--line)" }}>
-            <Btn
-              label={setCeiling.isPending ? t("aiAutomation.dial.saving") : t("aiAutomation.dial.save")}
-              icon="check"
-              variant="primary"
-              disabled={changes.length === 0 || setCeiling.isPending}
-              onClick={() => setConfirming(true)}
-            />
-            {changes.length > 0 ? (
-              <>
-                <Btn label={t("aiAutomation.dial.discard")} onClick={discard} />
-                {/* NOT `role="alert"`: this is the state of the form, announced as
-                    the operator arrives at it, not an interruption. */}
-                <span role="status" className="form-hint">
-                  {t("aiAutomation.dial.unsavedChanges", {
-                    count: changes.length,
-                    changes: changes.map(describeChange).join(changes.length === 1 ? "" : "; "),
-                  })}
-                </span>
-              </>
-            ) : null}
-            {saved && changes.length === 0 && !setCeiling.isError ? (
-              <span role="status" className="form-saved">
-                <Icon name={KIND_ICON.ok} size={13} />
-                {t("aiAutomation.dial.saved")}
-              </span>
-            ) : null}
-          </div>
-        ) : readOnly ? (
-          <p className="note" style={{ margin: 0, padding: "14px 18px 16px" }}>
-            {t("aiAutomation.dial.everyClientOnly")}
+        {/* WHAT IS UNSAVED, IN WORDS (the kit's bar says only that something
+            is): the last thing between an operator and a widened ceiling.
+            NOT `role="alert"`: this is the state of the form, announced as the
+            operator arrives at it, not an interruption. */}
+        {canSet && changes.length > 0 ? (
+          <p role="status" className="form-hint" style={{ margin: 0, padding: "14px 18px 16px", borderTop: "1px solid var(--line)" }}>
+            {t("aiAutomation.dial.unsavedChanges", {
+              count: changes.length,
+              changes: changes.map(describeChange).join(changes.length === 1 ? "" : "; "),
+            })}
           </p>
         ) : null}
       </Panel>
+
+      {/* THE ONE BAR (decision D22). Save opens today's confirmation: raising
+          the ceiling is an act that is confirmed, and audited server-side. */}
+      <UnsavedGuard dirty={changes.length > 0} />
+      {canSet ? (
+        <SaveBar
+          dirty={changes.length > 0}
+          saving={applying}
+          saved={saved && changes.length === 0 && !setCeiling.isError}
+          savedMessage={t("aiAutomation.dial.saved")}
+          onDiscard={discard}
+          onSave={() => setConfirming(true)}
+        />
+      ) : null}
 
       <WaitingActionsPanel />
 

@@ -45,7 +45,6 @@ export const aiAdmin: Shape<typeof en> = {
     checking: "Comprobando si el asistente está disponible…",
     unavailable: "el asistente no está disponible aquí",
     settingsLink: "Configuración del asistente",
-    openSettings: "Abrir la configuración del asistente",
     turnedOnBy:
       "El asistente lo activa quien administra este servidor, no se hace desde la consola. Alguien con permiso para administrar el asistente puede ver cómo está configurado.",
     invitation: "¿Qué te gustaría saber?",

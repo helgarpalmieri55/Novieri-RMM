@@ -7,7 +7,9 @@
 // authoritative-looking action description with nothing beside it to say
 // otherwise. The server omits the field from the list model too.
 //
-// THE LIST IS v3's `assistant/actions` SCREEN: a bare panel of rows, each led
+// THE LIST IS THE KIT'S LIST PATTERN (redesign plan, Task 12, 7.6; Receta L):
+// chips by what became of each proposal, in `?state=`, with how many it shows
+// and an empty state that says why. THE ROW IS v3's: a bare panel of rows, each led
 // by the robot glyph, titled with the action and sub-titled with when it was
 // proposed, and its outcome as a pill on the right. The columns the console
 // adds (job type, persona, risk) are the facts a person deciding whether to
@@ -19,105 +21,148 @@ import { Link, useParams } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import { lazyFields } from "../../i18n/lazy";
+import type { MessageKey } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
-import { KIND_ICON, PageHead, Panel, QueryState, StatusPill, type Kind } from "../../shell/components";
+import {
+  DetailHead,
+  FilterChips,
+  KIND_ICON,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ShowingCount,
+  StatusPill,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 import { useProfileZone } from "../ai-admin/api";
 import { jobTypeLabel } from "../jobs/jobTypes";
 import { personaLabel, riskClassLabel } from "./types";
 import { useAiAction, useAiActions, useAiActPermissions } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { outcomeOf } from "./outcome";
 
 /**
- * What became of a proposal, in the operator's words. The wire's `state` is
- * the server's vocabulary (`app/models/ai.py`); anything this table does not
- * name renders as itself through `StatusPill`'s own classification, so an
- * unknown state is visible rather than mislabelled.
+ * THE STATE CHIPS, in the outcome's own words: awaiting approval, ran
+ * (confirmed or dispatched, which the outcome already names alike), declined,
+ * expired. Read from the list the server answered: `GET /ai/actions` takes no
+ * state filter and answers no per-state totals, so the chips carry no number
+ * (the Absent Zero Rule).
  */
-const OUTCOME = {
-  previewed: lazyFields({ kind: "warn" as Kind }, { label: "aiAutomation.outcome.previewed" }),
-  confirmed: lazyFields({ kind: "ok" as Kind }, { label: "aiAutomation.outcome.confirmed" }),
-  dispatched: lazyFields({ kind: "ok" as Kind }, { label: "aiAutomation.outcome.dispatched" }),
-  rejected: lazyFields({ kind: "mut" as Kind }, { label: "aiAutomation.outcome.rejected" }),
-  expired: lazyFields({ kind: "mut" as Kind }, { label: "aiAutomation.outcome.expired" }),
-} as const;
+const STATE_FILTERS = ["previewed", "ran", "rejected", "expired"] as const;
+type StateFilter = (typeof STATE_FILTERS)[number];
 
-function outcomeOf(state: string): { label: string; kind: Kind } | undefined {
-  return (OUTCOME as Record<string, { label: string; kind: Kind } | undefined>)[state];
+const STATE_FILTER_LABEL: Record<StateFilter, MessageKey> = {
+  previewed: "aiAutomation.outcome.previewed",
+  ran: "aiAutomation.outcome.confirmed",
+  rejected: "aiAutomation.outcome.rejected",
+  expired: "aiAutomation.outcome.expired",
+};
+
+function matchesState(state: string, filter: string): boolean {
+  if (filter === "") return true;
+  if (filter === "ran") return state === "confirmed" || state === "dispatched";
+  return state === filter;
 }
 
 export function AiActionsPage(): ReactElement {
   const t = useT();
   const actions = useAiActions();
   const zone = useProfileZone();
-  const items = actions.data ?? [];
+  const filters = useUrlFilters(["state"] as const);
+  const all = actions.data ?? [];
+  const items = all.filter((action) => matchesState(action.state, filters.values.state));
+  const title = t("aiAutomation.list.title");
+  // NO RAIL ENTRY OF ITS OWN (coordinator ruling 1b): the shell titles the tab
+  // by the entry this page lights, "Assistant", so the page puts its h1 in
+  // front of it -- "Assistant actions · Assistant · Novieri RMM".
+  useRecordTitle(title);
   return (
     <>
       <PageHead
-        title={t("aiAutomation.list.title")}
+        title={title}
         description={t("aiAutomation.list.description")}
       />
       <Panel bare>
-        <QueryState
-          loading={actions.isLoading}
-          error={actions.error}
-          empty={items.length === 0}
-          emptyLabel={t("aiAutomation.list.empty")}
-          emptyIcon="automation"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("aiAutomation.list.action")}</Th>
-                <Th>{t("aiAutomation.list.whatRuns")}</Th>
-                <Th>{t("aiAutomation.list.askedBy")}</Th>
-                <Th>{t("aiAutomation.list.risk")}</Th>
-                <Th>{t("aiAutomation.list.state")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((action) => {
-                const outcome = outcomeOf(action.state);
-                return (
-                  <tr key={action.id}>
-                    <Td
-                      lead={<Icon name="automation" size={18} />}
-                      gutter={action.destructive ? "crit" : action.tainted ? "warn" : undefined}
-                    >
-                      <div className="cell-title">
-                        <Link to={`/assistant/actions/${action.id}`}>{action.approved_action_key}</Link>
-                      </div>
-                      <div className="cell-sub flex flex-wrap items-center gap-2">
-                        <span>{t("aiAutomation.list.proposed", { when: formatDateTime(action.created_at, zone) })}</span>
-                        {action.destructive && (
-                          <StatusPill value="destructive" kind="crit" label={t("aiAutomation.list.destructive")} />
+        <ListToolbar
+          chips={
+            <FilterChips
+              label={t("aiAutomation.list.state")}
+              options={[
+                { value: "", label: t("aiAutomation.list.all") },
+                ...STATE_FILTERS.map((state) => ({ value: state, label: t(STATE_FILTER_LABEL[state]) })),
+              ]}
+              value={filters.values.state}
+              onChange={(value) => filters.set("state", value)}
+            />
+          }
+          end={actions.data ? <ShowingCount shown={items.length} total={all.length} /> : null}
+        />
+        <QueryState loading={actions.isPending} error={actions.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("aiAutomation.list.empty")}
+              icon="automation"
+            />
+          ) : (
+            <Table label={t("aiAutomation.list.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("aiAutomation.list.action")}</Th>
+                  <Th>{t("aiAutomation.list.whatRuns")}</Th>
+                  <Th>{t("aiAutomation.list.askedBy")}</Th>
+                  <Th>{t("aiAutomation.list.risk")}</Th>
+                  <Th>{t("aiAutomation.list.state")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((action) => {
+                  const outcome = outcomeOf(action.state);
+                  return (
+                    <tr key={action.id}>
+                      <Td
+                        lead={<Icon name="automation" size={18} />}
+                        gutter={action.destructive ? "crit" : action.tainted ? "warn" : undefined}
+                      >
+                        <div className="cell-title">
+                          <Link to={`/assistant/actions/${action.id}`}>{action.approved_action_key}</Link>
+                        </div>
+                        <div className="cell-sub flex flex-wrap items-center gap-2">
+                          <span>{t("aiAutomation.list.proposed", { when: formatDateTime(action.created_at, zone) })}</span>
+                          {action.destructive && (
+                            <StatusPill value="destructive" kind="crit" label={t("aiAutomation.list.destructive")} />
+                          )}
+                          {action.tainted && (
+                            <StatusPill value="tainted" kind="warn" label={t("aiAutomation.list.tainted")} />
+                          )}
+                        </div>
+                      </Td>
+                      <Td>
+                        <div>{jobTypeLabel(action.job_type)}</div>
+                        <div className="cell-sub mono">{action.job_type}</div>
+                      </Td>
+                      <Td>{personaLabel(action.persona)}</Td>
+                      <Td>
+                        <StatusPill value={action.risk_class} label={riskClassLabel(action.risk_class)} />
+                      </Td>
+                      <Td>
+                        {outcome ? (
+                          <StatusPill value={action.state} kind={outcome.kind} label={outcome.label} />
+                        ) : (
+                          <StatusPill value={action.state} />
                         )}
-                        {action.tainted && (
-                          <StatusPill value="tainted" kind="warn" label={t("aiAutomation.list.tainted")} />
-                        )}
-                      </div>
-                    </Td>
-                    <Td>
-                      <div>{jobTypeLabel(action.job_type)}</div>
-                      <div className="cell-sub mono">{action.job_type}</div>
-                    </Td>
-                    <Td>{personaLabel(action.persona)}</Td>
-                    <Td>
-                      <StatusPill value={action.risk_class} label={riskClassLabel(action.risk_class)} />
-                    </Td>
-                    <Td>
-                      {outcome ? (
-                        <StatusPill value={action.state} kind={outcome.kind} label={outcome.label} />
-                      ) : (
-                        <StatusPill value={action.state} />
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
       </Panel>
     </>
@@ -129,6 +174,9 @@ export function AiActionPage(): ReactElement {
   const { actionId } = useParams<{ actionId: string }>();
   const preview = useAiAction(actionId ?? null);
   const { confirm } = useAiActPermissions();
+  // THE RECORD IN THE BROWSER TAB (redesign, Receta F): the catalogue's name
+  // for the action, never the model's words.
+  useRecordTitle(preview.data?.name);
 
   return (
     <>
@@ -138,16 +186,17 @@ export function AiActionPage(): ReactElement {
           the title and the decision are one surface and the component holding
           the mutations has to own both. What is left here is the head for the
           states where there IS no action yet: loading, and a preview that did
-          not load.
+          not load -- the kit's record head, with its way back to the list.
 
           THE TITLE IS THE CATALOGUE'S NAME, never the model's words: `name` is
           a field an org admin authored through the approved-action write path,
           which is what makes it safe to be the largest text on the screen.
           Until it loads, the screen says what it is for. */}
       {preview.data === undefined && (
-        <PageHead
+        <DetailHead
+          back={{ to: "/assistant/actions", label: t("aiAutomation.list.title") }}
           title={t("aiAutomation.page.title")}
-          description={t("aiAutomation.page.description")}
+          context={t("aiAutomation.page.description")}
         />
       )}
       {preview.isLoading && <p className="note">{t("aiAutomation.page.loading")}</p>}

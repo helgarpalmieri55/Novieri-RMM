@@ -138,10 +138,13 @@ describe("AiActionsPage in Spanish", () => {
     for (const header of ["Acción", "Qué se ejecuta", "Solicitada por", "Riesgo", "Estado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
-    expect(screen.getByText("Pendiente de aprobación")).toBeInTheDocument();
-    expect(screen.getByText("Ejecutado")).toBeInTheDocument();
-    expect(screen.getByText("Rechazado")).toBeInTheDocument();
-    expect(screen.getByText("Caducado")).toBeInTheDocument();
+    // RE-POINTED (redesign plan, Task 12, 7.6; Receta L): the state chips say
+    // the same words above the table, so the pills are read in the table.
+    const table = within(screen.getByRole("table", { name: "Acciones del asistente" }));
+    expect(table.getByText("Pendiente de aprobación")).toBeInTheDocument();
+    expect(table.getByText("Ejecutado")).toBeInTheDocument();
+    expect(table.getByText("Rechazado")).toBeInTheDocument();
+    expect(table.getByText("Caducado")).toBeInTheDocument();
     expect(screen.getByText("Destructiva")).toBeInTheDocument();
     expect(screen.getByText("Motivada por contenido no fiable")).toBeInTheDocument();
     // A risk class is a masculine word under "Riesgo".
@@ -155,8 +158,9 @@ describe("AiActionsPage in Spanish", () => {
 
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Assistant actions" })).toBeInTheDocument();
-    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
-    expect(screen.getByText("Ran")).toBeInTheDocument();
+    const tableEn = within(screen.getByRole("table", { name: "Assistant actions" }));
+    expect(tableEn.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(tableEn.getByText("Ran")).toBeInTheDocument();
     expect(screen.getByText("Destructive")).toBeInTheDocument();
     expect(screen.getAllByText("Technician").length).toBeGreaterThan(0);
   });
@@ -362,7 +366,7 @@ describe("AutonomyDialPage in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Automatización con IA" })).toBeInTheDocument();
     expect(await screen.findByText("Límites de autonomía")).toBeInTheDocument();
     expect(screen.getByText("Qué puede preparar cada tipo de usuario para cada clase de riesgo")).toBeInTheDocument();
-    expect(screen.getByText("Una celda vacía significa Desactivado. No se guarda nada hasta que pulses Guardar cambios.")).toBeInTheDocument();
+    expect(screen.getByText("Una celda vacía significa Desactivado. No se guarda nada hasta que pulses Guardar.")).toBeInTheDocument();
     for (const header of ["Tipo de usuario", "Riesgo bajo", "Riesgo medio", "Riesgo alto"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
@@ -382,7 +386,9 @@ describe("AutonomyDialPage in Spanish", () => {
     expect(screen.getByText(/· Técnico · propuesta el /)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Revisar" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Todas las acciones" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): the kit's bar is drawn only with a
+    // change, so an untouched dial offers no Save at all.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     // "user": the stored token `end_user` the grid prints under the persona's name on purpose (the identifier an
     // operator searches the docs for); the rest of the page is checked in full.
     expectNoEnglish(container, ["user"]);
@@ -412,7 +418,7 @@ describe("AutonomyDialPage in Spanish", () => {
     await user.click(within(screen.getByTestId("dial-admin-low")).getByRole("button", { name: "Solo sugerir" }));
     expect(screen.getByText(/^2 cambios sin guardar: /)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog", { name: "Subir el límite de autonomía del asistente" });
     expect(dialog.textContent).toContain("Técnico, con riesgo alto. El asistente puede preparar la acción y dejarla en espera.");
     expect(dialog.textContent).toContain("Administrador, con riesgo bajo. El asistente puede describir una acción en su respuesta.");
@@ -430,7 +436,7 @@ describe("AutonomyDialPage in Spanish", () => {
     mockUseApi.mockReturnValue(api({ setAiCeiling }));
     mount(<AutonomyDialPage />);
     await user.click(within(await screen.findByTestId("dial-technician-low")).getByRole("button", { name: "Solo sugerir" }));
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     await user.click(await screen.findByRole("button", { name: "Subir el límite" }));
     await waitFor(() => expect(setAiCeiling).toHaveBeenCalledWith({ persona: "technician", risk_class: "low", level: "suggest" }));
     expect(await screen.findByText("Guardado. La cuadrícula muestra lo que devolvió el servidor.")).toBeInTheDocument();
@@ -441,7 +447,7 @@ describe("AutonomyDialPage in Spanish", () => {
     mockUseApi.mockReturnValue(api({ setAiCeiling: vi.fn().mockRejectedValue(new ApiError(503, "")) }));
     mount(<AutonomyDialPage />);
     await user.click(within(await screen.findByTestId("dial-admin-medium")).getByRole("button", { name: "Requiere aprobación" }));
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     await user.click(await screen.findByRole("button", { name: "Subir el límite" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/^Administrador, con riesgo medio: el límite no se modificó\. .*no está disponible.* La cuadrícula sigue mostrando lo que no se ha aplicado\.$/i);
@@ -453,7 +459,7 @@ describe("AutonomyDialPage in Spanish", () => {
     const user = userEvent.setup();
     mount(<AutonomyDialPage />);
     await user.click(within(await screen.findByTestId("dial-technician-low")).getByRole("button", { name: "Solo sugerir" }));
-    await user.click(screen.getByRole("button", { name: "Descartar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
     expect(screen.queryByText(/cambio sin guardar/)).not.toBeInTheDocument();
   });
 });

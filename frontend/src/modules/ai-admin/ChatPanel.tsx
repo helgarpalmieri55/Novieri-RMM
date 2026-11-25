@@ -34,6 +34,7 @@ import { RelTime } from "../../components/reltime";
 import { personaLabel } from "../ai-automation/types";
 import { Icon } from "../../shell/icons";
 import { Btn, KIND_ICON, PageHead, Panel, QueryState } from "../../shell/components";
+import { EmptyState } from "../../components/emptystate";
 import {
   useAiPermissions,
   useAiSession,
@@ -218,29 +219,19 @@ export function ChatPanel() {
     // problem it is. What changes is everything AROUND it: the duplicate
     // heading is gone, the action is a button rather than a bare link, and
     // somebody who cannot act is told who can instead of being shown nothing.
+    //
+    // THE EMPTY STATE SAYS THE CAUSE AND WHOM TO ASK (redesign plan, Task 12,
+    // 7.4; spec §10.6): the server's sentence as its title, and who turns the
+    // assistant on as its body, for everyone. An `ai.admin` holder also gets
+    // the settings in the head, as in the enabled state: a secondary action.
     return (
       <>
-        {head()}
+        {head(settingsLink)}
         <Panel>
-          <div className="notice gold">
-            <Icon name={KIND_ICON.warn} size={16} />
-            {/* `sentence()` is TYPOGRAPHY, not a rewrite: it capitalises the
-                first letter and closes the sentence. Which problem this is,
-                and whose it is, stays the server's words. */}
-            <p>{sentence(reason)}</p>
-          </div>
-          {settingsLink ? (
-            <p style={{ marginTop: 12 }}>
-              <Link to="/assistant/settings" className="btn">
-                <Icon name="settings" size={14} />
-                <span>{t("aiAdmin.chat.openSettings")}</span>
-              </Link>
-            </p>
-          ) : (
-            <p className="note" style={{ marginTop: 12 }}>
-              {t("aiAdmin.chat.turnedOnBy")}
-            </p>
-          )}
+          {/* `sentence()` is TYPOGRAPHY, not a rewrite: it capitalises the
+              first letter and closes the sentence. Which problem this is,
+              and whose it is, stays the server's words. */}
+          <EmptyState icon="sparkles" title={sentence(reason)} body={t("aiAdmin.chat.turnedOnBy")} headingLevel={2} />
         </Panel>
       </>
     );

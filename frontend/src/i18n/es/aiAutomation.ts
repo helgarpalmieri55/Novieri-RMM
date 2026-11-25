@@ -63,6 +63,7 @@ export const aiAutomation: Shape<typeof en> = {
   list: {
     title: "Acciones del asistente",
     description: "Todo lo que ha propuesto el asistente y lo que ha pasado con ello.",
+    all: "Todos",
     empty: "No hay nada a la espera de una decisión.",
     action: "Acción",
     whatRuns: "Qué se ejecuta",
@@ -132,7 +133,7 @@ export const aiAutomation: Shape<typeof en> = {
     description: "Cuánto puede hacer el asistente por su cuenta.",
     panelTitle: "Límites de autonomía",
     panelSubtitle: "Qué puede preparar cada tipo de usuario para cada clase de riesgo",
-    emptyNote: "Una celda vacía significa Desactivado. No se guarda nada hasta que pulses Guardar cambios.",
+    emptyNote: "Una celda vacía significa Desactivado. No se guarda nada hasta que pulses Guardar.",
     classNote:
       "La clase de riesgo la fija cada acción aprobada del catálogo de tu organización, no esta página.",
     notChanged: "{persona}, con riesgo {risk}: el límite no se modificó.",
@@ -143,10 +144,7 @@ export const aiAutomation: Shape<typeof en> = {
     fixed: "Fijo",
     cellLabel: "{persona}, riesgo {risk}",
     unsaved: "Sin guardar. Guardado: {level}",
-    saving: "Guardando…",
-    save: "Guardar cambios",
     everyClientOnly: "Solo lectura: todos los clientes comparten el dial de autonomía, así que cambiarlo requiere el permiso ai.admin en todos los clientes.",
-    discard: "Descartar cambios",
     unsavedChanges: {
       one: "{count} cambio sin guardar: {changes}",
       other: "{count} cambios sin guardar: {changes}",

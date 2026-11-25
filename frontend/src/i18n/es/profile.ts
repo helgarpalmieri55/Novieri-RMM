@@ -13,7 +13,7 @@ export const profile: Shape<typeof en> = {
     timezone: "Zona horaria",
     timezonePlaceholder: "p. ej., Europe/Lisbon",
     smsNote: "Nada en esta plataforma envía SMS. Un número de teléfono aquí es información de directorio, no un segundo factor.",
-    noChanges: "No hay cambios sin guardar",
+    details: "Tus datos",
   },
   security: {
     title: "Inicio de sesión y seguridad",
@@ -25,6 +25,7 @@ export const profile: Shape<typeof en> = {
     title: "Tu seguridad",
     description: "Cómo inicias sesión y dónde tienes la sesión iniciada ahora.",
     loading: "Cargando…",
+    sections: { signIn: "Cómo inicias sesión", signedIn: "Dónde tienes la sesión iniciada" },
     password: {
       title: "Contraseña",
       subtitle: "Al menos 12 caracteres. Una frase larga que puedas recordar es mejor que una corta y complicada",

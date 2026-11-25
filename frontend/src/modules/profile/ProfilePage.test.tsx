@@ -20,7 +20,7 @@
  * Organization tab does -- never an editable form that posts into the void.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,7 +83,7 @@ describe("Your profile", () => {
     await user.type(phone, "+57 601 555 0199");
     expect(calls.updateMe).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateMe).toHaveBeenCalledTimes(1));
     expect(calls.updateMe).toHaveBeenCalledWith({
       display_name: "Operator",
@@ -95,25 +95,21 @@ describe("Your profile", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Phone")).toHaveValue("+57 601 555 0199");
   });
 
-  it("refuses a clean save out loud instead of presenting a dead button", async () => {
-    // ONE CONTROL, ONE BEHAVIOUR, ACROSS THE GROUP. The sibling route
-    // /settings draws this same `SaveBar` with `requireDirty={false}`, so its
-    // "Save changes" is a live accent button that says why it will not save.
-    // Here the default left a pale disabled chip -- same size, radius, icon
-    // and shape as the enabled "Change password" below it, and no on-screen
-    // reason it could not be pressed.
+  it("offers no save on a clean form, and the bar comes with a change", async () => {
+    // Redesign decision D22: with no change there is no bar to press; requireDirty={false} went with the settings module's own SaveBar (deleted).
+    // (This replaced "refuses a clean save out loud instead of presenting a
+    // dead button": the dead control it refused cannot exist now.)
     const user = await openProfile();
-    const save = await screen.findByRole("button", { name: "Save changes" });
-    expect(save).toBeEnabled();
-
-    await user.click(save);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/no unsaved changes/i);
-    // Refused, not written: nothing reached the server.
+    await screen.findByLabelText("Display name");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(calls.updateMe).not.toHaveBeenCalled();
 
-    // And the refusal is stale the moment there IS something to save.
+    // A change brings the one bar.
     await user.type(screen.getByLabelText("Phone"), "9");
-    expect(screen.queryByText(/no unsaved changes/i)).not.toBeInTheDocument();
+    const bar = screen.getByRole("region", { name: "Unsaved changes" });
+    expect(within(bar).getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(calls.updateMe).not.toHaveBeenCalled();
   });
 
   it("a 404 disables the form and says why, rather than accepting typing that goes nowhere", async () => {
@@ -122,7 +118,7 @@ describe("Your profile", () => {
     const phone = await screen.findByLabelText("Phone");
     await user.clear(phone);
     await user.type(phone, "+57 601 555 0199");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     // THE SERVER'S OWN WORDS, not the status code (cycle 4). This asserted
@@ -215,5 +211,37 @@ describe("Your profile", () => {
     expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0);
     expect(screen.queryByLabelText(/^Email/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/current password/i)).not.toBeInTheDocument();
+  });
+});
+
+// The form pattern (redesign plan, Task 12, 7.2; Receta FO): one bar, drawn
+// only with a change; Discard puts the form back; leaving with a change asks.
+describe("Your profile on the form pattern", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    const user = await openProfile();
+    const phone = await screen.findByLabelText("Phone");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await user.type(phone, "x");
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("Phone")).toHaveValue(ME_FIXTURE.phone);
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    const user = userEvent.setup();
+    const { router } = renderProfilePage();
+    await user.type(await screen.findByLabelText("Phone"), "x");
+    // Leave as a person does: through a link on the page (your security).
+    await user.click(screen.getByRole("link", { name: "Open your security" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/profile");
+  });
+
+  it("has no back link: it is reached from the account menu", async () => {
+    await openProfile();
+    await screen.findByLabelText("Display name");
+    expect(screen.getByRole("heading", { level: 1, name: "Your profile" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /back/i })).toBeNull();
   });
 });

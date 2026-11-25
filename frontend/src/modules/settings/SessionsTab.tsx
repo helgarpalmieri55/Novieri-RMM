@@ -19,19 +19,19 @@
 // forget a device; a password change, a factor reset or a disable forgets
 // them all -- are the server's.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useStepUp } from "../../components/stepUp";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
-import { FieldGroup, KIND_ICON, Panel, Toggle } from "../../shell/components";
+import { FormSection, KIND_ICON, SaveBar, Toggle, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useGlobalWriteReason, useSessionSettings, useUpdateSessionSettingsMutation } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, parseIntegerField, sentenceProblem } from "./settingsState";
 import {
   SESSION_BOUNDS,
   type SessionNumberKey,
@@ -94,16 +94,19 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
   const stepUp = useStepUp();
   const update = useUpdateSessionSettingsMutation(stepUp.run);
 
+  // THE KIT'S DRAFT (redesign, Receta FO): what the server holds is the saved
+  // state, a refetch never overwrites a change, and a save's answer becomes the
+  // new saved state (`markSent`).
   const seed = seedFrom(settings.data);
-  const [form, setForm] = useState<SessionsForm>(seed);
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as SessionsForm);
-  }, [seedSignature]);
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<SessionsForm>(
+    settings.data ? seed : undefined,
+  );
+  const form = draft ?? seed;
+  // A save refused for a value out of range, said in the bar until it is fixed.
+  const [tried, setTried] = useState(false);
 
   const forbidden = isForbidden(settings.error);
   const failed = settings.error != null && !forbidden;
-  const dirty = isDirty(form, seed);
   // A REMEMBER VALUE IS NOT CHECKED WHILE REMEMBERING IS OFF (final review
   // D2, Minor 6): its box is disabled, so a value typed out of range and then
   // switched off could neither be corrected nor saved past, and Save stayed
@@ -113,11 +116,16 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
   const editable = canEdit && settings.data != null;
 
   function set<K extends keyof SessionsForm>(key: K, value: SessionsForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setDraft({ ...form, [key]: value });
   }
 
   function submit() {
-    if (invalid.length > 0) return;
+    // A value out of range keeps Save enabled and is said on submit (the
+    // kit's rule: `blockedReason` is a permission, never input to correct).
+    if (invalid.length > 0) {
+      setTried(true);
+      return;
+    }
     const number = (key: SessionNumberKey): number => parseIntegerField(hidden(key) ? seed[key] : form[key]) as number;
     const body: SessionSettingsUpdate = {
       staff_idle_minutes: number("staff_idle_minutes"),
@@ -128,7 +136,9 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
       contact_idle_minutes: number("contact_idle_minutes"),
       contact_max_days: number("contact_max_days"),
     };
-    update.mutate(body);
+    setTried(false);
+    markSent(form);
+    update.mutate(body, { onError: () => markSent(null) });
   }
 
   function numberField(key: SessionNumberKey, off = false) {
@@ -149,74 +159,75 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
     );
   }
 
-  // The panel, then the confirmation outside it (`components/stepUp.tsx`).
-  const panel = (
-    <Panel title={t("settings.sessions.title")} subtitle={t("settings.sessions.subtitle")}>
-      {settings.isLoading ? (
-        <p className="note">{t("settings.sessions.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">{t("settings.sessions.forbidden", { code: SESSIONS_MANAGE })}</p>
-      ) : failed ? (
-        <LoadFailure error={settings.error} />
-      ) : (
-        <>
-          <FieldGroup title={t("settings.sessions.groups.staff")} icon="users">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              {numberField("staff_idle_minutes")}
-              {numberField("staff_max_hours")}
-            </div>
-            <p className="note" style={{ marginTop: 8 }}>
-              {t("settings.sessions.staffNote")}
-            </p>
-          </FieldGroup>
-          <FieldGroup title={t("settings.sessions.groups.remember")} icon="devices">
-            <Toggle
-              checked={form.remember_device_enabled}
-              disabled={!editable}
-              label={t("settings.sessions.rememberEnabled")}
-              onChange={(next) => set("remember_device_enabled", next)}
-            />
-            <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 10 }}>
-              {numberField("remember_device_days", !form.remember_device_enabled)}
-              {numberField("remembered_max_hours", !form.remember_device_enabled)}
-            </div>
-            <p className="notice gold" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.warn} size={16} />
-              <span>{t("settings.sessions.rememberRisk")}</span>
-            </p>
-          </FieldGroup>
-          <FieldGroup title={t("settings.sessions.groups.contacts")} icon="portal">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              {numberField("contact_idle_minutes")}
-              {numberField("contact_max_days")}
-            </div>
-            <p className="note" style={{ marginTop: 8 }}>
-              {t("settings.sessions.contactsNote")}
-            </p>
-          </FieldGroup>
+  if (settings.isLoading) return <p className="note">{t("settings.sessions.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.sessions.forbidden", { code: SESSIONS_MANAGE })}</p>;
+  if (failed) return <LoadFailure error={settings.error} />;
 
-          {invalid.length > 0 ? (
-            <p className="form-error" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.crit} size={13} /> {t("settings.sessions.outOfRange")}
-            </p>
-          ) : null}
-
-          <SaveBar
-            canEdit={editable && invalid.length === 0}
-            disabledReason={canEdit ? t("settings.sessions.correct") : reason}
-            dirty={dirty}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess && !dirty}
-            onSave={submit}
-          />
-        </>
-      )}
-    </Panel>
-  );
+  // The sections, the one bar, then the confirmation outside them
+  // (`components/stepUp.tsx`).
   return (
     <>
-      {panel}
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      <p className="note" style={{ marginBottom: 14 }}>
+        {t("settings.sessions.subtitle")}
+      </p>
+      {!canEdit ? <ReadOnlyNotice reason={reason} /> : null}
+      <FormSection title={t("settings.sessions.groups.staff")} icon="users">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          {numberField("staff_idle_minutes")}
+          {numberField("staff_max_hours")}
+        </div>
+        <p className="note" style={{ marginTop: 8 }}>
+          {t("settings.sessions.staffNote")}
+        </p>
+      </FormSection>
+      <FormSection title={t("settings.sessions.groups.remember")} icon="devices">
+        <Toggle
+          checked={form.remember_device_enabled}
+          disabled={!editable}
+          label={t("settings.sessions.rememberEnabled")}
+          onChange={(next) => set("remember_device_enabled", next)}
+        />
+        <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 10 }}>
+          {numberField("remember_device_days", !form.remember_device_enabled)}
+          {numberField("remembered_max_hours", !form.remember_device_enabled)}
+        </div>
+        <p className="notice gold" style={{ marginTop: 10 }}>
+          <Icon name={KIND_ICON.warn} size={16} />
+          <span>{t("settings.sessions.rememberRisk")}</span>
+        </p>
+      </FormSection>
+      <FormSection title={t("settings.sessions.groups.contacts")} icon="portal">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          {numberField("contact_idle_minutes")}
+          {numberField("contact_max_days")}
+        </div>
+        <p className="note" style={{ marginTop: 8 }}>
+          {t("settings.sessions.contactsNote")}
+        </p>
+      </FormSection>
+
+      {/* Said as the value is typed; once a save was refused, the bar says
+          it instead, so the sentence is never on screen twice. */}
+      {invalid.length > 0 && !tried ? (
+        <p className="form-error" style={{ marginTop: 10 }}>
+          <Icon name={KIND_ICON.crit} size={13} /> {t("settings.sessions.outOfRange")}
+        </p>
+      ) : null}
+
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        problems={tried && invalid.length > 0 ? [sentenceProblem("range", t("settings.sessions.outOfRange"))] : []}
+        saved={update.isSuccess && !dirty}
+        onDiscard={() => {
+          discard();
+          setTried(false);
+          update.reset();
+        }}
+        onSave={submit}
+      />
       {stepUp.dialog}
     </>
   );

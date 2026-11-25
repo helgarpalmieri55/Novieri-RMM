@@ -81,7 +81,7 @@ describe("Settings — Service levels tab", () => {
       stale_ticket_sla: 0,
     });
 
-    await user.click(screen.getByRole("button", { name: "Save service levels" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateSlaSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateSlaSettings).toHaveBeenCalledWith({ auto_close_after_days: 21 });
@@ -101,7 +101,7 @@ describe("Settings — Service levels tab", () => {
       new ApiError(400, JSON.stringify({ detail: "auto_close_after_days is out of bounds" })),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save service levels" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("auto_close_after_days is out of bounds");
@@ -121,7 +121,9 @@ describe("Settings — Service levels tab", () => {
     renderSettings();
     await openTab();
     expect(await screen.findByLabelText(FIELD)).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save service levels" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): the reason is a notice above the
+    // form, and there is no bar, since nothing can be changed to save.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByText(/requires the sla\.admin permission/i)).toBeInTheDocument();
   });
 
