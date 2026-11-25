@@ -11,14 +11,29 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { useCreateVendorMutation, useLicenses, useVendors } from "./api";
 import { LicensePageNav } from "./licenseNav";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 export function VendorsPage() {
   const t = useT();
   const api = useApi();
-  const [creating, setCreating] = useState(false);
+  // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.3): the
+  // search in `?q=` and New vendor from `?new=vendor`. Vendors are the
+  // organisation's, shared by licenses and subscriptions: no Client chip.
+  const filters = useUrlFilters(["q"] as const);
+  const newVendor = useNewParam("vendor");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -34,7 +49,8 @@ export function VendorsPage() {
   // v3's row carries "4 products" under the vendor's name. The nearest fact
   // this API serves is how many licenses name the vendor; the list is already
   // fetched by the page next door, so it is one cached read here. A failed
-  // read shows no count rather than a count of nothing.
+  // read shows no count rather than a count of nothing. Read without a chip:
+  // the count is every license the vendor sold, as before.
   const licenses = useLicenses();
   const licenseCountByVendor = useMemo(() => {
     const counts = new Map<string, number>();
@@ -44,33 +60,42 @@ export function VendorsPage() {
     return counts;
   }, [licenses.data]);
   const items = vendors.data ?? [];
+  const needle = filters.values.q.trim().toLowerCase();
+  const shown = items.filter((vendor) => `${vendor.name} ${vendor.website ?? ""}`.toLowerCase().includes(needle));
+
+  const primary = canManage ? (
+    <Btn label={t("licenses.vendors.newVendor")} icon="plus" variant="primary" onClick={newVendor.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("licenses.vendors.title")}
-        description={t("licenses.vendors.description")}
-        actions={
-          canManage ? (
-            <Button onClick={() => setCreating(true)}>
-              <Icon name="plus" size={14} />
-              {t("licenses.vendors.newVendor")}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHead title={t("licenses.vendors.title")} description={t("licenses.vendors.description")} actions={primary} />
 
       <LicensePageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={vendors.isLoading}
-          error={vendors.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.vendors.empty")}
-          emptyIcon="building"
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("licenses.vendors.searchPlaceholder")}
+              aria-label={t("licenses.vendors.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          end={vendors.data ? <ShowingCount shown={shown.length} total={items.length} /> : null}
+        />
+        <QueryState loading={vendors.isLoading} error={vendors.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.vendors.empty")}
+              action={primary}
+              icon="building"
+            />
+          ) : (
+          <Table label={t("licenses.vendors.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.vendors.colName")}</Th>
@@ -79,7 +104,7 @@ export function VendorsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((vendor) => {
+              {shown.map((vendor) => {
                 const count = licenses.data ? (licenseCountByVendor.get(vendor.id) ?? 0) : null;
                 return (
                   <tr key={vendor.id}>
@@ -101,10 +126,11 @@ export function VendorsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <NewVendorDialog open={creating} onClose={() => setCreating(false)} />
+      {canManage ? <NewVendorDialog open={newVendor.open} onClose={newVendor.close} /> : null}
     </div>
   );
 }

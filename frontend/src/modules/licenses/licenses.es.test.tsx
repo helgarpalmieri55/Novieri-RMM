@@ -156,9 +156,11 @@ describe("the licenses register in Spanish", () => {
     expect(screen.getByText("Productos excedidos")).toBeInTheDocument();
     expect(screen.getByText("Por dispositivo")).toBeInTheDocument();
     expect(screen.getByText("Con clave")).toBeInTheDocument();
-    expect(screen.getByText("1 de 1")).toBeInTheDocument();
+    // The kit's count at the end of the toolbar (Receta L, point 2).
+    expect(screen.getByText("Mostrando 1 de 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar licencias")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Cola de revisión" })).toBeInTheDocument();
+    // The section strip is a navigation of links (waves' common rules: SectionNav).
+    expect(screen.getByRole("link", { name: "Cola de revisión" })).toHaveAttribute("href", "/licenses/review-queue");
     expectNoEnglish(container, RECORDED);
   });
 
@@ -171,7 +173,8 @@ describe("the licenses register in Spanish", () => {
     await user.clear(screen.getByLabelText("Buscar licencias"));
     await user.type(screen.getByLabelText("Buscar licencias"), "perpetua");
     expect(screen.queryByRole("link", { name: "Acme Office Suite" })).toBeNull();
-    expect(screen.getByText("Ninguna licencia coincide con ese filtro.")).toBeInTheDocument();
+    // The kit's sentence for a filtered list, with its way out (Receta L, point 3).
+    expect(screen.getByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
   it("says a failed tile query as n/d and the empty states in Spanish", async () => {
@@ -260,7 +263,7 @@ describe("the licenses register in Spanish", () => {
     expect(screen.getByText("across 1 publisher")).toBeInTheDocument();
     expect(screen.getByText("Per device")).toBeInTheDocument();
     expect(screen.getByText("Has key")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Review queue" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review queue" })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByText("Por dispositivo")).toBeInTheDocument();
   });
@@ -407,7 +410,8 @@ describe("compliance and renewals in Spanish", () => {
   it("words the empty renewal state", async () => {
     mockUseApi.mockReturnValue(api({ licenseRenewals: vi.fn().mockResolvedValue([]) }));
     const { container } = mount(<RenewalCalendar />);
-    expect(await screen.findByText("No hay renovaciones próximas.")).toBeInTheDocument();
+    // The empty calendar says its cause (Task 10, 5.1).
+    expect(await screen.findByText("Ninguna licencia se renueva en este periodo.")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 });

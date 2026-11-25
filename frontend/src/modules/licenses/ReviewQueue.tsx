@@ -22,7 +22,7 @@ import {
 import { LicensePageNav } from "./licenseNav";
 import { productPickerEmptyHint, productPickerOptions } from "./pickerOptions";
 import type { ReviewQueueRow } from "./types";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
@@ -112,15 +112,17 @@ export function ReviewQueue() {
         </div>
       ) : null}
 
+      {/* ON THE LIST KIT (Receta L, a list with no filter; Task 10, 5.1): the
+          count at the end of the toolbar, and an empty queue that says why.
+          No bulk bar: the queue has no bulk action today, and the kit draws
+          one only where one exists (Receta L, point 2). */}
       <Panel bare>
-        <QueryState
-          loading={queue.isLoading}
-          error={queue.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.review.empty")}
-          emptyIcon="license"
-        >
-          <Table>
+        <ListToolbar end={queue.data ? <ShowingCount shown={items.length} total={items.length} /> : null} />
+        <QueryState loading={queue.isLoading} error={queue.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty filtered={false} onClear={() => undefined} nothingYet={t("licenses.review.empty")} icon="license" />
+          ) : (
+          <Table label={t("licenses.review.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.review.colName")}</Th>
@@ -186,6 +188,7 @@ export function ReviewQueue() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 

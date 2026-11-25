@@ -20,9 +20,10 @@ import {
 } from "./api";
 import { licenseTypeKind } from "./licenseState";
 import { initialsOf, personIndex } from "../../lib/people";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { Btn, ClientContext, DetailHead, Panel, QueryState, StatsGrid } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { KV, Person } from "../../shell/viz";
+import { useRecordTitle } from "../../shell/title";
+import { KV, Person, Tile } from "../../shell/viz";
 import { PersonLink } from "../people/links";
 
 // The revealed key lives only in local component state (`revealed`) and is
@@ -53,6 +54,12 @@ export function LicenseDetail() {
     (users.data?.users ?? []).map((user) => [user.id, user.display_name || user.email] as const),
   );
   const allocations = useAllocations(licenseId);
+  // The seats held now: an allocation with no release instant. `null` until
+  // the allocations have answered, so no tile counts what was not read.
+  const inUse = allocations.data ? allocations.data.filter((row) => row.released_at === null).length : null;
+  const free = inUse === null || !license.data ? null : license.data.entitlements - inUse;
+  // The tab names the record (Receta F): "<Product> · Licenses · Novieri RMM".
+  useRecordTitle(product.data?.name);
   const reveal = useRevealLicenseKeyMutation();
   // Cycle 7. `DELETE /licenses/{license_id}` has existed since the module
   // shipped (licenses/api.py's `delete_license_route`) and
@@ -84,56 +91,78 @@ export function LicenseDetail() {
         empty={!license.isLoading && !license.error && license.data == null}
         emptyLabel={t("licenses.detail.notFound")}
       >
-        <PageHead
+        {/* ON THE RECORD KIT (redesign plan, Receta F; Task 10, 5.1): the way
+            back to the register, the product as the title, the license type
+            as the head's state and the client as its context (linked to its
+            360 page). The actions are today's, in the head's action row.
+
+            THE STATE BELONGS UNDER THE TITLE, NOT IN THE BUTTON ROW (design
+            review M14): `DetailHead` draws it in its meta row, so the action
+            row still holds only what can be pressed. */}
+        <DetailHead
+          back={{ to: "/licenses", label: t("licenses.detail.back") }}
           title={product.data?.name ?? t("licenses.detail.titleFallback")}
-          description={t("licenses.detail.description")}
+          status={
+            license.data
+              ? { kind: licenseTypeKind(license.data.type), label: humaniseEnum(license.data.type, "LicenseType") }
+              : undefined
+          }
+          context={license.data ? <ClientContext clientId={license.data.client_id} /> : undefined}
           actions={
-            <>
-              {canReveal && license.data?.has_key && (
-                <Button
-                  disabled={reveal.isPending}
-                  onClick={() =>
-                    reveal.mutate(licenseId, {
-                      onSuccess: (data) => setRevealed(data.key),
-                    })
-                  }
-                >
-                  {reveal.isPending ? t("licenses.detail.revealing") : t("licenses.detail.reveal")}
-                </Button>
-              )}
-              {canManage && license.data && (
-                <Button
-                  variant="outline"
-                  disabled={remove.isPending}
-                  onClick={() => setConfirmingDelete(true)}
-                >
-                  {remove.isPending ? t("licenses.detail.deleting") : t("licenses.detail.delete")}
-                </Button>
-              )}
-            </>
+            (canReveal && license.data?.has_key) || (canManage && license.data) ? (
+              <>
+                {canReveal && license.data?.has_key ? (
+                  <Btn
+                    label={reveal.isPending ? t("licenses.detail.revealing") : t("licenses.detail.reveal")}
+                    icon="key"
+                    disabled={reveal.isPending}
+                    onClick={() =>
+                      reveal.mutate(licenseId, {
+                        onSuccess: (data) => setRevealed(data.key),
+                      })
+                    }
+                  />
+                ) : null}
+                {canManage && license.data ? (
+                  <Btn
+                    label={remove.isPending ? t("licenses.detail.deleting") : t("licenses.detail.delete")}
+                    icon="trash"
+                    variant="danger"
+                    disabled={remove.isPending}
+                    onClick={() => setConfirmingDelete(true)}
+                  />
+                ) : null}
+              </>
+            ) : undefined
           }
         />
 
-        {/* THE STATE BELONGS UNDER THE TITLE, NOT IN THE BUTTON ROW.
-
-            The licence-type pill used to be the first child of `actions`, so
-            `.ph-act` -- a row whose whole job is "the things you can press
-            here" -- opened with something that cannot be pressed, and the
-            reader met "Per user" between the heading and "Reveal key" (design
-            review M14). Every other record page in this console puts its state
-            in a pill row directly under the head: /service-desk/tickets/:id,
-            /portal/tickets/:id, /devices/:id. This is that row, with the same
-            three utilities and the same negative top margin pulling it under
-            the description. */}
-        {license.data && (
-          <div className="flex flex-wrap items-center gap-2" style={{ margin: "-8px 0 14px" }}>
-            <StatusPill
-              value={license.data.type}
-              label={humaniseEnum(license.data.type, "LicenseType")}
-              kind={licenseTypeKind(license.data.type)}
+        {/* THE SEATS, FROM WHAT THIS PAGE ALREADY READS: the entitlement on
+            the license and the allocations listed below it (a released one
+            included, so "in use" counts only the ones still held). Not links:
+            the allocations are the table under them, and the entitlement is
+            this record's own figure. */}
+        {license.data ? (
+          <StatsGrid columns={3}>
+            <Tile
+              label={t("licenses.detail.tileEntitled")}
+              value={String(license.data.entitlements)}
+              icon="license"
             />
-          </div>
-        )}
+            <Tile
+              label={t("licenses.detail.tileInUse")}
+              value={inUse === null ? t("licenses.common.na") : String(inUse)}
+              icon="users"
+            />
+            <Tile
+              label={t("licenses.detail.tileFree")}
+              value={free === null ? t("licenses.common.na") : String(Math.max(0, free))}
+              icon="circle-check"
+              kind={free !== null && free < 0 ? "crit" : undefined}
+              sub={free !== null && free < 0 ? t("licenses.detail.tileOver", { count: -free }) : undefined}
+            />
+          </StatsGrid>
+        ) : null}
 
         {/* The subject is the product name and the entitlement count, because
             an estate carries several licenses for one product and the count is

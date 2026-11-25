@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -12,7 +13,19 @@ import { useApi } from "../../lib/ApiContext";
 import { useCompliance, useCreateProductMutation, useProducts, useUpdateProductMutation } from "./api";
 import { LicensePageNav } from "./licenseNav";
 import type { MatchRule, ProductOut } from "./types";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUrlFilters,
+  writeQuery,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
@@ -35,10 +48,54 @@ const MATCH_RULE_LABEL: Readonly<Record<MatchRule["type"], string>> = lazyLabels
 
 const productRules = (): readonly FieldRule[] => [{ name: "name", label: translate("licenses.common.name") }];
 
+/**
+ * `?edit=<id>` opens that product's editor, so an edit is a link like
+ * `?new=product` is (decision D8). Opening adds a history entry, so Back
+ * closes it; closing goes Back from the entry this page's `open` added, and
+ * otherwise (the editor arrived in a link) drops the key in place, as
+ * `useNewParam` does for `?new=`.
+ */
+function useEditParam(): { id: string; open: (id: string) => void; close: () => void } {
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const id = params.get("edit") ?? "";
+  const open = useCallback(
+    (next: string) => {
+      const query = new URLSearchParams(params);
+      query.set("edit", next);
+      writeQuery(params, query, setParams, { state: { productEditOpened: next } });
+    },
+    [params, setParams],
+  );
+  const close = useCallback(() => {
+    if (!params.has("edit")) return;
+    if ((location.state as { productEditOpened?: string } | null)?.productEditOpened === params.get("edit")) {
+      void navigate(-1);
+      return;
+    }
+    const query = new URLSearchParams(params);
+    query.delete("edit");
+    writeQuery(params, query, setParams, { replace: true });
+  }, [params, setParams, location.state, navigate]);
+  return { id, open, close };
+}
+
+function matchesProduct(product: ProductOut, needle: string): boolean {
+  if (needle === "") return true;
+  return `${product.name} ${product.publisher}`.toLowerCase().includes(needle);
+}
+
 export function ProductsPage() {
   const t = useT();
   const api = useApi();
-  const [editing, setEditing] = useState<ProductOut | "new" | null>(null);
+  // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.2): the
+  // search in `?q=`, New product from `?new=product` and an edit from
+  // `?edit=<id>`, each a link. The catalog is the organisation's, shared by
+  // every client: no Client chip.
+  const filters = useUrlFilters(["q"] as const);
+  const newProduct = useNewParam("product");
+  const edit = useEditParam();
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -64,33 +121,45 @@ export function ProductsPage() {
     return totals;
   }, [compliance.data]);
   const items = products.data ?? [];
+  const needle = filters.values.q.trim().toLowerCase();
+  const shown = items.filter((product) => matchesProduct(product, needle));
+  // The editor opens only for a product that is in the catalog, and only for
+  // someone who may change it: a stale `?edit=` opens nothing.
+  const editing = canManage ? items.find((product) => product.id === edit.id) : undefined;
+
+  const primary = canManage ? (
+    <Btn label={t("licenses.products.newProduct")} icon="plus" variant="primary" onClick={newProduct.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("licenses.products.title")}
-        description={t("licenses.products.description")}
-        actions={
-          canManage ? (
-            <Button onClick={() => setEditing("new")}>
-              <Icon name="plus" size={14} />
-              {t("licenses.products.newProduct")}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHead title={t("licenses.products.title")} description={t("licenses.products.description")} actions={primary} />
 
       <LicensePageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={products.isLoading}
-          error={products.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.products.empty")}
-          emptyIcon="license"
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("licenses.products.searchPlaceholder")}
+              aria-label={t("licenses.products.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          end={products.data ? <ShowingCount shown={shown.length} total={items.length} /> : null}
+        />
+        <QueryState loading={products.isLoading} error={products.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.products.empty")}
+              action={primary}
+              icon="package"
+            />
+          ) : (
+          <Table label={t("licenses.products.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.products.colName")}</Th>
@@ -101,7 +170,7 @@ export function ProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((product) => {
+              {shown.map((product) => {
                 const installed = installedByProduct.get(product.id);
                 const rules = product.match_rules.length;
                 return (
@@ -136,9 +205,7 @@ export function ProductsPage() {
                     </Td>
                     <Td>
                       {canManage && (
-                        <Button variant="outline" onClick={() => setEditing(product)}>
-                          {t("licenses.common.edit")}
-                        </Button>
+                        <Btn label={t("licenses.common.edit")} onClick={() => edit.open(product.id)} />
                       )}
                     </Td>
                   </tr>
@@ -146,10 +213,14 @@ export function ProductsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <ProductEditor product={editing} onClose={() => setEditing(null)} />
+      {/* Mounted per product (its `key`), so the editor's fields start from
+          the product it opens; one mounted for "new" starts empty. */}
+      {canManage && newProduct.open ? <ProductEditor key="new" product="new" onClose={newProduct.close} /> : null}
+      {editing ? <ProductEditor key={editing.id} product={editing} onClose={edit.close} /> : null}
     </div>
   );
 }

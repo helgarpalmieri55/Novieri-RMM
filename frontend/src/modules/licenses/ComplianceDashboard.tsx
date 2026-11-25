@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { useClientScope } from "../../lib/clientScope";
+import { useFleetQuery } from "../../lib/detectors";
 import { useClientName } from "../settings/api";
-import { useCompliance } from "./api";
+import { useCompliance, useProducts } from "./api";
 import { LicenseReadiness } from "./LicenseReadiness";
 import { LicensePageNav } from "./licenseNav";
 import { complianceKind } from "./licenseState";
@@ -22,9 +25,32 @@ export function ComplianceDashboard() {
   const clientName = useClientName();
   // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
   // chosen every row is that client's, and the column would only repeat it.
-  const { selected } = useClientScope();
+  const { selected, clients } = useClientScope();
   const showClient = selected === null;
   const items = compliance.data ?? [];
+
+  // NO USAGE DATA IS NOT ZERO INSTALLED (The Absent Zero Rule; Task 10, 5.1).
+  // An installed count is a measurement only where something could measure
+  // it: a computer running the agent reports its software (the readiness
+  // panel's own fleet read, cached), and a product has a match rule to count
+  // installs by (the catalog this module already reads). Without either, the
+  // report's 0 is "nothing looked", and a row saying "5 free" over it would
+  // be a compliance claim nobody measured.
+  const fleet = useFleetQuery();
+  const products = useProducts();
+  const noAgent = fleet.isSuccess && fleet.data.managed === 0;
+  const unmatchable = new Set((products.data ?? []).filter((p) => p.match_rules.length === 0).map((p) => p.id));
+  const noUsage = (productId: string) => noAgent || unmatchable.has(productId);
+
+  // EACH FIGURE OPENS THE LIST THAT EXPLAINS IT: the register searched for
+  // that product, and narrowed to the row's client when every client is
+  // shown (the Client chip, `?client=`; only a client of this person's, so
+  // the chip never drops it on arrival).
+  const licensesOf = (row: (typeof items)[number]): string => {
+    const query = new URLSearchParams({ q: row.name });
+    if (showClient && clients.some((client) => client.id === row.client_id)) query.set("client", row.client_id);
+    return `/licenses?${query.toString()}`;
+  };
 
   return (
     <div>
@@ -45,7 +71,7 @@ export function ComplianceDashboard() {
           emptyLabel={t("licenses.compliance.empty")}
           emptyIcon="license"
         >
-          <Table>
+          <Table label={t("licenses.compliance.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.compliance.colProduct")}</Th>
@@ -59,7 +85,8 @@ export function ComplianceDashboard() {
             </thead>
             <tbody>
               {items.map((row) => {
-                const kind = complianceKind(row.breach);
+                const unmeasured = noUsage(row.product_id);
+                const kind = unmeasured ? "mut" : complianceKind(row.breach);
                 // The bar is the fraction of the entitlement in use, capped at
                 // full so an over-deployment reads as a full red bar and the
                 // pill beside it says by how much. Nothing entitled is not a
@@ -76,8 +103,17 @@ export function ComplianceDashboard() {
                     {showClient && <Td>{clientName(row.client_id)}</Td>}
                     <Td>
                       <div style={{ display: "grid", gap: 4, minWidth: 140 }}>
-                        <span className="mono">{`${row.installed} / ${row.entitled}`}</span>
-                        {pct === null ? null : (
+                        {/* The figure is the link, named for what it opens. */}
+                        <Link
+                          className={unmeasured ? undefined : "mono"}
+                          to={licensesOf(row)}
+                          title={t("licenses.compliance.figureLink", { name: row.name })}
+                        >
+                          {unmeasured
+                            ? t("licenses.compliance.noUsageOwned", { count: row.entitled })
+                            : `${row.installed} / ${row.entitled}`}
+                        </Link>
+                        {pct === null || unmeasured ? null : (
                           <Progress
                             value={pct}
                             tone={row.breach ? "red" : "green"}
@@ -90,16 +126,30 @@ export function ComplianceDashboard() {
                       <span className="mono">{row.entitled}</span>
                     </Td>
                     <Td>
-                      <span className="mono">{row.installed}</span>
+                      {unmeasured ? (
+                        <NoValue label={t("licenses.compliance.noUsage")} />
+                      ) : (
+                        <span className="mono">{row.installed}</span>
+                      )}
                     </Td>
                     <Td>
-                      <span className="mono">{row.delta}</span>
+                      {unmeasured ? (
+                        <NoValue label={t("licenses.compliance.noUsage")} />
+                      ) : (
+                        <span className="mono">{row.delta}</span>
+                      )}
                     </Td>
                     <Td>
                       <StatusPill
-                        value={row.breach ? "over_deployed" : "compliant"}
+                        value={unmeasured ? "no_usage_data" : row.breach ? "over_deployed" : "compliant"}
                         kind={kind}
-                        label={row.breach ? t("licenses.compliance.over", { count: over }) : t("licenses.compliance.free", { count: -over })}
+                        label={
+                          unmeasured
+                            ? t("licenses.compliance.noUsageStatus")
+                            : row.breach
+                              ? t("licenses.compliance.over", { count: over })
+                              : t("licenses.compliance.free", { count: -over })
+                        }
                       />
                     </Td>
                   </tr>
