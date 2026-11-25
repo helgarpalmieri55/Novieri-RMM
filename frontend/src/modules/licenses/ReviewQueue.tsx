@@ -192,7 +192,11 @@ export function ReviewQueue() {
         </QueryState>
       </Panel>
 
-      <MapSoftwareDialog row={mapping} onClose={() => setMapping(null)} />
+      {/* Mounted only while a title is being mapped, and keyed by it: each
+          title starts with no product chosen, so a product picked for one and
+          cancelled is never mapped onto the next (the coordinator's rulings 4
+          and 12). */}
+      {mapping ? <MapSoftwareDialog key={mapping.name} row={mapping} onClose={() => setMapping(null)} /> : null}
 
       {/* The subject is the discovered title AND its device count, because the
           count is what makes the difference between ignoring a stray utility
@@ -242,7 +246,7 @@ function MapSoftwareDialog({
   row,
   onClose,
 }: {
-  row: ReviewQueueRow | null;
+  row: ReviewQueueRow;
   onClose: () => void;
 }) {
   const t = useT();
@@ -256,9 +260,8 @@ function MapSoftwareDialog({
   // Populated ON SUBMIT, never while typing; worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
-  // ReviewQueue keeps this dialog mounted and toggles `row`, so without
-  // clearing the mutation a failure from mapping one title would still be on
-  // screen while the operator maps the next, attached to the wrong name.
+  // Clearing the mutation on close keeps a failure off the next opening (the
+  // dialog is mounted per title now, so the next title starts clean anyway).
   function close() {
     map.reset();
     setAttempt(null);
@@ -266,10 +269,14 @@ function MapSoftwareDialog({
   }
 
   function submit() {
-    if (!row) return;
     const next: Attempt = { rules: mapRules, values: { product_id: productId } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error must not hide this attempt's missing product (the
+      // coordinator's ruling 7).
+      map.reset();
+      return;
+    }
 
     map.mutate(
       { name: row.name, product_id: productId },
@@ -283,7 +290,7 @@ function MapSoftwareDialog({
   }
 
   return (
-    <Dialog open={row != null} onClose={close} title={t("licenses.review.mapTitle", { name: row?.name ?? "" })}>
+    <Dialog open onClose={close} title={t("licenses.review.mapTitle", { name: row.name })}>
       <Form onSubmit={submit}>
         {/* Same empty-lookup dead end as the New license dialog, on the screen
             an operator reaches FIRST: a fresh install discovers software before

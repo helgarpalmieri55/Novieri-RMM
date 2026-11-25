@@ -285,7 +285,7 @@ export function DriftPage() {
         />
 
         {tab === "orphans" ? (
-          <OrphansTab chip={chip} />
+          <OrphansTab chip={chip} onClearChip={() => filters.set("client", "")} />
         ) : (
           <>
             {tab !== "all" && (
@@ -584,7 +584,9 @@ function HandlePanel({ finding, onClose }: { finding: DriftOut; onClose: () => v
 
 // Orphans: their own tab, their own action. Registering the subnet is what
 // turns these observations into something the plan can be wrong about.
-function OrphansTab({ chip }: { chip: string }) {
+// `onClearChip` clears the one filter this view reads, the Client chip, and
+// keeps the view (review I4: it was a "Clear filters" that did nothing).
+function OrphansTab({ chip, onClearChip }: { chip: string; onClearChip: () => void }) {
   const t = useT();
   const orphans = useIpamOrphans(chip);
   // Inside the page's one list panel (no panel within a panel): the sentence
@@ -598,7 +600,7 @@ function OrphansTab({ chip }: { chip: string }) {
         {(orphans.data ?? []).length === 0 ? (
           <ListEmpty
             filtered={chip !== ""}
-            onClear={() => undefined}
+            onClear={onClearChip}
             nothingYet={t("ipam.drift.orphansEmpty")}
             icon="eye"
           />

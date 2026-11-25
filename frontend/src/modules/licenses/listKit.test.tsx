@@ -339,6 +339,30 @@ describe("the renewal calendar (licenses)", () => {
 });
 
 describe("the review queue", () => {
+  // The coordinator's rulings 4 and 12 (review I3): the Map dialog stayed
+  // mounted and kept the product chosen for one title, so Map on the next
+  // title wrote that product onto it.
+  it("starts Map empty for each title: a product chosen for one and cancelled is not mapped onto the next", async () => {
+    const mapSoftware = vi.fn();
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), mapSoftware } as never));
+    renderPage("/licenses/review-queue", <ReviewQueue />, "/licenses/review-queue");
+    const rowOf = async (name: string) =>
+      (await screen.findByText(name, { selector: ".cell-title" })).closest("tr") as HTMLElement;
+    await userEvent.click(within(await rowOf("7-Zip 24.08 (x64 edition)")).getByRole("button", { name: "Map" }));
+    let dialog = await screen.findByRole("dialog", { name: 'Map "7-Zip 24.08 (x64 edition)"' });
+    await userEvent.click(within(dialog).getByRole("combobox", { name: "Product" }));
+    const list = await within(dialog).findByRole("listbox", { name: "Product" });
+    await userEvent.click(await within(list).findByRole("option", { name: /Microsoft Visio/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(within(await rowOf("Zoom Workplace")).getByRole("button", { name: "Map" }));
+    dialog = await screen.findByRole("dialog", { name: 'Map "Zoom Workplace"' });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Map" }));
+    // Nothing chosen for Zoom Workplace: the field is named and nothing is written.
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Product is required");
+    expect(mapSoftware).not.toHaveBeenCalled();
+  });
+
   it("says why the list is empty", async () => {
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), reviewQueue: () => [] }));
     renderPage("/licenses/review-queue", <ReviewQueue />, "/licenses/review-queue");

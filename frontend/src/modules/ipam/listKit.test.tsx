@@ -416,6 +416,34 @@ describe("an edit never carries to another client (coordinator's ruling 12)", ()
 });
 
 describe("the drift page on the list kit", () => {
+  // Review I5: the drift page has the Client chip (Q2), so its lists are read
+  // narrowed. `listDevices` is the evidence's names for the machines a finding
+  // mentions (`useIpamDeviceNames`): a courtesy over ids, read through the
+  // console like the other organisation-wide lookups, never a list of rows.
+  it("reads the drift lists only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: ["listDevices"] });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderPage(`/ipam/drift?client=${ANDES}`, <DriftPage />, "/ipam/drift");
+    expect(await screen.findByRole("table", { name: "Drift" })).toBeInTheDocument();
+    await waitFor(() => expect(narrowing.client(ANDES).listIpamOrphans).toHaveBeenCalledWith());
+    expect(narrowing.client(ANDES).listIpamDrift).toHaveBeenCalledWith({});
+    expect(narrowing.client(ANDES).listIpamDrift).toHaveBeenCalledWith({ class: "dormant" });
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("opens, from a tile counted for the chip's client, exactly the rows it counted", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { container } = renderPage(`/ipam/drift?client=${ANDES}`, <DriftPage />, "/ipam/drift");
+    // Once the chip's client is decided (`/me`), each tile carries it.
+    await waitFor(() =>
+      expect([...container.querySelectorAll("a.stat-card")].map((a) => a.getAttribute("href"))).toEqual([
+        `/ipam/drift?client=${ANDES}`,
+        `/ipam/drift?class=dormant&client=${ANDES}`,
+        `/ipam/drift?class=orphans&client=${ANDES}`,
+      ]),
+    );
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/ipam/drift?class=conflict", <DriftPage />, "/ipam/drift");
@@ -459,6 +487,15 @@ describe("the drift page on the list kit", () => {
     renderPage("/ipam/drift?finding=drift-1", <DriftPage />, "/ipam/drift");
     expect(await screen.findByRole("button", { name: "Suppress" })).toBeDisabled();
     expect(screen.getByText("Suppressing needs a note and a date.")).toBeInTheDocument();
+  });
+
+  // Review I4: the orphans view's "Clear filters" did nothing (a dead control).
+  it("clears the Client chip from an empty orphans view, keeping the view", async () => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listIpamOrphans: () => [] }));
+    const { router } = renderPage(`/ipam/drift?class=orphans&client=${ANDES}`, <DriftPage />, "/ipam/drift");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?class=orphans"));
   });
 
   it("keeps the register-the-subnet link of an orphan as it was", async () => {
