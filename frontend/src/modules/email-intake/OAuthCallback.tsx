@@ -9,11 +9,14 @@
 // The code is stripped from the address bar at once: it has no business in
 // history, a bookmark or a screenshot.
 
-import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
-import { Btn, FormPage, Panel } from "../../shell/components";
+import { FormPage, Panel } from "../../shell/components";
+import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
+import { KIND_ICON, type Kind } from "../../shell/viz";
 import { useAbandonMailboxOAuthMutation, useCompleteMailboxOAuthMutation } from "./api";
 
 type Phase = "working" | "done" | "cancelled" | "failed";
@@ -25,8 +28,26 @@ type Phase = "working" | "done" | "cancelled" | "failed";
  */
 type Failure = { kind: "notStarted" } | { kind: "error"; error: unknown };
 
+/**
+ * AN OUTCOME IS A NOTICE WITH ITS KIND'S ICON (final review I1, the critique's
+ * P2), the way the auth screens and the Microsoft sign-in return say one: the
+ * notice family's three tones, never the save bar's 12px line, and never
+ * colour alone (The Second Carrier Rule).
+ */
+function Outcome({ kind, children }: { kind: Extract<Kind, "ok" | "info" | "crit">; children: ReactNode }) {
+  return (
+    <p role={kind === "crit" ? "alert" : "status"} className={kind === "crit" ? "notice red" : "notice"}>
+      <Icon name={KIND_ICON[kind]} size={16} />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 export function OAuthCallback() {
   const t = useT();
+  // A sub-page with no rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "Microsoft 365 sign-in · Email intake · Novieri RMM".
+  useRecordTitle(t("emailIntake.oauth.title"));
   const complete = useCompleteMailboxOAuthMutation();
   const abandon = useAbandonMailboxOAuthMutation();
   const location = useLocation();
@@ -85,25 +106,26 @@ export function OAuthCallback() {
       <Panel>
         {phase === "working" ? <p className="note">{t("emailIntake.oauth.working")}</p> : null}
         {phase === "done" ? (
-          <p role="status" className="form-saved">
+          <Outcome kind="ok">
             {address ? t("emailIntake.oauth.connectedAs", { address }) : t("emailIntake.oauth.connected")}
-          </p>
+          </Outcome>
         ) : null}
-        {phase === "cancelled" ? (
-          <p role="status">
-            {t("emailIntake.oauth.cancelled")}
-          </p>
-        ) : null}
+        {phase === "cancelled" ? <Outcome kind="info">{t("emailIntake.oauth.cancelled")}</Outcome> : null}
         {phase === "failed" ? (
-          <p role="alert" className="form-error">
+          <Outcome kind="crit">
             {t("emailIntake.oauth.failed", {
               reason: failure?.kind === "error" ? describeSubmitError(failure.error) : t("emailIntake.oauth.notStarted"),
             })}
-          </p>
+          </Outcome>
         ) : null}
+        {/* A ROUTE IS A LINK (the critique's P2): it opens in a new tab, copies
+            and middle-clicks, and is announced as what it is. The button's
+            skin, as BcpReport's way back wears it. */}
         {phase !== "working" ? (
           <div className="form-actions">
-            <Btn label={t("emailIntake.oauth.back")} onClick={() => navigate("/email-intake")} />
+            <Link className="btn" to="/email-intake">
+              {t("emailIntake.oauth.back")}
+            </Link>
           </div>
         ) : null}
       </Panel>

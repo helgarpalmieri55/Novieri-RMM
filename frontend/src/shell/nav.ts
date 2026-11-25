@@ -280,6 +280,11 @@ export const NAV_UNLISTED: readonly NavUnlisted[] = [
   unlisted("/software", "shell.nav.page.installedSoftware", "/deploy"),
   unlisted("/discovered", "shell.nav.page.discovered", "/devices"),
   unlisted("/agent-push", "shell.nav.item.pushInstall", "/admin"),
+  // MICROSOFT'S RETURN TO EMAIL INTAKE (final review I1). Its address starts
+  // with /settings because it is the redirect registered with Microsoft and
+  // cannot move, so without this the tab read "Settings" while the page, its
+  // back link and its way out all say Email intake.
+  unlisted("/settings/email-intake/oauth/callback", "shell.nav.item.emailIntake", "/admin"),
   // IMAGING LEFT THE RAIL AND THE SEARCH (phase 3 design §2, project decision
   // P3: it depends on PXE, which is not built). Nothing outside its own pages
   // links to them any more -- a device's Imaging tab shows that device's

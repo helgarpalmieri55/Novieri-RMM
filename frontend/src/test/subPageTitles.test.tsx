@@ -33,6 +33,7 @@ import { BcpReport } from "../modules/bcp/BcpReport";
 import { TestRecorder } from "../modules/bcp/TestRecorder";
 import { PackagesPage } from "../modules/deploy/PackagesPage";
 import { ScriptsPage } from "../modules/deploy/ScriptsPage";
+import { OAuthCallback } from "../modules/email-intake/OAuthCallback";
 import { PatchPolicyEditor } from "../modules/patch/PatchPolicyEditor";
 import { ProfilePage } from "../modules/profile/ProfilePage";
 import { SecurityPage } from "../modules/profile/SecurityPage";
@@ -171,6 +172,18 @@ family("remote sessions", [
     over: { getRemoteRecording: () => new Promise<Blob>(() => {}) },
     en: "lis-ws-041 · Session recording · Remote sessions · Novieri RMM",
     es: "lis-ws-041 · Grabación de la sesión · Sesiones remotas · Novieri RMM",
+  },
+]);
+
+// Microsoft's return to Email intake (final review I1): its URL is the one
+// registered with Microsoft, under /settings, but the page is Email intake's,
+// as its back link says. With no state it asks the server nothing.
+family("email intake", [
+  {
+    path: "/settings/email-intake/oauth/callback",
+    element: <OAuthCallback />,
+    en: "Microsoft 365 sign-in · Email intake · Novieri RMM",
+    es: "Inicio de sesión de Microsoft 365 · Entrada de correo · Novieri RMM",
   },
 ]);
 

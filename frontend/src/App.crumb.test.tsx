@@ -109,6 +109,9 @@ describe("the shell's breadcrumb, at a route the rail does not list", () => {
     ["/discovered", "Devices", "/devices", "Discovered · Novieri RMM"],
     ["/agent-push", "Admin", "/admin", "Push install · Novieri RMM"],
     ["/agent-push/credential-scopes", "Admin", "/admin", "Push install · Novieri RMM"],
+    // Microsoft's return to Email intake: its URL starts with /settings because
+    // it is the address registered with Microsoft, and it read "Settings".
+    ["/settings/email-intake/oauth/callback", "Admin", "/admin", "Email intake · Novieri RMM"],
   ])("%s sits under %s, linked to %s", async (path, section, href, title) => {
     const crumb = await crumbAt(path);
     const link = within(crumb).getByRole("link", { name: section });
