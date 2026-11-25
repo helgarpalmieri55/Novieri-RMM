@@ -136,4 +136,25 @@ describe("notifications on the form kit", () => {
     await userEvent.click(added);
     expect(added).toHaveAttribute("aria-checked", "false");
   });
+
+  // General ruling 3: the Add rule form in `?new=rule` is covered by the page's
+  // one guard, with the switches: Back asks, Cancel does not.
+  it("asks before Back drops a half-written rule, and Cancel does not ask", async () => {
+    const { router } = renderPage("/notifications", <NotificationAdminPage />);
+    const rules = await rulesSection();
+    await userEvent.click(await within(rules).findByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add rule" });
+    await userEvent.selectOptions(within(dialog).getAllByRole("combobox")[0] as HTMLElement, within(dialog).getAllByRole("combobox")[0]?.querySelectorAll("option")[1]?.getAttribute("value") ?? "");
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await userEvent.click(within(leave).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Add rule" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add rule" })).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
 });

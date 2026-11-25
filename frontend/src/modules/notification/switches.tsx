@@ -34,6 +34,13 @@ export interface Switches {
   /** The refused save of a rule switch, or of a channel switch, for its panel's own sentence. */
   readonly ruleError: unknown;
   readonly channelError: unknown;
+  /**
+   * The Add rule dialog's form (`?new=rule`) tells the page whether it holds
+   * a change, so the page's ONE guard covers it and the switches together
+   * (general ruling 3), and `release` lets its Cancel or Save close it.
+   */
+  readonly reportDialog: (dirty: boolean) => void;
+  readonly release: () => void;
 }
 
 const SwitchesContext = createContext<Switches | null>(null);
@@ -96,7 +103,7 @@ export function useSwitchDraft(rules: readonly RuleOut[] | undefined, channels: 
   // other switches were thrown, so the draft did not adopt the new list --
   // starts from the row's saved state (fix round 1).
   const current = (kind: Kind, id: string): boolean | undefined => draft?.[kind][id] ?? saved[kind][id];
-  const switches: Switches = {
+  const switches: Omit<Switches, "reportDialog" | "release"> = {
     active: (kind, id, fallback) => current(kind, id) ?? fallback,
     toggle: (kind, id) => {
       if (!draft) return;

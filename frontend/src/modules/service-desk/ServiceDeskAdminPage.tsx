@@ -21,7 +21,7 @@ import { SectionLead } from "./SectionLead";
 import { ServiceDeskNav } from "./ServiceDeskNav";
 import { ticketTypeLabel } from "./serviceDeskState";
 import type { TicketType } from "./types";
-import { Btn, FormSection, PageHead, QueryState, StatusPill, useNewParam } from "../../shell/components";
+import { Btn, FormSection, PageHead, QueryState, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Auditor B, cross-cutting: "Same silent-no-op failure repeats on every form
@@ -193,7 +193,7 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
       // testing emptiness, so an untrimmed send could carry a name the checks
       // never actually saw.
       { key: key.trim(), name: name.trim() },
-      { onSuccess: () => { setKey(""); setName(""); setAttempt(null); created.close(); } },
+      { onSuccess: () => { setKey(""); setName(""); setAttempt(null); release(); created.close(); } },
     );
   }
 
@@ -213,7 +213,16 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
+  // ONE GUARD FOR THE FORM IN THE `?new=` DIALOG (general ruling 3): Back,
+  // or any change of `new`, asks before a half-written form is dropped.
+  // Cancel and a successful save are the person's own act, so they release
+  // the guard first.
+  const { guard, release } = useUnsavedGuard(opened && (key.trim() !== "" || name.trim() !== ""), {
+    search: ["new"],
+  });
+
   function closeCreate() {
+    release();
     created.close();
   }
 
@@ -224,6 +233,7 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
+      {guard}
       <FormSection title={t("serviceDesk.admin.queues")} icon="list-check">
         <SectionLead
           text={t("serviceDesk.admin.queuesSubtitle")}
@@ -371,6 +381,7 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
           setRequiresApproval(false);
           setDefaultQueueId("");
           setAttempt(null);
+          release();
           created.close();
         },
       },
@@ -391,7 +402,18 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
+  // ONE GUARD FOR THE FORM IN THE `?new=` DIALOG (general ruling 3): Back,
+  // or any change of `new`, asks before a half-written form is dropped.
+  // Cancel and a successful save are the person's own act, so they release
+  // the guard first.
+  const { guard, release } = useUnsavedGuard(
+    opened &&
+      (key.trim() !== "" || name.trim() !== "" || type !== "incident" || requiresApproval || defaultQueueId !== ""),
+    { search: ["new"] },
+  );
+
   function closeCreate() {
+    release();
     created.close();
   }
 
@@ -402,6 +424,7 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
+      {guard}
       <FormSection title={t("serviceDesk.admin.categories")} icon="tag">
         <SectionLead
           text={t("serviceDesk.admin.categoriesSubtitle")}

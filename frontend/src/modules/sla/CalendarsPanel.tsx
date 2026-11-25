@@ -4,7 +4,7 @@ import { attemptProblems, describeSubmitError, Form, FormActions } from "../../c
 import type { Attempt, FieldRule } from "../../components/form";
 import { Badge, Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Icon } from "../../shell/icons";
-import { Btn, FormSection, StatusPill, useNewParam } from "../../shell/components";
+import { Btn, FormSection, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
@@ -159,6 +159,19 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creating]);
 
+  // ONE GUARD FOR THE FORM IN THE `?new=` DIALOG (general ruling 3): Back,
+  // or any change of `new`, asks before a half-written form is dropped.
+  // Cancel and a successful save are the person's own act, so they release
+  // the guard first.
+  const { guard, release } = useUnsavedGuard(
+    creating && (name.trim() !== "" || timezone !== DEFAULT_TIMEZONE || !active),
+    { search: ["new"] },
+  );
+  function closeCreate() {
+    release();
+    created.close();
+  }
+
   function openEdit(calendar: CalendarOut) {
     setName(calendar.name);
     setTimezone(calendar.timezone);
@@ -178,6 +191,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
       { name: name.trim(), timezone: timezone.trim(), active },
       {
         onSuccess: (calendar) => {
+          release();
           created.close();
           // A brand-new calendar has no windows, so it is `no_working_windows`
           // by construction -- open it straight into the week editor rather
@@ -205,6 +219,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // "Add calendar" (secondary: the open dialog's Save is the primary), then
     // the list. No Client chip: calendars are the organisation's.
     <>
+      {guard}
       <FormSection title={t("sla.calendars.title")} icon="calendar">
         <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
           <p className="note" style={{ margin: 0 }}>
@@ -382,7 +397,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
           </Form>
         </Dialog>
       </FormSection>
-      <Dialog open={creating} onClose={created.close} title={t("sla.calendars.addTitle")}>
+      <Dialog open={creating} onClose={closeCreate} title={t("sla.calendars.addTitle")}>
         <Form onSubmit={submitCreate}>
           <CalendarFields
             name={name}
@@ -396,7 +411,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
             {/* `type="button"` is load-bearing now that there is a form around
                 it: a button with no type inside a <form> IS a submit button,
                 so Cancel would save. */}
-            <Button type="button" variant="ghost" onClick={created.close}>
+            <Button type="button" variant="ghost" onClick={closeCreate}>
               {t("common.actions.cancel")}
             </Button>
             {/* Enabled with the fields empty ON PURPOSE. The refusal is what

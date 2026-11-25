@@ -297,6 +297,10 @@ export function TicketListPage() {
 
   // One clock for every relative time in the table.
   const now = Date.now();
+  // A TILE COUNTED ON A NARROWED READ OPENS THE SAME CLIENT'S ROWS (general
+  // ruling 2): with the Client chip set, every tile's link carries it.
+  const withClient = (to: string): string =>
+    clientChip === "" ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(clientChip)}`;
   const newTicket = canWrite ? (
     <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={created.start} />
   ) : undefined;
@@ -314,7 +318,9 @@ export function TicketListPage() {
           label={t("serviceDesk.list.shown")}
           value={String(stats.total)}
           icon="ticket"
-          to="/service-desk"
+          to={withClient("/service-desk")}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="neutral"
           foot={foot.total}
           zeroLabel={t("serviceDesk.list.zeroShown")}
@@ -323,7 +329,9 @@ export function TicketListPage() {
           label={t("serviceDesk.common.unassigned")}
           value={String(stats.unassigned)}
           icon="help-circle"
-          to="/service-desk?scope=unassigned"
+          to={withClient("/service-desk?scope=unassigned")}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="gold"
           urgent
           foot={foot.unassigned}
@@ -333,7 +341,9 @@ export function TicketListPage() {
           label={t("serviceDesk.common.highOrUrgentPriority")}
           value={String(stats.urgent)}
           icon="alert-triangle"
-          to="/service-desk?priority=high,urgent"
+          to={withClient("/service-desk?priority=high,urgent")}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="red"
           urgent
           foot={foot.urgent}
@@ -343,7 +353,9 @@ export function TicketListPage() {
           label={t("serviceDesk.list.fromAlerts")}
           value={String(stats.fromAlerts)}
           icon="bell-ringing"
-          to="/service-desk?origin=alert"
+          to={withClient("/service-desk?origin=alert")}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="blue"
           foot={foot.fromAlerts}
           zeroLabel={t("serviceDesk.list.zeroFromAlerts")}
@@ -490,7 +502,7 @@ export function TicketListPage() {
 
       {/* Open only for someone who may write a ticket: the same code the
           button checks, so a bare `?new=ticket` opens nothing for a reader. */}
-      <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} />
+      <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} guardNew />
     </div>
   );
 }

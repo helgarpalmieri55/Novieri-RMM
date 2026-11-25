@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { RowMenu } from "../../components/rowmenu";
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
@@ -101,6 +101,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
           setChannelId("");
           setRecipientKind("queue_members");
           setQueueId("");
+          switches.release();
           created.close();
         },
       },
@@ -110,6 +111,29 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   // A rule's on/off switch is one of the page's settings: held in the page's
   // one draft (`switches.tsx`) and saved by its one save bar.
   const switches = useSwitches();
+  // The Add rule form starts empty whenever its dialog opens, however it was
+  // opened (general ruling 4), and the page's one guard covers it while it
+  // holds a change (ruling 3).
+  useLayoutEffect(() => {
+    if (!creating) return;
+    setEventType(DEFAULT_EVENT_TYPE);
+    setChannelId("");
+    setRecipientKind("queue_members");
+    setQueueId("");
+    create.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creating]);
+  const dialogDirty =
+    creating && (eventType !== DEFAULT_EVENT_TYPE || channelId !== "" || recipientKind !== "queue_members" || queueId !== "");
+  const { reportDialog } = switches;
+  useEffect(() => {
+    reportDialog(dialogDirty);
+    return () => reportDialog(false);
+  }, [dialogDirty, reportDialog]);
+  function closeCreate() {
+    switches.release();
+    created.close();
+  }
   const activeOf = (rule: RuleOut): boolean => switches.active("rule", rule.id, rule.active);
 
   function channelName(id: string): string {
@@ -278,7 +302,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
         />
 
       </FormSection>
-        <Dialog open={creating} onClose={created.close} title={t("notification.rules.addTitle")}>
+        <Dialog open={creating} onClose={closeCreate} title={t("notification.rules.addTitle")}>
           <div className="form-grid">
             <Field label={t("notification.rules.eventType")} full>
               <select className={inputClass} value={eventType} onChange={(e) => setEventType(e.target.value)}>
@@ -342,7 +366,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={created.close}>
+            <Button variant="ghost" onClick={closeCreate}>
               {t("notification.rules.cancel")}
             </Button>
             <Button onClick={submit} disabled={create.isPending || !channelId}>

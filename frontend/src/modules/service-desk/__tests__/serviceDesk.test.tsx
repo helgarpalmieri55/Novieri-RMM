@@ -1999,13 +1999,41 @@ describe("ServiceDeskAdminPage wiring", () => {
     await user.type(within(dialog).getByLabelText("Name"), "Helpdesk");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(/unavailable/i);
-    // Back, not Cancel: the dialog closes through the URL.
+    // Back, not Cancel: the dialog closes through the URL, and its guard asks
+    // first (general ruling 3); the person leaves.
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
     await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
     await user.click(screen.getByRole("button", { name: title }));
     dialog = screen.getByRole("dialog", { name: title });
     expect(within(dialog).queryByRole("alert")).toBeNull();
     expect(within(dialog).getByLabelText("Key")).toHaveValue("");
+  });
+
+  // General ruling 3: the form in `?new=queue` asks before Back drops it; Cancel does not ask.
+  it("asks before Back drops a half-written queue, and Cancel does not ask", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    const { router } = renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await user.click(await screen.findByRole("button", { name: "New queue" }));
+    await user.type(within(screen.getByRole("dialog", { name: "New queue" })).getByLabelText("Key"), "helpdesk");
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await user.click(within(leave).getByRole("button", { name: "Cancel" }));
+    await user.click(within(screen.getByRole("dialog", { name: "New queue" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New queue" })).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 
   it("draws no primary button in the body but the open dialog's", async () => {

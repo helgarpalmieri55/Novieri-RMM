@@ -66,6 +66,8 @@ describe("the SLA page on the form kit", () => {
     expect(await screen.findByRole("table", { name: "SLA policies" })).toBeInTheDocument();
     await waitFor(() => expect(narrowing.client(ANDES).listSlaPolicies).toHaveBeenCalledWith());
     expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
+    // The tile counted on the narrowed read opens that client's (general ruling 2).
+    expect(screen.getByRole("link", { name: /Active policies/ })).toHaveAttribute("href", `/sla?client=${ANDES}`);
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
@@ -118,5 +120,35 @@ describe("the SLA page on the form kit", () => {
     const add = await screen.findByRole("dialog", { name: "Add policy" });
     expect(within(add).getByLabelText(/^Response target in minutes/)).toHaveValue(60);
     expect(within(add).getByLabelText(/^Resolution target in minutes/)).toHaveValue(480);
+  });
+
+  // General ruling 10: no empty policy list before the narrowed read.
+  it("draws no empty policy list while /me has not answered with the Client chip set", async () => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise(() => {}) }));
+    renderPage(`/sla?client=${ANDES}`, <SlaAdminPage />);
+    const section = (await screen.findByRole("heading", { name: "SLA policies" })).closest("section") as HTMLElement;
+    expect(within(section).getByText("Loading…")).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(within(section).queryByRole("table")).toBeNull();
+  });
+
+  // General ruling 3: Back asks before a half-written calendar is dropped; Cancel does not.
+  it("asks before Back drops a half-written calendar, and Cancel does not ask", async () => {
+    const { router } = renderPage("/sla", <SlaAdminPage />);
+    const section = (await screen.findByRole("heading", { name: "Business calendars" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(section).findByRole("button", { name: "Add calendar" }));
+    const dialog = screen.getByRole("dialog", { name: "Add calendar" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Porto");
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await userEvent.click(within(leave).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Add calendar" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add calendar" })).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 });

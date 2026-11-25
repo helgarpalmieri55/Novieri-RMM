@@ -138,7 +138,45 @@ describe("the ticket queue on the list kit", () => {
       }),
     );
     expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
+    // A tile counted on the narrowed read opens that client's rows (general ruling 2).
+    const unassigned = [...document.querySelectorAll<HTMLAnchorElement>(".stat-card")].find(
+      (card) => card.querySelector(".stat-label")?.textContent === "Unassigned",
+    );
+    expect(unassigned).toHaveAttribute("href", `/service-desk?scope=unassigned&client=${ANDES}`);
     expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  // General ruling 10: with the chip set and `/me` not answered, the read is
+  // not enabled yet; the list says it is loading, never that nothing matches.
+  it("draws no empty state while /me has not answered with the Client chip set", async () => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise(() => {}) }));
+    renderPage(`/service-desk?client=${ANDES}`, <TicketListPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No open tickets.")).toBeNull();
+    // The tiles are not counted yet either: "n/a", never an invented 0.
+    expect([...document.querySelectorAll(".stat-card .stat-value")].map((v) => v.textContent)).not.toContain("0");
+  });
+
+  // General ruling 3: the New ticket form lives in `?new=ticket`; Back asks
+  // before a half-written ticket is dropped, Cancel drops it without asking.
+  it("asks before Back drops a half-written ticket, and Cancel does not ask", async () => {
+    const { router } = renderPage("/service-desk", <TicketListPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "New ticket" }));
+    const dialog = await screen.findByRole("dialog", { name: "New ticket" });
+    await userEvent.type(within(dialog).getByLabelText("Subject"), "Printer jams");
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await userEvent.click(within(leave).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "New ticket" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 });
 

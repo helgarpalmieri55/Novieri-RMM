@@ -7,7 +7,7 @@ import type { Attempt, FieldRule, Problem } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import type { PickerOption } from "../../components/picker";
 import { Badge, Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
-import { Btn, ClientFilter, FormSection, StatusPill, useNewParam, useUrlFilters } from "../../shell/components";
+import { Btn, ClientFilter, FormSection, StatusPill, useNewParam, useUnsavedGuard, useUrlFilters } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
@@ -198,6 +198,19 @@ export function PoliciesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creating]);
 
+  // ONE GUARD FOR THE FORM IN THE `?new=` DIALOG (general ruling 3): Back,
+  // or any change of `new`, asks before a half-written form is dropped.
+  // Cancel and a successful save are the person's own act, so they release
+  // the guard first.
+  const { guard, release } = useUnsavedGuard(
+    creating && (forEveryClient || JSON.stringify(draft) !== JSON.stringify(emptyDraft())),
+    { search: ["new"] },
+  );
+  function closeCreate() {
+    release();
+    created.close();
+  }
+
   function openEdit(policy: PolicyOut) {
     setAttempt(null);
     update.reset();
@@ -255,7 +268,12 @@ export function PoliciesPanel({
         ...draftBody,
         ...(forEveryClient ? {} : { client_id: requireKnown(policyClient.clientId) }),
       }),
-      { onSuccess: () => created.close() },
+      {
+        onSuccess: () => {
+          release();
+          created.close();
+        },
+      },
     );
   }
 
@@ -273,6 +291,7 @@ export function PoliciesPanel({
     // sentence, the Client chip and "Add policy" as a secondary button (the
     // open dialog's Save is the page's primary), then the list.
     <>
+      {guard}
       <FormSection title={t("sla.policies.title")} icon="shield-check">
         <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
           <p className="note" style={{ margin: 0 }}>
@@ -459,7 +478,7 @@ export function PoliciesPanel({
           </Form>
         </Dialog>
       </FormSection>
-      <Dialog open={creating} onClose={created.close} title={t("sla.policies.addTitle")}>
+      <Dialog open={creating} onClose={closeCreate} title={t("sla.policies.addTitle")}>
         <Form onSubmit={submitCreate}>
           <PolicyFields
             draft={draft}
@@ -491,7 +510,7 @@ export function PoliciesPanel({
           <div className="flex items-center justify-end gap-2">
             {/* `type="button"`: inside a <form>, an untyped button submits, so
                 Cancel would save the policy it was meant to abandon. */}
-            <Button type="button" variant="ghost" onClick={created.close}>
+            <Button type="button" variant="ghost" onClick={closeCreate}>
               {t("common.actions.cancel")}
             </Button>
             {/* Enabled with no calendar chosen ON PURPOSE -- the press is what

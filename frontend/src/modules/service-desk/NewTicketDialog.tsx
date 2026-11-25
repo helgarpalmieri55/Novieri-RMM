@@ -3,7 +3,7 @@
  * page, which opens it with the device (and a subject) already filled in.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ClientField } from "../../components/ClientField";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -13,6 +13,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { parentClientOf, requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
+import { useUnsavedGuard } from "../../shell/components";
 import {
   useCreateTicketMutation,
   useDirectoryDevices,
@@ -46,6 +47,7 @@ export function NewTicketDialog({
   initialDeviceId,
   initialSubject,
   onCreated,
+  guardNew = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -54,6 +56,13 @@ export function NewTicketDialog({
   initialDeviceId?: string;
   initialSubject?: string;
   onCreated?: (ticket: TicketOut) => void;
+  /**
+   * The dialog is opened from `?new=ticket` (TicketListPage): Back, or any
+   * change of `new`, asks before a half-written ticket is dropped (general
+   * ruling 3). Off for a caller that opens it from its own state, which keeps
+   * its own page's one guard.
+   */
+  guardNew?: boolean;
 }) {
   const t = useT();
   const create = useCreateTicketMutation();
@@ -123,9 +132,31 @@ export function NewTicketDialog({
   // it unconditionally and toggles `open`), so mutation state OUTLIVES the
   // dialog: without these resets a failed Save leaves `create.error` set and
   // the next open announces the refusal of a request nobody has made yet.
+  // And on every OPEN, however it was opened (general ruling 4): Back to
+  // `?new=ticket` skips `close()`.
+  useLayoutEffect(() => {
+    if (!open) return;
+    reset();
+    create.reset();
+    // The opening is what counts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const changed =
+    type !== "incident" ||
+    categoryId !== "" ||
+    queueId !== "" ||
+    subject !== (initialSubject ?? "") ||
+    description !== "" ||
+    assignedTo !== "" ||
+    deviceId !== (initialDeviceId ?? "");
+  const { guard, release } = useUnsavedGuard(guardNew && open && changed, { search: ["new"] });
+
   function close() {
     setAttempt(null);
     create.reset();
+    // Cancel is the person's own act: it drops the form without asking.
+    release();
     onClose();
   }
 
@@ -174,6 +205,7 @@ export function NewTicketDialog({
     create.mutate(build, {
       onSuccess: (ticket) => {
         reset();
+        release();
         onClose();
         onCreated?.(ticket);
       },
@@ -181,6 +213,8 @@ export function NewTicketDialog({
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={close} title={t("serviceDesk.newTicket.title")}>
       {/* A real <form>, so Enter in Subject saves instead of doing nothing --
           `ui.tsx`'s Button sets no type, so before this the submit control was
@@ -315,5 +349,6 @@ export function NewTicketDialog({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

@@ -143,7 +143,8 @@ export function SlaAdminPage() {
           label={t("sla.admin.policiesLabel")}
           value={count(policies.data !== undefined, activePolicyCount)}
           icon="shield-check"
-          to="/sla"
+          // Counted on the chip's narrowed read, it opens that client's (general ruling 2).
+          to={filters.values.client === "" ? "/sla" : `/sla?client=${encodeURIComponent(filters.values.client)}`}
           tone="blue"
           foot={policyFoot}
           zeroLabel={t("sla.admin.policiesZero")}
