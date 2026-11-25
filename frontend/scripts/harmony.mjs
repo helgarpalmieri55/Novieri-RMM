@@ -125,7 +125,8 @@ function parseArgs(argv) {
  * - 390 COARSE: the phone's top bar, which marks the chosen client in the
  *   drawer toggle (operator decision 4, 2026-11-02);
  * - 641: the first width above the handset's, where the desktop selector sits
- *   in the bar beside the labelled "Add a computer" -- the band up to 1024 px
+ *   in the bar (beside the labelled "Add a computer" when this was written; the
+ *   labelled control is New now, left of the search) -- the band up to 1024 px
  *   that nothing measured before.
  *
  * A native <select> is as wide as its longest option whichever is chosen, so

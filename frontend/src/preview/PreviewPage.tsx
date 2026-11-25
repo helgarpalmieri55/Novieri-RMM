@@ -29,6 +29,7 @@ import { EntityPicker } from "../components/picker";
 import { Badge, Field, inputClass, Table, Td, Th } from "../components/ui";
 import { WeekPainter } from "../components/weekpainter";
 import { AppShell, HealthGlyph } from "../shell/AppShell";
+import type { NewMenuEntry } from "../shell/newMenu";
 import { SessionEnded } from "../shell/SessionEnded";
 import {
   Avatar,
@@ -127,6 +128,20 @@ const ALL_PERMISSIONS = [
   "notification.read", "email_intake.read", "sla.read", "docs.read", "change.read",
   "bcp.read", "reporting.read", "licenses.read", "subscriptions.read", "budget.read",
   "ipam.read", "jobs.read", "platform.errors.read",
+];
+
+/**
+ * THE NEW MENU, every entry (redesign Task 4, design §1.2): the top bar's one
+ * primary, which the browser pass measures here as it measured "Add a
+ * computer" before it moved into this menu (decision D11).
+ */
+const PREVIEW_NEW_MENU: readonly NewMenuEntry[] = [
+  { kind: "ticket", to: "/service-desk?new=ticket", icon: "ticket" },
+  { kind: "client", to: "/clients?new=client", icon: "building" },
+  { kind: "contact", to: "/clients?new=contact", icon: "user" },
+  { kind: "device", to: "/devices/onboard", icon: "devices" },
+  { kind: "document", to: "/docs?new=article", icon: "book" },
+  { kind: "change", to: "/changes?new=change", icon: "changes" },
 ];
 
 /**
@@ -1194,6 +1209,7 @@ export function PreviewPage() {
          in the drawer toggle (operator decision 4) as it grades the rest of
          the chrome: at 390px it is drawn, at 320px it wraps out of sight. */
       clientMark={{ short: "AL", name: "Andes Logistics" }}
+      newMenu={PREVIEW_NEW_MENU}
       user={{ name: "Alex Morgan", role: "Administrator" }}
       onSignOut={() => undefined}
     >

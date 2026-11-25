@@ -3,7 +3,8 @@
  * something, from every page. The chrome's one primary control (DESIGN.md v4,
  * "Buttons"). Nothing at all when the person may create nothing: no dead
  * control. A WAI-ARIA menu button: opens on its first item, arrows move,
- * Escape closes and gives focus back.
+ * Escape closes and gives focus back, and Tab leaves it closed (its items are
+ * not tab stops; critique of the shell, 2026-11-24).
  */
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
@@ -67,7 +68,13 @@ export function NewMenu({ entries }: { entries: readonly NewMenuEntry[] }) {
 
   if (entries.length === 0) return null;
   return (
-    <div className="new-menu-anchor">
+    <div
+      className="new-menu-anchor"
+      onBlur={(event) => {
+        // Focus left the button and its list (Tab, or a click elsewhere).
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <button
         type="button"
         ref={button}
@@ -83,7 +90,7 @@ export function NewMenu({ entries }: { entries: readonly NewMenuEntry[] }) {
       {open ? (
         <div className="top-menu" role="menu" aria-label={t("shell.newMenu.label")} ref={menu} onKeyDown={move}>
           {entries.map((entry) => (
-            <Link key={entry.kind} className="menu-item" role="menuitem" to={entry.to} onClick={() => close(false)}>
+            <Link key={entry.kind} className="menu-item" role="menuitem" tabIndex={-1} to={entry.to} onClick={() => close(false)}>
               <Icon name={entry.icon} size={15} />
               {t(LABEL[entry.kind])}
             </Link>

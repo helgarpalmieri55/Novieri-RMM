@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -31,6 +31,17 @@ describe("Admin, as Atera draws it (redesign design §1.1)", () => {
     expect(within(panel).getByRole("button", { name: /Security/ })).toHaveAttribute("aria-expanded", "true");
     expect(within(panel).getByRole("button", { name: /Service desk/ })).toHaveAttribute("aria-expanded", "false");
     expect(within(panel).getByRole("link", { name: "Audit log" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the section of an Admin page reached from outside the panel (critique 2026-11-24, P2)", async () => {
+    // The panel stays mounted between two Admin pages; reached by a link it
+    // does not own (search, an /admin card), the new page's section opens, as
+    // Atera's panel does (walkthrough, line 343).
+    const { router } = rail("/audit");
+    await act(() => router.navigate("/notifications"));
+    const panel = screen.getByRole("navigation", { name: "Admin" });
+    expect(within(panel).getByRole("button", { name: /Service desk/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(panel).getByRole("link", { name: "Notifications" })).toHaveAttribute("aria-current", "page");
   });
 
   it("goes back to the main rail and stays on the page", async () => {

@@ -87,12 +87,17 @@
 .nav-item .lbl { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .nav-item:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 .nav-item.sub { padding-left: 40px; }
+/* A folder's or Admin's page name takes a second line rather than an
+ * ellipsis: it starts 77px in, and in Spanish "Registro de auditoría" did not
+ * fit the 232px rail (critique of the shell, 2026-11-24). */
+.nav-item.sub .lbl { white-space: normal; }
 .nav-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--rail-mark); }
 .nav-item .chev { margin-left: auto; transition: transform .15s ease; }
 .nav-item .chev.open { transform: rotate(180deg); }
 .nav-anchored { flex: 0 0 auto; padding: 8px 0; border-top: 1px solid var(--rail-2); }
 .sidebar .admin-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
 .sidebar .admin-title { margin: 6px 22px 2px; color: var(--accent-ink); font-weight: 600; font-size: var(--t-h2); text-decoration: none; }
+.sidebar .admin-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .sidebar .admin-title:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: var(--r-ctl); }
 .admin-search { padding: 4px 10px 8px; }
 .sidebar .admin-none { margin: 8px 22px; color: var(--rail-ink); font-size: var(--t-sm); }

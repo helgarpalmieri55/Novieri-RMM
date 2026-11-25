@@ -5,7 +5,7 @@
  * as before; only Clients left, for the main rail. Folded, the panel is its
  * pages' icons.
  */
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useT } from "../i18n/context";
@@ -37,6 +37,12 @@ export function AdminPanel({
   const current = activeNavTo(pathname, [{ key: "main", label: "", items: pages }]);
   const holding = area.sections.find((section) => section.items.some((item) => item.to === current))?.label;
   const [openSection, setOpenSection] = useState<string | undefined>(holding ?? area.sections[0]?.label);
+  // Arriving at another Admin page while the panel stays open (a search
+  // result, an /admin card) opens that page's section, as Atera's panel does
+  // (critique of the shell, 2026-11-24; Atera's walkthrough, line 343).
+  useEffect(() => {
+    if (holding !== undefined) setOpenSection(holding);
+  }, [holding]);
   const wanted = fold(query);
   const sections = area.sections
     .map((section) => ({

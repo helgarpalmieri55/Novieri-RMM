@@ -581,7 +581,7 @@ export function AppShell({
                 profile, with no AI icon; its AI is anchored at the rail's foot
                 and is a round button at the bottom right of every page. This
                 console does the same: `nav.ts` anchors the Assistant, and the
-                round button is drawn after `<main>` below (`.assistant-fab`).
+                round button is the last thing in `<main>` below (`.assistant-fab`).
                 This replaces the ruling of 2026-09-08 ("AI Analyst needs to be
                 there") that put the icon here. Its other half stands: no
                 documentation link in the bar at any width (2026-09-09); /docs
@@ -635,15 +635,19 @@ export function AppShell({
             )}
           </nav>
           <RecordTitleProvider value={setRecord}>{children}</RecordTitleProvider>
+          {/* THE ASSISTANT, ONE TAP FROM EVERY PAGE (decision D12). A link to
+              the Assistant's page, as the bar's icon was: not a chat drawn
+              over the page, which would be a feature this console does not
+              have. The LAST THING IN <main>: fixed in the corner, it is
+              reached after the page, and it sits in a landmark (drawn after
+              `</main>` it was outside every one, axe `region` on every route;
+              critique of the shell, 2026-11-24). */}
+          {assistantFab ? (
+            <Link className="assistant-fab" to="/assistant" aria-label={t("shell.app.askAssistant")} title={t("shell.app.askAssistant")}>
+              <Icon name="sparkles" size={22} />
+            </Link>
+          ) : null}
         </main>
-        {/* THE ASSISTANT, ONE TAP FROM EVERY PAGE (decision D12). A link to
-            the Assistant's page, as the bar's icon was: not a chat drawn over
-            the page, which would be a feature this console does not have. */}
-        {assistantFab ? (
-          <Link className="assistant-fab" to="/assistant" aria-label={t("shell.app.askAssistant")} title={t("shell.app.askAssistant")}>
-            <Icon name="sparkles" size={22} />
-          </Link>
-        ) : null}
       </div>
     </div>
   );

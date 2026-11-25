@@ -44,3 +44,63 @@ Respondidas por el coordinador el 2026-11-24 y aplicadas en la ronda 2 de correc
   sesión de quien desarrolla, y uno desactivado sería un control muerto.
 - **Regla.** `DESIGN.md`, «Don't ship a dead control»; `PRODUCT.md`, principio 2: «Every control leads somewhere
   real».
+
+---
+
+## El armazón (`frontend/src/shell/Sidebar.tsx`, `AppShell.tsx`, `AreaPage.tsx`), Task 4
+
+Críticas `.impeccable/critique/2026-11-24T23-59-19Z__frontend-src-shell-sidebar-tsx.md` (28/40),
+`…-appshell-tsx.md` (29/40) y `…-areapage-tsx.md` (31/40), las tres cerradas. Contestadas el 2026-11-25 con
+`DESIGN.md`, el diseño aprobado y las decisiones del operador, y aplicadas en el pulido de la Task 4. Las tres
+preguntas de `AreaPage.tsx` no las zanjan estas fuentes: van al coordinador en el informe de la Task 4.
+
+### 1. En español, el panel de Administración corta el nombre de sus páginas
+
+- **Respuesta: (a).** El nombre de una página de una carpeta o de Administración pasa a una segunda línea en
+  lugar de cortarse (`.nav-item.sub .lbl { white-space: normal; }`). No se estrecha la sangría ni se ensancha
+  el riel.
+- **Por qué.** Empieza a 77 px del borde y «Registro de auditoría», «Registros de seguridad» o «Portal del
+  usuario final» no cabían: en `/audit` la página actual se leía «Registro de aud…». El operador trabaja en
+  español.
+- **Regla.** `DESIGN.md`, «Layout»: el riel mide 232 px; la maqueta de la dirección A fija la sangría en
+  40 px; «The Floor Is The Ramp's Smallest Step» impide bajar la letra. Solo queda la segunda línea.
+
+### 2. La sección abierta del panel de Administración al llegar a otra página suya
+
+- **Respuesta: (b).** Se abre la sección que contiene la página actual cada vez que esta cambia, aunque el
+  panel ya estuviera abierto.
+- **Por qué.** Llegando desde fuera del panel (la búsqueda, una tarjeta de `/admin`), la página actual quedaba
+  dentro de una sección cerrada y su marca no se veía.
+- **Regla.** Decisión D10 (el panel abre la sección de la página actual) y el panel de Atera que el diseño
+  §1.1 toma («el grupo de la página activa se abre», recorrido, línea 343).
+
+### 3. El título «Administración» del panel, que enlaza a `/admin`
+
+- **Respuesta: (b).** Se subraya al pasar el puntero, como los enlaces de la miga.
+- **Por qué.** Era texto blanco sin ninguna señal de ser un enlace.
+- **Regla.** `shell.css`, `.crumb a:hover`: el enlace de texto del armazón se subraya; D10: el título enlaza a
+  la portada. (Los números de página de cada sección se quedan: son los del panel de Atera, recorrido, línea 44.)
+
+### 4. El botón redondo del Asistente fuera de toda región (axe `region`, en todas las rutas)
+
+- **Respuesta: (a).** Es lo último de `<main>`: sigue fijo en la esquina, se alcanza después de la página y
+  queda dentro de una región.
+- **Por qué.** Dibujado detrás de `</main>`, axe lo daba como contenido fuera de toda región en las 424
+  capturas de cada idioma; una región propia necesitaría un nombre que repite el del botón.
+- **Regla.** D12 (un enlace a `/assistant`, no un panel); `PRODUCT.md`, «Accessibility & Inclusion»: WCAG 2.2
+  AA medido, no afirmado.
+
+### 5. El menú «Nuevo» y el tabulador
+
+- **Respuesta: (a).** Sus entradas no son paradas del tabulador (las flechas las recorren) y el menú se cierra
+  cuando el foco sale de él.
+- **Por qué.** Con Tab el foco salía y el menú quedaba abierto sobre la búsqueda.
+- **Regla.** El patrón de botón de menú de WAI-ARIA que `NewMenu.tsx` declara; `PRODUCT.md`, «Accessibility &
+  Inclusion».
+
+### 6. Añadir un equipo desde la barra
+
+- **Respuesta: (a).** Se queda en «Nuevo → Equipo» y en la cabecera de Equipos; ningún botón propio en la
+  barra.
+- **Regla.** Diseño §1.2: «Atera tiene "Instalar agente" como botón propio; aquí entra en el menú "Nuevo" y
+  en la página de Equipos»; decisión D11.

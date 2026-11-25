@@ -199,7 +199,7 @@ describe("the chrome below the drawer breakpoint", () => {
     // The link's name is a catalogue entry; the shortcut survives where the
     // shell still renders that key and the English entry still says it. It
     // is the round button at the bottom right now (decision D12, the operator
-    // on 2026-11-24), drawn after `</main>` and never inside the top bar.
+    // on 2026-11-24), the last thing in `<main>` and never inside the top bar.
     const header = shellTsx.slice(shellTsx.indexOf('<header className="topbar">'), shellTsx.indexOf("</header>"));
     expect(header, "the top bar draws the Assistant again").not.toContain("shell.app.askAssistant");
     expect(shellTsx).toContain('className="assistant-fab"');
@@ -446,5 +446,20 @@ describe("the Assistant's round button", () => {
     expect(SHELL).toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*72px;/);
     expect(SHELL_BLOCKS.get(640) ?? "").toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*64px;/);
     expect(SHELL).toMatch(/body\.assistant-fab-on \.content\s*\{\s*padding-bottom:\s*88px;/);
+  });
+});
+
+/**
+ * A FOLDER'S OR ADMIN'S PAGE NAME WRAPS, IT IS NOT CUT (critique of the rail,
+ * 2026-11-24, P1). At the rail's 232px a sub-item's label starts 77px in, and
+ * in Spanish "Registro de auditoría" or "Automatización con IA" did not fit:
+ * the current page read "Registro de aud…". The rail's width and the 40px
+ * indent are DESIGN.md's and the mock's, so the name takes a second line.
+ */
+describe("the rail's sub-items", () => {
+  it("let a long name take a second line instead of an ellipsis", () => {
+    const rule = /\.nav-item\.sub \.lbl\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(rule, "no `.nav-item.sub .lbl` rule in shell.css").not.toBe("");
+    expect(rule).toMatch(/white-space:\s*normal/);
   });
 });

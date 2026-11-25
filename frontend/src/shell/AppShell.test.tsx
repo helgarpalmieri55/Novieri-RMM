@@ -976,6 +976,9 @@ describe("AppShell session notice", () => {
     expect(fab).toHaveAttribute("href", "/assistant");
     expect(fab).toHaveClass("assistant-fab");
     expect(bar.contains(fab)).toBe(false);
+    // INSIDE A LANDMARK (critique 2026-11-24, P1; axe `region` on every route
+    // when it was drawn after `</main>`): the last thing in the page's main.
+    expect(screen.getByRole("main").lastElementChild).toBe(fab);
     const anchored = screen.getByRole("navigation", { name: "Assistant and Admin" });
     expect(within(anchored).getByRole("link", { name: "Assistant" })).toHaveAttribute("href", "/assistant");
     expect(within(bar).queryByRole("link", { name: "IT documentation" })).toBeNull();
