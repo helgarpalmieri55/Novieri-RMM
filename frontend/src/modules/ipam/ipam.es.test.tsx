@@ -1729,7 +1729,8 @@ describe("the state helpers' sentences in Spanish", () => {
     expect(allocationMethodPresentation({ allocation_method: "odd_one", allocation_method_source: "weird" as never }).meaning).toBe(
       "Método de asignación «odd_one» (origen no reconocido).",
     );
-    expect(allocationMethodPresentation({ allocation_method: "unknown", allocation_method_source: "unknown" })).toMatchObject({ label: "—" });
+    // Nobody has said: no word to draw (the grid draws NoValue), never a dash.
+    expect(allocationMethodPresentation({ allocation_method: "unknown", allocation_method_source: "unknown" })).toMatchObject({ label: null });
     setActiveLanguage("en");
     expect(allocationMethodPresentation({ allocation_method: "static", allocation_method_source: "documented" }).meaning).toBe(
       "Documented: an operator set this address's allocation method to \"static\".",

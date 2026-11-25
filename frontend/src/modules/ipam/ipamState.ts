@@ -296,12 +296,19 @@ export function allocationMethodLabel(method: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/**
+ * An address's allocation method as a label and what it means. `label` is
+ * `null` when nobody has said (the method is unknown): there is no word to
+ * draw, and the caller draws the kit's absent mark (`NoValue`) with the
+ * meaning on it. It was a bare dash, which the caller compared and replaced;
+ * a caller that drew it would have drawn a dash (adoption pass, no-dash rule).
+ */
 export function allocationMethodPresentation(
   entry: Pick<GridEntryOut, "allocation_method" | "allocation_method_source">,
-): { label: string; meaning: string } {
+): { label: string | null; meaning: string } {
   const method = entry.allocation_method;
   if (method === "unknown" || method === "") {
-    return { label: "—", meaning: translate("ipam.allocation.noneMeaning") };
+    return { label: null, meaning: translate("ipam.allocation.noneMeaning") };
   }
   const label = allocationMethodLabel(method);
   if (entry.allocation_method_source === "documented") {
