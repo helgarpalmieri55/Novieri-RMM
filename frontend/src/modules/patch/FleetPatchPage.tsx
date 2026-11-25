@@ -28,7 +28,7 @@ import {
   type PatchFamily,
 } from "./patchTabs";
 import type { SelectedHost } from "./selection";
-import { Btn, ClientFilter, PageHead, UrlTabs, useUrlFilters } from "../../shell/components";
+import { Btn, ClientFilter, PageHead, UrlTabs, useUrlFilters, writeQuery, type UrlFilters } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import type { UpdateFilters } from "./UpdatesPanel";
 
@@ -216,6 +216,23 @@ export function FleetPatchPage() {
     setSelectedIds((current) => (current.length === 0 ? current : []));
     setSelectedHosts((current) => (current.length === 0 ? current : []));
   }, [chip]);
+  // ...and both PAGE POSITIONS, which are places in the old client's lists:
+  // the kit drops the update list's `offset`, and the machine list's
+  // `devices` goes with it (review fix round 1), as a tab change drops both.
+  const clientChipFilters = useMemo<UrlFilters<"client">>(
+    () => ({
+      ...clientChip,
+      set: (key, value, options = {}) => {
+        const next = new URLSearchParams(params);
+        if (value === "") next.delete(key);
+        else next.set(key, value);
+        next.delete("offset");
+        next.delete("devices");
+        writeQuery(params, next, setParams, { replace: options.replace });
+      },
+    }),
+    [clientChip, params, setParams],
+  );
 
   const report = usePatchFleetReport(chip);
   const approvals = usePatchApprovals({}, chip);
@@ -481,7 +498,7 @@ export function FleetPatchPage() {
           devicesAnchorId={DEVICES_ANCHOR}
           devicesAnchorRef={devicesSection}
           chip={chip}
-          clientFilter={<ClientFilter filters={clientChip} />}
+          clientFilter={<ClientFilter filters={clientChipFilters} />}
         />
       </UrlTabs>
 

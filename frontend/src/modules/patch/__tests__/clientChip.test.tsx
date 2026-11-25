@@ -89,6 +89,19 @@ describe("FleetPatchPage under the Client chip", () => {
     expect(screen.queryAllByRole("table")).toEqual([]);
   });
 
+  it("drops both lists' page positions when the client changes", async () => {
+    // `?offset=` and `?devices=` are positions in the old client's lists: on
+    // another client's they point past rows nobody has seen, or past the end.
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/patch?offset=25&devices=25", <FleetPatchPage />, "/patch");
+    const chip = await screen.findByRole("combobox", { name: "Client" });
+    await userEvent.selectOptions(chip, ANDES);
+    const search = new URLSearchParams(router.state.location.search);
+    expect(search.get("client")).toBe(ANDES);
+    expect(search.has("offset")).toBe(false);
+    expect(search.has("devices")).toBe(false);
+  });
+
   it("says why the list is empty", async () => {
     // Nothing rated low: the filter is the cause, and the sentence says what it hides.
     const registry = fixtureRegistry();
