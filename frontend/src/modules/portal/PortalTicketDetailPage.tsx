@@ -170,8 +170,8 @@ function ApprovalOutcomeCard({
           {portalApprovalLabel(approval.state)}
         </Badge>
         {/* `formatDateTime` renders NO_DATE for a null decision time, so the
-            guard is only about not printing a bare em dash beside a state that
-            has not been decided at all. */}
+            guard is only about not printing a bare absent mark beside a state
+            that has not been decided at all. */}
         {approval.decided_at && (
           <span className="note">{formatDateTime(approval.decided_at, zone)}</span>
         )}
