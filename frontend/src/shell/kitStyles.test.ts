@@ -59,3 +59,26 @@ describe("a page's and a record's title balance their lines (kit requests batch 
     expect(source("./formKit.tsx")).toMatch(/<section className="ph">/);
   });
 });
+
+describe("ListToolbar: the chips flow beside the search (kit requests batch 1, item 1)", () => {
+  // /devices' toolbar was four rows tall at 1440: the search took the whole
+  // first row, because `.list-chips` was ONE flex item, and a flex line breaks
+  // on an item's max-content width, so the chips never fit beside it. A search
+  // basis alone (O1's proposal) left it so: measured in Chromium over
+  // /__preview, the replica of /devices' toolbar stayed 180px tall at 1440.
+  it("lets each chip group be a flex item of the bar, so a group fits beside the search on its own width", () => {
+    expect(rule(KIT, ".filterbar > .list-chips")).toMatch(/display:\s*contents/);
+  });
+
+  it("gives the search a basis and a ceiling beside chips, so it neither crowds them out nor stretches across the row", () => {
+    const search = rule(KIT, ".filterbar:has(> .list-chips) > .srch-wrap");
+    expect(search).toMatch(/flex:\s*1 1 320px/);
+    expect(search).toMatch(/max-width:\s*480px/);
+  });
+
+  it("leaves a toolbar with no chips as it was: the search still takes the row", () => {
+    // Non-vacuity in the other direction: the ceiling is scoped to a bar that
+    // holds chips, never written on every `.filterbar > .srch-wrap`.
+    expect(rule(KIT, ".filterbar > .srch-wrap")).toBe("");
+  });
+});
