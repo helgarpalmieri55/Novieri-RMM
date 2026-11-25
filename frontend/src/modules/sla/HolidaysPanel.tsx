@@ -137,7 +137,7 @@ export function HolidaysPanel({
         title={t("sla.holidays.removeTitle")}
         subject={
           pendingRemove
-            ? `${formatHolidayDate(pendingRemove.holiday_date)} — ${pendingRemove.name}`
+            ? `${formatHolidayDate(pendingRemove.holiday_date)}: ${pendingRemove.name}`
             : ""
         }
         body={t("sla.holidays.removeBody")}

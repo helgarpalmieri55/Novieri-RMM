@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { NoValue } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
 import { Badge } from "../../components/ui";
 import { Panel } from "../../shell/components";
@@ -199,9 +200,10 @@ function SlaFootnotes({ sla, zone }: { sla: TicketSlaOut; zone: string | null })
   const t = useT();
   const source = sla.policy_source;
   // An unrecognised source still says something rather than nothing: the raw
-  // value, humanised, is better than "—" when the server grows a fourth one.
+  // value, humanised, is better than the absent mark when the server grows a
+  // fourth one. No source at all is the kit's absent mark, named.
   const headlineKey = source ? POLICY_SOURCE_HEADLINES[source] : undefined;
-  const headline = source ? (headlineKey ? translate(headlineKey) : humaniseStatus(source)) : "—";
+  const headline = source ? (headlineKey ? translate(headlineKey) : humaniseStatus(source)) : null;
   const noteKey = source ? POLICY_SOURCE_NOTES[source] : undefined;
   const sourceNote = noteKey ? translate(noteKey) : undefined;
   return (
@@ -210,16 +212,16 @@ function SlaFootnotes({ sla, zone }: { sla: TicketSlaOut; zone: string | null })
       items={[
         { k: t("sla.ticket.factSource"), v: (
           <>
-            {headline}
+            {headline ?? <NoValue label={t("sla.ticket.noSource")} />}
             {sourceNote && <span className="note" style={{ display: "block" }}>{sourceNote}</span>}
           </>
         ) },
         // "No" is a real answer (this ticket has not escalated) and is
-        // deliberately NOT `NO_DATE`: an em dash here would read as "we do
-        // not know", which is a different and worse claim.
+        // deliberately NOT `NO_DATE`: the absent mark here would read as "we
+        // do not know", which is a different and worse claim.
         { k: t("sla.ticket.factEscalated"), v: sla.escalated_at ? formatDateTime(sla.escalated_at, zone) : t("sla.ticket.no") },
-        { k: t("sla.ticket.factPolicy"), v: sla.policy_name ?? "—" },
-        { k: t("sla.ticket.factHours"), v: sla.calendar_name ?? "—" },
+        { k: t("sla.ticket.factPolicy"), v: sla.policy_name ?? <NoValue label={t("sla.ticket.noPolicy")} /> },
+        { k: t("sla.ticket.factHours"), v: sla.calendar_name ?? <NoValue label={t("sla.ticket.noHours")} /> },
       ]}
     />
   );

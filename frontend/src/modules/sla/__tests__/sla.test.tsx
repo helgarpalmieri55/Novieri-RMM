@@ -319,6 +319,16 @@ describe("SLA administration", () => {
     expect(screen.getAllByText(/this queue \+ any priority/).length).toBe(2);
     expect(screen.getAllByText("Shadowed by a more specific level").length).toBe(2);
     expect(screen.getByText("Applies")).toBeInTheDocument();
+    // A level with no policy draws the kit's absent mark in its Policy cell,
+    // named for a screen reader, never a bare dash.
+    const unmatched = screen.getAllByText("No active policy at this level", { selector: ".cell-sub" });
+    expect(unmatched.length).toBeGreaterThan(0);
+    for (const sub of unmatched) {
+      const policy = (sub.closest("tr") as HTMLElement).querySelectorAll("td")[2] as HTMLElement;
+      expect(policy.querySelector(".no-value")).toHaveTextContent("n/a");
+      expect(within(policy).getByText("No active policy at this level")).toHaveClass("sr-only");
+      expect(policy.textContent).not.toContain("—");
+    }
   });
 
   // Review wave round 3 (harmony): the panel's only two controls sat in a
@@ -626,6 +636,29 @@ describe("ticket SLA panel", () => {
 
     expect(await screen.findByText("2h remaining")).toBeInTheDocument();
     expect(screen.getByText("8h remaining")).toBeInTheDocument();
+  });
+
+  it("draws the absent mark for a fact the row does not carry, never a dash", async () => {
+    renderTicketSla(
+      ticketSla({
+        response_due_at: fromNow(2 * HOUR + 30_000),
+        resolution_due_at: fromNow(8 * HOUR + 30_000),
+        policy_source: null,
+        policy_name: null,
+        calendar_name: null,
+      }),
+    );
+    expect(await screen.findByText("2h remaining")).toBeInTheDocument();
+    for (const [term, label] of [
+      ["Policy applied because", "No reason recorded"],
+      ["Policy", "No policy name recorded"],
+      ["Working hours", "No working hours recorded"],
+    ] as const) {
+      const value = screen.getByText(term, { selector: "dt" }).nextElementSibling as HTMLElement;
+      expect(value.querySelector(".no-value")).toHaveTextContent("n/a");
+      expect(within(value).getByText(label)).toHaveClass("sr-only");
+      expect(value.textContent).not.toContain("—");
+    }
   });
 
   it("says past due without claiming a breach the server has not recorded", async () => {
@@ -1166,6 +1199,9 @@ describe("destructive failures are announced, not swallowed", () => {
     const row = await firstRowOf("Date");
     expect(within(row).getByText("25 Dec 2026")).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: "Remove" }));
+    // The question names the holiday by its date and name, joined by a colon
+    // (no em dash in the interface).
+    expect(await screen.findByText("25 Dec 2026: Christmas Day")).toBeInTheDocument();
     // Removing asks first (cycle 8); the refusal is on the far side of it.
     await user.click(await screen.findByRole("button", { name: "Remove holiday" }));
 
