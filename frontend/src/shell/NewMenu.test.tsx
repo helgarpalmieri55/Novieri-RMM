@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -47,6 +47,13 @@ describe("NewMenu", () => {
     await userEvent.tab();
     expect(screen.getByRole("textbox", { name: "After the menu" })).toHaveFocus();
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("stays open when focus goes nowhere, so a click on an item still lands (Safari focuses no clicked link)", async () => {
+    renderPage("/x", <NewMenu entries={ENTRIES} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.focusOut(screen.getByRole("menuitem", { name: "Ticket" }), { relatedTarget: null });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("closes on Escape and gives focus back to the button", async () => {

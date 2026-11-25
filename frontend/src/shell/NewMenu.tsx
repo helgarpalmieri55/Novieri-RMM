@@ -71,8 +71,12 @@ export function NewMenu({ entries }: { entries: readonly NewMenuEntry[] }) {
     <div
       className="new-menu-anchor"
       onBlur={(event) => {
-        // Focus left the button and its list (Tab, or a click elsewhere).
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+        // Focus moved to something outside the button and its list (Tab). NOT
+        // on a null target: Safari does not focus a clicked link, and closing
+        // there would drop the click on a menu item; a click outside is the
+        // `mousedown` listener's to handle.
+        const next = event.relatedTarget as Node | null;
+        if (next !== null && !event.currentTarget.contains(next)) setOpen(false);
       }}
     >
       <button
