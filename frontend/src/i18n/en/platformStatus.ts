@@ -75,9 +75,9 @@ export const platformStatus = {
     timeout: "It answered too slowly to be usable. Check load, and the network path between this host and it.",
     auth_failed: "It answered, and rejected our credentials. Check the credential this deployment is configured with.",
     sealed: "The vault is sealed, so nothing stored in it can be decrypted. Unseal it to restore anything that reads a stored credential.",
-    empty_cache: "The cache answered but holds nothing yet — expected shortly after a restart, a problem if it persists.",
+    empty_cache: "The cache answered but holds nothing yet: expected shortly after a restart, a problem if it persists.",
     misconfigured: "The dependency is reachable but this deployment's settings for it are wrong. Check the configuration.",
-    stale: "The last update is older than it should be — the dependency answers, but what it is serving has stopped moving.",
+    stale: "The last update is older than it should be: the dependency answers, but what it is serving has stopped moving.",
     failed: "The last run reported a failure. Read that run's log on the host (journalctl) for the cause.",
   },
 } as const;
