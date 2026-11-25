@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -439,13 +439,13 @@ describe("every deploy page links to the other two", () => {
   ] as const;
 
   function expectStrip(activeLabel: string) {
-    // `role="tablist"` overrides the <nav> element's implicit role, so the
-    // strip is found as the tablist it announces itself to be.
-    const nav = screen.getByRole("tablist", { name: "Software deployment" });
+    // The kit's SectionNav (redesign plan, waves' common rules): a navigation
+    // of links, the current one marked `aria-current="page"`, not a tablist.
+    const nav = screen.getByRole("navigation", { name: "Software deployment" });
     for (const [label, href] of EXPECTED) {
-      expect(within(nav).getByRole("tab", { name: label })).toHaveAttribute("href", href);
+      expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("href", href);
     }
-    expect(within(nav).getByRole("tab", { name: activeLabel }).className).toContain("active");
+    expect(within(nav).getByRole("link", { name: activeLabel })).toHaveAttribute("aria-current", "page");
   }
 
   it("draws the strip on the deployments page", async () => {
@@ -481,7 +481,7 @@ describe("every deploy page links to the other two", () => {
     renderWithProviders(<ScriptsPage />, "/deploy/scripts");
 
     await screen.findByText("cleanup-temp");
-    expect(screen.queryByRole("tablist", { name: "Software deployment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Software deployment" })).not.toBeInTheDocument();
   });
 });
 
@@ -544,14 +544,16 @@ describe("PackagesPage", () => {
     renderWithProviders(<PackagesPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("No packages registered.")).not.toBeInTheDocument();
+    // The empty sentence is the brief's now (redesign plan, O3 3.4).
+    expect(screen.queryByText("No packages yet.")).not.toBeInTheDocument();
   });
 
   it("says the catalog is genuinely empty when it is", async () => {
     mockUseApi.mockReturnValue(baseApi(vi.fn(() => Promise.resolve([]))) as ApiClient);
     renderWithProviders(<PackagesPage />);
 
-    expect(await screen.findByText("No packages registered.")).toBeInTheDocument();
+    // Redesign plan, O3 3.4: "No packages yet.", with New package beside it.
+    expect(await screen.findByText("No packages yet.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -716,6 +718,45 @@ describe("ScriptsPage", () => {
     expect(api.getScript).toHaveBeenCalledWith("scr1");
     const textarea = await screen.findByDisplayValue(SCRIPT_DETAIL.body);
     expect(textarea).toBeInTheDocument();
+  });
+
+  // GENERAL RULING 13: no write without a change. Edit replaces the whole body
+  // of a script that runs as SYSTEM, and every PUT is an audit entry; a Save on
+  // the body as it was loaded is a close, not a write.
+  it("sends nothing when Save is pressed on an untouched script, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ScriptsPage />);
+
+    await screen.findByText("cleanup-temp");
+    const row = screen.getByText("cleanup-temp").closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit cleanup-temp" });
+    await within(dialog).findByDisplayValue(SCRIPT_DETAIL.body);
+    // Save stays enabled: pressing it untouched is allowed, and answers by closing.
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit cleanup-temp" })).toBeNull());
+    expect(api.editScript).not.toHaveBeenCalled();
+  });
+
+  it("sends the whole changed body when Save is pressed on a changed script", async () => {
+    api.editScript = vi.fn().mockResolvedValue({ ...SCRIPT_DETAIL, body: `${SCRIPT_DETAIL.body}\n# done` });
+    const user = userEvent.setup();
+    renderWithProviders(<ScriptsPage />);
+
+    await screen.findByText("cleanup-temp");
+    const row = screen.getByText("cleanup-temp").closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit cleanup-temp" });
+    const textarea = await within(dialog).findByDisplayValue(SCRIPT_DETAIL.body);
+    await user.type(textarea, "{Enter}# done");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.editScript).toHaveBeenCalledWith("scr1", { body: `${SCRIPT_DETAIL.body}\n# done` }),
+    );
+    expect(api.editScript).toHaveBeenCalledTimes(1);
   });
 
   it("calls the run mutation with the target the operator picked and confirmed", async () => {
@@ -1125,7 +1166,9 @@ describe("deploy failure paths say what went wrong", () => {
 
     await screen.findByText("cleanup-temp");
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByDisplayValue(SCRIPT_DETAIL.body);
+    // A change first: an untouched Save sends nothing, so it cannot fail
+    // (general ruling 13).
+    await user.type(await screen.findByDisplayValue(SCRIPT_DETAIL.body), "{Enter}# done");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/unavailable right now/);
@@ -1945,9 +1988,10 @@ describe("every deployment KPI tile is a link to the runs it counts", () => {
     renderWithProviders(<DeployPage />, "/deploy?state=failed");
     await screen.findByText("dep-bad");
 
-    const select = screen.getByRole("combobox", { name: "Filter by state" });
-    expect(select).toHaveValue("failed");
-    await user.selectOptions(select, "");
+    // The state filter is chips (redesign plan, Receta L): the tile's is pressed, "All" clears it.
+    const chips = screen.getByRole("group", { name: "Filter by state" });
+    expect(within(chips).getByRole("button", { name: "Failed" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(chips).getByRole("button", { name: "All deployments" }));
     expect(screen.getByText("dep-old")).toBeInTheDocument();
   });
 

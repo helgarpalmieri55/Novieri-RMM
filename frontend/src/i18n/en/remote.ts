@@ -48,7 +48,7 @@ export const remote = {
     searchPlaceholder: "Search device, protocol or state",
     searchLabel: "Search sessions",
     emptyNone: "No remote sessions yet.",
-    emptyFiltered: "No sessions match that filter.",
+    stateLabel: "Sessions",
     colDevice: "Device",
     colConsent: "Consent",
     colState: "State",
@@ -98,7 +98,7 @@ export const remote = {
     noCredential:
       "Your session in this console has ended, so the screen was not opened and nothing was asked of the device. Signing in again restores it.",
     titleFallback: "Remote session",
-    description: "The device's screen, live.",
+    back: "Remote sessions",
     ending: "Ending…",
     end: "End session",
     factConnection: "Connection",

@@ -38,6 +38,7 @@ export const security: Shape<typeof en> = {
       body: "No hay nada en {window} que coincida con {filters}. Puede que el filtro sea más estrecho que la evidencia, o que esté escrito de forma distinta al nombre que notificó el equipo.",
       filterUsername: "usuario «{username}»",
       filterEventType: "tipo de evento «{eventType}»",
+      filterClient: "cliente «{client}»",
       widen: "Ampliar a {range}",
       clear: "Quitar filtros",
     },
@@ -51,14 +52,13 @@ export const security: Shape<typeof en> = {
       user: "Usuario",
       when: "Cuándo",
     },
+    openEventAria: "{event} en {host}, {when}",
     noAccount: "Sin cuenta registrada",
     raw: {
       title: "Evento sin procesar",
       subtitle: "Campos almacenados de la fila seleccionada",
       loading: "Cargando…",
       noFields: "Este evento no tiene campos almacenados.",
-      noneTitle: "Ningún evento seleccionado",
-      noneBody: "Elige una fila de la lista de eventos para ver los campos almacenados con ella.",
     },
   },
   prerequisites: {

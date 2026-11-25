@@ -4,9 +4,8 @@ import { Link } from "react-router-dom";
 import { EmptyState, type EmptyStateProps } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
-import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
-import { Panel, StatCard, StatsGrid } from "../../shell/components";
+import { Panel, StatCard, StatsGrid, useNarrowedApi } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import {
   PATCH_ROLLUP_PAGE_SIZE,
@@ -89,6 +88,8 @@ export function PatchTabPanel({
   devicesHref,
   devicesAnchorId,
   devicesAnchorRef,
+  chip = "",
+  clientFilter,
 }: {
   family: PatchFamily;
   filters: UpdateFilters;
@@ -113,9 +114,16 @@ export function PatchTabPanel({
   devicesHref: () => string;
   devicesAnchorId: string;
   devicesAnchorRef: RefObject<HTMLDivElement | null>;
+  /** The Client chip's value (`?client=`): every list on the tab reads that client's (O3 3.2). */
+  chip?: string;
+  /** The Client chip itself, drawn in the update list's toolbar. */
+  clientFilter?: ReactNode;
 }) {
   const t = useT();
-  const api = useApi();
+  // Reads, the "select all N matching" resolvers among them, go through the
+  // chip's narrowing, so a selection is drawn from the rows on screen; the
+  // approvals and installs the bars send keep `useApi()`.
+  const { api } = useNarrowedApi(chip);
   const label = FAMILY_LABEL[family];
 
   /** The criterion this tab's update list is showing, in the API's own
@@ -133,14 +141,20 @@ export function PatchTabPanel({
     [filters.severities, filters.search, family],
   );
 
-  const updates = usePatchUpdates({
-    ...updateCriterion,
-    offset: filters.offset || undefined,
-  });
-  const devices = usePatchDeviceRollup({
-    os_family: family,
-    offset: deviceOffset || undefined,
-  });
+  const updates = usePatchUpdates(
+    {
+      ...updateCriterion,
+      offset: filters.offset || undefined,
+    },
+    chip,
+  );
+  const devices = usePatchDeviceRollup(
+    {
+      os_family: family,
+      offset: deviceOffset || undefined,
+    },
+    chip,
+  );
 
   const resolveMatchingUpdates = useCallback(
     () =>
@@ -202,6 +216,19 @@ export function PatchTabPanel({
     return count === 0 ? undefined : words;
   };
 
+  /**
+   * AND BEFORE THE READ, NEITHER (clarification 10a). Until the response a
+   * tile counts has answered -- under the Client chip that includes the wait
+   * for `/me`, when the reads are not even sent -- there is no figure and no
+   * claim: "—" and no line under it, as Alerts' tiles do. "0 ... every
+   * reporting machine is up to date" before anything was asked was a finding
+   * the page had not made.
+   */
+  const updatesFigure = (count: number): string =>
+    updates.isPending || neverScanned ? "—" : String(count);
+  const updatesFoot = (count: number, words: string): string | undefined =>
+    updates.isPending ? undefined : tileFoot(count, words);
+
   /** Both lists answered, and both are empty. Not "the filter matched nothing"
    *  — the severity filter cannot reach `total_unfiltered`, and the device
    *  rollup is never severity-filtered at all, so this really is "this platform
@@ -239,6 +266,7 @@ export function PatchTabPanel({
       subtitle={linux ? t("patch.tab.linuxUpdatesSub") : t("patch.tab.osUpdatesSub")}
       severityNote={SEVERITY_PROVENANCE[family]}
       scopeName={t("patch.tab.updatesScope", { label })}
+      clientFilter={clientFilter}
     />
   );
 
@@ -264,6 +292,7 @@ export function PatchTabPanel({
         fleetDeviceTotal={fleetDeviceTotal}
         platformLabel={label}
         managedCount={managedCount}
+        chip={chip}
         title={linux ? t("patch.tab.linuxMachinesTitle") : t("patch.tab.osMachinesTitle", { label })}
         subtitle={linux ? t("patch.tab.linuxMachinesSub") : t("patch.tab.osMachinesSub")}
         /* THE CHECKBOX COLUMN IS GATED ON `patch.apply`, NOT ON THE TAB. A
@@ -316,28 +345,28 @@ export function PatchTabPanel({
       <StatsGrid columns={4}>
         <StatCard
           label={t("patch.tab.updatesOutstanding")}
-          value={neverScanned ? "—" : String(outstanding)}
+          value={updatesFigure(outstanding)}
           icon="patch"
           to={severityHref(ALL_SEVERITIES_PARAM)}
           tone="neutral"
-          foot={tileFoot(outstanding, t("patch.tab.updatesFoot", { label }))}
+          foot={updatesFoot(outstanding, t("patch.tab.updatesFoot", { label }))}
           zeroLabel={t("patch.tab.updatesZero", { label })}
         />
         <StatCard
           label={t("patch.tab.critical")}
-          value={neverScanned ? "—" : String(criticalCount)}
+          value={updatesFigure(criticalCount)}
           icon="alert-triangle"
           to={severityHref("critical")}
           tone="red"
           urgent={criticalCount > 0}
-          foot={tileFoot(criticalCount, t("patch.tab.criticalFoot"))}
+          foot={updatesFoot(criticalCount, t("patch.tab.criticalFoot"))}
           zeroLabel={
             family === "macos" ? t("patch.tab.criticalZeroMac") : t("patch.tab.criticalZero")
           }
         />
         <StatCard
           label={t("patch.tab.important")}
-          value={neverScanned ? "—" : String(importantCount)}
+          value={updatesFigure(importantCount)}
           icon="clock-exclamation"
           to={severityHref("important")}
           tone="orange"
@@ -345,18 +374,18 @@ export function PatchTabPanel({
              rule that a measured zero is never loud still holds inside
              `StatCard`. */
           urgent={importantCount > 0}
-          foot={tileFoot(importantCount, t("patch.tab.importantFoot"))}
+          foot={updatesFoot(importantCount, t("patch.tab.importantFoot"))}
           zeroLabel={
             family === "linux" ? t("patch.tab.importantZeroLinux") : t("patch.tab.importantZero")
           }
         />
         <StatCard
           label={t("patch.tab.machines")}
-          value={neverScanned ? "—" : String(deviceTotal)}
+          value={devices.isPending || neverScanned ? "—" : String(deviceTotal)}
           icon="devices"
           to={devicesHref()}
           tone="blue"
-          foot={tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
+          foot={devices.isPending ? undefined : tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
           zeroLabel={t("patch.tab.machinesZero", { label })}
         />
       </StatsGrid>
@@ -406,6 +435,7 @@ export function PatchTabPanel({
                 canApprove={canApprove}
                 ringOptions={ringOptions}
                 fleetDeviceTotal={fleetDeviceTotal}
+                chip={chip}
               />
             </div>
           )}

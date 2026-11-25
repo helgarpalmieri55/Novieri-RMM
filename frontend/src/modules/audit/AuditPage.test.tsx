@@ -225,7 +225,8 @@ describe("AuditPage", () => {
 
     await userEvent.clear(screen.getByLabelText("Search the loaded page by action, actor or target"));
     await userEvent.type(screen.getByLabelText("Search the loaded page by action, actor or target"), "zzzz");
-    expect(screen.getByText("No loaded audit event matches that filter.")).toBeInTheDocument();
+    // The kit's filtered empty list now (redesign plan, Receta L); "Showing 0 of N" says the page was loaded.
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 
   it("sends the action filter to the SERVER, because that is where it is applied", async () => {

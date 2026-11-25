@@ -11,14 +11,31 @@ import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { Prerequisites } from "../../components/prerequisites";
 import { useFleetPrerequisite } from "../../lib/detectors";
-import { formatDateTime, intlLocale } from "../../lib/datetime";
+import { NO_DATE, formatDateTime, intlLocale } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { getLanguage } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useUrlFilters,
+} from "../../shell/components";
+import { Drawer } from "../../shell/Drawer";
 import { Icon } from "../../shell/icons";
-import { Chips, KV, Timeline, type Kind, type TimelineRun } from "../../shell/viz";
+import { KV, Timeline, type Kind, type TimelineRun } from "../../shell/viz";
 import {
   JOB_STATUSES,
   canRetry,
@@ -205,8 +222,11 @@ export function JobsPage() {
    * there is one vocabulary rather than a tile vocabulary and a control
    * vocabulary that drift apart. Same shape as `DevicesPage`'s `state`/`q`.
    */
-  const statusFilter = params.get("status") ?? "";
-  const search = params.get("q") ?? "";
+  // THE LIST KIT (redesign plan, O3 3.7): the same `status` and `q`, plus the
+  // Client chip's `client`; a chip is a history entry, the search is not.
+  const filters = useUrlFilters(["q", "status", "client"] as const);
+  const statusFilter = filters.values.status;
+  const search = filters.values.q;
 
   function update(patch: Record<string, string>, replace = false) {
     const next = new URLSearchParams(params);
@@ -219,10 +239,12 @@ export function JobsPage() {
     setParams(next, { replace });
   }
 
-  const setStatusFilter = (value: string) => update({ status: value });
-  // REPLACE, not push: one history entry per keystroke makes Back useless for
-  // exactly the person trying to undo a filter.
-  const setSearch = (value: string) => update({ q: value }, true);
+  const setStatusFilter = (value: string) => filters.set("status", value);
+  // REPLACE, not push (the kit's `q`): one history entry per keystroke makes
+  // Back useless for exactly the person trying to undo a filter.
+  const setSearch = (value: string) => filters.set("q", value);
+  /** Closing the open job takes it out of the URL, in place: Back is not spent on it. */
+  const closeJob = () => update({ job: "" }, true);
 
   /** A link to this job's detail that KEEPS whatever filter is on screen. */
   const detailHref = (jobId: string) => {
@@ -238,7 +260,22 @@ export function JobsPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const zone = me.data?.timezone;
 
-  const jobs = useQuery({ queryKey: ["jobs"], queryFn: () => api.listJobs() });
+  // UNDER THE CLIENT CHIP (decisions D6, D20) the queue and the machines that
+  // name it are that client's: the same calls, through `useNarrowedApi`, kept
+  // under the client's key (today's key without a chip; the client as
+  // `{ client }`, since `["devices", id]` is one device). The mutations still
+  // invalidate `["jobs"]`, which reaches every copy, and stop and retry keep
+  // `useApi()`. The open job is read by id, as before.
+  const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
+  // as Alerts' `withClient`): the tiles below count the chip's client.
+  const underChip = (to: string): string =>
+    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  const jobs = useQuery({
+    queryKey: client === null ? ["jobs"] : ["jobs", { client }],
+    queryFn: () => readApi.listJobs(),
+    enabled: ready,
+  });
   const detail = useQuery({
     queryKey: ["jobs", selected],
     queryFn: () => api.getJob(selected as string),
@@ -249,7 +286,11 @@ export function JobsPage() {
   // does rather than a UUID. Shares the `["devices"]` cache the rest of the
   // console fills; a device the join cannot resolve keeps its id, which is
   // still the thing to search the backend for.
-  const devices = useQuery({ queryKey: ["devices"], queryFn: () => api.listDevices() });
+  const devices = useQuery({
+    queryKey: client === null ? ["devices"] : ["devices", { client }],
+    queryFn: () => readApi.listDevices(),
+    enabled: ready,
+  });
   const hostnameFor = useMemo(() => {
     const byId = new Map((devices.data?.items ?? []).map((device) => [device.id, device.hostname ?? device.id]));
     return (id: string) => byId.get(id) ?? id;
@@ -467,45 +508,49 @@ export function JobsPage() {
           that need a person are loud. The zero labels are the other half:
           "0 failed" and "0 because nothing has run" are the same glyph, and
           only one of them is good news. */}
+      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
+          read a tile counts has answered -- under the Client chip that
+          includes the wait for `/me` -- it reads "—" with no line under it,
+          as Alerts' tiles do. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("jobs.tiles.jobs")}
-          value={String(total)}
+          value={jobs.isPending ? NO_DATE : String(total)}
           icon="jobs"
           // The whole queue: from a filtered view this is the way back to it.
-          to="/jobs"
+          to={underChip("/jobs")}
           tone="neutral"
           zeroLabel={t("jobs.tiles.jobsZero")}
-          foot={totalFoot}
+          foot={jobs.isPending ? undefined : totalFoot}
         />
         <StatCard
           label={t("jobs.tiles.running")}
-          value={String(running)}
+          value={jobs.isPending ? NO_DATE : String(running)}
           icon="progress"
-          to="/jobs?status=running"
+          to={underChip("/jobs?status=running")}
           tone="violet"
           zeroLabel={t("jobs.tiles.runningZero")}
-          foot={runningFoot}
+          foot={jobs.isPending ? undefined : runningFoot}
         />
         <StatCard
           label={t("jobs.tiles.failed")}
-          value={String(failed)}
+          value={jobs.isPending ? NO_DATE : String(failed)}
           icon="circle-x"
-          to="/jobs?status=failed"
+          to={underChip("/jobs?status=failed")}
           tone="red"
           urgent={failed > 0}
           zeroLabel={t("jobs.tiles.failedZero")}
-          foot={failedFoot}
+          foot={jobs.isPending ? undefined : failedFoot}
         />
         <StatCard
           label={t("jobs.tiles.waiting")}
-          value={String(stuck)}
+          value={jobs.isPending ? NO_DATE : String(stuck)}
           icon="clock-exclamation"
-          to="/jobs?status=stuck"
+          to={underChip("/jobs?status=stuck")}
           tone="gold"
           urgent={stuck > 0}
           zeroLabel={t("jobs.tiles.waitingZero")}
-          foot={stuckFoot}
+          foot={jobs.isPending ? undefined : stuckFoot}
         />
       </StatsGrid>
 
@@ -569,7 +614,6 @@ export function JobsPage() {
           560px floor pushed the whole page to 757px at 390 wide instead of
           scrolling inside `.table-wrap`. The two-column track is
           `minmax(0, …)` and has never had that problem. */}
-      <div className={selected ? "grid grid-2" : undefined}>
       <div>
         {/* Section headings, so the page has structure a screen reader can
             navigate by — Auditor A's "[LOW] Page has a single `<h1>` and no
@@ -577,53 +621,49 @@ export function JobsPage() {
             screen in the console. */}
         <h2 className="sr-only">{t("jobs.page.queueHeading")}</h2>
         <Panel bare>
-          <FilterBar>
-            <SearchField
-              placeholder={t("jobs.filters.searchPlaceholder")}
-              /* Bounded, like every other search field in the console
-                 (Auditor A, "[LOW] Search input has no maxlength and accepts
-                 500+ characters"). A job id is 36 characters; 128 leaves room
-                 for anything a person would actually paste. */
-              maxLength={128}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label={t("jobs.filters.searchAria")}
-            />
-            {/* THE STATUS FILTER IS v3's CHIP ROW, not a native select. The
-                design draws this page's filter as chips, and the select the
-                port shipped kept the browser's own control -- its chevron, its
-                menu, its metrics -- beside kit fields, so one filter bar spoke
-                two vocabularies. The chips also say the states in words: the
-                options were the wire's own `queued`/`dispatched`, lowercase,
-                because an <option> has nowhere to put a label. Every value the
-                select carried is still here, `stuck` included, and it is still
-                the URL's own vocabulary. */}
-            <Chips
-              label={t("jobs.filters.label")}
-              items={filterOptions.map((option) => option.label)}
-              /* A status in the URL that this build does not know marks NO
-                 chip: the list below is filtered by it either way, and
-                 lighting "All" would be the one reading that is false. */
-              active={filterOptions.findIndex((option) => option.value === statusFilter)}
-              onSelect={(index) => setStatusFilter(filterOptions[index]?.value ?? "")}
-            />
-            <span className="filter-spacer" />
-            {jobs.data ? (
-              <span className="mono cell-sub">
-                {t("jobs.filters.count", { count: filtered.length })}
-              </span>
-            ) : null}
-          </FilterBar>
-          <QueryState
-            loading={jobs.isLoading}
-            error={jobs.error}
-            empty={filtered.length === 0}
-            emptyLabel={
-              items.length === 0 ? t("jobs.filters.emptyNone") : t("jobs.filters.emptyFiltered")
+          <ListToolbar
+            search={
+              <SearchField
+                placeholder={t("jobs.filters.searchPlaceholder")}
+                /* Bounded, like every other search field in the console
+                   (Auditor A, "[LOW] Search input has no maxlength and accepts
+                   500+ characters"). A job id is 36 characters; 128 leaves room
+                   for anything a person would actually paste. */
+                maxLength={128}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                aria-label={t("jobs.filters.searchAria")}
+              />
             }
-            emptyIcon="jobs"
-          >
-          <Table>
+            chips={
+              <>
+                {/* THE STATUS FILTER IS THE KIT'S CHIP GROUP (redesign plan,
+                    Receta L). Every value the select once carried is a chip,
+                    `stuck` included, in words, and the URL's own vocabulary. A
+                    status in the URL this build does not know presses no chip:
+                    the list below is filtered by it either way. No numbers:
+                    `GET /jobs` sends no count by status. */}
+                <FilterChips
+                  label={t("jobs.filters.label")}
+                  options={filterOptions.map((option) => ({ value: option.value, label: option.label }))}
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                />
+                <ClientFilter filters={filters} />
+              </>
+            }
+            end={jobs.data ? <ShowingCount shown={filtered.length} total={total} /> : null}
+          />
+          <QueryState loading={jobs.isPending} error={jobs.error} empty={false} emptyLabel="">
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="jobs"
+              nothingYet={t("jobs.filters.emptyNone")}
+            />
+          ) : (
+          <Table label={t("jobs.page.queueHeading")}>
             <thead>
               <tr>
                 <Th>{t("jobs.table.name")}</Th>
@@ -684,16 +724,14 @@ export function JobsPage() {
               ))}
             </tbody>
           </Table>
+          )}
           </QueryState>
         </Panel>
       </div>
-      {selected ? (
-      <div>
-        <h2 className="sr-only">{t("jobs.page.detailHeading")}</h2>
-        {/* `Panel`, not `Card`: the queue beside it is a `Panel` and this is
-            the same box. The section already has its own `sr-only` heading,
-            so the panel takes no title of its own. */}
-        <Panel>
+      {/* THE OPEN JOB IN ITS DRAWER (redesign plan, O3 3.7), from `?job=`, so
+          a job is still a link and Back still closes it. It was a pane beside
+          the queue; the drawer's title is the section's heading. */}
+      <Drawer open={selected != null} onClose={closeJob} title={t("jobs.page.detailHeading")}>
           {detail.data ? (
             <div style={{ display: "grid", gap: 14 }}>
               {/* IDENTITY FIRST. Auditor B: "Once the panel opens, the user has
@@ -876,10 +914,7 @@ export function JobsPage() {
                cannot claim nothing is selected. */
             <p className="cell-sub">{t("jobs.page.loadingJob")}</p>
           )}
-        </Panel>
-      </div>
-      ) : null}
-      </div>
+      </Drawer>
     </>
   );
 }

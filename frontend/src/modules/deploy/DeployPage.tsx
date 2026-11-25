@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -8,6 +8,7 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { WeekPainter } from "../../components/weekpainter";
 import { useT } from "../../i18n/context";
+import { NO_DATE } from "../../lib/datetime";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { humaniseEnum } from "../../lib/labels";
@@ -42,7 +43,25 @@ import {
 } from "./pickerOptions";
 import { initialsOf, personIndex } from "../../lib/people";
 import type { Deployment, DeploymentAction, DeployTargetType } from "./types";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 
 // The design's `P['deploy']` (docs/design/itms-prototype-v3.html): the head
 // with New deployment as the page's primary, a tile row, and one bare panel
@@ -111,7 +130,9 @@ function actionGlyph(action: string): string {
 export function DeployPage() {
   const t = useT();
   const api = useApi();
-  const [createOpen, setCreateOpen] = useState(false);
+  // New → Deployment (decision D8): `?new=deployment` opens the dialog, so a
+  // link can.
+  const created = useNewParam("deployment");
 
   /**
    * THE LIST FILTER LIVES IN THE URL, because the stat tiles link into it.
@@ -119,25 +140,12 @@ export function DeployPage() {
    * "Failed 3" is an anchor to `/deploy?state=failed` now, and a filter held
    * in component state cannot be reached by a link: the tile would have been
    * a link to the page its reader is already on. `q` mirrors `DevicesPage`'s
-   * search param; `state` carries the backend's own state words.
+   * search param; `state` carries the backend's own state words; `client` is
+   * the Client chip's (redesign plan, Receta L).
    */
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q") ?? "";
-  const stateFilter = params.get("state") ?? "";
-
-  function update(patch: Record<string, string>, replace = false) {
-    const next = new URLSearchParams(params);
-    for (const [key, value] of Object.entries(patch)) {
-      // Absent, not `?q=`: an empty filter in the URL reads as a filter set to
-      // nothing.
-      if (value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    setParams(next, { replace });
-  }
-
-  const setSearch = (value: string) => update({ q: value }, true);
-  const setStateFilter = (value: string) => update({ state: value });
+  const filters = useUrlFilters(["q", "state", "client"] as const);
+  const search = filters.values.q;
+  const stateFilter = filters.values.state;
   // The deployment awaiting confirmation, or null. Holding the ROW rather than
   // an id keeps the confirmation's subject readable even if a refetch drops it.
   const [pendingExecute, setPendingExecute] = useState<Deployment | null>(null);
@@ -148,7 +156,14 @@ export function DeployPage() {
   const canCreate = permissions.includes("deploy.create");
   const canExecute = permissions.includes("deploy.execute");
 
-  const deployments = useDeployments();
+  // Narrowed to the Client chip's client; executing keeps `useApi()`.
+  const deployments = useDeployments(filters.values.client);
+  // The client the list was read for (null without a chip, or before `/me`).
+  const { client } = useNarrowedApi(filters.values.client);
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
+  // as Alerts' `withClient`): the tiles below count the chip's client.
+  const underChip = (to: string): string =>
+    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
   const execute = useExecuteDeploymentMutation();
 
   // Fetched by the PAGE, not only by the create dialog: the table rendered
@@ -237,6 +252,9 @@ export function DeployPage() {
   // operator-initiated action with no approval workflow (that is patch's
   // ring/approval gate, not deploy's). The three cards below are computed
   // from `deployments`, the same list this page renders.
+  // Until the list answers, the tiles have nothing to count (clarification 10a).
+  const unanswered = deployments.isPending;
+  const counted = (figure: string): string => (unanswered ? NO_DATE : figure);
   const stats = useMemo(() => {
     const thisWeek = allDeployments.filter((d) => isThisWeek(d)).length;
     const terminal = allDeployments.filter((d) => d.state === "complete" || d.state === "failed");
@@ -283,7 +301,7 @@ export function DeployPage() {
         description={t("deploy.deployments.description")}
         actions={
           canCreate ? (
-            <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" onClick={() => setCreateOpen(true)} />
+            <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" onClick={created.start} />
           ) : undefined
         }
       />
@@ -313,17 +331,21 @@ export function DeployPage() {
           (inert total neutral, an informational count blue, healthy green,
           failure red) and only Failed is loud, because it is the only one of
           the four that needs somebody. */}
+      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
+          deployments answer -- under the Client chip that includes the wait
+          for `/me` -- each tile reads "—" with no line under it, as Alerts'
+          tiles do. "Nothing has ever been deployed" is a finding, not a default. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("deploy.deployments.tileDeployments")}
-          value={String(stats.total)}
+          value={counted(String(stats.total))}
           icon="package"
           // Every deployment: from a filtered view, the way back.
-          to="/deploy"
+          to={underChip("/deploy")}
           tone="neutral"
           zeroLabel={t("deploy.deployments.tileDeploymentsZero")}
           foot={
-            stats.total === 0
+            unanswered || stats.total === 0
               ? undefined
               : stats.running > 0
                 ? t("deploy.deployments.stillToRun", { count: stats.running })
@@ -332,23 +354,25 @@ export function DeployPage() {
         />
         <StatCard
           label={t("deploy.deployments.tileWeek")}
-          value={String(stats.thisWeek)}
+          value={counted(String(stats.thisWeek))}
           icon="calendar-event"
-          to="/deploy?state=week"
+          to={underChip("/deploy?state=week")}
           tone="blue"
           zeroLabel={t("deploy.deployments.tileWeekZero")}
-          foot={stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
+          foot={unanswered || stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
         />
         <StatCard
           label={t("deploy.deployments.tileRate")}
-          value={stats.successRate}
+          value={counted(stats.successRate)}
           icon="circle-check"
-          to="/deploy?state=complete"
+          to={underChip("/deploy?state=complete")}
           tone="green"
           // NO `zeroLabel`: this tile's "nothing measured" case is "—", not 0,
           // and `rateFoot` already says which: "No completed runs yet".
           foot={
-            stats.rateUnknown
+            unanswered
+              ? undefined
+              : stats.rateUnknown
               ? t("deploy.deployments.rateNone")
               : t("deploy.deployments.rateOf", {
                   complete: stats.complete,
@@ -359,52 +383,63 @@ export function DeployPage() {
         />
         <StatCard
           label={t("deploy.deployments.tileFailed")}
-          value={String(stats.failed)}
+          value={counted(String(stats.failed))}
           icon="circle-x"
-          to="/deploy?state=failed"
+          to={underChip("/deploy?state=failed")}
           tone="red"
           urgent={stats.failed > 0}
           zeroLabel={t("deploy.deployments.tileFailedZero")}
-          foot={stats.failed === 0 ? undefined : t("deploy.deployments.runsFinished", { count: stats.finished })}
+          foot={unanswered || stats.failed === 0 ? undefined : t("deploy.deployments.runsFinished", { count: stats.finished })}
         />
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("deploy.deployments.searchPlaceholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("deploy.deployments.searchLabel")}
-          />
-          {/* The control the tiles link into, and the one that clears what
-              they set. */}
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => setStateFilter(event.target.value)}
-            aria-label={t("deploy.deployments.filterLabel")}
-          >
-            <option value="">{t("deploy.deployments.filterAll")}</option>
-            {STATE_FILTERS.map((option) => (
-              <option key={option} value={option}>
-                {filterLabel(option)}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-
-        <QueryState
-          loading={deployments.isLoading}
-          error={deployments.error}
-          empty={deployments.data != null && filtered.length === 0}
-          emptyIcon="package"
-          emptyLabel={
-            allDeployments.length === 0 ? t("deploy.deployments.emptyNone") : t("deploy.deployments.emptyFiltered")
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("deploy.deployments.searchPlaceholder")}
+              value={search}
+              onChange={(event) => filters.set("q", event.target.value)}
+              aria-label={t("deploy.deployments.searchLabel")}
+            />
           }
-        >
-          <Table>
+          chips={
+            <>
+              {/* The control the tiles link into, and the one that clears
+                  what they set. No counts: `GET /deploy/deployments` sends
+                  none, and a number counted here would be the browser's. */}
+              <FilterChips
+                label={t("deploy.deployments.filterLabel")}
+                options={[
+                  { value: "", label: t("deploy.deployments.filterAll") },
+                  ...STATE_FILTERS.map((option) => ({ value: option, label: filterLabel(option) })),
+                ]}
+                value={stateFilter}
+                onChange={(value) => filters.set("state", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={deployments.data ? <ShowingCount shown={filtered.length} total={allDeployments.length} /> : null}
+        />
+
+        <QueryState loading={deployments.isPending} error={deployments.error} empty={false} emptyLabel="">
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="package"
+              nothingYet={t("deploy.deployments.emptyNone")}
+              action={
+                canCreate ? (
+                  <Btn label={t("deploy.deployments.newDeployment")} icon="plus" small onClick={created.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          // Named for what it lists: the heading is the rail's "Software" now
+          // (coordinator ruling, wave O3 fix round 1), too broad for a table.
+          <Table label={t("deploy.nav.deployments")}>
             <thead>
               <tr>
                 <Th>{t("deploy.deployments.colPackage")}</Th>
@@ -494,6 +529,7 @@ export function DeployPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -537,7 +573,10 @@ export function DeployPage() {
         }}
       />
 
-      <CreateDeploymentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {/* MOUNTED ONLY WHILE OPEN (general ruling 4): however it opens -- the
+          button, a link, Back or Forward -- the form starts empty, and nothing
+          from the last one (a refusal included) is carried over. */}
+      {created.open && canCreate ? <CreateDeploymentDialog open onClose={created.close} /> : null}
     </div>
   );
 }
@@ -568,6 +607,16 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
   // reached yet is its own kind of unhelpful. Held as rules + values and worded
   // at render (see `Attempt`), so a language switch re-words it.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (general ruling 3): Cancel,
+  // Escape and Back all leave `?new=deployment`, and the guard asks first.
+  const changed =
+    packageId !== "" ||
+    action !== "install" ||
+    targetType !== "device" ||
+    targetId !== "" ||
+    windowCron !== "" ||
+    changeId !== "";
+  const { guard, release } = useUnsavedGuard(changed, { search: ["new"] });
 
   // Not memoised: the sublabels are worded, and must follow a language switch.
   const packageOptions = packagePickerOptions(packages.data ?? []);
@@ -597,23 +646,19 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
       },
       {
         onSuccess: () => {
-          setChangeId("");
-          setPackageId("");
-          setTargetId("");
-          setWindowCron("");
-          setAttempt(null);
+          // Saved: leaving does not ask.
+          release();
           onClose();
         },
       },
     );
   }
 
-  // This dialog is never unmounted -- the page keeps it rendered and toggles
-  // `open` -- so a refusal from the last attempt would otherwise still be
-  // announced when the operator opens it again for a different deployment.
+  // The page mounts this dialog only while it is open, so the next opening
+  // starts from an empty form with no refusal from this one. Nothing is reset
+  // here: the guard may still keep the operator in the form, which then keeps
+  // what it held, its last refusal included.
   function dismiss() {
-    setAttempt(null);
-    create.reset();
     onClose();
   }
 
@@ -622,6 +667,7 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
   // by keyboard clears a stale refusal exactly as leaving by Cancel does.
 
   return (
+    <>
     <Dialog open={open} onClose={dismiss} title={t("deploy.deployments.create.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -772,5 +818,9 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
         </div>
       </Form>
     </Dialog>
+    {/* AFTER THE FORM (fix round 2, C1): the leave question and the form are both
+        `.modal` at one z-index, so the later one in the document paints on top. */}
+    {guard}
+    </>
   );
 }

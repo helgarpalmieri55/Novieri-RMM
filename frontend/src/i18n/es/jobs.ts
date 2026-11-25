@@ -50,9 +50,7 @@ export const jobs: Shape<typeof en> = {
     stuck: "Esperando demasiado",
     searchPlaceholder: "Tipo de tarea, id de la tarea, dispositivo",
     searchAria: "Buscar tareas",
-    count: { one: "{count} tarea", other: "{count} tareas" },
     emptyNone: "Aún no se ha enviado ninguna tarea.",
-    emptyFiltered: "Ninguna tarea coincide con ese filtro.",
   },
   table: {
     name: "Nombre",

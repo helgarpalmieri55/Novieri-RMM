@@ -1,14 +1,25 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
-import { EmptyState, NoValue } from "../../components/emptystate";
+import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { lazyLabels } from "../../i18n/lazy";
 import { Badge, Table, Td, Th } from "../../components/ui";
 import { ApiError } from "../../lib/api";
 import { RelTime } from "../../components/reltime";
 import { formatDateTime, intlLocale } from "../../lib/datetime";
-import { Btn, FilterBar, Panel } from "../../shell/components";
+import { ADD_COMPUTER_CTA, useFleetQuery } from "../../lib/detectors";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  Panel,
+  QueryState,
+  ResultCount,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON, kindOf } from "../../shell/viz";
 import { useHealthAlerts, useUserTimezone } from "./api";
@@ -24,7 +35,7 @@ import {
   isMachineResolved,
   severityVariant,
 } from "./healthState";
-import type { AlertFilters, AlertOut, AlertState, HealthSeverity } from "./types";
+import type { AlertFilters, AlertOut, AlertState, AlertSummary, HealthSeverity } from "./types";
 
 // The live alert list (spec §13), filterable by state, severity and device, and
 // sortable by flapping. Drawn in v3's row shape (`P['health']`): the check's
@@ -45,6 +56,8 @@ import type { AlertFilters, AlertOut, AlertState, HealthSeverity } from "./types
 // `healthState.ts` owns those three decisions; this file only lays them out.
 
 const STATES: ReadonlyArray<AlertState> = ["active", "acknowledged", "muted", "cleared"];
+/** The three states an open alert wears, which the server's summary counts. */
+const OPEN_STATES = ["active", "acknowledged", "muted"] as const;
 const SEVERITIES: ReadonlyArray<HealthSeverity> = ["critical", "warning", "info"];
 
 // THE FILTERS LIVE IN THE URL, AND THAT IS WHAT MAKES THE FIGURES ABOVE THIS
@@ -82,16 +95,16 @@ const RESOLUTION_LABEL: Readonly<Record<(typeof RESOLUTIONS)[number], string>> =
 // than as a filter matching nothing — a page that renders "No alerts match
 // this filter" because somebody mistyped a query string is the console
 // telling an operator the fleet is quiet.
-function readState(raw: string | null): StateParam {
+function readState(raw: string): StateParam {
   if (raw === OPEN_STATE) return OPEN_STATE;
   return STATES.includes(raw as AlertState) ? (raw as AlertState) : "";
 }
 
-function readSeverity(raw: string | null): HealthSeverity | "" {
+function readSeverity(raw: string): HealthSeverity | "" {
   return SEVERITIES.includes(raw as HealthSeverity) ? (raw as HealthSeverity) : "";
 }
 
-function readResolution(raw: string | null): Resolution {
+function readResolution(raw: string): Resolution {
   return RESOLUTIONS.includes(raw as (typeof RESOLUTIONS)[number])
     ? (raw as (typeof RESOLUTIONS)[number])
     : "";
@@ -117,39 +130,42 @@ export function matchesResolution(alert: AlertOut, resolution: Resolution): bool
 export function AlertConsole({
   onSelect,
   selectedId,
+  counts,
 }: {
   onSelect: (alertId: string) => void;
   selectedId?: string;
+  /**
+   * The server's counts of open alerts for the same client as the list
+   * (`GET /health/alerts/summary`, read by the page under the Client chip's
+   * narrowing). The chips carry its numbers; without it they carry none,
+   * never a count of the page in hand (The Absent Zero Rule).
+   */
+  counts?: AlertSummary;
 }) {
   const t = useT();
-  const [params, setParams] = useSearchParams();
-  const stateParam = readState(params.get("state"));
-  const severityParam = readSeverity(params.get("severity"));
-  const resolution = readResolution(params.get("resolution"));
+  // THE KIT'S FILTERS (redesign plan, Receta L): the same keys this console
+  // always read, plus `client`, which the Client chip writes itself. A chip
+  // pushes a history entry, so Back undoes one.
+  const filters = useUrlFilters(["state", "severity", "resolution", "device", "client"] as const);
+  const stateParam = readState(filters.values.state);
+  const severityParam = readSeverity(filters.values.severity);
+  const resolution = readResolution(filters.values.resolution);
   // One device's alerts, as the device page links here. The route filters on
   // `device_id` itself.
-  const deviceParam = params.get("device") ?? "";
+  const deviceParam = filters.values.device;
 
   // What the SERVER can narrow. "open" is not one of its states, so it is
   // dropped here and applied to the rows below.
-  const filters: AlertFilters = {
+  const query: AlertFilters = {
     state: stateParam === OPEN_STATE ? "" : stateParam,
     severity: severityParam,
     ...(deviceParam ? { device_id: deviceParam } : {}),
   };
 
-  // `replace`, because a filter is not a place: an operator who changed the
-  // state select four times should press Back once and be where they came
-  // from, not walk out through four intermediate filters.
-  const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value === "") next.delete(key);
-    else next.set(key, value);
-    setParams(next, { replace: true });
-  };
-
   const [flappingFirst, setFlappingFirst] = useState(false);
-  const alerts = useHealthAlerts(filters);
+  // Narrowed to the Client chip's client (O3 3.1); writes keep `useApi()`.
+  const alerts = useHealthAlerts(query, filters.values.client);
+  const fleet = useFleetQuery();
   const zone = useUserTimezone();
   const forbidden = alerts.error instanceof ApiError && alerts.error.status === 403;
   // EVERY OTHER FAILURE USED TO VANISH HERE. `alerts.data ?? []` turns a 500,
@@ -188,90 +204,126 @@ export function AlertConsole({
     );
   }
 
-  return (
-    <Panel
-      title={t("health.console.title")}
-      subtitle={alerts.data ? t("health.console.subtitle", { open: openCount, total: rows.length }) : undefined}
-      bare
-    >
-      <FilterBar>
-        <select
-          aria-label={t("health.console.filterState")}
-          className="select-field"
-          value={stateParam}
-          onChange={(e) => setParam("state", e.target.value)}
-        >
-          <option value="">{t("health.console.anyState")}</option>
-          {/* "Open (any state)" is a REAL option and not a convenience:
-              acknowledged and muted alerts are open, so a person looking
-              for what is still wrong cannot get there by picking one
-              state. It is also the destination of the report panel's
-              "Still open" figure, which counts exactly this set. */}
-          <option value={OPEN_STATE}>{t("health.console.openAny")}</option>
-          {STATES.map((state) => (
-            <option key={state} value={state}>
-              {ALERT_STATE_PRESENTATION[state].label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={t("health.console.filterSeverity")}
-          className="select-field"
-          value={severityParam}
-          onChange={(e) => setParam("severity", e.target.value)}
-        >
-          <option value="">{t("health.console.anySeverity")}</option>
-          {/* THE SAME LABEL THE ROWS CARRY. This list read `critical` /
-              `warning` / `info` -- the wire words -- while the two selects
-              beside it offered presentation labels, so one filter bar spoke
-              two alphabets. */}
-          {SEVERITIES.map((severity) => (
-            <option key={severity} value={severity}>
-              {SEVERITY_PRESENTATION[severity].label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={t("health.console.filterResolution")}
-          className="select-field"
-          value={resolution}
-          onChange={(e) => setParam("resolution", e.target.value)}
-        >
-          <option value="">{t("health.console.anyResolution")}</option>
-          {RESOLUTIONS.map((value) => (
-            <option key={value} value={value}>
-              {RESOLUTION_LABEL[value]}
-            </option>
-          ))}
-        </select>
-        {deviceParam ? (
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="note">
-              {t("health.console.oneDevice")}{" "}
-              <Link to={`/devices/${deviceParam}`}>
-                {alerts.data?.[0]?.device_hostname || t("health.console.thisDevice")}
-              </Link>
-            </span>
-            <Btn label={t("health.console.showEvery")} small onClick={() => setParam("device", "")} />
-          </span>
-        ) : null}
-        <span className="filter-spacer" />
-        <Btn
-          label={flappingFirst ? t("health.console.sortSeverity") : t("health.console.sortRepeating")}
-          icon="sort-descending"
-          small
-          onClick={() => setFlappingFirst((v) => !v)}
-        />
-      </FilterBar>
+  // THE STATE CHIPS ARE TODAY'S STATE SELECT, ONE CHIP PER OPTION. "Open"
+  // is a REAL option and not a convenience: acknowledged and muted alerts are
+  // open, so a person looking for what is still wrong cannot get there by
+  // picking one state. It is also the destination of the report panel's
+  // "Still open" figure, and "Cleared" that of its resolution figures. The
+  // numbers are the server's (`counts`); `cleared` and "every state" have
+  // none there, so their chips carry none.
+  const stateOptions = [
+    { value: "", label: t("health.console.anyState") },
+    { value: OPEN_STATE, label: t("health.console.chipOpen"), count: counts?.open },
+    ...OPEN_STATES.map((state) => ({
+      value: state,
+      label: ALERT_STATE_PRESENTATION[state].label,
+      count: counts?.by_state[state],
+    })),
+    { value: "cleared", label: ALERT_STATE_PRESENTATION.cleared.label },
+  ];
+  // THE SAME LABEL THE ROWS CARRY, so one filter bar speaks one alphabet.
+  // "Any state" and "Any severity", not two "All"s side by side: the two
+  // groups share one row, and each first chip has to say which one it clears.
+  const severityOptions = [
+    { value: "", label: t("health.console.anySeverity") },
+    ...SEVERITIES.map((severity) => ({
+      value: severity,
+      label: SEVERITY_PRESENTATION[severity].label,
+      count: counts?.by_severity[severity],
+    })),
+  ];
+  // THE CAUSE OF AN EMPTY LIST (redesign plan, O3 3.1; Atera's flaw: "try
+  // adjusting the filters" on an account with no computers). With no filter
+  // and no computer running the agent, nothing can have raised an alert yet:
+  // say so, and lead to adding one. `fleet` is the readiness panel's own
+  // read, so this costs no request.
+  const noComputer = fleet.data !== undefined && fleet.data.managed === 0;
 
+  return (
+    <Panel title={t("health.console.title")} bare>
+      <ListToolbar
+        chips={
+          <>
+            <FilterChips
+              label={t("health.console.stateLabel")}
+              options={stateOptions}
+              value={stateParam}
+              onChange={(value) => filters.set("state", value)}
+            />
+            <FilterChips
+              label={t("health.console.severityLabel")}
+              options={severityOptions}
+              value={severityParam}
+              onChange={(value) => filters.set("severity", value)}
+            />
+            <span className={resolution === "" ? "chip chip-select" : "chip chip-select on"}>
+              <span aria-hidden="true">{t("health.console.resolutionLabel")}</span>
+              <select
+                aria-label={t("health.console.filterResolution")}
+                value={resolution}
+                onChange={(e) => filters.set("resolution", e.target.value)}
+              >
+                <option value="">{t("health.console.anyResolution")}</option>
+                {RESOLUTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {RESOLUTION_LABEL[value]}
+                  </option>
+                ))}
+              </select>
+            </span>
+            <ClientFilter filters={filters} />
+            {deviceParam ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="note">
+                  {t("health.console.oneDevice")}{" "}
+                  <Link to={`/devices/${deviceParam}`}>
+                    {alerts.data?.[0]?.device_hostname || t("health.console.thisDevice")}
+                  </Link>
+                </span>
+                <Btn label={t("health.console.showEvery")} small onClick={() => filters.set("device", "")} />
+              </span>
+            ) : null}
+          </>
+        }
+        end={
+          <>
+            <Btn
+              label={flappingFirst ? t("health.console.sortSeverity") : t("health.console.sortRepeating")}
+              icon="sort-descending"
+              small
+              onClick={() => setFlappingFirst((v) => !v)}
+            />
+            {/* THE LIST'S COUNT, in the kit's place for it: how many rows are
+                shown, and how many of them are open, since acknowledged and
+                muted alerts are. No count before the list has answered. */}
+            {alerts.data ? (
+              <ResultCount>{t("health.console.subtitle", { open: openCount, total: rows.length })}</ResultCount>
+            ) : null}
+          </>
+        }
+      />
+
+      {/* PENDING, not loading: under the Client chip the list waits for /me
+          (`enabled: ready`), and a disabled query is not "loading". The
+          errors are drawn above, so this only ever waits. */}
+      <QueryState loading={alerts.isPending} error={null} empty={false} emptyLabel="">
       {rows.length === 0 ? (
-        <EmptyState
+        <ListEmpty
+          filtered={filters.active}
+          onClear={filters.clear}
           icon="health"
-          title={t("health.console.emptyTitle")}
-          body={t("health.console.emptyBody")}
+          nothingYet={noComputer ? t("health.console.noComputer") : t("health.console.emptyYet")}
+          action={
+            noComputer ? (
+              <Link className="btn primary small" to={ADD_COMPUTER_CTA.to}>
+                <Icon name="plus" size={14} />
+                {ADD_COMPUTER_CTA.label}
+              </Link>
+            ) : undefined
+          }
         />
       ) : (
-        <Table>
+        <Table label={t("health.console.title")}>
           <thead>
             <tr>
               <Th>{t("health.console.colDevice")}</Th>
@@ -370,6 +422,7 @@ export function AlertConsole({
           </tbody>
         </Table>
       )}
+      </QueryState>
     </Panel>
   );
 }

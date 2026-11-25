@@ -1,6 +1,7 @@
 import { translate } from "../../i18n/core";
-import type { RemoteSessionState } from "../../lib/api";
-import type { BadgeVariant } from "../jobs/jobState";
+import type { RemoteSession, RemoteSessionState } from "../../lib/api";
+import type { Kind } from "../../shell/viz";
+import { variantKind, type BadgeVariant } from "../jobs/jobState";
 
 export const REMOTE_SESSION_STATES: readonly RemoteSessionState[] = [
   "awaiting_consent",
@@ -35,4 +36,15 @@ export function formatDuration(startedAt: string | null, endedAt: string | null)
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return translate("remote.duration", { minutes, seconds: seconds.toString().padStart(2, "0") });
+}
+
+/**
+ * The colour of a session's state, for a row's edge and a record's pill. A
+ * session that is still coming up is work in flight, which v3 draws as `run`
+ * (the progress glyph), not as `info`; the variant table has no word for
+ * that, so it is said here, as `jobStatusKind` says it for jobs.
+ */
+export function sessionKind(session: Pick<RemoteSession, "state">): Kind {
+  if (session.state === "connecting") return "run";
+  return variantKind(remoteStateVariant(session.state));
 }

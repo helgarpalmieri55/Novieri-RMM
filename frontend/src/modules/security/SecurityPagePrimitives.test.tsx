@@ -114,16 +114,13 @@ describe("SecurityPage's raw-event panel", () => {
     expect(screen.queryByRole("heading", { name: "No event selected" })).not.toBeInTheDocument();
   });
 
-  it("still invites a selection when nothing has been selected and nothing has failed", async () => {
-    // NOW THE KIT'S `EmptyState`, NOT A BARE SENTENCE. Asserted as a HEADING
-    // rather than as text: the finding was that this resting state had no
-    // glyph and no emphasis while every sibling had both, and `getByText`
-    // would go on passing if it reverted to a `<p>` with the same words.
-    // `level: 3` is the rung under this panel's own title.
+  // Redesign plan, O3 3.10: the event opens in a drawer from `?event=`, so
+  // nothing waits under the list before a choice; what this held -- the
+  // resting state is not a failure -- still holds: no drawer, no alert.
+  it("shows no event drawer and no alert before an event is chosen", async () => {
     renderPage({}, "Asia/Tokyo");
     await screen.findByText("DC-01");
-    expect(screen.getByRole("heading", { name: "No event selected", level: 3 })).toBeInTheDocument();
-    expect(screen.getByText(/Choose a row in the event list/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Raw event" })).toBeNull();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

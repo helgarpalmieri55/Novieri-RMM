@@ -47,9 +47,7 @@ export const jobs = {
     stuck: "Waiting too long",
     searchPlaceholder: "Job type, job id, device",
     searchAria: "Search jobs",
-    count: { one: "{count} job", other: "{count} jobs" },
     emptyNone: "No jobs dispatched yet.",
-    emptyFiltered: "No jobs match that filter.",
   },
   table: {
     name: "Name",

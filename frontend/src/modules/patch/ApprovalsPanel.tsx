@@ -169,7 +169,7 @@ export function ApprovalsPanel({
           </div>
         )}
         <QueryState
-          loading={query.isLoading}
+          loading={query.isPending}
           error={query.error}
           empty={query.data != null && items.length === 0}
           emptyIcon="patch"

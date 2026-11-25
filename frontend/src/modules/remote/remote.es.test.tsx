@@ -271,10 +271,11 @@ describe("the sessions page, in Spanish", () => {
     expect(screen.getByText("Flota, ahora mismo")).toBeInTheDocument();
     expect(screen.getByText("Activas ahora")).toBeInTheDocument();
     expect(screen.getByText("Grabadas")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Todas las sesiones/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Sesiones activas/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Con grabación/ })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "Todas las sesiones" })).toBeInTheDocument();
+    // The strip that filtered the list is chips on the same ?state= (redesign plan, Receta L point 5).
+    const chips = screen.getByRole("group", { name: "Sesiones" });
+    expect(within(chips).getByRole("button", { name: "Todas las sesiones" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(chips).getByRole("button", { name: "Sesiones activas" })).toBeInTheDocument();
+    expect(within(chips).getByRole("button", { name: "Con grabación" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Buscar sesiones" })).toHaveAttribute(
       "placeholder",
       "Buscar por dispositivo, protocolo o estado",
@@ -303,7 +304,8 @@ describe("the sessions page, in Spanish", () => {
     const { container } = renderApp(<SessionsPage />);
     await screen.findAllByText("workstation-1");
     await user.type(screen.getByRole("textbox", { name: "Buscar sesiones" }), "zzz");
-    expect(await screen.findByText("Ninguna sesión coincide con ese filtro.")).toBeInTheDocument();
+    // The kit's empty list with a filter on (redesign plan, Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -325,10 +327,10 @@ describe("the sessions page, in Spanish", () => {
     stubApi();
     renderApp(<SessionsPage />);
     await screen.findAllByText("workstation-1");
-    expect(screen.getByRole("tabpanel", { name: "Todas las sesiones" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Sesiones" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Remote sessions" })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "All sessions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All sessions" })).toBeInTheDocument();
     expect(screen.getByText("Awaiting consent")).toBeInTheDocument();
     expect(screen.getByText("2m 05s")).toBeInTheDocument();
     expect(screen.getByText("Unattended")).toBeInTheDocument();
@@ -543,7 +545,8 @@ describe("the live screen, in Spanish", () => {
     expect(await screen.findByText("Esperando a que la persona que está en el dispositivo permita esta sesión")).toBeInTheDocument();
     expect(screen.getByText("Tiene 30 segundos para responder. Si nadie responde, la solicitud se rechaza.")).toBeInTheDocument();
     expect(screen.getByText("Esperando el consentimiento")).toBeInTheDocument();
-    expect(screen.getByText("La pantalla del dispositivo, en directo.")).toBeInTheDocument();
+    // The record head (redesign plan, Receta F): back to the sessions, in place of the head's sentence.
+    expect(screen.getByRole("link", { name: "Sesiones remotas" })).toHaveAttribute("href", "/remote");
     expect(screen.getByRole("button", { name: "Finalizar sesión" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
@@ -724,14 +727,15 @@ describe("the recording player, in Spanish", () => {
     stubApi();
     const { container } = renderPlayer();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reproducir" })).toBeEnabled());
-    expect(screen.getByText("Grabación de la sesión")).toBeInTheDocument();
+    // The record head names the machine now (redesign plan, Receta F; O3 3.6), and says what the page is.
+    expect(await screen.findByRole("heading", { level: 1, name: "workstation-1" })).toBeInTheDocument();
     expect(screen.getByText("Una grabación almacenada. Nada de lo que hay aquí llega al dispositivo.")).toBeInTheDocument();
     expect(screen.getByLabelText("Posición de reproducción")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Pantalla de la grabación" })).toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
-    expect(screen.getByText("Session recording")).toBeInTheDocument();
+    expect(screen.getByText("A stored recording. Nothing here reaches the device.")).toBeInTheDocument();
   });
 
   it("words a recording with no frames", async () => {

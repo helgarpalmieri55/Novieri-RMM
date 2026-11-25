@@ -267,3 +267,63 @@ arriba; las dos que no zanjan van al coordinador en el informe de la tarea (punt
   (`portalTitle.tsx`); dentro de la consola (un técnico con un código del portal) la nombra el armazón, y el marco
   incrustado de `/__preview` no la toca. Sube al coordinador por si prefiere que el armazón del portal la nombre
   desde la ruta.
+---
+
+## Oleada O3 (Task 8): alertas, parches, software, sesiones remotas, trabajos y registros
+
+Críticas `.impeccable/critique/2026-11-25T04-21-4*Z__…` (14, una por página, todas cerradas tras el pulido). Las
+preguntas que zanjan `DESIGN.md`, el plan y las decisiones del operador se contestan aquí; las que no, van al
+coordinador en el informe de la Task 8 (puntos marcados «sin respuesta en las fuentes»).
+
+### 1. Alertas: ¿«Cerradas» necesita ser un chip, o solo el destino de los enlaces del informe?
+
+- **Respuesta: (a) se queda como chip**, junto a «Abiertas» y los tres estados abiertos.
+- **Por qué.** El selector de estado lo ofrecía, el informe enlaza a `?state=cleared&resolution=…`, y un filtro que
+  la URL aplica sin un chip pulsado que lo diga es un filtro invisible.
+- **Regla.** Global Constraints, «Comportamiento» (lo que la página hacía no cambia); Receta L, punto 5.
+
+### 2. Alertas: ¿el título de la página pasa a «Alertas», como el riel?
+
+- **Sin respuesta en las fuentes.** D13 cambia tres entradas del riel en español y nombra qué oleada cambia cada
+  título; «Alertas» no está entre ellas y el plan no pide a la O3 cambiar `health.page.title`. Se deja «Salud y
+  alertas» / «Health & alerts» y sube al coordinador.
+
+### 3. Parches: ¿aprobaciones, reinicios y cumplimiento pasan a vistas como las de Alertas?
+
+- **Respuesta: (b) no.** Quedan debajo de las pestañas de plataforma, como «el registro» de toda la flota.
+- **Por qué.** D21 es una decisión para Alertas; el módulo documenta por qué ese registro no es de una plataforma y
+  el plan no lo mueve.
+- **Regla.** D21 (solo `/health`); Receta L (la página conserva su forma salvo lo que la oleada nombra).
+
+### 4. Políticas de parches: ¿una política nueva en una página propia (`/patch/policies/new`)?
+
+- **Respuesta: (b) no.** El formulario vive bajo la lista, en `?policy=new`, con su barra de guardado.
+- **Regla.** Global Constraints: «Este plan no mueve ninguna» ruta; el plan define `/patch/policies` como la página
+  FO.
+
+### 5. Despliegues: ¿la vista «últimos 7 días» en un grupo de chips propio?
+
+- **Respuesta: (b) no.** Sigue entre los chips de estado.
+- **Por qué.** La tarjeta «Desplegados esta semana» enlaza a `?state=week`, y el parámetro no cambia.
+- **Regla.** Receta L, punto 5: el filtro pasa a chips «con el mismo parámetro: la URL no cambia».
+
+### 6. Paquetes: ¿decir por paquete si ya se puede desplegar?
+
+- **Respuesta: (b) no en esta oleada.** Sería una función nueva (leer las reglas de detección); la fila ya dice «Sin
+  archivo subido».
+- **Regla.** Receta L; Global Constraints, «Comportamiento».
+
+### 7. Scripts: ¿chips de intérprete solo para los intérpretes en uso?
+
+- **Respuesta: (b) no.** Un chip por valor de `INTERPRETERS`, como pide el plan (O3 3.5).
+
+### 8. Monitor de errores: ¿la antigüedad como selector, como el orden?
+
+- **Respuesta: (b) no.** El periodo son chips (24 h, 7 días, 30 días); el orden no es un filtro y va en un
+  `.chip-select`.
+- **Regla.** Plan, O3 3.8.
+
+### 9. Registros de seguridad: ¿la exportación de evidencias se estrecha al cliente del chip?
+
+- **Respuesta: (b) no.** La exportación es la de hoy.
+- **Regla.** Plan, O3 3.10, «Acepta: la evidencia exportada es la de hoy»; D20 (el chip solo estrecha la lista).

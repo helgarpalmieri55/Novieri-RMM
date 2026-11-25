@@ -21,6 +21,7 @@ import {
 } from "./api";
 import { OsIcon } from "../../shell/viz";
 import { DeployPageNav } from "./deployNav";
+import { fold, OS_FILTERS } from "./listFilters";
 import { SchedulesPanel } from "./SchedulesPanel";
 import {
   devicePickerEmptyHint,
@@ -31,8 +32,21 @@ import {
   nameForOption,
   osFamilyLabel,
 } from "./pickerOptions";
-import type { DeployTargetType, ScriptListItem } from "./types";
-import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import { INTERPRETERS, type DeployTargetType, type ScriptListItem } from "./types";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The design's `P['deploy/scripts']`: one bare panel of rows led by the
@@ -61,7 +75,15 @@ const editRules = (): readonly FieldRule[] => [{ name: "body", label: translate(
 export function ScriptsPage() {
   const t = useT();
   const api = useApi();
-  const [authorOpen, setAuthorOpen] = useState(false);
+  // New → Script (decision D8): `?new=script` opens the author dialog.
+  const authoring = useNewParam("script");
+  /* THE LIST KIT (redesign plan, O3 3.5): the search, the System and the
+     Interpreter chips in the URL. `GET /deploy/scripts` answers the whole
+     list, with no filter and no count, so all three apply here and the chips
+     carry no number. No Client chip: scripts are the organisation's. Editing
+     and running stay in their dialogs, as they were: running signs a job
+     (invariant 1), and nothing about it changes. */
+  const filters = useUrlFilters(["q", "os", "interpreter"] as const);
   const [editing, setEditing] = useState<ScriptListItem | null>(null);
   const [running, setRunning] = useState<ScriptListItem | null>(null);
 
@@ -74,6 +96,17 @@ export function ScriptsPage() {
   const canSchedule = permissions.includes("deploy.script.schedule");
 
   const scripts = useScripts();
+  const all = scripts.data ?? [];
+  const wanted = fold(filters.values.q);
+  const rows = all.filter(
+    (script) =>
+      (filters.values.os === "" || script.os_family.toLowerCase() === filters.values.os) &&
+      (filters.values.interpreter === "" || script.interpreter.trim().toLowerCase() === filters.values.interpreter) &&
+      (wanted === "" || fold(script.name).includes(wanted)),
+  );
+  const newScript = canManage ? (
+    <Btn label={t("deploy.scripts.newScript")} icon="plus" small onClick={authoring.start} />
+  ) : undefined;
 
   return (
     <div>
@@ -82,7 +115,7 @@ export function ScriptsPage() {
         description={t("deploy.scripts.description")}
         actions={
           canManage ? (
-            <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" onClick={() => setAuthorOpen(true)} />
+            <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" onClick={authoring.start} />
           ) : undefined
         }
       />
@@ -93,14 +126,50 @@ export function ScriptsPage() {
       <DeployPageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={scripts.isLoading}
-          error={scripts.error}
-          empty={scripts.data != null && scripts.data.length === 0}
-          emptyIcon="terminal"
-          emptyLabel={t("deploy.scripts.empty")}
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              aria-label={t("deploy.scripts.search")}
+              placeholder={t("deploy.scripts.searchPlaceholder")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          chips={
+            <>
+              <FilterChips
+                label={t("deploy.scripts.osLabel")}
+                options={[
+                  { value: "", label: t("deploy.scripts.osAll") },
+                  ...OS_FILTERS.map((os) => ({ value: os, label: osFamilyLabel(os) })),
+                ]}
+                value={filters.values.os}
+                onChange={(value) => filters.set("os", value)}
+              />
+              <FilterChips
+                label={t("deploy.scripts.interpreterLabel")}
+                options={[
+                  { value: "", label: t("deploy.scripts.interpreterAll") },
+                  ...INTERPRETERS.map((interpreter) => ({ value: interpreter, label: interpreterLabel(interpreter) })),
+                ]}
+                value={filters.values.interpreter}
+                onChange={(value) => filters.set("interpreter", value)}
+              />
+            </>
+          }
+          end={scripts.data ? <ShowingCount shown={rows.length} total={all.length} /> : null}
+        />
+        <QueryState loading={scripts.isPending} error={scripts.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="terminal-2"
+              nothingYet={t("deploy.scripts.empty")}
+              action={newScript}
+            />
+          ) : (
+          <Table label={t("deploy.scripts.title")}>
             <thead>
               <tr>
                 <Th>{t("deploy.scripts.colName")}</Th>
@@ -111,7 +180,7 @@ export function ScriptsPage() {
               </tr>
             </thead>
             <tbody>
-              {scripts.data?.map((script) => (
+              {rows.map((script) => (
                 <tr key={script.id}>
                   {/* REVIEW WAVE, round 3 (composition): this cell carried a
                       constant sub-line, "runs as SYSTEM or root" -- the same
@@ -149,12 +218,16 @@ export function ScriptsPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
       <SchedulesPanel scripts={scripts.data ?? []} canRead={canRead} canSchedule={canSchedule} />
 
-      <AuthorScriptDialog open={authorOpen} onClose={() => setAuthorOpen(false)} />
+      {/* MOUNTED ONLY WHILE OPEN (general ruling 4): however it opens -- the
+          button, a link, Back or Forward -- the form starts empty, and nothing
+          from the last one (a refusal included) is carried over. */}
+      {authoring.open && canManage ? <AuthorScriptDialog open onClose={authoring.close} /> : null}
       <EditScriptDialog script={editing} onClose={() => setEditing(null)} />
       <RunScriptDialog script={running} onClose={() => setRunning(null)} />
     </div>
@@ -169,6 +242,9 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [interpreter, setInterpreter] = useState("powershell");
   const [body, setBody] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (general ruling 3).
+  const changed = name !== "" || osFamily !== "windows" || interpreter !== "powershell" || body !== "";
+  const { guard, release } = useUnsavedGuard(changed, { search: ["new"] });
 
   function submit() {
     const next: Attempt = { rules: authorRules, values: { name, osFamily, interpreter, body } };
@@ -182,18 +258,19 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
       { name: name.trim(), os_family: osFamily.trim(), interpreter: interpreter.trim(), body },
       {
         onSuccess: () => {
-          setName("");
-          setBody("");
-          setAttempt(null);
+          // Saved: leaving does not ask.
+          release();
           onClose();
         },
       },
     );
   }
 
+  // The page mounts this dialog only while it is open, so the next opening
+  // starts from an empty form with no refusal from this one. Nothing is reset
+  // here: the guard may still keep the operator in the form, which then keeps
+  // what it held, its last refusal included.
   function dismiss() {
-    setAttempt(null);
-    author.reset();
     onClose();
   }
 
@@ -204,6 +281,7 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
   // local copy.
 
   return (
+    <>
     <Dialog open={open} onClose={dismiss} title={t("deploy.scripts.authorTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -251,6 +329,10 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
         </div>
       </Form>
     </Dialog>
+    {/* AFTER THE FORM (fix round 2, C1): the leave question and the form are both
+        `.modal` at one z-index, so the later one in the document paints on top. */}
+    {guard}
+    </>
   );
 }
 
@@ -291,6 +373,15 @@ function EditScriptDialog({
     // saving now would PUT an empty string over a script that runs as
     // SYSTEM. The control says so rather than refusing silently.
     if (!bodyReady) return;
+    // NO WRITE WITHOUT A CHANGE (general ruling 13). The PUT replaces the
+    // whole body of a script that runs as SYSTEM, and every one is an audit
+    // entry: a Save on the body exactly as it was loaded is a close, and
+    // sends nothing. Compared untrimmed, as it is sent -- a changed blank line
+    // is a changed script.
+    if (body === detail.data.body) {
+      dismiss();
+      return;
+    }
     const next: Attempt = { rules: editRules, values: { body } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

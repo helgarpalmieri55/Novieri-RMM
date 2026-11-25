@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import { PATCH_ROLLUP_PAGE_SIZE, usePatchAppSources, usePatchUpdates } from "./api";
 import type { PatchFamily } from "./patchTabs";
 import { resolveMatchingUpdateIds } from "./selection";
@@ -44,14 +44,17 @@ export function AppsPanel({
   canApprove,
   ringOptions,
   fleetDeviceTotal,
+  chip = "",
 }: {
   family: PatchFamily;
   canApprove: boolean;
   ringOptions: RingOption[];
   fleetDeviceTotal: number | null;
+  /** The Client chip's value (`?client=`): the app updates of the same client as the page's lists. */
+  chip?: string;
 }) {
   const t = useT();
-  const api = useApi();
+  const { api } = useNarrowedApi(chip);
   const manager = APP_MANAGER[family] ?? t("patch.apps.fallbackManager");
   const [filters, setFilters] = useState<UpdateFilters>({ search: "", severities: [], offset: 0 });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -60,8 +63,8 @@ export function AppsPanel({
     () => ({ kind: "apps", os_family: family, q: filters.search.trim() || undefined }),
     [family, filters.search],
   );
-  const updates = usePatchUpdates({ ...criterion, offset: filters.offset || undefined });
-  const sources = usePatchAppSources(family);
+  const updates = usePatchUpdates({ ...criterion, offset: filters.offset || undefined }, chip);
+  const sources = usePatchAppSources(family, chip);
   const resolveMatching = useCallback(
     () => resolveMatchingUpdateIds((request) => api.listPatchUpdates(request), criterion),
     [api, criterion],
@@ -88,6 +91,9 @@ export function AppsPanel({
         severityNote={t("patch.apps.severityNote", { manager })}
         scopeName={t("patch.apps.scopeName")}
         clearLabel={t("patch.apps.clearLabel", { manager })}
+        // The package managers publish no severity ("every app update is
+        // unknown"), so a severity chip here could only empty the list.
+        severityFilter={false}
       />
       {sentences.length > 0 ? (
         <ul className="note mt-2" aria-label={t("patch.apps.statusAria", { manager })}>

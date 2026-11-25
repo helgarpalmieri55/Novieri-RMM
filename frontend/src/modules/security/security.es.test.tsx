@@ -109,10 +109,11 @@ describe("the security logs page in Spanish", () => {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
     // The pills and the select read the same Spanish event names.
-    const select = screen.getByLabelText("Filtrar por tipo de evento");
-    expect(within(select).getByRole("option", { name: "Todos los tipos de evento" })).toBeInTheDocument();
-    expect(within(select).getByRole("option", { name: "Cambio en el grupo de administradores" })).toBeInTheDocument();
-    expect(within(select).getByRole("option", { name: "Inicio de sesión correcto" })).toBeInTheDocument();
+    // The event type is chips now (redesign plan, O3 3.10), one per type, in the same words.
+    const select = screen.getByRole("group", { name: "Filtrar por tipo de evento" });
+    expect(within(select).getByRole("button", { name: "Todos los tipos de evento" })).toBeInTheDocument();
+    expect(within(select).getByRole("button", { name: "Cambio en el grupo de administradores" })).toBeInTheDocument();
+    expect(within(select).getByRole("button", { name: "Inicio de sesión correcto" })).toBeInTheDocument();
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows.map((row) => row.querySelector(".cell-title")?.textContent)).toEqual([
       "Inicio de sesión fallido",
@@ -131,11 +132,11 @@ describe("the security logs page in Spanish", () => {
       .mockResolvedValue({ ...EVENTS[0], raw: { Status: "0xC000006D", IpAddress: "185.12.4.9" } });
     const { container } = renderPage({ getSecurityEvent });
     await screen.findByText("DC-01");
-    expect(screen.getByText("Evento sin procesar")).toBeInTheDocument();
-    expect(screen.getByText("Campos almacenados de la fila seleccionada")).toBeInTheDocument();
-    expect(screen.getByText("Ningún evento seleccionado")).toBeInTheDocument();
-    expect(screen.getByText("Elige una fila de la lista de eventos para ver los campos almacenados con ella.")).toBeInTheDocument();
+    // The event opens in its drawer now (redesign plan, O3 3.10): nothing waits under the list.
+    expect(screen.queryByRole("dialog", { name: "Evento sin procesar" })).toBeNull();
     await user.click((screen.getByText("DC-01").closest("tr")) as HTMLElement);
+    const drawer = await screen.findByRole("dialog", { name: "Evento sin procesar" });
+    expect(within(drawer).getByText("Campos almacenados de la fila seleccionada")).toBeInTheDocument();
     expect(await screen.findByText("185.12.4.9")).toBeInTheDocument();
     // The stored values and their field names are recorded; the panel around them is Spanish.
     // The stored fields are the agent's own, so their names ("Status", "IP address", from the
