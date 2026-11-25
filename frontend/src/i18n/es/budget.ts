@@ -37,7 +37,6 @@ export const budget: Shape<typeof en> = {
     na: "n/d",
     cancel: "Cancelar",
     save: "Guardar",
-    saving: "Guardando…",
     edit: "Editar",
     name: "Nombre",
     key: "Clave",

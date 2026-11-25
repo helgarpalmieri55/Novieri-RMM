@@ -45,7 +45,6 @@ export const budget = {
     na: "n/a",
     cancel: "Cancel",
     save: "Save",
-    saving: "Saving…",
     edit: "Edit",
     name: "Name",
     key: "Key",

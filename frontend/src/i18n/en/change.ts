@@ -51,7 +51,6 @@ export const change = {
   detail: {
     tabs: "Sections of this change",
     fallbackTitle: "Change",
-    description: "Everything recorded about one change request.",
     exporting: "Exporting…",
     exportEvidence: "Export evidence",
     summary: "Summary",

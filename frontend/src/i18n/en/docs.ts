@@ -56,12 +56,10 @@ export const docs = {
       tableLabel: "Articles",
       filterByCategory: "Filter by category",
       all: "All",
-      count: { one: "{count} article", other: "{count} articles" },
       searchNote:
         "Searches titles, descriptions, categories and the current file's name. It does not search inside stored files, and it does not search older versions' filenames.",
       noMatch: "No documentation matches that search.",
       noArticles: "No articles yet.",
-      noneInCategory: "No article in {category}.",
       searchResults: "Search results",
       groupArticles: "Articles",
       groupRecords: "Records",
@@ -83,7 +81,6 @@ export const docs = {
     markdown: "Markdown",
     preview: "Preview",
     cancel: "Cancel",
-    save: "Save",
   },
   article: {
     updated: "updated {date}",

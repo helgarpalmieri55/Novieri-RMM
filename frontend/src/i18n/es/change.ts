@@ -46,7 +46,6 @@ export const change: Shape<typeof en> = {
   detail: {
     tabs: "Secciones de este cambio",
     fallbackTitle: "Cambio",
-    description: "Todo lo registrado sobre una solicitud de cambio.",
     exporting: "Exportando…",
     exportEvidence: "Exportar evidencias",
     summary: "Resumen",

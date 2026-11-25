@@ -50,12 +50,10 @@ export const docs: Shape<typeof en> = {
       tableLabel: "Artículos",
       filterByCategory: "Filtrar por categoría",
       all: "Todas",
-      count: { one: "{count} artículo", other: "{count} artículos" },
       searchNote:
         "Busca en títulos, descripciones, categorías y en el nombre del archivo actual. No busca dentro de los archivos almacenados ni en los nombres de archivo de versiones anteriores.",
       noMatch: "Ninguna documentación coincide con esa búsqueda.",
       noArticles: "Todavía no hay artículos.",
-      noneInCategory: "No hay ningún artículo en {category}.",
       searchResults: "Resultados de la búsqueda",
       groupArticles: "Artículos",
       groupRecords: "Registros",
@@ -77,7 +75,6 @@ export const docs: Shape<typeof en> = {
     markdown: "Markdown",
     preview: "Vista previa",
     cancel: "Cancelar",
-    save: "Guardar",
   },
   article: {
     updated: "actualizado {date}",
