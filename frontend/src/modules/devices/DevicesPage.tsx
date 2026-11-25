@@ -67,6 +67,7 @@ import {
   TableFoot,
   TableWrap,
   useNarrowedApi,
+  useNewParam,
   useUrlFilters,
   type Kind,
 } from "../../shell/components";
@@ -395,7 +396,10 @@ export function DevicesPage() {
   // `credentials.checkout`, every bound and the ceiling on each request.
   const canPush = permissions.includes(AGENT_PUSH_RUN);
   const [selected, setSelected] = useState<Device[]>([]);
-  const [pushing, setPushing] = useState(false);
+  // The chooser opens from `?new=push` (decision D8), so Push runs' empty list
+  // can lead to it; for a holder of `agent.push.run` only, whatever the URL asks.
+  const pushParam = useNewParam("push");
+  const pushing = pushParam.open && canPush;
   const isSelected = (device: Device) => selected.some((d) => d.id === device.id);
   function toggle(device: Device) {
     setSelected((current) =>
@@ -409,7 +413,7 @@ export function DevicesPage() {
   function unselect(id: string) {
     const next = selected.filter((d) => d.id !== id);
     setSelected(next);
-    if (next.length === 0) setPushing(false);
+    if (next.length === 0) pushParam.close();
   }
 
   useLiveEvents(() => {
@@ -486,7 +490,7 @@ export function DevicesPage() {
                 server checks that code and everything else on every request. */}
             {canPush ? (
               <>
-                <Btn label={t("devices.page.pushInstall")} icon="play" onClick={() => setPushing(true)} />
+                <Btn label={t("devices.page.pushInstall")} icon="play" onClick={pushParam.start} />
                 <Link className="btn" to="/devices/push-runs">
                   {t("devices.page.pushRuns")}
                 </Link>
@@ -585,7 +589,7 @@ export function DevicesPage() {
         <PushInstallChooser
           machines={selected}
           onRemove={unselect}
-          onClose={() => setPushing(false)}
+          onClose={pushParam.close}
         />
       ) : null}
 
@@ -685,7 +689,7 @@ export function DevicesPage() {
             count={selected.length}
             onClear={() => {
               setSelected([]);
-              setPushing(false);
+              pushParam.close();
             }}
           >
             <p className="note" role="status">
@@ -695,7 +699,7 @@ export function DevicesPage() {
               label={t("devices.filters.pushSelected", { count: selected.length })}
               icon="play"
               small
-              onClick={() => setPushing(true)}
+              onClick={pushParam.start}
             />
           </BulkBar>
         ) : null}

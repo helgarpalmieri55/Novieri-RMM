@@ -125,3 +125,10 @@ describe("Devices on the list kit (Receta L)", () => {
     expect(await screen.findByRole("combobox", { name: "Filter by site" })).toBeInTheDocument();
   });
 });
+
+describe("push install from the URL", () => {
+  it("opens Push install the agent from ?new=push, the way Push runs' empty list leads here", async () => {
+    renderPage("/devices?new=push", <DevicesPage />);
+    expect(await screen.findByRole("heading", { name: "Push install: choose the machines" })).toBeInTheDocument();
+  });
+});

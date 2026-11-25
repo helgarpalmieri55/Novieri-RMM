@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, MeClient } from "../../../lib/api";
+import { renderPage as renderRouted } from "../../../test/renderPage";
 import { PushRunPage } from "../PushRunPage";
 import { PushRunsPage } from "../PushRunsPage";
 import type { PushRunOut, PushRunState, PushRunTargetOut } from "../types";
@@ -164,5 +165,39 @@ describe("Push runs", () => {
     for (const name of ["Pause", "Resume", "Cancel run"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.7; Receta L) ------------------------------ */
+
+describe("Push runs on the list kit", () => {
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    stubApi("running");
+    const { router } = renderRouted("/devices/push-runs?state=running", <PushRunsPage />);
+    expect(await screen.findByRole("button", { name: "Running" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Paused" }));
+    expect(router.state.location.search).toContain("state=paused");
+  });
+
+  it("says why the list is empty", async () => {
+    stubApi("running");
+    renderRouted("/devices/push-runs?state=cancelled", <PushRunsPage />);
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("says there is no run yet, with the way to start one, and leads back to the computers", async () => {
+    const api = stubApi();
+    api.listPushRuns.mockResolvedValue([]);
+    renderRouted("/devices/push-runs", <PushRunsPage />);
+    expect(await screen.findByText("No subnet push has been started.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Install on many" })).toHaveAttribute("href", "/devices?new=push");
+    expect(screen.getByRole("link", { name: "Devices" })).toHaveAttribute("href", "/devices");
+  });
+
+  it("counts the runs it shows", async () => {
+    stubApi();
+    renderRouted("/devices/push-runs", <PushRunsPage />);
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
   });
 });

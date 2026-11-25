@@ -303,8 +303,12 @@ export const agentPush = {
   runs: {
     title: "Push runs",
     description: "Subnet pushes someone confirmed, installed at most 50 machines at a time.",
-    back: "Back to Devices",
+    // The list's way back to the computers (redesign Task 6, 1.7), by the rail's word.
+    back: "Devices",
     empty: "No subnet push has been started.",
+    installOnMany: "Install on many",
+    stateLabel: "Filter by state",
+    allStates: "All runs",
     subnet: "Subnet",
     started: "Started",
     state: "State",

@@ -304,8 +304,11 @@ export const agentPush: Shape<typeof en> = {
   runs: {
     title: "Ejecuciones de instalación remota",
     description: "Instalaciones remotas por subred que alguien confirmó, instaladas en 50 equipos como máximo a la vez.",
-    back: "Volver a Dispositivos",
+    back: "Equipos",
     empty: "No se ha iniciado ninguna instalación remota por subred.",
+    installOnMany: "Instalar en varias",
+    stateLabel: "Filtrar por estado",
+    allStates: "Todas las ejecuciones",
     subnet: "Subred",
     started: "Inicio",
     state: "Estado",
