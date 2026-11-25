@@ -276,6 +276,7 @@ export function ListEmpty({
  */
 export function ClientFilter({
   filters,
+  resets,
 }: {
   /**
    * The page's `useUrlFilters`, with `client` among its keys. The chip reads
@@ -284,10 +285,33 @@ export function ClientFilter({
    * history entry of its own.
    */
   filters: UrlFilters<"client">;
+  /**
+   * THE PAGE'S OWN KEYS THAT GO WITH THE CLIENT (kit requests batch 2, K2): a
+   * place in the old client's list that the kit's `offset` does not cover, a
+   * second list's page cursor (`devices` on /patch) or a selection kept in the
+   * URL. They are dropped in the same entry as the client, whenever it
+   * changes: a person's choice (so Back brings both back) and a stale client
+   * dropped in place. `offset` always goes, as for any filter. Without
+   * `resets` the chip writes exactly as before, through `filters.set`.
+   */
+  resets?: readonly string[];
 }) {
   const t = useT();
   const { selected, clients, ready } = useClientScope();
+  const [params, setParams] = useSearchParams();
   const value = filters.values.client;
+  const write = (next: string, options: WriteOptions = {}) => {
+    if (!resets || resets.length === 0) {
+      filters.set("client", next, options);
+      return;
+    }
+    const query = new URLSearchParams(params);
+    if (next === "") query.delete("client");
+    else query.set("client", next);
+    query.delete(CURSOR);
+    for (const key of resets) query.delete(key);
+    writeQuery(params, query, setParams, { replace: options.replace ?? false });
+  };
   // A CLIENT THE PERSON DOES NOT HAVE (a stale or edited link) leaves the URL
   // once /me has listed theirs, rather than being drawn as "All clients" over
   // the empty list the server answers for it (decision D17).
@@ -295,15 +319,15 @@ export function ClientFilter({
   // IN PLACE, AND ONCE (review fix rounds 1 and 2). Dropped with a new
   // history entry, the stale link stayed one Back away, and Back reopened it,
   // which dropped it again: a page Back could never leave. So `replace`, and
-  // the effect runs on `foreign` alone; the latest `filters` is read from a
-  // ref, since its identity changes with every query.
-  const latest = useRef(filters);
+  // the effect runs on `foreign` alone; the latest writer is read from a ref,
+  // since its identity changes with every query.
+  const latest = useRef(write);
   useLayoutEffect(() => {
-    latest.current = filters;
+    latest.current = write;
   });
   const foreign = ready && value !== "" && !clients.some((client) => client.id === value);
   useEffect(() => {
-    if (foreign) latest.current.set("client", "", { replace: true });
+    if (foreign) latest.current("", { replace: true });
   }, [foreign]);
   if (selected !== null || clients.length < 2) return null;
   return (
@@ -315,7 +339,7 @@ export function ClientFilter({
       ]}
       value={value}
       // A person's choice is a new entry, so Back undoes it, as for any chip.
-      onChange={(next) => filters.set("client", next)}
+      onChange={(next) => write(next)}
     />
   );
 }

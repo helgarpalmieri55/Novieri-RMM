@@ -895,3 +895,50 @@ describe("ListToolbar's chips slot when its chips draw nothing (batch 1 review, 
     expect(container.querySelector(".list-chips")?.matches(":empty")).toBe(false);
   });
 });
+
+/**
+ * THE CLIENT CHIP DROPS THE PAGE'S OWN KEYS WITH THE CLIENT (kit requests
+ * batch 2, K2): a second page cursor (`devices` on /patch) or a selection is a
+ * place in the old client's list. O3 reached into `writeQuery` for it.
+ */
+function ResettingChip({ resets }: { resets?: readonly string[] }) {
+  const filters = useUrlFilters(["client"] as const);
+  return <ClientFilter filters={filters} {...(resets === undefined ? {} : { resets })} />;
+}
+
+describe("ClientFilter's resets (kit requests batch 2, K2)", () => {
+  it("drops the keys it names when a person changes the client, in the same entry, so Back brings them back", async () => {
+    const start = "?os=linux&devices=50&offset=25";
+    const { router } = renderPage(`/patch${start}`, <ResettingChip resets={["devices"]} />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), ANDES);
+    const after = new URLSearchParams(router.state.location.search);
+    expect(after.get("client")).toBe(ANDES);
+    expect(after.has("devices")).toBe(false);
+    expect(after.has("offset")).toBe(false);
+    // Only what it names: the page's other keys stay.
+    expect(after.get("os")).toBe("linux");
+    expect(router.state.historyAction).toBe("PUSH");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe(start);
+  });
+
+  it("drops them when it clears the client too", async () => {
+    const { router } = renderPage(`/patch?client=${ANDES}&devices=50`, <ResettingChip resets={["devices"]} />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), "");
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("drops them with a stale client, in place, as it drops the client", async () => {
+    const { router } = renderPage(`/patch?client=${FOREIGN}&devices=50&os=linux`, <ResettingChip resets={["devices"]} />);
+    await waitFor(() => expect(router.state.location.search).toBe("?os=linux"));
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("leaves the page's keys alone without resets, as before", async () => {
+    const { router } = renderPage("/patch?devices=50", <ResettingChip />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Client" }), ANDES);
+    const after = new URLSearchParams(router.state.location.search);
+    expect(after.get("client")).toBe(ANDES);
+    expect(after.get("devices")).toBe("50");
+  });
+});
