@@ -9,7 +9,7 @@ export const setup = {
     organizationName: "Organization name",
     settingUp: "Setting up…",
     finish: "Finish setup",
-    // Beside the disabled button while a field is empty (coordinator ruling 8).
+    // Finish setup pressed with a field empty (coordinator ruling 8a: the button stays on).
     incomplete: "Fill in every field to finish.",
     passwordHint: "The first administrator signs in with this address and this password, and adds a second factor at the first sign-in.",
     unreachable: "The server could not be reached, so nothing was created. {reason}",

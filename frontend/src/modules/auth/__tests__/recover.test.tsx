@@ -202,9 +202,13 @@ describe("recovering an account whose password an emailed link set", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(NEEDS_PASSWORD);
     expect(where.location?.pathname).toBe("/recover");
     expect(screen.queryByText(/This recovery link has expired/)).not.toBeInTheDocument();
-    // Required now: no longer offered as optional, and an empty press is not possible.
+    // Required now: no longer offered as optional, and an empty press sends
+    // nothing. Since coordinator ruling 8a (2026-11-25) the button stays on
+    // and the press says the rule, where it used to be disabled.
     expect(screen.queryByText(/Optional: set a new password now/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Recover my account" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use at least 12 characters.");
+    expect(calls.acceptRecovery).toHaveBeenCalledTimes(1);
 
     await choose(user, GOOD);
     await user.click(screen.getByRole("button", { name: "Recover my account" }));

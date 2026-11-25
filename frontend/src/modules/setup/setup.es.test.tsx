@@ -61,7 +61,8 @@ describe("the setup screen in Spanish", () => {
     const user = userEvent.setup();
     const { container } = renderInSpanish(<SetupPage />);
     expect(screen.getByRole("heading", { name: "Configura esta instalación" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Finalizar configuración" })).toBeDisabled();
+    // On while empty since coordinator ruling 8a (2026-11-25): a press says what is missing.
+    expect(screen.getByRole("button", { name: "Finalizar configuración" })).toBeEnabled();
     expect(screen.getByText(/El primer administrador inicia sesión con este correo y esta contraseña/)).toBeInTheDocument();
     expectNoEnglish(container);
 

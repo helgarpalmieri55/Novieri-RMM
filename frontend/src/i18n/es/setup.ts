@@ -12,7 +12,7 @@ export const setup: Shape<typeof en> = {
     organizationName: "Nombre de la organización",
     settingUp: "Configurando…",
     finish: "Finalizar configuración",
-    // Beside the disabled button while a field is empty (coordinator ruling 8).
+    // Finish setup pressed with a field empty (coordinator ruling 8a: the button stays on).
     incomplete: "Rellena todos los campos para terminar.",
     passwordHint: "El primer administrador inicia sesión con este correo y esta contraseña, y añade un segundo factor al entrar por primera vez.",
     unreachable: "No se pudo contactar con el servidor, así que no se creó nada. {reason}",

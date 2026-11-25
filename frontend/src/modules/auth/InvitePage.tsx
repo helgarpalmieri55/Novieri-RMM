@@ -150,6 +150,8 @@ export function InvitePage() {
   };
 
   function submit(kind: "staff" | "contact", minimum: number) {
+    // On while empty: an empty press is refused with the rule it breaks
+    // (coordinator ruling 8a), and nothing is sent.
     const problem = checkNewPassword(password, again, minimum);
     if (problem) {
       setError(problem);
@@ -261,7 +263,7 @@ export function InvitePage() {
             variant={offerPasskey ? "secondary" : "primary"}
             icon="arrow-right"
             label={busy ? t("auth.common.working") : t("auth.invite.submit")}
-            disabled={busy || !password || !again}
+            disabled={busy}
           />
         </div>
       </Form>

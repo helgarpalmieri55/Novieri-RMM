@@ -134,7 +134,14 @@ export function SetupPage() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (inFlight.current || !complete) return;
+    if (inFlight.current) return;
+    // ON WHILE INCOMPLETE, AND A PRESS SAYS WHAT IS MISSING (coordinator
+    // ruling 8a): seven fields, none marked, and a grey button was all a
+    // person who missed one saw.
+    if (!complete) {
+      setError(t("setup.page.incomplete"));
+      return;
+    }
     const problem = checkNewPassword(form.password, form.again);
     if (problem) {
       setError(problem);
@@ -230,12 +237,8 @@ export function SetupPage() {
             label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
             icon="check"
             variant="primary"
-            disabled={!complete || submitting}
+            disabled={submitting}
           />
-          {/* WHY THE BUTTON IS OFF, ON SCREEN (coordinator ruling 8): none of
-              the seven fields is marked, and a grey button was all a person
-              who missed one saw. */}
-          {complete ? null : <span className="form-hint">{t("setup.page.incomplete")}</span>}
           <span className="form-hint">
             {t("setup.page.passwordHint")}
           </span>

@@ -52,7 +52,13 @@ export function SignInPage() {
   const inFlight = useRef(false);
 
   async function submit() {
-    if (inFlight.current || !email.trim() || !password) return;
+    if (inFlight.current) return;
+    // ON WHILE EMPTY, AND A PRESS SAYS WHAT IS MISSING (coordinator ruling 8a):
+    // it was disabled until both fields held something, with no reason given.
+    if (!email.trim() || !password) {
+      setError(t("auth.signIn.missing"));
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setError(null);
@@ -97,7 +103,7 @@ export function SignInPage() {
             variant="primary"
             icon="lock"
             label={busy ? t("auth.common.working") : t("auth.signIn.submit")}
-            disabled={busy || !email.trim() || !password}
+            disabled={busy}
           />
         </div>
       </Form>

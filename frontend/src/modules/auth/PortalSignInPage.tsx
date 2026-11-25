@@ -62,7 +62,12 @@ export function PortalSignInPage() {
   }
 
   function submit() {
-    if (!email.trim() || !password) return;
+    if (inFlight.current) return;
+    // On while empty; a press says what is missing (coordinator ruling 8a).
+    if (!email.trim() || !password) {
+      setError(t("auth.signIn.missing"));
+      return;
+    }
     void guarded(async () => {
       try {
         const result = await api.login({ email: email.trim(), password });
@@ -131,7 +136,7 @@ export function PortalSignInPage() {
             variant={passkey ? "secondary" : "primary"}
             icon="lock"
             label={busy ? t("auth.common.working") : t("auth.signIn.submit")}
-            disabled={busy || !email.trim() || !password}
+            disabled={busy}
           />
         </div>
       </Form>

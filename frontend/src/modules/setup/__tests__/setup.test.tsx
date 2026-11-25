@@ -130,17 +130,18 @@ describe("the setup screen", () => {
     expect(document.title).toBe("Set up this installation · Novieri RMM");
   });
 
-  it("says why Finish setup is off while a field is empty, and stops saying it once all are filled", async () => {
-    // Coordinator ruling 8 (a disabled control shows its reason on screen),
-    // critique of 2026-11-25 (P1): seven fields, none marked, and a grey
-    // button was all a person who missed one saw.
+  it("keeps Finish setup on, and says what is missing when it is pressed early, claiming nothing", async () => {
+    // Coordinator ruling 8a (2026-11-25): seven fields, so the button stays on
+    // and the press reports what is missing. It was disabled with no reason on
+    // screen (critique of 2026-11-25, P1).
     const user = userEvent.setup();
     render(<SetupPage />);
-    expect(screen.getByRole("button", { name: /finish setup/i })).toBeDisabled();
-    expect(screen.getByText("Fill in every field to finish.")).toBeInTheDocument();
-    await fillTheForm(user, "install-code");
-    expect(screen.getByRole("button", { name: /finish setup/i })).toBeEnabled();
-    expect(screen.queryByText("Fill in every field to finish.")).toBeNull();
+    const finish = screen.getByRole("button", { name: /finish setup/i });
+    expect(finish).toBeEnabled();
+    await user.type(screen.getByLabelText("Install code"), "install-code");
+    await user.click(finish);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Fill in every field to finish.");
+    expect(claims).toHaveLength(0);
   });
 
   it("stays out of the way once the platform has an owner", async () => {

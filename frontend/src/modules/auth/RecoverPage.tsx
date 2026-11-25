@@ -92,6 +92,8 @@ export function RecoverPage() {
   async function recover(required: boolean) {
     if (inFlight.current) return;
     // Optional and left empty: only the token, and the password stays.
+    // Required and left empty: refused here with the rule it breaks, and the
+    // button stays on to say so (coordinator ruling 8a).
     const withPassword = required || password !== "" || again !== "";
     if (withPassword) {
       const problem = checkNewPassword(password, again);
@@ -181,7 +183,7 @@ export function RecoverPage() {
             variant="primary"
             icon="key"
             label={busy ? t("auth.common.working") : t("auth.recover.submit")}
-            disabled={busy || (required && (!password || !again))}
+            disabled={busy}
           />
         </div>
       </Form>

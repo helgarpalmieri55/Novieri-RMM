@@ -200,14 +200,20 @@ Críticas `.impeccable/critique/2026-11-25T05-34-19Z__…` de las doce páginas 
 pulido. Las preguntas que zanjan el encargo de la oleada, `DESIGN.md`, las reglas generales del coordinador y las
 Global Constraints se contestan aquí; la que no zanjan (punto 3) va al coordinador en el informe de la tarea.
 
-### 1. «Continuar» desactivado hasta que hay correo y contraseña (inicio de sesión y portal)
+### 1. Los botones desactivados hasta que el formulario está completo
 
-- **Respuesta: se queda desactivado.** El motivo está en pantalla: los dos campos vacíos, justo encima.
-- **Por qué.** Es el comportamiento de hoy (prevención de errores y la guarda del doble envío), y el encargo pide «el
-  mismo envío». La regla 8 del coordinador pide el motivo en pantalla, no un botón activo; aquí el motivo son los dos
-  únicos campos del formulario.
-- **Regla.** Encargo de la Task 13, 8.1 («Acepta: el mismo envío»); reglas generales, 8. En el alta del dueño, con
-  siete campos sin marcar, el motivo no se veía: allí se añadió la línea «Rellena todos los campos para terminar.».
+- **Respuesta: se quedan activos y la pulsación dice lo que falta**, en los seis formularios de más de un campo:
+  inicio de sesión y el del portal («Introduce tu correo electrónico y tu contraseña.»), el enlace de cambio, la
+  invitación y la recuperación con contraseña obligatoria (la regla que incumple: «Usa al menos 12 caracteres.»), y
+  el alta del dueño («Rellena todos los campos para terminar.»). No se envía nada. Los de un solo campo (código de la
+  aplicación, código de recuperación, nombre de la clave de acceso, correo de la contraseña olvidada) y la casilla de
+  los códigos guardados siguen desactivados mientras están vacíos: el campo de al lado es el motivo.
+- **Por qué.** Desactivados, no decían por qué; en el alta del dueño, con siete campos sin marcar, una persona que
+  dejaba uno vacío solo veía un botón gris.
+- **Regla.** Reglas generales del coordinador, 8 y su aclaración 8a (2026-11-25): solo un formulario de un campo
+  puede dejar el botón desactivado sin motivo escrito; los demás dejan el botón activo e informan de lo que falta al
+  enviar. Ninguna llamada a la API cambia y ningún texto de error existente cambia; los dos textos nuevos solo dicen
+  lo que falta.
 
 ### 2. El titular «Entrando con Microsoft» sobre un fallo
 
