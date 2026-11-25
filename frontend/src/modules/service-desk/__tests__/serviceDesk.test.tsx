@@ -1781,6 +1781,53 @@ describe("MyWorkPage", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No open tickets are assigned to you.")).not.toBeInTheDocument();
   });
+
+  // General ruling 10a: no tile draws a number it has no data for. Both tiles
+  // counted `tickets.data?.items ?? []`, so they read "0" (and "nothing
+  // assigned to you") while the read was pending and after it failed.
+  const tileValues = () =>
+    [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+
+  it("draws the absent mark on both tiles, never 0, while the read has not answered", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockImplementation(() => new Promise<never>(() => {})),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await waitFor(() => expect(api.listTickets).toHaveBeenCalled());
+    expect(tileValues()).toEqual(["n/a", "n/a"]);
+    // No zero sentence either: it is a claim about tickets nobody has read.
+    expect(screen.queryByText("Nothing open is assigned to you")).not.toBeInTheDocument();
+  });
+
+  it("draws the absent mark on both tiles, never 0, when the read failed", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockRejectedValue(new Error("boom")),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await screen.findByRole("alert");
+    expect(tileValues()).toEqual(["n/a", "n/a"]);
+  });
+
+  it("counts both tiles once the read answers", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockResolvedValue(page([TICKET_OPEN])),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await screen.findByText("INC-1");
+    expect(tileValues()).toEqual(["1", "0"]);
+  });
 });
 
 // --------------------------------------------------------------------------

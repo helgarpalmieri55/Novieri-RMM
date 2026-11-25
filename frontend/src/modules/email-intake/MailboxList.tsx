@@ -241,9 +241,9 @@ export function MailboxList({ canAdmin, zone }: { canAdmin: boolean; zone?: stri
                   </Td>
                   {/* Was the raw ISO string, and `"Never polled"` for null.
                       `formatDateTime` renders it in the operator's profile zone
-                      and NO_DATE ("—") when there is no timestamp -- the same
-                      em dash the status cell's absent-error line uses, which
-                      is the point of having one renderer. */}
+                      and NO_DATE when there is no timestamp -- the kit's
+                      absent mark, the same one `NoValue` draws, which is the
+                      point of having one renderer. */}
                   <Td>
                     <RelTime iso={m.last_polled_at} zone={zone} />
                   </Td>

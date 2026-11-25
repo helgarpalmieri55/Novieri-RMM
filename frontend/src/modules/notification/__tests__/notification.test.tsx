@@ -1289,7 +1289,8 @@ describe("notification stat tiles", () => {
 
     await screen.findAllByText("Ops Mattermost");
     const allowlist = tile("Allowlist entries");
-    expect(allowlist.querySelector(".stat-value")?.textContent).toBe("—");
+    // The kit's absent mark (StatCard pending; ruling 10a), not an em dash.
+    expect(allowlist.querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(allowlist).not.toHaveTextContent("nothing allowlisted");
   });
 });

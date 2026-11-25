@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NoValue } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
 import { Badge, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Panel, useUrlFilters } from "../../shell/components";
@@ -176,7 +177,7 @@ export function PolicyResolverPanel() {
                       <Td>{level.label}</Td>
                       <Td>
                         {level.policy === null
-                          ? "—"
+                          ? <NoValue label={t("sla.resolver.noActive")} />
                           : t("sla.resolver.policyCell", {
                               response: formatMinutes(level.policy.response_target_minutes),
                               resolution: formatMinutes(level.policy.resolution_target_minutes),

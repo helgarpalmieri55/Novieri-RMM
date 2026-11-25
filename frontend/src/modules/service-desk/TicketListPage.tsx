@@ -21,6 +21,7 @@ import { TicketTable } from "./TicketTable";
 import type { TicketOut, TicketScope, TicketSort } from "./types";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterBar,
   FilterChips,
@@ -35,6 +36,7 @@ import {
   StatsGrid,
   useNewParam,
   useUrlFilters,
+  withClient,
   writeQuery,
 } from "../../shell/components";
 import { intlLocale } from "../../lib/datetime";
@@ -297,10 +299,6 @@ export function TicketListPage() {
 
   // One clock for every relative time in the table.
   const now = Date.now();
-  // A TILE COUNTED ON A NARROWED READ OPENS THE SAME CLIENT'S ROWS (general
-  // ruling 2): with the Client chip set, every tile's link carries it.
-  const withClient = (to: string): string =>
-    clientChip === "" ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(clientChip)}`;
   const newTicket = canWrite ? (
     <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={created.start} />
   ) : undefined;
@@ -312,13 +310,15 @@ export function TicketListPage() {
       <TicketReadiness />
 
       {/* Each tile counts rows on screen and links at the URL that shows
-          exactly those rows. */}
+          exactly those rows. A TILE COUNTED ON A NARROWED READ OPENS THE SAME
+          CLIENT'S ROWS (general ruling 2): with the Client chip set, the kit's
+          `withClient` adds it to every tile's link. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("serviceDesk.list.shown")}
           value={String(stats.total)}
           icon="ticket"
-          to={withClient("/service-desk")}
+          to={withClient("/service-desk", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="neutral"
@@ -329,7 +329,7 @@ export function TicketListPage() {
           label={t("serviceDesk.common.unassigned")}
           value={String(stats.unassigned)}
           icon="help-circle"
-          to={withClient("/service-desk?scope=unassigned")}
+          to={withClient("/service-desk?scope=unassigned", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="gold"
@@ -341,7 +341,7 @@ export function TicketListPage() {
           label={t("serviceDesk.common.highOrUrgentPriority")}
           value={String(stats.urgent)}
           icon="alert-triangle"
-          to={withClient("/service-desk?priority=high,urgent")}
+          to={withClient("/service-desk?priority=high,urgent", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="red"
@@ -353,7 +353,7 @@ export function TicketListPage() {
           label={t("serviceDesk.list.fromAlerts")}
           value={String(stats.fromAlerts)}
           icon="bell-ringing"
-          to={withClient("/service-desk?origin=alert")}
+          to={withClient("/service-desk?origin=alert", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="blue"
@@ -395,7 +395,7 @@ export function TicketListPage() {
                   this page, P1): a row of every status wrapped to three lines at
                   1440 and pushed the first ticket below the fold. Still the
                   closed vocabulary, in the first row beside the scope. */}
-              <FilterSelect
+              <ChipSelect
                 label={t("serviceDesk.list.statusAria")}
                 value={statusFilter}
                 onChange={(value) => filters.set("status", value)}
@@ -411,7 +411,7 @@ export function TicketListPage() {
           end={dataReady ? <ShowingCount shown={visibleTickets.length} total={shownTotal} /> : null}
         />
         <FilterBar>
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.queueAria")}
             value={queueFilter}
             onChange={(value) => filters.set("queue", value)}
@@ -420,7 +420,7 @@ export function TicketListPage() {
               ...(queues.data ?? []).map((q) => ({ value: q.id, label: q.name })),
             ]}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.priorityAria")}
             value={priorityFilter}
             onChange={(value) => filters.set("priority", value)}
@@ -430,7 +430,7 @@ export function TicketListPage() {
                 p.value === "" ? t("serviceDesk.list.allPriorities") : p.label ? t(p.label) : ticketPriorityLabel(p.value),
             }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.typeAria")}
             value={typeFilter}
             onChange={(value) => filters.set("type", value)}
@@ -439,13 +439,13 @@ export function TicketListPage() {
               label: type === "" ? t("serviceDesk.list.allTypes") : ticketTypeLabel(type),
             }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.originAria")}
             value={originFilter}
             onChange={(value) => filters.set("origin", value)}
             options={ORIGIN_FILTERS.map((o) => ({ value: o.value, label: t(o.label) }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.assigneeAria")}
             value={assigneeFilter}
             onChange={setAssigneeFilter}
@@ -504,35 +504,5 @@ export function TicketListPage() {
           button checks, so a bare `?new=ticket` opens nothing for a reader. */}
       <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} guardNew />
     </div>
-  );
-}
-
-/**
- * One of the list's other filters as a chip with its name on it (the kit's
- * `.chip-select`, as the Client chip is drawn): the caption is what a person
- * reads, and the select carries the same name for assistive technology.
- */
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: readonly { value: string; label: string }[];
-}) {
-  return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{label}</span>
-      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </span>
   );
 }

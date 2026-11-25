@@ -45,7 +45,7 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { Device, Job, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { NO_DATE, formatDate, formatDateTime } from "../../lib/datetime";
+import { formatDate, formatDateTime } from "../../lib/datetime";
 import { Btn, PageHead, Panel, QueryState, SaveBar, StatusPill, UnsavedGuard } from "../../shell/components";
 import { DashboardReadiness } from "./DashboardReadiness";
 import { Icon } from "../../shell/icons";
@@ -137,7 +137,14 @@ function pct(value: number): number {
  *
  * ZERO IS A MEASUREMENT, NOT AN ABSENCE. A zero tile drops out of the urgent
  * treatment and says which zero it is; "0 open" wearing an alarm wash reads as
- * a perfect score. An unresolved query reads `NO_DATE`, never `0`.
+ * a perfect score. An unresolved query reads the kit's absent mark
+ * (`shell.viz.na`, n/a or n/d; ruling 10a), never `0`, and wears no colour.
+ *
+ * NOT `Tile pending` (adoption pass, 2026-11-25): `pending` drops the line
+ * under the figure, and this tile's line is the REASON there is no figure
+ * ("Not counted yet.", "Could not be read, so nothing is counted."), which
+ * ruling 10a keeps and the brief (Task 7, 2.1) requires. Nor `StatCard`,
+ * whose foot is the `.stat-foot` hook the page's "no trend delta" test reads.
  *
  * THE `.stat-card` / `.stat-label` / `.stat-value` / `.urgent` HOOKS STAY, as
  * the class names the page's tests locate tiles by.
@@ -182,10 +189,10 @@ function KpiTile({
       className={`stat-card${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={measured ? String(value) : NO_DATE}
+      value={measured ? String(value) : t("shell.viz.na")}
       icon={icon}
       to={to}
-      kind={loud || kind === "ok" ? kind : undefined}
+      kind={measured && (loud || kind === "ok") ? kind : undefined}
       sub={isZero ? zeroLabel : measured ? sub : t(failed ? "dashboard.tile.failed" : "dashboard.tile.waiting")}
       spark={spark}
     />

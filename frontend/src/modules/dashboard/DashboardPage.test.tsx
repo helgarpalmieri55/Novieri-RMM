@@ -27,6 +27,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, Device } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { DashboardPage } from "./DashboardPage";
 
 /** The edit mode's save bar (redesign plan, Task 7, 2.1): its Save writes the arrangement. */
@@ -578,7 +579,7 @@ describe("DashboardPage", () => {
     expect(screen.queryByText(/8\/16\/2026/)).not.toBeInTheDocument();
   });
 
-  it("renders an absent date as an em dash, never as Invalid Date", async () => {
+  it("renders an absent date as the absent date mark, never as Invalid Date", async () => {
     // An absent `last_seen_at` used to reach `new Date(...)`, and the two ways
     // that goes wrong are BOTH worse than an em dash: `new Date(undefined)` is
     // "Invalid Date", which reads as a broken agent, and `new Date(null)` is
@@ -593,7 +594,9 @@ describe("DashboardPage", () => {
     // assertion, and `new Date(null)` is the EPOCH rather than "Invalid Date",
     // so 1970 is checked for by name.
     const cells = [...row.querySelectorAll("td")].map((cell) => cell.textContent?.trim());
-    expect(cells[3]).toBe("—");
+    // The date formatters' own absent mark (`lib/datetime` NO_DATE), not a
+    // literal: the adoption pass makes it the kit's localized n/a.
+    expect(cells[3]).toBe(NO_DATE);
     expect(row.textContent).not.toMatch(/1970|Invalid Date|null/);
   });
 
@@ -649,8 +652,8 @@ describe("DashboardPage", () => {
     const tile = (await screen.findByText("Jobs needing attention")).closest(
       ".stat-card",
     ) as HTMLElement;
-    // The tile reads an em dash until the query resolves; asserting before
-    // that would pass against a broken count as readily as a working one.
+    // The tile reads the absent mark until the query resolves; asserting
+    // before that would pass against a broken count as readily as a working one.
     await waitFor(() => expect(tile.textContent).toContain("2"));
   });
 
@@ -666,7 +669,8 @@ describe("DashboardPage", () => {
       ".stat-card",
     ) as HTMLElement;
     await waitFor(() => expect(tile.textContent).toContain("0"));
-    expect(tile.textContent).not.toContain("—");
+    // A measured zero, not the kit's absent mark (n/a; it was an em dash).
+    expect(tile.textContent).not.toContain("n/a");
   });
 
   it("adds a stuck job to the failures rather than replacing them", async () => {
@@ -1139,6 +1143,8 @@ describe("customizing the dashboard", () => {
       return found as HTMLElement;
     });
     await waitFor(() => expect(tile).toHaveTextContent("Could not be read, so nothing is counted."));
+    // No figure: the kit's absent mark (ruling 10a), never a dash or a 0.
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
     // And it still leads to its list.
     expect(tile).toHaveAttribute("href", "/jobs");
   });

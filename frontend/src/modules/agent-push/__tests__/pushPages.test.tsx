@@ -773,7 +773,7 @@ describe("Before a push can run: Windows over WinRM", () => {
     expect(item(WINRM).textContent).toContain("deploy/WINDOWS-PUSH.md");
     expect(item(KDC).textContent).toContain("deploy/WINDOWS-PUSH.md");
     // Review I2: advisory, and says why.
-    expect(item(KDC).textContent).toMatch(/not found via DNS — fine if the credential names a domain controller/);
+    expect(item(KDC).textContent).toMatch(/not found via DNS \(fine if the credential names a domain controller\)/);
     // The item rendered in the missing state, not as uncheckable or pending.
     expect(item(WINRM).getAttribute("aria-current")).toBe("step");
     expect(item(KDC).getAttribute("aria-current")).toBe("step");

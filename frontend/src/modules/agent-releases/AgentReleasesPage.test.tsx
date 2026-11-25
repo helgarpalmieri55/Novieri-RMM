@@ -376,6 +376,10 @@ describe("AgentReleasesPage", () => {
     // download link expires, and a bare /expires/i matches both -- which would
     // let the token's expiry be dropped entirely without failing this test.
     expect(tokenLine?.textContent).toMatch(/expires/i);
+    // The digest and what it is for, as two sentences (no em dash in UI text).
+    expect(screen.getByText(/The installer verifies this digest/).closest("p")?.textContent).toBe(
+      "SHA-256: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90. The installer verifies this digest.",
+    );
   });
 
   it("renders the token expiry in the signed-in user's zone", async () => {

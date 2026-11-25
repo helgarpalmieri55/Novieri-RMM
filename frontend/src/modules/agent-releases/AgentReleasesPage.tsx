@@ -283,8 +283,8 @@ export function AgentReleasesPage() {
   // a console that kept them would be wrong on every deployment.
   const withArtifact = allItems.filter((release) => release.has_artifact).length;
   const platforms = new Set(allItems.map((release) => release.os)).size;
-  // The tiles' one condition (ruling 10a): no catalogue, pending or failed. The
-  // kit's `pending` draws its absent mark; the adoption pass keeps this name.
+  // The tiles' one condition (ruling 10a): no catalogue, pending or failed.
+  // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
   const noCatalogue = releases.data == null;
 
   useScrollToCatalogue(releases.data != null);
@@ -329,7 +329,7 @@ export function AgentReleasesPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("agentReleases.page.releases")}
-          value={noCatalogue ? t("shell.viz.na") : String(allItems.length)}
+          value={noCatalogue ? "" : String(allItems.length)}
           pending={noCatalogue}
           icon="package"
           to="/agent-packages#releases"
@@ -338,7 +338,7 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.ready")}
-          value={noCatalogue ? t("shell.viz.na") : String(withArtifact)}
+          value={noCatalogue ? "" : String(withArtifact)}
           pending={noCatalogue}
           icon="check"
           to="/agent-packages#releases"
@@ -350,7 +350,7 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.platforms")}
-          value={noCatalogue ? t("shell.viz.na") : String(platforms)}
+          value={noCatalogue ? "" : String(platforms)}
           pending={noCatalogue}
           icon="devices"
           to="/agent-packages#releases"

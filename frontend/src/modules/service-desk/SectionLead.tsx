@@ -4,9 +4,12 @@ import type { ReactNode } from "react";
  * A settings section's sentence and its "New ..." (redesign plan, Task 7,
  * 2.5): a secondary button, because the open dialog's Save is the page's one
  * primary. Shared by the service desk's queues, categories and saved replies
- * and by the notification sections. Module-local until the kit's
- * `FormSection` takes a `description` (the wave's kit request K2), which then
- * replaces it.
+ * and by the notification rules, channels and allowlist.
+ *
+ * STILL LOCAL, ON PURPOSE (adoption pass, 2026-11-25). The kit's
+ * `FormSection description` draws the sentence alone; every section here
+ * also carries its "New ..." beside it, which the kit does not cover. A lead
+ * with no action is `FormSection description` (Queue members).
  */
 export function SectionLead({ text, action }: { text: string; action?: ReactNode }) {
   return (

@@ -54,7 +54,7 @@ export const agentReleases: Shape<typeof en> = {
     title: "Comando de instalación",
     forOne: "Para <strong>un solo equipo</strong>. El token de inscripción de abajo es de <strong>un solo uso</strong> y caduca {date}.",
     shellHistory: "El token es un literal de este comando, así que quedará en el historial de tu shell; por eso es de un solo uso y de vida corta. Para una flota, usa en su lugar <strong>Despliegue administrado</strong>.",
-    digest: "SHA-256: <mono>{sha}</mono> — el instalador verifica este resumen.",
+    digest: "SHA-256: <mono>{sha}</mono>. El instalador verifica este resumen.",
     download: "Descargar el binario del agente",
     downloadNote: {
       one: "(el mismo archivo que descarga el comando; el enlace caduca en {count} minuto)",

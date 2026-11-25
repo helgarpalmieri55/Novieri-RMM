@@ -1156,8 +1156,12 @@ describe("email-intake stat tiles", () => {
     renderAdmin();
 
     await screen.findAllByText("Printer trouble");
-    expect(tile("Mailboxes reporting errors").querySelector(".stat-value")?.textContent).toBe("—");
-    expect(tile("Mailboxes configured").querySelector(".stat-value")?.textContent).toBe("—");
+    // The kit's absent mark (StatCard pending; ruling 10a, DESIGN.md's Absent
+    // Zero Rule). It was an em dash, which the interface no longer draws.
+    expect(tile("Mailboxes reporting errors").querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile("Mailboxes configured").querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(tile("Mailboxes reporting errors")).not.toHaveTextContent("every mailbox polling cleanly");
+    // And not loud: an alarm wash over "no answer yet" is the same lie as a 0.
+    expect(tile("Mailboxes reporting errors").className).not.toContain("urgent");
   });
 });
