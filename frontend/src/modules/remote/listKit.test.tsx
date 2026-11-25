@@ -92,6 +92,30 @@ describe("Remote sessions on the list kit", () => {
     expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
   });
 
+  it("asks before Start remote session is left with a change, and opens it empty again (general rulings 3, 4)", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/remote?new=session", <SessionsPage />, "/remote");
+    const title = "Start remote session";
+    const dialog = await screen.findByRole("dialog", { name: title });
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "VPN");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const ask = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(router.state.location.search).toBe("?new=session");
+    await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(within(screen.getByRole("dialog", { name: title })).getByLabelText("Reason")).toHaveValue("VPN");
+
+    await userEvent.click(within(screen.getByRole("dialog", { name: title })).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog", { name: "Leave without saving?" })).getByRole("button", {
+        name: "Leave without saving",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Start session" }));
+    expect(within(await screen.findByRole("dialog", { name: title })).getByLabelText("Reason")).toHaveValue("");
+    // Two dialogs, a week grid and typing: slow on a busy machine, not stuck.
+  }, 20_000);
+
   it("opens Start remote session from ?new=session", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/remote?new=session", <SessionsPage />, "/remote");

@@ -364,7 +364,10 @@ export function SessionsPage() {
         </QueryState>
       </Panel>
 
-      <StartSessionDialog open={started.open && canControl} onClose={started.close} />
+      {/* MOUNTED ONLY WHILE OPEN (general ruling 4): however it opens -- the
+          button, a link, Back or Forward -- the form starts empty, and nothing
+          from the last one (a refusal included) is carried over. */}
+      {started.open && canControl ? <StartSessionDialog open guardNew onClose={started.close} /> : null}
     </>
   );
 }

@@ -33,6 +33,7 @@ import {
   SearchField,
   ShowingCount,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -286,7 +287,10 @@ export function PackagesPage() {
         }}
       />
 
-      <CreatePackageDialog open={created.open && canManage} onClose={created.close} />
+      {/* MOUNTED ONLY WHILE OPEN (general ruling 4): however it opens -- the
+          button, a link, Back or Forward -- the form starts empty, and nothing
+          from the last one (a refusal included) is carried over. */}
+      {created.open && canManage ? <CreatePackageDialog open onClose={created.close} /> : null}
     </div>
   );
 }
@@ -300,6 +304,10 @@ function CreatePackageDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [installerType, setInstallerType] = useState("msi");
   const [installArgs, setInstallArgs] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (general ruling 3).
+  const changed =
+    name !== "" || version !== "" || osFamily !== "windows" || installerType !== "msi" || installArgs !== "";
+  const { guard, release } = useUnsavedGuard(changed, { search: ["new"] });
 
   function submit() {
     const next: Attempt = { rules: packageRules, values: { name, version, osFamily, installerType } };
@@ -317,23 +325,25 @@ function CreatePackageDialog({ open, onClose }: { open: boolean; onClose: () => 
       },
       {
         onSuccess: () => {
-          setName("");
-          setVersion("");
-          setInstallArgs("");
-          setAttempt(null);
+          // Saved: leaving does not ask.
+          release();
           onClose();
         },
       },
     );
   }
 
+  // The page mounts this dialog only while it is open, so the next opening
+  // starts from an empty form with no refusal from this one. Nothing is reset
+  // here: the guard may still keep the operator in the form, which then keeps
+  // what it held, its last refusal included.
   function dismiss() {
-    setAttempt(null);
-    create.reset();
     onClose();
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={dismiss} title={t("deploy.packages.createTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -391,5 +401,6 @@ function CreatePackageDialog({ open, onClose }: { open: boolean; onClose: () => 
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

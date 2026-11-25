@@ -10,6 +10,7 @@ import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import type { Device, RemoteMode } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useUnsavedGuard } from "../../shell/components";
 import { ADD_COMPUTER_CTA } from "../../lib/detectors";
 import { agentTooOld, devicePickerEmptyHint, devicePickerOptions, unreachableReason } from "./pickerOptions";
 
@@ -60,9 +61,16 @@ export function StartSessionDialog({
   onClose,
   initialDeviceId,
   initialReason,
+  guardNew = false,
 }: {
   open: boolean;
   onClose: () => void;
+  /**
+   * Opened from `?new=session` and mounted only while open (SessionsPage):
+   * a change asks before the dialog is left (general ruling 3), and closing
+   * resets nothing, since the next opening is a new form anyway.
+   */
+  guardNew?: boolean;
   /** Opened from a device or a ticket: the device is already chosen. */
   initialDeviceId?: string;
   /** Opened from a ticket: its reference, which the technician may edit. */
@@ -85,6 +93,9 @@ export function StartSessionDialog({
   // confirmation renders is derived below, so it cannot go stale against a
   // field the operator changed after opening it.
   const [confirming, setConfirming] = useState(false);
+  const changed =
+    deviceId !== (initialDeviceId ?? "") || mode !== "attended" || reason !== (initialReason ?? "");
+  const { guard, release } = useUnsavedGuard(guardNew && open && changed, { search: ["new"] });
 
   useEffect(() => {
     if (!open) return;
@@ -120,6 +131,8 @@ export function StartSessionDialog({
       }),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["remote-sessions"] });
+      // Started: leaving for the viewer does not ask.
+      release();
       reset();
       onClose();
       navigate(`/remote/${data.session_id}`);
@@ -151,12 +164,16 @@ export function StartSessionDialog({
     start.mutate();
   }
 
-  // The dialog is never unmounted -- SessionsPage keeps it rendered and
-  // toggles `open` -- so a refusal from the last attempt would otherwise still
-  // be announced the next time the technician opens it.
+  // Where the dialog stays mounted (a device's or a ticket's page toggles
+  // `open`), a refusal from the last attempt would otherwise still be
+  // announced the next time it opens, so closing resets it. From `?new=`
+  // nothing is reset: the guard may keep the technician in the form, which
+  // then keeps what it held, and the page unmounts it once it is left.
   function dismiss() {
-    reset();
-    start.reset();
+    if (!guardNew) {
+      reset();
+      start.reset();
+    }
     onClose();
   }
 
@@ -176,6 +193,7 @@ export function StartSessionDialog({
 
   return (
     <>
+      {guard}
       <Dialog open={open} onClose={dismiss} title={t("remote.start.dialogTitle")}>
         <Form onSubmit={submit}>
           <div className="form-grid">

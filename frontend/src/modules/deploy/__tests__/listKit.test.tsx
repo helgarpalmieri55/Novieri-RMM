@@ -20,6 +20,39 @@ const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CU
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
+/**
+ * General rulings 3 and 4 on a `?new=` dialog: Cancel with a change in the
+ * form asks first, and staying keeps the change; leaving, then opening the
+ * dialog again, starts from an empty form.
+ */
+async function guardsThenStartsEmpty(
+  router: { state: { location: { search: string } } },
+  title: string,
+  search: string,
+  change: (dialog: HTMLElement) => Promise<void>,
+  holdsChange: (dialog: HTMLElement) => void,
+  isEmpty: (dialog: HTMLElement) => void,
+  reopen: string,
+): Promise<void> {
+  const dialog = await screen.findByRole("dialog", { name: title });
+  await change(dialog);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  const ask = await screen.findByRole("dialog", { name: "Leave without saving?" });
+  expect(router.state.location.search).toBe(search);
+  await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+  holdsChange(screen.getByRole("dialog", { name: title }));
+
+  await userEvent.click(within(screen.getByRole("dialog", { name: title })).getByRole("button", { name: "Cancel" }));
+  await userEvent.click(
+    within(await screen.findByRole("dialog", { name: "Leave without saving?" })).getByRole("button", {
+      name: "Leave without saving",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+  await userEvent.click(screen.getAllByRole("button", { name: reopen })[0]!);
+  isEmpty(await screen.findByRole("dialog", { name: title }));
+}
+
 describe("Deployments (/deploy)", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
@@ -97,6 +130,21 @@ describe("Deployments (/deploy)", () => {
     expect(lists.filter((href) => !href.includes(`client=${ANDES}`))).toEqual([]);
   });
 
+  it("asks before New deployment is left with a change, and opens it empty again (general rulings 3, 4)", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/deploy?new=deployment", <DeployPage />, "/deploy");
+    await guardsThenStartsEmpty(
+      router,
+      "New deployment",
+      "?new=deployment",
+      (dialog) => userEvent.selectOptions(within(dialog).getByLabelText("Action"), "uninstall"),
+      (dialog) => expect(within(dialog).getByLabelText("Action")).toHaveValue("uninstall"),
+      (dialog) => expect(within(dialog).getByLabelText("Action")).toHaveValue("install"),
+      "New deployment",
+    );
+    // Two dialogs, a week grid and typing: slow on a busy machine, not stuck.
+  }, 20_000);
+
   it("opens New deployment from ?new=deployment", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/deploy?new=deployment", <DeployPage />, "/deploy");
@@ -140,6 +188,21 @@ describe("Packages (/deploy/packages)", () => {
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
 
+  it("asks before New package is left with a change, and opens it empty again (general rulings 3, 4)", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/deploy/packages?new=package", <PackagesPage />, "/deploy/packages");
+    await guardsThenStartsEmpty(
+      router,
+      "New package",
+      "?new=package",
+      (dialog) => userEvent.type(within(dialog).getByLabelText("Name"), "7z"),
+      (dialog) => expect(within(dialog).getByLabelText("Name")).toHaveValue("7z"),
+      (dialog) => expect(within(dialog).getByLabelText("Name")).toHaveValue(""),
+      "New package",
+    );
+    // Two dialogs, a week grid and typing: slow on a busy machine, not stuck.
+  }, 20_000);
+
   it("opens New package from ?new=package", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/deploy/packages?new=package", <PackagesPage />, "/deploy/packages");
@@ -176,6 +239,21 @@ describe("Scripts (/deploy/scripts)", () => {
     expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
+
+  it("asks before New script is left with a change, and opens it empty again (general rulings 3, 4)", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/deploy/scripts?new=script", <ScriptsPage />, "/deploy/scripts");
+    await guardsThenStartsEmpty(
+      router,
+      "New script",
+      "?new=script",
+      (dialog) => userEvent.type(within(dialog).getByLabelText("Name"), "dns"),
+      (dialog) => expect(within(dialog).getByLabelText("Name")).toHaveValue("dns"),
+      (dialog) => expect(within(dialog).getByLabelText("Name")).toHaveValue(""),
+      "New script",
+    );
+    // Two dialogs, a week grid and typing: slow on a busy machine, not stuck.
+  }, 20_000);
 
   it("opens New script from ?new=script", async () => {
     mockUseApi.mockReturnValue(fixtureClient());

@@ -44,6 +44,7 @@ import {
   SearchField,
   ShowingCount,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -223,7 +224,10 @@ export function ScriptsPage() {
 
       <SchedulesPanel scripts={scripts.data ?? []} canRead={canRead} canSchedule={canSchedule} />
 
-      <AuthorScriptDialog open={authoring.open && canManage} onClose={authoring.close} />
+      {/* MOUNTED ONLY WHILE OPEN (general ruling 4): however it opens -- the
+          button, a link, Back or Forward -- the form starts empty, and nothing
+          from the last one (a refusal included) is carried over. */}
+      {authoring.open && canManage ? <AuthorScriptDialog open onClose={authoring.close} /> : null}
       <EditScriptDialog script={editing} onClose={() => setEditing(null)} />
       <RunScriptDialog script={running} onClose={() => setRunning(null)} />
     </div>
@@ -238,6 +242,9 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [interpreter, setInterpreter] = useState("powershell");
   const [body, setBody] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (general ruling 3).
+  const changed = name !== "" || osFamily !== "windows" || interpreter !== "powershell" || body !== "";
+  const { guard, release } = useUnsavedGuard(changed, { search: ["new"] });
 
   function submit() {
     const next: Attempt = { rules: authorRules, values: { name, osFamily, interpreter, body } };
@@ -251,18 +258,19 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
       { name: name.trim(), os_family: osFamily.trim(), interpreter: interpreter.trim(), body },
       {
         onSuccess: () => {
-          setName("");
-          setBody("");
-          setAttempt(null);
+          // Saved: leaving does not ask.
+          release();
           onClose();
         },
       },
     );
   }
 
+  // The page mounts this dialog only while it is open, so the next opening
+  // starts from an empty form with no refusal from this one. Nothing is reset
+  // here: the guard may still keep the operator in the form, which then keeps
+  // what it held, its last refusal included.
   function dismiss() {
-    setAttempt(null);
-    author.reset();
     onClose();
   }
 
@@ -273,6 +281,8 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
   // local copy.
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={dismiss} title={t("deploy.scripts.authorTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -320,6 +330,7 @@ function AuthorScriptDialog({ open, onClose }: { open: boolean; onClose: () => v
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }
 
