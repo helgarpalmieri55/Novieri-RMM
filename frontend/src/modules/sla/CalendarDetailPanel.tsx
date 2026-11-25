@@ -59,7 +59,14 @@ export function CalendarDetailPanel({
       </div>
       {explanation && <p className="notice red">{explanation}</p>}
 
+      {/* KEYED BY THE CALENDAR (general ruling 12): the calendar is a
+          selection that changes without a route change, and a calendar read
+          once is cached, so without the key the editor stayed mounted with the
+          last calendar's unsaved hours and Save week sent them to this one.
+          A new calendar starts a new editor: the unsaved week is dropped, and
+          its report to the page's one guard goes with it. */}
       <WorkingWindowsEditor
+        key={calendarId}
         calendarId={calendarId}
         timezone={calendar.data.timezone}
         windows={calendar.data.windows}
