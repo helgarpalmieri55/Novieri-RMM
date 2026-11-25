@@ -415,7 +415,10 @@ describe("a plan's detail, in Spanish", () => {
     for (const name of ["Registrar revisión", "Editar plan", "Archivar"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
-    for (const label of ["Estado", "RTO", "RPO", "Última revisión", "Intervalo de revisión", "Revisión"]) {
+    // No "Estado" in the strip: the head's badge says the state (the
+    // coordinator's rule for the 360's Details; wave O4 critique).
+    expect(screen.getAllByText("Activo").length).toBeGreaterThan(0);
+    for (const label of ["RTO", "RPO", "Última revisión", "Intervalo de revisión", "Revisión"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getAllByText("60 min").length).toBeGreaterThan(0);

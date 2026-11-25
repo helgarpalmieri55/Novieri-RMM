@@ -4,7 +4,7 @@ import type { enrollment as en } from "../en/enrollment";
 export const enrollment: Shape<typeof en> = {
   page: {
     title: "Inscripción",
-    description: "Los tokens que permiten que un equipo nuevo se una y los certificados que tienen los equipos.",
+    description: "Los tokens que inscriben equipos y los certificados que reciben.",
     createToken: "Crear token",
     permissionsUnread: "No se pudieron leer tus permisos, así que se ocultan las pestañas que los necesitan. Esto no significa que no los tengas.",
   },

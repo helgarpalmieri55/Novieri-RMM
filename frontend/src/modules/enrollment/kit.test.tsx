@@ -89,4 +89,11 @@ describe("enrollment on the kit (4.11)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
     expect(router.state.location.search).toBe("?tab=certificates");
   });
+
+  it("counts what each tab shows against what it has (Receta L; critique, wave O4)", async () => {
+    renderPage("/enrollment", <EnrollmentPage />);
+    expect(await screen.findByText(/^Showing \d+ of \d+$/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
+    expect(await screen.findByText(/^Showing \d+ of \d+$/)).toBeInTheDocument();
+  });
 });

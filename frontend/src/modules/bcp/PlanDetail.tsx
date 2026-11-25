@@ -209,16 +209,8 @@ export function PlanDetail() {
           <h2 className="sr-only">{t("bcp.detail.summary")}</h2>
           <Facts
             items={[
-              {
-                k: t("bcp.detail.state"),
-                v: (
-                  <StatusPill
-                    value={plan.data.state}
-                    kind={plan.data.state === "active" ? "ok" : "mut"}
-                    label={planStateLabel(plan.data.state)}
-                  />
-                ),
-              },
+              // No State fact: the record head's badge says it (the coordinator's
+              // rule for the client 360's Details, applied here; critique, wave O4).
               {
                 k: t("bcp.detail.rto"),
                 v:

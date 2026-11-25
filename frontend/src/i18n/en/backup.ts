@@ -313,7 +313,7 @@ export const backup = {
   },
   offsite: {
     title: "Off-site copy",
-    description: "A second, locked copy of every backup, somewhere this server cannot delete it.",
+    description: "A second, locked copy that this server cannot delete.",
     keyTitle: "Recovery key",
     keySubtitle: "Lets you read the off-site copy if this server is ever lost. Only you hold it.",
     keySetUp: "Set up the recovery key",

@@ -413,7 +413,10 @@ export function BackupPointsPage() {
                       {point.size == null || point.size < 0 ? (
                         <NoValue label={t("backup.points.noSize")} />
                       ) : (
-                        <span className="mono">{formatBytes(point.size)}</span>
+                        // One line: a size broken over two is a number to reassemble (critique, wave O4).
+                        <span className="mono" style={{ whiteSpace: "nowrap" }}>
+                          {formatBytes(point.size)}
+                        </span>
                       )}
                     </Td>
                     <Td>

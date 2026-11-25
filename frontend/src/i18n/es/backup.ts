@@ -319,7 +319,7 @@ export const backup: Shape<typeof en> = {
   offsite: {
     title: "Copia externa",
     description:
-      "Una segunda copia bloqueada de cada copia de seguridad, en un lugar donde este servidor no puede borrarla.",
+      "Una segunda copia bloqueada, que este servidor no puede borrar.",
     keyTitle: "Clave de recuperación",
     keySubtitle:
       "Te permite leer la copia externa si alguna vez se pierde este servidor. Solo la tienes tú.",

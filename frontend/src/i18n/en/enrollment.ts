@@ -2,7 +2,7 @@ export const enrollment = {
   // The token form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   page: {
     title: "Enrollment",
-    description: "Tokens that let a new computer join, and the certificates computers hold.",
+    description: "The tokens that enroll computers, and the certificates they get.",
     createToken: "Create token",
     permissionsUnread: "Your permissions could not be read, so the tabs that need them are hidden. This is not a statement that you lack them.",
   },

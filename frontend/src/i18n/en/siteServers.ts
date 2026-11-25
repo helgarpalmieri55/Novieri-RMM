@@ -1,7 +1,7 @@
 export const siteServers = {
   page: {
     title: "Site servers",
-    description: "Devices that run sweeps and Wake-on-LAN on their own segment.",
+    description: "Computers that sweep their segment and wake others with Wake-on-LAN.",
     promote: "Promote device",
     registered: "Registered servers",
     registeredZero: "No device has been promoted",

@@ -191,3 +191,71 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
   computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
 - **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
   desplazar la página) y antes de pintar.
+
+---
+
+## Oleada O4: copias, continuidad, imágenes, servidores de sitio e inscripción, Task 9
+
+Críticas `.impeccable/critique/2026-11-25T04-37-41Z__…` de las quince páginas de la oleada (de 27/36 a 30/40),
+todas cerradas tras el pulido. Tres tenían tres asuntos prioritarios y por tanto preguntas: la copia externa
+(`backup/OffsitePage.tsx`), el registro de una prueba (`bcp/TestRecorder.tsx`) y la inscripción
+(`enrollment/EnrollmentPage.tsx`). Las fuentes las zanjan todas; se aplicaron en el pulido de la oleada. Las
+demás críticas tenían menos de tres y llevan `Questions skipped`.
+
+### Copia externa 1. La frase de la cabecera, de 79 caracteres (104 en español)
+
+- **Respuesta: (a).** «A second, locked copy that this server cannot delete.» / «Una segunda copia bloqueada, que este
+  servidor no puede borrar.».
+- **Por qué.** A 390 ocupaba tres líneas y dejaba «borrarla.» sola (el detector, `straggler`).
+- **Regla.** Receta L, punto 1 (40 a 70 caracteres), aplicada a toda cabecera de página; la respuesta 1 de los
+  clientes, Task 5.
+
+### Copia externa 2. El editor de un almacenamiento, que ninguna captura enseña
+
+- **Respuesta: (a).** Se pide al coordinador una variante de harmony con una sesión que tenga
+  `backup.offsite.manage` (la sesión de prueba vive en `fixtures/core.ts`, clase 1); mientras tanto lo miden
+  las pruebas de `__tests__/offsiteKit.test.tsx`.
+- **Regla.** «Archivos compartidos», clase 1 (`fixtures/**` es de la Task 3): una oleada no lo edita, lo pide.
+
+### Copia externa 3. Un paso de la prueba escrito por su clave («reach»)
+
+- **Respuesta: (a).** El dato de prueba usa la clave que el servidor escribe (`connect`, `backup/offsite.py`).
+- **Regla.** `PRODUCT.md`, principio 5 (cada palabra en los dos idiomas); el dato de prueba sigue al servidor,
+  como ya pide `coverage.fixture.test.tsx` para el informe de cobertura.
+
+### Registro de una prueba 1. Tres botones primarios en el cuerpo de una página
+
+- **Respuesta: (a).** «Registrar prueba» es el único primario; «Guardar paso» y «Añadir hallazgo» van en
+  contorno (`FormActions variant="outline"`).
+- **Regla.** `DESIGN.md`, «Buttons»: «One primary per page body».
+
+### Registro de una prueba 2. Los tres números de la instantánea, una tarjeta dentro de otra
+
+- **Respuesta: (a).** Una lista de definiciones sin marco (`KV`) dentro del panel.
+- **Regla.** `DESIGN.md`, «Elevation & Depth» (una sola sombra, sin segunda elevación); la respuesta 1 del banco
+  `/__preview` («nested cards are always wrong»).
+
+### Registro de una prueba 3. El resultado dos veces
+
+- **Respuesta: (a).** Sale de la tira de datos: lo dice la insignia de la cabecera. Lo mismo en la ficha de un
+  plan con su estado.
+- **Regla.** La decisión del coordinador sobre los Datos de la ficha 360 (Task 5, punto 5): lo que la cabecera
+  y las tarjetas ya dicen no se repite.
+
+### Inscripción 1. «Mostrando x de y»
+
+- **Respuesta: (a).** Al final de la barra de filtros de cada pestaña: los tokens sobre el total de la
+  organización para esa vista (`total`), los certificados sobre los equipos que la pestaña leyó.
+- **Regla.** `DESIGN.md`, «Lists»: «"Showing x of y" at the end of the toolbar»; Receta L, punto 2.
+
+### Inscripción 2. La frase de la cabecera, de 93 caracteres en español
+
+- **Respuesta: (a).** «The tokens that enroll computers, and the certificates they get.» / «Los tokens que inscriben
+  equipos y los certificados que reciben.».
+- **Regla.** Receta L, punto 1.
+
+### Inscripción 3. Las cuatro tarjetas sobre tres pestañas
+
+- **Respuesta: (a).** Se quedan: cada una enlaza a la vista que cuenta (la de tokens activos, a su pestaña).
+- **Regla.** `DESIGN.md`, «Records (detail)» y la regla de la consola de que un número lleva a donde vive; el
+  pulido no rediseña (`reference/polish.md`).

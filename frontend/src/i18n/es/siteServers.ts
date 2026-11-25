@@ -4,7 +4,7 @@ import type { siteServers as en } from "../en/siteServers";
 export const siteServers: Shape<typeof en> = {
   page: {
     title: "Servidores de sitio",
-    description: "Dispositivos que hacen barridos y encienden equipos con Wake-on-LAN en su propio segmento.",
+    description: "Equipos que barren su segmento y encienden otros con Wake-on-LAN.",
     promote: "Promover dispositivo",
     registered: "Servidores registrados",
     registeredZero: "No se ha promovido ningún dispositivo",

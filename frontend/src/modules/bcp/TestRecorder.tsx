@@ -50,7 +50,7 @@ import {
   useDraft,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { Facts } from "../../shell/viz";
+import { Facts, KV } from "../../shell/viz";
 
 type TriState = "" | "true" | "false";
 
@@ -204,16 +204,7 @@ export function TestRecorder() {
           <Facts
             items={[
               { k: t("bcp.recorder.type"), v: testTypeLabel(test.data.type) },
-              {
-                k: t("bcp.recorder.outcome"),
-                v: (
-                  <StatusPill
-                    value={test.data.outcome}
-                    kind={outcomeKind(test.data.outcome)}
-                    label={outcomeLabel(test.data.outcome)}
-                  />
-                ),
-              },
+              // No Outcome fact: the record head's badge says it (critique, wave O4).
               {
                 k: t("bcp.recorder.scheduled"),
                 v: <span>{formatDateTime(test.data.scheduled_for, zone)}</span>,
@@ -369,11 +360,14 @@ export function TestRecorder() {
             title={t("bcp.recorder.snapshotTitle")}
             subtitle={t("bcp.recorder.snapshotSubtitle", { when: formatDateTime(evidence.captured_at, zone) })}
           >
-            <Facts
+            {/* A PLAIN DEFINITION LIST, NOT A FACTS STRIP: the strip is a
+                bordered card, and inside this panel it was a card in a card
+                (the detector's `nested-cards`; critique, wave O4). */}
+            <KV
               items={[
-                { k: t("bcp.recorder.devices"), v: evidence.summary.total_n },
-                { k: t("bcp.recorder.covered"), v: evidence.summary.covered_n },
-                { k: t("bcp.recorder.restoreProven"), v: evidence.summary.restore_proven_n },
+                [t("bcp.recorder.devices"), <span className="mono">{evidence.summary.total_n}</span>],
+                [t("bcp.recorder.covered"), <span className="mono">{evidence.summary.covered_n}</span>],
+                [t("bcp.recorder.restoreProven"), <span className="mono">{evidence.summary.restore_proven_n}</span>],
               ]}
             />
             <Table>
@@ -551,7 +545,10 @@ function StepForm({ testId, onDirty }: { testId: string; onDirty: (dirty: boolea
               the user gets to read, and a control that will not move is not. The
               server failure comes from here too, so a bodyless 503 produces a
               sentence instead of the empty string the old line rendered. */}
+          {/* OUTLINE: Record test is the page's one primary (DESIGN.md, "One
+              primary per page body"); a step only adds a row. */}
           <FormActions
+            variant="outline"
             label={t("bcp.recorder.saveStep")}
             pendingLabel={t("bcp.recorder.saving")}
             pending={upsertStep.isPending}
@@ -689,7 +686,9 @@ function FindingsSection({
             {/* Enabled with the description empty ON PURPOSE, and the server's
                 refusal comes from here too. A DR finding that fails to save
                 silently is a gap in the evidence pack nobody knows about. */}
+            {/* OUTLINE, like Save step: Record test is the one primary. */}
             <FormActions
+              variant="outline"
               label={t("bcp.recorder.addFinding")}
               pending={createFinding.isPending}
               error={createFinding.error}

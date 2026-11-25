@@ -144,6 +144,7 @@ import {
   Progress,
   QueryState,
   SearchField,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
@@ -1034,6 +1035,8 @@ export function EnrollmentPage() {
                   />
                 ) : null}
                 <span className="filter-spacer" />
+                {/* The org's count for this view, not the page's (Receta L). */}
+                <ShowingCount shown={tokenItems.length} total={tokenTotal} />
               </FilterBar>
             ) : null}
             <QueryState loading={tokens.isLoading} error={tokens.error} empty={false} emptyLabel="">
@@ -1202,6 +1205,8 @@ export function EnrollmentPage() {
               />
             ) : null}
             <span className="filter-spacer" />
+            {/* Over the devices this tab read, which is what it can show. */}
+            {devices.data ? <ShowingCount shown={filteredDevices.length} total={deviceItems.length} /> : null}
           </FilterBar>
           <QueryState loading={devices.isLoading} error={devices.error} empty={false} emptyLabel="">
             {filteredDevices.length === 0 ? (
