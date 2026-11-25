@@ -30,6 +30,16 @@ import type {
 } from "../types";
 
 /**
+ * The ticket's properties save through the kit's one save bar (redesign plan,
+ * Task 7, 2.3): its "Save" stands where the panel's "Save changes" was, and
+ * the bar is there only while something changed.
+ */
+function saveBarSave(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" });
+}
+
+
+/**
  * `GET /service-desk/tickets` answers `{items, total}` since closeout
  * recommendation 10 -- it returned a bare array, so a full page and a
  * complete queue were indistinguishable and the page could not say
@@ -1222,7 +1232,7 @@ describe("TicketDetailPage wiring", () => {
   it("offers the copilot on the ticket", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(screen.getByRole("heading", { name: "Copilot" })).toBeInTheDocument();
     expect(screen.getByLabelText("Ask the copilot")).toBeInTheDocument();
   });
@@ -1231,7 +1241,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Message"), "Replaced the cable.");
     await user.click(screen.getByRole("button", { name: "Send reply" }));
 
@@ -1245,7 +1255,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.click(screen.getByRole("radio", { name: /Internal note/ }));
     await user.type(screen.getByLabelText("Message"), "Escalating internally.");
     await user.click(screen.getByRole("button", { name: "Add note" }));
@@ -1260,10 +1270,10 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "resolved");
     await user.type(screen.getByLabelText("Why is the status changing? (optional)"), "Fixed.");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", {
       to_status: "resolved",
@@ -1300,7 +1310,7 @@ describe("TicketDetailPage wiring", () => {
       const user = userEvent.setup();
       renderDetail("t1");
 
-      await screen.findByText("INC-1: Laptop won't boot");
+      await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
       expect(await screen.findByText(/This ticket belongs to Novieri IT/)).toBeInTheDocument();
       const select = await screen.findByLabelText("Move to another client");
       const offered = within(select).getAllByRole("option").map((option) => option.textContent);
@@ -1332,7 +1342,7 @@ describe("TicketDetailPage wiring", () => {
       api.me = vi.fn().mockResolvedValue(ME_FULL);
       renderDetail("t1");
 
-      await screen.findByText("INC-1: Laptop won't boot");
+      await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
       expect(screen.queryByLabelText("Move to another client")).not.toBeInTheDocument();
       expect(api.listClients).not.toHaveBeenCalled();
     });
@@ -1342,11 +1352,11 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     // Cycle 6: the label used to be "Assignee user ID" over a text box.
     expect(screen.queryByLabelText("Assignee user ID")).not.toBeInTheDocument();
     await pickEntity(user, "Assigned to", /Tessa Technician/);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { assigned_to: "tech-1" });
   });
@@ -1379,7 +1389,7 @@ describe("TicketDetailPage wiring", () => {
   it("labels status, priority, type and comment visibility for people", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(screen.getAllByText("Open").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Normal").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Incident").length).toBeGreaterThanOrEqual(1);
@@ -1395,7 +1405,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, assigned_to: "ghost-9" });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await waitFor(() => expect(screen.getAllByText("ghost-9").length).toBeGreaterThanOrEqual(1));
   });
 
@@ -1403,12 +1413,12 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(screen.queryByLabelText("Device ID")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("Device"));
     expect(await screen.findByRole("option", { name: /BUILD-01\s*linux · offline/ })).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /WKS-042\s*windows · online/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.updateTicket).toHaveBeenCalledWith(
       "t1",
@@ -1419,7 +1429,7 @@ describe("TicketDetailPage wiring", () => {
   it("edits Description and posts comments through textareas, not one-line inputs", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(screen.getByLabelText("Description").tagName).toBe("TEXTAREA");
     expect(screen.getByLabelText("Message").tagName).toBe("TEXTAREA");
   });
@@ -1435,9 +1445,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "cancelled");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     // Nothing has been sent yet -- the dialog is the gate, not a receipt.
     expect(api.changeTicketStatus).not.toHaveBeenCalled();
@@ -1456,9 +1466,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "cancelled");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
     await user.click(
       within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
     );
@@ -1476,9 +1486,9 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, status: "resolved" });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "closed");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     const dialog = await screen.findByRole("dialog", { name: "Close this ticket" });
     expect(within(dialog).getByText(/can be reopened from this same panel/)).toBeInTheDocument();
@@ -1491,9 +1501,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "resolved");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", {
@@ -1532,9 +1542,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await pickEntity(user, "Assigned to", /^Nobody/);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { assigned_to: null });
   });
@@ -1543,9 +1553,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Queue"), "q2");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { queue_id: "q2" });
   });
@@ -1555,7 +1565,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#REQ-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Reason (required to reject)"), "Looks good.");
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
@@ -1567,7 +1577,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#REQ-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Reason (required to reject)"), "Not authorized.");
     await user.click(screen.getByRole("button", { name: "Reject" }));
 
@@ -1582,7 +1592,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_PENDING_APPROVAL);
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#REQ-1 Laptop won't boot" });
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
 
@@ -1596,7 +1606,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_PENDING_APPROVAL);
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#REQ-1 Laptop won't boot" });
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
@@ -1608,7 +1618,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_CLOSED);
     renderDetail("t3");
 
-    await screen.findByText("INC-2: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-2 Laptop won't boot" });
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
     expect(
       screen.getByText("This ticket is closed and takes no new replies. Reopen it to reply."),
@@ -1629,7 +1639,7 @@ describe("TicketDetailPage wiring", () => {
   it("renders the status history table oldest-first", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     const heading = await screen.findByRole("heading", { name: "Status history" });
     // `.panel` RATHER THAN `div`: this panel is `<Panel>` now, which renders a
     // `<section>`, and the heading's nearest `div` is the panel head — which
@@ -1652,7 +1662,7 @@ describe("TicketDetailPage wiring", () => {
     api.listTicketStatusHistory = vi.fn().mockResolvedValue([]);
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(await screen.findByText("No status history yet.")).toBeInTheDocument();
   });
 
@@ -1664,7 +1674,7 @@ describe("TicketDetailPage wiring", () => {
   it("does not render a device summary panel when the ticket has no linked device", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-1 Laptop won't boot" });
     expect(screen.queryByText("Inventory summary")).not.toBeInTheDocument();
     expect(screen.queryByText("Patch state")).not.toBeInTheDocument();
   });
@@ -1675,7 +1685,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockResolvedValue(DEVICE_PATCH_STATUS);
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-3 Laptop won't boot" });
     await screen.findByText("Inventory summary");
     expect(kvValue("Hostname")).toHaveTextContent("WKS-042");
     // The OS reads as a person writes it: the agent reports "windows".
@@ -1696,7 +1706,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockResolvedValue(DEVICE_PATCH_STATUS);
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-3 Laptop won't boot" });
     expect(
       await screen.findByText("Inventory summary not available (insufficient permissions)."),
     ).toBeInTheDocument();
@@ -1713,7 +1723,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockRejectedValue(new ApiError(403, "forbidden"));
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "#INC-3 Laptop won't boot" });
     expect(
       await screen.findByText("Patch state not available (insufficient permissions)."),
     ).toBeInTheDocument();

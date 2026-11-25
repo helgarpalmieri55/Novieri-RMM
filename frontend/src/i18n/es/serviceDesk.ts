@@ -248,6 +248,7 @@ export const serviceDesk: Shape<typeof en> = {
     nobodyHint: "Cualquiera puede hacerse cargo",
     noDevice: "Ningún dispositivo",
     saveChanges: "Guardar cambios",
+    subjectRequired: "Escribe un asunto para el ticket",
     moveTo: "Pasar a «{status}»",
     closeTicket: "Cerrar ticket",
     clientTitle: "Cliente",

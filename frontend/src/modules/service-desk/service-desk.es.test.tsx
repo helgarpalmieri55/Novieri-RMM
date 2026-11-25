@@ -522,7 +522,8 @@ describe("a ticket's page in Spanish", () => {
   it("words the header, the conversation and the reply box", async () => {
     detailApi(OPEN_TICKET);
     const { container } = renderTicket(OPEN_TICKET);
-    expect(await screen.findByRole("heading", { name: "INC-100: La impresora t1 atasca el papel" })).toBeInTheDocument();
+    // The record's head (redesign plan, Task 7, 2.3): "#<number> <subject>".
+    expect(await screen.findByRole("heading", { name: "#INC-100 La impresora t1 atasca el papel" })).toBeInTheDocument();
     expect(screen.getByText(/Abierto el .+ por Rosa Solicitante · Soporte general/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Responder" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Añadir nota interna" })).toBeInTheDocument();
@@ -588,7 +589,8 @@ describe("a ticket's page in Spanish", () => {
     expect(screen.getByLabelText("Categoría")).toHaveDisplayValue("Equipos");
     expect(screen.getByLabelText("Asunto")).toBeInTheDocument();
     expect(screen.getByLabelText("Descripción")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled();
+    // Nothing changed: the kit's save bar is not drawn (it replaced a disabled "Guardar cambios").
+    expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull();
     // Linked device.
     expect(await screen.findByText("Dispositivo vinculado")).toBeInTheDocument();
     expect(await screen.findByText("Resumen del inventario")).toBeInTheDocument();
@@ -668,7 +670,7 @@ describe("a ticket's page in Spanish", () => {
     await screen.findByText("Editar ticket");
     await user.selectOptions(screen.getByLabelText("Estado"), "cancelled");
     expect(await screen.findByLabelText("¿Por qué cambia el estado? (opcional)")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Pasar este ticket a «Cancelado»")).toBeInTheDocument();
     expect(within(dialog).getByText(/Nada sale del estado «Cancelado»\. Este ticket no se podrá reabrir, comentar ni editar nunca más\./)).toBeInTheDocument();
@@ -688,7 +690,7 @@ describe("a ticket's page in Spanish", () => {
     renderTicket(t);
     await screen.findByText("Editar ticket");
     await user.selectOptions(screen.getByLabelText("Estado"), "closed");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Cerrar este ticket")).toBeInTheDocument();
     expect(within(dialog).getByText(/No es definitivo: un ticket cerrado se puede reabrir desde este mismo panel\./)).toBeInTheDocument();

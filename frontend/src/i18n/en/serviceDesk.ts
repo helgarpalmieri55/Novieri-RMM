@@ -242,6 +242,7 @@ export const serviceDesk = {
     nobodyHint: "Anyone can pick it up",
     noDevice: "No device",
     saveChanges: "Save changes",
+    subjectRequired: "Write a subject for the ticket",
     moveTo: "Move to {status}",
     closeTicket: "Close ticket",
     clientTitle: "Client",
