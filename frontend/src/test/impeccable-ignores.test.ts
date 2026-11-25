@@ -76,5 +76,9 @@ describe("the detector's shared ignores", () => {
     expect(broken[0]?.value).toBe("*");
     expect(broken[0]?.files).toEqual(["frontend/src/modules/docs/DocumentViewer.tsx"]);
     expect(broken[0]?.reason).toMatch(/the src is on the next line/);
+    // AND NO LINE NUMBER (P3 adoption pass; batch 3 review, Minor 3): it said
+    // `DocumentViewer.tsx:256` while the `src` was already at 258. A quoted
+    // number rots with the next edit above it; "the next line" stays true.
+    expect(broken[0]?.reason).not.toMatch(/\.tsx:\d+|\bline \d+|\bL\d+\b/);
   });
 });
