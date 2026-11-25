@@ -134,3 +134,50 @@ a 9, aplicadas en la ronda 1 de correcciones de la Task 4).
 - **Por qué.** Abrir la primera sección repetía la primera tarjeta y no respondía a nada que la persona
   estuviera mirando.
 
+
+---
+
+## Clientes: la lista y la ficha 360 (`frontend/src/modules/clients/ClientsPage.tsx`, `ClientDetailPage.tsx`), Task 5
+
+Críticas `.impeccable/critique/2026-11-25T02-07-50Z__frontend-src-modules-clients-clientspage-tsx.md` (30/40) y
+`…-clientdetailpage-tsx.md` (27/40), las dos cerradas. Las preguntas que zanjan `DESIGN.md`, el diseño aprobado,
+el glosario y las decisiones del operador se contestan aquí y se aplicaron en el pulido de la Task 5; la que no
+zanjan (punto 5) va al coordinador en el informe de la tarea.
+
+### 1. La frase de la cabecera de la lista, de 98 caracteres
+
+- **Respuesta: (a).** Una frase de 40 a 70 caracteres: «The companies you serve, with their sites, contacts
+  and modules.» / «Las empresas que atiendes, con sus sedes, contactos y módulos.».
+- **Por qué.** A 1440 dejaba «uses.» sola en la segunda línea (el detector, `straggler`).
+- **Regla.** Receta L, punto 1: «una frase de 40 a 70 caracteres que dice qué es la página».
+
+### 2. Los equipos de un cliente, con dos nombres en la misma pantalla
+
+- **Respuesta: (a).** Los equipos de un cliente se llaman igual en la lista, en las tarjetas, en Datos y en la
+  pestaña Sedes: «Equipos» en español; en inglés, «Computers» en toda la ficha 360 (la palabra de su pestaña y
+  de su tarjeta) y «Devices» en la columna de la lista, la palabra del riel.
+- **Por qué.** La tarjeta decía «Equipos 12» encima de la fila «Dispositivos 12» de Datos.
+- **Regla.** El glosario de `src/i18n/es/index.ts`: «computer → equipo … la lista de máquinas, /devices, es
+  "Equipos" en el riel y en su página» (D13).
+
+### 3. Las comprobaciones de la pestaña Alertas, por su clave de protocolo
+
+- **Respuesta: (a).** Cada comprobación por su nombre (`checkLabel`, «CPU ocupada»), el valor observado debajo y
+  el equipo en una sola línea, como en la consola de alertas.
+- **Por qué.** La pestaña escribía `cpu.busy_pct` y `service.running`, en inglés en la página en español.
+- **Regla.** `PRODUCT.md`, principio 5 («every word exists in both»); el comentario de `checkLabel` en
+  `modules/health/healthState.ts` (el título de la fila son las palabras; la clave es para los registros).
+
+### 4. La pestaña elegida, fuera de la tira en un teléfono
+
+- **Respuesta: (a).** La tira sigue siendo de una línea y se desplaza; es `Tabs`, del kit, quien lleva la
+  pestaña elegida a la vista al llegar. La Task 5 lo pide al kit en su informe con el código; no toca
+  `shell/components.tsx`.
+- **Regla.** `DESIGN.md`, «Records (detail)»: «one row of tabs that change the URL»; «Archivos compartidos»,
+  clase 1: `shell/**` es de las Tasks 1 a 4.
+
+### 5. Datos repite el estado, el tipo y los dos números de las tarjetas
+
+- **Sin respuesta en las fuentes.** `DESIGN.md` («Records») dice qué lleva la cabecera, las tarjetas y las
+  pestañas, no qué lleva la pestaña Resumen. Opciones: (a) Datos conserva todos sus datos, como ahora; (b) Datos
+  quita los cuatro que ya están arriba. Sube al coordinador en el informe de la Task 5.

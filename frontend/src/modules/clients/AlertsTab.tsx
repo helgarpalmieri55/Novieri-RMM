@@ -14,6 +14,7 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
 import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
+import { checkLabel } from "../health/healthState";
 
 export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
   const t = useT();
@@ -57,11 +58,16 @@ export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boo
             <tbody>
               {rows.map((alert) => (
                 <tr key={alert.id}>
-                  <Td>
-                    <Link to={`/devices/${alert.device_id}?tab=health`}>{alert.device_hostname}</Link>
+                  {/* A hostname is one word: it does not break at its own hyphens
+                      (the alert console's rule). */}
+                  <Td className="whitespace-nowrap">
+                    <Link to={`/devices/${alert.device_id}?tab=health`}>{alert.device_hostname || alert.device_id}</Link>
                   </Td>
                   <Td>
-                    <div className="cell-title">{alert.check_type}</div>
+                    {/* THE CHECK IN WORDS, as the alert console, its drawer and a
+                        device's page name it (`checkLabel`); the wire key is
+                        what a log is grepped for, not what a row is read by. */}
+                    <div className="cell-title">{checkLabel(alert.check_type)}</div>
                     <div className="cell-sub mono">{alert.observed_value}</div>
                   </Td>
                   <Td>

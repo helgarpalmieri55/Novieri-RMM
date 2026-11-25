@@ -124,6 +124,12 @@ describe("the client 360 (redesign design §1.3)", () => {
     expect(narrowedTo).toContain(ANDES);
   });
 
+  it("names each alert's check in words, as the alert console does, not by its wire key (critique P1)", async () => {
+    page("?tab=alerts");
+    expect((await screen.findAllByText("CPU busy")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("cpu.busy_pct")).toBeNull();
+  });
+
   it("shows the assets as three counts, each leading to its list with the Client chip set (D14)", async () => {
     page("?tab=assets");
     expect(await screen.findByRole("link", { name: /Licenses/ })).toHaveAttribute("href", `/licenses?client=${ANDES}`);

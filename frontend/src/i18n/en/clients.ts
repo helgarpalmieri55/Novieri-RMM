@@ -19,7 +19,7 @@ export const clients = {
   },
   list: {
     title: "Clients",
-    description: "The companies you serve, with their sites, their contacts and the optional modules each one uses.",
+    description: "The companies you serve, with their sites, contacts and modules.",
     newClient: "New client",
     search: "Search clients",
     archivedLabel: "Archived clients",
@@ -93,7 +93,8 @@ export const clients = {
     address: "Address",
     website: "Website",
     notes: "Notes",
-    devices: "Devices",
+    // The 360's word for a client's machines: its tile and its tab say "Computers" too.
+    devices: "Computers",
     sites: "Sites",
     notSet: "Not set",
     archiveTitle: "Archive this client",
@@ -114,7 +115,7 @@ export const clients = {
     add: "Add site",
     tableLabel: "Sites",
     colSite: "Site",
-    colDevices: "Devices",
+    colDevices: "Computers",
     colStatus: "Status",
     inUse: "In use",
     archivedOn: "Archived {date}",
