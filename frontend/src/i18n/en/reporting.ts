@@ -135,7 +135,7 @@ export const reporting = {
       "No ticket queues exist in this organisation yet, so there is no queue to restrict this report to.",
   },
   validation: {
-    notNumber: "{label} must be a number — \"{value}\" is not one",
+    notNumber: "{label} must be a number; \"{value}\" is not one",
     atLeast: "{label} must be at least {min}",
     atMost: "{label} must be at most {max}",
     notDateTime: "{label} must be a date and time",

@@ -489,7 +489,7 @@ describe("DocsPage article view", () => {
     await openArticle(user);
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    expect(await screen.findByText("v3 — 06 Aug 2026, 08:30")).toBeInTheDocument();
+    expect(await screen.findByText("v3 · 06 Aug 2026, 08:30")).toBeInTheDocument();
     expect(screen.queryByText(/05 Aug 2026/)).not.toBeInTheDocument();
   });
 

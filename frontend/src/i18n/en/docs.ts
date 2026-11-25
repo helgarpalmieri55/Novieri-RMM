@@ -97,7 +97,7 @@ export const docs = {
       "The version history could not be loaded, so this is not a list of the edits to this article. {reason}",
     loading: "Loading…",
     noEarlier: "No earlier versions.",
-    version: "v{version} — {date}",
+    version: "v{version} · {date}",
     loadFailed: "The article could not be loaded. {reason}",
   },
   portal: {
@@ -154,7 +154,7 @@ export const docs = {
       "The document leaves the library and search. Its files stay downloadable, and only an administrator can restore it. Nothing is destroyed.",
     archiveConfirm: "Archive document",
     purgeTitle: "Destroy these bytes",
-    purgeSubject: "Version {version} — {filename}, {size}",
+    purgeSubject: "Version {version} ({filename}, {size})",
     purgeBody:
       "The file is deleted from storage and cannot be recovered: no undo, and no backup this console can reach. The filename, size, digest, and who did it survive in the version history and the audit log.",
     purgeConfirm: "Destroy the bytes",
@@ -215,7 +215,7 @@ export const docs = {
     auditNote:
       "Opening a document is recorded in the audit log as a download, the same as pressing Download.",
     destroyed:
-      "<b>These bytes were destroyed.</b> Version {version} ({filename}, {size}) was purged and cannot be recovered from this platform. The record of the destruction — who did it and when — is kept in the audit log.",
+      "<b>These bytes were destroyed.</b> Version {version} ({filename}, {size}) was purged and cannot be recovered from this platform. The record of the destruction, who did it and when, is kept in the audit log.",
     noPreview:
       "This console does not preview {type} files. Download {filename} to open it in an application that can.",
     loading: "Loading {filename}…",
@@ -224,6 +224,6 @@ export const docs = {
     noPreviewShort: "This console does not preview {type} files. Download {filename} to open it.",
   },
   markdown: {
-    linkRemoved: "Link removed — unsupported URL scheme.",
+    linkRemoved: "Link removed: unsupported URL scheme.",
   },
 } as const;
