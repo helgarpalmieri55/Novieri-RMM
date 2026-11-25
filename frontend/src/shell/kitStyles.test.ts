@@ -82,3 +82,31 @@ describe("ListToolbar: the chips flow beside the search (kit requests batch 1, i
     expect(rule(KIT, ".filterbar > .srch-wrap")).toBe("");
   });
 });
+
+describe("the leave question's own layer (kit requests batch 2, G1)", () => {
+  const OVERLAYS = read("./overlays.css");
+  const z = (css: string, selector: string) => Number(/z-index:\s*(\d+)/.exec(rule(css, selector))?.[1] ?? NaN);
+
+  it("reads the layers it is ranked against", () => {
+    // NON-VACUITY: NaN compares false with everything, so a renamed rule
+    // would pass every ranking below by failing to be read.
+    expect(z(OVERLAYS, ".modal")).toBe(95);
+    expect(z(OVERLAYS, ".overlay")).toBe(70);
+    expect(z(OVERLAYS, ".toast-stack")).toBe(110);
+  });
+
+  it("is a stacking context of its own, so its scrim and panel stack inside it", () => {
+    const layer = rule(KIT, ".leave-layer");
+    expect(layer).toMatch(/position:\s*relative/);
+    expect(layer).toMatch(/z-index:\s*\d+/);
+  });
+
+  it("sits above every dialog and its scrim, whatever the document's order", () => {
+    expect(z(KIT, ".leave-layer")).toBeGreaterThan(z(OVERLAYS, ".modal"));
+    expect(z(KIT, ".leave-layer")).toBeGreaterThan(z(OVERLAYS, ".overlay"));
+  });
+
+  it("stays under the toasts, which report what just happened", () => {
+    expect(z(KIT, ".leave-layer")).toBeLessThan(z(OVERLAYS, ".toast-stack"));
+  });
+});

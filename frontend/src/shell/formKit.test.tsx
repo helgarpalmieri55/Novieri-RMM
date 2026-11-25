@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { createBrowserRouter, Link, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
+import { Dialog } from "../components/ui";
 import { renderPage } from "../test/renderPage";
 import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
 import { useNewParam } from "./listKit";
@@ -627,3 +628,85 @@ describe("FormSection's description (kit requests batch 1, item 3)", () => {
     expect(at).toBeGreaterThan(-1);
   });
 });
+
+/**
+ * THE LEAVE QUESTION OVER A FORM'S DIALOG (kit requests batch 2, G1 and G2).
+ * Found in Chromium by a wave's review: the question and a form's `Dialog`
+ * shared `.modal`'s layer, so a page that rendered its guard before the
+ * dialog had the form painted over the question, and Escape reached both.
+ */
+function DialogForm({ guardInside = false, onClose }: { guardInside?: boolean; onClose?: () => void }) {
+  const created = useNewParam("ticket");
+  const [title, setTitle] = useState("");
+  const { guard } = useUnsavedGuard(title !== "", { search: ["new"] });
+  const close = () => {
+    onClose?.();
+    created.close();
+  };
+  return (
+    <>
+      <button type="button" onClick={created.start}>
+        New ticket
+      </button>
+      {guardInside ? null : guard}
+      <Dialog open={created.open} onClose={close} title="New ticket">
+        {guardInside ? guard : null}
+        <label>
+          Title
+          <input value={title} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        <button type="button" onClick={close}>
+          Cancel
+        </button>
+      </Dialog>
+    </>
+  );
+}
+
+async function askToLeave(guardInside = false, onClose?: () => void) {
+  const view = renderPage("/service-desk", <DialogForm guardInside={guardInside} onClose={onClose} />, "/service-desk");
+  await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+  await userEvent.type(screen.getByLabelText("Title"), "Printer");
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  return {
+    ...view,
+    form: screen.getByRole("dialog", { name: "New ticket" }),
+    question: screen.getByRole("dialog", { name: "Leave without saving?" }),
+  };
+}
+
+describe("the leave question over a form's dialog (kit requests batch 2, G1)", () => {
+  it("is drawn after the form's dialog, in a layer of its own, when the page renders the guard first", async () => {
+    const { form, question } = await askToLeave();
+    // Later in the document AND in its own layer: on top whatever the page's order.
+    expect(form.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const layer = question.closest(".leave-layer");
+    expect(layer).not.toBeNull();
+    expect(layer?.parentElement).toBe(document.body);
+    // Its scrim is in the layer too, so the form behind is dimmed and cannot be clicked.
+    expect(layer?.querySelector(".overlay.open")).not.toBeNull();
+  });
+
+  it("is drawn outside the form's dialog when the guard is inside it, so the panel cannot position or clip it", async () => {
+    const { form, question } = await askToLeave(true);
+    expect(form.contains(question)).toBe(false);
+    expect(question.closest(".leave-layer")?.parentElement).toBe(document.body);
+  });
+
+  it("takes focus, and gives it back to the form when the person stays", async () => {
+    const { form, question } = await askToLeave();
+    expect(question).toContainElement(document.activeElement as HTMLElement);
+    await userEvent.click(within(question).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(form).toContainElement(document.activeElement as HTMLElement);
+    expect(screen.getByLabelText("Title")).toHaveValue("Printer");
+  });
+
+  it("still leaves when the person says so", async () => {
+    const { router } = await askToLeave();
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+    expect(router.state.location.search).toBe("");
+  });
+});
+

@@ -5,6 +5,7 @@
  * this console has one. A page with changes asks before it is left.
  */
 import { useCallback, useContext, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker, type Location } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/confirm";
@@ -363,6 +364,26 @@ function leavesForm(current: Location, next: Location, search: GuardedQuery): bo
 /** How many questions are mounted, that is how many guards hold changes right now. */
 let guardsHoldingChanges = 0;
 
+/**
+ * THE QUESTION IS DRAWN ABOVE ANY DIALOG, WHATEVER THE PAGE'S ORDER (kit
+ * requests batch 2, G1). A form in a `Dialog` is the commonest guarded form,
+ * and the question used to render where the page put `guard`, as a second
+ * `.modal` on the same layer (`overlays.css`, z-index 95):
+ *
+ * - a page that rendered `guard` BEFORE the dialog had the form painted over
+ *   the question (same z-index, later in the document), so its buttons could
+ *   not be clicked while focus sat trapped in it (seen in Chromium by a wave's
+ *   review, and by the batch's browser probe);
+ * - a page that rendered `guard` INSIDE the dialog put the question inside
+ *   `.modal.open`, whose `transform` makes it the containing block of every
+ *   `position: fixed` descendant: the question and its scrim were laid out in
+ *   the form's panel and clipped by its `.modal-body`.
+ *
+ * So the question is a PORTAL to the end of `<body>` (out of any panel that
+ * would position or clip it), inside `.leave-layer`, a stacking context of
+ * its own above `.modal` (kit.css). Order alone would not do: equal z-indexes
+ * are decided by the document, and a later portal would win again.
+ */
 function LeaveQuestion({ search, pass }: { search: GuardedQuery; pass: ReleasePass }) {
   const t = useT();
   useEffect(() => {
@@ -382,16 +403,20 @@ function LeaveQuestion({ search, pass }: { search: GuardedQuery; pass: ReleasePa
     // `release()` lets this one through, and only this one.
     return !pass.take();
   });
-  return (
-    <ConfirmDialog
-      open={blocker.state === "blocked"}
-      title={t("shell.kit.leaveTitle")}
-      subject=""
-      body={t("shell.kit.leaveBody")}
-      confirmLabel={t("shell.kit.leave")}
-      destructive
-      onCancel={() => blocker.reset?.()}
-      onConfirm={() => blocker.proceed?.()}
-    />
+  if (blocker.state !== "blocked") return null;
+  return createPortal(
+    <div className="leave-layer">
+      <ConfirmDialog
+        open
+        title={t("shell.kit.leaveTitle")}
+        subject=""
+        body={t("shell.kit.leaveBody")}
+        confirmLabel={t("shell.kit.leave")}
+        destructive
+        onCancel={() => blocker.reset?.()}
+        onConfirm={() => blocker.proceed?.()}
+      />
+    </div>,
+    document.body,
   );
 }

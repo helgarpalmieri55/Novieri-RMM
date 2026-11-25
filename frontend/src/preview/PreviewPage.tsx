@@ -26,7 +26,7 @@ import { BarChart, LineChart } from "../components/chart";
 import { ConfirmDialog } from "../components/confirm";
 import { EmptyState, NoValue } from "../components/emptystate";
 import { EntityPicker } from "../components/picker";
-import { Badge, Field, inputClass, Table, Td, Th } from "../components/ui";
+import { Badge, Dialog, Field, inputClass, Table, Td, Th } from "../components/ui";
 import { WeekPainter } from "../components/weekpainter";
 import { AppShell, HealthGlyph } from "../shell/AppShell";
 import type { NewMenuEntry } from "../shell/newMenu";
@@ -79,6 +79,8 @@ import {
   Tabs,
   Toggle,
   UrlTabs,
+  useNewParam,
+  useUnsavedGuard,
   useUrlTab,
 } from "../shell/components";
 import type { DocDocument, DocDocumentVersion, Me, PortalMe } from "../lib/api";
@@ -1176,7 +1178,39 @@ function KitPreview() {
           <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
         </div>
       </div>
+      <GuardedDialogBench />
     </>
+  );
+}
+
+/**
+ * A FORM IN A DIALOG, GUARDED (kit requests batch 2, G1 and G2), the case a
+ * wave's review found broken in Chromium: the page renders its guard BEFORE
+ * the dialog, so with both on `.modal`'s layer the form painted over the
+ * leave question, and Escape reached both. The browser probe opens it, types,
+ * presses Cancel, and checks the question is on top and Escape answers it
+ * alone. Closed by default (`?new=kit-ticket` opens it), so the a11y pass
+ * measures the page as before.
+ */
+function GuardedDialogBench() {
+  const created = useNewParam("kit-ticket");
+  const [subject, setSubject] = useState("");
+  const { guard } = useUnsavedGuard(subject !== "", { search: ["new"] });
+  return (
+    <div style={{ marginTop: 24 }}>
+      <Btn label="New ticket in a dialog" icon="plus" onClick={created.start} />
+      {guard}
+      <Dialog open={created.open} onClose={created.close} title="New ticket">
+        <div className="form-grid">
+          <Field label="Subject" full>
+            <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} />
+          </Field>
+        </div>
+        <div className="confirm-actions">
+          <Btn label="Cancel" onClick={created.close} />
+        </div>
+      </Dialog>
+    </div>
   );
 }
 
