@@ -54,7 +54,7 @@ export const agentReleases = {
     title: "Install command",
     forOne: "For <strong>one machine</strong>. The enrollment token below is <strong>single use</strong> and expires {date}.",
     shellHistory: "The token is a literal in this command, so it will land in your shell history; that is why it is single-use and short-lived. For a fleet, use <strong>Managed deployment</strong> instead.",
-    digest: "SHA-256: <mono>{sha}</mono> — the installer verifies this digest.",
+    digest: "SHA-256: <mono>{sha}</mono>. The installer verifies this digest.",
     download: "Download the agent binary",
     downloadNote: {
       one: "(the same file the command fetches; the link expires in {count} minutes)",
