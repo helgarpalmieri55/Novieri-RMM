@@ -141,18 +141,20 @@ describe("the test recorder on the form kit (4.5)", () => {
     const recordTest = vi.fn((id: string, body: object) => ({ ...(fixtureRegistry().getTest as (id: string) => object)(id), ...body }));
     mockUseApi.mockReturnValue(api({ recordTest } as unknown as FixtureMap));
     const { router } = recorder();
-    await userEvent.type(await screen.findByLabelText("Notes"), "All services back in 12 minutes");
+    await userEvent.type(await screen.findByLabelText("Notes"), "Back in 12 min");
     await userEvent.click(screen.getByRole("button", { name: "Record test" }));
     // test-1 was recorded before, so replacing its evidence asks first.
     const confirm = await screen.findByRole("dialog", { name: "Re-record this DR test" });
     await userEvent.click(within(confirm).getByRole("button", { name: "Replace the evidence" }));
     await waitFor(() => expect(recordTest).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Test recorded.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Notes")).toHaveValue("All services back in 12 minutes");
+    expect(screen.getByLabelText("Notes")).toHaveValue("Back in 12 min");
     await userEvent.click(screen.getByRole("link", { name: "Back to the plan" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/bcp/plans/plan-1"));
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
-  });
+    // Seven steps through a confirmation and a refetch: under a loaded suite
+    // the default five seconds were measured short (the full run, 5340 ms).
+  }, 15_000);
 });
 
 describe("the printable report (4.5)", () => {
