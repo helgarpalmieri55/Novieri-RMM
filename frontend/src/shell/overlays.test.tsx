@@ -61,6 +61,29 @@ describe("Drawer", () => {
     expect(screen.getByRole("button", { name: "Edit record" })).toBeInTheDocument();
   });
 
+  /*
+   * A DIALOG ON AN ELEMENT THAT MAY BE ONE (P3 adoption pass; B's axe run on
+   * /jobs?job=job-1 and /security?event=sec-1: `aria-allowed-role`). The
+   * drawer was the prototype's `<aside>` given `role="dialog"`, and ARIA in
+   * HTML allows no dialog role on `aside`. It is a `div` now, with the same
+   * class, the same dialog semantics and the same name.
+   */
+  it("is its dialog on an element ARIA allows it on, with axe's aria-allowed-role clean", async () => {
+    const { container } = render(
+      <Drawer open onClose={vi.fn()} title="DEV-004">
+        <p>body content</p>
+      </Drawer>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "DEV-004" });
+    expect(dialog.tagName).toBe("DIV");
+    expect(dialog).toHaveClass("drawer", "open");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const axe = (await import("axe-core")).default;
+    const result = await axe.run(container, { runOnly: { type: "rule", values: ["aria-allowed-role"] } });
+    expect(result.violations.map((violation) => violation.id)).toEqual([]);
+    expect(result.passes.map((pass) => pass.id)).toContain("aria-allowed-role");
+  });
+
   it("closes on Escape", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
