@@ -38,6 +38,8 @@ export const devices = {
     searchPeople: "Search name, description, IP, FQDN, operating system, architecture or who it's assigned to",
     search: "Search name, description, IP, FQDN, operating system or architecture",
     searchAria: "Search devices",
+    // The state chips' group (redesign Receta L, 5: the tab strip on `?state=` became chips).
+    stateLabel: "Filter by state",
     clear: "Clear search",
     provenanceAria: "Filter by how the record came to exist",
     provenanceAny: "Recorded by anyone",
@@ -48,13 +50,11 @@ export const devices = {
       other: "{count} of at most {max} machines selected for push install.",
     },
     pushSelected: "Push install the agent… ({count})",
-    clearSelection: "Clear selection",
     approveAll: "Approve all…",
   },
   empty: {
-    none: "No devices enrolled yet.",
-    search: "No devices match “{term}”.",
-    filter: "No devices match that filter.",
+    // The empty fleet's cause and its way forward (redesign Task 6, 1.1: `ListEmpty` with Add a computer).
+    yet: "No devices yet. Install the agent on the first one.",
   },
   table: {
     selectForPush: "Select for push install",

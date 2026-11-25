@@ -167,7 +167,8 @@ beforeEach(() => mockUseApi.mockReset());
 describe("the devices page in Spanish", () => {
   it("words the page head, tiles, tabs, filters, columns and every row state", async () => {
     const { container } = renderDevices(ESTATE, ["devices.read", "people.read", "agent.push.run", "devices.review"]);
-    expect(await screen.findByRole("heading", { name: "Dispositivos" })).toBeInTheDocument();
+    // «Equipos», the rail's word for this list (decision D13).
+    expect(await screen.findByRole("heading", { name: "Equipos" })).toBeInTheDocument();
     await screen.findByText("ws-alpha");
     for (const label of ["Añadir activo", "Exportar inventario", "Instalar el agente de forma remota…", "Ejecuciones de instalación remota", "Añadir un equipo"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -175,7 +176,8 @@ describe("the devices page in Spanish", () => {
     const labels = [...document.querySelectorAll(".stat-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Equipos administrados", "Activos", "En línea ahora", "Certificados que requieren atención"]);
     for (const tab of ["Todos los dispositivos", "En línea", "Sin conexión", "Sin agente", "Certificados que requieren atención", "Pendientes de revisión"]) {
-      expect(screen.getByRole("tab", { name: new RegExp(tab) })).toBeInTheDocument();
+      // The state tabs are chips on the same `?state=` (redesign Receta L, 5).
+      expect(screen.getByRole("button", { name: new RegExp(tab) })).toBeInTheDocument();
     }
     const table = screen.getByRole("table");
     for (const header of ["Dispositivo", "Agente", "Visto por última vez", "Asignado a", "Certificado", "Sistema operativo", "Arquitectura", "Registrado por", "Acciones"]) {
@@ -196,9 +198,10 @@ describe("the devices page in Spanish", () => {
     const user = userEvent.setup();
     const { container } = renderDevices(ESTATE, ["devices.read"]);
     await screen.findByText("ws-alpha");
-    const filter = screen.getByLabelText("Filtrar por cómo se creó el registro");
+    // The provenance filter is a row of chips (redesign Task 6, 1.1: «Origen»).
+    const filter = screen.getByRole("group", { name: "Filtrar por cómo se creó el registro" });
     for (const option of ["Registrado por cualquiera", "Inscripción del agente", "Introducido a mano", "Confirmado desde el descubrimiento", "Encontrado por un barrido"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: option })).toBeInTheDocument();
     }
     expect(screen.getByPlaceholderText("Buscar por nombre, descripción, IP, FQDN, sistema operativo o arquitectura")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Buscar dispositivos"), "zzzz");
@@ -208,7 +211,9 @@ describe("the devices page in Spanish", () => {
 
   it("words the empty states", async () => {
     const { container } = renderDevices([], ["devices.read"]);
-    expect(await screen.findByText("Aún no hay dispositivos inscritos.")).toBeInTheDocument();
+    // The kit's empty list: the cause and the way to the first computer (redesign Task 6, 1.1).
+    expect(await screen.findByText("Aún no hay equipos. Instala el agente en el primero.")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Añadir un equipo" }).length).toBeGreaterThan(0);
     expectNoEnglish(container, STORED);
   });
 
@@ -219,7 +224,9 @@ describe("the devices page in Spanish", () => {
     await user.click(screen.getByLabelText("Seleccionar lab-pc para la instalación remota"));
     expect(await screen.findByText(/1 de un máximo de \d+ equipos seleccionado para la instalación remota\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Instalar el agente de forma remota… (1)" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Borrar la selección" })).toBeInTheDocument();
+    // The selection is the kit's bulk bar, with the kit's own way to clear it.
+    const bar = screen.getByRole("region", { name: "Acciones en lote" });
+    expect(within(bar).getByRole("button", { name: "Quitar selección" })).toBeInTheDocument();
     expectNoEnglish(container, [...STORED, "boxed laptop"]);
   });
 
@@ -673,13 +680,14 @@ describe("the device groups page in Spanish", () => {
 describe("a live language switch on the devices pages", () => {
   it("re-words a mounted fleet list", async () => {
     renderDevices(ESTATE, ["devices.read", "agent.push.run"]);
-    expect(await screen.findByRole("heading", { name: "Dispositivos" })).toBeInTheDocument();
+    // «Equipos» (decision D13); the state tabs are chips (Receta L, 5).
+    expect(await screen.findByRole("heading", { name: "Equipos" })).toBeInTheDocument();
     await screen.findByText("ws-alpha");
-    expect(screen.getByRole("tab", { name: /Sin conexión/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sin conexión/ })).toBeInTheDocument();
     expect(screen.getByText(/Mostrando 1–4 de 4 dispositivos\./)).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Offline/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Offline/ })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–4 of 4 devices.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run job on ws-alpha" })).toBeInTheDocument();
     // The provenance words are catalogue lookups, not stored text.

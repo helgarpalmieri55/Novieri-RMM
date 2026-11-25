@@ -3,7 +3,8 @@ import type { devices as en } from "../en/devices";
 
 export const devices: Shape<typeof en> = {
   page: {
-    title: "Dispositivos",
+    // «Equipos», the rail's word for this list (decision D13; the glossary in `es/index.ts`).
+    title: "Equipos",
     description: "Todos los equipos y dispositivos que administras, con o sin agente.",
     addAsset: "Añadir activo",
     exportInventory: "Exportar inventario",
@@ -40,6 +41,7 @@ export const devices: Shape<typeof en> = {
     searchPeople: "Buscar por nombre, descripción, IP, FQDN, sistema operativo, arquitectura o persona asignada",
     search: "Buscar por nombre, descripción, IP, FQDN, sistema operativo o arquitectura",
     searchAria: "Buscar dispositivos",
+    stateLabel: "Filtrar por estado",
     clear: "Borrar la búsqueda",
     provenanceAria: "Filtrar por cómo se creó el registro",
     provenanceAny: "Registrado por cualquiera",
@@ -50,13 +52,10 @@ export const devices: Shape<typeof en> = {
       other: "{count} de un máximo de {max} equipos seleccionados para la instalación remota.",
     },
     pushSelected: "Instalar el agente de forma remota… ({count})",
-    clearSelection: "Borrar la selección",
     approveAll: "Aprobar todos…",
   },
   empty: {
-    none: "Aún no hay dispositivos inscritos.",
-    search: "Ningún dispositivo coincide con «{term}».",
-    filter: "Ningún dispositivo coincide con ese filtro.",
+    yet: "Aún no hay equipos. Instala el agente en el primero.",
   },
   table: {
     selectForPush: "Seleccionar para la instalación remota",

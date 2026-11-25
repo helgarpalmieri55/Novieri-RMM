@@ -218,12 +218,14 @@ describe("DevicesPage", () => {
     // a greenfield deployment must not look identical.
     renderPage(() => Promise.reject(new Error("boom")));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText(/No devices enrolled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No devices yet/i)).not.toBeInTheDocument();
   });
 
   it("says the fleet is empty when it is genuinely empty", async () => {
     renderPage(() => Promise.resolve({ items: [], total: 0 }));
-    expect(await screen.findByText("No devices enrolled yet.")).toBeInTheDocument();
+    // The kit's empty list (redesign Task 6, 1.1): the cause and the way to the
+    // first computer, in place of "No devices enrolled yet.".
+    expect(await screen.findByText("No devices yet. Install the agent on the first one.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -282,7 +284,8 @@ describe("DevicesPage", () => {
       }),
     );
     await screen.findByText("ws-alpha");
-    await userEvent.click(screen.getByRole("tab", { name: /Offline/ }));
+    // The state tabs are chips on the same `?state=` (redesign Receta L, 5).
+    await userEvent.click(screen.getByRole("button", { name: /^Offline/ }));
     expect(screen.getByText("srv-beta")).toBeInTheDocument();
     expect(screen.queryByText("ws-alpha")).not.toBeInTheDocument();
   });
@@ -298,11 +301,13 @@ describe("DevicesPage", () => {
     await userEvent.type(screen.getByLabelText("Search devices"), "dc.local");
     expect(screen.getByText("srv-beta")).toBeInTheDocument();
     expect(screen.queryByText("ws-alpha")).not.toBeInTheDocument();
-    // And the empty state distinguishes "no match" from "none enrolled", and
-    // quotes the term that produced it.
+    // And the empty state distinguishes "no match" from "none enrolled": the
+    // kit's filtered empty list with its way out (redesign Receta L, 3), in
+    // place of the sentence that quoted the term.
     await userEvent.clear(screen.getByLabelText("Search devices"));
     await userEvent.type(screen.getByLabelText("Search devices"), "zzzz");
-    expect(screen.getByText("No devices match \u201Czzzz\u201D.")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
 
   /**
@@ -321,15 +326,16 @@ describe("DevicesPage", () => {
       }),
     );
     await screen.findByText("ws-alpha");
-    const tabs = () => screen.getByRole("tablist");
-    expect(within(tabs()).getByRole("tab", { name: /All devices/ })).toHaveTextContent("2");
+    // The strip is the state chips' group (redesign Receta L, 5).
+    const tabs = () => screen.getByRole("group", { name: "Filter by state" });
+    expect(within(tabs()).getByRole("button", { name: /All devices/ })).toHaveTextContent("2");
 
     await userEvent.type(screen.getByLabelText("Search devices"), "dc.local");
 
-    expect(within(tabs()).getByRole("tab", { name: /All devices/ })).toHaveTextContent("1");
-    // And the tab for the rows the search excluded drops to zero rather than
+    expect(within(tabs()).getByRole("button", { name: /All devices/ })).toHaveTextContent("1");
+    // And the chip for the rows the search excluded drops to zero rather than
     // advertising a device the table will not show.
-    expect(within(tabs()).getByRole("tab", { name: /Online/ })).toHaveTextContent("0");
+    expect(within(tabs()).getByRole("button", { name: /^Online/ })).toHaveTextContent("0");
   });
 
   /**
@@ -352,7 +358,9 @@ describe("DevicesPage", () => {
 
   it("does not paste 500 characters of search term into the empty state", async () => {
     // The audit typed exactly that. Echoing it verbatim pushes the message —
-    // and the way out of it — off the card.
+    // and the way out of it — off the card. The kit's empty list quotes no
+    // term at all (redesign Receta L, 3): the message stays short and the way
+    // out stays on it.
     renderPage(() => Promise.resolve({ items: [device()], total: 1 }));
     await screen.findByText("ws-alpha");
     // Pasted rather than typed: 500 keystrokes prove nothing extra.
@@ -360,9 +368,10 @@ describe("DevicesPage", () => {
     await userEvent.click(box);
     await userEvent.paste("z".repeat(500));
 
-    const empty = screen.getByText(/No devices match/);
+    const empty = await screen.findByText("Nothing matches these filters.");
     expect(empty.textContent!.length).toBeLessThan(120);
-    expect(empty.textContent).toContain("\u2026");
+    expect(empty.textContent).not.toContain("zzzz");
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
 
   it("shows no fabricated column the API cannot fill", async () => {
@@ -590,7 +599,7 @@ describe("last seen", () => {
     it("puts the chosen tab in the URL", async () => {
       renderWithUrl("/devices");
       await screen.findByText("ws-alpha");
-      await userEvent.click(screen.getByRole("tab", { name: /Offline/ }));
+      await userEvent.click(screen.getByRole("button", { name: /^Offline/ }));
 
       expect(screen.getByTestId("url")).toHaveTextContent("/devices?state=offline");
     });
@@ -676,32 +685,32 @@ describe("what the device table owes assistive technology", () => {
     expect(within(agentlessRow).queryByRole("button", { name: /Run job/ })).not.toBeInTheDocument();
   });
 
-  it("gives the tab strip a panel to control", async () => {
-    // "[MEDIUM] Tabs are missing `aria-controls`/`tabpanel` wiring … no
-    // element on the page has `role='tabpanel'` (count = 0), every tab has
-    // `aria-controls: null`."
+  it("names the state filter and says which state is on", async () => {
+    // "[MEDIUM] Tabs are missing `aria-controls`/`tabpanel` wiring". The
+    // strip is no longer a tablist: the design makes a filtering strip a row
+    // of toggle chips (redesign Receta L, 5), and a toggle owes a name for its
+    // group and a pressed state, not a panel.
     renderPage(one);
     await screen.findByText("ws-alpha");
 
-    const panel = screen.getByRole("tabpanel");
-    expect(panel).toHaveAttribute("id", "devices-tabpanel");
-    const tabs = screen.getAllByRole("tab");
-    // Six since the install link added "Waiting for review" (2026-09-28).
-    expect(tabs).toHaveLength(6);
-    for (const tab of tabs) expect(tab).toHaveAttribute("aria-controls", "devices-tabpanel");
+    const group = screen.getByRole("group", { name: "Filter by state" });
+    const chips = within(group).getAllByRole("button");
+    // Five here: "Waiting for review" is drawn when the server counts it, and
+    // this fake (an older server's answer) does not.
+    expect(chips).toHaveLength(5);
+    for (const chip of chips) expect(chip).toHaveAttribute("aria-pressed");
   });
 
-  it("keeps the whole tab strip to one tab stop", async () => {
-    // The other half of the same finding: "all four tabs have `tabIndex: 0`
-    // rather than the roving `0/-1` pattern", so keyboard users had to press
-    // Tab four times to get past the strip.
+  it("presses exactly one state chip", async () => {
+    // The other half of the same finding, for a row of toggles: which one is on
+    // is said by `aria-pressed`, and exactly one is.
     renderPage(one);
     await screen.findByText("ws-alpha");
-    const reachable = screen
-      .getAllByRole("tab")
-      .filter((tab) => tab.getAttribute("tabindex") !== "-1");
-    expect(reachable).toHaveLength(1);
-    expect(reachable[0]).toHaveAttribute("aria-selected", "true");
+    const pressed = within(screen.getByRole("group", { name: "Filter by state" }))
+      .getAllByRole("button")
+      .filter((chip) => chip.getAttribute("aria-pressed") === "true");
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0]).toHaveTextContent(/All devices/);
   });
 
   it("gives the page headings below the H1 to navigate by", async () => {
@@ -799,9 +808,12 @@ describe("the stat tiles are links to the rows they counted", () => {
   it("offers one way to add a computer, the same one the top bar offers", async () => {
     // The review (2026-09-23) counted six install entry points. "Enroll
     // device" and "Add devices" were two of them on this head alone.
-    renderPage(() => Promise.resolve({ items: [], total: 0 }));
-    const add = await screen.findByRole("link", { name: "Add a computer" });
-    expect(add).toHaveAttribute("href", "/devices/onboard");
+    // Offered with `devices.read`, the code the New menu shows it with (redesign
+    // Task 6, 1.1); on an empty fleet the empty list leads there too, to the
+    // same page.
+    renderPage(() => Promise.resolve({ items: [], total: 0 }), { permissions: ["devices.read"] });
+    const adds = await screen.findAllByRole("link", { name: "Add a computer" });
+    for (const add of adds) expect(add).toHaveAttribute("href", "/devices/onboard");
     expect(screen.queryByRole("link", { name: "Enroll device" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Add devices" })).toBeNull();
   });
@@ -856,8 +868,9 @@ describe("the stat tiles are links to the rows they counted", () => {
     // rank above it, so the primary MOVED rather than multiplied -- which is
     // also the ranking the design file itself gives this head.
     //
-    const { container } = renderPage(() => Promise.resolve({ items: [], total: 0 }));
-    await screen.findByRole("link", { name: "Add a computer" });
+    const { container } = renderPage(() => Promise.resolve({ items: [], total: 0 }), { permissions: ["devices.read"] });
+    // The empty list's own way to the same page is a secondary link: one primary on the screen.
+    await screen.findAllByRole("link", { name: "Add a computer" });
     const primaries = [...container.querySelectorAll(".btn.primary")].map(
       (el) => el.textContent?.trim(),
     );
@@ -995,7 +1008,7 @@ describe("revoked certificates", () => {
     const rows = document.querySelectorAll("tbody tr");
     expect(rows.length).toBe(counted);
     // ...and the tab strip's own count is the third reading of it.
-    expect(screen.getByRole("tab", { name: /Certificate attention/ })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /Certificate attention/ })).toHaveTextContent(
       String(counted),
     );
   });
@@ -1068,7 +1081,7 @@ describe("which rows a person vouched for", () => {
     renderPage(mixed, {}, "/devices?provenance=sweep");
     await screen.findByText("10.70.0.11");
     expect(
-      screen.getByRole("tab", { name: /All devices/ }).textContent,
+      screen.getByRole("button", { name: /All devices/ }).textContent,
     ).toContain("1");
   });
 
@@ -1103,9 +1116,11 @@ describe("which rows a person vouched for", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("ws-alpha");
-    await userEvent.selectOptions(
-      screen.getByLabelText("Filter by how the record came to exist"),
-      "sweep",
+    // The filter is a row of chips (redesign Task 6, 1.1: «Origen»).
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Filter by how the record came to exist" })).getByRole("button", {
+        name: "Found by a sweep",
+      }),
     );
     expect(screen.getByTestId("url")).toHaveTextContent("/devices?provenance=sweep");
   });
@@ -1176,7 +1191,7 @@ describe("paging a fleet that does not fit on one page", () => {
     await screen.findByText("host-000");
     await userEvent.type(screen.getByLabelText("Search devices"), "host-109");
     expect(await screen.findByText("host-109")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /All devices/ })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: /All devices/ })).toHaveTextContent("1");
     // The tiles still describe the estate, not the search.
     const assets = [...document.querySelectorAll(".stat-card")].find(
       (card) => card.querySelector(".stat-label")?.textContent === "Assets",
@@ -1238,7 +1253,7 @@ describe("the filters travel to the server", () => {
     // The fixture deliberately matches NOTHING (`ws-alpha` is not `beta`), so
     // the page renders its empty state -- what is under test is the request,
     // not the answer.
-    await screen.findByText(/No devices match/);
+    await screen.findByText("Nothing matches these filters.");
     expect(calls[0]).toEqual({
       q: "beta",
       state: "certs",
@@ -1311,7 +1326,7 @@ describe("the estate in the operator's words", () => {
     // denominator for a number that has none -- is noise where the tile has
     // one thing to say.
     renderPage(() => Promise.resolve({ items: [], total: 0 }));
-    await screen.findByText(/No devices enrolled yet/);
+    await screen.findByText(/No devices yet/);
     const cards = [...document.querySelectorAll(".stat-card")];
     expect(cards.some((card) => card.querySelector(".stat-foot"))).toBe(false);
     expect(cards.every((card) => card.querySelector(".stat-zero"))).toBe(true);
