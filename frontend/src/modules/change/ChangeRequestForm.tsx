@@ -8,6 +8,7 @@ import { translate } from "../../i18n/core";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDateTime, toInstant } from "../../lib/datetime";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
+import { useUnsavedGuard } from "../../shell/components";
 import { useCreateChangeMutation, useUpdateChangeMutation, useUserTimezone } from "./api";
 import { riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
@@ -119,6 +120,23 @@ export function ChangeRequestForm({
   // language switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
+  // WHAT WOULD BE LOST (redesign Task 11, 6.2; Receta FO, 5). The form lives
+  // in the `?new=change` dialog, so Back or Close is leaving it: with a change
+  // typed in, the page's one guard asks first (`search: ["new"]`). The parent
+  // remounts this component each time the dialog opens, so these are the
+  // values it opened with.
+  const dirty =
+    change != null &&
+    (type !== (existing?.type ?? "standard") ||
+      title !== (existing?.title ?? "") ||
+      description !== (existing?.description ?? "") ||
+      risk !== (existing?.risk ?? "low") ||
+      windowStart !== (existing?.window_start ?? "") ||
+      windowEnd !== (existing?.window_end ?? "") ||
+      rollbackPlan !== (existing?.rollback_plan ?? "") ||
+      (!existing && clientField.picked !== ""));
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
+
   const mutation = existing ? update : create;
   // Unassigned chosen at the top files no new change; an edit keeps its own.
   const refused = !existing && clientField.refused !== null;
@@ -193,6 +211,8 @@ export function ChangeRequestForm({
     };
 
     const onSuccess = () => {
+      // Saved: closing goes Back from the dialog's entry, and must not ask.
+      release();
       reset();
       onClose();
     };
@@ -207,121 +227,124 @@ export function ChangeRequestForm({
   }
 
   return (
-    <Dialog open={change != null} onClose={close} title={change === "new" ? t("change.form.newTitle") : t("change.form.editTitle")}>
-      {/* A real <form>, so Enter in the Title field saves instead of doing
-          nothing — the other half of the same finding. */}
-      <Form onSubmit={submit}>
-        {/* Auditor B (MEDIUM): "All seven controls report `required === false`
-            and none has a placeholder or hint." Two of the seven actually are
-            required, and only those two are marked: Type and Risk are selects
-            that always hold a value, and the window fields are genuinely
-            optional server-side (`window_start: datetime | None = None`, see
-            change_mgmt/schema.py) — marking a field the API accepts empty is
-            the same lie pointing the other way. */}
-        <p className="note mb-3">{t("change.form.requiredNote")}</p>
-        <div className="form-grid">
-          {/* With every client chosen, a new change says whose it is (design
-              §3.1). A client without change management is the server's 404,
-              shown as it is (plan Task 11 D11.2). */}
-          {!existing && clientField.needsField ? <ClientField field={clientField} /> : null}
-          <Field label={t("change.form.type")} full>
-            <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="standard">{t("change.form.typeStandard")}</option>
-              <option value="normal">{t("change.form.typeNormal")}</option>
-              <option value="emergency">{t("change.form.typeEmergency")}</option>
-            </select>
-          </Field>
-          {/* `required` is the same fact stated for assistive tech, which is what
-              the auditor actually measured (`input.required === false` on all
-              seven). It blocks nothing: <Form> is `noValidate`, because a native
-              bubble that vanishes on the next click is the silent no-op wearing a
-              hat. `CHANGE_RULES` is what the user reads. */}
-          <Field label={t("change.form.titleRequired")} full>
-            <input
-              className={inputClass}
-              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
-              data-keep
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </Field>
-          <Field label={t("change.form.descriptionRequired")} full>
-            <textarea
-              className={inputClass}
-              required
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-            />
-          </Field>
-          <Field label={t("change.form.risk")} full>
-            <select className={inputClass} value={risk} onChange={(e) => setRisk(e.target.value)}>
-              <option value="low">{riskLabel("low")}</option>
-              <option value="medium">{riskLabel("medium")}</option>
-              <option value="high">{riskLabel("high")}</option>
-            </select>
-          </Field>
-          <Field label={t("change.form.windowStart")}>
-            <input
-              type="datetime-local"
-              className={inputClass}
-              value={windowStart}
-              onChange={(e) => setWindowStart(e.target.value)}
-            />
-          </Field>
-          <Field label={t("change.form.windowEnd")}>
-            {/* `min` is the same bound stated to the picker widget, so the
-                backwards window is awkward to enter as well as refused; the
-                sentence a typed or pasted one gets is `windowOrderRule`'s. */}
-            <input
-              type="datetime-local"
-              className={inputClass}
-              min={windowStart || undefined}
-              value={windowEnd}
-              onChange={(e) => setWindowEnd(e.target.value)}
-            />
-          </Field>
-          {/* Auditor B (HIGH): "Nothing in the UI states which timezone either
-              the input or the output is in." Cycle 5 made the round trip
-              correct; this says which clock it is correct in, on the one field
-              whose entire output is coordinating people across teams and
-              vendors. */}
-          <p className="note">{t("change.form.windowZone", { zone: windowZone })}</p>
-          <Field label={t("change.form.rollbackPlan")} full>
-            <textarea
-              className={inputClass}
-              value={rollbackPlan}
-              onChange={(e) => setRollbackPlan(e.target.value)}
-              rows={2}
-            />
-          </Field>
-        </div>
+    <>
+      {guard}
+      <Dialog open={change != null} onClose={close} title={change === "new" ? t("change.form.newTitle") : t("change.form.editTitle")}>
+        {/* A real <form>, so Enter in the Title field saves instead of doing
+            nothing — the other half of the same finding. */}
+        <Form onSubmit={submit}>
+          {/* Auditor B (MEDIUM): "All seven controls report `required === false`
+              and none has a placeholder or hint." Two of the seven actually are
+              required, and only those two are marked: Type and Risk are selects
+              that always hold a value, and the window fields are genuinely
+              optional server-side (`window_start: datetime | None = None`, see
+              change_mgmt/schema.py) — marking a field the API accepts empty is
+              the same lie pointing the other way. */}
+          <p className="note mb-3">{t("change.form.requiredNote")}</p>
+          <div className="form-grid">
+            {/* With every client chosen, a new change says whose it is (design
+                §3.1). A client without change management is the server's 404,
+                shown as it is (plan Task 11 D11.2). */}
+            {!existing && clientField.needsField ? <ClientField field={clientField} /> : null}
+            <Field label={t("change.form.type")} full>
+              <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
+                <option value="standard">{t("change.form.typeStandard")}</option>
+                <option value="normal">{t("change.form.typeNormal")}</option>
+                <option value="emergency">{t("change.form.typeEmergency")}</option>
+              </select>
+            </Field>
+            {/* `required` is the same fact stated for assistive tech, which is what
+                the auditor actually measured (`input.required === false` on all
+                seven). It blocks nothing: <Form> is `noValidate`, because a native
+                bubble that vanishes on the next click is the silent no-op wearing a
+                hat. `CHANGE_RULES` is what the user reads. */}
+            <Field label={t("change.form.titleRequired")} full>
+              <input
+                className={inputClass}
+                // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+                data-keep
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </Field>
+            <Field label={t("change.form.descriptionRequired")} full>
+              <textarea
+                className={inputClass}
+                required
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+              />
+            </Field>
+            <Field label={t("change.form.risk")} full>
+              <select className={inputClass} value={risk} onChange={(e) => setRisk(e.target.value)}>
+                <option value="low">{riskLabel("low")}</option>
+                <option value="medium">{riskLabel("medium")}</option>
+                <option value="high">{riskLabel("high")}</option>
+              </select>
+            </Field>
+            <Field label={t("change.form.windowStart")}>
+              <input
+                type="datetime-local"
+                className={inputClass}
+                value={windowStart}
+                onChange={(e) => setWindowStart(e.target.value)}
+              />
+            </Field>
+            <Field label={t("change.form.windowEnd")}>
+              {/* `min` is the same bound stated to the picker widget, so the
+                  backwards window is awkward to enter as well as refused; the
+                  sentence a typed or pasted one gets is `windowOrderRule`'s. */}
+              <input
+                type="datetime-local"
+                className={inputClass}
+                min={windowStart || undefined}
+                value={windowEnd}
+                onChange={(e) => setWindowEnd(e.target.value)}
+              />
+            </Field>
+            {/* Auditor B (HIGH): "Nothing in the UI states which timezone either
+                the input or the output is in." Cycle 5 made the round trip
+                correct; this says which clock it is correct in, on the one field
+                whose entire output is coordinating people across teams and
+                vendors. */}
+            <p className="note">{t("change.form.windowZone", { zone: windowZone })}</p>
+            <Field label={t("change.form.rollbackPlan")} full>
+              <textarea
+                className={inputClass}
+                value={rollbackPlan}
+                onChange={(e) => setRollbackPlan(e.target.value)}
+                rows={2}
+              />
+            </Field>
+          </div>
 
-        <div className="flex items-center justify-end gap-2">
-          {/* `type="button"` is load-bearing now that there is a form around it:
-              a button with no type inside a <form> IS a submit button, so
-              Cancel would save. */}
-          <Button type="button" variant="ghost" onClick={close}>
-            {t("change.form.cancel")}
-          </Button>
-          {/* Enabled with the fields empty ON PURPOSE — the refusal is what the
-              user gets to read, and a control that will not move is not. The
-              server failure comes from here too, so a bodyless 503 still
-              produces a sentence and `role="alert"` announces it, replacing the
-              `{String(mutation.error)}` line that rendered a raw object. */}
-          {refused ? (
-            <UnassignedRefusal />
-          ) : (
-            <FormActions
-              label={t("change.form.save")}
-              pending={mutation.isPending}
-              error={mutation.error}
-              problems={attemptProblems(attempt)}
-            />
-          )}
-        </div>
-      </Form>
-    </Dialog>
+          <div className="flex items-center justify-end gap-2">
+            {/* `type="button"` is load-bearing now that there is a form around it:
+                a button with no type inside a <form> IS a submit button, so
+                Cancel would save. */}
+            <Button type="button" variant="ghost" onClick={close}>
+              {t("change.form.cancel")}
+            </Button>
+            {/* Enabled with the fields empty ON PURPOSE — the refusal is what the
+                user gets to read, and a control that will not move is not. The
+                server failure comes from here too, so a bodyless 503 still
+                produces a sentence and `role="alert"` announces it, replacing the
+                `{String(mutation.error)}` line that rendered a raw object. */}
+            {refused ? (
+              <UnassignedRefusal />
+            ) : (
+              <FormActions
+                label={t("change.form.save")}
+                pending={mutation.isPending}
+                error={mutation.error}
+                problems={attemptProblems(attempt)}
+              />
+            )}
+          </div>
+        </Form>
+      </Dialog>
+    </>
   );
 }

@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { formatDate, formatDateTime, toInstant } from "../../lib/datetime";
 import { useT } from "../../i18n/context";
 import { useChangeCalendar, useUserTimezone } from "./api";
 import { changeStateKind, changeStateLabel, changeTypeLabel, riskKind, riskLabel } from "./changeState";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { ChangeSectionNav } from "./changeNav";
+import { PageHead, Panel, QueryState, StatusPill, writeQuery } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 
@@ -37,14 +37,38 @@ function defaultTo(zone: string | null): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 }
 
+/**
+ * THE WINDOW IS IN THE URL (redesign Task 11, 6.2): `?from=` and `?to=`, so a
+ * window is a link and a reload keeps it. Absent, an end is this month's, in
+ * the reader's zone, and the page writes nothing. Present and EMPTY (`?from=`),
+ * the person cleared that end -- "from the earliest change" or "onwards", as
+ * the sentence under the fields says -- which is a different fact from never
+ * having chosen one, so the key stays with no value.
+ */
+function useWindowEnd(
+  params: URLSearchParams,
+  key: "from" | "to",
+  fallback: () => string,
+): string {
+  const value = params.get(key);
+  return value === null ? fallback() : value;
+}
+
 export function ChangeCalendar() {
   const t = useT();
   const zone = useUserTimezone();
-  // Seeded once, before `/me` has answered on a cold load, so these defaults
-  // are the browser's month. Retyping is the correction, and the boundaries
-  // sent from them are qualified below either way.
-  const [from, setFrom] = useState(() => defaultFrom(zone));
-  const [to, setTo] = useState(() => defaultTo(zone));
+  const [params, setParams] = useSearchParams();
+  // The defaults are the reader's month. Before `/me` has answered on a cold
+  // load they are the browser's; the boundaries sent from them are qualified
+  // below either way.
+  const from = useWindowEnd(params, "from", () => defaultFrom(zone));
+  const to = useWindowEnd(params, "to", () => defaultTo(zone));
+  // Typing a date is one entry, not one per keystroke: the field replaces it.
+  const setEnd = (key: "from" | "to", value: string) => {
+    const next = new URLSearchParams(params);
+    next.set(key, value);
+    writeQuery(params, next, setParams, { replace: true });
+  };
 
   // A `type="date"` value is a wall-clock DAY with no zone, and
   // `new Date("2026-02-01").toISOString()` read it as UTC midnight -- so an
@@ -65,16 +89,8 @@ export function ChangeCalendar() {
 
   return (
     <div>
-      <PageHead
-        title={t("change.calendar.title")}
-        description={t("change.calendar.description")}
-        actions={
-          <Link className="btn" to="/changes">
-            <Icon name="git-branch" size={14} />
-            {t("change.common.allChanges")}
-          </Link>
-        }
-      />
+      <PageHead title={t("change.calendar.title")} description={t("change.calendar.description")} />
+      <ChangeSectionNav />
 
       {/* THE WINDOW IS A PANEL, NOT TWO CONTROLS LOOSE ON THE PAGE.
 
@@ -99,7 +115,7 @@ export function ChangeCalendar() {
               className={inputClass}
               style={{ maxWidth: "18rem" }}
               value={from}
-              onChange={(e) => setFrom(e.target.value)}
+              onChange={(e) => setEnd("from", e.target.value)}
             />
           </Field>
           <Field label={t("change.calendar.to")}>
@@ -108,7 +124,7 @@ export function ChangeCalendar() {
               className={inputClass}
               style={{ maxWidth: "18rem" }}
               value={to}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={(e) => setEnd("to", e.target.value)}
             />
           </Field>
         </div>
@@ -151,7 +167,7 @@ export function ChangeCalendar() {
           emptyLabel={t("change.calendar.empty")}
           emptyIcon="calendar-event"
         >
-          <Table>
+          <Table label={t("change.calendar.title")}>
             <thead>
               <tr>
                 <Th>{t("change.common.name")}</Th>
