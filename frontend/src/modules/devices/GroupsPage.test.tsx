@@ -430,6 +430,9 @@ describe("the editor", () => {
     await screen.findByText("servers");
 
     await user.click(screen.getByRole("button", { name: "Edit" }));
+    // A change first: a Save of an untouched group sends nothing at all
+    // (coordinator ruling 13), so there would be no request to inspect.
+    await user.type(await screen.findByLabelText("Name"), "-east");
     await user.click(await screen.findByRole("button", { name: "Save group" }));
 
     await waitFor(() => expect(updateDeviceGroup).toHaveBeenCalledTimes(1));
@@ -1258,6 +1261,19 @@ describe("the group editor asks before Back drops a change", () => {
     await waitFor(() => expect(router.state.location.search).toBe(""));
     // The router moves first; the page draws the close on its next render.
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("closes an edit nobody changed on Save, and sends nothing (coordinator ruling 13)", async () => {
+    // A PATCH with no change would write an audit entry for a change nobody made.
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups", <GroupsPage />);
+    await screen.findByText("servers");
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit servers/ });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save group" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updateDeviceGroup).not.toHaveBeenCalled();
   });
 
   it("closes without asking once the group is created", async () => {

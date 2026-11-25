@@ -846,6 +846,15 @@ export function GroupsPage() {
 
   function submit() {
     if (!editor) return;
+    // NO WRITE WITHOUT A CHANGE (coordinator ruling 13): Save on a group
+    // nobody changed closes and sends nothing; an unchanged PATCH would write
+    // an audit entry for a change nobody made.
+    if (editor.group !== null && !editorChanged) {
+      save.reset();
+      setEditor(null);
+      closeEditor();
+      return;
+    }
     // Held as rules + values, not as sentences, so a language switch rewords them.
     const next: Attempt = {
       rules: () => [

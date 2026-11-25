@@ -41,15 +41,18 @@ export function PushDetailsDialog({
   const queryClient = useQueryClient();
   const [details, setDetails] = useState<PushDetails>(() => initial(device));
 
+  /** Only what changed: the server is sent nothing it already holds. */
+  function changes(): AssetInput {
+    const was = initial(device);
+    const body: AssetInput = {};
+    if (details.fqdn.trim() !== was.fqdn) body.fqdn = details.fqdn.trim() || null;
+    if (details.os !== was.os) body.os_family = details.os || null;
+    if (details.arch !== was.arch) body.architecture = details.arch || null;
+    return body;
+  }
+
   const save = useMutation({
-    mutationFn: () => {
-      const was = initial(device);
-      const body: AssetInput = {};
-      if (details.fqdn.trim() !== was.fqdn) body.fqdn = details.fqdn.trim() || null;
-      if (details.os !== was.os) body.os_family = details.os || null;
-      if (details.arch !== was.arch) body.architecture = details.arch || null;
-      return api.updateAsset(device.id, body);
-    },
+    mutationFn: (body: AssetInput) => api.updateAsset(device.id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
       void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
@@ -65,7 +68,18 @@ export function PushDetailsDialog({
 
   return (
     <Dialog open={open} onClose={close} title={t("devices.pushDetails.title")}>
-      <Form onSubmit={() => save.mutate()}>
+      <Form
+        onSubmit={() => {
+          // NO WRITE WITHOUT A CHANGE (coordinator ruling 13): Save on details
+          // nobody changed closes and sends nothing.
+          const body = changes();
+          if (Object.keys(body).length === 0) {
+            close();
+            return;
+          }
+          save.mutate(body);
+        }}
+      >
         <p className="note mb-3">
           {t("devices.pushDetails.note")}
         </p>
