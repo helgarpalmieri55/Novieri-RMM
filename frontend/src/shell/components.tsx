@@ -394,7 +394,16 @@ export function Tabs({
   // the tabs before the selected one and pushes it past the edge, as Settings'
   // "Set up" did on a phone. Their text is the layout's input, so it is the
   // effect's.
-  const text = items.map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000")).join("\u0001");
+  //
+  // ONLY THE SELECTED TAB'S TEXT AND THE TEXT BEFORE IT (P3 adoption pass;
+  // batch 3 review, Minor 2): a tab after the selected one cannot move it, so
+  // a count refetched there must not undo a person's sideways look along the
+  // strip.
+  const through = items.findIndex((item) => item.key === active);
+  const text = items
+    .slice(0, through + 1)
+    .map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000"))
+    .join("\u0001");
   useLayoutEffect(() => {
     const list = strip.current;
     if (!scroll || !list) return;

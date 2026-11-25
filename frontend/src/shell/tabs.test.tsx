@@ -268,4 +268,40 @@ describe("Tabs that scroll, when a label changes (B3-3)", () => {
     // "Email Set up" is 240px: Sessions is at 300-460, 264-424 on screen; it follows by 124 + 16.
     expect(strip.scrollLeft).toBe(176);
   });
+
+  /*
+   * ONLY THE TEXT THAT CAN MOVE THE SELECTED TAB (P3 adoption pass; batch 3
+   * review, Minor 2). A tab after the selected one cannot push it anywhere, so
+   * a count refetched there must not undo a person's sideways look along the
+   * strip: the strip jumped back to the selected tab on every such change.
+   * Its own text, and any tab's before it, still re-scroll (above).
+   */
+  const fleet = (users: number, own?: number) => [
+    { key: "org", label: "Org" },
+    { key: "email", label: "Email", ...(own === undefined ? {} : { count: own }) },
+    { key: "sessions", label: "Sessions" },
+    { key: "users", label: "Users", count: users },
+  ];
+
+  it("leaves a strip the person scrolled alone when a tab after the selected one changes", () => {
+    layOutByText();
+    const { rerender } = render(<Tabs items={fleet(3)} active="email" onSelect={() => {}} scroll label="Settings" />);
+    const strip = screen.getByRole("tablist", { name: "Settings" });
+    // Email spans 60-160 in a 0-300 strip: already in view.
+    expect(strip.scrollLeft).toBe(0);
+    // The person looks along the strip; Email is now off its left edge.
+    strip.scrollLeft = 160;
+    rerender(<Tabs items={fleet(4)} active="email" onSelect={() => {}} scroll label="Settings" />);
+    expect(strip.scrollLeft).toBe(160);
+  });
+
+  it("still follows the selected tab when its own text changes", () => {
+    layOutByText();
+    const { rerender } = render(<Tabs items={fleet(3)} active="email" onSelect={() => {}} scroll label="Settings" />);
+    const strip = screen.getByRole("tablist", { name: "Settings" });
+    strip.scrollLeft = 160;
+    rerender(<Tabs items={fleet(3, 2)} active="email" onSelect={() => {}} scroll label="Settings" />);
+    // "Email 2" spans 60-200, -100-40 on screen: back by 100 + 16.
+    expect(strip.scrollLeft).toBe(44);
+  });
 });
