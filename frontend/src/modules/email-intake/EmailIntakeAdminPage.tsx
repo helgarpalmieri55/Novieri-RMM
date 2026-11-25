@@ -7,6 +7,7 @@ import { useApi } from "../../lib/ApiContext";
 import { useEmailIntakeMessages, useEmailMailboxes } from "./api";
 import { EmailIntakePrerequisites } from "./EmailIntakePrerequisites";
 import { MailboxList } from "./MailboxList";
+import { MailboxSettings } from "./MailboxSettings";
 import { MessageLog } from "./MessageLog";
 import { MicrosoftConnection } from "./MicrosoftConnection";
 import { PageHead, StatCard, StatsGrid } from "../../shell/components";
@@ -254,8 +255,17 @@ export function EmailIntakeAdminPage() {
       {/* The profile zone (`/me`.timezone, cycle 2) reaches both panels that
           render a time. This page already holds `me` for its permission
           gate, so nothing new is fetched. */}
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {/* THE MAILBOXES, THEN WHAT EACH DOES WITH ITS MAIL (redesign plan,
+          Task 7, 2.7): the list with each mailbox's connection and its
+          actions, then a section per mailbox with its settings, saved by the
+          page's one save bar; the Microsoft app registration and the message
+          log after. The log is every client's mail and is read only with the
+          code on every client (invariant 5a), so it carries no Client chip. */}
+      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)", marginBottom: 16 }}>
         <MailboxList canAdmin={canAdmin} zone={me.data?.timezone} />
+      </div>
+      <MailboxSettings canAdmin={canAdmin} />
+      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)", marginTop: 16 }}>
         <MicrosoftConnection canAdmin={canAdmin} />
         <MessageLog zone={me.data?.timezone} />
       </div>

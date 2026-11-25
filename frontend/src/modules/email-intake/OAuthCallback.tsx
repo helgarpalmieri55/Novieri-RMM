@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
-import { Btn, Panel } from "../../shell/components";
+import { Btn, FormPage, Panel } from "../../shell/components";
 import { useAbandonMailboxOAuthMutation, useCompleteMailboxOAuthMutation } from "./api";
 
 type Phase = "working" | "done" | "cancelled" | "failed";
@@ -77,8 +77,12 @@ export function OAuthCallback() {
   }, []);
 
   return (
-    <div style={{ maxWidth: 560, margin: "48px auto" }}>
-      <Panel title={t("emailIntake.oauth.title")}>
+    // INSIDE THE CONSOLE'S FRAME (redesign plan, Task 7, 2.7): the page's own
+    // head, with the way back to Email intake above it, and the same panel of
+    // today under it. Microsoft sends the person back here mid-flow, so the
+    // first thing on the page says where they are and how to return.
+    <FormPage back={{ to: "/email-intake", label: t("emailIntake.admin.title") }} title={t("emailIntake.oauth.title")}>
+      <Panel>
         {phase === "working" ? <p className="note">{t("emailIntake.oauth.working")}</p> : null}
         {phase === "done" ? (
           <p role="status" className="form-saved">
@@ -103,6 +107,6 @@ export function OAuthCallback() {
           </div>
         ) : null}
       </Panel>
-    </div>
+    </FormPage>
   );
 }

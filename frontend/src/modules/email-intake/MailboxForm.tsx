@@ -71,7 +71,7 @@ function invalidPort(value: string): string | null {
 // `ge=1, le=3650` (schema.py). Zero is the interesting one: it reads as
 // "never reopen", but the server refuses it, so the honest answer is the
 // bound rather than a silent 422.
-function invalidReopenWindow(value: string): string | null {
+export function invalidReopenWindow(value: string): string | null {
   if (!/^\d+$/.test(value)) {
     return translate("emailIntake.form.badReopen", { value });
   }
