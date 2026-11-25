@@ -51,4 +51,20 @@ describe("the detector's shared ignores", () => {
     expect(consent[0]?.files).toEqual(["frontend/src/modules/auth/ConsentPage.tsx"]);
     expect(consent[0]?.reason).toMatch(/a notice is a message, not a card/);
   });
+
+  it("ignores nested-cards on Settings' sessions notice and the assistant's action preview, each alone (kit requests batch 3, B3-5)", () => {
+    // O7: the remember-device risk notice inside its form section, and the
+    // facts strip inside the "What will run" panel, are not cards in cards.
+    const expected: [file: string, reason: RegExp][] = [
+      ["frontend/src/modules/settings/SessionsTab.tsx", /a notice is a message, not a card/],
+      ["frontend/src/modules/ai-automation/ActionPreview.tsx", /the design's summary row inside its panel, not a card/],
+    ];
+    for (const [file, reason] of expected) {
+      const entries = nested.filter((item) => item.files?.includes(file));
+      expect(entries, file).toHaveLength(1);
+      expect(entries[0]?.value).toBe("*");
+      expect(entries[0]?.files).toEqual([file]);
+      expect(entries[0]?.reason).toMatch(reason);
+    }
+  });
 });

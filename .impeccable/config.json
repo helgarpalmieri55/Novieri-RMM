@@ -25,6 +25,24 @@
         ],
         "createdAt": "2026-11-25T08:14:48.893Z",
         "reason": "the .notice.gold is the design's inline warning (role note), placed in the card beside Approve by plan Task 13 8.11 and invariant 1c; a notice is a message, not a card"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/settings/SessionsTab.tsx"
+        ],
+        "createdAt": "2026-11-25T09:23:15.620Z",
+        "reason": "the .notice.gold (remember-device risk) is the design's inline warning inside its form section; a notice is a message, not a card"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/ai-automation/ActionPreview.tsx"
+        ],
+        "createdAt": "2026-11-25T09:23:15.637Z",
+        "reason": "the facts strip (Facts) is the design's summary row inside its panel, not a card"
       }
     ]
   },
