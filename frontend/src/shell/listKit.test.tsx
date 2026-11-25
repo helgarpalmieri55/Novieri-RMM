@@ -27,6 +27,7 @@ import {
   MultiFilterChips,
   parseUrlList,
   useEditParam as useEditParamFromKit,
+  withClient,
 } from "./components";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
@@ -786,5 +787,39 @@ describe("ChipSelect (kit requests batch 1, item 5)", () => {
     const element = benchElement("ChipSelect");
     expect(element).not.toBe("");
     expect(element).toMatch(/value=\{/);
+  });
+});
+
+/**
+ * A LINK UNDER THE CLIENT CHIP KEEPS IT (kit requests batch 2, K1): Health's
+ * `withClient`, copied by O3 (`underChip`) and O4 (`withChip`), as one kit piece.
+ */
+describe("withClient (kit requests batch 2, K1)", () => {
+  it("leaves the link alone when no client is read", () => {
+    expect(withClient("/health?state=open", null)).toBe("/health?state=open");
+    expect(withClient("/devices", null)).toBe("/devices");
+  });
+
+  it("adds the client to a link with no query", () => {
+    expect(withClient("/devices", ANDES)).toBe(`/devices?client=${ANDES}`);
+  });
+
+  it("adds it after a link's own query", () => {
+    expect(withClient("/health?state=cleared&resolution=resolved", ANDES)).toBe(
+      `/health?state=cleared&resolution=resolved&client=${ANDES}`,
+    );
+  });
+
+  it("encodes what it adds", () => {
+    expect(withClient("/devices", "a b&c")).toBe("/devices?client=a%20b%26c");
+  });
+
+  it("reads an empty chip as no client, so it never writes an empty client=", () => {
+    expect(withClient("/devices?state=offline", "")).toBe("/devices?state=offline");
+  });
+
+  it("opens the list on the same client: the Client chip there reads it", () => {
+    renderPage(withClient("/devices?state=offline", ANDES), <ChipPage />);
+    expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
   });
 });

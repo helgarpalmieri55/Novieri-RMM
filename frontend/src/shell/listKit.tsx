@@ -451,6 +451,25 @@ export function useNarrowedApi(clientId: string): NarrowedApi {
 }
 
 /**
+ * A LINK OUT OF A LIST UNDER THE CLIENT CHIP KEEPS THE CHIP (kit requests
+ * batch 2, K1; general ruling 2). A tile or a figure counted under the chip
+ * counted that client's rows, so the list it opens is that client's too:
+ *
+ *   const { client } = useNarrowedApi(filters.values.client);
+ *   <Tile to={withClient("/health?state=open", client)} ... />
+ *
+ * `client` is the client actually read: `useNarrowedApi`'s `client`, `null`
+ * without one (Health's `withClient`, which this is), or a chip's raw value,
+ * where `""` is no client too (O4's `withChip`). With none, `to` comes back
+ * unchanged; otherwise `client=<id>` is added after `to`'s own query. `to`
+ * names no client of its own.
+ */
+export function withClient(to: string, client: string | null): string {
+  if (client === null || client === "") return to;
+  return `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+}
+
+/**
  * Marks the history entry `start()` pushed, with this document's identity:
  * the entry a `close()` may go Back from. A reload is another document, and a
  * link that arrived with `?new=` carries no mark.
