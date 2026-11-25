@@ -447,6 +447,28 @@ describe("the editor", () => {
     expect(createDeviceGroup).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("Name is required");
   });
+
+  it("drops a refused save's error when the next attempt has a problem of its own (ruling 7)", async () => {
+    // Coordinator ruling 7: a stale error is cleared before a new attempt.
+    // `FormActions` shows a server refusal before the form's own problems, so
+    // a refusal left standing hid "Name is required" behind an answer to a
+    // request this attempt never sent.
+    createDeviceGroup.mockRejectedValueOnce(new ApiError(503, "unavailable"));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("servers");
+
+    await user.click(screen.getByRole("button", { name: "New group" }));
+    await user.type(screen.getByLabelText("Name"), "workstations");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+    const refusal = await screen.findByRole("alert");
+    expect(refusal.textContent).not.toContain("Name is required");
+
+    await user.clear(screen.getByLabelText("Name"));
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+    expect(createDeviceGroup).toHaveBeenCalledOnce();
+    expect(screen.getByRole("alert").textContent).toContain("Name is required");
+  });
 });
 
 describe("archiving", () => {
@@ -588,6 +610,32 @@ describe("membership", () => {
     await user.click(within(dialog).getByRole("option", { name: /ws-01/ }));
     await user.click(within(dialog).getByRole("button", { name: "Add to group" }));
     expect(addDeviceGroupMembers).toHaveBeenCalledWith("g-1", ["d-1"]);
+  });
+
+  it("drops a failed remove's error once the next add is made (ruling 7)", async () => {
+    // Coordinator ruling 7: a stale error is cleared before a new attempt. The
+    // panel shows one line for both writes, so a refused Remove left standing
+    // read as the answer to the Add that followed it.
+    removeDeviceGroupMember.mockRejectedValueOnce(new ApiError(503, "remove unavailable"));
+    listDevices.mockResolvedValue({
+      items: [device({ id: "d-in", hostname: "in-group", device_group_id: "g-1" }), device()],
+      total: 2,
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("servers");
+
+    await user.click(screen.getByRole("button", { name: "Members" }));
+    const panel = (await screen.findByRole("heading", { name: "Members of servers" })).closest("section") as HTMLElement;
+    await within(panel).findByText("in-group");
+    await user.click(within(panel).getByRole("button", { name: "Remove" }));
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(/remove unavailable/);
+
+    await user.click(within(panel).getByRole("combobox", { name: "Add a device" }));
+    await user.click(within(panel).getByRole("option", { name: /ws-01/ }));
+    await user.click(within(panel).getByRole("button", { name: "Add to group" }));
+    await waitFor(() => expect(addDeviceGroupMembers).toHaveBeenCalledWith("g-1", ["d-1"]));
+    await waitFor(() => expect(within(panel).queryByText(/remove unavailable/)).toBeNull());
   });
 
   it("offers no hand placement on a rule-driven group, and says why", async () => {
@@ -1124,5 +1172,97 @@ describe("Device groups on the list kit", () => {
     await act(() => router.navigate("/device-groups?edit=g-1"));
     expect(await screen.findByRole("dialog", { name: /Edit servers/ })).toBeInTheDocument();
     expect(getDeviceGroup).toHaveBeenCalledWith("g-1");
+  });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (ruling 10)", async () => {
+    // Coordinator ruling 10: with the chip set and `/me` pending the narrowed
+    // read is disabled, and a disabled query is not "loading" to TanStack v5.
+    // "Nothing matches these filters" about a list nobody has read is a lie.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    mockUseApi.mockReturnValue(api({ me: vi.fn(() => new Promise<never>(() => {})) }));
+    renderAt(`/device-groups?client=${ANDES.id}`, <GroupsPage />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No groups yet")).toBeNull();
+    expect(listDeviceGroups).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * A HALF-WRITTEN GROUP ASKS BEFORE IT IS DROPPED (coordinator ruling 3, fix
+ * round 1 of wave O1). The editor lives in `?new=group` or `?edit=<id>`, so
+ * Back and Close are a change of one of them: the page's one guard names both
+ * keys, and an editor holding a change asks first. Under the data router the
+ * console runs on, the one that can block.
+ */
+describe("the group editor asks before Back drops a change", () => {
+  function api(): ApiClient {
+    return {
+      listDeviceGroups,
+      listDevices,
+      getDeviceGroup,
+      previewDeviceGroupRules,
+      createDeviceGroup,
+      updateDeviceGroup,
+      archiveDeviceGroup,
+      unarchiveDeviceGroup,
+      addDeviceGroupMembers,
+      removeDeviceGroupMember,
+      me: vi.fn().mockResolvedValue({ permissions: ["devices.read", "devices.manage"], org_id: ORG } as Me),
+    } as unknown as ApiClient;
+  }
+
+  it("asks before Close drops a new group with a name typed in it, and keeps it", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups", <GroupsPage />);
+    await screen.findByText("servers");
+    await userEvent.click(screen.getAllByRole("button", { name: "New group" })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "New device group" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "branch");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=group");
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("branch");
+  });
+
+  it("asks before Back drops a changed group opened from ?edit=", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups", <GroupsPage />);
+    await screen.findByText("servers");
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit servers/ });
+    expect(router.state.location.search).toBe("?edit=g-1");
+    await userEvent.type(within(dialog).getByLabelText("Name"), "-east");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?edit=g-1");
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("servers-east");
+  });
+
+  it("closes an editor nobody changed without asking", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups", <GroupsPage />);
+    await screen.findByText("servers");
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit servers/ });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("closes without asking once the group is created", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups", <GroupsPage />);
+    await screen.findByText("servers");
+    await userEvent.click(screen.getAllByRole("button", { name: "New group" })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "New device group" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "branch");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create group" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(createDeviceGroup).toHaveBeenCalledOnce();
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });

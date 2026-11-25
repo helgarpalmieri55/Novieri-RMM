@@ -114,6 +114,7 @@ import {
   TableWrap,
   useNarrowedApi,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -487,6 +488,18 @@ interface EditorState {
   conditions: ConditionDraft[];
 }
 
+/** What of the editor a person can change, so two states compare by what they would save. */
+function editorContent(state: EditorState): string {
+  return JSON.stringify([
+    state.name,
+    state.description,
+    state.precedence,
+    state.parentGroupId,
+    state.dynamic,
+    state.conditions,
+  ]);
+}
+
 function blankEditor(): EditorState {
   return {
     group: null,
@@ -525,6 +538,8 @@ export function GroupsPage() {
   const editId = params.get("edit");
   const groupId = params.get("group");
   const [editor, setEditor] = useState<EditorState | null>(null);
+  // The editor as it opened: a change is a difference from this, not an open form.
+  const [editorOpened, setEditorOpened] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // The group the operator has ASKED to archive, not one being archived:
   // nothing is sent until the confirmation is answered.
@@ -588,6 +603,17 @@ export function GroupsPage() {
   const newRow = useNewRowClientField("devices.manage", parentClientOf(editor?.parentGroupId, items));
   const newClient = newRow.clientId;
   /**
+   * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
+   * editor lives in `?new=group` or `?edit=<id>`, so Back and Close are a
+   * change of one of those keys: with a change in it, either asks first. A
+   * change is a difference from the editor as it opened (and, for a new
+   * group, a client picked), never merely an open form.
+   */
+  const editorChanged =
+    editor !== null &&
+    (editorContent(editor) !== editorOpened || (editor.group === null && newRow.picked !== ""));
+  const { guard, release } = useUnsavedGuard(editorChanged, { search: ["new", "edit"] });
+  /**
    * The parent's NAME, for the row that is drawn inside it.
    *
    * `buildTree` already refuses a parent that is not on this page (an archived
@@ -633,6 +659,8 @@ export function GroupsPage() {
         : api.createDeviceGroup({ ...body, client_id: requireKnown(newClient) });
     },
     onSuccess: () => {
+      // Saved: the close that follows is not a lost change.
+      release();
       setEditor(null);
       closeEditor();
       refresh();
@@ -708,7 +736,9 @@ export function GroupsPage() {
     save.reset();
     setAttempt(null);
     newRow.setPicked("");
-    setEditor(blankEditor());
+    const blank = blankEditor();
+    setEditor(blank);
+    setEditorOpened(editorContent(blank));
   }
 
   /**
@@ -726,7 +756,7 @@ export function GroupsPage() {
     setLoadingRules(true);
     try {
       const detail = await api.getDeviceGroup(group.id);
-      setEditor({
+      const opened: EditorState = {
         group,
         name: group.name,
         description: group.description,
@@ -734,7 +764,9 @@ export function GroupsPage() {
         parentGroupId: group.parent_group_id ?? "",
         dynamic: detail.rules !== null,
         conditions: fromDocument(detail.rules),
-      });
+      };
+      setEditor(opened);
+      setEditorOpened(editorContent(opened));
     } finally {
       setLoadingRules(false);
     }
@@ -834,7 +866,12 @@ export function GroupsPage() {
       values: { name: editor.name, precedence: editor.precedence, client: newClient },
     };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A refusal of the LAST attempt would be shown before this one's
+      // problems (`FormActions` puts a failure first): clear it (ruling 7).
+      save.reset();
+      return;
+    }
     save.mutate(editor);
   }
 
@@ -945,7 +982,9 @@ export function GroupsPage() {
             })()
           : null}
         <QueryState
-          loading={groups.isLoading || !ready}
+          // `isPending`, not `isLoading` (coordinator ruling 10): a read disabled
+          // until the chip's client is decided is pending, not loading, to TanStack v5.
+          loading={groups.isPending}
           error={groups.error}
           empty={false}
           emptyLabel={t("devices.groups.emptyLabel")}
@@ -1118,85 +1157,90 @@ export function GroupsPage() {
       title={t("devices.groups.memberDialog.title", { name: openGroup.name })}
       actions={<Btn label={t("devices.groups.closeMembers")} variant="ghost" small onClick={() => closeParam("group")} />}
     >
-            {openGroup.dynamic ? (
-              <p>
-                {t("devices.groups.memberDialog.byRules")}
-              </p>
-            ) : null}
+      {openGroup.dynamic ? (
+        <p>
+          {t("devices.groups.memberDialog.byRules")}
+        </p>
+      ) : null}
 
-            {members.length === 0 ? (
-              <p className="note">
-                {t("devices.groups.memberDialog.none")}
-              </p>
-            ) : (
-              <ul className="mt-3">
-                {members.map((device: Device) => (
-                  <li key={device.id} className="flex items-center justify-between gap-3">
-                    <span>{device.hostname ?? device.description ?? device.id}</span>
-                    {canManage && !openGroup.dynamic ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() =>
-                          removeMember.mutate({
-                            groupId: openGroup.id,
-                            deviceId: device.id,
-                          })
-                        }
-                      >
-                        {t("devices.groups.memberDialog.remove")}
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {canManage && !openGroup.dynamic ? (
-              <div className="mt-3">
-                <EntityPicker
-                  label={t("devices.groups.memberDialog.add")}
-                  options={joinable.map((device) => ({
-                    id: device.id,
-                    label: device.hostname ?? device.description ?? t("devices.row.unnamed"),
-                    sublabel:
-                      device.device_group_id === null
-                        ? t("devices.groups.memberDialog.orgDefault")
-                        : t("devices.groups.memberDialog.otherGroup"),
-                  }))}
-                  value={addingDevice}
-                  onChange={setAddingDevice}
-                  emptyHint={t("devices.groups.memberDialog.addEmpty")}
-                />
+      {members.length === 0 ? (
+        <p className="note">
+          {t("devices.groups.memberDialog.none")}
+        </p>
+      ) : (
+        <ul className="mt-3">
+          {members.map((device: Device) => (
+            <li key={device.id} className="flex items-center justify-between gap-3">
+              <span>{device.hostname ?? device.description ?? device.id}</span>
+              {canManage && !openGroup.dynamic ? (
                 <Button
-                  disabled={addingDevice === "" || addMember.isPending}
-                  onClick={() =>
-                    addMember.mutate({ groupId: openGroup.id, deviceId: addingDevice })
-                  }
+                  variant="ghost"
+                  onClick={() => {
+                    // One answer line serves both writes: the last one's goes first (ruling 7).
+                    addMember.reset();
+                    setNotMoved([]);
+                    removeMember.mutate({
+                      groupId: openGroup.id,
+                      deviceId: device.id,
+                    });
+                  }}
                 >
-                  {t("devices.groups.memberDialog.addToGroup")}
+                  {t("devices.groups.memberDialog.remove")}
                 </Button>
-                <p className="note">
-                  {t("devices.groups.memberDialog.fallback")}
-                </p>
-              </div>
-            ) : null}
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
 
-            {addMember.isError || removeMember.isError ? (
-              <p role="alert" className="form-error mt-3">
-                {describeSubmitError(addMember.error ?? removeMember.error)}
-              </p>
-            ) : notMoved.length > 0 ? (
-              <p role="alert" className="form-error mt-3">
-                {notMoved
-                  .map((result) =>
-                    t("devices.groups.memberDialog.notMoved", {
-                      name: deviceName(result.device_id),
-                      reason: notMovedReason(result.reason),
-                    }),
-                  )
-                  .join(" ")}
-              </p>
-            ) : null}
+      {canManage && !openGroup.dynamic ? (
+        <div className="mt-3">
+          <EntityPicker
+            label={t("devices.groups.memberDialog.add")}
+            options={joinable.map((device) => ({
+              id: device.id,
+              label: device.hostname ?? device.description ?? t("devices.row.unnamed"),
+              sublabel:
+                device.device_group_id === null
+                  ? t("devices.groups.memberDialog.orgDefault")
+                  : t("devices.groups.memberDialog.otherGroup"),
+            }))}
+            value={addingDevice}
+            onChange={setAddingDevice}
+            emptyHint={t("devices.groups.memberDialog.addEmpty")}
+          />
+          <Button
+            disabled={addingDevice === "" || addMember.isPending}
+            onClick={() => {
+              // One answer line serves both writes: the last one's goes first (ruling 7).
+              removeMember.reset();
+              addMember.mutate({ groupId: openGroup.id, deviceId: addingDevice });
+            }}
+          >
+            {t("devices.groups.memberDialog.addToGroup")}
+          </Button>
+          <p className="note">
+            {t("devices.groups.memberDialog.fallback")}
+          </p>
+        </div>
+      ) : null}
+
+      {addMember.isError || removeMember.isError ? (
+        <p role="alert" className="form-error mt-3">
+          {describeSubmitError(addMember.error ?? removeMember.error)}
+        </p>
+      ) : notMoved.length > 0 ? (
+        <p role="alert" className="form-error mt-3">
+          {notMoved
+            .map((result) =>
+              t("devices.groups.memberDialog.notMoved", {
+                name: deviceName(result.device_id),
+                reason: notMovedReason(result.reason),
+              }),
+            )
+            .join(" ")}
+        </p>
+      ) : null}
     </Panel>
   ) : null;
 
@@ -1217,12 +1261,13 @@ export function GroupsPage() {
 
       {/* ------------------------------------------------------------ editor */}
 
+      {guard}
       <Dialog
         open={editor !== null}
-        onClose={() => {
-          setEditor(null);
-          closeEditor();
-        }}
+        // CLOSING IS A CHANGE OF THE URL, AND ONLY THAT: the effect above
+        // clears the editor once `?new=`/`?edit=` is gone. Clearing it here
+        // first would drop the form before the guard could ask to keep it.
+        onClose={closeEditor}
         title={editor?.group ? t("devices.groups.editor.editTitle", { name: editor.group.name }) : t("devices.groups.editor.newTitle")}
         dismissible={false}
       >
