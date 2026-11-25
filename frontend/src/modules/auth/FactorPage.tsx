@@ -141,6 +141,7 @@ export function FactorPage() {
         <AuthSection title={t("auth.factor.passkeyTitle")} hint={t("auth.factor.passkeyHint")}>
           <div>
             <Btn
+              wide
               variant="primary"
               icon="key"
               label={busy ? t("auth.common.working") : t("auth.factor.usePasskey")}
@@ -176,6 +177,7 @@ export function FactorPage() {
             </Field>
             <div className="form-actions">
               <Btn
+                wide
                 type="submit"
                 variant={passkey ? "secondary" : "primary"}
                 label={t("auth.factor.totpSubmit")}
@@ -219,6 +221,7 @@ export function FactorPage() {
             </Field>
             <div className="form-actions">
               <Btn
+                wide
                 type="submit"
                 label={t("auth.factor.recoverySubmit")}
                 disabled={busy || !recoveryCode.trim()}

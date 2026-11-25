@@ -597,6 +597,7 @@ export function RequireAuth({ children, bare = false }: { children: React.ReactN
         <AuthAlert text={signOutFailed ? t("shell.app.signOutFailed") : null} />
         <div>
           <Btn
+            wide
             variant="primary"
             label={t("shell.accountMenu.signOut")}
             onClick={() => {

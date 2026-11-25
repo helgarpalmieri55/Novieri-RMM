@@ -135,10 +135,10 @@ export function Btn({
    *  cannot be used because of what its own row is, not because of anything
    *  the operator can do about it, needs a place to say so. */
   title?: string;
-  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): a
-   *  step's one action in the sign-in frame, which drew the markup by hand
-   *  (`AuthWideBtn`) because `.btn` is `inline-flex` with its content at the
-   *  start. */
+  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): every
+   *  step action of a card in the sign-in frame (P3 adoption pass), which drew
+   *  the markup by hand (`AuthWideBtn`, gone) because `.btn` is `inline-flex`
+   *  with its content at the start. */
   wide?: boolean;
 }) {
   const tone = variant === "secondary" || variant === "gold" ? "" : variant;

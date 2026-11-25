@@ -172,7 +172,7 @@ function ConsentRequest() {
         <AuthAlert text={describeSubmitError(details.error)} />
         {passing ? (
           <div className="form-actions">
-            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
+            <Btn wide label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
       </AuthCard>
@@ -193,7 +193,7 @@ function ConsentRequest() {
         <AuthAlert text={shown.detail} />
         {passing ? (
           <div className="form-actions">
-            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
+            <Btn wide label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
       </AuthCard>
@@ -205,6 +205,7 @@ function ConsentRequest() {
         <AuthAlert text={shown.detail} />
         <div className="form-actions">
           <Btn
+            wide
             label={t("auth.consent.backTo", { host: shown.redirect_host })}
             onClick={() => navigation.assign(shown.redirect_to)}
           />
@@ -255,12 +256,14 @@ function ConsentRequest() {
       </p>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <Btn
+          wide
           variant="primary"
           label={sending === "approve" && !stepUp.open ? t("auth.common.working") : t("auth.consent.approve")}
           disabled={sending !== null}
           onClick={() => void answer(true)}
         />
         <Btn
+          wide
           label={sending === "decline" && !stepUp.open ? t("auth.common.working") : t("auth.consent.deny")}
           disabled={sending !== null}
           onClick={() => void answer(false)}

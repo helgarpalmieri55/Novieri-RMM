@@ -33,7 +33,8 @@ import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { safeNext } from "../../lib/session";
-import { AuthAlert, AuthCard, AuthOr, AuthWideBtn } from "./AuthCard";
+import { Btn } from "../../shell/components";
+import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
@@ -98,7 +99,8 @@ export function SignInPage() {
         </Field>
         <AuthAlert text={error} />
         <div className="form-actions">
-          <AuthWideBtn
+          <Btn
+            wide
             type="submit"
             variant="primary"
             icon="lock"

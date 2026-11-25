@@ -130,6 +130,13 @@ describe("the setup screen", () => {
     expect(document.title).toBe("Set up this installation · Novieri RMM");
   });
 
+  // Every card in the sign-in frame draws its action across the card (P3
+  // adoption pass; the coordinator's answer to O8's Q3): the kit's `Btn wide`.
+  it("draws Finish setup across the card", () => {
+    render(<SetupPage />);
+    expect(screen.getByRole("button", { name: /finish setup/i })).toHaveClass("btn", "primary", "wide");
+  });
+
   it("keeps Finish setup on, and names every empty field when it is pressed early, claiming nothing", async () => {
     // Coordinator ruling 8a (2026-11-25): seven fields, so the button stays on
     // and the press reports what is missing, by name (ruling 8, fix round 1).

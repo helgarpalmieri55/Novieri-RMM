@@ -71,7 +71,7 @@ export function ResetPasswordPage() {
       <AuthCard title={t("auth.reset.title")}>
         <AuthDone>{t("auth.reset.done")}</AuthDone>
         <div className="form-actions">
-          <Link className="btn primary" to="/sign-in">
+          <Link className="btn primary wide" to="/sign-in">
             {t("auth.reset.signIn")}
           </Link>
         </div>
@@ -113,6 +113,7 @@ export function ResetPasswordPage() {
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant="primary"
             icon="lock"

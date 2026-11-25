@@ -46,7 +46,7 @@ import { apiErrorCode } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useSecretMutation } from "../../lib/secretMutation";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard, READ_ONLY } from "./AuthCard";
+import { AuthAlert, AuthCard } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
 import { NewPasswordFields } from "./NewPasswordFields";
@@ -173,12 +173,13 @@ export function RecoverPage() {
         {/* For the password manager: the account the new password belongs to.
             Read-only, so drawn on the sunken surface. */}
         <Field label={t("auth.common.email")}>
-          <input className={inputClass} type="email" autoComplete="username" value={email} readOnly style={READ_ONLY} />
+          <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
         </Field>
         <NewPasswordFields password={password} again={again} onPassword={setPassword} onAgain={setAgain} />
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant="primary"
             icon="key"
