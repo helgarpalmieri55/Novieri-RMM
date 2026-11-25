@@ -14,6 +14,7 @@ import {
   ClientFilter,
   FilterChips,
   ListEmpty,
+  ListToolbar,
   ShowingCount,
   useNarrowedApi,
   useNewParam,
@@ -821,5 +822,21 @@ describe("withClient (kit requests batch 2, K1)", () => {
   it("opens the list on the same client: the Client chip there reads it", () => {
     renderPage(withClient("/devices?state=offline", ANDES), <ChipPage />);
     expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
+  });
+});
+
+describe("ListToolbar's chips slot when its chips draw nothing (batch 1 review, Minor 1)", () => {
+  // kit.css scopes the search's ceiling to `.list-chips:not(:empty)`; this is
+  // what makes that selector true: React draws nothing at all for a chip that
+  // returns null, so the slot is `:empty` and the search keeps the row.
+  it("is empty when its only chip is a Client chip that is not drawn", () => {
+    scope.selected = ANDES;
+    const { container } = renderPage("/x", <ListToolbar search={<input aria-label="Search" />} chips={<ChipPage />} />);
+    expect(container.querySelector(".list-chips")?.matches(":empty")).toBe(true);
+  });
+
+  it("is not empty when the chip is drawn", () => {
+    const { container } = renderPage("/x", <ListToolbar search={<input aria-label="Search" />} chips={<ChipPage />} />);
+    expect(container.querySelector(".list-chips")?.matches(":empty")).toBe(false);
   });
 });

@@ -4,15 +4,18 @@
 /* THE CHIPS FLOW BESIDE THE SEARCH (kit requests batch 1, O1). `.list-chips`
  * as one flex item wrapped as a whole: a flex line breaks on an item's
  * max-content width, so a row of groups never fit beside the search, which
- * then took the first row alone, and /devices was four rows tall at 1440.
- * As `contents`, each group (and each select chip) is an item of the bar and
- * wraps on its own width; the bar's own gap spaces them. A search basis alone
- * changed nothing: measured over /__preview, a replica of /devices' toolbar
- * stayed 180px tall at 1440 with it, and is 109px (two rows) with this. */
+ * then took the first row alone, and /devices' toolbar was four rows tall at
+ * 1440. As `contents`, each group (and each select chip) is an item of the
+ * bar and wraps on its own width; the bar's own gap spaces them. A search
+ * basis alone left the toolbar as tall as before (the batch 1 report's
+ * Chromium measurement over /__preview, with a replica of /devices' toolbar). */
 .filterbar > .list-chips { display: contents; }
 /* Beside chips the search has a basis and a ceiling: wide enough for its
- * placeholder, never a 1,100px box. Without chips it still takes the row. */
-.filterbar:has(> .list-chips) > .srch-wrap { flex: 1 1 320px; max-width: 480px; }
+ * placeholder, never a box across the whole bar. ONLY WHEN A CHIP IS DRAWN
+ * (batch 1 review, Minor 1): `ListToolbar` draws `.list-chips` whenever it is
+ * handed `chips`, and a Client chip alone draws nothing with a client chosen
+ * above, so `:not(:empty)`. With no chip drawn the search still takes the row. */
+.filterbar:has(> .list-chips:not(:empty)) > .srch-wrap { flex: 1 1 320px; max-width: 480px; }
 .chip-select { padding: 0 4px 0 11px; gap: 6px; }
 .chip-select select { min-height: 30px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .chip-select:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
