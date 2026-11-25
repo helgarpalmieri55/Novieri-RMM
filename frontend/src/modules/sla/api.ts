@@ -17,6 +17,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { QueueOut } from "../service-desk/types";
 import type {
   CalendarCreate,
@@ -191,11 +192,22 @@ export function useRemoveSlaHolidayMutation() {
 // Policies
 // --------------------------------------------------------------------------
 
-export function useSlaPolicies() {
-  const api = useApi();
+/**
+ * `chip` is the policy list's `?client=` ("" without one, as every other
+ * caller reads it): the Client chip narrows this READ and nothing else
+ * (redesign plan, Receta L, 7; decision D6). The same call, through the API
+ * narrowed to that client and keyed on it, so a change of chip reads again;
+ * nothing is read until `/me` has said the client is one of the person's.
+ * A policy "for every client" (`client_id` null) is still in a client's
+ * answer: the server includes it in the intersection. Writes keep `useApi()`
+ * and invalidate the `["sla-policies"]` prefix, which reaches every client.
+ */
+export function useSlaPolicies(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<PolicyOut[], ApiError>({
-    queryKey: ["sla-policies"],
+    queryKey: ["sla-policies", client],
     queryFn: () => api.listSlaPolicies(),
+    enabled: ready,
     ...NO_RETRY,
   });
 }

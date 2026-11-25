@@ -7,7 +7,7 @@ import type { Attempt, FieldRule, Problem } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import type { PickerOption } from "../../components/picker";
 import { Badge, Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
-import { Btn, Panel, StatusPill } from "../../shell/components";
+import { Btn, ClientFilter, FormSection, StatusPill, useNewParam, useUrlFilters } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
@@ -126,13 +126,19 @@ export function PoliciesPanel({
   onCreateCalendar?: () => void;
 }) {
   const t = useT();
-  const policies = useSlaPolicies();
+  // THE CLIENT CHIP (redesign plan, Task 7, 2.6): the policies of one client,
+  // and the ones every client shares, which the server includes in its answer.
+  const filters = useUrlFilters(["client"] as const);
+  const policies = useSlaPolicies(filters.values.client);
   const calendars = useSlaCalendars();
   const create = useCreateSlaPolicyMutation();
   const update = useUpdateSlaPolicyMutation();
   const del = useDeleteSlaPolicyMutation();
 
-  const [creating, setCreating] = useState(false);
+  // New policy opens from the URL (`?new=policy`, decision D8), and only for
+  // someone who may create one, whatever the URL asks.
+  const created = useNewParam("policy");
+  const creating = canAdmin && created.open;
   const [editing, setEditing] = useState<PolicyOut | null>(null);
   // The policy a Delete click has named but not yet destroyed (cycle 8).
   // Auditor B, HIGH: "Delete sits directly beside Edit in the same row with
@@ -182,7 +188,7 @@ export function PoliciesPanel({
     policyClient.setPicked("");
     setAttempt(null);
     create.reset();
-    setCreating(true);
+    created.start();
   }
 
   function openEdit(policy: PolicyOut) {
@@ -242,7 +248,7 @@ export function PoliciesPanel({
         ...draftBody,
         ...(forEveryClient ? {} : { client_id: requireKnown(policyClient.clientId) }),
       }),
-      { onSuccess: () => setCreating(false) },
+      { onSuccess: () => created.close() },
     );
   }
 
@@ -256,24 +262,30 @@ export function PoliciesPanel({
   }
 
   return (
-    <Panel
-      title={t("sla.policies.title")}
-      subtitle={t("sla.policies.subtitle")}
-      bare
-      actions={
-        canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" variant="primary" onClick={openCreate} /> : undefined
-      }
-    >
-      {policies.isLoading ? (
-        <p className="note" style={{ padding: "16px 18px" }}>{t("sla.common.loading")}</p>
+    // A SECTION OF THE SLA PAGE (redesign plan, Task 7, 2.6; Receta FO): its
+    // sentence, the Client chip and "Add policy" as a secondary button (the
+    // open dialog's Save is the page's primary), then the list.
+    <FormSection title={t("sla.policies.title")} icon="shield-check">
+      <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+        <p className="note" style={{ margin: 0 }}>
+          {t("sla.policies.subtitle")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <ClientFilter filters={filters} />
+          {canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" onClick={openCreate} /> : null}
+        </div>
+      </div>
+      {/* `isPending`, not `isLoading`: until `/me` decides the Client chip the read is not enabled yet, and that is still loading. */}
+      {policies.isPending ? (
+        <p className="note">{t("sla.common.loading")}</p>
       ) : forbidden ? (
-        <p className="note" style={{ padding: "16px 18px" }}>{t("sla.policies.forbidden")}</p>
+        <p className="note">{t("sla.policies.forbidden")}</p>
       ) : failed ? (
-        <p role="alert" className="notice red" style={{ margin: 14 }}>
+        <p role="alert" className="notice red">
           {t("sla.policies.failed", { reason: describeSubmitError(policies.error) })}
         </p>
       ) : (
-        <Table>
+        <Table label={t("sla.policies.title")}>
           <thead>
             <tr>
               <Th>{t("sla.common.priority")}</Th>
@@ -412,7 +424,7 @@ export function PoliciesPanel({
       />
 
       {/* A real <form>, so Enter submits from any field in the dialog. */}
-      <Dialog open={creating} onClose={() => setCreating(false)} title={t("sla.policies.addTitle")}>
+      <Dialog open={creating} onClose={created.close} title={t("sla.policies.addTitle")}>
         <Form onSubmit={submitCreate}>
           <PolicyFields
             draft={draft}
@@ -423,7 +435,8 @@ export function PoliciesPanel({
             onCreateCalendar={
               canAdmin && onCreateCalendar
                 ? () => {
-                    setCreating(false);
+                    // The calendar's dialog takes this one's place in the URL
+                    // (`?new=calendar`), so Back comes back to the policy.
                     onCreateCalendar();
                   }
                 : undefined
@@ -443,7 +456,7 @@ export function PoliciesPanel({
           <div className="flex items-center justify-end gap-2">
             {/* `type="button"`: inside a <form>, an untyped button submits, so
                 Cancel would save the policy it was meant to abandon. */}
-            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
+            <Button type="button" variant="ghost" onClick={created.close}>
               {t("common.actions.cancel")}
             </Button>
             {/* Enabled with no calendar chosen ON PURPOSE -- the press is what
@@ -487,7 +500,7 @@ export function PoliciesPanel({
           </div>
         </Form>
       </Dialog>
-    </Panel>
+    </FormSection>
   );
 }
 

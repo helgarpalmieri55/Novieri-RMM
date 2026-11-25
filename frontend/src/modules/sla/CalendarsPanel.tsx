@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Badge, Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel, StatusPill } from "../../shell/components";
+import { Btn, FormSection, StatusPill, useNewParam } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
@@ -109,22 +109,7 @@ const calendarRules = (): readonly FieldRule[] => [
   { name: "timezone", label: translate("sla.calendars.timezoneLabel"), validate: invalidTimezone },
 ];
 
-export function CalendarsPanel({
-  canAdmin,
-  openCreateNonce = 0,
-}: {
-  canAdmin: boolean;
-  /**
-   * A counter the parent bumps to open this panel's create dialog (cycle 7).
-   *
-   * The policy form is dead without a calendar and says so; this is how its
-   * "Add a business calendar" gets the user to the form that fixes it instead
-   * of leaving them to find a card further down the page. A NONCE rather than
-   * a boolean, so a second request after the dialog was dismissed reopens it
-   * -- a boolean that is already `true` cannot ask twice.
-   */
-  openCreateNonce?: number;
-}) {
+export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
   const t = useT();
   const calendars = useSlaCalendars();
   const create = useCreateSlaCalendarMutation();
@@ -136,7 +121,11 @@ export function CalendarsPanel({
   const zone = useUserTimezone();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  // Add calendar opens from the URL (`?new=calendar`, decision D8): so does
+  // the policy form's "Add a business calendar" (cycle 7), which puts it in
+  // the policy dialog's place, and Back returns to that dialog.
+  const created = useNewParam("calendar");
+  const creating = canAdmin && created.open;
   const [editing, setEditing] = useState<CalendarOut | null>(null);
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
@@ -162,15 +151,8 @@ export function CalendarsPanel({
     setActive(true);
     setAttempt(null);
     create.reset();
-    setCreating(true);
+    created.start();
   }
-
-  // Deliberately keyed on the nonce alone: `openCreate` is redefined every
-  // render, and depending on it would reopen the dialog on any re-render.
-  useEffect(() => {
-    if (openCreateNonce > 0) openCreate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openCreateNonce]);
 
   function openEdit(calendar: CalendarOut) {
     setName(calendar.name);
@@ -191,7 +173,7 @@ export function CalendarsPanel({
       { name: name.trim(), timezone: timezone.trim(), active },
       {
         onSuccess: (calendar) => {
-          setCreating(false);
+          created.close();
           // A brand-new calendar has no windows, so it is `no_working_windows`
           // by construction -- open it straight into the week editor rather
           // than leaving a calendar that cannot produce a deadline sitting in
@@ -214,24 +196,26 @@ export function CalendarsPanel({
   }
 
   return (
-    <Panel
-      title={t("sla.calendars.title")}
-      subtitle={t("sla.calendars.subtitle")}
-      bare
-      actions={
-        canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={openCreate} /> : undefined
-      }
-    >
+    // A SECTION OF THE SLA PAGE (redesign plan, Task 7, 2.6): its sentence and
+    // "Add calendar" (secondary: the open dialog's Save is the primary), then
+    // the list. No Client chip: calendars are the organisation's.
+    <FormSection title={t("sla.calendars.title")} icon="calendar">
+      <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+        <p className="note" style={{ margin: 0 }}>
+          {t("sla.calendars.subtitle")}
+        </p>
+        {canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={openCreate} /> : null}
+      </div>
       {calendars.isLoading ? (
-        <p className="note" style={{ padding: "16px 18px" }}>{t("sla.common.loading")}</p>
+        <p className="note">{t("sla.common.loading")}</p>
       ) : forbidden ? (
-        <p className="note" style={{ padding: "16px 18px" }}>{t("sla.calendars.forbidden")}</p>
+        <p className="note">{t("sla.calendars.forbidden")}</p>
       ) : failed ? (
         /* The generic half says WHICH surface is missing; `describeSubmitError`
            says why, which is the difference between "retry" and "you do not
            have permission" being the right next move. Announced, because the
            table it replaces is otherwise just absent. */
-        <p role="alert" className="notice red" style={{ margin: 14 }}>
+        <p role="alert" className="notice red">
           {t("sla.calendars.failed", { reason: describeSubmitError(calendars.error) })}
         </p>
       ) : (
@@ -357,14 +341,14 @@ export function CalendarsPanel({
       />
 
       {selectedId && (
-        <div style={{ padding: "16px 18px", borderTop: "1px solid var(--line)" }}>
+        <div style={{ paddingTop: 16, marginTop: 16, borderTop: "1px solid var(--line)" }}>
           <CalendarDetailPanel calendarId={selectedId} canAdmin={canAdmin} />
         </div>
       )}
 
       {/* A real <form>, so Enter in the name field saves instead of doing
           nothing -- the other half of the same finding. */}
-      <Dialog open={creating} onClose={() => setCreating(false)} title={t("sla.calendars.addTitle")}>
+      <Dialog open={creating} onClose={created.close} title={t("sla.calendars.addTitle")}>
         <Form onSubmit={submitCreate}>
           <CalendarFields
             name={name}
@@ -378,7 +362,7 @@ export function CalendarsPanel({
             {/* `type="button"` is load-bearing now that there is a form around
                 it: a button with no type inside a <form> IS a submit button,
                 so Cancel would save. */}
-            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
+            <Button type="button" variant="ghost" onClick={created.close}>
               {t("common.actions.cancel")}
             </Button>
             {/* Enabled with the fields empty ON PURPOSE. The refusal is what
@@ -422,7 +406,7 @@ export function CalendarsPanel({
           </div>
         </Form>
       </Dialog>
-    </Panel>
+    </FormSection>
   );
 }
 
