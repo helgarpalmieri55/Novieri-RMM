@@ -229,6 +229,9 @@ describe("step 3 — swept, and the segment nothing could look at", () => {
     expect(blind.state).toBe("blocked");
     expect(blind.status).toMatch(/no enrolled agent/i);
     expect(blind.remedy).toMatch(/never probes/);
+    // The emphasis is in the wording, not in typed capitals (DESIGN.md: no
+    // uppercase copy); it was "performed BY an agent".
+    expect(blind.remedy).toMatch(/^A sweep is always performed by an agent inside the segment\./);
     // And it sends them somewhere that helps, rather than back to the button
     // that just failed.
     expect(blind.to).toBe("/agent-packages");
