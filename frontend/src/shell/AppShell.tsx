@@ -566,8 +566,8 @@ export function AppShell({
           <div className="top-actions">
             {/* THE CLIENT EVERYTHING IN THIS CLUSTER, AND ON THE PAGE, IS FOR
                 (phase 3 design §1.1): first, because it is the context of the
-                rest. On a handset it is in the
-                drawer instead: there is no room for it here (`./handset`). */}
+                rest. On a handset it is in the drawer instead: there is no
+                room for it here (`./handset`). */}
             {handset ? null : clientSelector}
             {/* ADD A COMPUTER LEFT THE BAR (redesign design §1.2, decision D11): it is New → Computer and the Devices page's own head. */}
             {permissions.includes("health.read") ? <HealthGlyph reading={reading} /> : null}
