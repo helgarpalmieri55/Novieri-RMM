@@ -16,6 +16,7 @@ import {
   StatusPill,
   TableWrap,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { formatDate } from "../../lib/datetime";
@@ -255,12 +256,32 @@ function BindForm({ onDone }: { onDone: () => void }) {
   const [credentialId, setCredentialId] = useState("");
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
+  /**
+   * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
+   * form lives in the `?new=scope` dialog, so Back, Close and Escape are all
+   * a change of `new`: with anything chosen or typed, each asks first. A
+   * binding that was made lets its own close through (`release`).
+   */
+  const { guard, release } = useUnsavedGuard(credentialId !== "" || prefix !== "" || note !== "", {
+    search: ["new"],
+  });
 
   const parsed = parsePrefix(prefix);
   const available = credentials.data ?? [];
+  // WHAT BIND WAITS FOR, ON SCREEN (coordinator ruling 8): a disabled button
+  // says why. A prefix that does not parse already says so, in red.
+  const waitsFor =
+    credentialId === "" && prefix.trim() === ""
+      ? t("agentPush.scopes.form.needsBoth")
+      : credentialId === ""
+        ? t("agentPush.scopes.form.needsCredential")
+        : prefix.trim() === ""
+          ? t("agentPush.scopes.form.needsPrefix")
+          : null;
 
   return (
     <>
+      {guard}
       <p className="note mb-3">{t("agentPush.scopes.form.subtitle")}</p>
       <div className="notice gold">
         <Icon name="warning" size={17} />
@@ -350,6 +371,8 @@ function BindForm({ onDone }: { onDone: () => void }) {
                 onSuccess: () => {
                   setPrefix("");
                   setNote("");
+                  // The binding is made: its own close is not a lost change.
+                  release();
                   onDone();
                 },
               },
@@ -360,6 +383,7 @@ function BindForm({ onDone }: { onDone: () => void }) {
           {t("agentPush.scopes.form.submit")}
         </Button>
       </div>
+      {waitsFor !== null ? <p className="note mt-2">{waitsFor}</p> : null}
 
       {/* SEPARATION OF DUTIES, AT THE CONTROL, as on the authorizations page.
           It was the tail of a 391-char page description. */}

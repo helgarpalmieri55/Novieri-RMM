@@ -890,3 +890,120 @@ describe("Credential scopes on the list kit", () => {
     expect(router.state.location.search).toBe("");
   });
 });
+
+/*
+ * A HALF-WRITTEN FORM ASKS BEFORE IT IS DROPPED (coordinator ruling 3, fix
+ * round 1 of wave O1). The grant and bind forms live in `?new=` dialogs, so
+ * Back, Close and Escape are all a change of `new`: each page's one guard
+ * names that key, and a form with something typed in it asks first. Under the
+ * data router the console runs on (`renderRouted`), which is the one that can
+ * block.
+ */
+describe("the grant and bind forms ask before Back drops them", () => {
+  async function openGrant() {
+    const { router } = renderRouted("/agent-push/authorizations", <PushAuthorizationsPage />);
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New authorization" }));
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    return { router, dialog };
+  }
+
+  it("asks before Close drops a grant with a prefix typed in it, and keeps what was typed", async () => {
+    stubApi();
+    const { router, dialog } = await openGrant();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=authorization");
+    expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
+  });
+
+  it("closes an untouched grant form without asking", async () => {
+    stubApi();
+    const { router, dialog } = await openGrant();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("closes without asking once the grant is made", async () => {
+    const createPushAuthorization = vi.fn().mockResolvedValue(grant());
+    stubApi({ createPushAuthorization });
+    const { router, dialog } = await openGrant();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Authorize" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(createPushAuthorization).toHaveBeenCalledOnce();
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("asks before Close drops a binding with a prefix typed in it", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/credential-scopes", <PushCredentialScopesPage />);
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New scope" }));
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=scope");
+    expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
+  });
+
+  it("closes without asking once the binding is made", async () => {
+    const bindPushCredentialScope = vi.fn().mockResolvedValue(scope());
+    stubApi({
+      bindPushCredentialScope,
+      listCredentials: vi
+        .fn()
+        .mockResolvedValue([{ id: "c1", name: "branch-installer", type: "push_install", has_secret: true }]),
+    });
+    const { router } = renderRouted("/agent-push/credential-scopes?new=scope", <PushCredentialScopesPage />);
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await within(dialog).findByRole("option", { name: "branch-installer" });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "c1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Bind" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(bindPushCredentialScope).toHaveBeenCalledOnce();
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+/*
+ * A DISABLED BUTTON SAYS WHY ON SCREEN (coordinator ruling 8, fix round 1 of
+ * wave O1). Authorize and Bind wait for what they need; the form says what
+ * that is, beside them, and stops saying it once it is there.
+ */
+describe("the disabled submits say what they wait for", () => {
+  it("says Authorize needs a prefix while none is typed", async () => {
+    stubApi();
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    expect(within(dialog).getByRole("button", { name: "Authorize" })).toBeDisabled();
+    expect(within(dialog).getByText("Type the prefix to authorize.")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    expect(within(dialog).queryByText("Type the prefix to authorize.")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Authorize" })).toBeEnabled();
+  });
+
+  it("says Bind needs a credential and a prefix, naming the one still missing", async () => {
+    stubApi({
+      listCredentials: vi
+        .fn()
+        .mockResolvedValue([{ id: "c1", name: "branch-installer", type: "push_install", has_secret: true }]),
+    });
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    expect(within(dialog).getByText("Choose a credential and type the prefix to bind it to.")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    expect(within(dialog).getByText("Choose the credential to bind.")).toBeInTheDocument();
+    await within(dialog).findByRole("option", { name: "branch-installer" });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "c1");
+    expect(within(dialog).queryByText(/^Choose the credential|^Choose a credential/)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Bind" })).toBeEnabled();
+  });
+});

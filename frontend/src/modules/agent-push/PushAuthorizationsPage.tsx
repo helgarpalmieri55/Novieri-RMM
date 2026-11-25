@@ -21,6 +21,7 @@ import {
   StatusPill,
   TableWrap,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
   type Kind,
 } from "../../shell/components";
@@ -324,6 +325,16 @@ function GrantForm({ onDone }: { onDone: () => void }) {
   // Client field with every client chosen, named rather than sent without.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const problems = attemptProblems(attempt);
+  /**
+   * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
+   * form lives in the `?new=authorization` dialog, so Back, Close and Escape
+   * are all a change of `new`: with anything typed in it, each asks first.
+   * A grant that was made lets its own close through (`release`).
+   */
+  const { guard, release } = useUnsavedGuard(
+    prefix !== "" || note !== "" || expiresAt !== "" || client.picked !== "",
+    { search: ["new"] },
+  );
 
   const parsed = parsePrefix(prefix);
 
@@ -341,6 +352,7 @@ function GrantForm({ onDone }: { onDone: () => void }) {
 
   return (
     <>
+      {guard}
       <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
       <div className="form-grid">
         {client.needsField ? <ClientField field={client} /> : null}
@@ -456,6 +468,8 @@ function GrantForm({ onDone }: { onDone: () => void }) {
                   setPrefix("");
                   setNote("");
                   setExpiresAt("");
+                  // The grant is made: its own close is not a lost change.
+                  release();
                   onDone();
                 },
               },
@@ -466,6 +480,12 @@ function GrantForm({ onDone }: { onDone: () => void }) {
           {t("agentPush.authorizations.form.submit")}
         </Button>
       </div>
+      {/* WHAT AUTHORIZE WAITS FOR, ON SCREEN (coordinator ruling 8): a
+          disabled button says why. A prefix that does not parse already says
+          so above, in red. */}
+      {prefix.trim() === "" ? (
+        <p className="note mt-2">{t("agentPush.authorizations.form.needsPrefix")}</p>
+      ) : null}
 
       {/* SEPARATION OF DUTIES, AT THE CONTROL. It was the tail of a 465-char
           page description; the fact is about who may press this button, so it
