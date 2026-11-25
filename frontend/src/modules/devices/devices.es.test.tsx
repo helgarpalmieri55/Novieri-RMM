@@ -421,7 +421,8 @@ describe("the discovered page in Spanish", () => {
       {},
       ["devices.read", "assets.manage"],
     );
-    expect(await screen.findByRole("heading", { name: "Descubiertos en la red" })).toBeInTheDocument();
+    // The h1 is the page's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Descubiertos" })).toBeInTheDocument();
     await screen.findByText("172.22.104.55");
     expect(screen.getByRole("button", { name: /Escanear una subred/ })).toBeInTheDocument();
     for (const header of ["Dirección", "MAC", "Fabricante", "Evidencia", "Visto"]) {
@@ -460,7 +461,8 @@ describe("the discovered page in Spanish", () => {
   it("words the Scan-a-subnet dialog through to the queued confirmation", async () => {
     const user = userEvent.setup();
     renderCandidates({ items: [], total: 0, truncated: false, unsweepable_subnets: 0 }, { listAssetSuggestions: vi.fn().mockResolvedValue({ items: [] }) });
-    await screen.findByRole("heading", { name: "Descubiertos en la red" });
+    // The h1 is the page's name in the navigation (coordinator ruling, fix round 1).
+    await screen.findByRole("heading", { level: 1, name: "Descubiertos" });
     await user.click(await screen.findByRole("button", { name: /Escanear una subred/ }));
     const dialog = await screen.findByRole("dialog", { name: "Escanear una subred en busca de dispositivos" });
     await user.selectOptions(await within(dialog).findByRole("combobox"), "sub-1");

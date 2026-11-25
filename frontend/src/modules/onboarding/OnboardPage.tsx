@@ -193,7 +193,8 @@ export function OnboardPage() {
   return (
     <FormPage
       back={{ to: "/devices", label: t("onboarding.page.back") }}
-      title={t("onboarding.page.title")}
+      // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+      title={t("shell.nav.page.addComputer")}
       description={t("onboarding.page.description")}
     >
       <FormSection title={t("onboarding.target.title")} icon="building">

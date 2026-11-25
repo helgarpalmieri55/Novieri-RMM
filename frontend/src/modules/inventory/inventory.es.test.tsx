@@ -546,7 +546,8 @@ describe("the software page in Spanish", () => {
   it("words the list, the count, the selection prompt and a selected title", async () => {
     const user = userAction();
     const { container } = software();
-    expect(await screen.findByRole("heading", { name: "Software" })).toBeInTheDocument();
+    // The h1 is the page's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Software instalado" })).toBeInTheDocument();
     expect(screen.getByText("Lo que está instalado en toda la flota, según el inventario.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exportar software" })).toBeInTheDocument();
     expect(await screen.findByText("Paquete de ejemplo")).toBeInTheDocument();

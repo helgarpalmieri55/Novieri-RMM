@@ -206,7 +206,6 @@ export const inventory: Shape<typeof en> = {
     unchanged: "Elige otra sede de su cliente.",
   },
   software: {
-    title: "Software",
     description: "Lo que está instalado en toda la flota, según el inventario.",
     export: "Exportar software",
     exportFailed: "La exportación falló.",

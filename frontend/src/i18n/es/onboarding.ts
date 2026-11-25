@@ -3,7 +3,6 @@ import type { onboarding as en } from "../en/onboarding";
 
 export const onboarding: Shape<typeof en> = {
   page: {
-    title: "Añadir un equipo",
     back: "Equipos",
     description: "Instala el agente en un equipo o encuentra todos los equipos de una red.",
     oneComputer: {

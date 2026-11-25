@@ -289,7 +289,8 @@ export function AgentReleasesPage() {
       {/* THE PAGE'S ONE PRIMARY, and only for the one person who can use it.
           v3 keeps a page's primary in the head; the rows below stay plain. */}
       <PageHead
-        title={t("agentReleases.page.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.item.agentPackages")}
         description={t("agentReleases.page.description")}
         actions={
           canPublish ? (

@@ -61,7 +61,8 @@ export function PushRunsPage() {
         <Icon name="chevron-left" size={14} />
         {t("agentPush.runs.back")}
       </Link>
-      <PageHead title={t("agentPush.runs.title")} description={t("agentPush.runs.description")} />
+      {/* The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label). */}
+      <PageHead title={t("shell.nav.page.pushRuns")} description={t("agentPush.runs.description")} />
       <Panel bare>
         <ListToolbar
           chips={
@@ -89,7 +90,7 @@ export function PushRunsPage() {
             />
           ) : (
             <TableWrap>
-              <table aria-label={t("agentPush.runs.title")}>
+              <table aria-label={t("shell.nav.page.pushRuns")}>
                 <thead>
                   <tr>
                     <Th>{t("agentPush.runs.subnet")}</Th>

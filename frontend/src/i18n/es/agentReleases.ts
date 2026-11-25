@@ -3,7 +3,6 @@ import type { agentReleases as en } from "../en/agentReleases";
 
 export const agentReleases: Shape<typeof en> = {
   page: {
-    title: "Paquetes del agente",
     description: "Instaladores para cada plataforma y los comandos que los instalan.",
     publish: "Publicar una versión…",
     releases: "Versiones",

@@ -3,8 +3,6 @@ import type { devices as en } from "../en/devices";
 
 export const devices: Shape<typeof en> = {
   page: {
-    // «Equipos», the rail's word for this list (decision D13; the glossary in `es/index.ts`).
-    title: "Equipos",
     description: "Todos los equipos y dispositivos que administras, con o sin agente.",
     addAsset: "Añadir activo",
     exportInventory: "Exportar inventario",
@@ -177,7 +175,6 @@ export const devices: Shape<typeof en> = {
     failed: "No se cambió nada.",
   },
   candidates: {
-    title: "Descubiertos en la red",
     description: "Direcciones que ha visto la flota y que ningún registro de activo explica.",
     scan: "Escanear una subred",
     swept: "Registrados por un barrido",
@@ -266,7 +263,6 @@ export const devices: Shape<typeof en> = {
     noAgent: "Sin agente",
   },
   groups: {
-    title: "Grupos de dispositivos",
     description: "Divide la flota en grupos para aplicar políticas y despliegues.",
     newGroup: "Nuevo grupo",
     prerequisitesTitle: "Antes de que un grupo tenga equipos que contener",

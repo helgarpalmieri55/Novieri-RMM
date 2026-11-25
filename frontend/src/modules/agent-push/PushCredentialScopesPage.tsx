@@ -83,7 +83,9 @@ export function PushCredentialScopesPage() {
           sentence reads as prose to nobody and is a role name to an admin;
           both readers need the code, neither needs it unannounced. */}
       <PageHead
-        title={t("agentPush.scopes.title")}
+        // The area's name in the navigation (coordinator ruling, fix round 1: a
+        // page's h1 is its rail label); the section nav under it says which page.
+        title={t("shell.nav.item.pushInstall")}
         description={t("agentPush.scopes.description")}
         actions={
           permissions.scopeManage ? (

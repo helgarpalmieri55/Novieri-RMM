@@ -92,7 +92,8 @@ export function SoftwarePage() {
   return (
     <>
       <PageHead
-        title={t("inventory.software.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.page.installedSoftware")}
         description={t("inventory.software.description")}
         actions={
           /* "Export CSV" WAS THE LABEL, AND IT WOULD NOW BE FALSE. The route
@@ -142,7 +143,7 @@ export function SoftwarePage() {
             />
           ) : (
             <TableWrap>
-              <table aria-label={t("inventory.software.title")}>
+              <table aria-label={t("shell.nav.page.installedSoftware")}>
                 <thead>
                   <tr>
                     <th scope="col">{t("inventory.software.thName")}</th>

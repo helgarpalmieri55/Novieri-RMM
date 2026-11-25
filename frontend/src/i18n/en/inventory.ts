@@ -209,7 +209,6 @@ export const inventory = {
     unchanged: "Choose another of its client's sites.",
   },
   software: {
-    title: "Software",
     description: "What is installed across the fleet, from inventory.",
     export: "Export software",
     exportFailed: "The export failed.",

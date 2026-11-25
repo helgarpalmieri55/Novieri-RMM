@@ -293,7 +293,8 @@ export function CandidatesPage() {
   return (
     <>
       <PageHead
-        title={t("devices.candidates.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.page.discovered")}
         description={t("devices.candidates.description")}
         actions={
           // THE OPERATOR ASKED FOR THIS HERE, and it is the right place: the
@@ -445,7 +446,7 @@ export function CandidatesPage() {
             />
           ) : (
           <TableWrap>
-            <table aria-label={t("devices.candidates.title")}>
+            <table aria-label={t("shell.nav.page.discovered")}>
               <thead>
                 <tr>
                   {/* NAMED "Select", NOT "Actions". This is the LEADING column

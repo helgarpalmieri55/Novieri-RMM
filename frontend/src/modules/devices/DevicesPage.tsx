@@ -480,7 +480,8 @@ export function DevicesPage() {
   return (
     <>
       <PageHead
-        title={t("devices.page.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.item.devices")}
         description={t("devices.page.description")}
         actions={
           <>

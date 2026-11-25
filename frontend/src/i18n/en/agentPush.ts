@@ -307,7 +307,6 @@ export const agentPush = {
     },
   },
   runs: {
-    title: "Push runs",
     description: "Subnet pushes someone confirmed, installed at most 50 machines at a time.",
     // The list's way back to the computers (redesign Task 6, 1.7), by the rail's word.
     back: "Devices",

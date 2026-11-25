@@ -113,7 +113,9 @@ export function PushAuthorizationsPage() {
           other tabbed screen in the console keeps: crumb, title, description,
           then the strip that switches what follows. */}
       <PageHead
-        title={t("agentPush.authorizations.title")}
+        // The area's name in the navigation (coordinator ruling, fix round 1: a
+        // page's h1 is its rail label); the section nav under it says which page.
+        title={t("shell.nav.item.pushInstall")}
         description={t("agentPush.authorizations.description")}
         actions={
           permissions.scopeManage ? (

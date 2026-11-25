@@ -1201,7 +1201,8 @@ export function GroupsPage() {
 
   return (
     <>
-      <PageHead title={t("devices.groups.title")} description={t("devices.groups.description")} actions={newGroup} />
+      {/* The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label). */}
+      <PageHead title={t("shell.nav.item.deviceGroups")} description={t("devices.groups.description")} actions={newGroup} />
 
       <Prerequisites title={t("devices.groups.prerequisitesTitle")} items={[computersItem]} />
 

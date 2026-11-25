@@ -1,6 +1,5 @@
 export const agentReleases = {
   page: {
-    title: "Agent packages",
     description: "Installers for each platform, and the commands that install them.",
     publish: "Publish a release…",
     releases: "Releases",

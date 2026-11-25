@@ -321,7 +321,8 @@ describe("push install pages in Spanish", () => {
     stubApi();
     // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
     const { container } = renderPage(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
-    expect(await screen.findByRole("heading", { name: "Autorizaciones de instalación remota" })).toBeInTheDocument();
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Instalación remota" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
     expect(screen.getAllByText("Revocar").length).toBeGreaterThan(0);
@@ -355,7 +356,8 @@ describe("push install pages in Spanish", () => {
     stubApi();
     // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
     const { container } = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
-    expect(await screen.findByRole("heading", { name: "Ámbitos de credenciales" })).toBeInTheDocument();
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(await screen.findByRole("heading", { level: 1, name: "Instalación remota" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByText("(credencial eliminada)")).toBeInTheDocument();
     expect(screen.getByText("Desvinculado")).toBeInTheDocument();
@@ -639,7 +641,8 @@ describe("a live language switch on the push install pages", () => {
     renderPage(<PushAuthorizationsPage />);
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Push authorizations" })).toBeInTheDocument();
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    expect(screen.getByRole("heading", { level: 1, name: "Push install" })).toBeInTheDocument();
     expect(screen.getByText(/WinRM answered on 1 of 2 Windows machines probed/)).toBeInTheDocument();
     expect(screen.getByText(/2 ranges are authorized\./)).toBeInTheDocument();
     // A grant's status label and its tooltip are catalogue lookups, not stored text.

@@ -1,7 +1,6 @@
 export const devices = {
   // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   page: {
-    title: "Devices",
     description: "Every computer and device you manage, with or without an agent.",
     addAsset: "Add asset",
     exportInventory: "Export inventory",
@@ -176,7 +175,6 @@ export const devices = {
     failed: "Nothing was changed.",
   },
   candidates: {
-    title: "Discovered on the network",
     description: "Addresses the fleet has seen that no asset record accounts for.",
     scan: "Scan a subnet",
     swept: "Recorded by a sweep",
@@ -267,7 +265,6 @@ export const devices = {
     noAgent: "No agent",
   },
   groups: {
-    title: "Device groups",
     description: "Carve the fleet into groups for policy and deployment.",
     newGroup: "New group",
     prerequisitesTitle: "Before a group has computers to hold",
