@@ -433,7 +433,7 @@ describe("the calendar and policy dialogs in Spanish", () => {
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent('La zona horaria debe ser un nombre IANA, como Europe/London: "Londres" no lo es.');
     act(() => setActiveLanguage("en"));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent('Timezone must be an IANA name such as Europe/London — "Londres" is not one.');
+    expect(within(dialog).getByRole("alert")).toHaveTextContent('Timezone must be an IANA name such as Europe/London: "Londres" is not one.');
     act(() => setActiveLanguage("es"));
     await user.clear(zone);
     await user.type(zone, "Europe/Nowhere");
@@ -463,7 +463,7 @@ describe("the calendar and policy dialogs in Spanish", () => {
     expect(alert).toHaveTextContent("El campo Objetivo de respuesta en minutos debe ser de al menos 1 minuto: un objetivo de cero minutos se incumple al crearse el ticket.");
     expectNoEnglish(dialog);
     act(() => setActiveLanguage("en"));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Calendar is required. Response target in minutes must be at least 1 minute — a zero-minute target is breached on creation.");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Calendar is required. Response target in minutes must be at least 1 minute: a zero-minute target is breached on creation.");
     act(() => setActiveLanguage("es"));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("El campo Calendario es obligatorio.");
   });

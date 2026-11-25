@@ -81,7 +81,7 @@ export const sla = {
         "No policy matched this ticket, or its calendar cannot produce a deadline. This is a real state, not a missing value.",
     },
     void: {
-      headline: "Promise voided — neither met nor breached",
+      headline: "Promise voided: neither met nor breached",
       detailUndated:
         "The ticket reached a terminal-not-resolved status, so this deadline no longer applies.",
       detail:
@@ -101,8 +101,8 @@ export const sla = {
       at: "Met {met}.",
     },
     paused: {
-      headline: "Paused — clock stopped",
-      headlineFor: "Paused for {duration} — clock stopped",
+      headline: "Paused: clock stopped",
+      headlineFor: "Paused for {duration}: clock stopped",
       since: "Paused since {date}",
       extends: "the {date} deadline extends by the working time paused when the ticket resumes",
       credited: "{duration} of earlier pause already credited",
@@ -181,8 +181,8 @@ export const sla = {
     staleNote:
       "Tickets whose deadline is out of date are still counting, measured against the configuration this one replaced.",
     neverConfigured: {
-      one: "Never configured — this org is running on the default of {count} day.",
-      other: "Never configured — this org is running on the default of {count} days.",
+      one: "Never configured: this org is running on the default of {count} day.",
+      other: "Never configured: this org is running on the default of {count} days.",
     },
     needsAdmin: "Changing SLA settings needs the SLA administrator permission.",
     daysLabel: "Auto-close resolved tickets after (days)",
@@ -203,7 +203,7 @@ export const sla = {
     colCreated: "Created",
     hoursAndHolidays: "Hours & holidays",
     close: "Close",
-    empty: "No calendars yet — a policy needs one before any ticket can get an SLA.",
+    empty: "No calendars yet: a policy needs one before any ticket can get an SLA.",
     deleteTitle: "Delete business calendar",
     deleteBody:
       "Its working windows and holidays go with it. Any policy pointing at this calendar loses the thing that turns minutes into a deadline, and tickets resolving to that policy get no SLA at all. To take a calendar out of use without destroying it, clear Active on it instead.",
@@ -213,10 +213,10 @@ export const sla = {
     editHint: "Changing the timezone recomputes every still-running deadline on this calendar.",
     timezoneLabel: "Timezone (IANA name)",
     timezoneHint:
-      "This is a real value and will be saved as typed — {example} is only a starting point. Type to search the IANA list.",
-    timezoneShape: "Timezone must be an IANA name such as {example} — \"{value}\" is not one",
+      "This is a real value and will be saved as typed: {example} is only a starting point. Type to search the IANA list.",
+    timezoneShape: "Timezone must be an IANA name such as {example}: \"{value}\" is not one",
     timezoneUnknown:
-      "There is no timezone named \"{value}\" — check the spelling against the IANA list",
+      "There is no timezone named \"{value}\": check the spelling against the IANA list",
   },
   detail: {
     forbidden: "Calendar not available (insufficient permissions).",
@@ -271,7 +271,7 @@ export const sla = {
     colActive: "Active",
     forEveryClientHint:
       "Ticked, it measures the tickets of every client that has no active policy of its own. Unticked, only the tickets of the client it is filed under.",
-    empty: "No policies yet — with none configured, no ticket gets an SLA at all.",
+    empty: "No policies yet: with none configured, no ticket gets an SLA at all.",
     deleteTitle: "Delete SLA policy",
     deleteBody:
       "Tickets currently resolved by this policy lose the promise attached to them, and new tickets matching it get no SLA at all unless another policy matches. To stop a policy applying without destroying it, clear Active on it instead.",
@@ -293,7 +293,7 @@ export const sla = {
     queueEmptyForbidden:
       "Queue names need permission to view tickets, which this account does not have. Leave this as Any queue, or ask an administrator.",
     queueEmpty:
-      "No ticket queues exist yet — the service desk owns them, and until one exists a policy can only match Any queue.",
+      "No ticket queues exist yet: the service desk owns them, and until one exists a policy can only match Any queue.",
     priorityLabel: "Priority (blank = any priority)",
     calendarPlaceholder: "Search calendars…",
     calendarsFailed:
@@ -313,13 +313,13 @@ export const sla = {
       "Queue names need permission to view tickets, which this account does not have. A breach will leave the ticket where it is.",
     escalateEmpty: "No ticket queues exist yet, so there is nowhere to escalate to.",
     noRecompute:
-      "A breach escalation deliberately does not recompute the deadline — a system priority bump is the engine reacting to its own output, not new information about the work.",
+      "A breach escalation deliberately does not recompute the deadline: a system priority bump is the engine reacting to its own output, not new information about the work.",
     activeLabel: "Active (only active policies are considered during resolution)",
     targetNegative:
-      "{label} cannot be negative — a deadline before the ticket exists is not a promise",
+      "{label} cannot be negative: a deadline before the ticket exists is not a promise",
     targetWhole: "{label} must be a whole number of minutes",
     targetZero:
-      "{label} must be at least 1 minute — a zero-minute target is breached on creation",
+      "{label} must be at least 1 minute: a zero-minute target is breached on creation",
   },
   ticket: {
     title: "SLA",

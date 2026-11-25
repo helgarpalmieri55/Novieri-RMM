@@ -685,7 +685,7 @@ describe("ticket SLA panel", () => {
       }),
     );
 
-    const headlines = await screen.findAllByText(/Paused for 3h — clock stopped/);
+    const headlines = await screen.findAllByText(/Paused for 3h: clock stopped/);
     expect(headlines).toHaveLength(2);
     expect(screen.getAllByText("Paused")).toHaveLength(2);
     expect(screen.queryByText(/remaining/)).toBeNull();
@@ -706,7 +706,7 @@ describe("ticket SLA panel", () => {
     );
 
     expect(
-      (await screen.findAllByText("Promise voided — neither met nor breached")).length,
+      (await screen.findAllByText("Promise voided: neither met nor breached")).length,
     ).toBe(2);
     expect(screen.queryByText("Breached")).toBeNull();
     expect(screen.getAllByText("Void")).toHaveLength(2);
@@ -840,7 +840,7 @@ describe("Add calendar refuses out loud instead of doing nothing", () => {
 
     await user.click(save);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      'Timezone must be an IANA name such as Europe/London — "London" is not one',
+      'Timezone must be an IANA name such as Europe/London: "London" is not one',
     );
     expect(api.createSlaCalendar).not.toHaveBeenCalled();
 

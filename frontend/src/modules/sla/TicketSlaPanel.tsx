@@ -23,7 +23,7 @@ import type { TargetState, TicketSlaOut } from "./types";
 // `views.target_state`; this panel maps them to a label, a colour and a
 // duration and never re-derives one from the timestamps. That is why:
 //
-//   * a PAUSED clock renders "Paused for 2h — clock stopped" (counting up,
+//   * a PAUSED clock renders "Paused for 2h: clock stopped" (counting up,
 //     never down): the stored due instant is the deadline as it stood when
 //     the clock stopped, and `tracking.resume` re-derives it with the pause
 //     credited, so any "time remaining" shown now would be wrong the moment
