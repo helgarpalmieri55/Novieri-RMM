@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
@@ -182,14 +182,21 @@ export function PoliciesPanel({
   // `reset()` because mutation state outlives the dialog: a failed Save would
   // otherwise have `FormActions` announce that refusal again the next time the
   // dialog is opened, against a request nobody has made yet.
-  function openCreate() {
+  // THE ADD FORM STARTS EMPTY WHENEVER IT OPENS, whatever opened it (the
+  // button, Back, a link to `?new=policy`; fix round 1): add and edit share
+  // the draft, so without this an edit's values reappeared under "Add
+  // policy". `reset()` because mutation state outlives the dialog. Before
+  // paint, so nothing stale flashes.
+  useLayoutEffect(() => {
+    if (!creating) return;
     setDraft(emptyDraft());
     setForEveryClient(false);
     policyClient.setPicked("");
     setAttempt(null);
     create.reset();
-    created.start();
-  }
+    // The opening is what counts; the setters and `create` are not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creating]);
 
   function openEdit(policy: PolicyOut) {
     setAttempt(null);
@@ -273,7 +280,7 @@ export function PoliciesPanel({
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <ClientFilter filters={filters} />
-          {canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" onClick={openCreate} /> : null}
+          {canAdmin ? <Btn label={t("sla.policies.add")} icon="plus" onClick={created.start} /> : null}
         </div>
       </div>
       {/* `isPending`, not `isLoading`: until `/me` decides the Client chip the read is not enabled yet, and that is still loading. */}

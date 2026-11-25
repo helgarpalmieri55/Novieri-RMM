@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
@@ -197,13 +197,23 @@ function QueuesSection({ canAdmin }: { canAdmin: boolean }) {
     );
   }
 
-  // The section stays mounted with the dialog shut, so mutation state
-  // OUTLIVES the dialog: without `create.reset()` a failed Save leaves
-  // `create.error` set and the NEXT open announces the refusal of a request
-  // nobody has made yet.
-  function closeCreate() {
-    create.reset();
+  // THE FORM STARTS EMPTY WHENEVER THE DIALOG OPENS, whatever opened it (the
+  // button, Back, a link to `?new=queue`; fix round 1: Back closes it without
+  // `closeCreate`). The section stays mounted with the dialog shut, so
+  // mutation state OUTLIVES the dialog: without `create.reset()` a failed Save
+  // leaves `create.error` set and the NEXT open announces the refusal of a
+  // request nobody has made yet.
+  const opened = canAdmin && created.open;
+  useLayoutEffect(() => {
+    if (!opened) return;
+    setKey("");
+    setName("");
     setAttempt(null);
+    create.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened]);
+
+  function closeCreate() {
     created.close();
   }
 
@@ -367,10 +377,21 @@ function CategoriesSection({ canAdmin }: { canAdmin: boolean }) {
     );
   }
 
-  // See QueuesSection.closeCreate -- the same stale-error-on-reopen hole.
-  function closeCreate() {
-    create.reset();
+  // See QueuesSection: the form starts empty whenever the dialog opens.
+  const opened = canAdmin && created.open;
+  useLayoutEffect(() => {
+    if (!opened) return;
+    setKey("");
+    setName("");
+    setType("incident");
+    setRequiresApproval(false);
+    setDefaultQueueId("");
     setAttempt(null);
+    create.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened]);
+
+  function closeCreate() {
     created.close();
   }
 

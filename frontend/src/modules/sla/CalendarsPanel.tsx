@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -34,7 +34,7 @@ import type { CalendarOut } from "./types";
 // route is gated `sla.admin` server-side (invariant #6).
 
 // The timezone the calendar is PREFILLED with. Named once so the field, the
-// reset in `openCreate` and the sentence under the field cannot drift apart --
+// reset when the Add dialog opens and the sentence under the field cannot drift apart --
 // the audit found the same string doing duty as a placeholder AND as the
 // silently-applied value, which is exactly how those three drift.
 const DEFAULT_TIMEZONE = "Europe/London";
@@ -142,17 +142,22 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
   const forbidden = calendars.error instanceof ApiError && calendars.error.status === 403;
   const failed = calendars.error != null && !forbidden;
 
-  // `reset()` on open, because mutation state OUTLIVES the dialog: without it
-  // a failed Save leaves `create.error` set, and the next time the dialog is
-  // opened `FormActions` announces a refusal of a request nobody has made yet.
-  function openCreate() {
+  // THE FORM STARTS EMPTY WHENEVER THE DIALOG OPENS, whatever opened it: the
+  // Add button, Back to `?new=calendar`, a link, or the policy form's "Add a
+  // business calendar" (fix round 1). `reset()` too, because mutation state
+  // OUTLIVES the dialog: a failed Save leaves `create.error` set, and the next
+  // open would announce a refusal of a request nobody has made yet. Before
+  // paint, so the last attempt never flashes.
+  useLayoutEffect(() => {
+    if (!creating) return;
     setName("");
     setTimezone(DEFAULT_TIMEZONE);
     setActive(true);
     setAttempt(null);
     create.reset();
-    created.start();
-  }
+    // `create` is a new object every render; the opening is what counts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creating]);
 
   function openEdit(calendar: CalendarOut) {
     setName(calendar.name);
@@ -205,7 +210,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
         <p className="note" style={{ margin: 0 }}>
           {t("sla.calendars.subtitle")}
         </p>
-        {canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={openCreate} /> : null}
+        {canAdmin ? <Btn label={t("sla.calendars.add")} icon="plus" onClick={created.start} /> : null}
       </div>
       {calendars.isLoading ? (
         <p className="note">{t("sla.common.loading")}</p>

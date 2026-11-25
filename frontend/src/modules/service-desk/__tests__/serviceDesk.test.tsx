@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -1980,6 +1980,30 @@ describe("ServiceDeskAdminPage wiring", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(api.updateTicketCategory).toHaveBeenCalledWith(CATEGORIES[0]?.id, { name: "Hardware faults", active: true });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit category" })).toBeNull());
+  });
+
+  // FIX ROUND 1 (review, Important): Back closes a create dialog without its
+  // Cancel, and the next open used to show the last attempt's refusal.
+  it.each([
+    ["queue", "New queue", { createTicketQueue: vi.fn().mockRejectedValue(new ApiError(503, "")) }],
+    ["category", "New category", { createTicketCategory: vi.fn().mockRejectedValue(new ApiError(503, "")) }],
+  ] as const)("reopens the %s dialog after a failed attempt with no stale error", async (_kind, title, failing) => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(baseApi(failing) as ApiClient);
+    const { router } = renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await user.click(await screen.findByRole("button", { name: title }));
+    let dialog = screen.getByRole("dialog", { name: title });
+    await user.type(within(dialog).getByLabelText("Key"), "helpdesk");
+    await user.type(within(dialog).getByLabelText("Name"), "Helpdesk");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/unavailable/i);
+    // Back, not Cancel: the dialog closes through the URL.
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+    await user.click(screen.getByRole("button", { name: title }));
+    dialog = screen.getByRole("dialog", { name: title });
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).getByLabelText("Key")).toHaveValue("");
   });
 
   it("draws no primary button in the body but the open dialog's", async () => {
