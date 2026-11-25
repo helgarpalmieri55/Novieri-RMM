@@ -364,7 +364,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
       // string "Operations" on every deployment, for every tenant -- which is
       // also why both UX auditors reported the tenant control as reading
       // "Operations": it was never showing anything else.
-      orgName={org.data?.name ?? (me.data?.org_id ? "\u2026" : "\u2014")}
+      // A name on its way is an ellipsis (also before `/me` answers, which
+      // drew an em dash on every first paint); one absent once both reads
+      // answered is the kit's absent mark (P3 adoption pass: no em dash in UI
+      // text).
+      orgName={
+        org.data?.name ??
+        (me.data?.org_id || me.isPending || org.isPending ? "\u2026" : t("shell.viz.na"))
+      }
       /* THE ASK ROW'S DESTINATION, and it is omitted rather than disabled for
          an operator without `ai.use`: an affordance that opens a 403 is worse
          than one that was never offered. The question travels in the URL so
