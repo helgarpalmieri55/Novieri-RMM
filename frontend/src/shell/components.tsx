@@ -272,6 +272,7 @@ export function StatCard({
   foot,
   spark,
   pending = false,
+  absent = false,
 }: {
   label: string;
   value: string;
@@ -307,20 +308,32 @@ export function StatCard({
    * whenever there is no data, pending or failed (`pending={!q.data}`).
    */
   pending?: boolean;
+  /**
+   * THE READ ANSWERED AND THERE IS NO FIGURE (coordinator, P3 adoption pass):
+   * `Tile`'s `absent`. The mark, not busy, and the `foot` KEPT, because once
+   * the read has answered the foot says why there is no figure ("No completed
+   * runs yet"). Not a zero (no zero label), not urgent, no trend. Keep it out
+   * of `pending`, which would hide that reason while claiming a read is on its
+   * way. `pending` wins when both are set.
+   */
+  absent?: boolean;
 }) {
   // A measured zero is not urgent, whatever the caller said. Neither is an
   // unmeasured one, and an unmeasured one is not a zero at all.
   const t = useT();
-  const isZero = !pending && value.trim() === "0";
-  const loud = urgent && !isZero && !pending;
-  const kind = pending ? "mut" : tileKind(tone, loud);
+  const noFigure = pending || absent;
+  const isZero = !noFigure && value.trim() === "0";
+  const loud = urgent && !isZero && !noFigure;
+  const kind = noFigure ? "mut" : tileKind(tone, loud);
 
-  // Nothing under the mark while pending: `Tile` draws no sub then.
+  // Nothing under the mark while pending: `Tile` draws no sub then. With an
+  // absent figure only the foot, the reason, is drawn.
+  const showTrend = trend !== undefined && !isZero && !noFigure;
   const sub =
-    !pending && ((isZero && zeroLabel) || (trend && !isZero) || foot) ? (
+    !pending && ((isZero && zeroLabel) || showTrend || foot) ? (
       <>
         {isZero && zeroLabel ? <span className="stat-zero">{zeroLabel}</span> : null}
-        {trend && !isZero ? (
+        {trend && showTrend ? (
           <span className={`trend stat-trend ${trend.direction}`}>
             <Icon name={trend.direction === "up" ? "arrow-up" : "arrow-down"} size={12} />
             <span className="sr-only">{trend.direction === "up" ? t("shell.ui.statUp") : t("shell.ui.statDown")}</span>
@@ -343,6 +356,7 @@ export function StatCard({
       spark={spark}
       sub={sub}
       pending={pending}
+      absent={absent}
     />
   );
 }

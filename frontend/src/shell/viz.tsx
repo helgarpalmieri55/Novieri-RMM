@@ -222,16 +222,41 @@ export interface TileProps {
    * real figure and claim.
    */
   pending?: boolean;
+  /**
+   * THE READ ANSWERED AND THERE IS NO FIGURE (coordinator, P3 adoption pass):
+   * a success rate with no completed runs, an average of nothing. Not
+   * `pending`: nothing is on its way, so the tile is not `aria-busy`, and its
+   * `sub` is kept, because once the read has answered the sub-line is the
+   * reason there is no figure ("No completed runs yet"). It draws the kit's
+   * absent mark with no unit, no sparkline and no wash, which would be claims
+   * about a reading. `pending` wins when both are set.
+   */
+  absent?: boolean;
 }
 
 /**
  * v3 `tiles([...])`, one tile. The figure is `--t-kpi`, the one size outside
  * the five-step scale. `has-sp` makes room for the sparkline in the corner.
  */
-export function Tile({ label, value, unit, sub, kind, spark, to, icon, className, parts, pending = false }: TileProps) {
+export function Tile({
+  label,
+  value,
+  unit,
+  sub,
+  kind,
+  spark,
+  to,
+  icon,
+  className,
+  parts,
+  pending = false,
+  absent = false,
+}: TileProps) {
   const t = useT();
-  const hasSpark = !pending && spark !== undefined && spark.length >= 2;
-  const shownKind = pending ? "mut" : kind;
+  // No figure, for either reason: the mark, and no unit, sparkline or wash.
+  const noFigure = pending || absent;
+  const hasSpark = !noFigure && spark !== undefined && spark.length >= 2;
+  const shownKind = noFigure ? "mut" : kind;
   const cls = ["tile", shownKind ?? "", hasSpark ? "has-sp" : "", className].filter(Boolean).join(" ");
   const body = (
     <>
@@ -240,8 +265,8 @@ export function Tile({ label, value, unit, sub, kind, spark, to, icon, className
         {label}
       </div>
       <div className={["v", parts?.value].filter(Boolean).join(" ")}>
-        {pending ? t("shell.viz.na") : value}
-        {unit && !pending ? <small>{unit}</small> : null}
+        {noFigure ? t("shell.viz.na") : value}
+        {unit && !noFigure ? <small>{unit}</small> : null}
       </div>
       {sub && !pending ? <div className={["z", parts?.sub].filter(Boolean).join(" ")}>{sub}</div> : null}
       {hasSpark ? <Sparkline values={spark} /> : null}
