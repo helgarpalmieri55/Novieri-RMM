@@ -1043,6 +1043,12 @@ function KitPreview() {
   const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
   return (
     <>
+      {/* TILES ABOVE A LIST: one answered, one whose read has not (kit
+          requests batch 2, K3; ruling 10a): no number, no claim, busy. */}
+      <div className="tiles" style={{ marginBottom: 24 }}>
+        <Tile label="Deployed this week" icon="cpu" value="14" sub="3 failed, 11 installed" to="/deploy" />
+        <Tile label="Waiting for a reboot" icon="heartbeat" value="0" sub="Every machine is up to date" to="/patch" pending />
+      </div>
       {/* A LIST: one bare panel, as every list page draws it, so the toolbar
           and the bulk bar run flush to its edges. */}
       <Panel title="Kit v4: a list" subtitle="Search, filter chips with counts, the count, the bulk bar, both empty states" bare>

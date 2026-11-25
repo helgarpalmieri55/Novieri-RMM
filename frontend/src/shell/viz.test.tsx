@@ -5,6 +5,8 @@
  */
 
 import { render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -126,6 +128,61 @@ describe("Tile", () => {
     const tile = container.querySelector(".tile");
     expect(tile).toHaveClass("crit", "has-sp");
     expect(tile?.querySelector("svg.sp")).not.toBeNull();
+  });
+});
+
+describe("Tile while its read has not answered (kit requests batch 2, K3; ruling 10a)", () => {
+  const pendingTile = (pending: boolean) =>
+    render(
+      <MemoryRouter>
+        <Tile
+          label="Deployed"
+          value="0"
+          unit="%"
+          sub="Nothing has ever been deployed"
+          kind="crit"
+          spark={[4, 5, 4, 6, 9]}
+          to="/deploy"
+          pending={pending}
+        />
+      </MemoryRouter>,
+    );
+
+  it("draws no number and no claim: the absent mark, no unit, no sub-line, no trend", () => {
+    const { container } = pendingTile(true);
+    const tile = container.querySelector(".tile");
+    // The kit's one absent mark (the Absent Zero Rule), as StatCard's pending draws it.
+    expect(tile?.querySelector(".v")).toHaveTextContent(/^n\/a$/);
+    expect(tile?.querySelector(".v small")).toBeNull();
+    expect(screen.queryByText("Nothing has ever been deployed")).toBeNull();
+    expect(tile?.querySelector(".z")).toBeNull();
+    expect(tile?.querySelector("svg.sp")).toBeNull();
+  });
+
+  it("wears no wash, which would be a claim about a reading", () => {
+    const { container } = pendingTile(true);
+    expect(container.querySelector(".tile")).not.toHaveClass("crit");
+  });
+
+  it("says it is busy, and keeps its label and where it leads", () => {
+    pendingTile(true);
+    const link = screen.getByRole("link", { name: /Deployed/ });
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("href", "/deploy");
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<Tile\b[^>]*\bpending\b/);
+  });
+
+  it("is the tile as before once the read answers", () => {
+    const { container } = pendingTile(false);
+    const tile = container.querySelector(".tile");
+    expect(tile).not.toHaveAttribute("aria-busy");
+    expect(tile?.querySelector(".v")).toHaveTextContent("0%");
+    expect(screen.getByText("Nothing has ever been deployed")).toBeInTheDocument();
+    expect(tile).toHaveClass("crit");
   });
 });
 

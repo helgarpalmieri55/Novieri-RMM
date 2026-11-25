@@ -208,15 +208,28 @@ export interface TileProps {
    * should need it.
    */
   parts?: { label?: string; value?: string; sub?: string };
+  /**
+   * THE TILE'S READ HAS NOT ANSWERED (kit requests batch 2, K3; general ruling
+   * 10a: no tile draws a number or a claim before its read answers). While
+   * `pending` (the query `isPending`, or narrowing not `ready`) the tile keeps
+   * its label, icon and destination and draws the kit's one absent mark
+   * (`n/a`, the Absent Zero Rule; StatCard's `pending` draws the same), with
+   * no unit, no sub-line ("Nothing has ever been deployed" is a claim), no
+   * sparkline and no wash, and says `aria-busy`. Once the read answers, the
+   * real figure and claim.
+   */
+  pending?: boolean;
 }
 
 /**
  * v3 `tiles([...])`, one tile. The figure is `--t-kpi`, the one size outside
  * the five-step scale. `has-sp` makes room for the sparkline in the corner.
  */
-export function Tile({ label, value, unit, sub, kind, spark, to, icon, className, parts }: TileProps) {
-  const hasSpark = spark !== undefined && spark.length >= 2;
-  const cls = ["tile", kind ?? "", hasSpark ? "has-sp" : "", className].filter(Boolean).join(" ");
+export function Tile({ label, value, unit, sub, kind, spark, to, icon, className, parts, pending = false }: TileProps) {
+  const t = useT();
+  const hasSpark = !pending && spark !== undefined && spark.length >= 2;
+  const shownKind = pending ? "mut" : kind;
+  const cls = ["tile", shownKind ?? "", hasSpark ? "has-sp" : "", className].filter(Boolean).join(" ");
   const body = (
     <>
       <div className={["k", parts?.label].filter(Boolean).join(" ")}>
@@ -224,19 +237,22 @@ export function Tile({ label, value, unit, sub, kind, spark, to, icon, className
         {label}
       </div>
       <div className={["v", parts?.value].filter(Boolean).join(" ")}>
-        {value}
-        {unit ? <small>{unit}</small> : null}
+        {pending ? t("shell.viz.na") : value}
+        {unit && !pending ? <small>{unit}</small> : null}
       </div>
-      {sub ? <div className={["z", parts?.sub].filter(Boolean).join(" ")}>{sub}</div> : null}
+      {sub && !pending ? <div className={["z", parts?.sub].filter(Boolean).join(" ")}>{sub}</div> : null}
       {hasSpark ? <Sparkline values={spark} /> : null}
     </>
   );
+  const busy = pending ? true : undefined;
   return to ? (
-    <Link className={cls} to={to}>
+    <Link className={cls} to={to} aria-busy={busy}>
       {body}
     </Link>
   ) : (
-    <div className={cls}>{body}</div>
+    <div className={cls} aria-busy={busy}>
+      {body}
+    </div>
   );
 }
 
