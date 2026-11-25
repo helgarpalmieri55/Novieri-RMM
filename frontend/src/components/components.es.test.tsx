@@ -347,6 +347,25 @@ describe("inputs and displays in Spanish", () => {
     expect(screen.getByText("hace 5 minutos")).toBeInTheDocument();
     expectNoEnglish(container);
   });
+
+  // The kit's absent mark in Spanish, "n/d", for an absent attribute and an
+  // absent time (P3 adoption pass): never "n/a", never an em dash.
+  it("writes an absent attribute and an absent time as n/d", () => {
+    const { container } = renderInSpanish(
+      <div>
+        <div data-testid="attrs">
+          <Attributes value={{ estado: null }} empty="Sin atributos" raw={false} />
+        </div>
+        <div data-testid="when">
+          <RelTime iso={null} />
+        </div>
+      </div>,
+    );
+    expect(screen.getByTestId("attrs").textContent).toContain("n/d");
+    expect(screen.getByTestId("when").textContent).toBe("n/d");
+    expect(container).not.toHaveTextContent("—");
+    expect(container).not.toHaveTextContent("n/a");
+  });
 });
 
 describe("describeSubmitError in Spanish (own-auth Task 10)", () => {
