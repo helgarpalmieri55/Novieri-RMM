@@ -7,6 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { CurrentOrg, Me } from "../../lib/api";
 import type {
   ApplyRequest,
@@ -53,6 +54,18 @@ export const PATCH_APPROVALS_QUERY_KEY = "patch-approvals";
  * has a number of machines behind it. Long `staleTime`: ring membership moves
  * when a policy or a group changes, not while somebody is ticking boxes.
  */
+/**
+ * A READ UNDER THE CLIENT CHIP IS KEPT UNDER THAT CLIENT (redesign plan,
+ * Receta L point 7; decision D6): `client` is the client `useNarrowedApi`
+ * sends, `null` without a chip. WITHOUT ONE THE KEY IS TODAY'S, exactly: the
+ * report readiness panel shares `["patch-fleet"]`, and the `/__preview` bench
+ * seeds these keys by value, so a list with no chip must not move them. A
+ * mutation's prefix still reaches both.
+ */
+export function narrowedKey(key: readonly unknown[], client: string | null): unknown[] {
+  return client === null ? [...key] : [...key, client];
+}
+
 export function usePatchRings() {
   const api = useApi();
   return useQuery({
@@ -88,12 +101,13 @@ export const PATCH_RUNS_QUERY_KEY = "patch-runs";
  * filtered a capped page, so it could answer "No patches match that filter"
  * about updates it had never asked for.
  */
-export function usePatchUpdates(filters: PatchUpdateFilters = {}) {
-  const api = useApi();
+export function usePatchUpdates(filters: PatchUpdateFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   const params: PatchUpdateFilters = { limit: PATCH_ROLLUP_PAGE_SIZE, ...filters };
   return useQuery({
-    queryKey: [PATCH_UPDATES_QUERY_KEY, params],
+    queryKey: narrowedKey([PATCH_UPDATES_QUERY_KEY, params], client),
     queryFn: () => api.listPatchUpdates(params),
+    enabled: ready,
   });
 }
 
@@ -123,12 +137,13 @@ export function usePatchRuns(deviceId: string | null, limit = 5) {
   });
 }
 
-export function usePatchDeviceRollup(filters: PatchDeviceRollupFilters = {}) {
-  const api = useApi();
+export function usePatchDeviceRollup(filters: PatchDeviceRollupFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   const params: PatchDeviceRollupFilters = { limit: PATCH_ROLLUP_PAGE_SIZE, ...filters };
   return useQuery({
-    queryKey: [PATCH_DEVICE_ROLLUP_QUERY_KEY, params],
+    queryKey: narrowedKey([PATCH_DEVICE_ROLLUP_QUERY_KEY, params], client),
     queryFn: () => api.listPatchDeviceRollup(params),
+    enabled: ready,
   });
 }
 
@@ -152,12 +167,13 @@ export function usePatchDeviceRollup(filters: PatchDeviceRollupFilters = {}) {
  * the `fleet`-vs-`state_counts` distinction the devices page already records,
  * on a control the operator uses to decide where to look.
  */
-export function usePatchFamilyTotal(osFamily: string) {
-  const api = useApi();
+export function usePatchFamilyTotal(osFamily: string, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   const params: PatchUpdateFilters = { os_family: osFamily, limit: 1 };
   return useQuery({
-    queryKey: [PATCH_UPDATES_QUERY_KEY, params],
+    queryKey: narrowedKey([PATCH_UPDATES_QUERY_KEY, params], client),
     queryFn: () => api.listPatchUpdates(params),
+    enabled: ready,
     // The strip is navigation. It does not need to be fresher than the page.
     staleTime: 30_000,
   });
@@ -183,10 +199,10 @@ export function usePatchFamilyTotal(osFamily: string) {
  * would put an unmeasured number on the one screen whose whole discipline is
  * that a zero states its provenance.
  */
-export function usePatchFamilyManagedCount(osFamily: string, enabled: boolean) {
-  const api = useApi();
+export function usePatchFamilyManagedCount(osFamily: string, enabled: boolean, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: ["patch-family-managed", osFamily],
+    queryKey: narrowedKey(["patch-family-managed", osFamily], client),
     queryFn: async () => {
       const page = await api.listDevices({
         osFamily: osFamily as "windows" | "linux" | "macos",
@@ -194,16 +210,17 @@ export function usePatchFamilyManagedCount(osFamily: string, enabled: boolean) {
       });
       return page.state_counts.all - page.state_counts.assets;
     },
-    enabled,
+    enabled: enabled && ready,
     staleTime: 60_000,
   });
 }
 
-export function usePatchFleetReport() {
-  const api = useApi();
+export function usePatchFleetReport(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: ["patch-fleet"],
+    queryKey: narrowedKey(["patch-fleet"], client),
     queryFn: () => api.getPatchFleetReport(),
+    enabled: ready,
   });
 }
 
@@ -233,21 +250,22 @@ export function useAuthorizingChanges(clientId: string | null) {
 }
 
 /** Whether this platform's app package manager could be scanned, fleet-wide. */
-export function usePatchAppSources(osFamily: string) {
-  const api = useApi();
+export function usePatchAppSources(osFamily: string, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: ["patch-app-sources", osFamily],
+    queryKey: narrowedKey(["patch-app-sources", osFamily], client),
     queryFn: () => api.listPatchAppSources(osFamily),
+    enabled: ready,
   });
 }
 
 /** Devices still owed a restart after patching. */
-export function usePatchRestarts(enabled = true) {
-  const api = useApi();
+export function usePatchRestarts(enabled = true, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: [PATCH_RESTARTS_QUERY_KEY],
+    queryKey: narrowedKey([PATCH_RESTARTS_QUERY_KEY], client),
     queryFn: () => api.listPatchRestarts(),
-    enabled,
+    enabled: enabled && ready,
   });
 }
 
@@ -308,12 +326,13 @@ export function usePatchScanMutation() {
  * would show a shorter history than the audit log does. The list marks them
  * instead.
  */
-export function usePatchApprovals(filters: ApprovalListFilters = {}) {
-  const api = useApi();
+export function usePatchApprovals(filters: ApprovalListFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   const params: ApprovalListFilters = { limit: PATCH_APPROVALS_LIST_LIMIT, ...filters };
   return useQuery({
-    queryKey: [PATCH_APPROVALS_QUERY_KEY, params],
+    queryKey: narrowedKey([PATCH_APPROVALS_QUERY_KEY, params], client),
     queryFn: () => api.listPatchApprovals(params),
+    enabled: ready,
   });
 }
 

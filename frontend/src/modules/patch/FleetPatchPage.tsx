@@ -28,7 +28,7 @@ import {
   type PatchFamily,
 } from "./patchTabs";
 import type { SelectedHost } from "./selection";
-import { Btn, PageHead, Tabs } from "../../shell/components";
+import { Btn, ClientFilter, PageHead, UrlTabs, useUrlFilters } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import type { UpdateFilters } from "./UpdatesPanel";
 
@@ -204,8 +204,21 @@ export function FleetPatchPage() {
     setParams(next);
   };
 
-  const report = usePatchFleetReport();
-  const approvals = usePatchApprovals();
+  /* THE CLIENT CHIP (redesign plan, O3 3.2; decisions D6, D20): it narrows
+     every list and count on the page to one of the person's clients, and
+     nothing else -- the approvals and installs the bars send keep `useApi()`,
+     so the chip never changes where a decision goes. Drawn in the update
+     list's toolbar; a change of client is a new criterion, so it discards
+     both selections, as a change of filter does. */
+  const clientChip = useUrlFilters(["client"] as const);
+  const chip = clientChip.values.client;
+  useEffect(() => {
+    setSelectedIds((current) => (current.length === 0 ? current : []));
+    setSelectedHosts((current) => (current.length === 0 ? current : []));
+  }, [chip]);
+
+  const report = usePatchFleetReport(chip);
+  const approvals = usePatchApprovals({}, chip);
   const rings = usePatchRings();
   const scan = usePatchScanMutation();
 
@@ -223,9 +236,9 @@ export function FleetPatchPage() {
    * are one row each, and being able to see the shape of all three fleets
    * without clicking is what the strip is FOR.
    */
-  const windowsTotal = usePatchFamilyTotal("windows");
-  const linuxTotal = usePatchFamilyTotal("linux");
-  const macosTotal = usePatchFamilyTotal("macos");
+  const windowsTotal = usePatchFamilyTotal("windows", chip);
+  const linuxTotal = usePatchFamilyTotal("linux", chip);
+  const macosTotal = usePatchFamilyTotal("macos", chip);
   const familyTotals: Record<PatchFamily, number | undefined> = {
     windows: windowsTotal.data?.total_unfiltered,
     linux: linuxTotal.data?.total_unfiltered,
@@ -236,7 +249,7 @@ export function FleetPatchPage() {
    *  the patch API cannot supply, because `fleet_scan_coverage` counts the
    *  whole org whatever `os_family` was filtered on. Only the open tab's is
    *  fetched: it is the only one whose empty state or device sentence needs it. */
-  const managed = usePatchFamilyManagedCount(family, canReadDevices);
+  const managed = usePatchFamilyManagedCount(family, canReadDevices, chip);
   const managedCount = canReadDevices ? (managed.data ?? null) : null;
 
   async function handleExport() {
@@ -429,10 +442,12 @@ export function FleetPatchPage() {
       {/* THE STRIP CARRIES EACH PLATFORM'S OUTSTANDING COUNT, and that is what
           makes a fixed default tab safe: an operator who lands on Windows and
           sees "Linux 300" beside it has been told where the work is before
-          reading a row. `Tabs` supplies the roving tabindex and the arrow keys;
-          the panel and its id come from here, because only this page knows what
-          the strip switches. */}
-      <Tabs
+          reading a row. The kit's `UrlTabs` on `?os=` (redesign plan, O3 3.2:
+          the platform changes the content, it does not filter one list), with
+          this page's own change handler, because switching platform also
+          drops what belonged to the old one. */}
+      <UrlTabs
+        label={t("patch.fleet.platforms")}
         items={PATCH_FAMILIES.map((key) => ({
           key,
           label: FAMILY_LABEL[key],
@@ -440,10 +455,7 @@ export function FleetPatchPage() {
         }))}
         active={family}
         onSelect={onTabChange}
-        panelId={TAB_PANEL_ID}
-      />
-
-      <div id={TAB_PANEL_ID} role="tabpanel" aria-label={t("patch.fleet.tabAria", { family: FAMILY_LABEL[family] })}>
+      >
         <PatchTabPanel
           key={family}
           family={family}
@@ -468,8 +480,10 @@ export function FleetPatchPage() {
           devicesHref={devicesHref}
           devicesAnchorId={DEVICES_ANCHOR}
           devicesAnchorRef={devicesSection}
+          chip={chip}
+          clientFilter={<ClientFilter filters={clientChip} />}
         />
-      </div>
+      </UrlTabs>
 
       {/* ---- the record, and it belongs to the whole fleet ----
 
@@ -497,7 +511,7 @@ export function FleetPatchPage() {
 
       {canRead && (
         <div className="mt-4">
-          <RestartsPanel zone={zone} />
+          <RestartsPanel zone={zone} chip={chip} />
         </div>
       )}
 
@@ -513,10 +527,6 @@ export function FleetPatchPage() {
 /** The fragment the machine tile links to, and the id of the section it lands
  *  on. One constant so the href and the target cannot drift apart. */
 const DEVICES_ANCHOR = "machines-needing-updates";
-
-/** The id the tab strip names with `aria-controls` and the panel answers to.
- *  One constant for the same reason. */
-const TAB_PANEL_ID = "patch-tabpanel";
 
 /**
  * The rings this console offers even when no policy names them.

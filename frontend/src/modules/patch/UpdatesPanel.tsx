@@ -1,16 +1,22 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import { FilterBar, Pager, Panel, QueryState, SearchField, StatusPill } from "../../shell/components";
+import {
+  ListToolbar,
+  Pager,
+  Panel,
+  QueryState,
+  ResultCount,
+  SearchField,
+  StatusPill,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { DecisionBar, type RingOption } from "./DecisionBar";
 import { severityKind, severityLabel } from "./patchState";
 import type { MatchingSelection } from "./selection";
 import {
-  ALL_SEVERITIES_PARAM,
-  DEFAULT_SEVERITIES,
   deviceCount,
   hiddenBySeverityMessage,
   pageRangeMessage,
@@ -85,6 +91,7 @@ export function UpdatesPanel({
   severityNote = null,
   scopeName,
   clearLabel,
+  clientFilter,
 }: {
   query: UseQueryResult<PatchUpdateListResponse>;
   filters: UpdateFilters;
@@ -112,6 +119,8 @@ export function UpdatesPanel({
   scopeName?: string;
   /** Replaces the sentence for a measured, empty list. */
   clearLabel?: string;
+  /** The Client chip, for the one list on the page that carries it (the fleet's OS updates). */
+  clientFilter?: ReactNode;
 }) {
   const t = useT();
   const items = query.data?.items ?? [];
@@ -147,48 +156,47 @@ export function UpdatesPanel({
     );
   }
 
-  const severityValue =
-    filters.severities.length === 0 ? ALL_SEVERITIES_PARAM : filters.severities.join(",");
   const hidden = hiddenBySeverityMessage(total, totalUnfiltered);
   const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
   const page = Math.floor(filters.offset / pageSize);
 
   return (
     <Panel title={panelTitle} subtitle={panelSubtitle} bare>
-      <FilterBar>
-        <SearchField
-          placeholder={t("patch.updates.searchPlaceholder")}
-          value={filters.search}
-          onChange={(event) => onFilterChange({ search: event.target.value, offset: 0 }, true)}
-          aria-label={t("patch.updates.searchAria", { scope })}
-        />
-        {/* THE CONTROL THAT WIDENS THE DEFAULT, and it is a real select rather
-            than a link so the narrowed state is visibly a CHOICE that is
-            currently in force. A filter the reader cannot see is the defect
-            this whole panel exists to stop being. */}
-        <select
-          className="select-field"
-          value={severityValue}
-          onChange={(event) =>
-            onFilterChange({
-              severities:
-                event.target.value === ALL_SEVERITIES_PARAM ? [] : event.target.value.split(","),
-              offset: 0,
-            })
-          }
-          aria-label={t("patch.updates.filterAria", { scope })}
-        >
-          {/* THE THREE OPTIONS ARE THE SAME ON EVERY TAB; only which one is in
-              force by default differs (`defaultSeveritiesFor`). Offering a
-              different vocabulary per platform would make the control unlearnable
-              — and "critical and important" is a meaningful narrowing everywhere,
-              it is just not the right STARTING point where the vendor leaves most
-              updates unrated. */}
-          <option value={DEFAULT_SEVERITIES.join(",")}>{t("patch.updates.optCriticalImportant")}</option>
-          <option value="critical">{t("patch.updates.optCritical")}</option>
-          <option value={ALL_SEVERITIES_PARAM}>{t("patch.updates.optAll")}</option>
-        </select>
-      </FilterBar>
+      <ListToolbar
+        search={
+          <SearchField
+            placeholder={t("patch.updates.searchPlaceholder")}
+            value={filters.search}
+            onChange={(event) => onFilterChange({ search: event.target.value, offset: 0 }, true)}
+            aria-label={t("patch.updates.searchAria", { scope })}
+          />
+        }
+        chips={
+          <>
+            {/* THE CONTROL THAT WIDENS THE DEFAULT, a chip per severity (redesign
+                plan, O3 3.2): the narrowed state is visibly a CHOICE that is in
+                force, and each chip carries the server's count of it. The
+                severities are the same on every tab; only which are on by
+                default differs (`defaultSeveritiesFor`). */}
+            <SeverityChips
+              label={t("patch.updates.filterAria", { scope })}
+              selected={filters.severities}
+              counts={query.data?.severity_counts}
+              allCount={query.data?.total_unfiltered}
+              onChange={(severities) => onFilterChange({ severities, offset: 0 })}
+            />
+            {clientFilter}
+          </>
+        }
+        end={
+          /* WHERE THIS PAGE SITS INSIDE THE WHOLE SET, in the kit's place for a
+             list's count (`ResultCount`, what `ShowingCount` draws): a paged
+             list says which rows, "Showing 26–50 of 300", not only how many. */
+          query.data != null && total > 0 ? (
+            <ResultCount>{pageRangeMessage(items.length, filters.offset, total)}</ResultCount>
+          ) : null
+        }
+      />
 
       {/* WHAT THE WORD IN THAT SELECT MEANS ON THIS PLATFORM. The three
           scanners disagree, and until the page had tabs there was nowhere
@@ -210,9 +218,8 @@ export function UpdatesPanel({
           and the bar's "Select all N matching" acts on exactly that criterion,
           so the number in the sentence and the number on the button are read
           one after the other. */}
-      {query.data != null && total > 0 && (
+      {query.data != null && total > 0 && hidden && (
         <p className="note flex flex-wrap items-center gap-2 px-4.5 pt-2.5 pb-1.5">
-          <span>{pageRangeMessage(items.length, filters.offset, total)}</span>
           {hidden && (
             <>
               <span>{hidden}</span>
@@ -245,7 +252,10 @@ export function UpdatesPanel({
       )}
 
       <QueryState
-        loading={query.isLoading}
+        /* PENDING, NOT LOADING: under the Client chip the list waits for /me
+           (`enabled: ready`), and a query that has not started is not
+           "loading" -- it drew an empty table. */
+        loading={query.isPending}
         error={query.error}
         empty={query.data != null && items.length === 0}
         emptyIcon="patch"
@@ -257,7 +267,7 @@ export function UpdatesPanel({
               : t("patch.updates.emptyFiltered", { count: totalUnfiltered })
         }
       >
-        <Table>
+        <Table label={panelTitle}>
           <thead>
             <tr>
               {canApprove && (
@@ -365,5 +375,70 @@ export function UpdatesPanel({
         onNext={() => onFilterChange({ offset: filters.offset + pageSize })}
       />
     </Panel>
+  );
+}
+
+/** The severities in the order a person decides in, worst first; any other the server counts follows. */
+const SEVERITY_ORDER = ["critical", "important", "moderate", "low", "unknown"] as const;
+
+/**
+ * THE SEVERITY FILTER, ONE CHIP PER SEVERITY AND SEVERAL AT ONCE (redesign
+ * plan, O3 3.2). The URL keeps its list format (`?severity=critical,important`,
+ * `all`); every chip pressed is one more severity in it, and "All severities"
+ * is the empty list. Each count is the server's (`severity_counts`, which sums
+ * to `total_unfiltered`), never a count of the page in hand.
+ *
+ * DRAWN AS THE KIT'S `FilterChips` DRAWS ITS CHIPS (`.chips`, `.chip`,
+ * `aria-pressed`, the check on a pressed chip, `.n` for the count), because
+ * the kit's group selects one value and this filter selects several: the wave
+ * asks the kit for a multi-select `FilterChips` (report, kit request K1), and
+ * this goes when it lands.
+ */
+function SeverityChips({
+  label,
+  selected,
+  counts,
+  allCount,
+  onChange,
+}: {
+  label: string;
+  selected: readonly string[];
+  counts: Record<string, number> | undefined;
+  allCount: number | undefined;
+  onChange: (severities: string[]) => void;
+}) {
+  const t = useT();
+  const extra = Object.keys(counts ?? {}).filter((key) => !(SEVERITY_ORDER as readonly string[]).includes(key));
+  const severities = [...SEVERITY_ORDER, ...extra.sort()];
+  // A loaded answer counts every severity: one it leaves out has none.
+  const countOf = (severity: string) => (counts === undefined ? undefined : (counts[severity] ?? 0));
+  const toggle = (severity: string) =>
+    onChange(selected.includes(severity) ? selected.filter((value) => value !== severity) : [...selected, severity]);
+  const chips = [
+    { key: "(all)", label: t("patch.updates.optAll"), on: selected.length === 0, count: allCount, onClick: () => onChange([]) },
+    ...severities.map((severity) => ({
+      key: severity,
+      label: severityLabel(severity),
+      on: selected.includes(severity),
+      count: countOf(severity),
+      onClick: () => toggle(severity),
+    })),
+  ];
+  return (
+    <div className="chips" role="group" aria-label={label}>
+      {chips.map((chip) => (
+        <button
+          key={chip.key}
+          type="button"
+          className={chip.on ? "chip on" : "chip"}
+          aria-pressed={chip.on}
+          onClick={chip.onClick}
+        >
+          {chip.on ? <Icon name="circle-check" size={13} /> : null}
+          {chip.label}
+          {chip.count === undefined ? null : <span className="n">{chip.count}</span>}
+        </button>
+      ))}
+    </div>
   );
 }

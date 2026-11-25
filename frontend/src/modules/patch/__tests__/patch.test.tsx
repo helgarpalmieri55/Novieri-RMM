@@ -27,6 +27,7 @@ import { FleetPatchPage } from "../FleetPatchPage";
 import { PatchPolicyEditor } from "../PatchPolicyEditor";
 import { patchStateLabel, patchStateVariant, severityVariant } from "../patchState";
 import { describeCron } from "../cron";
+import { renderPage } from "../../../test/renderPage";
 
 // The auth-backed API client is mocked so this is a pure component test: no
 // real fetch. Patch data is plain TanStack Query state (no live-event
@@ -411,6 +412,30 @@ function neverScannedApi(overrides: Partial<ApiClient> = {}): Partial<ApiClient>
 // invisible.
 // ===========================================================================
 
+
+/** The severity chips in force in the group named `group`, by their words (the count stripped). */
+function pressedSeverities(group: string): string[] {
+  return within(screen.getByRole("group", { name: group }))
+    .getAllByRole("button")
+    .filter((chip) => chip.getAttribute("aria-pressed") === "true")
+    .map((chip) => (chip.textContent ?? "").replace(/\d+$/, ""));
+}
+
+/**
+ * THE DECISION BAR'S Client field. Since the Client chip (redesign plan, O3
+ * 3.2) the update list's toolbar carries a second control named "Client",
+ * which narrows the list and decides nothing; the bar's is the one outside
+ * the chips.
+ */
+function queryBarClient(): HTMLElement | null {
+  return screen.queryAllByLabelText("Client").find((field) => field.closest(".chip") === null) ?? null;
+}
+function barClient(): HTMLElement {
+  const field = queryBarClient();
+  if (!field) throw new Error("the decision bar draws no Client field");
+  return field;
+}
+
 describe("FleetPatchPage — the fleet view is one row per update, not per pair", () => {
   let api: Partial<ApiClient>;
 
@@ -496,9 +521,8 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     );
     // VISIBLE, not silent: the narrowed state has to read as a choice that is
     // currently in force.
-    expect(screen.getByRole("combobox", { name: "Filter Linux updates by severity" })).toHaveValue(
-      "critical,important",
-    );
+    // One chip per severity now (redesign plan, O3 3.2): the two in force are pressed.
+    expect(pressedSeverities("Filter Linux updates by severity")).toEqual(["Critical", "Important"]);
   });
 
   it("does NOT narrow on Windows, because Microsoft leaves the rollup unrated", async () => {
@@ -510,9 +534,7 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     expect(listPatchUpdates).toHaveBeenCalledWith(
       expect.objectContaining({ severity: [], os_family: "windows" }),
     );
-    expect(
-      screen.getByRole("combobox", { name: "Filter Windows updates by severity" }),
-    ).toHaveValue("all");
+    expect(pressedSeverities("Filter Windows updates by severity")).toEqual(["All severities"]);
   });
 
   it("says how many updates the severity filter is hiding, and offers to widen", async () => {
@@ -1215,9 +1237,11 @@ describe("every patch KPI tile is a link, and its number comes from the table be
     expect(listPatchUpdates).toHaveBeenCalledWith(expect.objectContaining({ severity: [] }));
 
     // A filter a tile can set and nothing on screen can undo is a trap door.
-    const select = screen.getByRole("combobox", { name: "Filter Windows updates by severity" });
-    expect(select).toHaveValue("all");
-    await user.selectOptions(select, "critical,important");
+    // Severity chips now (redesign plan, O3 3.2): "All" in force, then two severities chosen.
+    expect(pressedSeverities("Filter Windows updates by severity")).toEqual(["All severities"]);
+    const chips = screen.getByRole("group", { name: "Filter Windows updates by severity" });
+    await user.click(within(chips).getByRole("button", { name: /^Critical/ }));
+    await user.click(within(chips).getByRole("button", { name: /^Important/ }));
     await waitFor(() =>
       expect(listPatchUpdates).toHaveBeenLastCalledWith(
         expect.objectContaining({ severity: ["critical", "important"] }),
@@ -1433,11 +1457,12 @@ async function openPolicyDialog(policies: PatchPolicy[], upsert = vi.fn()) {
   renderWithProviders(<PatchPolicyEditor />);
   await screen.findByRole("button", { name: "New policy" });
   await user.click(screen.getByRole("button", { name: "New policy" }));
-  const dialog = await screen.findByRole("dialog", { name: "New patch policy" });
+  const dialog = await screen.findByRole("region", { name: "New patch policy" });
   return { user, dialog, upsert };
 }
 
 describe("PatchPolicyEditor — New policy actually opens something", () => {
+  // Redesign plan, Receta FO (O3 3.2): the form opens on the page, in its sections, not in a dialog.
   it("opens a dialog with form controls in it", async () => {
     // The audit's own probes: `[role=dialog], dialog` → 0, and
     // `document.querySelectorAll('input,select,textarea').length` → 0.
@@ -1487,6 +1512,66 @@ describe("PatchPolicyEditor — New policy actually opens something", () => {
 
     await screen.findByText("No patch policies configured.");
     expect(screen.queryByRole("button", { name: "New policy" })).not.toBeInTheDocument();
+  });
+});
+
+// THE FORM PATTERN (redesign plan, Receta FO; O3 3.2): one save bar, only
+// with a change, and a question before a change is left behind.
+describe("PatchPolicyEditor on the form pattern", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(policyApi([POLICY]) as ApiClient);
+    renderPage("/patch/policies?policy=pol1", <PatchPolicyEditor />, "/patch/policies");
+    const form = await screen.findByRole("region", { name: "Edit patch policy" });
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await user.type(within(form).getByLabelText("Ring name"), "x");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(within(form).getByLabelText("Ring name")).toHaveValue("broad");
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(policyApi([POLICY]) as ApiClient);
+    const { router } = renderPage("/patch/policies?policy=pol1", <PatchPolicyEditor />, "/patch/policies");
+    const form = await screen.findByRole("region", { name: "Edit patch policy" });
+    await user.type(within(form).getByLabelText("Ring name"), "x");
+    // Leave as a person does: through the page's back link.
+    await user.click(screen.getByRole("link", { name: "Patching" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/patch/policies");
+  });
+
+  it("opens the policy the URL names, and New policy puts itself in the URL", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(policyApi([POLICY]) as ApiClient);
+    const { router } = renderPage("/patch/policies", <PatchPolicyEditor />, "/patch/policies");
+    await screen.findByText("broad");
+    expect(screen.queryByRole("region", { name: "Edit patch policy" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "New policy" }));
+    expect(router.state.location.search).toBe("?policy=new");
+    expect(await screen.findByRole("region", { name: "New patch policy" })).toBeInTheDocument();
+  });
+
+  it("goes on editing what a new policy stored, without asking", async () => {
+    const user = userEvent.setup();
+    const stored = { ...POLICY, id: "pol2", ring_name: "pilot", device_group_id: "g1" };
+    const listPatchPolicies = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([stored]);
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(MANAGER),
+      listPatchPolicies,
+      upsertPatchPolicy: vi.fn().mockResolvedValue(stored),
+    } as unknown as ApiClient);
+    const { router } = renderPage("/patch/policies?policy=new", <PatchPolicyEditor />, "/patch/policies");
+    const form = await screen.findByRole("region", { name: "New patch policy" });
+    await user.clear(within(form).getByLabelText("Ring name"));
+    await user.type(within(form).getByLabelText("Ring name"), "pilot");
+    await user.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?policy=pol2"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(await screen.findByRole("region", { name: "Edit patch policy" })).toBeInTheDocument();
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
   });
 });
 
@@ -1618,7 +1703,7 @@ describe("PatchPolicyEditor — 'New' replaces the org default, and says so", ()
 
     await screen.findByText("broad");
     await user.click(screen.getByRole("button", { name: /^Edit the / }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit patch policy" });
+    const dialog = await screen.findByRole("region", { name: "Edit patch policy" });
     // Prefilled from the row, as strings — including the stored window, which
     // in this fixture is the unparseable value the old placeholder taught.
     expect(within(dialog).getByLabelText("Ring order")).toHaveValue(100);
@@ -1891,21 +1976,26 @@ describe("Scan cannot be dispatched twice while the first request is in flight",
 // .overflow` is `auto`".
 // --------------------------------------------------------------------------
 
+// Redesign plan, Receta FO (O3 3.2): the policy is a form on the page, in
+// sections with the one save bar, not a dialog over it. What these two held
+// for the dialog -- it can be left without the mouse, and it leaves the page
+// as it found it -- is held for the form: Discard closes a new policy, and
+// nothing locks the page, since nothing covers it.
 describe("PatchPolicyEditor's dialog can be left with the keyboard", () => {
   it("closes on Escape", async () => {
     const { user } = await openPolicyDialog([]);
-    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
 
     expect(
-      screen.queryByRole("dialog", { name: "New patch policy" }),
+      screen.queryByRole("region", { name: "New patch policy" }),
     ).not.toBeInTheDocument();
   });
 
   it("locks the page behind it, and gives the scrollbar back on close", async () => {
     const { user } = await openPolicyDialog([]);
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body.style.overflow).toBe("");
 
-    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
     expect(document.body.style.overflow).toBe("");
   });
 
@@ -1924,7 +2014,7 @@ describe("PatchPolicyEditor's dialog can be left with the keyboard", () => {
     expect(
       screen.queryByRole("dialog", { name: "Replace the organisation-wide patch policy" }),
     ).not.toBeInTheDocument();
-    const stillOpen = screen.getByRole("dialog", { name: "New patch policy" });
+    const stillOpen = screen.getByRole("region", { name: "New patch policy" });
     expect(within(stillOpen).getByLabelText("Ring name")).toHaveValue("pilot");
   });
 });
@@ -2524,9 +2614,10 @@ describe("FleetPatchPage — selecting everything the filter matches", () => {
     // Narrowing the filter is a different question being asked, and carrying
     // an answer to the old one across is how a batch comes to contain rows
     // nobody looked at.
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Filter Windows updates by severity" }),
-      "critical",
+    await user.click(
+      within(screen.getByRole("group", { name: "Filter Windows updates by severity" })).getByRole("button", {
+        name: /^Critical/,
+      }),
     );
     await waitFor(() =>
       expect(screen.queryByText(/updates selected of/)).not.toBeInTheDocument(),
@@ -2641,9 +2732,7 @@ describe("the platform tabs are navigation, and the URL is where they live", () 
     await user.click(within(strip).getByRole("tab", { name: /macOS/ }));
 
     await waitFor(() =>
-      expect(
-        screen.getByRole("combobox", { name: "Filter macOS updates by severity" }),
-      ).toHaveValue("all"),
+      expect(pressedSeverities("Filter macOS updates by severity")).toEqual(["All severities"]),
     );
     expect(screen.getByRole("textbox", { name: "Search macOS updates" })).toHaveValue("");
   });
@@ -3330,7 +3419,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     renderWithProviders(<FleetPatchPage />);
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(queryBarClient()).toBeNull();
 
     const confirm = await openApproval(user);
     expect(confirm).toHaveTextContent(/installable on the 1 device of Acme in the "test" ring/);
@@ -3354,7 +3443,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
 
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.selectOptions(barClient(), "c-acme");
     const confirm = await openApproval(user);
     await user.click(within(confirm).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalled());
@@ -3373,7 +3462,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     renderWithProviders(<FleetPatchPage />);
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
-    const field = screen.getByLabelText("Client");
+    const field = barClient();
     expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Choose a client",
       "Novieri",
@@ -3394,12 +3483,12 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
 
     const toggle = screen.getByRole("checkbox", { name: /For every client/ });
-    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(barClient()).toHaveValue("");
     expect(toggle.closest("label")).toHaveTextContent(
       "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of the client you choose.",
     );
 
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.selectOptions(barClient(), "c-acme");
     expect(toggle.closest("label")).toHaveTextContent(
       "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of Acme.",
     );
@@ -3417,7 +3506,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     renderWithProviders(<FleetPatchPage />);
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
-    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(barClient()).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -3425,7 +3514,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     expect(bulkApprovePatches).not.toHaveBeenCalled();
 
     // Picking one clears the complaint.
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.selectOptions(barClient(), "c-acme");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -3699,3 +3788,4 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     expect(confirm).toHaveTextContent("KB5031354 → pilot ring, Acme");
   });
 });
+

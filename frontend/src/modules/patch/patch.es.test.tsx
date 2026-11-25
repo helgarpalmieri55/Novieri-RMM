@@ -251,7 +251,8 @@ describe("the fleet patch page in Spanish", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByRole("tab", { name: /Windows/ })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "Parches de Windows" })).toBeInTheDocument();
+    // The kit's UrlTabs names its panel by the tab (redesign plan, O3 3.2).
+    expect(screen.getByRole("tabpanel", { name: "Windows" })).toBeInTheDocument();
     const labels = [...document.querySelectorAll(".stat-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Actualizaciones pendientes", "Críticas", "Importantes", "Equipos que necesitan actualizaciones"]);
     // The updates list.
@@ -262,8 +263,10 @@ describe("the fleet patch page in Spanish", () => {
     expect(within(updates).getByText("Crítica")).toBeInTheDocument();
     expect(screen.getByText("No autorizada para ningún anillo")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar actualizaciones de Windows")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filtrar actualizaciones de Windows por gravedad")).toBeInTheDocument();
-    expect(screen.getAllByRole("option", { name: "Solo críticas e importantes" }).length).toBeGreaterThan(0);
+    // One chip per severity (redesign plan, O3 3.2), worded in Spanish.
+    const severity = screen.getByRole("group", { name: "Filtrar actualizaciones de Windows por gravedad" });
+    expect(within(severity).getByRole("button", { name: /^Todas las gravedades/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(severity).getByRole("button", { name: /^Crítica/ })).toBeInTheDocument();
     expect(screen.getByText(/Mostrando 1–2 de 2 actualizaciones\./)).toBeInTheDocument();
     expect(screen.getByText(/Aquí la gravedad es la valoración MSRC de Microsoft/)).toBeInTheDocument();
     // The machines list.
@@ -509,7 +512,8 @@ describe("the patch policies page in Spanish", () => {
     });
     const { baseElement } = renderPage(<PatchPolicyEditor />, "/patch/policies");
     await user.click(await screen.findByRole("button", { name: "Nueva política" }));
-    const dialog = await screen.findByRole("dialog", { name: "Nueva política de parches" });
+    // The policy is a form on the page now, not a dialog (redesign plan, Receta FO; O3 3.2).
+    const dialog = await screen.findByRole("region", { name: "Nueva política de parches" });
     for (const label of ["Se aplica a", "Nombre del anillo", "Orden del anillo", "Reinicio", "Avisar a un usuario con sesión iniciada durante (horas)", "Intervalo de escaneo (horas)"]) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
@@ -544,12 +548,12 @@ describe("the patch policies page in Spanish", () => {
     });
     renderPage(<PatchPolicyEditor />, "/patch/policies");
     await user.click(await screen.findByRole("button", { name: "Nueva política" }));
-    const dialog = await screen.findByRole("dialog", { name: "Nueva política de parches" });
+    const dialog = await screen.findByRole("region", { name: "Nueva política de parches" });
     await user.clear(within(dialog).getByLabelText("Nombre del anillo"));
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Nombre del anillo");
     act(() => setActiveLanguage("en"));
-    expect(within(screen.getByRole("dialog", { name: "New patch policy" })).getByRole("alert")).toHaveTextContent("Ring name is required");
+    expect(within(screen.getByRole("region", { name: "New patch policy" })).getByRole("alert")).toHaveTextContent("Ring name is required");
   });
 
   it("words a window the painter cannot draw, and a mistyped one", async () => {
@@ -562,7 +566,7 @@ describe("the patch policies page in Spanish", () => {
     renderPage(<PatchPolicyEditor />, "/patch/policies");
     expect(await screen.findByText("Expresión personalizada")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Editar la política broad" }));
-    expect(await screen.findByRole("dialog", { name: "Editar política de parches" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Editar política de parches" })).toBeInTheDocument();
     expect(screen.getByText("Se aplica a: Valor predeterminado de la organización.")).toBeInTheDocument();
   });
 });
