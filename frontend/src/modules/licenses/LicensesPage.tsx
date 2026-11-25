@@ -81,6 +81,7 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -201,7 +202,6 @@ export function LicensesPage() {
   // that client's rows opens the page with the same `client=`, so it opens
   // exactly the rows it counted (coordinator's ruling on the wave reviews).
   const { client: narrowedTo } = useNarrowedApi(chip);
-  const withClient = (path: string) => (narrowedTo === null ? path : `${path}?client=${narrowedTo}`);
   const licenses = useLicenses(chip);
   const products = useProducts();
   const vendors = useVendors();
@@ -344,7 +344,7 @@ export function LicensesPage() {
           label={t("licenses.list.tileOver")}
           value={String(breachCount)}
           icon="alert-triangle"
-          to={withClient("/licenses/compliance")}
+          to={withClient("/licenses/compliance", narrowedTo)}
           tone="red"
           urgent={breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
@@ -361,7 +361,10 @@ export function LicensesPage() {
           label={t("licenses.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
           value={String((renewals.data ?? []).length)}
           icon="clock"
-          to={withClient("/licenses/renewals")}
+          // It counts a 90-day window, so it opens the calendar on it (its
+          // default is the server's 30 days): the rows it opens are the rows
+          // it counted (adoption pass, O5 leftover 2).
+          to={withClient(`/licenses/renewals?within=${RENEWAL_WINDOW_DAYS}`, narrowedTo)}
           tone="gold"
           zeroLabel={t("licenses.list.tileRenewalsZero")}
           pending={renewalsNoData}
@@ -385,7 +388,7 @@ export function LicensesPage() {
           label={t("licenses.list.tileCompliant")}
           value={String(compliantCount)}
           icon="circle-check"
-          to={withClient("/licenses/compliance")}
+          to={withClient("/licenses/compliance", narrowedTo)}
           tone="green"
           zeroLabel={t("licenses.list.tileCompliantZero")}
           pending={compliantNoData}

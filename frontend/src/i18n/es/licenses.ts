@@ -80,6 +80,8 @@ export const licenses: Shape<typeof en> = {
     renewal: "Renovación",
     overdue: { one: "{count} día de retraso", other: "{count} días de retraso" },
     inDays: { one: "{count} día", other: "{count} días" },
+    window: "Ventana",
+    nextDays: { one: "Próximos {count} días", other: "Próximos {count} días" },
   },
   list: {
     title: "Licencias",

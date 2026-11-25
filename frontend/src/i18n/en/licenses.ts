@@ -84,6 +84,8 @@ export const licenses = {
     renewal: "Renewal",
     overdue: { one: "{count} days overdue", other: "{count} days overdue" },
     inDays: { one: "{count} days", other: "{count} days" },
+    window: "Window",
+    nextDays: { one: "Next {count} days", other: "Next {count} days" },
   },
   list: {
     title: "Licenses",

@@ -8,6 +8,7 @@
  */
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
@@ -23,6 +24,11 @@ import { ReviewQueue } from "./ReviewQueue";
 import { VendorsPage } from "./VendorsPage";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
+
+/** The register, and the renewal calendar once its tile opens it: one router, both pages. */
+function RegisterThenCalendar() {
+  return useLocation().pathname === "/licenses/renewals" ? <RenewalCalendar /> : <LicensesPage />;
+}
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -224,7 +230,12 @@ describe("the license register on the list kit", () => {
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Over-deployed/ })).toHaveAttribute("href", `/licenses/compliance?client=${ANDES}`),
     );
-    expect(screen.getByRole("link", { name: /Renewals in 90 days/ })).toHaveAttribute("href", `/licenses/renewals?client=${ANDES}`);
+    // The tile counts a 90-day window, so it opens the calendar on 90 days,
+    // not on its 30-day default (adoption pass, O5 leftover 2).
+    expect(screen.getByRole("link", { name: /Renewals in 90 days/ })).toHaveAttribute(
+      "href",
+      `/licenses/renewals?within=90&client=${ANDES}`,
+    );
     expect(screen.getByRole("link", { name: /Compliant/ })).toHaveAttribute("href", `/licenses/compliance?client=${ANDES}`);
     // The catalog is the organisation's: its tile counts no client.
     expect(screen.getByRole("link", { name: /License products/ })).toHaveAttribute("href", "/licenses/products");
@@ -344,6 +355,44 @@ describe("the renewal calendar (licenses)", () => {
     expect(await screen.findByRole("table", { name: "Upcoming renewals" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).licenseRenewals).toHaveBeenCalledWith(undefined);
     expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  // Adoption pass, O5 leftover 2: the register's "Renewals in 90 days" tile
+  // counted 90 days and opened the calendar on the server's default 30.
+  it("opens the renewal calendar on the 90 days its tile counts", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/licenses", <RegisterThenCalendar />);
+    await userEvent.click(await screen.findByRole("link", { name: /Renewals in 90 days/ }));
+    expect(router.state.location.search).toBe("?within=90");
+    const calendar = await screen.findByRole("table", { name: "Upcoming renewals" });
+    const window = screen.getByRole("group", { name: "Window" });
+    expect(within(window).getByRole("button", { name: "Next 90 days" })).toHaveAttribute("aria-pressed", "true");
+    // Acrobat renews in 55 days: in the 90 days the tile counted, not in 30.
+    expect(within(calendar).getByText("Adobe Acrobat Pro")).toBeInTheDocument();
+    expect(within(calendar).getByText("Microsoft Visio")).toBeInTheDocument();
+  });
+
+  it("keeps the window in the URL, and the default 30 days writes nothing", async () => {
+    const licenseRenewals = vi.fn(fixtureRegistry().licenseRenewals);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), licenseRenewals } as never));
+    const { router } = renderPage("/licenses/renewals", <RenewalCalendar />, "/licenses/renewals");
+    const window = await screen.findByRole("group", { name: "Window" });
+    expect(within(window).getByRole("button", { name: "Next 30 days" })).toHaveAttribute("aria-pressed", "true");
+    // The default asks what the page always asked: the server's own 30 days.
+    expect(licenseRenewals).toHaveBeenLastCalledWith(undefined);
+    const calendar = await screen.findByRole("table", { name: "Upcoming renewals" });
+    expect(within(calendar).queryByText("Adobe Acrobat Pro")).toBeNull();
+    await userEvent.click(within(window).getByRole("button", { name: "Next 60 days" }));
+    expect(router.state.location.search).toBe("?within=60");
+    await waitFor(() => expect(licenseRenewals).toHaveBeenLastCalledWith(60));
+    expect(await within(screen.getByRole("table", { name: "Upcoming renewals" })).findByText("Adobe Acrobat Pro")).toBeInTheDocument();
+    // A window the page does not offer falls back to the default.
+    await act(() => router.navigate("/licenses/renewals?within=7"));
+    expect(within(screen.getByRole("group", { name: "Window" })).getByRole("button", { name: "Next 30 days" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(licenseRenewals).toHaveBeenLastCalledWith(undefined);
   });
 
   it("says why the calendar is empty", async () => {

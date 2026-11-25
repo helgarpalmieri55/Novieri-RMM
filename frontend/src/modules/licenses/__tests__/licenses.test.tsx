@@ -557,9 +557,11 @@ describe("LicensesPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     expect(tiles.map((tile) => tile.tagName)).toEqual(["A", "A", "A", "A"]);
+    // The renewal tile opens the calendar on the 90 days it counts (adoption
+    // pass, O5 leftover 2), as the subscriptions registry's does.
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/licenses/compliance",
-      "/licenses/renewals",
+      "/licenses/renewals?within=90",
       "/licenses/products",
       "/licenses/compliance",
     ]);
@@ -567,8 +569,9 @@ describe("LicensesPage", () => {
     const routes = staticRoutePaths();
     // Guard the guard: an empty route list would pass every href vacuously.
     expect(routes.length).toBeGreaterThan(10);
+    // The path is what App.tsx serves; a query (`?within=90`) is that page's filter.
     for (const tile of tiles) {
-      expect(isServedRoute(tile.getAttribute("href"), routes)).toBe(true);
+      expect(isServedRoute(tile.getAttribute("href")?.split("?")[0] ?? null, routes)).toBe(true);
     }
   });
 
