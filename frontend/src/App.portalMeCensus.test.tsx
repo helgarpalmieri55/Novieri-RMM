@@ -138,8 +138,8 @@ describe("a client's contact on every portal route", () => {
   it.each([
     ["/portal", "My tickets"],
     ["/portal/new", "New ticket"],
-    ["/portal/tickets/t1", "INC-1: The VPN does not connect"],
-    ["/portal/security", "Your security"],
+    ["/portal/tickets/t1", "INC-1 The VPN does not connect"],
+    ["/portal/security", "Sign-in and security"],
   ])("%s has exactly one observer of the console's /me: the guard's", async (path, heading) => {
     openApp(path);
     expect(await screen.findByTestId("portal-shell")).toBeInTheDocument();

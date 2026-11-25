@@ -45,6 +45,8 @@ vi.mock("../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
 interface Screen {
   route: string;
+  /** Where the page is mounted, when its write lives behind a query (Alerts' `?view=`, decision D21). */
+  entry?: string;
   page: () => ReactElement;
   /** What the person holds on SOME client: the read, and the write. */
   held: string[];
@@ -62,6 +64,13 @@ interface Screen {
    * chosen (plan Task 11 D11.1). Absent: every client.
    */
   client?: string;
+  /**
+   * The write is drawn for everyone and DISABLED without the code -- the
+   * dial's chips (decision D22: no Save button until there is an edit) -- so
+   * "offered" means every such control enabled, and "not offered" every one
+   * disabled, once /me has answered.
+   */
+  enabledOnly?: boolean;
 }
 
 /** A client of the person's, for `Screen.client`. */
@@ -90,9 +99,10 @@ const SCREENS: Screen[] = [
   { route: "/provisioning/profiles", page: () => <ProfilesPage />, held: ["provisioning.read", "provisioning.manage"], code: "provisioning.manage", write: "New profile" },
   { route: "/agent-packages", page: () => <AgentReleasesPage />, held: ["agent.release.read", "agent.release.manage"], code: "agent.release.manage", write: "Publish a release…" },
   { route: "/agent-packages, self-update", page: () => <AgentReleasesPage />, held: ["agent.release.read", "agent.update.read", "agent.update.rollout"], code: "agent.update.rollout", write: "New rollout…" },
-  { route: "/assistant/autonomy", page: () => <AutonomyDialPage />, held: ["ai.admin"], code: "ai.admin", write: "Save changes" },
+  { route: "/assistant/autonomy", page: () => <AutonomyDialPage />, held: ["ai.admin"], code: "ai.admin", write: "Suggest only", enabledOnly: true, answers: { listAiCeilings: [] } },
   {
     route: "/health",
+    entry: "/health?view=profiles",
     page: () => <HealthPage />,
     held: ["health.read", "health.admin"],
     code: "health.admin",
@@ -135,26 +145,33 @@ function stubApi(me: Me, answers: Record<string, unknown> = {}): ReturnType<type
   return meFn;
 }
 
-function renderPage(page: ReactElement): void {
+function renderPage(page: ReactElement, entry = "/"): void {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <MemoryRouter>{page}</MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>{page}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-describe.each(SCREENS)("$route", ({ page, held, code, write, stays, answers, client }) => {
+describe.each(SCREENS)("$route", ({ page, entry, held, code, write, stays, answers, client, enabledOnly }) => {
   it("offers the write to a holder of the code on every client", async () => {
     chooseClient(client);
     stubApi(meWith(held, held, client), answers);
-    renderPage(page());
-    expect(await screen.findByRole("button", { name: write })).toBeInTheDocument();
+    renderPage(page(), entry);
+    if (enabledOnly) {
+      await waitFor(() => {
+        const controls = screen.getAllByRole("button", { name: write });
+        for (const control of controls) expect(control).toBeEnabled();
+      });
+    } else {
+      expect(await screen.findByRole("button", { name: write })).toBeInTheDocument();
+    }
   });
 
   it("does not offer it to a holder of the code on some clients only", async () => {
     chooseClient(client);
     const me = stubApi(meWith(held, held.filter((one) => one !== code), client), answers);
-    renderPage(page());
+    renderPage(page(), entry);
     await waitFor(() => expect(me).toHaveBeenCalled());
     if (stays) {
       // The screen is still there, and its one-client writes with it.
@@ -162,6 +179,15 @@ describe.each(SCREENS)("$route", ({ page, held, code, write, stays, answers, cli
     } else {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    expect(screen.queryByRole("button", { name: write })).toBeNull();
+    if (enabledOnly) {
+      // Disabled while /me loads too: wait for the page's own read-only notice,
+      // drawn only once /me has answered, before judging the chips.
+      expect(await screen.findByText(/every client shares the autonomy dial/)).toBeInTheDocument();
+      const controls = screen.getAllByRole("button", { name: write });
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of controls) expect(control).toBeDisabled();
+    } else {
+      expect(screen.queryByRole("button", { name: write })).toBeNull();
+    }
   });
 });

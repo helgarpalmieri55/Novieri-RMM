@@ -19,10 +19,16 @@ vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
 const TARGET = "offsite-wasabi"; // the fixture's one storage, "Wasabi (Amsterdam)"
 
-/** The fixture session, which manages backups but not off-site storage, given that code too. */
+/** The fixture session, given the off-site code (kept explicit though the fixture catalogue now holds it). */
 function managing(): Me {
   const me = (fixtureRegistry().me as () => Me)();
   return { ...me, permissions: [...me.permissions, "backup.offsite.manage"] };
+}
+
+/** The fixture session without the off-site code (the fixture catalogue holds it since kit batch 1, item 7). */
+function notManaging(): Me {
+  const me = (fixtureRegistry().me as () => Me)();
+  return { ...me, permissions: me.permissions.filter((code) => code !== "backup.offsite.manage") };
 }
 
 function api(over: FixtureMap = {}): ApiClient {
@@ -146,8 +152,8 @@ describe("the off-site copy page on the form kit (4.4)", () => {
   });
 
   it("opens neither the dialog nor an editor for someone who may not manage storage", async () => {
-    // The fixture session itself: it holds no `backup.offsite.manage`.
-    mockUseApi.mockReturnValue(fixtureClient());
+    // A session without `backup.offsite.manage` (the fixture session holds it since kit batch 1, item 7).
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: notManaging }));
     page(`?edit=${TARGET}&new=target`);
     expect(await screen.findByText("Wasabi (Amsterdam)")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Add off-site storage" })).toBeNull();
