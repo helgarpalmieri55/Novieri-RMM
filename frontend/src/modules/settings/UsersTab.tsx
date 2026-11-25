@@ -85,10 +85,10 @@
 // the avatar tone is chosen from the user's id so the same person is the same
 // colour on every page that draws them.
 
-import { useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
-import { attemptProblems, describeSubmitError, requiredProblems, type Attempt } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -328,10 +328,13 @@ export function UsersTab({
   const [draftRoleId, setDraftRoleId] = useState("");
   const [draftClientId, setDraftClientId] = useState("");
   const [draftTyping, setDraftTyping] = useState(false);
-  // "Add this access" was pressed with half a pair (coordinator ruling 8; O7
-  // review, S2): the button stays pressable and the missing half is named
-  // beside it, re-read on every render so it goes as soon as it is chosen.
-  const [grantTried, setGrantTried] = useState(false);
+  // "Add this access" pressed with half a pair (coordinator ruling 8; O7
+  // review, S2), held as data and worded at render. It answers that press
+  // only (O7 re-review, N1): the next change to the pair, or sending the
+  // invitation, clears it.
+  const [grantAttempt, setGrantAttempt] = useState<Attempt | null>(null);
+  // The same for the roles panel's "Assign role" (O7 re-review, S3).
+  const [assignAttempt, setAssignAttempt] = useState<Attempt | null>(null);
   const [shownLink, setShownLink] = useState<ShownLink | null>(null);
   // An invitation refused for a missing address, held as data and worded at render.
   const [inviteAttempt, setInviteAttempt] = useState<Attempt | null>(null);
@@ -345,6 +348,18 @@ export function UsersTab({
   // client id. `grantScopeTyping`: the picker holds text that is not a choice.
   const [grantClientId, setGrantClientId] = useState("");
   const [grantScopeTyping, setGrantScopeTyping] = useState(false);
+  // Typing in either client box is a change to its pair, and clears what the
+  // last press said was missing. Stable callbacks: the picker reports through
+  // an effect keyed on the callback, and a new one each render would clear
+  // the sentence on the very render that draws it.
+  const draftTypingChanged = useCallback((typing: boolean) => {
+    setDraftTyping(typing);
+    if (typing) setGrantAttempt(null);
+  }, []);
+  const grantTypingChanged = useCallback((typing: boolean) => {
+    setGrantScopeTyping(typing);
+    if (typing) setAssignAttempt(null);
+  }, []);
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
 
   const effective = useEffectivePermissions(permissionsForId);
@@ -380,7 +395,7 @@ export function UsersTab({
     setDraftRoleId("");
     setDraftClientId("");
     setDraftTyping(false);
-    setGrantTried(false);
+    setGrantAttempt(null);
     setInviteAttempt(null);
     invite.reset();
     // `invite` is a new object each render; only the opening matters here.
@@ -406,28 +421,31 @@ export function UsersTab({
   const roleNameOf = (roleId: string): string => grantable.find((role) => role.id === roleId)?.name ?? roleId;
 
   /**
-   * What the pair being chosen still lacks, in the person's words. Text typed
-   * into the client picker that is not one of its choices is no client.
+   * A (role, client) pair as a press found it, for "Add this access" and
+   * "Assign role" alike. Text typed into the client picker that is not one of
+   * its choices is no client (final review, T11R-I1).
    */
-  function grantProblems() {
-    return requiredProblems(
-      [
+  function pairAttempt(roleId: string, clientId: string, typing: boolean): Attempt {
+    return {
+      rules: () => [
         { name: "role", label: t("settings.users.role") },
         { name: "client", label: t("settings.users.clientLabel") },
       ],
-      { role: draftRoleId, client: draftTyping ? "" : draftClientId },
-    );
+      values: { role: roleId, client: typing ? "" : clientId },
+    };
   }
 
-  const grantMissing = grantTried ? grantProblems() : [];
+  const grantMissing = attemptProblems(grantAttempt);
+  const assignMissing = attemptProblems(assignAttempt);
 
   /** The chosen pair joins the invitation; the same pair twice is one grant. */
   function addGrant() {
-    if (grantProblems().length > 0) {
-      setGrantTried(true);
+    const found = pairAttempt(draftRoleId, draftClientId, draftTyping);
+    if (attemptProblems(found).length > 0) {
+      setGrantAttempt(found);
       return;
     }
-    setGrantTried(false);
+    setGrantAttempt(null);
     const grant: InviteGrant = { role_id: draftRoleId, client_id: grantClientIdFor(draftClientId) };
     setInviteGrants((current) =>
       current.some((held) => held.role_id === grant.role_id && held.client_id === grant.client_id)
@@ -448,6 +466,9 @@ export function UsersTab({
    * "Done" is what removes it.
    */
   function sendInvite() {
+    // Sent without an access: what "Add this access" said is no longer the
+    // answer to anything (O7 re-review, N1).
+    setGrantAttempt(null);
     // A missing address is said on submit, never by a dead button (the kit's
     // rule; coordinator ruling 8a keeps that for every form but a one-box composer).
     const found: Attempt = {
@@ -796,9 +817,11 @@ export function UsersTab({
                           type="button"
                           variant="outline"
                           aria-label={t("settings.users.manageRolesAria", { email: user.email })}
-                          onClick={() =>
-                            setRolesForId((current) => (current === user.id ? null : user.id))
-                          }
+                          onClick={() => {
+                            // Another person's panel: the last press's sentence was about this one.
+                            setAssignAttempt(null);
+                            setRolesForId((current) => (current === user.id ? null : user.id));
+                          }}
                         >
                           {t("settings.users.manageRoles")}
                         </Button>
@@ -1034,7 +1057,10 @@ export function UsersTab({
                   className="select-field"
                   value={grantRoleId}
                   disabled={!canManage}
-                  onChange={(event) => setGrantRoleId(event.target.value)}
+                  onChange={(event) => {
+                    setGrantRoleId(event.target.value);
+                    setAssignAttempt(null);
+                  }}
                 >
                   <option value="">{t("settings.users.selectRole")}</option>
                   {grantable.map((role) => (
@@ -1051,12 +1077,15 @@ export function UsersTab({
                 label={t("settings.users.clientLabel")}
                 options={clientOptions}
                 value={grantClientId}
-                onChange={setGrantClientId}
+                onChange={(id) => {
+                  setGrantClientId(id);
+                  setAssignAttempt(null);
+                }}
                 loading={clients.isLoading}
                 emptyHint={clientPickerEmptyHint()}
                 placeholder={t("settings.users.clientPlaceholder")}
                 disabled={!canManage}
-                onPendingChange={setGrantScopeTyping}
+                onPendingChange={grantTypingChanged}
               />
             </div>
 
@@ -1065,32 +1094,39 @@ export function UsersTab({
                 // THE BUTTON NAMES THE SCOPE IT GRANTS (final review,
                 // T11R-I1): "Assign role on Warehouse", "... on every
                 // client". The click that sends a grant says where it
-                // applies, whatever the box above happens to show.
+                // applies, whatever the box above happens to show. While the
+                // box holds text that is not a choice it names no client (O7
+                // re-review, S3): the one it last held is not what the box
+                // says, and not what a press would send.
                 label={
                   assignRole.isPending
                     ? t("settings.users.assigning")
-                    : grantClientId === EVERY_CLIENT_CHOICE
-                      ? t("settings.users.assignEvery")
-                      : grantClientId !== ""
-                        ? t("settings.users.assignOn", {
+                    : grantScopeTyping || grantClientId === ""
+                      ? t("settings.users.assign")
+                      : grantClientId === EVERY_CLIENT_CHOICE
+                        ? t("settings.users.assignEvery")
+                        : t("settings.users.assignOn", {
                             client: clientNames.get(grantClientId) ?? grantClientId,
                           })
-                        : t("settings.users.assign")
                 }
                 icon="plus"
                 variant="primary"
-                // Disabled until a scope is CHOSEN, and while the picker
-                // holds typed text that is not a choice: "Ware" typed and
-                // never clicked is not Warehouse -- and it used to be every
-                // client.
-                disabled={
-                  !canManage ||
-                  grantRoleId === "" ||
-                  grantClientId === "" ||
-                  grantScopeTyping ||
-                  assignRole.isPending
-                }
-                onClick={() =>
+                // Pressable but for a reader and while sending (coordinator
+                // ruling 8; O7 re-review, S3). Pressed before a role and a
+                // scope are both CHOSEN -- or while the picker holds typed
+                // text that is not a choice: "Ware" typed and never clicked
+                // is not Warehouse, and it used to be every client -- it sends
+                // nothing and says which half is missing.
+                disabled={!canManage || assignRole.isPending}
+                onClick={() => {
+                  const found = pairAttempt(grantRoleId, grantClientId, grantScopeTyping);
+                  if (attemptProblems(found).length > 0) {
+                    // The last refusal from the server is not this one (ruling 7).
+                    assignRole.reset();
+                    setAssignAttempt(found);
+                    return;
+                  }
+                  setAssignAttempt(null);
                   assignRole.mutate(
                     {
                       userId: rolesTarget.id,
@@ -1109,10 +1145,16 @@ export function UsersTab({
                         setGrantClientId("");
                       },
                     },
-                  )
-                }
+                  );
+                }}
               />
               {!canManage ? <span className="form-hint">{reason}</span> : null}
+              {assignMissing.length > 0 ? (
+                <span role="alert" className="form-error">
+                  <Icon name={KIND_ICON.crit} size={13} />
+                  {assignMissing.map((problem) => problem.message).join(". ")}.
+                </span>
+              ) : null}
               {roles.error ? (
                 <span className="form-hint">
                   {t("settings.users.catalogueFailed")}
@@ -1257,7 +1299,10 @@ export function UsersTab({
                   className="select-field"
                   value={draftRoleId}
                   disabled={!canManage}
-                  onChange={(event) => setDraftRoleId(event.target.value)}
+                  onChange={(event) => {
+                    setDraftRoleId(event.target.value);
+                    setGrantAttempt(null);
+                  }}
                 >
                   <option value="">{t("settings.users.selectRole")}</option>
                   {grantable.map((role) => (
@@ -1271,12 +1316,15 @@ export function UsersTab({
                 label={t("settings.users.clientLabel")}
                 options={clientOptions}
                 value={draftClientId}
-                onChange={setDraftClientId}
+                onChange={(id) => {
+                  setDraftClientId(id);
+                  setGrantAttempt(null);
+                }}
                 loading={clients.isLoading}
                 emptyHint={clientPickerEmptyHint()}
                 placeholder={t("settings.users.clientPlaceholder")}
                 disabled={!canManage}
-                onPendingChange={setDraftTyping}
+                onPendingChange={draftTypingChanged}
               />
             </div>
           )}

@@ -254,6 +254,40 @@ describe("Settings — Users tab", () => {
     expect(calls.inviteUser).not.toHaveBeenCalled();
   });
 
+  // O7 RE-REVIEW, N1: the sentence "Add this access" leaves is an answer to
+  // that press, not a standing state. The next change to the pair clears it --
+  // choosing a role, or typing in the client box -- and so does sending the
+  // invitation without an access.
+  it("clears the missing-access sentence on the next change to the pair", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const add = within(invite).getByRole("button", { name: "Add this access" });
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+    expect(within(invite).queryByRole("alert")).toBeNull();
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    await user.type(within(invite).getByLabelText(/client/i), "Wa");
+    expect(within(invite).queryByRole("alert")).toBeNull();
+  });
+
+  it("clears the missing-access sentence when the invitation is sent without an access", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    // What the send was refused for is said; what "Add this access" was
+    // refused for is not said again.
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Email is required\.$/);
+    expect(within(invite).queryByText(/Role is required/)).toBeNull();
+    expect(calls.inviteUser).not.toHaveBeenCalled();
+  });
+
   /**
    * CYCLE 9. The pasted "Device group id" field, help text and all, became a
    * picker fed by a list endpoint rather than a pasted id.
@@ -337,7 +371,12 @@ describe("Settings — Users tab", () => {
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
     await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
-    expect(within(panel).getByRole("button", { name: "Assign role" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 re-review, S3) from "disabled": the
+    // button stays pressable and, pressed without a scope, says so and sends
+    // nothing.
+    await user.click(within(panel).getByRole("button", { name: "Assign role" }));
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(calls.assignUserRole).not.toHaveBeenCalled();
   });
 
   it("typed text that is not a chosen client cannot assign", async () => {
@@ -348,10 +387,12 @@ describe("Settings — Users tab", () => {
     const field = within(panel).getByLabelText(/client/i);
 
     // Typed, never clicked: nothing is chosen, so nothing can be assigned.
+    // RE-POINTED (O7 re-review, S3) from "disabled": pressed, it names the
+    // missing client and sends nothing.
     await user.type(field, "Ware");
     const assign = within(panel).getByRole("button", { name: /^Assign role/ });
-    expect(assign).toBeDisabled();
     await user.click(assign);
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
     expect(calls.assignUserRole).not.toHaveBeenCalled();
 
     // A client chosen, then other text typed over it: still not a choice.
@@ -361,7 +402,10 @@ describe("Settings — Users tab", () => {
     expect(within(panel).getByRole("button", { name: "Assign role on Warehouse" })).toBeEnabled();
     await user.clear(field);
     await user.type(field, "Toe");
-    expect(within(panel).getByRole("button", { name: /^Assign role/ })).toBeDisabled();
+    // RE-POINTED (O7 re-review, S3) from "disabled": the button no longer
+    // names Warehouse while the box says "Toe" -- pressing it would name the
+    // missing client (the test above), never send Warehouse.
+    expect(within(panel).getByRole("button", { name: "Assign role" })).toBeEnabled();
     await user.click(await within(panel).findByRole("option", { name: /Toeshee Group/ }));
     await user.click(within(panel).getByRole("button", { name: "Assign role on Toeshee Group" }));
 
@@ -369,6 +413,42 @@ describe("Settings — Users tab", () => {
     expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
       role_id: AUDITOR_ROLE.id,
       client_id: "org-1",
+    });
+  });
+
+  // A DISABLED CONTROL SHOWS ITS REASON ON SCREEN (coordinator ruling 8; O7
+  // re-review, S3). "Assign role" sat disabled until a role and a scope were
+  // both chosen, with nothing on screen saying so. It is pressable now (but
+  // for a reader, and while sending), names what the pair lacks, and still
+  // never takes typed text for a client (T11R-I1).
+  it("names what a grant is missing when Assign role is pressed early, and sends nothing", async () => {
+    const user = await openUsers();
+    await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
+    const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
+    const assign = () => within(panel).getByRole("button", { name: /^Assign role/ });
+    const field = within(panel).getByLabelText(/client/i);
+    expect(assign()).toBeEnabled();
+
+    await user.click(assign());
+    expect(within(panel).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    // The next change to the pair clears the sentence (N1's rule, here too).
+    await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
+    expect(within(panel).queryByRole("alert")).toBeNull();
+
+    await user.type(field, "Ware");
+    await user.click(assign());
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(calls.assignUserRole).not.toHaveBeenCalled();
+
+    await user.click(field);
+    await user.click(await within(panel).findByRole("option", { name: /Warehouse/ }));
+    expect(within(panel).queryByRole("alert")).toBeNull();
+    await user.click(within(panel).getByRole("button", { name: "Assign role on Warehouse" }));
+    await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(1));
+    // The request is the one it always was.
+    expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
+      role_id: AUDITOR_ROLE.id,
+      client_id: "44444444-4444-4444-8444-444444444444",
     });
   });
 

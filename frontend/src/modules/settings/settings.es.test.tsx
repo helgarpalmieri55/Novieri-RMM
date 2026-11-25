@@ -543,7 +543,12 @@ describe("the users tab in Spanish", () => {
     expect(within(section).getByRole("option", { name: "Elige un rol…" })).toBeInTheDocument();
     expect(within(section).getByText("Cliente")).toBeInTheDocument();
     expect(within(section).getByPlaceholderText("Elige un cliente o todos los clientes")).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Asignar rol" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 re-review, S3) from "disabled": the
+    // button stays pressable and names, in Spanish, what the grant is missing.
+    await user.click(within(section).getByRole("button", { name: "Asignar rol" }));
+    expect(within(section).getByRole("alert")).toHaveTextContent(
+      "El campo Rol es obligatorio. El campo Cliente es obligatorio.",
+    );
     expectNoEnglish(container, RECORDED);
   });
 
@@ -571,7 +576,9 @@ describe("the users tab in Spanish", () => {
     await user.selectOptions(within(section).getByLabelText("Rol"), AUDITOR_ROLE.id);
     const field = within(section).getByLabelText(/cliente/i);
     await user.type(field, "Ware");
-    expect(within(section).getByRole("button", { name: /^Asignar rol/ })).toBeDisabled();
+    // RE-POINTED (O7 re-review, S3) from "disabled": while the box holds text
+    // that is not a choice, the button names no client.
+    expect(within(section).getByRole("button", { name: "Asignar rol" })).toBeEnabled();
 
     await user.clear(field);
     expect(await within(section).findByRole("option", { name: /Todos los clientes/ })).toBeInTheDocument();
