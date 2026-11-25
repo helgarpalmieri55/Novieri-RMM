@@ -350,7 +350,8 @@ describe("the audit vocabulary in Spanish", () => {
     expect(within(table).queryByText("jobs.dispatched")).not.toBeInTheDocument();
     // ...and after a switch it matches the new language's label, not a cached one.
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("No loaded audit event matches that filter.")).toBeInTheDocument();
+    // The kit's filtered empty list now (redesign plan, Receta L); "Showing 0 of N" says the page was loaded.
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(within(await screen.findByRole("table")).getByText("Barrido rechazado")).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Buscar en la página cargada por acción, actor o destino"));

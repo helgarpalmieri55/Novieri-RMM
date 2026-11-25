@@ -53,7 +53,6 @@ export const audit: Shape<typeof en> = {
     actionAria: "Filtrar por acción exacta, en el servidor",
     emptyForAction: "No hay eventos de auditoría registrados para la acción \"{action}\".",
     emptyNone: "Aún no hay eventos de auditoría registrados.",
-    emptyFiltered: "Ningún evento de auditoría cargado coincide con ese filtro.",
     action: "Acción",
     actor: "Actor",
     when: "Cuándo",

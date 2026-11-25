@@ -50,7 +50,6 @@ export const audit = {
     actionAria: "Filter by exact action, server-side",
     emptyForAction: "No audit events recorded for action \"{action}\".",
     emptyNone: "No audit events recorded yet.",
-    emptyFiltered: "No loaded audit event matches that filter.",
     action: "Action",
     actor: "Actor",
     when: "When",
