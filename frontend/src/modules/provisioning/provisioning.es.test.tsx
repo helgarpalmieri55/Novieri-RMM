@@ -1,6 +1,6 @@
 /**
  * Provisioning and imaging in Spanish: the runs page (tiles, filter, table and
- * the Provision dialog with its refusal and its confirmation), the images page
+ * the Build a computer dialog with its refusal and its confirmation), the images page
  * and its New image dialog, the profiles page and its editor, a device's own
  * Imaging tab, the prerequisites panel and the labels the module builds
  * outside React. Profile, image and device names, MAC addresses and the
@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -173,13 +173,17 @@ beforeEach(() => {
 describe("the provisioning runs page, in Spanish", () => {
   it("words the head, the tabs, the tiles, the filter and the table", async () => {
     const { container } = renderPage(<ProvisioningRunsPage />);
-    expect(await screen.findByRole("heading", { name: "Aprovisionamiento e imágenes de disco" })).toBeInTheDocument();
+    // The h1 is the rail's label (general ruling 1).
+    expect(await screen.findByRole("heading", { name: "Imágenes de sistema" })).toBeInTheDocument();
     await screen.findByText("run1");
-    expect(screen.getByRole("button", { name: "Aprovisionar" })).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "Aprovisionamiento" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
+    // The section menu is a navigation of links now (redesign plan, waves'
+    // common rules: `SectionNav`), the current page marked `aria-current`.
+    const nav = screen.getByRole("navigation", { name: "Aprovisionamiento" });
     for (const tab of ["Ejecuciones", "Imágenes", "Perfiles"]) {
-      expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: tab })).toBeInTheDocument();
     }
+    expect(within(nav).getByRole("link", { name: "Ejecuciones" })).toHaveAttribute("aria-current", "page");
     // The tiles.
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
     expect(screen.getByText("50 %")).toBeInTheDocument();
@@ -188,10 +192,11 @@ describe("the provisioning runs page, in Spanish", () => {
     expect(screen.getByText("Mediana del tiempo de construcción")).toBeInTheDocument();
     expect(screen.getByText("12 min")).toBeInTheDocument();
     // The filter.
-    const filter = screen.getByRole("combobox", { name: "Filtrar las ejecuciones por estado" });
-    expect(within(filter).getByRole("option", { name: "Todas las ejecuciones" })).toBeInTheDocument();
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar las ejecuciones por estado" });
+    expect(within(filter).getByRole("button", { name: "Todas las ejecuciones" })).toBeInTheDocument();
     for (const state of ["Pendiente", "Esperando inscripción", "Inscrita", "Completada", "Fallida"]) {
-      expect(within(filter).getByRole("option", { name: state })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: state })).toBeInTheDocument();
     }
     // The table.
     for (const header of ["Destino", "Perfil", "Estado", "Iniciada", "Finalizada", "Error"]) {
@@ -211,7 +216,10 @@ describe("the provisioning runs page, in Spanish", () => {
   it("says a fleet that never built anything has never run, and what each zero means", async () => {
     baseApi({ getProvisioningReport: vi.fn().mockResolvedValue(EMPTY_REPORT), listProvisionRuns: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<ProvisioningRunsPage />);
-    expect(await screen.findByText("Todavía no hay ejecuciones de aprovisionamiento.")).toBeInTheDocument();
+    // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
+    expect(await screen.findByText("Aún no se ha construido ningún equipo.")).toBeInTheDocument();
+    // The head's button and the empty state's: one act, one name (fix round 1).
+    expect(screen.getAllByRole("button", { name: "Construir un equipo" })).toHaveLength(2);
     expect(screen.getByText("Nunca ejecutado")).toBeInTheDocument();
     expect(screen.getByText("Todavía no se ha aprovisionado ningún equipo")).toBeInTheDocument();
     expect(screen.getByText("Nunca se ha ejecutado ninguna construcción")).toBeInTheDocument();
@@ -227,8 +235,12 @@ describe("the provisioning runs page, in Spanish", () => {
     const { container } = renderPage(<ProvisioningRunsPage />);
     await screen.findByText("run1");
     expect(screen.getByText("Ninguna construcción ha fallado")).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filtrar las ejecuciones por estado" }), "failed");
-    expect(await screen.findByText("Ninguna ejecución coincide con ese filtro.")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("group", { name: "Filtrar las ejecuciones por estado" })).getByRole("button", { name: "Fallida" }),
+    );
+    // The list kit's filtered-empty sentence, with its way out (Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -245,24 +257,38 @@ describe("the provisioning runs page, in Spanish", () => {
     await screen.findByText("run1");
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Provisioning & Imaging" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Imaging" })).toBeInTheDocument();
     expect(screen.getByText("Success rate")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("12m")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filter runs by state" });
-    expect(within(filter).getByRole("option", { name: "Awaiting enrollment" })).toBeInTheDocument();
+    const filter = screen.getByRole("group", { name: "Filter runs by state" });
+    expect(within(filter).getByRole("button", { name: "Awaiting enrollment" })).toBeInTheDocument();
     expect(within(screen.getByText("run5").closest("tr") as HTMLElement).getByText("Failed")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
   });
 });
 
-describe("the Provision dialog, in Spanish", () => {
+describe("the Build a computer dialog, in Spanish", () => {
+  /**
+   * The build's confirmation. It names the act as the button and the form do
+   * (fix round 2: one name for one act), so it is the second dialog of that
+   * name, drawn over the form's.
+   */
+  async function confirmation(name: string): Promise<HTMLElement> {
+    let dialogs: HTMLElement[] = [];
+    await waitFor(() => {
+      dialogs = screen.getAllByRole("dialog", { name });
+      expect(dialogs).toHaveLength(2);
+    });
+    return dialogs[1] as HTMLElement;
+  }
+
   async function open(user: ReturnType<typeof userEvent.setup>) {
     renderPage(<ProvisioningRunsPage />);
     await screen.findByText("run1");
-    await user.click(screen.getByRole("button", { name: "Aprovisionar" }));
-    return screen.findByRole("dialog", { name: "Aprovisionar un dispositivo" });
+    await user.click(screen.getByRole("button", { name: "Construir un equipo" }));
+    return screen.findByRole("dialog", { name: "Construir un equipo" });
   }
 
   it("names the missing profile on submit, and re-words the refusal on a switch", async () => {
@@ -273,7 +299,7 @@ describe("the Provision dialog, in Spanish", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("El campo Perfil es obligatorio.");
     expectNoEnglish(dialog);
     act(() => setActiveLanguage("en"));
-    expect(within(screen.getByRole("dialog", { name: "Provision a device" })).getByRole("alert")).toHaveTextContent(
+    expect(within(screen.getByRole("dialog", { name: "Build a computer" })).getByRole("alert")).toHaveTextContent(
       "Profile is required",
     );
   });
@@ -285,17 +311,17 @@ describe("the Provision dialog, in Spanish", () => {
     await user.click(await screen.findByRole("option", { name: /estación-estándar/ }));
     await user.type(within(dialog).getByRole("textbox", { name: /Referencia del destino/ }), "AA:BB:CC:00:11:22");
     await user.click(within(dialog).getByRole("button", { name: "Iniciar" }));
-    const confirm = await screen.findByRole("dialog", { name: "Iniciar una ejecución de aprovisionamiento" });
+    const confirm = await confirmation("Construir un equipo");
     expect(confirm).toHaveTextContent("estación-estándar");
     expect(confirm).toHaveTextContent("Windows 11 Estándar · habilitado se instalará en el equipo en AA:BB:CC:00:11:22.");
     expect(confirm).toHaveTextContent(
       "El aprovisionamiento sustituye el contenido del disco del equipo; todo lo que no tenga copia de seguridad se pierde.",
     );
     expect(confirm).toHaveTextContent("Una ejecución iniciada no se puede cancelar desde la consola.");
-    expect(within(confirm).getByRole("button", { name: "Iniciar la construcción" })).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
     expectNoEnglish(confirm);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("dialog", { name: "Start provisioning run" })).toHaveTextContent(
+    expect(await confirmation("Build a computer")).toHaveTextContent(
       "Windows 11 Estándar · enabled will be laid down on the machine at AA:BB:CC:00:11:22.",
     );
   });
@@ -306,7 +332,7 @@ describe("the Provision dialog, in Spanish", () => {
     await user.click(within(dialog).getByRole("combobox", { name: "Perfil" }));
     await user.click(await screen.findByRole("option", { name: /estación-estándar/ }));
     await user.click(within(dialog).getByRole("button", { name: "Iniciar" }));
-    const confirm = await screen.findByRole("dialog", { name: "Iniciar una ejecución de aprovisionamiento" });
+    const confirm = await confirmation("Construir un equipo");
     expect(confirm).toHaveTextContent("se instalará en el equipo que reclame esta construcción.");
     expectNoEnglish(confirm);
   });
@@ -336,9 +362,10 @@ describe("the images page, in Spanish", () => {
     expect(screen.getByText("En 2 plataformas")).toBeInTheDocument();
     expect(screen.getByText("Listas para construir a partir de ellas")).toBeInTheDocument();
     expect(screen.getByText("Registradas pero sin poder construir a partir de ellas")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar las imágenes por estado" });
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar las imágenes por estado" });
     for (const option of ["Todas las imágenes", "Activas", "No activas"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: option })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Plataforma", "Tipo", "Estado", "Añadida"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
@@ -412,9 +439,10 @@ describe("the profiles page, in Spanish", () => {
     expect(screen.getByText("Usan 1 imagen")).toBeInTheDocument();
     expect(screen.getByText("Listos para aprovisionar")).toBeInTheDocument();
     expect(screen.getByText("Configurados pero sin aprovisionar nada")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar los perfiles por estado" });
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar los perfiles por estado" });
     for (const option of ["Todos los perfiles", "Habilitados", "Deshabilitados"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: option })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Credenciales", "Estado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();

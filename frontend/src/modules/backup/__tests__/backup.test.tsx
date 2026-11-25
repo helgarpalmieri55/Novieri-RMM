@@ -507,6 +507,8 @@ describe("BackupPointsPage", () => {
     const restoreButton = screen.getByRole("button", { name: "Restore" });
     expect(restoreButton).toBeDisabled();
     expect(restoreButton).toHaveAttribute("title", expect.stringMatching(/failed/i));
+    // And on screen, under the control (general ruling 8).
+    expect(screen.getByText("This run failed, so no complete point was captured to restore from.")).toBeInTheDocument();
   });
 
   it("disables Restore, with a reason, on a pruned backup point", async () => {
@@ -517,6 +519,8 @@ describe("BackupPointsPage", () => {
     const restoreButton = screen.getByRole("button", { name: "Restore" });
     expect(restoreButton).toBeDisabled();
     expect(restoreButton).toHaveAttribute("title", expect.stringMatching(/retention/i));
+    // And on screen, under the control (general ruling 8).
+    expect(screen.getByText("This point has aged out of the repository's retention and is no longer stored.")).toBeInTheDocument();
   });
 
   it("keeps Restore enabled on a complete backup point", async () => {
@@ -1465,11 +1469,34 @@ describe("PolicyDialog failure, validation and the edit it used to blank", () =>
     await screen.findByText("primary-vault");
     await user.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByLabelText("Cron expression");
+    // One change, so Save has something to send (general ruling 13); the
+    // window it did not touch goes with it, as stored.
+    const enabled = screen.getByLabelText("Enabled");
+    const was = (enabled as HTMLInputElement).checked;
+    await user.click(enabled);
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.upsertBackupPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ repository_id: "repo1", window_cron: "0 2 * * *" }),
+      expect.objectContaining({ repository_id: "repo1", window_cron: "0 2 * * *", enabled: !was }),
     );
+  });
+
+  // GENERAL RULING 13: no write without a change. A PUT with nothing in it
+  // would still write an audit entry saying the policy was edited.
+  it("sends nothing when Save is pressed on an untouched policy, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+
+    await screen.findByText("primary-vault");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
+    await within(dialog).findByLabelText("Cron expression");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit policy" })).not.toBeInTheDocument());
+    expect(api.upsertBackupPolicy).not.toHaveBeenCalled();
   });
 });
 
@@ -1944,9 +1971,12 @@ describe("every backup tile opens the rows it counted", () => {
     api.listBackupPoints = vi.fn().mockResolvedValue([VERIFY_POINTS[1] as BackupPoint]);
     renderWithProviders(<BackupPointsPage />, "/backup?verify=pending");
 
-    expect(
-      await screen.findByText("No backup point is awaiting verification."),
-    ).toBeInTheDocument();
+    // The filtered-empty sentence is the list kit's now, with its way out
+    // (redesign plan, Receta L, 3: "nada con estos filtros" with "Quitar
+    // filtros", never the "nothing yet" sentence).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.queryByText("No backup points recorded yet.")).not.toBeInTheDocument();
   });
 
   it("links every repositories tile at a route the application has", async () => {

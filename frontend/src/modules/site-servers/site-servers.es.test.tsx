@@ -154,7 +154,12 @@ describe("site servers in Spanish", () => {
     expect(screen.getByText("de 3 registrados")).toBeInTheDocument();
     expectNoEnglish(container, ["Storage"]);
 
-    await user.selectOptions(screen.getByLabelText("Filtrar los servidores de sitio por estado"), "disabled");
+    // The filter is a row of chips now (Receta L: `FilterChips`), same values, same words.
+    await user.click(
+      within(screen.getByRole("group", { name: "Filtrar los servidores de sitio por estado" })).getByRole("button", {
+        name: "Deshabilitados",
+      }),
+    );
     expect(screen.queryByText("rack-b4-relay")).toBeNull();
     expect(screen.getByText("por-branch-relay")).toBeInTheDocument();
     expectNoEnglish(container, ["Storage"]);
@@ -175,14 +180,17 @@ describe("site servers in Spanish", () => {
 
     stubApi({ listSiteServers: vi.fn().mockResolvedValue([]) });
     const empty = renderApp("/site-servers");
-    expect(await screen.findByText("No hay servidores de sitio")).toBeInTheDocument();
+    // The list kit's "nothing yet" sentence (redesign plan, Task 9, 4.9; Receta L, 3).
+    expect(await screen.findByText("Aún no hay servidores de sitio: promueve un equipo de la red del cliente.")).toBeInTheDocument();
     expect(screen.getByText("No hay ningún servidor de sitio que habilitar")).toBeInTheDocument();
     expectNoEnglish(empty.container);
     empty.unmount();
 
     stubApi({ listSiteServers: vi.fn().mockResolvedValue([server({ enabled: false })]) });
     const filtered = renderApp("/site-servers?state=enabled");
-    expect(await screen.findByText("Ningún servidor de sitio coincide con ese filtro.")).toBeInTheDocument();
+    // The list kit's filtered-empty sentence, with its way out (Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expect(screen.getByText("Todos los servidores de sitio están deshabilitados, así que ninguno presta servicio")).toBeInTheDocument();
     expectNoEnglish(filtered.container);
   });
@@ -231,7 +239,11 @@ describe("site servers in Spanish", () => {
     stubApi();
     const { container } = renderApp("/site-servers/ss-1");
     expect(await screen.findByRole("heading", { name: "rack-b4-relay" })).toBeInTheDocument();
-    expect(await screen.findByText("declarado para 2 segmentos", { exact: false })).toBeInTheDocument();
+    // The segments are counted in the facts strip now: the record head names
+    // the client alone, since a link inside a run of text is told apart by
+    // colour only (axe `link-in-text-block`; redesign plan, Receta F).
+    expect((await screen.findByTestId("detail-segments")).textContent?.split(", ")).toHaveLength(2);
+    expect(screen.getByText("Segmentos declarados")).toBeInTheDocument();
     expect(await screen.findByText("Coinciden")).toBeInTheDocument();
     expect(screen.getByText(/Sin preferencia de barrido en él hasta que el inventario ubique este equipo/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Encender un equipo" })).toBeInTheDocument();
@@ -265,7 +277,8 @@ describe("site servers in Spanish", () => {
     stubApi({ getSiteServer: vi.fn().mockResolvedValue(server({ segments: ["10.20.9.0/24"] })), getSiteServerSegmentCheck: vi.fn().mockResolvedValue({ ...CHECK, matched: [], observed_undeclared: [], declared_unobserved: ["10.20.9.0/24", "10.20.10.0/24"] }) });
     const { container } = renderApp("/site-servers/ss-1");
     expect(await screen.findByText(/Sin preferencia de barrido en ellos hasta que el inventario ubique este equipo/)).toBeInTheDocument();
-    expect(screen.getByText("declarado para 1 segmento", { exact: false })).toBeInTheDocument();
+    // In the facts strip (see the test above).
+    expect(screen.getByTestId("detail-segments").textContent?.split(", ")).toHaveLength(1);
     expectNoEnglish(container);
   });
 

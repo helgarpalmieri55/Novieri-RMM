@@ -31,12 +31,25 @@ import { outcomeKind, outcomeLabel, planStateLabel, testTypeLabel } from "./bcpS
 import { reviewStanding, reviewStandingKind, reviewStandingLabel } from "./reviewState";
 import { PlanEditor } from "./PlanEditor";
 import type { PlanOut, TestType } from "./types";
-import { PageHead, Panel, StatusPill } from "../../shell/components";
+import { Btn, ClientContext, DetailHead, Panel, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 import { Facts, KV } from "../../shell/viz";
 
 const TEST_TYPES: TestType[] = ["restore_drill", "failover", "tabletop", "other"];
 
+/**
+ * One continuity plan, on the record kit (redesign plan, Task 9, 4.5; Receta
+ * F): `DetailHead` with the way back to the plans, the plan's state, its
+ * client, and its actions -- New test (`?new=test`, decision D8) the one
+ * primary; the facts strip as its summary; then the plan and its tests.
+ *
+ * NO TABS. Receta F's tabs are for a record with more than one section of its
+ * own; a plan has its text (description, scope, procedures) and its tests, and
+ * the steps and the evidence the brief names belong to a test, which is the
+ * recorder's page. Two short panels read better together than one behind a
+ * tab.
+ */
 export function PlanDetail() {
   const t = useT();
   const { planId } = useParams<{ planId: string }>();
@@ -81,7 +94,9 @@ export function PlanDetail() {
   const articleOptions = procedurePickerOptions(articles.data ?? [], zone);
 
   const [editing, setEditing] = useState<PlanOut | null>(null);
-  const [creatingTest, setCreatingTest] = useState(false);
+  const creatingTest = useNewParam("test");
+  // The plan's name in the browser tab: "<plan> · Continuity tests · Novieri RMM".
+  useRecordTitle(plan.data?.name);
   // Cycle 8. Both of these write to the immutable audit log and neither can be
   // withdrawn, so neither may fire on a single click from a row of three
   // identically styled buttons -- Auditor B: "The three header buttons are
@@ -93,33 +108,33 @@ export function PlanDetail() {
 
   return (
     <div>
-      {/* THE ACTIONS BELONG TO THE HEAD, so they are passed to it. They were
-          in a hand-built flex row wrapping `PageHead`, which already IS a
-          `space-between` flex row with an actions slot and an 18px bottom
-          margin — so the page carried two rows of layout doing one row's job,
-          with its own `gap-2` beside `.head-actions`'s 9px. That is why the
-          buttons on this page do not line up with the buttons on the plans
-          list, which passes `actions` properly. */}
-      <PageHead
+      {/* THE ACTIONS BELONG TO THE HEAD, so they are passed to it: the
+          record head's own actions slot, never a hand-built row beside it. */}
+      <DetailHead
+        back={{ to: "/bcp", label: t("bcp.detail.back") }}
         title={plan.data?.name ?? t("bcp.detail.planFallback")}
-        description={t("bcp.detail.description")}
+        status={
+          plan.data
+            ? { kind: plan.data.state === "active" ? "ok" : "mut", label: planStateLabel(plan.data.state) }
+            : undefined
+        }
+        context={plan.data ? <ClientContext clientId={plan.data.client_id} /> : undefined}
         actions={
           <>
             {canApprove && (
-              <Button disabled={reviewPlan.isPending} onClick={() => setConfirming("review")}>
-                <Icon name="circle-check" size={14} />
-                {reviewPlan.isPending ? t("bcp.detail.recording") : t("bcp.detail.recordReview")}
-              </Button>
+              <Btn
+                label={reviewPlan.isPending ? t("bcp.detail.recording") : t("bcp.detail.recordReview")}
+                icon="circle-check"
+                disabled={reviewPlan.isPending}
+                onClick={() => setConfirming("review")}
+              />
             )}
             {canManage && plan.data && (
-              <Button variant="outline" onClick={() => setEditing(plan.data as PlanOut)}>
-                <Icon name="edit" size={14} />
-                {t("bcp.detail.editPlan")}
-              </Button>
+              <Btn label={t("bcp.detail.editPlan")} icon="edit" onClick={() => setEditing(plan.data as PlanOut)} />
             )}
             {canManage && plan.data && (
-              <Button
-                variant="outline"
+              <Btn
+                label={isArchived ? t("bcp.detail.unarchive") : t("bcp.detail.archive")}
                 disabled={updatePlan.isPending}
                 onClick={() => {
                   // ARCHIVING ASKS, UNARCHIVING DOES NOT. Archiving retires the
@@ -133,9 +148,11 @@ export function PlanDetail() {
                   }
                   setConfirming("archive");
                 }}
-              >
-                {isArchived ? t("bcp.detail.unarchive") : t("bcp.detail.archive")}
-              </Button>
+              />
+            )}
+            {/* The plan's one primary: a test is what proves the plan. */}
+            {canManage && plan.data && (
+              <Btn label={t("bcp.detail.newTest")} icon="plus" variant="primary" onClick={creatingTest.start} />
             )}
           </>
         }
@@ -192,16 +209,8 @@ export function PlanDetail() {
           <h2 className="sr-only">{t("bcp.detail.summary")}</h2>
           <Facts
             items={[
-              {
-                k: t("bcp.detail.state"),
-                v: (
-                  <StatusPill
-                    value={plan.data.state}
-                    kind={plan.data.state === "active" ? "ok" : "mut"}
-                    label={planStateLabel(plan.data.state)}
-                  />
-                ),
-              },
+              // No State fact: the record head's badge says it (the coordinator's
+              // rule for the client 360's Details, applied here; critique, wave O4).
               {
                 k: t("bcp.detail.rto"),
                 v:
@@ -280,19 +289,8 @@ export function PlanDetail() {
         </>
       )}
 
-      <Panel
-        title={t("bcp.detail.testsPanel")}
-        actions={
-          canManage && (
-            <Button variant="outline" onClick={() => setCreatingTest(true)}>
-              <Icon name="plus" size={14} />
-              {t("bcp.detail.newTest")}
-            </Button>
-          )
-        }
-        bare
-      >
-        <Table>
+      <Panel title={t("bcp.detail.testsPanel")} bare>
+        <Table label={t("bcp.detail.testsPanel")}>
           <thead>
             <tr>
               <Th>{t("bcp.detail.colTest")}</Th>
@@ -372,9 +370,8 @@ export function PlanDetail() {
       </Panel>
 
       {editing && <PlanEditor plan={editing} onClose={() => setEditing(null)} />}
-      {creatingTest && (
-        <NewTestDialog planId={planId} onClose={() => setCreatingTest(false)} />
-      )}
+      {/* Open only for someone who may manage plans, whatever the URL asks. */}
+      {creatingTest.open && canManage && <NewTestDialog planId={planId} onClose={creatingTest.close} />}
     </div>
   );
 }
@@ -387,6 +384,9 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
   const [type, setType] = useState<TestType>("restore_drill");
   const [scheduledFor, setScheduledFor] = useState("");
   const [notes, setNotes] = useState("");
+  // ONE GUARD FOR THE FORM IN `?new=test` (general ruling 3).
+  const dirty = type !== "restore_drill" || scheduledFor !== "" || notes !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function submit() {
     createTest.mutate(
@@ -401,15 +401,21 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
         body: { type, scheduled_for: toInstant(scheduledFor, zone) || null, notes },
       },
       {
+        // REPLACING: the new test's recorder takes the place of the plan with
+        // its `?new=test` dialog open, so Back returns to the plan, not to the
+        // dialog (and no Back from closing races the navigation).
         onSuccess: (test) => {
-          onClose();
-          navigate(`/bcp/tests/${test.id}`);
+          // Saved: the navigation that follows is not a change being dropped.
+          release();
+          navigate(`/bcp/tests/${test.id}`, { replace: true });
         },
       },
     );
   }
 
   return (
+    <>
+    {guard}
     <Dialog open onClose={onClose} title={t("bcp.detail.newTestTitle")}>
       <div className="form-grid">
         <Field label={t("bcp.detail.type")}>
@@ -466,5 +472,6 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
         </Button>
       </div>
     </Dialog>
+    </>
   );
 }

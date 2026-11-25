@@ -31,6 +31,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError, Device, Job, JobStatus, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type {
   SegmentCheckOut,
   SiteServerCreate,
@@ -72,13 +73,22 @@ export function useSiteServerPermissions(): {
   };
 }
 
-/** `enabled: false` holds the request back (e.g. until `/me` says the account holds `site.read`). */
-export function useSiteServers(filters: SiteServerFilters = {}, options: { enabled?: boolean } = {}) {
-  const api = useApi();
+/**
+ * `enabled: false` holds the request back (e.g. until `/me` says the account
+ * holds `site.read`). `chip` is the list's Client chip (`?client=`, "" or
+ * absent without one): the read is narrowed to that client (redesign plan,
+ * Receta L, 7; decision D6), keyed by it, and held until it is decided. The
+ * readiness checks of other modules pass no chip and read as before.
+ */
+export function useSiteServers(
+  filters: SiteServerFilters = {},
+  options: { enabled?: boolean; chip?: string } = {},
+) {
+  const { api, client, ready } = useNarrowedApi(options.chip ?? "");
   return useQuery<SiteServerOut[], ApiError>({
-    queryKey: [SITE_SERVERS_KEY, filters],
+    queryKey: [SITE_SERVERS_KEY, filters, client],
     queryFn: () => api.listSiteServers(filters),
-    enabled: options.enabled ?? true,
+    enabled: (options.enabled ?? true) && ready,
     ...NO_RETRY,
   });
 }

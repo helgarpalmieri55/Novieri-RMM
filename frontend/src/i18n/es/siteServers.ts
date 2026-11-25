@@ -4,7 +4,7 @@ import type { siteServers as en } from "../en/siteServers";
 export const siteServers: Shape<typeof en> = {
   page: {
     title: "Servidores de sitio",
-    description: "Dispositivos que hacen barridos y encienden equipos con Wake-on-LAN en su propio segmento.",
+    description: "Equipos que barren su segmento y encienden otros con Wake-on-LAN.",
     promote: "Promover dispositivo",
     registered: "Servidores registrados",
     registeredZero: "No se ha promovido ningún dispositivo",
@@ -21,8 +21,7 @@ export const siteServers: Shape<typeof en> = {
     filterEnabled: "Habilitados",
     filterDisabled: "Deshabilitados",
     rolesNote: "El almacenamiento en caché de contenido y el arranque por PXE no están disponibles en esta versión.",
-    noMatchTitle: "Ningún servidor de sitio coincide con ese filtro.",
-    noMatchBody: "El parque no está vacío; el filtro sí. Elige otro estado.",
+    emptyYet: "Aún no hay servidores de sitio: promueve un equipo de la red del cliente.",
     promoteTitle: "Promover un dispositivo a servidor de sitio",
   },
   list: {
@@ -47,6 +46,7 @@ export const siteServers: Shape<typeof en> = {
     pxe: "Arranque por PXE",
   },
   detail: {
+    back: "Todos los servidores de sitio",
     loading: "Cargando…",
     article: "Servidor de sitio {name}",
     state: "Estado",
@@ -60,7 +60,6 @@ export const siteServers: Shape<typeof en> = {
     wakeTitle: "Encender un equipo",
     wakeSubtitle: "Difunde un paquete mágico en uno de los segmentos de este servidor.",
     fallbackTitle: "Servidor de sitio",
-    declaredFor: { one: "declarado para {count} segmento", other: "declarado para {count} segmentos" },
   },
   prerequisites: {
     title: "Antes de poder promover un servidor de sitio",

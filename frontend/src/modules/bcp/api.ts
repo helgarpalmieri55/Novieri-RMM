@@ -6,6 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { Me } from "../../lib/api";
 import { requireKnown } from "../../lib/clientSelection";
 import type {
@@ -50,9 +51,15 @@ export function useUserTimezone(): string | null {
   return me.data?.timezone ?? null;
 }
 
-export function usePlans() {
-  const api = useApi();
-  return useQuery({ queryKey: ["bcp-plans"], queryFn: () => api.listPlans() });
+/**
+ * The plans, narrowed to the Client chip's client when it has one (redesign
+ * plan, Receta L, 7; decision D6). `chip` is `?client=`'s value, "" without a
+ * chip. The same call, keyed by the client it was narrowed to; the mutations
+ * below still invalidate the `["bcp-plans"]` prefix, which reaches them all.
+ */
+export function usePlans(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({ queryKey: ["bcp-plans", client], queryFn: () => api.listPlans(), enabled: ready });
 }
 
 export function useCreatePlanMutation() {
@@ -105,9 +112,14 @@ export function useReviewPlanMutation() {
   });
 }
 
-export function usePlanStatus() {
-  const api = useApi();
-  return useQuery({ queryKey: ["bcp-plan-status"], queryFn: () => api.planStatus() });
+/**
+ * Each plan's review and test standing, narrowed like `usePlans`: the list's
+ * Review, Last test and Findings columns are this read joined by plan id, so
+ * it follows the same Client chip (and the tiles over the list with it).
+ */
+export function usePlanStatus(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({ queryKey: ["bcp-plan-status", client], queryFn: () => api.planStatus(), enabled: ready });
 }
 
 // --------------------------------------------------------------------------

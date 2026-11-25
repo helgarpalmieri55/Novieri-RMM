@@ -778,7 +778,8 @@ describe("every site-server tile opens the rows it counted", () => {
     api.listSiteServers = vi.fn().mockResolvedValue([TWO[0] as SiteServerOut]);
     renderPage("/site-servers?state=disabled");
 
-    expect(await screen.findByText("No site server matches that filter.")).toBeInTheDocument();
+    // The list kit's filtered-empty sentence (redesign plan, Receta L, 3).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     expect(screen.queryByTestId("no-site-servers")).not.toBeInTheDocument();
   });
 

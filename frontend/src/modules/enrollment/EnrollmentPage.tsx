@@ -113,6 +113,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
@@ -126,13 +127,36 @@ import { ClientField } from "../../components/ClientField";
 import { SiteField } from "../../components/SiteField";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { useClientSites } from "../../lib/clientSites";
 import { useSitesOf } from "../devices/siteNames";
 import { useClientName } from "../settings/api";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { Btn, FilterBar, PageHead, Pager, Panel, Progress, QueryState, SearchField, StatCard, StatsGrid, StatusPill, TableWrap, Tabs } from "../../shell/components";
+import {
+  Btn,
+  FilterBar,
+  FilterChips,
+  ListEmpty,
+  PageHead,
+  Pager,
+  Panel,
+  Progress,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  TableWrap,
+  UrlTabs,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  useUrlTab,
+  writeQuery,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
 import {
@@ -315,17 +339,34 @@ export function EnrollmentPage() {
    * An unknown or unpermitted `?tab=` falls back to the first tab the caller
    * may actually see, exactly as the previous component state did.
    */
+  //
+  // ON THE KIT (redesign plan, Task 9, 4.11): the same `?tab=` read by the
+  // kit's `useUrlTab`, so the default tab writes nothing and an unknown one
+  // falls back to the first the person may see.
   const [params, setParams] = useSearchParams();
-  const requestedTab = params.get("tab");
-  const tab = tabs.some((item) => item.key === requestedTab)
-    ? (requestedTab as string)
-    : (tabs[0]?.key ?? "flow");
+  const [urlTab] = useUrlTab(tabKeys, tabKeys[0] ?? "flow");
+  // New token is `?new=token` (decision D8): it reveals the issue form, which
+  // lives on the Tokens tab, so while it is open that is the tab shown.
+  const creating = useNewParam("token");
+  const formOpen = creating.open && canManage;
+  const tab = formOpen ? "tokens" : urlTab;
+  /** Closes the issue form onto the Tokens tab, in one write that replaces the entry. */
+  function showIssuedOnTokens() {
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    if ((tabKeys[0] ?? "flow") === "tokens") next.delete("tab");
+    else next.set("tab", "tokens");
+    writeQuery(params, next, setParams, { replace: true });
+  }
+
   function setRequestedTab(key: string) {
     const next = new URLSearchParams(params);
-    next.set("tab", key);
-    // Pushed, not replaced: Back should undo a tab change, as it does on
-    // /devices.
-    setParams(next);
+    if (key === (tabKeys[0] ?? "flow")) next.delete("tab");
+    else next.set("tab", key);
+    // Leaving the Tokens tab leaves its issue form: one write, so the two
+    // keys never disagree. Pushed, as a tab change is: Back undoes it.
+    if (key !== "tokens") next.delete("new");
+    writeQuery(params, next, setParams);
   }
 
   /**
@@ -344,8 +385,14 @@ export function EnrollmentPage() {
    * BOTH TOGGLES STATE THE COUNT THEY ARE HIDING. A filter that silently
    * removes security records is worse than the clutter it fixes.
    */
-  const [showRevokedTokens, setShowRevokedTokens] = useState(false);
-  const [showRevokedCerts, setShowRevokedCerts] = useState(false);
+  //
+  // IN THE URL NOW (redesign plan, Task 9, 4.11): one `?revoked=1` for both
+  // tabs, as chips, so `/enrollment?tab=certificates&revoked=1` reloads in
+  // that view; `?unlimited=1` for the tokens with no use limit; `?q=` for the
+  // certificates' search.
+  const filters = useUrlFilters(["revoked", "unlimited", "q"] as const);
+  const showRevokedTokens = filters.values.revoked === "1";
+  const showRevokedCerts = showRevokedTokens;
   /**
    * NARROW THE TABLE TO THE CREDENTIALS NOBODY BOUNDED.
    *
@@ -359,7 +406,7 @@ export function EnrollmentPage() {
    * with three hundred tokens the ∞ rows are not on the page they are looking
    * at. The server filters on the same predicate it counts with.
    */
-  const [unlimitedOnly, setUnlimitedOnly] = useState(false);
+  const unlimitedOnly = filters.values.unlimited === "1";
   /**
    * WHICH PAGE OF TOKENS. `GET /enrollment-tokens` was unbounded and tokens
    * only accumulate — one per device onboarded, one per provisioning run, and
@@ -392,7 +439,7 @@ export function EnrollmentPage() {
     enabled: canManage,
   });
 
-  const [search, setSearch] = useState("");
+  const search = filters.values.q;
   const [pendingRevoke, setPendingRevoke] = useState<PendingRevoke | null>(null);
   /**
    * The one-time plaintext bootstrap token, held in COMPONENT STATE for the
@@ -403,7 +450,6 @@ export function EnrollmentPage() {
   const [issued, setIssued] = useState<EnrollmentTokenCreated | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [confirmingDismiss, setConfirmingDismiss] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   /** The validated request, waiting on the confirmation. Nothing is sent while
@@ -424,6 +470,35 @@ export function EnrollmentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
   }, [journeySite]);
 
+  // ONE GUARD FOR THE ISSUE FORM IN `?new=token` (general ruling 3): Cancel,
+  // Back, another tab or a link with a change in it asks first. The client
+  // and the site picked are the form too (fix round 2), but the site it opens
+  // with is no change: the journey's, or the client's only live site, which
+  // the Site field picks by itself (the same cached read as the field's).
+  const formSites = useClientSites(formOpen ? tokenClient : null);
+  const liveSites = (formSites.data ?? []).filter((site) => site.archived_at === null);
+  const openingSite = journeySite ?? (liveSites.length === 1 ? (liveSites[0]?.id ?? "") : "");
+  const formDirty =
+    form.name !== BLANK_FORM.name ||
+    form.hours !== BLANK_FORM.hours ||
+    form.maxUses !== BLANK_FORM.maxUses ||
+    client.picked !== "" ||
+    (siteId !== "" && siteId !== openingSite);
+  const { guard: formGuard, release: releaseForm } = useUnsavedGuard(formOpen && formDirty, { search: ["new"] });
+  // AND IT OPENS EMPTY EVERY TIME (general ruling 4), however it was opened:
+  // what was typed or picked in a form that closed without issuing is gone.
+  // The site goes back to the journey's where there is one (design §4.4);
+  // un-picking the client clears the site through `onPick` first.
+  const { setPicked } = client;
+  useEffect(() => {
+    if (!formOpen) {
+      setForm(BLANK_FORM);
+      setAttempt(null);
+      setPicked("");
+      setSiteId(journeySite ?? "");
+    }
+  }, [formOpen, setPicked, journeySite]);
+
   // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
   const create = useSecretMutation({
     mutationFn: (body: TokenDraft) =>
@@ -438,7 +513,19 @@ export function EnrollmentPage() {
       setAttempt(null);
       // The form closes on success: leaving it open with the fields cleared
       // invites a second click that would issue a second live credential.
-      setFormOpen(false);
+      //
+      // AND THE PAGE LANDS ON THE TOKENS TAB, where the one-time plaintext is
+      // drawn (fix round 1, I1). The form forces that tab while it is open,
+      // but closing it went Back to whatever `?tab=` the issue started from,
+      // so a token issued from Certificates was shown on a tab nobody was
+      // looking at. From another tab, then, one write in place: `new` goes
+      // and the tab is Tokens. Started on Tokens, the form closes as every
+      // `?new=` dialog does, Back where it can (fix round 2), so the list is
+      // not left twice in history. The token itself stays in component
+      // state, never in the URL.
+      releaseForm();
+      if (urlTab === "tokens") creating.close();
+      else showIssuedOnTokens();
       void queryClient.invalidateQueries({ queryKey: [ENROLLMENT_TOKENS_KEY] });
     },
   });
@@ -506,21 +593,24 @@ export function EnrollmentPage() {
   function toggleForm() {
     setAttempt(null);
     create.reset();
-    setFormOpen((open) => !open);
+    if (formOpen) creating.close();
+    else creating.start();
   }
 
   /**
    * v3 puts "New token" in the page head, primary. From any other tab it
-   * first opens the Tokens tab, so the form the click promises is the form
-   * that appears; on the Tokens tab it is the same toggle the panel had.
+   * opens the form, which shows the Tokens tab (`tab` above), so the form the
+   * click promises is the form that appears; on the Tokens tab it is the same
+   * toggle the panel had.
    */
   function createFromHead() {
-    if (tab !== "tokens") {
-      setRequestedTab("tokens");
-      if (!formOpen) toggleForm();
-      return;
-    }
     toggleForm();
+  }
+
+  /** A chip that turns one filter on and off. `offset` is dropped by every filter write (useUrlFilters). */
+  function toggleFilter(key: "revoked" | "unlimited") {
+    setTokenOffset(0);
+    filters.set(key, filters.values[key] === "1" ? "" : "1");
   }
 
   const deviceItems: Device[] = useMemo(() => devices.data?.items ?? [], [devices.data]);
@@ -600,6 +690,7 @@ export function EnrollmentPage() {
 
   return (
     <>
+      {formGuard}
       <PageHead
         title={t("enrollment.page.title")}
         description={t("enrollment.page.description")}
@@ -705,8 +796,7 @@ export function EnrollmentPage() {
         />
       </StatsGrid>
 
-      <Tabs items={tabs} active={tab} onSelect={setRequestedTab} />
-
+      <UrlTabs label={t("enrollment.tabs.label")} items={tabs} active={tab} onSelect={setRequestedTab}>
       {tab === "tokens" ? (
         <>
           {issued ? (
@@ -950,8 +1040,7 @@ export function EnrollmentPage() {
                     onClick={() => {
                       // Back to page one: the list this offset indexes into is
                       // a different list once it is filtered.
-                      setTokenOffset(0);
-                      setUnlimitedOnly(true);
+                      toggleFilter("unlimited");
                     }}
                   >
                     {t("enrollment.tokens.showThem")}
@@ -961,64 +1050,64 @@ export function EnrollmentPage() {
             ) : null}
             {tokens.data ? (
               <FilterBar>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={showRevokedTokens}
-                    onChange={(changeEvent) => {
-                      // BACK TO PAGE ONE. The list the offset indexes into is
-                      // a different list once revoked rows join it, so page
-                      // three of the live tokens is not page three of all of
-                      // them -- keeping the offset lands the operator
-                      // somewhere neither they nor this page chose.
-                      setTokenOffset(0);
-                      setShowRevokedTokens(changeEvent.target.checked);
-                    }}
-                  />
-                  {/* "hidden" IS ONLY TRUE WHILE THEY ARE HIDDEN. A label
-                      that still says "3 hidden" under a ticked box describes
-                      the screen the operator is not looking at. */}
-                  <span>
-                    {revokedTokenCount === 0
-                      ? t("enrollment.tokens.showRevokedNone")
-                      : showRevokedTokens
-                        ? t("enrollment.tokens.showRevokedShown", { count: revokedTokenCount })
-                        : t("enrollment.tokens.showRevokedHidden", { count: revokedTokenCount })}
-                  </span>
-                </label>
+                {/* CHIPS NOW, IN THE URL (Receta L), and each still names the
+                    count it is hiding: a filter that silently removes security
+                    records is worse than the clutter it fixes. The labels are
+                    the toggles' own sentences. BACK TO PAGE ONE on either: the
+                    list the offset indexes into is a different list once
+                    revoked rows join it, or once it is narrowed. */}
+                <FilterChips
+                  label={t("enrollment.tokens.filterLabel")}
+                  options={[
+                    {
+                      value: "1",
+                      /* "hidden" IS ONLY TRUE WHILE THEY ARE HIDDEN. A label
+                         that still says "3 hidden" under a pressed chip
+                         describes the screen the operator is not looking at. */
+                      label:
+                        revokedTokenCount === 0
+                          ? t("enrollment.tokens.showRevokedNone")
+                          : showRevokedTokens
+                            ? t("enrollment.tokens.showRevokedShown", { count: revokedTokenCount })
+                            : t("enrollment.tokens.showRevokedHidden", { count: revokedTokenCount }),
+                    },
+                  ]}
+                  value={filters.values.revoked}
+                  onChange={() => toggleFilter("revoked")}
+                />
                 {/* OFFERED ONLY WHERE IT WOULD FIND SOMETHING, and left
                     visible while it is on so the operator can turn it off --
                     a filter with no control to clear it is a table that has
                     silently stopped being the table. */}
                 {unlimitedTokenCount > 0 || unlimitedOnly ? (
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={unlimitedOnly}
-                      onChange={(changeEvent) => {
-                        setTokenOffset(0);
-                        setUnlimitedOnly(changeEvent.target.checked);
-                      }}
-                    />
-                    <span>{t("enrollment.tokens.onlyUnlimited", { count: unlimitedTokenCount })}</span>
-                  </label>
+                  <FilterChips
+                    label={t("enrollment.tokens.limitLabel")}
+                    options={[{ value: "1", label: t("enrollment.tokens.onlyUnlimited", { count: unlimitedTokenCount }) }]}
+                    value={filters.values.unlimited}
+                    onChange={() => toggleFilter("unlimited")}
+                  />
                 ) : null}
                 <span className="filter-spacer" />
+                {/* The org's count for this view, not the page's (Receta L). */}
+                <ShowingCount shown={tokenItems.length} total={tokenTotal} />
               </FilterBar>
             ) : null}
-            <QueryState
-              loading={tokens.isLoading}
-              error={tokens.error}
-              empty={tokenItems.length === 0}
-              emptyIcon="certificate"
-              emptyLabel={
-                unlimitedOnly
-                  ? t("enrollment.tokens.emptyUnlimited")
-                  : revokedTokenCount > 0 && !showRevokedTokens
-                    ? t("enrollment.tokens.emptyAllRevoked")
-                    : t("enrollment.tokens.emptyNone")
-              }
-            >
+            <QueryState loading={tokens.isLoading} error={tokens.error} empty={false} emptyLabel="">
+              {tokenItems.length === 0 ? (
+                // Narrowed to the unlimited tokens and none is: the kit's
+                // "nothing matches", with its way out. Otherwise nothing is
+                // filtered out but what the revoked chip names.
+                <ListEmpty
+                  filtered={unlimitedOnly}
+                  onClear={() => toggleFilter("unlimited")}
+                  nothingYet={
+                    revokedTokenCount > 0 && !showRevokedTokens
+                      ? t("enrollment.tokens.emptyAllRevoked")
+                      : t("enrollment.tokens.emptyNone")
+                  }
+                  icon="certificate"
+                />
+              ) : (
               <TableWrap>
                 <table>
                   <thead>
@@ -1098,6 +1187,7 @@ export function EnrollmentPage() {
                   </tbody>
                 </table>
               </TableWrap>
+              )}
             </QueryState>
             {/* THE PAGER, AND THE COUNT BESIDE IT. The count is the org's, not
                 the page's: "Page 1 of 3 — 61 tokens" is the only thing that
@@ -1137,7 +1227,7 @@ export function EnrollmentPage() {
               placeholder={t("enrollment.certs.searchPlaceholder")}
               aria-label={t("enrollment.certs.searchAria")}
               value={search}
-              onChange={(changeEvent) => setSearch(changeEvent.target.value)}
+              onChange={(changeEvent) => filters.set("q", changeEvent.target.value)}
             />
             {/* A REVOKED CERTIFICATE IS NOT DELETED, HERE OR ANYWHERE. The
                 device stays on `/devices` and the `agents` row stays in the
@@ -1150,40 +1240,45 @@ export function EnrollmentPage() {
             {/* And, as with the token toggle, only once the read has landed:
                 the count is a fact about `GET /devices`. */}
             {devices.data ? (
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={showRevokedCerts}
-                  onChange={(changeEvent) => setShowRevokedCerts(changeEvent.target.checked)}
-                />
-                <span>
-                  {revokedCertCount === 0
-                    ? t("enrollment.certs.showRevokedNone")
-                    : showRevokedCerts
-                      ? t("enrollment.certs.showRevokedShown", { count: revokedCertCount })
-                      : t("enrollment.certs.showRevokedHidden", { count: revokedCertCount })}
-                </span>
-              </label>
+              <FilterChips
+                label={t("enrollment.certs.filterLabel")}
+                options={[
+                  {
+                    value: "1",
+                    label:
+                      revokedCertCount === 0
+                        ? t("enrollment.certs.showRevokedNone")
+                        : showRevokedCerts
+                          ? t("enrollment.certs.showRevokedShown", { count: revokedCertCount })
+                          : t("enrollment.certs.showRevokedHidden", { count: revokedCertCount }),
+                  },
+                ]}
+                value={filters.values.revoked}
+                onChange={() => toggleFilter("revoked")}
+              />
             ) : null}
             <span className="filter-spacer" />
+            {/* Over the devices this tab read, which is what it can show. */}
+            {devices.data ? <ShowingCount shown={filteredDevices.length} total={deviceItems.length} /> : null}
           </FilterBar>
-          <QueryState
-            loading={devices.isLoading}
-            error={devices.error}
-            empty={filteredDevices.length === 0}
-            emptyIcon="certificate"
-            emptyLabel={
-              deviceItems.length === 0
-                ? t("enrollment.certs.emptyNone")
-                : // "No certificate matches that filter" over an empty search
-                  // box would send an operator hunting for a filter they never
-                  // set. When the revocation toggle is what emptied the table,
-                  // it says so and names the control that undoes it.
-                  search.trim() === "" && !showRevokedCerts && revokedCertCount > 0
-                  ? t("enrollment.certs.emptyAllRevoked")
-                  : t("enrollment.certs.emptyFiltered")
-            }
-          >
+          <QueryState loading={devices.isLoading} error={devices.error} empty={false} emptyLabel="">
+            {filteredDevices.length === 0 ? (
+              // "Nothing matches these filters" over an empty search box would
+              // send an operator hunting for a filter they never set. When the
+              // revoked chip is what emptied the table, it says so and names
+              // the control that undoes it; a search that found nothing gets
+              // the kit's sentence and its way out.
+              <ListEmpty
+                filtered={deviceItems.length > 0 && search.trim() !== ""}
+                onClear={() => filters.set("q", "")}
+                nothingYet={
+                  deviceItems.length > 0 && !showRevokedCerts && revokedCertCount > 0
+                    ? t("enrollment.certs.emptyAllRevoked")
+                    : t("enrollment.certs.emptyNone")
+                }
+                icon="certificate"
+              />
+            ) : (
             <TableWrap>
               <table>
                 <thead>
@@ -1256,6 +1351,7 @@ export function EnrollmentPage() {
                 </tbody>
               </table>
             </TableWrap>
+            )}
           </QueryState>
         </Panel>
       ) : (
@@ -1307,6 +1403,7 @@ export function EnrollmentPage() {
           </div>
         </Panel>
       )}
+      </UrlTabs>
 
       {/* STEP 3 OF THREE. Names the token, states its lifetime and its
           redemption limit, and says the plaintext is shown once — the three

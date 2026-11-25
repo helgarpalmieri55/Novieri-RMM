@@ -319,7 +319,7 @@ const offsiteTargets = (): OffsiteTarget[] => [
     test_requested_at: ago(3 * DAY),
     tested_at: ago(3 * DAY - 2),
     test_steps: [
-      { step: "reach", ok: true, detail: "The bucket answered." },
+      { step: "connect", ok: true, detail: "The bucket answered." },
       { step: "object_lock", ok: true, detail: "Object Lock is on, in compliance mode." },
       { step: "write", ok: true, detail: "A test object was written and locked." },
     ],

@@ -132,7 +132,6 @@ export const backup: Shape<typeof en> = {
       "Una segunda copia bloqueada necesita una clave de recuperación y un almacenamiento externo que funcione.",
   },
   points: {
-    title: "Copia de seguridad y restauración",
     description: "Cobertura de las copias de seguridad, puntos de restauración y verificación.",
     runBackup: "Ejecutar copia de seguridad",
     tileSuccess: "Éxito de las copias",
@@ -150,8 +149,9 @@ export const backup: Shape<typeof en> = {
     filterAria: "Filtrar los puntos de copia",
     allPoints: "Todos los puntos de copia",
     awaitingVerification: "Pendientes de verificación",
+    deviceChip: "Dispositivo",
+    allDevices: "Todos los dispositivos",
     emptyNone: "Todavía no hay puntos de copia registrados.",
-    emptyFiltered: "Ningún punto de copia está pendiente de verificación.",
     colDevice: "Dispositivo",
     colRepository: "Repositorio",
     colTaken: "Tomado",
@@ -222,7 +222,6 @@ export const backup: Shape<typeof en> = {
     filterAria: "Filtrar las políticas por estado",
     allPolicies: "Todas las políticas",
     emptyNone: "No hay políticas de copia de seguridad configuradas.",
-    emptyFiltered: "Ninguna política coincide con ese filtro.",
     colScope: "Ámbito",
     colClient: "Cliente",
     colRepository: "Repositorio",
@@ -262,7 +261,6 @@ export const backup: Shape<typeof en> = {
     everyPolicy: "Todos los dispositivos tienen una política de copia de seguridad",
     filterAria: "Mostrar dispositivos",
     allDevices: "Todos los dispositivos",
-    emptyFiltered: "Ningún dispositivo coincide con ese filtro.",
     emptyNone: "Todavía no hay dispositivos.",
     colDevice: "Dispositivo",
     colProtection: "Protección",
@@ -300,7 +298,6 @@ export const backup: Shape<typeof en> = {
     filterAria: "Filtrar los repositorios por estado",
     allRepositories: "Todos los repositorios",
     emptyNone: "No hay repositorios registrados.",
-    emptyFiltered: "Ningún repositorio coincide con ese filtro.",
     colName: "Nombre",
     colClient: "Cliente",
     colState: "Estado",
@@ -321,7 +318,7 @@ export const backup: Shape<typeof en> = {
   offsite: {
     title: "Copia externa",
     description:
-      "Una segunda copia bloqueada de cada copia de seguridad, en un lugar donde este servidor no puede borrarla.",
+      "Una segunda copia bloqueada, que este servidor no puede borrar.",
     keyTitle: "Clave de recuperación",
     keySubtitle:
       "Te permite leer la copia externa si alguna vez se pierde este servidor. Solo la tienes tú.",
@@ -395,7 +392,7 @@ export const backup: Shape<typeof en> = {
     gfsMonthly: "Copias mensuales que conservar",
     gfsYearly: "Copias anuales que conservar",
     keyHelp: "Déjala en blanco para conservar la actual.",
-    editStorage: "Editar almacenamiento externo",
+    editStorageNamed: "Editar {name}",
     targetIntro:
       "Crea primero el bucket con Object Lock activado: no se puede añadir después. Dale a este servidor una clave que pueda escribir, leer y establecer bloqueos, pero no cambiar el bucket ni saltarse su bloqueo.",
     storageAddress: "Dirección del almacenamiento",
@@ -408,7 +405,6 @@ export const backup: Shape<typeof en> = {
       "Nadie puede borrar ni modificar una copia bloqueada, ni siquiera quien tome el control de este servidor.",
     speedLimit: "Límite de velocidad de subida (Mbit/s)",
     speedLimitHelp: "Déjalo en blanco para no poner límite.",
-    save: "Guardar",
     add: "Añadir",
     copyTitle: "Copia externa de estos repositorios",
     copyEmpty: "Todavía no hay repositorios.",

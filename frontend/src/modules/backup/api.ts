@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type {
   OffsiteTargetCreate,
   OffsiteTargetUpdate,
@@ -111,9 +112,22 @@ export function useUpsertBackupPolicyMutation() {
   });
 }
 
-export function useBackupPoints() {
-  const api = useApi();
-  return useQuery({ queryKey: ["backup-points"], queryFn: () => api.listBackupPoints() });
+/**
+ * The backup points, narrowed to the Client chip's client when it has one
+ * (redesign plan, Receta L, 7; decision D6). `chip` is `?client=`'s value, ""
+ * without a chip. The same call with the same arguments: what changes is the
+ * client it is narrowed to, and the key it is kept under, so a change of chip
+ * reads again and no row of the last client stays on screen. The mutations
+ * below still invalidate the `["backup-points"]` prefix, which reaches every
+ * client's entry.
+ */
+export function useBackupPoints(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: ["backup-points", client],
+    queryFn: () => api.listBackupPoints(),
+    enabled: ready,
+  });
 }
 
 export function useRunBackupMutation() {
@@ -271,11 +285,18 @@ export function useProveRecoveryKeyMutation() {
   });
 }
 
-export function useBackupCoverage(coverage: string) {
-  const api = useApi();
+/**
+ * The coverage report, narrowed to the Client chip's client when it has one
+ * (Receta L, 7). The whole report arrives in one answer (`limit: 500`), and
+ * the coverage filter is applied to it here, so one cached answer per client
+ * serves every chip.
+ */
+export function useBackupCoverage(coverage: string, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   const params: Record<string, string> = { limit: "500" };
   return useQuery({
-    queryKey: ["backup-coverage"],
+    queryKey: ["backup-coverage", client],
+    enabled: ready,
     queryFn: () => api.runReport("backup-coverage", params),
     select: (page) =>
       coverage === "" ? page : { ...page, rows: page.rows.filter((r) => r.coverage === coverage) },
