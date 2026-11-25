@@ -48,7 +48,8 @@ describe("the sign-in pages in Spanish", () => {
     expect(screen.getByRole("button", { name: "Usar una clave de acceso" })).toBeInTheDocument();
     expect(screen.getByLabelText("Código de seis dígitos de tu aplicación de autenticación")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "No volver a preguntar en este equipo durante 15 días" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Usar un código de recuperación" })).toBeInTheDocument();
+    // A text link since the redesign (design §4, plan Task 13, 8.2).
+    expect(screen.getByRole("link", { name: "Usar un código de recuperación" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
 

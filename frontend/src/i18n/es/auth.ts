@@ -13,6 +13,8 @@ export const auth: Shape<typeof en> = {
     working: "Un momento…",
     startOver: "Empezar de nuevo",
     backToSignIn: "Volver al inicio de sesión",
+    // Between two ways through one step: the password and Microsoft, a passkey and a password.
+    or: "o",
     tooMany: "Demasiados intentos. Espera un minuto y vuelve a intentarlo.",
     wait: {
       one: "Demasiados intentos. Espera {count} segundo y vuelve a intentarlo.",
@@ -25,6 +27,11 @@ export const auth: Shape<typeof en> = {
     intro: "Usa el correo electrónico y la contraseña de tu cuenta. Después viene tu segundo factor.",
     submit: "Continuar",
     rejected: "Ese correo electrónico y esa contraseña no corresponden a ninguna cuenta de aquí.",
+    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on): only
+    // the field that is empty is named, and both only when both are.
+    missing: "Introduce tu correo electrónico y tu contraseña.",
+    missingEmail: "Introduce tu correo electrónico.",
+    missingPassword: "Introduce tu contraseña.",
     forgot: "¿Olvidaste tu contraseña?",
   },
   portalSignIn: {
@@ -118,7 +125,6 @@ export const auth: Shape<typeof en> = {
     introContact: "Te invitaron al portal de soporte como <b>{email}</b>. Elige una contraseña o usa una clave de acceso.",
     usePasskey: "Usar una clave de acceso",
     passkeyName: "Nombre de esta clave de acceso",
-    or: "o",
     microsoftWithPassword:
       "O acepta con tu cuenta de Microsoft. Elige también la contraseña de arriba: es tu forma de volver si Microsoft deja de funcionar.",
   },

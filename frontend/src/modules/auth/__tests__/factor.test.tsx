@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../lib/api";
 import { navigation } from "../../../lib/session";
-import { authApi, calls, installDefaults, renderAuth } from "./harness";
+import { authApi, calls, installDefaults, renderAuth, where } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => authApi() }));
 
@@ -54,7 +54,9 @@ describe("the second factor", () => {
     renderAuth("/sign-in/factor", EVERY);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(headings).toEqual(["Passkey", "Authenticator app"]);
-    expect(screen.getByRole("button", { name: "Use a recovery code instead" })).toBeInTheDocument();
+    // A text link, not a button (redesign design §4, plan Task 13, 8.2): the
+    // quieter way through, and a view of this page with its own address.
+    expect(screen.getByRole("link", { name: "Use a recovery code instead" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Recovery code")).not.toBeInTheDocument();
   });
 
@@ -92,12 +94,34 @@ describe("the second factor", () => {
   it("puts a recovery code in the form it was shown, however it was typed", async () => {
     const user = userEvent.setup();
     renderAuth("/sign-in/factor", EVERY);
-    await user.click(screen.getByRole("button", { name: "Use a recovery code instead" }));
+    // A text link since the redesign (design §4, plan Task 13, 8.2).
+    await user.click(screen.getByRole("link", { name: "Use a recovery code instead" }));
     await user.type(screen.getByLabelText("Recovery code"), "7k3qd 9xm2p");
     await user.click(screen.getByRole("button", { name: "Use recovery code" }));
     await waitFor(() =>
       expect(calls.factorRecovery).toHaveBeenCalledWith({ code: "7K3QD-9XM2P", remember_device: false }),
     );
+  });
+
+  it("opens the recovery code at its own address, keeping where the person was going and what the step said", async () => {
+    // The link is a view of this page (redesign "todo con URL"): `next` and
+    // the methods the sign-in step handed over ride along, so the remember
+    // box and the factors offered do not change under the person.
+    const user = userEvent.setup();
+    renderAuth("/sign-in/factor?next=%2Fdevices", EVERY);
+    await user.click(screen.getByRole("checkbox", { name: "Do not ask again on this computer for 15 days" }));
+    await user.click(screen.getByRole("link", { name: "Use a recovery code instead" }));
+    expect(where.location?.pathname).toBe("/sign-in/factor");
+    expect(new URLSearchParams(where.location?.search).get("next")).toBe("/devices");
+    expect(where.location?.state).toEqual(EVERY);
+    expect(screen.getByRole("checkbox", { name: "Do not ask again on this computer for 15 days" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Use a passkey" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Recovery code"), "7K3QD-9XM2P");
+    await user.click(screen.getByRole("button", { name: "Use recovery code" }));
+    await waitFor(() =>
+      expect(calls.factorRecovery).toHaveBeenCalledWith({ code: "7K3QD-9XM2P", remember_device: true }),
+    );
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/devices"));
   });
 
   it("offers only what the account has, and no passkey where the browser cannot use one", () => {

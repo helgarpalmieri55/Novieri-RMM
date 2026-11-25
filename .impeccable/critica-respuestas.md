@@ -430,3 +430,56 @@ decisiones se contestan aquí; las que no, van al coordinador en el informe de l
 - **Respuesta: (a).** El bloque «Inicio de sesión y seguridad» es una sección como «Tus datos», no un panel con
   cabecera rayada.
 - **Regla.** `DESIGN.md`, «Forms»: secciones plegables; una página no mezcla dos estilos de tarjeta.
+---
+
+## Las pantallas antes de una sesión (`frontend/src/modules/auth/*Page.tsx`, `frontend/src/modules/setup/SetupPage.tsx`), Task 13
+
+Críticas `.impeccable/critique/2026-11-25T05-34-19Z__…` de las doce páginas (de 24/32 a 32/40), todas cerradas tras el
+pulido. Las preguntas que zanjan el encargo de la oleada, `DESIGN.md`, las reglas generales del coordinador y las
+Global Constraints se contestan aquí; la que no zanjan (punto 3) va al coordinador en el informe de la tarea.
+
+### 1. Los botones desactivados hasta que el formulario está completo
+
+- **Respuesta: se quedan activos y la pulsación dice lo que falta**, en los seis formularios de más de un campo:
+  inicio de sesión y el del portal («Introduce tu correo electrónico y tu contraseña.»), el enlace de cambio, la
+  invitación y la recuperación con contraseña obligatoria (la regla que incumple: «Usa al menos 12 caracteres.»), y
+  el alta del dueño («Rellena todos los campos para terminar.»). No se envía nada. Los de un solo campo (código de la
+  aplicación, código de recuperación, nombre de la clave de acceso, correo de la contraseña olvidada) y la casilla de
+  los códigos guardados siguen desactivados mientras están vacíos: el campo de al lado es el motivo.
+- **Por qué.** Desactivados, no decían por qué; en el alta del dueño, con siete campos sin marcar, una persona que
+  dejaba uno vacío solo veía un botón gris.
+- **Regla.** Reglas generales del coordinador, 8 y su aclaración 8a (2026-11-25): solo un formulario de un campo
+  puede dejar el botón desactivado sin motivo escrito; los demás dejan el botón activo e informan de lo que falta al
+  enviar. Ninguna llamada a la API cambia y ningún texto de error existente cambia; los dos textos nuevos solo dicen
+  lo que falta.
+
+### 2. El titular «Entrando con Microsoft» sobre un fallo
+
+- **Respuesta: se queda.** El aviso de debajo dice que no terminó.
+- **Por qué.** Un titular por estado sería un texto nuevo de la página, y el encargo conserva los textos de cada
+  pantalla de acceso.
+- **Regla.** Encargo de la Task 13: «Cada página conserva sus textos, sus llamadas y sus errores; solo usa el marco».
+
+### 3. ¿La acción principal a lo ancho de la tarjeta en todos los formularios del marco?
+
+- **Sin respuesta en las fuentes.** El encargo la pone a lo ancho en el inicio de sesión y en el del portal (8.1,
+  8.10) y dice de las demás «solo usa el marco»; `DESIGN.md` no dice nada del ancho de un botón. Opciones: (a) solo
+  los dos inicios de sesión, como ahora; (b) toda pantalla de un solo formulario (contraseña olvidada, enlace de
+  cambio, invitación, recuperación, alta del dueño). La oleada deja (a), lo literal del encargo, y lo sube al
+  coordinador.
+
+### 4. «No volver a preguntar en este equipo» como enlace de texto
+
+- **Respuesta: sigue siendo una casilla.** Solo «Usar un código de recuperación» pasa a enlace (`?use=recovery`).
+- **Por qué.** La casilla es una elección que se envía con el factor (`remember_device`); un enlace no puede llevarla.
+  Convertirla cambiaría la llamada a la API.
+- **Regla.** Global Constraints, «Comportamiento» (las llamadas no cambian); encargo 8.2 («el código se envía igual»).
+
+### 5. El aviso de lo que permite aprobar, dentro de la tarjeta del consentimiento (`nested-cards`)
+
+- **Respuesta: falso positivo; el aviso se queda donde está.** Orden para el coordinador:
+  `impeccable ignores add-value nested-cards "*" --file "frontend/src/modules/auth/ConsentPage.tsx" --reason "the .notice.gold is the design's inline warning (role note), placed in the card beside Approve by plan Task 13 8.11 and invariant 1c; a notice is a message, not a card" --shared`.
+- **Por qué.** Un `.notice` es el mensaje en línea del diseño, no un contenedor; el encargo pide exactamente ese aviso
+  dentro de la tarjeta, junto a «Aprobar», y el aviso de «solo en este equipo» siempre fue el mismo elemento.
+- **Regla.** Invariante 1c de `CLAUDE.md`; encargo 8.11; la respuesta 1 de `/__preview` trata de paneles dentro de
+  paneles, no de avisos.

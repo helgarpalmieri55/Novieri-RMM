@@ -36,6 +36,27 @@ afterEach(() => {
 });
 
 describe("signing in to the portal", () => {
+  it.each([
+    ["the password", "ana.rojas@andeslogistics.example", "", "Enter your password."],
+    ["the address", "", "a long phrase I can remember", "Enter your email address."],
+    ["both", "", "", "Enter your email address and your password."],
+  ])(
+    "keeps Continue on, and names what is missing when it is pressed without %s, sending nothing",
+    async (_, email, password, sentence) => {
+      // Coordinator ruling 8a (2026-11-25): a form of more than one field keeps
+      // its button on and names the missing fields on submit (fix round 1).
+      const user = userEvent.setup();
+      renderAuth("/portal/sign-in");
+      if (email) await user.type(screen.getByLabelText("Email address"), email);
+      if (password) await user.type(screen.getByLabelText("Password"), password);
+      const go = screen.getByRole("button", { name: "Continue" });
+      expect(go).toBeEnabled();
+      await user.click(go);
+      expect(await screen.findByRole("alert")).toHaveTextContent(new RegExp(`^${sentence}$`));
+      expect(calls.login).not.toHaveBeenCalled();
+    },
+  );
+
   it("with a password and no second factor, lands on the portal", async () => {
     calls.login.mockResolvedValue({ state: "signed_in" });
     const user = userEvent.setup();

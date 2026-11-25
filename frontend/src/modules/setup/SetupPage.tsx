@@ -17,11 +17,13 @@
  *
  * THIS PAGE IS NOT INSIDE THE APP SHELL, AND CANNOT BE. The shell asks
  * `/api/v1/me` for a session that does not exist yet, and every route inside it
- * is behind `RequireAuth`. So this is a standalone full-page form, styled from
- * the same tokens, reached from `App.tsx` above the auth gate. It is the
- * design's `.panel` on the design's page ground, with the page-title rung for
- * its headline and the form kernel's field and actions row: v3 draws no
- * screen for first boot, so it is composed from the kit alone.
+ * is behind `RequireAuth`. So this is a standalone full-page form, reached
+ * from `App.tsx` above the auth gate, in the frame every screen without a
+ * session stands in (`modules/auth/AuthCard.tsx`; redesign design §4, plan
+ * Task 13, 8.12): the Novieri RMM lockup above the card, the page-title rung
+ * for its headline, the language switch below, and the tab named "Set up
+ * this installation · Novieri RMM". It was its own copy of that frame, with
+ * no `<main>` and no way to change the language.
  *
  * THE OWNER'S PASSWORD IS CHOSEN HERE (own-auth design §7: «la pantalla con el
  * código de instalación … crea al dueño con contraseña»; own-auth Task 8). It is
@@ -33,15 +35,16 @@
  * invitation to mail and no screen in between.
  */
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef, useState } from "react";
 
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
+import { getLanguage, type MessageKey } from "../../i18n/core";
 import { Field, inputClass } from "../../components/ui";
 import { ApiError, requestHeaders } from "../../lib/api";
 import { SIGN_IN_PATH, navigation } from "../../lib/session";
-import { Btn, KIND_ICON } from "../../shell/components";
-import { Icon } from "../../shell/icons";
+import { Btn } from "../../shell/components";
+import { AuthAlert, AuthCard } from "../auth/AuthCard";
 import { checkNewPassword, describeAuthError } from "../auth/errors";
 import { NewPasswordFields } from "../auth/NewPasswordFields";
 
@@ -99,11 +102,25 @@ type Form = { code: string; name: string; email: string; password: string; again
 
 const EMPTY: Form = { code: "", name: "", email: "", password: "", again: "", organization: "" };
 
-/** The page ground and the one card on it: the pre-auth surface with room to breathe. */
-const GROUND: CSSProperties = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 32 };
-const CARD: CSSProperties = { width: "100%", maxWidth: 520, padding: 32, margin: 0 };
-/** The page-title rung (`.ph h1`), on a screen that has no `.ph`. */
-const HEADLINE: CSSProperties = { fontSize: "var(--t-h1)", fontWeight: 600, letterSpacing: "-.015em", margin: 0 };
+/**
+ * Every field the claim needs, in the order the form draws them, with the
+ * label a person reads: a press with any of them empty names exactly those
+ * (coordinator rulings 8 and 8a). The password fields are never trimmed.
+ */
+const REQUIRED: readonly { field: keyof Form; label: MessageKey; trim: boolean }[] = [
+  { field: "code", label: "setup.page.installCode", trim: true },
+  { field: "name", label: "setup.page.yourName", trim: true },
+  { field: "email", label: "setup.page.yourEmail", trim: true },
+  { field: "password", label: "auth.password.new", trim: false },
+  { field: "again", label: "auth.password.confirm", trim: false },
+  { field: "organization", label: "setup.page.organizationName", trim: true },
+];
+
+/** The labels of the fields still empty, in the form's order. */
+function emptyFields(form: Form): MessageKey[] {
+  return REQUIRED.filter(({ field, trim }) => (trim ? form[field].trim() : form[field]) === "").map(({ label }) => label);
+}
+
 
 export function SetupPage() {
   const t = useT();
@@ -123,13 +140,6 @@ export function SetupPage() {
    */
   const inFlight = useRef(false);
 
-  const complete =
-    form.code.trim() !== "" &&
-    form.name.trim() !== "" &&
-    form.email.trim() !== "" &&
-    form.password !== "" &&
-    form.again !== "" &&
-    form.organization.trim() !== "";
 
   function set(field: keyof Form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -137,7 +147,17 @@ export function SetupPage() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (inFlight.current || !complete) return;
+    if (inFlight.current) return;
+    // ON WHILE INCOMPLETE, AND A PRESS NAMES WHAT IS MISSING (coordinator
+    // rulings 8 and 8a): seven fields, none marked, and a grey button was all
+    // a person who missed one saw. The labels are listed as the language lists
+    // them ("A, B, and C" / "A, B y C").
+    const empty = emptyFields(form);
+    if (empty.length > 0) {
+      const fields = new Intl.ListFormat(getLanguage(), { type: "conjunction" }).format(empty.map((key) => t(key)));
+      setError(t("setup.page.incomplete", { count: empty.length, fields }));
+      return;
+    }
     const problem = checkNewPassword(form.password, form.again);
     if (problem) {
       setError(problem);
@@ -184,74 +204,62 @@ export function SetupPage() {
   }
 
   return (
-    <div style={GROUND}>
-      <div className="panel" style={CARD}>
-        <h1 style={HEADLINE}>{t("setup.page.title")}</h1>
-        <p className="note" style={{ marginTop: 6 }}>
-          {t("setup.page.intro")}
-        </p>
-
-        <form style={{ marginTop: 20 }} onSubmit={(event) => void submit(event)}>
-          <Field label={t("setup.page.installCode")}>
-            <input
-              className={inputClass}
-              value={form.code}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => set("code", event.target.value)}
-            />
-          </Field>
-          <Field label={t("setup.page.yourName")}>
-            <input
-              className={inputClass}
-              value={form.name}
-              onChange={(event) => set("name", event.target.value)}
-            />
-          </Field>
-          <Field label={t("setup.page.yourEmail")}>
-            <input
-              className={inputClass}
-              type="email"
-              autoComplete="username"
-              value={form.email}
-              onChange={(event) => set("email", event.target.value)}
-            />
-          </Field>
-          <NewPasswordFields
-            password={form.password}
-            again={form.again}
-            onPassword={(value) => set("password", value)}
-            onAgain={(value) => set("again", value)}
+    <AuthCard title={t("setup.page.title")} intro={t("setup.page.intro")}>
+      <form onSubmit={(event) => void submit(event)}>
+        <Field label={t("setup.page.installCode")}>
+          <input
+            className={inputClass}
+            value={form.code}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => set("code", event.target.value)}
           />
-          <Field label={t("setup.page.organizationName")}>
-            <input
-              className={inputClass}
-              value={form.organization}
-              onChange={(event) => set("organization", event.target.value)}
-            />
-          </Field>
+        </Field>
+        <Field label={t("setup.page.yourName")}>
+          <input
+            className={inputClass}
+            value={form.name}
+            onChange={(event) => set("name", event.target.value)}
+          />
+        </Field>
+        <Field label={t("setup.page.yourEmail")}>
+          <input
+            className={inputClass}
+            type="email"
+            autoComplete="username"
+            value={form.email}
+            onChange={(event) => set("email", event.target.value)}
+          />
+        </Field>
+        <NewPasswordFields
+          password={form.password}
+          again={form.again}
+          onPassword={(value) => set("password", value)}
+          onAgain={(value) => set("again", value)}
+        />
+        <Field label={t("setup.page.organizationName")}>
+          <input
+            className={inputClass}
+            value={form.organization}
+            onChange={(event) => set("organization", event.target.value)}
+          />
+        </Field>
 
-          {error ? (
-            <p role="alert" className="notice red">
-              <Icon name={KIND_ICON.crit} size={16} />
-              <span>{error}</span>
-            </p>
-          ) : null}
+        <AuthAlert text={error} />
 
-          <div className="form-actions">
-            <Btn
-              type="submit"
-              label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
-              icon="check"
-              variant="primary"
-              disabled={!complete || submitting}
-            />
-            <span className="form-hint">
-              {t("setup.page.passwordHint")}
-            </span>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="form-actions">
+          <Btn
+            type="submit"
+            label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
+            icon="check"
+            variant="primary"
+            disabled={submitting}
+          />
+          <span className="form-hint">
+            {t("setup.page.passwordHint")}
+          </span>
+        </div>
+      </form>
+    </AuthCard>
   );
 }

@@ -16,6 +16,10 @@
  * SIGN IN WITH MICROSOFT (own-auth phase 2, Task 12, decision 1): below the
  * form, always, as on the console's page; it comes back to `next`, which is
  * the portal unless the link said otherwise.
+ *
+ * IN THE NOVIERI FRAME, LIKE `/sign-in` (redesign design §4, plan Task 13,
+ * 8.10): each way in across the card, an "or" between them, and one primary
+ * -- the passkey where the browser can use one, otherwise "Continue".
  */
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -25,10 +29,9 @@ import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { enterConsole, safeNext } from "../../lib/session";
-import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard } from "./AuthCard";
+import { AuthAlert, AuthCard, AuthOr, AuthWideBtn } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { afterLogin, carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
 import { canUsePasskeys, describePasskeyError, signWithPasskey } from "./passkey";
 
@@ -59,7 +62,12 @@ export function PortalSignInPage() {
   }
 
   function submit() {
-    if (!email.trim() || !password) return;
+    if (inFlight.current) return;
+    // On while empty; a press says what is missing (coordinator ruling 8a).
+    if (!email.trim() || !password) {
+      setError(t(missingKey(email, password)));
+      return;
+    }
     void guarded(async () => {
       try {
         const result = await api.login({ email: email.trim(), password });
@@ -86,18 +94,20 @@ export function PortalSignInPage() {
     });
   }
 
+  const passkey = canUsePasskeys();
   return (
     <AuthCard title={t("auth.portalSignIn.title")} intro={t("auth.portalSignIn.intro")}>
-      {canUsePasskeys() ? (
-        <div className="form-actions">
-          <Btn
+      {passkey ? (
+        <>
+          <AuthWideBtn
             variant="primary"
             icon="key"
             label={t("auth.portalSignIn.usePasskey")}
             disabled={busy}
             onClick={usePasskey}
           />
-        </div>
+          <AuthOr />
+        </>
       ) : null}
       <Form onSubmit={submit}>
         <Field label={t("auth.common.email")}>
@@ -121,16 +131,17 @@ export function PortalSignInPage() {
         </Field>
         <AuthAlert text={error} />
         <div className="form-actions">
-          <Btn
+          <AuthWideBtn
             type="submit"
-            variant="secondary"
+            variant={passkey ? "secondary" : "primary"}
             icon="lock"
             label={busy ? t("auth.common.working") : t("auth.signIn.submit")}
-            disabled={busy || !email.trim() || !password}
+            disabled={busy}
           />
         </div>
       </Form>
-      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" />
+      <AuthOr />
+      <MicrosoftButton start={{ intent: "sign_in" }} back={safeNext(next)} labelKey="auth.microsoft.signIn" wide />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/forgot-password", next)}>{t("auth.signIn.forgot")}</Link>
       </p>

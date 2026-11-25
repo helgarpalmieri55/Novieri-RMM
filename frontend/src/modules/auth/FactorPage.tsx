@@ -23,6 +23,14 @@
  * EVERY REFUSAL READS THE SAME: "not accepted", whatever the reason (§2.3).
  * Only a pre-factor session that has gone (`auth_required`) and a wait (429)
  * are told apart, because a person can act on those.
+ *
+ * THE RECOVERY CODE IS A TEXT LINK, NOT A BUTTON (redesign design §4, plan
+ * Task 13, 8.2): the quieter way through, and a view of this page with its
+ * own address (`?use=recovery`). The link carries `next` and the router's
+ * state with it, so the factors offered and the remember box do not change
+ * under the person. "Do not ask again on this computer" stays a checkbox: it
+ * is a choice sent with the factor (`remember_device`), which a link cannot
+ * carry.
  */
 import { useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -40,6 +48,17 @@ import { canUsePasskeys, describePasskeyError, passkeyHiddenAdvice, signWithPass
 import type { FactorMethod, SignedIn } from "./types";
 
 const EVERY_METHOD: readonly FactorMethod[] = ["passkey", "totp", "recovery"];
+
+/** `?use=recovery`: the view of this page with the recovery code open. */
+const USE = "use";
+const RECOVERY_VIEW = "recovery";
+
+/** This page's address with the recovery code open, keeping the rest of its query (`next`). */
+function recoveryView(search: string): string {
+  const params = new URLSearchParams(search);
+  params.set(USE, RECOVERY_VIEW);
+  return `?${params.toString()}`;
+}
 
 /** What the sign-in step hands this page, read defensively: router state is whatever the history holds. */
 function handedOver(state: unknown): { methods: readonly FactorMethod[]; rememberDays: number | null } {
@@ -70,7 +89,9 @@ export function FactorPage() {
   // none.
   const passkeyHidden = methods.includes("passkey") && !passkey;
   const hiddenAdvice = passkeyHidden ? (passkeyHiddenAdvice({ totp, recovery }) ?? "auth.passkey.hiddenNoOther") : null;
-  const [showRecovery, setShowRecovery] = useState(!passkey && !totp);
+  // Asked for through the link, or the only way left.
+  const askedRecovery = new URLSearchParams(location.search).get(USE) === RECOVERY_VIEW;
+  const showRecovery = askedRecovery || (!passkey && !totp);
   const [remember, setRemember] = useState(false);
   const [code, setCode] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -166,9 +187,11 @@ export function FactorPage() {
       ) : null}
 
       {recovery && !showRecovery ? (
-        <div>
-          <Btn variant="ghost" small label={t("auth.factor.showRecovery")} onClick={() => setShowRecovery(true)} />
-        </div>
+        <p className="note" style={{ margin: 0 }}>
+          <Link to={{ search: recoveryView(location.search) }} state={location.state}>
+            {t("auth.factor.showRecovery")}
+          </Link>
+        </p>
       ) : null}
       {recovery && showRecovery ? (
         <AuthSection title={t("auth.factor.recoveryTitle")} hint={t("auth.factor.recoveryHint")}>
@@ -182,8 +205,11 @@ export function FactorPage() {
             }}
           >
             <Field label={t("auth.factor.recoveryLabel")}>
+              {/* Focused when the person opened it with the link: the link is
+                  gone from the page, and focus would otherwise fall to the top. */}
               <input
                 className={inputClass}
+                autoFocus={askedRecovery}
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}

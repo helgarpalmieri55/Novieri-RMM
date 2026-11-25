@@ -121,6 +121,41 @@ describe("the setup screen", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  it("draws the lockup and names the page in the tab", () => {
+    // Redesign design §4: the screens before a session carry the brand in
+    // their own frame, and the tab says which screen this is (plan Task 13).
+    render(<SetupPage />);
+    expect(screen.getByRole("img", { name: "Novieri RMM" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Set up this installation" })).toBeInTheDocument();
+    expect(document.title).toBe("Set up this installation · Novieri RMM");
+  });
+
+  it("keeps Finish setup on, and names every empty field when it is pressed early, claiming nothing", async () => {
+    // Coordinator ruling 8a (2026-11-25): seven fields, so the button stays on
+    // and the press reports what is missing, by name (ruling 8, fix round 1).
+    // It was disabled with no reason on screen (critique of 2026-11-25, P1).
+    const user = userEvent.setup();
+    render(<SetupPage />);
+    const finish = screen.getByRole("button", { name: /finish setup/i });
+    expect(finish).toBeEnabled();
+    await user.type(screen.getByLabelText("Install code"), "install-code");
+    await user.click(finish);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^Fill in these fields: Your name, Your email address, New password, The same password again, and Organization name\.$/,
+    );
+    expect(claims).toHaveLength(0);
+  });
+
+  it("names the one field still empty, and only that one", async () => {
+    const user = userEvent.setup();
+    render(<SetupPage />);
+    await fillTheForm(user, "install-code");
+    await user.clear(screen.getByLabelText("Organization name"));
+    await user.click(screen.getByRole("button", { name: /finish setup/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Fill in this field: Organization name\.$/);
+    expect(claims).toHaveLength(0);
+  });
+
   it("stays out of the way once the platform has an owner", async () => {
     statusReply = { status: 200, body: { needed: false } };
     render(<App />);
