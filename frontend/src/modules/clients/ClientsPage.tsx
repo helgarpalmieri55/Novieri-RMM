@@ -149,7 +149,9 @@ function ContactClientDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState(choices[0]?.id ?? "");
   return (
     <Dialog open onClose={onClose} title={t("clients.list.newContactTitle")}>
-      <Form onSubmit={() => picked && navigate(`/clients/${picked}?tab=contacts&new=contact`)}>
+      {/* REPLACING: the client's contacts take the question's place, so Back
+          does not ask it again (Task 4 review, fix round 1). */}
+      <Form onSubmit={() => picked && navigate(`/clients/${picked}?tab=contacts&new=contact`, { replace: true })}>
         <Field label={t("shell.kit.client")}>
           <select className="select-field" value={picked} onChange={(event) => setPicked(event.target.value)}>
             {choices.map((client) => (

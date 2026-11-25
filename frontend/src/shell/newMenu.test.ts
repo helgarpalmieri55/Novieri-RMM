@@ -53,6 +53,19 @@ describe("the New menu (redesign design §1.2: only real destinations, each with
     expect(newMenuEntries(input({ clients: [client(A, ALL, "unassigned")] })).some((entry) => entry.kind === "contact")).toBe(false);
   });
 
+  // One code at a time (Task 4 review, fix round 1): each entry needs its own.
+  it.each([
+    ["ticket", "ticket.write"],
+    ["device", "devices.read"],
+    ["document", "docs.manage"],
+  ] as const)("offers no %s without %s", (kind, code) => {
+    const without = ALL.filter((held) => held !== code);
+    const kinds = newMenuEntries(input({ permissions: without, everywhere: without })).map((entry) => entry.kind);
+    expect(kinds).not.toContain(kind);
+    // NON-VACUITY: the rest of the menu is still there.
+    expect(kinds.length).toBeGreaterThan(0);
+  });
+
   it("offers a change only where the change module is on", () => {
     expect(newMenuEntries(input({ modules: new Set() })).some((entry) => entry.kind === "change")).toBe(false);
   });

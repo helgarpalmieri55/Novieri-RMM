@@ -52,7 +52,8 @@ Respondidas por el coordinador el 2026-11-24 y aplicadas en la ronda 2 de correc
 Críticas `.impeccable/critique/2026-11-24T23-59-19Z__frontend-src-shell-sidebar-tsx.md` (28/40),
 `…-appshell-tsx.md` (29/40) y `…-areapage-tsx.md` (31/40), las tres cerradas. Contestadas el 2026-11-25 con
 `DESIGN.md`, el diseño aprobado y las decisiones del operador, y aplicadas en el pulido de la Task 4. Las tres
-preguntas de `AreaPage.tsx` no las zanjan estas fuentes: van al coordinador en el informe de la Task 4.
+preguntas de `AreaPage.tsx` no las zanjaban estas fuentes: las contestó el coordinador el 2026-11-25 (puntos 7
+a 9, aplicadas en la ronda 1 de correcciones de la Task 4).
 
 ### 1. En español, el panel de Administración corta el nombre de sus páginas
 
@@ -104,3 +105,32 @@ preguntas de `AreaPage.tsx` no las zanjan estas fuentes: van al coordinador en e
   barra.
 - **Regla.** Diseño §1.2: «Atera tiene "Instalar agente" como botón propio; aquí entra en el menú "Nuevo" y
   en la página de Equipos»; decisión D11.
+
+### 7. La búsqueda de la portada de Administración (`/admin`), sola en un panel
+
+- **Respuesta del coordinador: (b).** El campo va solo, encima de las tarjetas, sin la franja blanca del panel
+  (`.admin-index-search`, con el ancho de la búsqueda de una lista). Y va en la URL: `?q=`, que sustituye la
+  entrada del historial como en toda lista (`useUrlFilters` del kit). La búsqueda del panel del riel sigue
+  siendo local: es parte del armazón, no de la página.
+- **Por qué.** Un panel de 1158 px alrededor de un solo campo de 670 px era una caja para un control; el patrón
+  de la barra de herramientas del kit es para la cabecera de una lista, y aquí no hay lista debajo.
+- **Regla.** Global Constraints, «Todo con URL»; `DESIGN.md`, «Elevation & Depth» (una superficie es un
+  contenido, no un marco para un control).
+
+### 8. Las tarjetas de la portada de Administración, de alturas muy distintas
+
+- **Respuesta del coordinador: (c).** Columnas de CSS (`columns: 2 320px`, una sola por debajo de 1024 px) y
+  ninguna tarjeta partida (`break-inside: avoid`). El orden del DOM es el de lectura: la primera columna de
+  arriba abajo y después la segunda.
+- **Por qué.** En la rejilla de dos columnas, Automatización (dos páginas) junto a Equipos (cinco) dejaba
+  huecos, y Plataforma quedaba sola en su fila.
+
+### 9. El panel de Administración en `/admin`
+
+- **Respuesta del coordinador: (b).** No abre ninguna sección: en la portada no hay página actual. La Task 4
+  aplica la misma razón al panel abierto con su botón desde una página de fuera de Administración: tampoco hay
+  página actual, y tampoco abre ninguna. En una página de Administración abre la sección que la contiene
+  (respuesta 2).
+- **Por qué.** Abrir la primera sección repetía la primera tarjeta y no respondía a nada que la persona
+  estuviera mirando.
+

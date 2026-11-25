@@ -44,6 +44,24 @@ describe("Admin, as Atera draws it (redesign design §1.1)", () => {
     expect(within(panel).getByRole("link", { name: "Notifications" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("opens no section on /admin, where no page is current", () => {
+    // The coordinator's answer to the critique's question 3 (2026-11-25): on
+    // the index no page is current, so the panel opens nothing for you.
+    rail("/admin");
+    const panel = screen.getByRole("navigation", { name: "Admin" });
+    expect(within(panel).queryAllByRole("button", { expanded: true })).toEqual([]);
+    // NON-VACUITY: the five sections are there, shut.
+    expect(within(panel).getAllByRole("button", { expanded: false })).toHaveLength(5);
+  });
+
+  it("opens no section when opened from a page outside Admin", async () => {
+    rail("/devices");
+    await userEvent.click(screen.getByRole("button", { name: "Admin" }));
+    const panel = screen.getByRole("navigation", { name: "Admin" });
+    expect(within(panel).getByRole("button", { name: /Service desk/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(panel).queryAllByRole("button", { expanded: true })).toEqual([]);
+  });
+
   it("goes back to the main rail and stays on the page", async () => {
     const { router } = rail("/audit");
     await userEvent.click(screen.getByRole("button", { name: "Back to the menu" }));

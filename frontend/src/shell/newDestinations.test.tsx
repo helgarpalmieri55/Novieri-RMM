@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient } from "../fixtures/client";
@@ -30,6 +31,15 @@ describe("every New entry is a real destination (redesign design §1.2, decision
     renderPage("/clients?new=contact", <ClientsPage />);
     expect(await screen.findByRole("dialog", { name: "New contact" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Client" })).toBeInTheDocument();
+  });
+
+  it("Contact's Continue takes the question's place in the history, so Back does not ask again", async () => {
+    const { router } = renderPage("/clients?new=contact", <ClientsPage />);
+    await screen.findByRole("dialog", { name: "New contact" });
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(router.state.location.search).toContain("new=contact");
+    expect(router.state.location.pathname).toMatch(/^\/clients\/./);
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 
   it("Contact, for a chosen client, opens Add contact on its contacts tab", async () => {

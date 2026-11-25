@@ -11,13 +11,8 @@ import { Link } from "react-router-dom";
 import { useT } from "../i18n/context";
 import { SearchField } from "./components";
 import { Icon } from "./icons";
-import { activeNavTo, type NavArea } from "./nav";
+import { activeNavTo, fold, sectionsMatching, type NavArea } from "./nav";
 import { RailLink } from "./Sidebar";
-
-/** For matching a search: case and accents do not count ("auditoria" finds "auditoría"). */
-export function fold(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-}
 
 export function AdminPanel({
   area,
@@ -36,7 +31,10 @@ export function AdminPanel({
   const pages = area.sections.flatMap((section) => section.items);
   const current = activeNavTo(pathname, [{ key: "main", label: "", items: pages }]);
   const holding = area.sections.find((section) => section.items.some((item) => item.to === current))?.label;
-  const [openSection, setOpenSection] = useState<string | undefined>(holding ?? area.sections[0]?.label);
+  // The section holding the current page, and none where no page is current
+  // (on /admin, or opened from a page outside Admin): the coordinator's answer
+  // to the critique's question 3, 2026-11-25.
+  const [openSection, setOpenSection] = useState<string | undefined>(holding);
   // Arriving at another Admin page while the panel stays open (a search
   // result, an /admin card) opens that page's section, as Atera's panel does
   // (critique of the shell, 2026-11-24; Atera's walkthrough, line 343).
@@ -44,12 +42,7 @@ export function AdminPanel({
     if (holding !== undefined) setOpenSection(holding);
   }, [holding]);
   const wanted = fold(query);
-  const sections = area.sections
-    .map((section) => ({
-      label: section.label,
-      items: wanted === "" ? section.items : section.items.filter((item) => fold(item.label).includes(wanted)),
-    }))
-    .filter((section) => section.items.length > 0);
+  const sections = sectionsMatching(area.sections, query);
 
   return (
     <nav className="nav-scroll admin-panel" id="nav" aria-label={area.label}>

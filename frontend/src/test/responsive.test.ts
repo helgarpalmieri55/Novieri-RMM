@@ -463,3 +463,19 @@ describe("the rail's sub-items", () => {
     expect(rule).toMatch(/white-space:\s*normal/);
   });
 });
+
+/**
+ * THE ADMIN INDEX'S CARDS STACK WITHOUT HOLES (the coordinator's answer to the
+ * critique's question 2, 2026-11-25): CSS columns, so DOM order is reading
+ * order (down the first column, then the second) and a short card no longer
+ * leaves a hole beside a tall one.
+ */
+describe("the Admin index", () => {
+  it("flows its cards in columns, never splitting one", () => {
+    const index = /\.admin-index\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(index, "no `.admin-index` rule").not.toBe("");
+    expect(index).toMatch(/columns:/);
+    expect(index).not.toMatch(/display:\s*grid/);
+    expect(SHELL).toMatch(/\.admin-index > \*\s*\{[^}]*break-inside:\s*avoid/);
+  });
+});

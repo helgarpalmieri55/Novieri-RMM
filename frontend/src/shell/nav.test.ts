@@ -13,6 +13,7 @@ import {
   activeNavTo,
   ADD_COMPUTER_TO,
   crumbFor,
+  fold,
   isArea,
   isFolder,
   isPortalOnly,
@@ -25,6 +26,7 @@ import {
   ORPHAN_SECTION,
   portalCrumbFor,
   searchDestinations,
+  sectionsMatching,
   visibleGroups,
   type RailEntry,
 } from "./nav";
@@ -548,5 +550,25 @@ describe("the Clients page (MSP clients phase 3, design §4.1)", () => {
   it("is offered to a person holding only clients.read, in the main rail (redesign design §1.1)", () => {
     const main = visibleGroups(["clients.read"], new Set()).find((group) => group.key === "main");
     expect(main?.items.map((entry) => ("to" in entry ? entry.to : entry.key))).toEqual(["/dashboard", "/clients"]);
+  });
+});
+
+/* ONE SEARCH FOR ADMIN'S PAGES, used by the Admin panel and the /admin index
+ * (Task 4 review, fix round 1): the same match in both places. */
+describe("searching Admin's pages", () => {
+  const sections = navAreas()[0]?.sections ?? [];
+
+  it("ignores case, accents and the spaces around a query", () => {
+    expect(fold("  Auditoría ")).toBe("auditoria");
+  });
+
+  it("keeps every section for an empty query, and only matching pages otherwise", () => {
+    expect(sectionsMatching(sections, "")).toHaveLength(sections.length);
+    const found = sectionsMatching(sections, "AUDIT");
+    expect(found.map((section) => section.items.map((item) => item.to))).toEqual([["/audit"]]);
+  });
+
+  it("drops a section none of whose pages match", () => {
+    expect(sectionsMatching(sections, "no page is called this")).toEqual([]);
   });
 });

@@ -40,3 +40,29 @@ function snapshot(): boolean {
 export function useHandset(): boolean {
   return useSyncExternalStore(subscribe, snapshot, () => false);
 }
+
+/**
+ * THE DRAWER WIDTH (`(max-width: 1024px)`, `shell.css`'s 1024px block): below
+ * it the rail is a full-width drawer and the stored fold is reverted, so the
+ * rail's components draw their unfolded form there (Task 4 review, fix round
+ * 1: a folded desktop rail used to bring its folded Admin panel into the
+ * drawer, without search or accordion). `handset.test.ts` holds the two to one
+ * number. No `matchMedia` (jsdom) reads as "not the drawer".
+ */
+export const DRAWER_QUERY = "(max-width: 1024px)";
+
+function drawerMedia(): MediaQueryList | null {
+  return typeof window.matchMedia === "function" ? window.matchMedia(DRAWER_QUERY) : null;
+}
+
+function subscribeDrawer(listener: () => void): () => void {
+  const list = drawerMedia();
+  if (list === null) return () => undefined;
+  list.addEventListener("change", listener);
+  return () => list.removeEventListener("change", listener);
+}
+
+/** True while the viewport is the drawer's (`(max-width: 1024px)`), and re-rendered when it stops being one. */
+export function useDrawer(): boolean {
+  return useSyncExternalStore(subscribeDrawer, () => drawerMedia()?.matches ?? false, () => false);
+}

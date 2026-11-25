@@ -130,7 +130,6 @@ export const shell: Shape<typeof en> = {
     openNavigation: "Abrir la navegación",
     openNavigationClient: "Abrir la navegación — cliente: {client}",
     closeNavigationClient: "Cerrar la navegación — cliente: {client}",
-    addComputer: "Añadir un equipo",
     askAssistant: "Preguntar al Asistente",
     assistantObject: "al Asistente",
     signInAgain: "Iniciar sesión de nuevo",
@@ -195,9 +194,6 @@ export const shell: Shape<typeof en> = {
   },
   areaPage: {
     empty: "Nada en esta área está disponible para tu cuenta. Pide acceso a un administrador.",
-    page: "Página",
-    open: "Abrir",
-    openPage: "Abrir {label}",
   },
   viz: {
     kindCritical: "crítico",

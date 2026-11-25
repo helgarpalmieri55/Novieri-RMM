@@ -137,7 +137,6 @@ export const shell = {
     // client's initials, and its name says the client in full.
     openNavigationClient: "Open navigation — client: {client}",
     closeNavigationClient: "Close navigation — client: {client}",
-    addComputer: "Add a computer",
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",
@@ -206,9 +205,6 @@ export const shell = {
   },
   areaPage: {
     empty: "Nothing in this area is open to your account. Ask an administrator for access.",
-    page: "Page",
-    open: "Open",
-    openPage: "Open {label}",
   },
   viz: {
     kindCritical: "critical",

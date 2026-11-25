@@ -401,6 +401,24 @@ export function visibleGroups(
     .filter((group) => group.items.length > 0);
 }
 
+/** For matching a search: case, accents and surrounding spaces do not count ("auditoria" finds "auditoría"). */
+export function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
+/**
+ * THE ONE SEARCH OVER AN AREA'S PAGES, for the Admin panel and the `/admin`
+ * index alike (Task 4 review, fix round 1): every section for an empty query,
+ * otherwise only the pages whose name holds it, and no section left empty.
+ */
+export function sectionsMatching(sections: readonly NavSection[], query: string): NavSection[] {
+  const wanted = fold(query);
+  if (wanted === "") return [...sections];
+  return sections
+    .map((section) => ({ label: section.label, items: section.items.filter((item) => fold(item.label).includes(wanted)) }))
+    .filter((section) => section.items.length > 0);
+}
+
 /** A page the search field can offer: every visible destination, flat. */
 export interface SearchDestination {
   readonly to: string;

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, Me } from "../lib/api";
@@ -10,7 +10,7 @@ import { AreaPage } from "./AreaPage";
 const mockUseApi = vi.fn();
 vi.mock("../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
-function renderArea(to: string, permissions: string[]) {
+function renderArea(to: string, permissions: string[], at: string = to) {
   const api: Partial<ApiClient> = {
     me: vi.fn().mockResolvedValue({ permissions } as unknown as Me),
   };
@@ -18,11 +18,18 @@ function renderArea(to: string, permissions: string[]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[at]}>
         <AreaPage to={to} />
+        <Where />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+/** Where the router is, so a test can read the query the page wrote. */
+function Where() {
+  const location = useLocation();
+  return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
 }
 
 /** A section's card on the Admin index, found by its heading (a `Panel` is an unnamed <section>). */
@@ -59,6 +66,22 @@ describe("an area's landing page", () => {
     expect(
       await screen.findByText(/Nothing in this area is open to your account/),
     ).toBeInTheDocument();
+  });
+
+  it("keeps its search in the URL, as every filter is (Task 4 review, fix round 1)", async () => {
+    renderArea("/admin", ["audit.read", "orgs.manage"], "/admin?q=audit");
+    expect(await screen.findByRole("searchbox", { name: "Search Admin" })).toHaveValue("audit");
+    expect(screen.getByRole("link", { name: "Audit log" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    await userEvent.clear(screen.getByRole("searchbox", { name: "Search Admin" }));
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search Admin" }), "sett");
+    expect(screen.getByTestId("where")).toHaveTextContent("/admin?q=sett");
+  });
+
+  it("draws the search on its own above the cards, not in a panel of its own (critique answer Q1)", async () => {
+    renderArea("/admin", ["audit.read"]);
+    const field = await screen.findByRole("searchbox", { name: "Search Admin" });
+    expect(field.closest(".panel")).toBeNull();
   });
 
   it("finds an Admin page by part of its name", async () => {

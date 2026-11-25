@@ -15,6 +15,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useT } from "../i18n/context";
 import { AdminPanel } from "./AdminPanel";
 import { NovieriSymbol, NovieriWordmark } from "./brand";
+import { useDrawer } from "./handset";
 import { Icon } from "./icons";
 import { activeNavTo, isArea, isFolder, OPTIONAL_MODULES, visibleGroups, type NavFolder, type NavItem } from "./nav";
 
@@ -61,15 +62,22 @@ export function RailLink({
   );
 }
 
-/** Assets or More: a heading that opens its pages in place, open by itself when it holds the current page. */
+/**
+ * Assets or More: a heading that opens its pages in place, open by itself when
+ * it holds the current page. FOLDED (decision D9) its pages show as icons
+ * under the folder's own icon, so none is a click further away; the folder is
+ * then a mark, not a control, because there is nothing left to open.
+ */
 function Folder({
   folder,
   activeTo,
   badges,
+  folded,
 }: {
   folder: NavFolder;
   activeTo: string | undefined;
   badges: Readonly<Record<string, number>>;
+  folded: boolean;
 }) {
   const holds = folder.items.some((item) => item.to === activeTo);
   const [open, setOpen] = useState(holds);
@@ -79,19 +87,25 @@ function Folder({
   const id = `nav-folder-${folder.key}`;
   return (
     <div className="nav-folder">
-      <button
-        type="button"
-        className={holds && !open ? "nav-item nav-folder-h active" : "nav-item nav-folder-h"}
-        aria-expanded={open}
-        aria-controls={id}
-        title={folder.label}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon name={folder.icon} size={17} />
-        <span className="lbl">{folder.label}</span>
-        <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
-      </button>
-      <div id={id} hidden={!open}>
+      {folded ? (
+        <div className="nav-item nav-folder-h folded" title={folder.label} aria-hidden="true">
+          <Icon name={folder.icon} size={17} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={holds && !open ? "nav-item nav-folder-h active" : "nav-item nav-folder-h"}
+          aria-expanded={open}
+          aria-controls={id}
+          title={folder.label}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <Icon name={folder.icon} size={17} />
+          <span className="lbl">{folder.label}</span>
+          <Icon name="chevron-down" size={14} className={open ? "chev open" : "chev"} />
+        </button>
+      )}
+      <div id={id} hidden={!(open || folded)}>
         {folder.items.map((item) => (
           <RailLink key={item.to} item={item} lit={item.to === activeTo} count={badges[item.to]} sub />
         ))}
@@ -110,6 +124,11 @@ export function Sidebar({
   clientSelector,
 }: SidebarProps) {
   const t = useT();
+  // THE FOLD IS A DESK STATE (Task 4 review, fix round 1). Below 1024px the
+  // rail is a full-width drawer and `shell.css` reverts the stored fold there,
+  // so the folders and the Admin panel draw their unfolded form too.
+  const drawer = useDrawer();
+  const folded = collapsed && !drawer;
   const groups = visibleGroups(permissions, modules ?? OPTIONAL_MODULES);
   const pathname = useLocation().pathname;
   const activeTo = activeNavTo(pathname, groups);
@@ -143,12 +162,12 @@ export function Sidebar({
       {clientSelector ? <div className="sidebar-client">{clientSelector}</div> : null}
 
       {view === "admin" && admin ? (
-        <AdminPanel area={admin} pathname={pathname} collapsed={collapsed} onBack={() => setView("main")} />
+        <AdminPanel area={admin} pathname={pathname} collapsed={folded} onBack={() => setView("main")} />
       ) : (
         <nav className="nav-scroll" id="nav" aria-label={t("shell.sidebar.main")}>
           {main.map((entry) =>
             isFolder(entry) ? (
-              <Folder key={entry.key} folder={entry} activeTo={activeTo} badges={badges} />
+              <Folder key={entry.key} folder={entry} activeTo={activeTo} badges={badges} folded={folded} />
             ) : isArea(entry) ? null : (
               <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
             ),
@@ -156,27 +175,33 @@ export function Sidebar({
         </nav>
       )}
 
-      <nav className="nav-anchored" aria-label={t("shell.sidebar.anchored")}>
-        {anchored.map((entry) =>
-          isArea(entry) ? (
-            <button
-              key={entry.to}
-              type="button"
-              className={inAdmin ? "nav-item active" : "nav-item"}
-              aria-expanded={view === "admin"}
-              aria-controls="nav"
-              title={entry.label}
-              onClick={() => setView(view === "admin" ? "main" : "admin")}
-            >
-              <Icon name={entry.icon} size={17} />
-              <span className="lbl">{entry.label}</span>
-              {inAdmin ? <span className="nav-dot" aria-hidden="true" /> : null}
-            </button>
-          ) : isFolder(entry) ? null : (
-            <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
-          ),
-        )}
-      </nav>
+      {/* THE FOOT, only when something is anchored there: a requester, or an
+          operator with neither the Assistant nor an Admin page, gets no empty
+          landmark and no divider (Task 4 review, fix round 1). */}
+      {anchored.length > 0 ? (
+        <nav className="nav-anchored" aria-label={t("shell.sidebar.anchored")}>
+          {anchored.map((entry) =>
+            isArea(entry) ? (
+              <button
+                key={entry.to}
+                type="button"
+                className={inAdmin ? "nav-item active" : "nav-item"}
+                aria-expanded={view === "admin"}
+                aria-controls="nav"
+                title={entry.label}
+                onClick={() => setView(view === "admin" ? "main" : "admin")}
+              >
+                <Icon name={entry.icon} size={17} />
+                <span className="lbl">{entry.label}</span>
+                {/* NO DOT HERE: the rail has one mark, and on an Admin page it is
+                    the page's own, in the panel. This keeps the lifted ground. */}
+              </button>
+            ) : isFolder(entry) ? null : (
+              <RailLink key={entry.to} item={entry} lit={entry.to === activeTo} count={badges[entry.to]} />
+            ),
+          )}
+        </nav>
+      ) : null}
 
       {/* IDENTITY, NOT A CONTROL: the one place the tenant is named. */}
       <div className="sidebar-footer">

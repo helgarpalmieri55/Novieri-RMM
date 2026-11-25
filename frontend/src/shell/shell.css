@@ -102,6 +102,10 @@
 .admin-search { padding: 4px 10px 8px; }
 .sidebar .admin-none { margin: 8px 22px; color: var(--rail-ink); font-size: var(--t-sm); }
 .nav-item.admin-acc { font-weight: 500; }
+/* A folded folder's icon (decision D9): it heads its pages and opens nothing,
+ * so it answers no pointer and sits a step quieter than the pages under it. */
+.nav-item.nav-folder-h.folded { cursor: default; opacity: .6; }
+.nav-item.nav-folder-h.folded:hover { color: var(--rail-ink); background: transparent; }
 /* v3 `.rail .ct`: the right-aligned mono count. */
 .sidebar .ct {
   margin-left: auto;
@@ -434,11 +438,17 @@ body.assistant-fab-on .content { padding-bottom: 88px; }
 .crumb a:hover { color: var(--accent); text-decoration: underline; }
 .crumb [aria-current="page"] { color: var(--ink); font-weight: 500; }
 
-/* The Admin index (/admin): its sections as cards (redesign design §1.1). */
-.admin-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+/* The Admin index (/admin): its sections as cards (redesign design §1.1), in
+ * CSS COLUMNS so a short card no longer leaves a hole beside a tall one and
+ * DOM order stays reading order (down the first column, then the second): the
+ * coordinator's answer to the critique's question 2. The search stands alone
+ * above them, at the width of a list's search field (question 1). */
+.admin-index-search { display: flex; max-width: 480px; margin-bottom: 16px; }
+.admin-index { columns: 2 320px; column-gap: 16px; }
+.admin-index > * { break-inside: avoid; }
 .admin-index-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .admin-index-list li { display: flex; align-items: flex-start; gap: 10px; }
-@media (max-width: 1024px) { .admin-index { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1024px) { .admin-index { columns: 1; } }
 
 /* The design's one wide-desktop step, kept where it was. */
 @media (max-width: 1300px) {
@@ -470,9 +480,10 @@ body.sidebar-collapsed .collapse-btn {
   border-color: var(--accent);
   box-shadow: var(--shadow);
 }
-/* A folder's or Admin's page has its own glyph, so a 76px rail shows it like
- * any item, centred: the folder's pages sit under the folder's own icon
- * (decision D9), so nothing is a click further away when folded. */
+/* Folded, every page is its own glyph, centred in the 76px rail: a folder's
+ * pages are listed as icons under the folder's icon, which is then a mark and
+ * not a control (`Sidebar.tsx`'s `Folder`, decision D9), and the Admin panel
+ * shows every section's pages, so nothing is a click further away. */
 body.sidebar-collapsed .nav-item, body.sidebar-collapsed .nav-item.sub { justify-content: center; padding: 0; }
 body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
 
