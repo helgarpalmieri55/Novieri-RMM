@@ -1145,7 +1145,29 @@ describe("customizing the dashboard", () => {
     await waitFor(() => expect(tile).toHaveTextContent("Could not be read, so nothing is counted."));
     // No figure: the kit's absent mark (ruling 10a), never a dash or a 0.
     expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    // The read answered, with a failure: the kit's `absent` form, which keeps
+    // the reason and is not busy, because nothing is on its way.
+    expect(tile).not.toHaveAttribute("aria-busy");
     // And it still leads to its list.
+    expect(tile).toHaveAttribute("href", "/jobs");
+  });
+
+  // PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's two
+  // forms). While its read is on its way the tile is the kit's `pending`:
+  // busy, the absent mark, and no line under it, since there is no reason to
+  // give about a read that has not answered.
+  it("a tile whose read is on its way is busy, and gives no reason yet", async () => {
+    renderPage({ listJobs: () => new Promise<never>(() => {}) });
+    await screen.findByText("ws-alpha");
+    const tile = [...document.querySelectorAll<HTMLElement>(".stat-card")].find(
+      (card) => card.querySelector(".stat-label")?.textContent === "Jobs needing attention",
+    ) as HTMLElement;
+    expect(tile).toBeDefined();
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile).toHaveAttribute("aria-busy", "true");
+    expect(tile.querySelector(".z")).toBeNull();
+    expect(tile).not.toHaveTextContent("Not counted yet.");
+    expect(tile).not.toHaveTextContent("Could not be read");
     expect(tile).toHaveAttribute("href", "/jobs");
   });
 

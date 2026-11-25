@@ -229,6 +229,11 @@ export function CandidatesPage() {
   // Each tile's one condition (ruling 10a): no data, pending or failed.
   // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
   const noSwept = swept.data === undefined;
+  // Without the fleet read the swept count is never asked for, so no figure
+  // is coming once `/me` has said so: the kit's `absent`, whose foot says
+  // which read it needs. Pending is for a count on its way (coordinator, P3
+  // adoption pass).
+  const noFleetRead = Boolean(me.data && !canReadDevices);
   const noCandidates = candidates.data === undefined;
 
   const promote = useMutation<PromoteOutcomes>({
@@ -360,13 +365,14 @@ export function CandidatesPage() {
         <StatCard
           label={t("devices.candidates.swept")}
           value={noSwept ? "" : String(swept.data.total)}
-          pending={noSwept}
+          pending={noSwept && !noFleetRead}
+          absent={noFleetRead}
           icon="network"
           to={sweptTo}
           tone="neutral"
           zeroLabel={t("devices.candidates.sweptZero")}
           foot={
-            me.data && !canReadDevices
+            noFleetRead
               ? <Trans k="devices.candidates.sweptNeedsRead" components={{ code: <code /> }} />
               : swept.data && swept.data.total > 0
                 ? t("devices.candidates.sweptFoot")

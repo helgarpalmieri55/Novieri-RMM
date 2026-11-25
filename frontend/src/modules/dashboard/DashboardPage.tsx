@@ -140,11 +140,13 @@ function pct(value: number): number {
  * a perfect score. An unresolved query reads the kit's absent mark
  * (`shell.viz.na`, n/a or n/d; ruling 10a), never `0`, and wears no colour.
  *
- * NOT `Tile pending` (adoption pass, 2026-11-25): `pending` drops the line
- * under the figure, and this tile's line is the REASON there is no figure
- * ("Not counted yet.", "Could not be read, so nothing is counted."), which
- * ruling 10a keeps and the brief (Task 7, 2.1) requires. Nor `StatCard`,
- * whose foot is the `.stat-foot` hook the page's "no trend delta" test reads.
+ * THE KIT'S TWO FORMS OF NO FIGURE (coordinator, P3 adoption pass). A read
+ * still on its way is `Tile pending`: busy, and no line under the mark, since
+ * there is no reason to give yet. A read that failed has answered: `Tile
+ * absent`, not busy, and its line is the REASON there is no figure ("Could
+ * not be read, so nothing is counted."), which ruling 10a keeps and the brief
+ * (Task 7, 2.1) requires. Not `StatCard`, whose foot is the `.stat-foot` hook
+ * the page's "no trend delta" test reads.
  *
  * THE `.stat-card` / `.stat-label` / `.stat-value` / `.urgent` HOOKS STAY, as
  * the class names the page's tests locate tiles by.
@@ -173,10 +175,11 @@ function KpiTile({
   zeroLabel: string;
   spark?: readonly number[];
   /**
-   * The read behind the figure failed. A tile with nothing measured SAYS WHY
-   * in a sentence (redesign plan, Task 7, 2.1; Atera's flaw: "Los widgets
-   * vacíos quedan en blanco, sin mensaje ni paso siguiente"): not counted
-   * yet, or could not be read.
+   * The read behind the figure failed. A tile with nothing measured once its
+   * read has answered SAYS WHY in a sentence (redesign plan, Task 7, 2.1;
+   * Atera's flaw: "Los widgets vacíos quedan en blanco, sin mensaje ni paso
+   * siguiente"): could not be read. Before it answers the tile is the kit's
+   * pending tile, busy, with no sentence yet.
    */
   failed?: boolean;
 }) {
@@ -189,12 +192,14 @@ function KpiTile({
       className={`stat-card${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={measured ? String(value) : t("shell.viz.na")}
+      value={measured ? String(value) : ""}
       icon={icon}
       to={to}
-      kind={measured && (loud || kind === "ok") ? kind : undefined}
-      sub={isZero ? zeroLabel : measured ? sub : t(failed ? "dashboard.tile.failed" : "dashboard.tile.waiting")}
+      kind={loud || kind === "ok" ? kind : undefined}
+      sub={isZero ? zeroLabel : measured ? sub : failed ? t("dashboard.tile.failed") : undefined}
       spark={spark}
+      pending={!measured && !failed}
+      absent={!measured && failed}
     />
   );
 }

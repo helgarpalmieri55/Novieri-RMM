@@ -1298,6 +1298,45 @@ describe("HealthReportPanel", () => {
     expect(caveat.textContent).toContain("not from the ticket history the specification");
     expect(document.body.textContent).not.toContain("no route exposes that history");
   });
+
+  // PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's `absent`
+  // form). A mean time to resolve and an auto-fix rate over NO resolution are
+  // reads that answered with no figure: nothing is loading, so neither tile
+  // is busy, and each keeps the line saying what it is over, which is why it
+  // has no figure. While the alerts are still on their way both are
+  // `pending`: busy, and no line yet.
+  const RATES: ReadonlyArray<readonly [string, string]> = [
+    ["Mean time to resolve", "Over resolved alerts only."],
+    ["Auto-fix rate", "Machine-resolved as a share of all resolutions."],
+  ];
+
+  it("calls the two rates over no resolution absent, not loading, and keeps what each is over", async () => {
+    stubApi({ listHealthAlerts: vi.fn().mockResolvedValue([alert({ id: "1", state: "active" })]) });
+    renderWithProviders(<HealthReportPanel />);
+
+    // Wait on a DERIVED number: every tile renders before the read answers.
+    const inView = (await screen.findByText("Alerts in view")).closest("a") as HTMLElement;
+    await waitFor(() => expect(inView.querySelector(".stat-value")?.textContent).toBe("1"));
+    for (const [label, foot] of RATES) {
+      const tile = screen.getByText(label).closest("a") as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(tile, label).not.toHaveAttribute("aria-busy");
+      expect(tile, label).toHaveTextContent(foot);
+    }
+  });
+
+  it("draws neither rate's line while the alerts are still on their way", async () => {
+    stubApi({ listHealthAlerts: vi.fn(() => new Promise<never>(() => {})) });
+    renderWithProviders(<HealthReportPanel />);
+
+    await screen.findByText("Alerts in view");
+    for (const [label, foot] of RATES) {
+      const tile = screen.getByText(label).closest("a") as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(tile, label).toHaveAttribute("aria-busy", "true");
+      expect(tile, label).not.toHaveTextContent(foot);
+    }
+  });
 });
 
 // --------------------------------------------------------------------------

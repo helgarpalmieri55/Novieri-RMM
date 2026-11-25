@@ -223,8 +223,9 @@ export function PatchTabPanel({
    * there is no figure and no claim: the kit's pending tile (the absent mark)
    * and no line under it, as Alerts' tiles do. "0 ... every reporting machine
    * is up to date" before anything was asked was a finding the page had not
-   * made. A fleet never scanned is unmeasured too: the same mark, with the
-   * line that says why.
+   * made. A fleet never scanned is unmeasured too, but that read HAS
+   * answered: the kit's absent tile, the same mark, not busy, with the line
+   * that says why.
    */
   const updatesNoData = !updates.data;
   const devicesNoData = !devices.data;
@@ -348,7 +349,8 @@ export function PatchTabPanel({
         <StatCard
           label={t("patch.tab.updatesOutstanding")}
           value={String(outstanding)}
-          pending={updatesNoData || neverScanned}
+          pending={updatesNoData}
+          absent={neverScanned}
           icon="patch"
           to={severityHref(ALL_SEVERITIES_PARAM)}
           tone="neutral"
@@ -358,7 +360,8 @@ export function PatchTabPanel({
         <StatCard
           label={t("patch.tab.critical")}
           value={String(criticalCount)}
-          pending={updatesNoData || neverScanned}
+          pending={updatesNoData}
+          absent={neverScanned}
           icon="alert-triangle"
           to={severityHref("critical")}
           tone="red"
@@ -371,7 +374,8 @@ export function PatchTabPanel({
         <StatCard
           label={t("patch.tab.important")}
           value={String(importantCount)}
-          pending={updatesNoData || neverScanned}
+          pending={updatesNoData}
+          absent={neverScanned}
           icon="clock-exclamation"
           to={severityHref("important")}
           tone="orange"
@@ -387,7 +391,8 @@ export function PatchTabPanel({
         <StatCard
           label={t("patch.tab.machines")}
           value={String(deviceTotal)}
-          pending={devicesNoData || neverScanned}
+          pending={devicesNoData}
+          absent={neverScanned}
           icon="devices"
           to={devicesHref()}
           tone="blue"

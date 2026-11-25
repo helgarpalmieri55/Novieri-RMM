@@ -262,8 +262,8 @@ export function DeployPage() {
     // zeros and one absent mark for one underlying condition, sending the
     // reader hunting for a distinction that does not exist. The absent mark
     // is the honest half (a rate over zero completed runs is undefined, not
-    // 0%) so it stays, drawn by the kit's pending tile, and what was missing
-    // is the sentence saying so. A count that is genuinely zero still prints
+    // 0%) so it stays, drawn by the kit's absent tile (the read answered, so
+    // not busy), and what was missing is the sentence saying so. A count that is genuinely zero still prints
     // 0: "we deployed nothing" is knowledge, and blanking it out would be the
     // false-unknown the patch page's four zeros were the mirror image of.
     const rateUnknown = terminal.length === 0;
@@ -365,7 +365,10 @@ export function DeployPage() {
         <StatCard
           label={t("deploy.deployments.tileRate")}
           value={stats.successRate}
-          pending={noData || stats.rateUnknown}
+          // No finished run: the read answered with no rate, so the kit's
+          // `absent` (not busy, the reason kept), not `pending`.
+          pending={noData}
+          absent={stats.rateUnknown}
           icon="circle-check"
           to={withClient("/deploy?state=complete", client)}
           tone="green"

@@ -1292,6 +1292,44 @@ describe("FleetPatchPage says 'never scanned' rather than reporting an all-clear
     expect(screen.getAllByText("Never scanned")).toHaveLength(4);
   });
 
+  // PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's `absent`
+  // form). "Never scanned" is a read that ANSWERED: `devices_scanned` is 0.
+  // Nothing is loading, so no tile is busy, and each keeps the line that says
+  // why it has no figure. Before the scan results answer the tiles are
+  // `pending`: busy, and they say nothing about scans they have not read.
+  const PATCH_TILES = ["Updates outstanding", "Critical", "Important", "Machines needing updates"];
+
+  it("calls a fleet never scanned absent, not loading, and says so on every tile", async () => {
+    mockUseApi.mockReturnValue(neverScannedApi());
+    renderWithProviders(<FleetPatchPage />);
+
+    await screen.findByText("No patch scan has completed yet");
+    for (const label of PATCH_TILES) {
+      const card = statCard(label);
+      expect(card.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(card, label).not.toHaveAttribute("aria-busy");
+      expect(card, label).toHaveTextContent("Never scanned");
+    }
+  });
+
+  it("says nothing about scans while the scan results are still on their way", async () => {
+    mockUseApi.mockReturnValue(
+      neverScannedApi({
+        listPatchUpdates: vi.fn(() => new Promise<never>(() => {})),
+        listPatchDeviceRollup: vi.fn(() => new Promise<never>(() => {})),
+      }),
+    );
+    renderWithProviders(<FleetPatchPage />);
+
+    await screen.findByText("Updates outstanding");
+    for (const label of PATCH_TILES) {
+      const card = statCard(label);
+      expect(card.querySelector(".stat-value")?.textContent, label).toBe("n/a");
+      expect(card, label).toHaveAttribute("aria-busy", "true");
+      expect(card, label).not.toHaveTextContent("Never scanned");
+    }
+  });
+
   it("prints real counts the moment a scan result exists", async () => {
     // The other half of the same rule: 0 is a fact when something HAS
     // reported, and dashing it out would be its own lie.

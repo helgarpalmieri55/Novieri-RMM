@@ -111,7 +111,8 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
   // NO NUMBER BEFORE THE LIST ANSWERS (clarification 10a): until then every
   // tile is the kit's pending tile, the absent mark, not the zeroes of an
   // empty list. A failed read never reaches here (the alert above). The two
-  // rates over no resolution are unmeasured, and drawn the same way.
+  // rates over no resolution are unmeasured once the list has answered: the
+  // kit's absent tile, not busy, its foot saying what the rate is over.
   const noData = !alerts.data;
 
   return (
@@ -146,7 +147,8 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.mttr")}
           value={mttr === null ? "" : formatSeconds(Math.round(mttr))}
-          pending={noData || mttr === null}
+          pending={noData}
+          absent={mttr === null}
           icon="clock"
           to={to(RESOLVED_ALERTS)}
           tone="blue"
@@ -175,7 +177,8 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.autoRate")}
           value={autoRate === null ? "" : `${autoRate}%`}
-          pending={noData || autoRate === null}
+          pending={noData}
+          absent={autoRate === null}
           icon="activity"
           to={to(RESOLVED_ALERTS)}
           tone="green"

@@ -10,7 +10,6 @@ export const dashboard = {
   },
   tile: {
     failed: "Could not be read, so nothing is counted.",
-    waiting: "Not counted yet.",
   },
   needs: {
     title: "Needs you",

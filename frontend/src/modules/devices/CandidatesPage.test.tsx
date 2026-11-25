@@ -102,7 +102,11 @@ function subnet(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me> = {}) {
+function renderPage(
+  listAssetCandidates: () => Promise<unknown>,
+  me: Partial<Me> = {},
+  overrides: Record<string, unknown> = {},
+) {
   mockUseApi.mockReturnValue({
     listAssetCandidates,
     promoteAssetCandidates: promote,
@@ -121,6 +125,7 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
     }),
     // `org_id` is the internal client's id, which a promotion names (phase 2).
     me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], clients: [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: [] }, { id: "c-y", name: "Yonder", kind: "customer", enabled_modules: [], permissions: [] }], ...me } as Me),
+    ...overrides,
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -589,6 +594,38 @@ describe("candidate timestamps", () => {
  * can say it points at the right thing, and only a test stops the next hurried
  * change from pointing it back at this page.
  */
+// PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's `absent`
+// form). Without `devices.read` the swept count is never read, so no figure is
+// coming: the tile is `absent`, not busy, and its line says which read it
+// needs. With the read held and the count on its way it is `pending`: busy,
+// and no line, least of all one saying the account lacks a read it holds.
+describe("the swept tile, with and without the fleet read", () => {
+  it("is absent, not loading, and names the read it needs, for a caller without it", async () => {
+    renderPage(() => Promise.resolve(page()));
+    const tile = (await screen.findByText("Recorded by a sweep")).closest(".stat-card") as HTMLElement;
+    await waitFor(() =>
+      expect(tile).toHaveTextContent(
+        "Counting these needs the fleet read (devices.read), which your account does not hold",
+      ),
+    );
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile).not.toHaveAttribute("aria-busy");
+  });
+
+  it("is busy and says nothing under the mark while its count is on its way", async () => {
+    renderPage(
+      () => Promise.resolve(page()),
+      { permissions: ["devices.read"] },
+      { listDevices: vi.fn(() => new Promise<never>(() => {})) },
+    );
+    await screen.findByText("172.22.104.55");
+    const tile = screen.getByText("Recorded by a sweep").closest(".stat-card") as HTMLElement;
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile).toHaveAttribute("aria-busy", "true");
+    expect(tile).not.toHaveTextContent("Counting these needs the fleet read");
+  });
+});
+
 describe("the tiles are links", () => {
   it("sends the unsweepable count to the subnets it is about", async () => {
     renderPage(() => Promise.resolve(page({ unsweepable_subnets: 3 })));

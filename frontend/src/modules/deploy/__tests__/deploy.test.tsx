@@ -1817,6 +1817,36 @@ describe("the stat cards use one convention for 'nothing to divide by'", () => {
     expect(card).toHaveTextContent("No completed runs yet");
   });
 
+  // PENDING IS NOT ABSENT (coordinator, P3 adoption pass; the kit's `absent`
+  // form). A rate over no finished run is a read that ANSWERED with no
+  // figure: nothing is loading, so the tile is not busy, and its line says
+  // why. While the list is still on its way the tile is `pending`: busy, and
+  // no reason yet, because there is nothing to give one about.
+  it("calls a rate over no finished run absent, not loading, and keeps its reason", async () => {
+    mockUseApi.mockReturnValue(withDeployments([]) as ApiClient);
+    renderWithProviders(<DeployPage />);
+
+    await screen.findByText("No deployments yet.");
+    const card = successCard();
+    expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(card).not.toHaveAttribute("aria-busy");
+    expect(card).toHaveTextContent("No completed runs yet");
+  });
+
+  it("draws no reason under the rate while the list is still on its way", async () => {
+    mockUseApi.mockReturnValue({
+      ...withDeployments([]),
+      listDeployments: vi.fn(() => new Promise<never>(() => {})),
+    } as unknown as ApiClient);
+    renderWithProviders(<DeployPage />);
+
+    await screen.findByText("Success rate");
+    const card = successCard();
+    expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(card).toHaveAttribute("aria-busy", "true");
+    expect(card).not.toHaveTextContent("No completed runs yet");
+  });
+
   it("says what the rate is over once runs have finished", async () => {
     mockUseApi.mockReturnValue(
       withDeployments([

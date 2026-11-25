@@ -13,7 +13,6 @@ export const dashboard: Shape<typeof en> = {
   },
   tile: {
     failed: "No se pudo leer, así que no se cuenta nada.",
-    waiting: "Todavía sin contar.",
   },
   needs: {
     title: "Requiere tu atención",
