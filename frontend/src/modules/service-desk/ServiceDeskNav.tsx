@@ -1,6 +1,6 @@
-import { Link, useLocation } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 
 // The three service-desk surfaces (spec §11), shared by every page so the
 // module nav renders identically everywhere -- the Phase-12 lesson: a page
@@ -9,10 +9,12 @@ import type { MessageKey } from "../../i18n/core";
 // them extracted into `BudgetPageNav`; this module starts with the shared
 // version instead).
 //
-// DRAWN AS v3's TAB STRIP (`.tabs`), the way `PushNav` and `IpamNav` draw a
-// module's surfaces, rather than as a row of outline buttons: a button that
-// navigates is a link wearing the wrong costume, and the strip is what the
-// design puts under a page head to move between views of one module.
+// THE KIT'S SECTION NAVIGATION (redesign plan, "Los menús de sección";
+// Task 7, 2.2): a plain `<nav>` of links with the current one marked by
+// `aria-current`, the way every module's menu is drawn now. Its name, its
+// labels and the `ticket.admin` check on Admin are unchanged. "Tickets" is
+// current on the queue alone (`end`); a ticket's own page draws its back
+// link to the queue instead of this strip.
 //
 // Labels are distinct from any in-page action button text so a query by
 // accessible name never collides between the nav link and a page control.
@@ -34,30 +36,12 @@ export function ServiceDeskNav({
   canAdmin: boolean;
 }) {
   const t = useT();
-  const { pathname } = useLocation();
   if (!canRead) return null;
   const items = SERVICE_DESK_NAV_ITEMS.filter((item) => !item.admin || canAdmin);
-  // `/service-desk` is a prefix of every other entry, so it is active only on
-  // the exact path and on a ticket's detail page; the other two match by prefix.
-  const isActive = (to: string) =>
-    to === "/service-desk"
-      ? pathname === to || pathname.startsWith("/service-desk/tickets")
-      : pathname.startsWith(to);
   return (
-    <nav aria-label={t("serviceDesk.nav.aria")} className="tabs">
-      {items.map((item) => {
-        const active = isActive(item.to);
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={active ? "tab active" : "tab"}
-            aria-current={active ? "page" : undefined}
-          >
-            {t(item.label)}
-          </Link>
-        );
-      })}
-    </nav>
+    <SectionNav
+      label={t("serviceDesk.nav.aria")}
+      items={items.map((item) => ({ to: item.to, label: t(item.label), end: item.to === "/service-desk" }))}
+    />
   );
 }

@@ -874,18 +874,22 @@ describe("TicketListPage wiring", () => {
   // other filter beside it is a dropdown ... a typo or a wrong tense
   // silently returns nothing, and the user cannot discover the valid
   // values."
-  it("filters by status from a dropdown of the real vocabulary, not a text box", async () => {
+  //
+  // The list kit (redesign plan, Task 7, 2.2) draws the status as a row of
+  // filter chips rather than a select: still the closed vocabulary, never a
+  // text box, which is what this test pins.
+  it("filters by status from chips of the real vocabulary, not a text box", async () => {
     const user = userEvent.setup();
     renderWithProviders(<TicketListPage />);
 
     await screen.findByText("Tickets", { selector: "h1" });
-    const status = screen.getByLabelText("Status");
-    expect(status.tagName).toBe("SELECT");
+    const status = screen.getByRole("group", { name: "Status" });
+    expect(within(status).queryByRole("textbox")).toBeNull();
     // Both type vocabularies are reachable -- the filter is not type-scoped.
-    expect(within(status).getByRole("option", { name: "Pending approval" })).toBeInTheDocument();
-    expect(within(status).getByRole("option", { name: "Resolved" })).toBeInTheDocument();
+    expect(within(status).getByRole("button", { name: "Pending approval" })).toBeInTheDocument();
+    expect(within(status).getByRole("button", { name: "Resolved" })).toBeInTheDocument();
 
-    await user.selectOptions(status, "resolved");
+    await user.click(within(status).getByRole("button", { name: "Resolved" }));
 
     await waitFor(() => {
       expect(api.listTickets).toHaveBeenCalledWith(

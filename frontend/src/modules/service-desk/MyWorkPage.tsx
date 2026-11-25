@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
@@ -7,12 +8,19 @@ import { useDirectoryUsers, useTicketQueues, useTickets } from "./api";
 import { userPickerOptions } from "./pickerOptions";
 import { ServiceDeskNav } from "./ServiceDeskNav";
 import { TicketTable } from "./TicketTable";
-import { PageHead, Panel, QueryState, StatCard, StatsGrid } from "../../shell/components";
+import { ListEmpty, ListToolbar, PageHead, Panel, QueryState, ShowingCount, StatCard, StatsGrid } from "../../shell/components";
 
 const URGENT_PRIORITIES = new Set(["high", "urgent"]);
 
 // Spec §11's "My work": the caller's open tickets across every queue, the
 // same set as the list's "My tickets" scope, soonest deadline first.
+//
+// A LIST WITH NO FILTER (redesign plan, Task 7, 2.4; Receta L, 8): the
+// section navigation at the top, the two tiles, then the list with how many
+// it shows of the server's total, and an empty list that says so and leads
+// to the queue. No Client chip: these are the person's own tickets, from every
+// client they work for, so the read is the console's own (`useTickets`
+// without a chip).
 export function MyWorkPage() {
   const t = useT();
   const api = useApi();
@@ -67,14 +75,32 @@ export function MyWorkPage() {
 
       <h2 className="sr-only">{t("serviceDesk.myWork.listHeading")}</h2>
       <Panel bare>
-        <QueryState
-          loading={tickets.isLoading}
-          error={tickets.error}
-          empty={tickets.data != null && items.length === 0}
-          emptyIcon="ticket"
-          emptyLabel={t("serviceDesk.myWork.empty")}
-        >
-          <TicketTable tickets={items} queueName={queueName} userOptions={userOptions} now={now} />
+        <ListToolbar
+          // No count before the list has answered: "Showing 0" would be an invented zero.
+          end={tickets.data ? <ShowingCount shown={items.length} total={tickets.data.total} /> : null}
+        />
+        <QueryState loading={tickets.isLoading} error={tickets.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty
+              filtered={false}
+              onClear={() => {}}
+              nothingYet={t("serviceDesk.myWork.empty")}
+              icon="ticket"
+              action={
+                <Link className="btn small" to="/service-desk">
+                  {t("serviceDesk.myWork.toQueue")}
+                </Link>
+              }
+            />
+          ) : (
+            <TicketTable
+              tickets={items}
+              queueName={queueName}
+              userOptions={userOptions}
+              now={now}
+              label={t("serviceDesk.myWork.listHeading")}
+            />
+          )}
         </QueryState>
       </Panel>
     </div>

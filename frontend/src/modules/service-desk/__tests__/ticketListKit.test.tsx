@@ -1,0 +1,154 @@
+/**
+ * The ticket queue on the list kit (redesign plan, Task 7, 2.2; Receta L):
+ * its filters in the URL, an empty list that says its cause, the scope that
+ * is not an ordinary filter, and the Client chip, which narrows the read and
+ * only the read (decision D6). On the fixture session, with the real client
+ * scope, so the chip is drawn and `/me` decides whose clients are whose.
+ */
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { fixtureClient, fixtureRegistry } from "../../../fixtures/client";
+import type { ApiClient } from "../../../lib/api";
+import { recordingNarrowing } from "../../../test/narrowing";
+import { renderPage } from "../../../test/renderPage";
+import { MyWorkPage } from "../MyWorkPage";
+import { TicketListPage } from "../TicketListPage";
+
+const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
+
+const mockUseApi = vi.fn();
+vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+beforeEach(() => mockUseApi.mockReturnValue(fixtureClient()));
+
+/** The fixture session with no ticket at all. */
+function emptyQueue(): ApiClient {
+  return fixtureClient({ ...fixtureRegistry(), listTickets: () => ({ items: [], total: 0 }) });
+}
+
+describe("the ticket queue on the list kit", () => {
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    const { router } = renderPage("/service-desk?status=pending_approval", <TicketListPage />);
+    const status = await screen.findByRole("group", { name: "Status" });
+    expect(within(status).getByRole("button", { name: /Pending approval/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(status).getByRole("button", { name: /^Open$/ }));
+    expect(router.state.location.search).toContain("status=open");
+    // The other filters keep their keys: a chip with its name on it.
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Origin" }), "email");
+    expect(router.state.location.search).toContain("origin=email");
+    await act(() => router.navigate("/service-desk?status=pending_approval&origin=portal"));
+    expect(screen.getByRole("combobox", { name: "Origin" })).toHaveValue("portal");
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(emptyQueue());
+    const { router } = renderPage("/service-desk?status=resolved", <TicketListPage />);
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(router.state.location.search).toBe("");
+    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("does not call a sort a filter", async () => {
+    mockUseApi.mockReturnValue(emptyQueue());
+    renderPage("/service-desk?sort=newest", <TicketListPage />);
+    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+  });
+
+  // The scope is not an ordinary filter (pre-flight review, W-M4): without
+  // `?scope=` the queue is the open tickets, so "All open" writes nothing and
+  // "All" writes `scope=all`; "My tickets" and "Unassigned" drop a picked
+  // assignee, as `setScope` always has.
+  it("picking Mine clears the assignee, and Open is the chip that writes nothing", async () => {
+    const { router } = renderPage("/service-desk?scope=all&assignee=usr-tk", <TicketListPage />);
+    const show = await screen.findByRole("group", { name: "Show" });
+    expect(within(show).getByRole("button", { name: /^All$/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(show).getByRole("button", { name: /My tickets/ }));
+    expect(router.state.location.search).toBe("?scope=mine");
+    await userEvent.click(within(show).getByRole("button", { name: /All open/ }));
+    expect(router.state.location.search).toBe("");
+    expect(within(show).getByRole("button", { name: /All open/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(show).getByRole("button", { name: /^All$/ }));
+    expect(router.state.location.search).toBe("?scope=all");
+  });
+
+  it("opens on the open tickets with All open marked, writing nothing", async () => {
+    const { router } = renderPage("/service-desk", <TicketListPage />);
+    const show = await screen.findByRole("group", { name: "Show" });
+    expect(within(show).getByRole("button", { name: /All open/ })).toHaveAttribute("aria-pressed", "true");
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("says how many it shows, of the server's total", async () => {
+    renderPage("/service-desk", <TicketListPage />);
+    expect(await screen.findByRole("table", { name: "Tickets" })).toBeInTheDocument();
+    expect(screen.getByText(/^Showing \d+ of \d+$/)).toBeInTheDocument();
+  });
+
+  // `/service-desk?client=<id>` is the link the client's 360 page draws.
+  it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    // What the queue reads on the console's own API, legitimately: the queue
+    // names and the user directory are the organisation's reference data,
+    // read to name a row's queue and people, never its rows; the readiness
+    // checklist (SLA policies, categories, mailboxes, health settings and the
+    // rules) is the organisation's own set-up, shown to whoever administers
+    // it; and the New ticket form's device picker (`listDevices`), mounted
+    // with the page, reads with the top bar's choice because a write goes
+    // where the top bar says, never where the chip does. The list itself
+    // must go through `forClient(ANDES)`.
+    const narrowing = recordingNarrowing(fixtureClient(), {
+      console: [
+        "listTicketQueues",
+        "listUsers",
+        "listDevices",
+        "listSlaPolicies",
+        "listTicketCategories",
+        "listEmailMailboxes",
+        "getHealthSettings",
+        "listNotificationRules",
+      ],
+    });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderPage(`/service-desk?client=${ANDES}`, <TicketListPage />);
+    expect(await screen.findByRole("table", { name: "Tickets" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(narrowing.client(ANDES).listTickets).toHaveBeenCalledWith({
+        type: undefined,
+        status: undefined,
+        queue_id: undefined,
+        priority: undefined,
+        q: undefined,
+        assigned_to: undefined,
+        scope: "open",
+        sort: "due",
+        limit: 200,
+      }),
+    );
+    expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ANDES);
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+});
+
+describe("My work on the list kit", () => {
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(emptyQueue());
+    renderPage("/service-desk/my-work", <MyWorkPage />);
+    expect(await screen.findByText("No open tickets are assigned to you.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See the ticket queue" })).toHaveAttribute("href", "/service-desk");
+    expect(screen.getByText("Showing 0 of 0")).toBeInTheDocument();
+  });
+
+  it("puts the service desk's section navigation at the top, with My work current", async () => {
+    renderPage("/service-desk/my-work", <MyWorkPage />);
+    const nav = await screen.findByRole("navigation", { name: "Service desk" });
+    expect(within(nav).getByRole("link", { name: "My work" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Tickets" })).not.toHaveAttribute("aria-current");
+    // At the top: before the tiles and the list.
+    const tiles = document.querySelector(".stats-grid") as HTMLElement;
+    expect(nav.compareDocumentPosition(tiles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

@@ -128,6 +128,7 @@ export const serviceDesk = {
     zeroAssigned: "Nothing open is assigned to you",
     zeroHighUrgent: "None of your tickets is high or urgent",
     listHeading: "Assigned tickets",
+    toQueue: "See the ticket queue",
     empty: "No open tickets are assigned to you.",
   },
   list: {

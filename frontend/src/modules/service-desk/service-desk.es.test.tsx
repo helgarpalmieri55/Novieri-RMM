@@ -213,12 +213,17 @@ describe("the ticket queue in Spanish", () => {
     expect(screen.getByPlaceholderText("Buscar tickets")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Ordenar" })).toHaveDisplayValue("Vencimiento más próximo");
     expect(screen.getByRole("combobox", { name: "Tipo" })).toHaveDisplayValue("Todos los tipos");
-    expect(screen.getByRole("combobox", { name: "Estado" })).toHaveDisplayValue("Cualquier estado");
+    // The status is a row of chips on the list kit (redesign plan, Task 7, 2.2), not a select.
+    expect(within(screen.getByRole("group", { name: "Estado" })).getByRole("button", { name: "Cualquier estado" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByRole("combobox", { name: "Cola" })).toHaveDisplayValue("Todas las colas");
     expect(screen.getByRole("combobox", { name: "Prioridad" })).toHaveDisplayValue("Todas las prioridades");
     expect(screen.getByRole("combobox", { name: "Origen" })).toHaveDisplayValue("Cualquier origen");
     expect(screen.getByRole("combobox", { name: "Responsable" })).toHaveDisplayValue("Cualquiera");
-    expect(screen.getByText("3 mostrados")).toBeInTheDocument();
+    // The kit's count at the end of the toolbar (Receta L): "Mostrando x de y".
+    expect(screen.getByText("Mostrando 3 de 3")).toBeInTheDocument();
     // The table: the recorded words stay, the labels around them are Spanish.
     const row = screen.getByText("La impresora 2 atasca el papel").closest("tr") as HTMLElement;
     expect(within(row).getByText("Rosa Solicitante · Soporte general")).toBeInTheDocument();
@@ -267,7 +272,8 @@ describe("the ticket queue in Spanish", () => {
       "Urgente",
     ]);
     expect(options("Tipo")).toEqual(["Todos los tipos", "Incidente", "Solicitud"]);
-    expect(options("Estado")).toEqual([
+    // The status chips (redesign plan, Task 7, 2.2), in the same order as the select's options were.
+    expect(within(screen.getByRole("group", { name: "Estado" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
       "Cualquier estado",
       "Nuevo",
       "Abierto",
@@ -394,7 +400,7 @@ describe("the ticket queue in Spanish", () => {
     expect(screen.getByText("2 incidents · 1 request")).toBeInTheDocument();
     expect(screen.getByText("1 high · 1 urgent")).toBeInTheDocument();
     expect(screen.getByText("1 still unassigned")).toBeInTheDocument();
-    expect(screen.getByText("3 shown")).toBeInTheDocument();
+    expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
     const row = screen.getByText("La impresora 2 atasca el papel").closest("tr") as HTMLElement;
     expect(within(row).getByText("Pending approval")).toBeInTheDocument();
     expect(within(row).getByText("Breached 1 h 30 min ago")).toBeInTheDocument();

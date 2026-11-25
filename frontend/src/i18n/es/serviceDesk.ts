@@ -128,6 +128,7 @@ export const serviceDesk: Shape<typeof en> = {
     zeroAssigned: "No tienes ningún ticket abierto asignado",
     zeroHighUrgent: "Ninguno de tus tickets tiene prioridad alta o urgente",
     listHeading: "Tickets asignados",
+    toQueue: "Ver la cola de tickets",
     empty: "No tienes tickets abiertos asignados.",
   },
   list: {
