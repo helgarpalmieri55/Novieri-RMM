@@ -552,23 +552,24 @@ describe("the software page in Spanish", () => {
     expect(await screen.findByText("Paquete de ejemplo")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar software")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Editor, producto, versión")).toBeInTheDocument();
-    expect(await screen.findByTestId("software-count")).toHaveTextContent("2 títulos");
+    // The kit's count (redesign Receta L, 8).
+    expect(await screen.findByText("Mostrando 2 de 2")).toBeInTheDocument();
     for (const header of ["Nombre", "Versión", "Instalaciones"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
-    expect(screen.getByRole("heading", { name: "Ningún software seleccionado" })).toBeInTheDocument();
-    expect(screen.getByText("Elige un título del inventario de software.")).toBeInTheDocument();
-    expect(screen.getByText("Instalado en")).toBeInTheDocument();
+    // No prompt before a selection: the chosen title's computers open under
+    // the list (redesign Task 6, 1.3), in «equipos», the list's word (D13).
     await user.click(screen.getByRole("link", { name: "Paquete de ejemplo" }));
-    expect(await screen.findByText("Dispositivos que informan de este título")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Dispositivo" })).toBeInTheDocument();
+    expect(await screen.findByText("Equipos que informan de este título")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Equipo" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Quitar la lista de equipos de Paquete de ejemplo" })).toHaveTextContent("Quitar");
     expectNoEnglish(container, [...STORED, "Editor SA", "Taller SL"]);
   });
 
   it("agrees the title count and words the empty answers", async () => {
     const one = software({ searchSoftware: vi.fn().mockResolvedValue({ items: [{ name: "Solo uno", version: "1", publisher: "X", device_count: 1 }], total: 1 }) });
     expect(await screen.findByText("Solo uno")).toBeInTheDocument();
-    expect(await screen.findByTestId("software-count")).toHaveTextContent("1 título");
+    expect(await screen.findByText("Mostrando 1 de 1")).toBeInTheDocument();
     one.unmount();
 
     const none = software({ searchSoftware: vi.fn().mockResolvedValue({ items: [], total: 0 }) });
@@ -579,14 +580,15 @@ describe("the software page in Spanish", () => {
     software({ searchSoftware: vi.fn().mockResolvedValue({ items: [], total: 0 }) });
     await screen.findByText("Todavía no se ha descubierto ningún software.");
     await user.type(screen.getByLabelText("Buscar software"), "zz");
-    expect(await screen.findByText("Ningún software coincide con esa búsqueda.")).toBeInTheDocument();
+    // The kit's filtered empty list (redesign Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
   it("words a selected title with no devices", async () => {
     const user = userAction();
     software({ softwareDevices: vi.fn().mockResolvedValue([]) });
     await user.click(await screen.findByRole("link", { name: "Paquete de ejemplo" }));
-    expect(await screen.findByText("Ningún dispositivo informa de este software.")).toBeInTheDocument();
+    expect(await screen.findByText("Ningún equipo informa de este software.")).toBeInTheDocument();
   });
 
   it("words a failed export and re-words it on a live switch", async () => {

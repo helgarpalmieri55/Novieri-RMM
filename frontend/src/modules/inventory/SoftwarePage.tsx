@@ -1,12 +1,22 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
-import { EmptyState } from "../../components/emptystate";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { Td } from "../../components/ui";
 import { useApi } from "../../lib/ApiContext";
 import { saveBlob } from "../../lib/download";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, TableWrap } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  TableWrap,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
 
@@ -19,6 +29,12 @@ import { OsIcon } from "../../shell/viz";
 // notion of the current version no endpoint serves. The design's Licenses
 // correlate also shows "Mapped license" and "Last seen"; those belong to the
 // licenses module and are not this endpoint's job either.
+//
+// ON THE LIST KIT (redesign plan Task 6, 1.3; Receta L, a list that only
+// searches): the search in `?q=`, "Showing x of y", an empty list that says
+// its cause, and the chosen title's computers in a panel under the list. NO
+// CLIENT CHIP: the software inventory is the fleet's, one catalogue across
+// every client.
 export function SoftwarePage() {
   const t = useT();
   const api = useApi();
@@ -30,20 +46,23 @@ export function SoftwarePage() {
    * reachable and middle-clickable; the previous version was a click handler
    * on the row that a keyboard could not reach at all.
    */
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q") ?? "";
+  const filters = useUrlFilters(["q"] as const);
+  const [params] = useSearchParams();
+  const search = filters.values.q;
   const selected = params.get("title");
-  const setSearch = (value: string) => {
-    const next = new URLSearchParams(params);
-    if (value === "") next.delete("q");
-    else next.set("q", value);
-    setParams(next, { replace: true });
-  };
   const hrefFor = (title: string) => {
     const next = new URLSearchParams(params);
     next.set("title", title);
     return `?${next.toString()}`;
   };
+  // Closing the chosen title's panel takes `?title=` away and leaves the search.
+  const { pathname } = useLocation();
+  const withoutTitle = (() => {
+    const next = new URLSearchParams(params);
+    next.delete("title");
+    const query = next.toString();
+    return { pathname, search: query === "" ? "" : `?${query}` };
+  })();
 
   const software = useQuery({
     queryKey: ["software", search],
@@ -99,41 +118,31 @@ export function SoftwarePage() {
         </p>
       )}
 
-      <div className="grid grid-2">
-        <Panel bare>
-          <FilterBar>
+      <Panel bare>
+        <ListToolbar
+          search={
             <SearchField
               placeholder={t("inventory.software.searchPlaceholder")}
               maxLength={128}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => filters.set("q", event.target.value)}
               aria-label={t("inventory.software.searchAria")}
             />
-            <span className="filter-spacer" />
-            {/* THE COUNT USED TO BE A FULL-WIDTH STAT CARD, and `StatCard`
-                requiring a destination is what ended that. It counted the very
-                table it sat above: there is no other list of software titles
-                to open, so the tile could only ever have linked to the page
-                the reader was already on. It is a result count, so it sits
-                where v3 puts one -- on the toolbar's right, in mono. */}
-            <span className="note mono" data-testid="software-count">
-              {software.data
-                ? t("inventory.software.titles", { count: software.data.total })
-                : "…"}
-            </span>
-          </FilterBar>
-
-          <QueryState
-            loading={software.isLoading}
-            error={software.error}
-            empty={items.length === 0}
-            emptyLabel={
-              search === "" ? t("inventory.software.emptyNone") : t("inventory.software.emptySearch")
-            }
-            emptyIcon="package"
-          >
+          }
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={software.data ? <ShowingCount shown={items.length} total={software.data.total} /> : null}
+        />
+        <QueryState loading={software.isLoading} error={software.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("inventory.software.emptyNone")}
+              icon="package"
+            />
+          ) : (
             <TableWrap>
-              <table>
+              <table aria-label={t("inventory.software.title")}>
                 <thead>
                   <tr>
                     <th scope="col">{t("inventory.software.thName")}</th>
@@ -149,7 +158,9 @@ export function SoftwarePage() {
                     >
                       {/* v3's row: the package glyph leads, the title is the
                           product, the sub-line the publisher. The title is
-                          the selection, as a link. */}
+                          the selection, as a link: keyboard reachable,
+                          middle-clickable, and a URL one technician sends
+                          another ("the machines with the old Chrome"). */}
                       <Td lead={<Icon name="package" size={18} />}>
                         <div className="cell-title">
                           <Link to={hrefFor(item.name)}>{item.name}</Link>
@@ -163,15 +174,26 @@ export function SoftwarePage() {
                 </tbody>
               </table>
             </TableWrap>
-          </QueryState>
-        </Panel>
+          )}
+        </QueryState>
+      </Panel>
 
-        <Panel
-          title={selected ?? t("inventory.software.installedOn")}
-          subtitle={selected ? t("inventory.software.devicesReporting") : undefined}
-          bare
-        >
-          {selected ? (
+      {/* THE CHOSEN TITLE'S COMPUTERS, under the list (redesign Task 6, 1.3),
+          from `?title=`, so the view is a link; closing it takes `?title=`
+          away and keeps the search. Its name says which list it closes: a
+          bare "Remove" beside a software title could read as uninstalling it. */}
+      {selected ? (
+        <div className="mt-4">
+          <Panel
+            title={selected}
+            subtitle={t("inventory.software.devicesReporting")}
+            actions={
+              <Link to={withoutTitle} aria-label={t("inventory.software.closeTitleAria", { title: selected })}>
+                {t("inventory.software.closeTitle")}
+              </Link>
+            }
+            bare
+          >
             <QueryState
               loading={devices.isLoading}
               error={devices.error}
@@ -205,32 +227,9 @@ export function SoftwarePage() {
                 </table>
               </TableWrap>
             </QueryState>
-          ) : (
-            /* THE KIT'S EMPTY STATE, not a hand-rolled one. The bare `<svg>`
-               took Tailwind preflight's `display:block` and sat flush against
-               the panel's left padding while the sentence centred underneath,
-               so the glyph and the words did not read as one unit;
-               `EmptyState` wraps it in `.empty-icon` for that. It also
-               requires the sentence saying WHY the panel is empty, which
-               "Select a software row." never said -- an operator who has not
-               yet worked out that the inventory list drives this panel is
-               exactly the one reading this.
-
-               AND IT NAMES NO DIRECTION. The copy read "in the list to the
-               left", which is true at 1440 and false at 390: below the kit's
-               640px fold the two panes stack, so the list is ABOVE, not
-               beside. A width-aware sentence would be a second place for the
-               breakpoint to be written down and a second place for it to rot
-               when the fold moves; naming the list instead is true at every
-               width and cannot go stale. */
-            <EmptyState
-              icon="package"
-              title={t("inventory.software.noneSelected")}
-              body={t("inventory.software.chooseTitle")}
-            />
-          )}
-        </Panel>
-      </div>
+          </Panel>
+        </div>
+      ) : null}
     </>
   );
 }
