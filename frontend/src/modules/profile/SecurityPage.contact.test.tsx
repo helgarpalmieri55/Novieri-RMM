@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 import { navigation } from "../../lib/session";
+import { renderPage } from "../../test/renderPage";
 import { MY_SECURITY_FIXTURE, apiClient, calls, installDefaults } from "../settings/__tests__/harness";
 import { PortalSecurityPage } from "./SecurityPage";
 
@@ -54,6 +55,40 @@ afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
   installDefaults();
   calls.getMySecurity.mockResolvedValue(CONTACT);
+});
+
+// THE PAGE TAKES THE NAME OF THE FRAME IT IS DRAWN IN (coordinator rulings 1
+// and 1a; O7 review, S1). The portal's nav calls this page "Sign-in and
+// security", so in the portal frame that is its h1 and its tab title; the
+// console frame keeps its own label ("Your security").
+describe("the portal frame's security page", () => {
+  it("is titled by the portal's own nav label, on the page and in the tab", async () => {
+    renderPortalSecurity();
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign-in and security" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Your security" })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Sign-in and security · Novieri RMM"));
+  });
+
+  // An operator may open `/portal/security` too, and then it is drawn in the
+  // console's shell, which titles the tab by the entry it lights ("End-user
+  // portal"). The page's name still leads the tab there (ruling 1b's way, as
+  // a record does), so the h1 and the tab agree in both frames.
+  it("leads the tab with its name inside the console's shell as well", async () => {
+    renderPage("/portal/security", <PortalSecurityPage />, "/portal/security", {
+      page: "shell.nav.item.endUserPortal",
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign-in and security" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Sign-in and security · End-user portal · Novieri RMM"));
+  });
+
+  it("says it in Spanish too", async () => {
+    setActiveLanguage("es");
+    renderPortalSecurity();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inicio de sesión y seguridad" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Inicio de sesión y seguridad · Novieri RMM"));
+  });
 });
 
 describe("a contact's security", () => {

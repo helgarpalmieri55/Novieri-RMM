@@ -217,9 +217,40 @@ describe("Settings — Users tab", () => {
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
 
-    expect(within(invite).getByRole("button", { name: "Add this access" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 review, S2) from "Add this access
+    // is disabled": the button stays pressable and, pressed with half a pair,
+    // says which half is missing instead of doing nothing silently.
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(within(invite).queryAllByRole("listitem")).toHaveLength(0);
     expect(within(invite).getByRole("button", { name: "Send invitation" })).toBeDisabled();
     expect(within(invite).getByText("Add the access you chose, or clear it, before sending.")).toBeInTheDocument();
+    expect(calls.inviteUser).not.toHaveBeenCalled();
+  });
+
+  // A DISABLED CONTROL SHOWS ITS REASON ON SCREEN (coordinator ruling 8; O7
+  // review, S2). "Add this access" used to sit disabled until a role and a
+  // client were both chosen, with nothing saying so; now it is pressable and
+  // names what is missing, and the sentence goes once the pair is complete.
+  it("names what is missing when Add this access is pressed without a whole pair", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const add = within(invite).getByRole("button", { name: "Add this access" });
+    expect(add).toBeEnabled();
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    expect(within(invite).queryAllByRole("listitem")).toHaveLength(0);
+
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+
+    await user.click(within(invite).getByLabelText(/client/i));
+    await user.click(await within(invite).findByRole("option", { name: /Warehouse/ }));
+    await user.click(add);
+    expect(within(invite).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(invite).queryByRole("alert")).toBeNull();
     expect(calls.inviteUser).not.toHaveBeenCalled();
   });
 

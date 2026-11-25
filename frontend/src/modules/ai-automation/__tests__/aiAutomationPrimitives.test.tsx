@@ -14,7 +14,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -412,6 +412,40 @@ describe("AutonomyDialPage", () => {
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 
+  // O7 review, M1: a save of several cells is one request per cell, in turn.
+  // A chip pressed while that runs would edit a draft the loop is narrowing
+  // from a snapshot, and the edit would be lost or saved without being
+  // confirmed; so every chip holds still from the confirmation until the last
+  // cell has answered, including the moment between two cells.
+  it("holds every chip still while a save of several cells is running", async () => {
+    const answers: Array<() => void> = [];
+    const setAiCeiling = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answers.push(() => resolve(CEILING_OK));
+        }),
+    );
+    stubApi({ setAiCeiling });
+    renderWithProviders(<AutonomyDialPage />);
+    const chips = () => screen.getAllByTestId(/^dial-/).flatMap((cell) => within(cell).queryAllByRole("button"));
+
+    await choose("dial-technician-high", "require_approval");
+    await choose("dial-admin-low", "suggest");
+    for (const chip of chips()) expect(chip).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise the ceiling" }));
+
+    await waitFor(() => expect(setAiCeiling).toHaveBeenCalledTimes(1));
+    for (const chip of chips()) expect(chip).toBeDisabled();
+    await act(async () => answers[0]?.());
+    await waitFor(() => expect(setAiCeiling).toHaveBeenCalledTimes(2));
+    for (const chip of chips()) expect(chip).toBeDisabled();
+    await act(async () => answers[1]?.());
+
+    expect(await screen.findByText(/^Saved\./)).toBeInTheDocument();
+    for (const chip of chips()) expect(chip).toBeEnabled();
+  });
+
   it("discarding restores the stored value and leaves nothing to save", async () => {
     const api = stubApi({ setAiCeiling: vi.fn().mockResolvedValue(CEILING_OK) });
     renderWithProviders(<AutonomyDialPage />);
@@ -627,7 +661,10 @@ describe("AutonomyDialPage on the form pattern", () => {
     stubApi();
     const { router } = renderPage("/assistant/autonomy", <AutonomyDialPage />, "/assistant/autonomy");
     await choose("dial-technician-high", "suggest");
-    void router.navigate("/assistant");
+    // RE-POINTED (O7 review, M2) from a bare `router.navigate`: the leave goes
+    // through the page's own way out, the waiting panel's "All actions" link,
+    // the click a person makes.
+    await userEvent.click(screen.getByRole("link", { name: "All actions" }));
     expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/assistant/autonomy");
   });

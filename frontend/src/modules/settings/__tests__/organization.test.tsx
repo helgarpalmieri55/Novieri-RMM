@@ -544,11 +544,13 @@ describe("Settings — Organization on the form pattern", () => {
 
   it("asks before leaving with an unsaved organization name", async () => {
     const user = userEvent.setup();
-    const { router } = renderSettings();
+    const { router } = renderSettings("/settings", { rail: true });
     await screen.findByLabelText("Default timezone");
     await user.type(screen.getByLabelText("Organization name"), " Holdings");
-    // Leaving is a change of path (the shell's rail, a link elsewhere).
-    void router.navigate("/devices");
+    // Leaving is a change of path. RE-POINTED (O7 review, M2) from a bare
+    // `router.navigate`: the Organization tab has no link out of Settings, so
+    // the leave is a click on the shell's rail, which the harness stands in for.
+    await user.click(screen.getByRole("link", { name: "Devices" }));
     expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings");
   });

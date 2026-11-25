@@ -4,7 +4,7 @@
 // queue both showed a blank table.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -126,6 +126,21 @@ describe("AiActionsPage on the list pattern", () => {
     } as unknown as ApiClient);
     return renderUnderRouter(path, <AiActionsPage />);
   }
+
+  // A SUB-PAGE WITH NO RAIL ENTRY TAKES ITS OWN NAME (coordinator ruling 1b;
+  // O7 review): the shell titles the tab "Assistant", the entry it lights,
+  // and the page puts its h1 in front of that.
+  it("is named by its h1, and the browser tab leads with it", async () => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listAiActions: vi.fn().mockResolvedValue(LIST),
+    } as unknown as ApiClient);
+    renderUnderRouter("/assistant/actions", <AiActionsPage />, "/assistant/actions", {
+      page: "shell.nav.item.assistant",
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Assistant actions" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Assistant actions · Assistant · Novieri RMM"));
+  });
 
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = underRouter("/assistant/actions?state=rejected");

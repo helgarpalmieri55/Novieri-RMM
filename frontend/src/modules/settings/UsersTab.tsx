@@ -85,10 +85,10 @@
 // the avatar tone is chosen from the user's id so the same person is the same
 // colour on every page that draws them.
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
-import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
+import { attemptProblems, describeSubmitError, requiredProblems, type Attempt } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -328,6 +328,10 @@ export function UsersTab({
   const [draftRoleId, setDraftRoleId] = useState("");
   const [draftClientId, setDraftClientId] = useState("");
   const [draftTyping, setDraftTyping] = useState(false);
+  // "Add this access" was pressed with half a pair (coordinator ruling 8; O7
+  // review, S2): the button stays pressable and the missing half is named
+  // beside it, re-read on every render so it goes as soon as it is chosen.
+  const [grantTried, setGrantTried] = useState(false);
   const [shownLink, setShownLink] = useState<ShownLink | null>(null);
   // An invitation refused for a missing address, held as data and worded at render.
   const [inviteAttempt, setInviteAttempt] = useState<Attempt | null>(null);
@@ -366,7 +370,9 @@ export function UsersTab({
   // New menu and a link can open it. It starts empty every time it opens,
   // however it was opened (the button, a link, Back or Forward).
   const newUser = useNewParam("user");
-  useEffect(() => {
+  // BEFORE PAINT (O7 review, M4): a layout effect, so a reopened dialog never
+  // shows the last invitation's address for one frame before it empties.
+  useLayoutEffect(() => {
     if (!newUser.open) return;
     setEmail("");
     setDisplayName("");
@@ -374,6 +380,7 @@ export function UsersTab({
     setDraftRoleId("");
     setDraftClientId("");
     setDraftTyping(false);
+    setGrantTried(false);
     setInviteAttempt(null);
     invite.reset();
     // `invite` is a new object each render; only the opening matters here.
@@ -398,9 +405,29 @@ export function UsersTab({
 
   const roleNameOf = (roleId: string): string => grantable.find((role) => role.id === roleId)?.name ?? roleId;
 
+  /**
+   * What the pair being chosen still lacks, in the person's words. Text typed
+   * into the client picker that is not one of its choices is no client.
+   */
+  function grantProblems() {
+    return requiredProblems(
+      [
+        { name: "role", label: t("settings.users.role") },
+        { name: "client", label: t("settings.users.clientLabel") },
+      ],
+      { role: draftRoleId, client: draftTyping ? "" : draftClientId },
+    );
+  }
+
+  const grantMissing = grantTried ? grantProblems() : [];
+
   /** The chosen pair joins the invitation; the same pair twice is one grant. */
   function addGrant() {
-    if (draftRoleId === "" || draftClientId === "" || draftTyping) return;
+    if (grantProblems().length > 0) {
+      setGrantTried(true);
+      return;
+    }
+    setGrantTried(false);
     const grant: InviteGrant = { role_id: draftRoleId, client_id: grantClientIdFor(draftClientId) };
     setInviteGrants((current) =>
       current.some((held) => held.role_id === grant.role_id && held.client_id === grant.client_id)
@@ -1254,15 +1281,23 @@ export function UsersTab({
             </div>
           )}
           <div className="form-actions">
-            {/* Disabled until a role and a scope are CHOSEN, and while the
-                picker holds typed text that is not a choice -- the same rule
-                as "Assign role" (final review, T11R-I1). */}
+            {/* Pressable whatever is chosen (coordinator ruling 8; O7 review,
+                S2): pressed before a role and a client are both CHOSEN -- or
+                while the picker holds typed text that is not a choice, the
+                rule "Assign role" keeps (final review, T11R-I1) -- it adds
+                nothing and says which half is missing. */}
             <Btn
               label={t("settings.users.invite.addGrant")}
               icon="plus"
-              disabled={!canManage || draftRoleId === "" || draftClientId === "" || draftTyping}
+              disabled={!canManage}
               onClick={addGrant}
             />
+            {grantMissing.length > 0 ? (
+              <span role="alert" className="form-error">
+                <Icon name={KIND_ICON.crit} size={13} />
+                {grantMissing.map((problem) => problem.message).join(". ")}.
+              </span>
+            ) : null}
           </div>
         </fieldset>
 

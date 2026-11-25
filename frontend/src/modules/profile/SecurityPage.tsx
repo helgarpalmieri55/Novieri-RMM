@@ -84,6 +84,7 @@ import { PORTAL_SIGN_IN_PATH, SIGN_IN_PATH, signOutEverywhere } from "../../lib/
 import { useOrgZone } from "../../lib/zone";
 import { Btn, FormSection, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useDocumentTitle, useRecordTitle } from "../../shell/title";
 import { checkNewPassword } from "../auth/errors";
 import { setupKeyOf } from "../auth/flow";
 import { describeMicrosoftError } from "../auth/microsoft";
@@ -188,23 +189,66 @@ function Failure({ message }: { message: string }) {
   );
 }
 
-/** `/profile/security`, in the console's frame. */
+/** `/profile/security`, in the console's frame, under the console's own name. */
 export function SecurityPage() {
+  const t = useT();
   const zone = useOrgZone();
-  return <SecurityBody zone={zone} back="/profile/security" signIn={SIGN_IN_PATH} />;
-}
-
-/** `/portal/security`, in the portal's: the zone of `/portal/me` (decision 3). */
-export function PortalSecurityPage() {
-  const me = usePortalMe();
-  return <SecurityBody zone={me.data?.timezone ?? null} back="/portal/security" signIn={PORTAL_SIGN_IN_PATH} />;
+  return (
+    <SecurityBody
+      title={t("profile.securityPage.title")}
+      zone={zone}
+      back="/profile/security"
+      signIn={SIGN_IN_PATH}
+    />
+  );
 }
 
 /**
- * `back`: this page's own address, where linking a Microsoft account comes
- * back to. `signIn`: where "Sign out everywhere" leaves for.
+ * `/portal/security`, in the portal's: the zone of `/portal/me` (decision 3).
+ *
+ * THE PAGE TAKES THE NAME OF THE FRAME IT IS DRAWN IN (coordinator rulings 1
+ * and 1a; O7 review, S1). The portal's nav calls it "Sign-in and security", so
+ * that is its h1 here and its tab title: the portal frame has no shell to name
+ * the tab, so the page names it itself. An operator who opens this address
+ * gets the console's shell instead, which titles the tab by the entry it
+ * lights ("End-user portal"); there the page puts its name in front of that,
+ * the way a sub-page with no rail entry does (ruling 1b). In the portal frame
+ * `useRecordTitle` has no shell to tell and does nothing; in the console's,
+ * the shell writes the tab after the page's `useDocumentTitle` does, so the
+ * record title is the one that shows.
  */
-function SecurityBody({ zone, back, signIn }: { zone: string | null; back: string; signIn: string }) {
+export function PortalSecurityPage() {
+  const t = useT();
+  const me = usePortalMe();
+  const title = t("portal.shell.security");
+  useDocumentTitle(title);
+  useRecordTitle(title);
+  return (
+    <SecurityBody
+      title={title}
+      zone={me.data?.timezone ?? null}
+      back="/portal/security"
+      signIn={PORTAL_SIGN_IN_PATH}
+    />
+  );
+}
+
+/**
+ * `title`: the frame's own name for this page (its h1). `back`: this page's
+ * own address, where linking a Microsoft account comes back to. `signIn`:
+ * where "Sign out everywhere" leaves for.
+ */
+function SecurityBody({
+  title,
+  zone,
+  back,
+  signIn,
+}: {
+  title: string;
+  zone: string | null;
+  back: string;
+  signIn: string;
+}) {
   const t = useT();
   const security = useMySecurity();
   const stepUp = useStepUp();
@@ -219,7 +263,7 @@ function SecurityBody({ zone, back, signIn }: { zone: string | null; back: strin
 
   return (
     <>
-      <PageHead title={t("profile.securityPage.title")} description={t("profile.securityPage.description")} />
+      <PageHead title={title} description={t("profile.securityPage.description")} />
       {security.isLoading ? (
         <Panel>
           <p className="note">{t("profile.securityPage.loading")}</p>

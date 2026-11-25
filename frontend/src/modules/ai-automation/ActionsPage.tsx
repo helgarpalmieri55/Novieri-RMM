@@ -75,10 +75,15 @@ export function AiActionsPage(): ReactElement {
   const filters = useUrlFilters(["state"] as const);
   const all = actions.data ?? [];
   const items = all.filter((action) => matchesState(action.state, filters.values.state));
+  const title = t("aiAutomation.list.title");
+  // NO RAIL ENTRY OF ITS OWN (coordinator ruling 1b): the shell titles the tab
+  // by the entry this page lights, "Assistant", so the page puts its h1 in
+  // front of it -- "Assistant actions · Assistant · Novieri RMM".
+  useRecordTitle(title);
   return (
     <>
       <PageHead
-        title={t("aiAutomation.list.title")}
+        title={title}
         description={t("aiAutomation.list.description")}
       />
       <Panel bare>

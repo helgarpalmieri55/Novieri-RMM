@@ -14,9 +14,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import type { RenderResult } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider, useLocation, type Location } from "react-router-dom";
+import { createMemoryRouter, Link, RouterProvider, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
+import { useT } from "../../../i18n/context";
 import { ApiError, type ApiClient } from "../../../lib/api";
 import { ProfilePage } from "../../profile/ProfilePage";
 import { SecurityPage } from "../../profile/SecurityPage";
@@ -760,8 +761,31 @@ function LocationProbe() {
  * The Settings page under a router, at `/settings` unless `path` says
  * otherwise (`/settings?tab=users`): the active tab lives in `?tab=`.
  */
-export function renderSettings(path = "/settings"): HarnessRender {
-  return renderUnderDataRouter(path, <SettingsPage />);
+export function renderSettings(path = "/settings", options: { rail?: boolean } = {}): HarnessRender {
+  return renderUnderDataRouter(
+    path,
+    options.rail ? (
+      <>
+        <RailStandIn />
+        <SettingsPage />
+      </>
+    ) : (
+      <SettingsPage />
+    ),
+  );
+}
+
+/**
+ * THE SHELL'S RAIL, AS ONE OF ITS LINKS (O7 review, M2). The page is rendered
+ * without the shell, and the Organization tab has no link out of Settings of
+ * its own: a person leaves it through the rail. A test that asks about leaving
+ * passes `{ rail: true }` and clicks this link, so the leave is the same
+ * `<Link>` click a person makes rather than a bare `router.navigate`. Its
+ * label is the rail's own catalogue value.
+ */
+function RailStandIn(): ReactElement {
+  const t = useT();
+  return <Link to="/devices">{t("shell.nav.item.devices")}</Link>;
 }
 
 /** A render, its QueryClient, and the data router it ran under. */

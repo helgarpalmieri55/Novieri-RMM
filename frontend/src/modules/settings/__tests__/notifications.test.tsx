@@ -691,3 +691,22 @@ describe("Settings — Notifications, grouped", () => {
     }
   });
 });
+
+// Ruling 13 (O7 review, I2): a Save on an untouched record sends nothing. The
+// channel dialog's Save stays enabled (ruling 8) and, with nothing changed,
+// closes the dialog: an update with the stored values would write a change
+// that did not happen into the audit log.
+describe("Settings — Notifications, saving an untouched channel", () => {
+  it("sends nothing and closes the dialog", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await openTab();
+    const dialog = await openChannel(user, "Operations mailbox");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+    expect(screen.queryByRole("dialog", { name: "Edit Operations mailbox" })).toBeNull();
+    expect(calls.updateNotificationChannel).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});

@@ -17,12 +17,13 @@
 //     rendered" is only half the assertion.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Component, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import { AiSettingsPage } from "../AiSettingsPage";
 import { ChatPanel, mergeTurns } from "../ChatPanel";
 import { EGRESS_DISCLOSURE } from "../egress";
@@ -520,6 +521,21 @@ describe("ToolTrace", () => {
 // still rendered verbatim, because what leaves the network did not change — only
 // who consents to it, and where.
 // --------------------------------------------------------------------------
+
+// A SUB-PAGE WITH NO RAIL ENTRY TAKES ITS OWN NAME (coordinator ruling 1b; O7
+// review). `/assistant/settings` lights the Assistant entry, so the shell's
+// half of the tab title is "Assistant"; the page puts its own name, its h1,
+// in front of it, the way a record page does.
+describe("AiSettingsPage's name", () => {
+  it("is its h1, and the browser tab leads with it", async () => {
+    stubApi({ listAiProviders: vi.fn().mockResolvedValue([]) });
+    renderPage("/assistant/settings", <AiSettingsPage />, "/assistant/settings", {
+      page: "shell.nav.item.assistant",
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Assistant settings" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Assistant settings · Assistant · Novieri RMM"));
+  });
+});
 
 describe("AiSettingsPage", () => {
   it("shows the egress disclosure verbatim, as information rather than as a consent", async () => {

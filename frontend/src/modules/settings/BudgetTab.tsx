@@ -84,11 +84,7 @@ function seedFrom(data: SettingsOut | undefined): BudgetForm {
   };
 }
 
-export function BudgetTab({
-  canRead,
-  canManage,
-  canReadUsers,
-}: {
+interface BudgetTabProps {
   canRead: boolean;
   canManage: boolean;
   /**
@@ -99,7 +95,22 @@ export function BudgetTab({
    * `useApprovalActorDirectory` already documents for the identical case).
    */
   canReadUsers: boolean;
-}) {
+}
+
+/**
+ * AN EDIT NEVER CARRIES TO ANOTHER CLIENT (coordinator ruling 12; O7 review,
+ * I1). The budget settings are the top-bar client's, and choosing another
+ * client changes no route, so no guard asks. Keyed by the client, the form is
+ * a new one for each: the draft, the acknowledgement and a refused save of one
+ * client are dropped, never shown against the next client's record and never
+ * saved onto it.
+ */
+export function BudgetTab(props: BudgetTabProps) {
+  const { selected } = useClientScope();
+  return <BudgetForm key={selected ?? "every-client"} {...props} />;
+}
+
+function BudgetForm({ canRead, canManage, canReadUsers }: BudgetTabProps) {
   const t = useT();
   const me = useMe();
   // Budget settings are one client's (base currency, fiscal year): the

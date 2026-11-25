@@ -201,6 +201,14 @@ export function NotificationsTab({
 
   function saveChannel() {
     if (!editing) return;
+    // No write without a change (coordinator ruling 13; O7 review, I2): a
+    // Save on an untouched row closes the dialog and sends nothing. A PATCH
+    // carrying the stored values would put a change that never happened into
+    // the audit log.
+    if (!channelDirty()) {
+      setEditing(null);
+      return;
+    }
     const { channel, edit } = editing;
     setTargetChannelId(channel.id);
     updateChannel.mutate(

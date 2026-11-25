@@ -41,6 +41,7 @@
 import { useT } from "../../i18n/context";
 import { Icon } from "../../shell/icons";
 import { FormSection, KIND_ICON, PageHead } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 import { KV } from "../../shell/viz";
 import { useAiProviders } from "./api";
 import { EGRESS_DISCLOSURE } from "./egress";
@@ -80,11 +81,16 @@ export function AiSettingsPage() {
   const t = useT();
   const providers = useAiProviders();
   const provider = describeProvider(providers.data);
+  const title = t("aiAdmin.settings.title");
+  // NO RAIL ENTRY OF ITS OWN (coordinator ruling 1b): the shell titles the tab
+  // by the entry this page lights, "Assistant", so the page puts its h1 in
+  // front of it -- "Assistant settings · Assistant · Novieri RMM".
+  useRecordTitle(title);
 
   return (
     <>
       <PageHead
-        title={t("aiAdmin.settings.title")}
+        title={title}
         description={t("aiAdmin.settings.description")}
       />
       <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>

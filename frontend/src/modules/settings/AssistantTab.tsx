@@ -312,7 +312,7 @@ export function AssistantTab({ canAdmin, canEdit = canAdmin }: { canAdmin: boole
       </FormSection>
 
       <p className="note" style={{ marginTop: 12 }}>
-      {t("settings.assistant.serverNote")}
+        {t("settings.assistant.serverNote")}
       </p>
 
       <SaveBar

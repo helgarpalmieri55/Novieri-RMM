@@ -190,6 +190,11 @@ export function AutonomyDialPage(): ReactElement {
   const edits = draft ?? NO_EDITS;
   const [confirming, setConfirming] = useState(false);
   const [saved, setSaved] = useState(false);
+  // A save of several cells is running (O7 review, M1). Held for the whole
+  // loop, not read from `setCeiling.isPending`, which drops for a moment
+  // between one cell's answer and the next cell's request: a chip pressed in
+  // that moment would edit a draft the loop is narrowing from its snapshot.
+  const [applying, setApplying] = useState(false);
 
   const stored = new Map<string, string>();
   for (const row of ceilings.data ?? []) {
@@ -244,26 +249,31 @@ export function AutonomyDialPage(): ReactElement {
   async function applyChanges(pending: readonly PendingChange[]): Promise<void> {
     setConfirming(false);
     setSaved(false);
+    setApplying(true);
     // What is left to apply, narrowed as each cell lands (read from this
     // closure, not from a render that has not happened yet).
     const landed: Record<string, AiCeilingLevel> = { ...edits };
-    for (const change of pending) {
-      try {
-        await setCeiling.mutateAsync({
-          persona: change.persona,
-          risk_class: change.risk,
-          level: change.to,
-        });
-      } catch {
-        // Deliberately swallowed HERE and rendered BELOW: `setCeiling.error`
-        // holds the refusal and `setCeiling.variables` names the cell, which is
-        // more than a rethrow into an unhandled rejection would give anyone.
-        return;
+    try {
+      for (const change of pending) {
+        try {
+          await setCeiling.mutateAsync({
+            persona: change.persona,
+            risk_class: change.risk,
+            level: change.to,
+          });
+        } catch {
+          // Deliberately swallowed HERE and rendered BELOW: `setCeiling.error`
+          // holds the refusal and `setCeiling.variables` names the cell, which
+          // is more than a rethrow into an unhandled rejection would give anyone.
+          return;
+        }
+        delete landed[cellKey(change.persona, change.risk)];
+        setDraft({ ...landed });
       }
-      delete landed[cellKey(change.persona, change.risk)];
-      setDraft({ ...landed });
+      setSaved(true);
+    } finally {
+      setApplying(false);
     }
-    setSaved(true);
   }
 
   return (
@@ -426,7 +436,7 @@ export function AutonomyDialPage(): ReactElement {
                             <Chips
                               items={AI_CEILING_LEVELS.map(ceilingLabel)}
                               active={AI_CEILING_LEVELS.indexOf(shownLevel(persona, risk))}
-                              disabled={!canSet}
+                              disabled={!canSet || applying}
                               onSelect={(at) => {
                                 const level = AI_CEILING_LEVELS[at];
                                 if (level !== undefined) edit(persona, risk, level);
@@ -470,7 +480,7 @@ export function AutonomyDialPage(): ReactElement {
       {canSet ? (
         <SaveBar
           dirty={changes.length > 0}
-          saving={setCeiling.isPending}
+          saving={applying}
           saved={saved && changes.length === 0 && !setCeiling.isError}
           savedMessage={t("aiAutomation.dial.saved")}
           onDiscard={discard}

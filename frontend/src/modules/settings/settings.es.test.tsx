@@ -650,7 +650,12 @@ describe("the users tab in Spanish", () => {
     expect(within(invite).getByText("Dar acceso a")).toBeInTheDocument();
     expect(within(invite).getByText(/^Todavía no has elegido ningún acceso\./)).toBeInTheDocument();
     expect(within(invite).getByText(/^Aquí no se establece ninguna contraseña/)).toBeInTheDocument();
-    expect(within(invite).getByRole("button", { name: "Añadir este acceso" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 review, S2) from "disabled": the
+    // button stays pressable and names, in Spanish, what the pair is missing.
+    await user.click(within(invite).getByRole("button", { name: "Añadir este acceso" }));
+    expect(within(invite).getByRole("alert")).toHaveTextContent(
+      "El campo Rol es obligatorio. El campo Cliente es obligatorio.",
+    );
     await user.type(within(invite).getByLabelText("Correo electrónico"), "casey@example.com");
     await user.click(within(invite).getByRole("button", { name: "Enviar invitación" }));
 

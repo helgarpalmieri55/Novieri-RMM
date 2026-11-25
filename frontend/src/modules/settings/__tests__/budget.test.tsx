@@ -1,11 +1,13 @@
 // Budget tab — `GET /budget/settings`, `PUT /budget/settings`.
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../lib/api";
 import {
+  BUDGET_SETTINGS_FIXTURE,
   CASEY_USER,
   PLANTED_SECRET,
   apiClient,
@@ -338,5 +340,57 @@ describe("Settings — Budget tab, fiscal year as chips", () => {
       "aria-pressed",
       "true",
     );
+  });
+});
+
+// Ruling 12 (O7 review, I1): the budget settings are the top-bar client's, and
+// choosing another client changes no route, so no guard asks. An unsaved edit
+// for one client must not survive the switch and be saved onto the next one.
+describe("Settings — Budget tab, a client switch", () => {
+  it("drops the other client's unsaved change, shows the new client's values, and sends nothing for the old edit", async () => {
+    const SCOPE_OTHER: MeClient = { ...SCOPE_INTERNAL, id: "org-2", name: "Andes", kind: "customer" };
+    const clients = [SCOPE_INTERNAL, SCOPE_OTHER];
+    const scopes = {
+      "org-1": { selected: "org-1", select: vi.fn(), clients, ready: true },
+      "org-2": { selected: "org-2", select: vi.fn(), clients, ready: true },
+    } as const;
+    let current: keyof typeof scopes = "org-1";
+    const listeners = new Set<() => void>();
+    mockClientScope.mockImplementation(() => {
+      const chosen = useSyncExternalStore(
+        (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        () => current,
+      );
+      return scopes[chosen];
+    });
+    calls.getBudgetSettings.mockImplementation(async (clientId: string) =>
+      clientId === "org-2"
+        ? { ...BUDGET_SETTINGS_FIXTURE, client_id: "org-2", base_currency: "EUR", fiscal_year_start_month: 7 }
+        : BUDGET_SETTINGS_FIXTURE,
+    );
+    const user = userEvent.setup();
+    renderSettings("/settings?tab=budget");
+    const currency = await screen.findByLabelText<HTMLInputElement>("Base currency");
+    await waitFor(() => expect(currency).toHaveValue("USD"));
+    await user.clear(currency);
+    await user.type(currency, "COP");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+
+    // The top bar chooses Andes: no navigation, a new client's record.
+    act(() => {
+      current = "org-2";
+      for (const listener of listeners) listener();
+    });
+
+    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>("Base currency")).toHaveValue("EUR"));
+    const fiscalYear = screen.getByRole("group", { name: "Fiscal year starts in" });
+    expect(within(fiscalYear).getByRole("button", { name: "July" })).toHaveAttribute("aria-pressed", "true");
+    // The edit made for org-1 is gone: no bar, nothing to send, nothing sent.
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(calls.updateBudgetSettings).not.toHaveBeenCalled();
   });
 });
