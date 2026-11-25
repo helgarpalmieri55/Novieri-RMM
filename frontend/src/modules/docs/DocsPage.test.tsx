@@ -1098,6 +1098,23 @@ describe("DocsPage on the kit", () => {
     expect(router.state.location.search).toBe("?category=Procedure");
   });
 
+  // THE LIBRARY STAYS MOUNTED WHEN THE READER OPENS BESIDE IT, so the row
+  // just chosen keeps the keyboard. The adoption pass found that drawing the
+  // library through the kit's `DetailGrid asideFirst` only while a reader is
+  // open (a full-width list has no `DetailGrid` shape) mounts the list anew
+  // on the first choice and drops focus to the page: this test, red then
+  // (activeElement BODY). It is the falsifier for that adoption.
+  it("keeps the chosen article's row focused when the reader opens beside the list", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    const { router } = renderKitPage("/docs", <DocsPage />, "/docs");
+    const row = await screen.findByRole("button", { name: /^Finance share recovery runbook/ });
+    await userEvent.click(row);
+    await waitFor(() => expect(router.state.location.search).toBe("?article=a1"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Finance share recovery runbook" })).toBeInTheDocument();
+    expect(row.isConnected).toBe(true);
+    expect(document.activeElement).toBe(row);
+  });
+
   it("says why the list is empty", async () => {
     mockUseApi.mockReturnValue(kitApi());
     renderKitPage("/docs?category=Nowhere", <DocsPage />, "/docs");
