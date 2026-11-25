@@ -49,6 +49,18 @@ const UNASSIGNED_CLIENT: MeClient = {
 };
 const WITH_A_READER = [INTERNAL_CLIENT, ACME_CLIENT, BETA_READER, UNASSIGNED_CLIENT];
 
+/**
+ * The article editor. With every client chosen the list's Client chip is on
+ * the page too (redesign Task 11, 6.1), so the editor's Client field is read
+ * inside the editor's form.
+ */
+function editorPanel() {
+  const title = screen.getByLabelText("Title");
+  const form = title.closest("form");
+  if (!form) throw new Error("the editor's form is not on the page");
+  return within(form);
+}
+
 function offered(field: HTMLElement): (string | null)[] {
   return within(field).getAllByRole("option").map((option) => option.textContent);
 }
@@ -103,14 +115,17 @@ function renderDocs(api: Partial<Record<keyof ApiClient, unknown>>, me: Me = MAN
 // phases 1-2 filed every new row whoever was chosen, so a test that chooses
 // "o1" at the top cannot tell that rule from this one. These choose "c-acme".
 
+// THE HEAD'S "New article" (redesign Task 11, 6.1): an empty library offers
+// the same action in its empty state (Receta L, 3), so the first of the two is
+// the head's.
 describe("a new article", () => {
   it("is the client chosen at the top's, which is not the organisation's own", async () => {
     selectClient("c-acme", [INTERNAL_CLIENT, ACME_CLIENT]);
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
     renderDocs({ createArticle });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
+    expect(editorPanel().queryByLabelText("Client")).toBeNull();
     await user.type(screen.getByLabelText("Title"), "VPN");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
@@ -126,7 +141,7 @@ describe("a new article", () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
     renderDocs({ createArticle });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
@@ -143,9 +158,9 @@ describe("a new article", () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
     renderDocs({ createArticle });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.selectOptions(editorPanel().getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
     expect(createArticle.mock.calls[0]?.[0]).toMatchObject({ title: "VPN", client_id: "c-acme" });
@@ -155,8 +170,8 @@ describe("a new article", () => {
     selectClient(null, WITH_A_READER);
     const user = userEvent.setup();
     renderDocs({ createArticle: vi.fn() }, { ...MANAGER, clients: WITH_A_READER });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
-    expect(offered(screen.getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
+    expect(offered(editorPanel().getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
   it("with every client chosen and no client picked, Save sends nothing and says so", async () => {
@@ -164,9 +179,9 @@ describe("a new article", () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
     renderDocs({ createArticle });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
-    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(editorPanel().getByLabelText("Client")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     // The field is named before anything is built (phase 3 final review D2):
@@ -180,17 +195,17 @@ describe("a new article", () => {
     selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
     const user = userEvent.setup();
     renderDocs({ createArticle: vi.fn() });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
-    expect(screen.getByLabelText("Client")).toBeInTheDocument();
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
+    expect(editorPanel().getByLabelText("Client")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /For every client/ }));
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(editorPanel().queryByLabelText("Client")).toBeNull();
   });
 
   it("is every client's when asked, sending no client", async () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue({ ...ARTICLE, client_id: null });
     renderDocs({ createArticle });
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
     await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -223,7 +238,7 @@ describe("a new article", () => {
     // Nothing to create from yet: the editor needs `docs.manage` from `/me`.
     expect(screen.queryByRole("button", { name: "New article" })).not.toBeInTheDocument();
     answer(MANAGER);
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     expect(createArticle).not.toHaveBeenCalled();
   });
 
@@ -241,6 +256,8 @@ describe("a new article", () => {
     await user.click(await screen.findByRole("button", { name: /VPN/ }));
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     expect(screen.queryByRole("checkbox", { name: /For every client/ })).not.toBeInTheDocument();
+    // The save bar is there once something changed (Receta FO, redesign Task 11, 6.1).
+    await user.type(screen.getByLabelText("Title"), " (v2)");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(updateArticle).toHaveBeenCalledTimes(1));
     expect(updateArticle.mock.calls[0]?.[1]).not.toHaveProperty("client_id");
@@ -428,11 +445,11 @@ describe("with Unassigned chosen at the top", () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue({ ...ARTICLE, client_id: null });
     renderDocs({ createArticle }, ADMIN);
-    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
     await user.type(screen.getByLabelText("Title"), "VPN");
     expect(screen.getByText(REFUSAL)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(editorPanel().queryByLabelText("Client")).toBeNull();
     // Enter in the title submits the form: still nothing is sent.
     await user.type(screen.getByLabelText("Title"), "{Enter}");
     expect(createArticle).not.toHaveBeenCalled();

@@ -11,10 +11,10 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, useLocation } from "react-router-dom";
 
 // The selected article lives in the query string now (cycle 7's linkability
 // finding), and `MemoryRouter` deliberately does not touch `window.location`.
@@ -27,6 +27,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient, DocArticle, DocVersion, Me, MeClient } from "../../lib/api";
+import { recordingNarrowing } from "../../test/narrowing";
+import { renderPage as renderKitPage } from "../../test/renderPage";
 import { DocsPage } from "./DocsPage";
 
 const mockUseApi = vi.fn();
@@ -104,6 +106,9 @@ beforeEach(() => {
   mockUseApi.mockReset();
 });
 
+// THE HEAD'S "New article" (redesign Task 11, 6.1): an empty library offers
+// the same action in its empty state (Receta L, 3), so the first of the two is
+// the head's.
 describe("DocsPage", () => {
   it("says it is loading rather than showing an empty library", async () => {
     renderPage(() => new Promise<never>(() => {}));
@@ -210,7 +215,7 @@ function renderManager(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 async function openArticleEditor(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "New article" }));
+  await user.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
   return screen.getByLabelText("Title");
 }
 
@@ -1032,12 +1037,14 @@ describe("DocsPage stat tiles", () => {
     // rather than `findByText`, which throws on more than one match.
     expect(await screen.findAllByText("Loading…")).not.toHaveLength(0);
 
-    expect(tile("Articles").querySelector(".stat-value")?.textContent).toBe("—");
-    expect(tile("Linked references").querySelector(".stat-value")?.textContent).toBe("—");
-    // The Documents tile reads an em dash for the SAME reason and from its own
+    // "n/a", the kit's unmeasured value, and no longer an em dash: no dash in
+    // the interface (redesign Global Constraints, "Textos").
+    expect(tile("Articles").querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile("Linked references").querySelector(".stat-value")?.textContent).toBe("n/a");
+    // The Documents tile reads n/a for the SAME reason and from its own
     // query: a library whose metadata request has not answered and one that is
     // genuinely empty must not print the same zero.
-    expect(tile("Documents").querySelector(".stat-value")?.textContent).toBe("—");
+    expect(tile("Documents").querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(tile("Articles")).not.toHaveTextContent("nothing written yet");
   });
 
@@ -1045,7 +1052,144 @@ describe("DocsPage stat tiles", () => {
     renderPage(() => Promise.reject(new Error("boom")));
     await screen.findByRole("alert");
 
-    expect(tile("Articles").querySelector(".stat-value")?.textContent).toBe("—");
+    // n/a, not a dash (see above).
+    expect(tile("Articles").querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(tile("Articles")).not.toHaveTextContent("nothing written yet");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The kit (redesign Task 11, 6.1; Recetas L, FO, O)
+// ---------------------------------------------------------------------------
+
+describe("DocsPage on the kit", () => {
+  const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+  const ANDES_CLIENT: MeClient = { id: ANDES, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: [] };
+  const LIST = {
+    items: [
+      { id: "a1", title: "Finance share recovery runbook", category: "Runbook", archived: false, updated_at: "2026-08-05T00:00:00.000Z", link_count: 0 },
+      { id: "a2", title: "Windows workstation build standard", category: "Procedure", archived: false, updated_at: "2026-08-01T00:00:00.000Z", link_count: 2 },
+    ],
+    total: 2,
+  };
+
+  function kitApi(overrides: Record<string, unknown> = {}): ApiClient {
+    const api: Record<string, unknown> = {
+      forClient: (): unknown => api,
+      me: vi.fn().mockResolvedValue(MANAGER),
+      listArticles: vi.fn().mockResolvedValue(LIST),
+      listDocRecords: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listDocuments: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      getArticle: vi.fn().mockResolvedValue(ARTICLE),
+      createArticle: vi.fn().mockResolvedValue({ ...ARTICLE, id: "a9" }),
+      updateArticle: vi.fn().mockResolvedValue(ARTICLE),
+      ...overrides,
+    };
+    return api as unknown as ApiClient;
+  }
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    const { router } = renderKitPage("/docs?category=Runbook", <DocsPage />, "/docs");
+    const chips = await screen.findByRole("group", { name: "Filter by category" });
+    expect(await within(chips).findByRole("button", { name: /^Runbook/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Windows workstation build standard")).toBeNull();
+    await userEvent.click(within(chips).getByRole("button", { name: /^Procedure/ }));
+    expect(router.state.location.search).toBe("?category=Procedure");
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    renderKitPage("/docs?category=Nowhere", <DocsPage />, "/docs");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("keeps its search in the URL, so a reload finds the same search", async () => {
+    mockUseApi.mockReturnValue(kitApi({ searchDocs: vi.fn().mockResolvedValue([]) }));
+    const { router } = renderKitPage("/docs", <DocsPage />, "/docs");
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Search documentation" }), "vpn");
+    expect(router.state.location.search).toBe("?q=vpn");
+  });
+
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    renderKitPage("/docs?article=a1", <DocsPage />, "/docs");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Title"), " v2");
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("Title")).toHaveValue("Finance share recovery runbook");
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    // Leave as a person does: through a link to another page (the rail's, here
+    // beside the page). A bare router.navigate() held by the blocker leaves a
+    // pending transition.
+    const { router } = renderKitPage(
+      "/docs?article=a1",
+      <>
+        <DocsPage />
+        <Link to="/devices">Devices</Link>
+      </>,
+      "/docs",
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Title"), " v2");
+    await userEvent.click(screen.getByRole("link", { name: "Devices" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/docs");
+  });
+
+  it("selects the saved article without asking to leave", async () => {
+    const api = kitApi();
+    mockUseApi.mockReturnValue(api);
+    const { router } = renderKitPage("/docs", <DocsPage />, "/docs");
+    await userEvent.click((await screen.findAllByRole("button", { name: "New article" }))[0]!);
+    await userEvent.type(screen.getByLabelText("Title"), "VPN runbook");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?article=a9"));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(router.state.location.pathname).toBe("/docs");
+  });
+
+  describe("behind the Client chip (decisions D6, D17)", () => {
+    beforeEach(() => selectClient(null, [SCOPE_INTERNAL, ANDES_CLIENT]));
+
+    it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+      // Nothing else is read un-narrowed on the list: the library, its
+      // records and its documents all go through the chip's client.
+      const narrowing = recordingNarrowing(kitApi());
+      mockUseApi.mockReturnValue(narrowing.api);
+      renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");
+      expect(await screen.findByRole("table", { name: "Articles" })).toBeInTheDocument();
+      expect(narrowing.client(ANDES).listArticles).toHaveBeenCalledWith();
+      expect(narrowing.client(ANDES).listDocRecords).toHaveBeenCalledWith();
+      expect(narrowing.client(ANDES).listDocuments).toHaveBeenCalledWith();
+      expect(narrowing.unnarrowed).toEqual([]);
+    });
+
+    it("draws no empty state while the chip's client is not yet known (general ruling 10)", async () => {
+      mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+      const listArticles = vi.fn().mockResolvedValue({ items: [], total: 0 });
+      mockUseApi.mockReturnValue(kitApi({ me: vi.fn(() => new Promise<Me>(() => {})), listArticles }));
+      renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");
+      expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+      // Long enough for a read that was not waiting to have answered and drawn its empty list.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(listArticles).not.toHaveBeenCalled();
+      expect(screen.queryByText("No articles yet.")).toBeNull();
+      expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    });
+
+    it("keeps the chip in a tile's link, so a tile opens the rows it counted", async () => {
+      mockUseApi.mockReturnValue(kitApi());
+      renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");
+      await screen.findByText("Finance share recovery runbook");
+      expect(tile("Articles").getAttribute("href")).toBe(`/docs?client=${ANDES}#articles`);
+    });
   });
 });

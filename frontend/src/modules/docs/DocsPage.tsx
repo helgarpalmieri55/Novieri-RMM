@@ -22,9 +22,27 @@ import { renderMarkdown } from "./markdown";
 import { RowButton } from "./RowButton";
 import { groupHits } from "./searchGroups";
 import { PortalVisibility } from "./PortalVisibility";
-import { FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, useNewParam } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SaveBar,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  UnsavedGuard,
+  useDraft,
+  useNarrowedApi,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { Chips } from "../../shell/viz";
 
 /** The kinds of documentation record the server knows (`record_type`). */
 export type DocRecordType = "network" | "service" | "vendor" | "location";
@@ -187,14 +205,40 @@ function useStatLinks(route: string) {
   );
 }
 
+/** What a new article starts as: the editor's empty draft. */
+const NEW_ARTICLE: DocArticleInput = { title: "", body: "", category: "General" };
+
+/**
+ * IT documentation: the article library, the records and the stored
+ * documents of the client chosen at the top (or of every client).
+ *
+ * ON THE KIT (redesign Task 11, 6.1; Recetas L y O):
+ * - THE LIST IS RECETA L. The search and the category, local state before,
+ *   are the URL (`?q=`, `?category=`), with the Client chip (`?client=`):
+ *   a filtered library is a link. The category chips count the whole
+ *   library. The library's lists (articles, records, documents, and the
+ *   search) read through the chip's narrowed API, keyed by its client and
+ *   only once `/me` has said whose it is (decisions D6, D17); every write --
+ *   save, archive, upload, a new record -- keeps `useApi()`.
+ * - THE ARTICLE OPEN IS `?article=` (as before): the list on the left and the
+ *   reader on the right on a desktop; on a phone the reader alone, with its
+ *   way back to the list.
+ * - THE EDITOR IS RECETA FO: one draft (`useDraft`), the kit's save bar, and
+ *   the page's one guard. Saving selects the saved article by changing only
+ *   the query, which is not leaving (decision D16); going to another page
+ *   with changes asks first. "New article" arrives by `?new=article`.
+ */
 export function DocsPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  // v3's category chips over the list. Local, not in the URL: it narrows what
-  // is on screen and nothing links to a category. `null` is the "All" chip.
-  const [category, setCategory] = useState<string | null>(null);
+  const filters = useUrlFilters(["q", "category", "client"] as const);
+  const search = filters.values.q;
+  // v3's category chips over the list, in the URL now (`?category=`): a
+  // category view is a link. `""` is the "All" chip.
+  const category = filters.values.category;
+  // The chip narrows the library's READS, and only those (decision D6).
+  const narrowed = useNarrowedApi(filters.values.client);
   // AUDIT (MEDIUM): "Selecting an article does not change the URL -- articles
   // are not linkable ... A documentation system whose articles cannot be
   // linked to is severely reduced in value -- you cannot paste a runbook link
@@ -243,7 +287,6 @@ export function DocsPage() {
     [setSearchParams],
   );
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<DocArticleInput>({ title: "", body: "", category: "General" });
   // Every client's only when the person asks (MSP clients plan 2026-10-26
   // Task 14). Set at creation only: an article's client never changes.
   const [forEveryClient, setForEveryClient] = useState(false);
@@ -281,20 +324,26 @@ export function DocsPage() {
   const zone = me.data?.timezone ?? null;
 
   const articles = useQuery({
-    queryKey: ["doc-articles"],
-    queryFn: () => api.listArticles(),
+    queryKey: ["doc-articles", narrowed.client],
+    queryFn: () => narrowed.api.listArticles(),
+    enabled: narrowed.ready,
   });
-  const records = useQuery({ queryKey: ["doc-records"], queryFn: () => api.listDocRecords() });
+  const records = useQuery({
+    queryKey: ["doc-records", narrowed.client],
+    queryFn: () => narrowed.api.listDocRecords(),
+    enabled: narrowed.ready,
+  });
   // §0.9/F8a: this query never touches the object store, so the library still
   // lists when MinIO is down. Only the byte paths fail, and they fail loudly.
   const documents = useQuery({
-    queryKey: ["doc-documents"],
-    queryFn: () => api.listDocuments(),
+    queryKey: ["doc-documents", narrowed.client],
+    queryFn: () => narrowed.api.listDocuments(),
+    enabled: narrowed.ready,
   });
   const hits = useQuery({
-    queryKey: ["doc-search", search],
-    queryFn: () => api.searchDocs(search),
-    enabled: search.length > 0,
+    queryKey: ["doc-search", search, narrowed.client],
+    queryFn: () => narrowed.api.searchDocs(search),
+    enabled: narrowed.ready && search.length > 0,
   });
   const article = useQuery({
     queryKey: ["doc-article", selectedId],
@@ -313,6 +362,19 @@ export function DocsPage() {
     void queryClient.invalidateQueries({ queryKey: ["doc-versions", selectedId] });
   };
 
+  // THE EDITOR'S DRAFT (Receta FO): against the article as stored, or the
+  // empty new one. Not editing, there is nothing to compare.
+  const creating = selectedId == null;
+  const savedArticle: DocArticleInput | undefined = !editing
+    ? undefined
+    : creating
+      ? NEW_ARTICLE
+      : article.data
+        ? { title: article.data.title, body: article.data.body, category: article.data.category }
+        : undefined;
+  const editor = useDraft<DocArticleInput>(savedArticle);
+  const draft = editor.draft ?? NEW_ARTICLE;
+
   const save = useMutation({
     mutationFn: async () => {
       if (selectedId && editing && article.data) {
@@ -328,9 +390,12 @@ export function DocsPage() {
     },
     onSuccess: (saved) => {
       invalidate();
+      // Selecting the saved article changes only the query: not leaving (D16).
       setSelectedId(saved.id);
       setEditing(false);
     },
+    // The save failed: the change is still unsaved, and a refetch must not replace it.
+    onError: () => editor.markSent(null),
   });
   // AUDIT CLASS (cycle 4/5): this mutation had NO error channel at all. A
   // refused archive — a 403 for an operator whose `docs.manage` was revoked
@@ -368,17 +433,18 @@ export function DocsPage() {
   // The chips: "All", then every category the library has, in first-seen
   // order. A category with no article has no chip, so a chip never opens an
   // empty list. The categories are data; the "All" chip is worded at render.
+  // Each counts its articles when the rows in hand are the whole library;
+  // otherwise no number at all (the Absent Zero Rule).
   const categories = useMemo(() => [...new Set(items.map((item) => item.category))], [items]);
-  const chipItems = [t("docs.page.list.all"), ...categories];
-  const activeChip = category === null ? 0 : Math.max(0, categories.indexOf(category) + 1);
+  const wholeLibrary = articles.data != null && articles.data.items.length === articles.data.total;
   const listed = useMemo(
-    () => (category === null ? items : items.filter((item) => item.category === category)),
+    () => (category === "" ? items : items.filter((item) => item.category === category)),
     [items, category],
   );
 
   const startNew = () => {
     setSelectedId(null);
-    setDraft({ title: "", body: "", category: "General" });
+    editor.setDraft(NEW_ARTICLE);
     setForEveryClient(false);
     articleClient.setPicked("");
     setAttempt(null);
@@ -398,7 +464,7 @@ export function DocsPage() {
   }, [newArticle.open, canManage, me.data]);
   const startEdit = () => {
     if (!article.data) return;
-    setDraft({
+    editor.setDraft({
       title: article.data.title,
       body: article.data.body,
       category: article.data.category,
@@ -428,13 +494,11 @@ export function DocsPage() {
   // submission that no longer exists. Every edit goes through here so no field
   // can be added later that forgets to clear it.
   const editDraft = (patch: Partial<DocArticleInput>) => {
-    setDraft((current) => ({ ...current, ...patch }));
+    editor.setDraft({ ...draft, ...patch });
     if (save.isError) save.reset();
     if (attempt) setAttempt(null);
   };
 
-  // A NEW article only: an edit keeps its client and asks nothing.
-  const creating = selectedId == null;
   // Unassigned chosen at the top files nothing new; every client's is not
   // filed under it, so the toggle lifts the refusal.
   const refusedNew = creating && !forEveryClient && articleClient.refused !== null;
@@ -450,6 +514,8 @@ export function DocsPage() {
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
+    // What is sent becomes what is saved when the server answers.
+    editor.markSent(draft);
     save.mutate();
   };
 
@@ -466,7 +532,7 @@ export function DocsPage() {
   // which is the very confusion `zeroLabel` exists to end one level down: an
   // empty knowledge base and a dead backend read identically. An em dash for
   // absent data means every zero on this row is a measured zero.
-  const count = (n: number | undefined): string => (n === undefined ? "—" : String(n));
+  // (No dash in the interface: the tile says "n/a" itself, `pending` below.)
 
   // EACH TILE SAYS ONE THING ITS FIGURE DOES NOT. A caption over a bare number
   // leaves the sub-line band empty on all four tiles, which is a row of
@@ -524,20 +590,16 @@ export function DocsPage() {
   /** "1 link" / "3 links", or nothing for an unlinked article. */
   const linksLine = (n: number): string | null => (n === 0 ? null : t("docs.page.linksLine", { count: n }));
 
+  const newArticleButton = canManage ? (
+    <Btn label={t("docs.page.newArticle")} icon="plus" variant="primary" onClick={startNew} />
+  ) : undefined;
+
   return (
     <div>
-      <PageHead
-        title={t("docs.page.title")}
-        description={t("docs.page.description")}
-        actions={
-          canManage ? (
-            <Button onClick={startNew}>
-              <Icon name="plus" size={14} />
-              {t("docs.page.newArticle")}
-            </Button>
-          ) : undefined
-        }
-      />
+      {/* THE PAGE'S ONE GUARD: the article editor's changes. Saving selects the
+          saved article by its query alone, which is not leaving (D16). */}
+      <UnsavedGuard dirty={editing && editor.dirty} />
+      <PageHead title={t("docs.page.title")} description={t("docs.page.description")} actions={newArticleButton} />
 
       {/* NOTHING ON THIS PAGE IS URGENT. A documentation library has no
           failing state: an article count is not an alarm however low it goes,
@@ -547,7 +609,8 @@ export function DocsPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("docs.page.tiles.articles")}
-          value={count(articles.data?.total)}
+          value={String(articles.data?.total ?? 0)}
+          pending={articles.data === undefined}
           icon="book"
           to={link("articles")}
           tone="blue"
@@ -556,7 +619,8 @@ export function DocsPage() {
         />
         <StatCard
           label={t("docs.page.tiles.records")}
-          value={count(records.data?.total)}
+          value={String(records.data?.total ?? 0)}
+          pending={records.data === undefined}
           icon="database"
           to={link("records")}
           tone="blue"
@@ -565,7 +629,8 @@ export function DocsPage() {
         />
         <StatCard
           label={t("docs.page.tiles.linked")}
-          value={count(linkedCount)}
+          value={String(linkedCount ?? 0)}
+          pending={linkedCount === undefined}
           icon="link"
           /* The link counts are rendered per article in the library list, so
              that list is where this total decomposes. */
@@ -584,7 +649,8 @@ export function DocsPage() {
             alternative and it breaks `columns={4}`. */}
         <StatCard
           label={t("docs.page.tiles.documents")}
-          value={count(documents.data?.total)}
+          value={String(documents.data?.total ?? 0)}
+          pending={documents.data === undefined}
           icon="file-text"
           to={link("documents")}
           tone="blue"
@@ -602,80 +668,84 @@ export function DocsPage() {
           nothing open the list spans the grid rather than sharing it with an
           empty pane, which had the toolbar, the chips and the count wrapping
           inside a third of the width. */}
+      {/* ON A PHONE THE READER IS THE PAGE (redesign Task 11, 6.1): with an
+          article, a document or the editor open, the list steps aside below
+          1024 px and the pane leads back to it; on a desktop the two share the
+          row, the list on the left. */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className={paneOpen ? "min-w-0" : "min-w-0 lg:col-span-3"}>
+        <div className={paneOpen ? "min-w-0 hidden lg:block" : "min-w-0 lg:col-span-3"}>
           {/* The Articles and Linked references tiles land here: this list is
               where each of those numbers decomposes. v3 draws it as the
               toolbar (search, chips, count) over one list of rows. */}
           <div id="articles">
             <Panel bare>
-              <FilterBar>
-                {/* AUDIT (LOW): "Once a query is typed the only way back to
-                    the full list is to select the text and delete it
-                    manually. There is no clear button and the input is not
-                    type=search." Both: the native type, and an explicit
-                    button for the browsers that render none. */}
-                <SearchField
-                  inputRef={searchInput}
-                  type="search"
-                  aria-label={t("docs.page.list.searchLabel")}
-                  placeholder={t("docs.page.list.searchPlaceholder")}
-                  maxLength={128}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-                {search && (
-                  <Button
-                    variant="ghost"
-                    aria-label={t("docs.page.list.clearSearch")}
-                    onClick={() => {
-                      setSearch("");
-                      searchInput.current?.focus();
-                    }}
-                  >
-                    {t("docs.page.list.clear")}
-                  </Button>
-                )}
-                {!search && chipItems.length > 1 && (
-                  <Chips
-                    items={chipItems}
-                    active={activeChip}
-                    onSelect={(at) => setCategory(at === 0 ? null : (categories[at - 1] ?? null))}
-                    label={t("docs.page.list.filterByCategory")}
-                  />
-                )}
-                <span className="filter-spacer" />
-                {articles.data ? (
-                  <span className="mono cell-sub">{t("docs.page.list.count", { count: listed.length })}</span>
-                ) : null}
-                {/* §11.6 — SAY WHAT SEARCH DOES, because it does less than a
-                    reader assumes. A search box that silently only searches
-                    metadata teaches people the library is empty when it is
-                    not, and this one never opens a stored file. */}
-                <p className="note" style={{ flexBasis: "100%" }}>
-                  {t("docs.page.list.searchNote")}
-                </p>
-              </FilterBar>
-              <QueryState
-                loading={articles.isLoading}
-                error={articles.error}
-                empty={
-                  search
-                    ? grouped.articles.length === 0 &&
-                      grouped.records.length === 0 &&
-                      grouped.documents.length === 0
-                    : listed.length === 0
+              <ListToolbar
+                search={
+                  <>
+                    {/* AUDIT (LOW): "Once a query is typed the only way back
+                        to the full list is to select the text and delete it
+                        manually." Both: the native type, and an explicit
+                        button for the browsers that render none. */}
+                    <SearchField
+                      inputRef={searchInput}
+                      type="search"
+                      aria-label={t("docs.page.list.searchLabel")}
+                      placeholder={t("docs.page.list.searchPlaceholder")}
+                      maxLength={128}
+                      value={search}
+                      onChange={(event) => filters.set("q", event.target.value)}
+                    />
+                    {search && (
+                      <Button
+                        variant="ghost"
+                        aria-label={t("docs.page.list.clearSearch")}
+                        onClick={() => {
+                          filters.set("q", "");
+                          searchInput.current?.focus();
+                        }}
+                      >
+                        {t("docs.page.list.clear")}
+                      </Button>
+                    )}
+                  </>
                 }
-                emptyLabel={
-                  search
-                    ? t("docs.page.list.noMatch")
-                    : items.length === 0
-                      ? t("docs.page.list.noArticles")
-                      : t("docs.page.list.noneInCategory", { category: category ?? "" })
+                chips={
+                  <>
+                    {!search && categories.length > 0 && (
+                      <FilterChips
+                        label={t("docs.page.list.filterByCategory")}
+                        options={[
+                          { value: "", label: t("docs.page.list.all") },
+                          ...categories.map((name) => ({
+                            value: name,
+                            label: name,
+                            count: wholeLibrary ? items.filter((item) => item.category === name).length : undefined,
+                          })),
+                        ]}
+                        value={category}
+                        onChange={(value) => filters.set("category", value)}
+                      />
+                    )}
+                    <ClientFilter filters={filters} />
+                  </>
                 }
-                emptyIcon="book"
-              >
-                {search ? (
+                end={
+                  articles.data && !search ? (
+                    <ShowingCount shown={listed.length} total={articles.data.total} />
+                  ) : null
+                }
+              />
+              {/* §11.6 — SAY WHAT SEARCH DOES, because it does less than a
+                  reader assumes. A search box that silently only searches
+                  metadata teaches people the library is empty when it is not,
+                  and this one never opens a stored file. */}
+              <p className="note" style={{ padding: "10px 18px 0" }}>
+                {t("docs.page.list.searchNote")}
+              </p>
+              {/* `isPending`: under the chip the library waits for `/me`, and a
+                  waiting read is not an empty library (general ruling 10). */}
+              <QueryState loading={articles.isPending} error={articles.error} empty={false} emptyLabel="">
+                {search && (hits.isPending || grouped.articles.length + grouped.records.length + grouped.documents.length > 0) ? (
                   <div
                     role="region"
                     aria-label={t("docs.page.list.searchResults")}
@@ -734,8 +804,27 @@ export function DocsPage() {
                       </div>
                     ))}
                   </div>
+                ) : search ? (
+                  // A search that matched nothing says so for that search; the
+                  // way out is the search's own Clear, beside it.
+                  <ListEmpty
+                    filtered={false}
+                    onClear={filters.clear}
+                    nothingYet={t("docs.page.list.noMatch")}
+                    icon="search"
+                  />
+                ) : listed.length === 0 ? (
+                  // A list with nothing in view says why: nothing yet (with
+                  // New article), or nothing for these filters (with the way out).
+                  <ListEmpty
+                    filtered={filters.active}
+                    onClear={filters.clear}
+                    nothingYet={t("docs.page.list.noArticles")}
+                    icon="book"
+                    action={newArticleButton}
+                  />
                 ) : (
-                  <Table>
+                  <Table label={t("docs.page.list.tableLabel")}>
                     <thead>
                       <tr>
                         <Th>{t("docs.page.list.name")}</Th>
@@ -822,6 +911,19 @@ export function DocsPage() {
 
         {paneOpen && (
         <div className="min-w-0 lg:col-span-2">
+          {/* The way back to the list on a phone, where the list stepped aside. */}
+          <button
+            type="button"
+            className="back-link lg:hidden"
+            style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
+            onClick={() => {
+              setEditing(false);
+              setSelectedId(null);
+            }}
+          >
+            <Icon name="chevron-left" size={14} />
+            {t("docs.page.backToList")}
+          </button>
           {/* THE DOCUMENT BRANCH COMES FIRST, and the two selections are
               mutually exclusive by construction (each setter clears the other),
               so this is an ordering for readers rather than a tie-break. */}
@@ -920,26 +1022,34 @@ export function DocsPage() {
                 <div className="mt-3 flex justify-end gap-2">
                   {/* `type="button"` because `ui.tsx`'s Button sets no type, and
                    * inside a real <form> the default is "submit" — Cancel would
-                   * save the article it is meant to abandon. */}
+                   * save the article it is meant to abandon. Cancel closes the
+                   * editor; the bar's Discard puts the draft back. */}
                   <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
                     {t("docs.editor.cancel")}
                   </Button>
-                  {/* Save STAYS ENABLED with an empty title: the old
-                   * `disabled={save.isPending || !draft.title}` was the audit's
-                   * silent no-op — a click that moved nothing and named no
-                   * field. Submitting now says what is wrong, in one alert,
-                   * whether the reason is a missing field or the server's. */}
-                  {refusedNew ? (
-                    <UnassignedRefusal />
-                  ) : (
-                    <FormActions
-                      label={t("docs.editor.save")}
-                      pending={save.isPending}
-                      error={save.isError ? save.error : undefined}
-                      problems={attemptProblems(attempt)}
-                    />
-                  )}
+                  {refusedNew ? <UnassignedRefusal /> : null}
                 </div>
+                {/* THE PAGE'S ONE SAVE BAR (Receta FO, 4), inside the form so
+                    Enter in a field still saves. A new article is unsaved from
+                    the moment it opens, so its bar is there at once and Save
+                    stays enabled with an empty title: the old disabled Save was
+                    the audit's silent no-op, and pressing it now names the
+                    field, or says the server's reason, in one alert. */}
+                {refusedNew ? null : (
+                  <SaveBar
+                    submit
+                    dirty={creating || editor.dirty}
+                    saving={save.isPending}
+                    error={save.isError ? save.error : undefined}
+                    problems={attemptProblems(attempt)}
+                    onDiscard={() => {
+                      if (creating) setEditing(false);
+                      else editor.discard();
+                      setAttempt(null);
+                      save.reset();
+                    }}
+                  />
+                )}
               </Form>
             </Panel>
           ) : article.data ? (

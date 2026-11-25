@@ -3,7 +3,9 @@ import type { docs as en } from "../en/docs";
 
 export const docs: Shape<typeof en> = {
   page: {
-    title: "Documentación de TI",
+    backToList: "Todos los artículos",
+    // The rail's label (coordinator ruling 1).
+    title: "Documentación",
     description: "Manuales de procedimiento, registros y archivos, vinculados a los dispositivos que describen.",
     newArticle: "Artículo nuevo",
     tiles: {
@@ -44,6 +46,8 @@ export const docs: Shape<typeof en> = {
       searchPlaceholder: "Buscar artículos, hosts, IP",
       clearSearch: "Borrar la búsqueda",
       clear: "Borrar",
+      // The article table's name and the phone's way back to it (redesign Task 11, 6.1).
+      tableLabel: "Artículos",
       filterByCategory: "Filtrar por categoría",
       all: "Todas",
       count: { one: "{count} artículo", other: "{count} artículos" },
