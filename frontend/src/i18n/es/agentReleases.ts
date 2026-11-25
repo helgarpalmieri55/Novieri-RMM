@@ -14,16 +14,17 @@ export const agentReleases: Shape<typeof en> = {
     platformsZero: "No se cubre ninguna plataforma",
     catalogue: "Versiones publicadas",
     newestSubtitle: {
-      one: "Versión {version}, {count} paquete. Las versiones anteriores están plegadas más abajo.",
-      other: "Versión {version}, {count} paquetes. Las versiones anteriores están plegadas más abajo.",
+      one: "Versión {version}, {count} paquete. El filtro de arriba muestra también las versiones anteriores.",
+      other: "Versión {version}, {count} paquetes. El filtro de arriba muestra también las versiones anteriores.",
     },
     allSubtitle: {
       one: "{count} paquete en {platforms}",
       other: "{count} paquetes en {platforms}",
     },
     platformCount: { one: "{count} plataforma", other: "{count} plataformas" },
-    showOlder: "Mostrar las versiones anteriores ({versions})",
-    hideOlder: "Ocultar las versiones anteriores",
+    versionsShown: "Versiones que se muestran",
+    chipNewest: "La versión más reciente",
+    chipOlder: "Con las versiones anteriores ({versions})",
   },
   where: { title: "Dónde van las máquinas nuevas", subtitle: "La sede en la que inscriben máquinas una instrucción de instalación, el enlace de instalación y un despliegue gestionado." },
   empty: {

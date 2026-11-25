@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { AgentRelease, ApiClient, ClientSiteOut, MeClient } from "../../lib/api";
+import { renderPage as renderRouted } from "../../test/renderPage";
 import { AgentReleasesPage } from "./AgentReleasesPage";
 
 const mockUseApi = vi.fn();
@@ -158,7 +159,8 @@ describe("AgentReleasesPage", () => {
     expect(within(table).getAllByText("1.5.0")).toHaveLength(2);
     expect(within(table).queryByText("1.4.0")).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "Show older versions (1.4.0)" }));
+    // The older versions are a chip on `?older=1` (redesign Task 6, 1.11).
+    await userEvent.click(screen.getByRole("button", { name: "With older versions (1.4.0)" }));
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows.map((row) => within(row).getByText(/^1\.\d\.0$/).textContent)).toEqual([
       "1.5.0",
@@ -720,5 +722,61 @@ describe("the install link panel on Agent packages", () => {
     await screen.findByRole("heading", { name: "Published releases" });
     expect(screen.queryByRole("heading", { name: "Install link" })).not.toBeInTheDocument();
     expect(getInstallLink).not.toHaveBeenCalled();
+  });
+});
+
+/* --- the kit (redesign plan Task 6, 1.11) ---------------------------------------------- */
+
+describe("Agent packages on the kit", () => {
+  function stub(releases: AgentRelease[], permissions: string[] = ["agent.release.manage"]) {
+    mockUseApi.mockReturnValue({
+      me: () =>
+        Promise.resolve({
+          user_id: "u",
+          org_id: "o",
+          email: "op@example.com",
+          display_name: "Operator",
+          permissions,
+          permissions_everywhere: permissions,
+          timezone: null,
+        }),
+      listAgentReleases: () => Promise.resolve(releases),
+      listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
+    } as unknown as ApiClient);
+  }
+
+  it("opens Publish a release from ?new=release", async () => {
+    stub([release()]);
+    renderRouted("/agent-packages?new=release", <AgentReleasesPage />);
+    expect(await screen.findByRole("dialog", { name: "Publish a release" })).toBeInTheDocument();
+  });
+
+  it("puts Publish a release in the URL when the head's button opens it", async () => {
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    expect(router.state.location.search).toBe("?new=release");
+  });
+
+  it("keeps the older versions behind a chip in the URL, and counts what it shows", async () => {
+    stub([
+      release({ id: "old-mac", version: "1.4.0", os: "darwin", arch: "arm64" }),
+      release({ id: "new-linux", version: "1.5.0" }),
+    ]);
+    const { router } = renderRouted("/agent-packages?older=1", <AgentReleasesPage />);
+    expect(await screen.findByRole("button", { name: "With older versions (1.4.0)" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(await screen.findByRole("table", { name: "Published releases" })).getByText("1.4.0")).toBeInTheDocument();
+    expect(screen.getByText("Showing 2 of 2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Newest version" }));
+    expect(router.state.location.search).toBe("");
+    expect(screen.getByText("Showing 1 of 2")).toBeInTheDocument();
+  });
+
+  it("draws its sections in the order of the design: versions, channels, the install link, updates", async () => {
+    stub([release()], ["agent.release.manage", "enrollment.link.manage", "agent.update.read"]);
+    renderRouted("/agent-packages", <AgentReleasesPage />);
+    const versions = await screen.findByRole("heading", { name: "Published releases" });
+    const channels = await screen.findByRole("heading", { name: "Release channels" });
+    expect(versions.compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
