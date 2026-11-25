@@ -121,6 +121,15 @@ describe("the setup screen", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  it("draws the lockup and names the page in the tab", () => {
+    // Redesign design §4: the screens before a session carry the brand in
+    // their own frame, and the tab says which screen this is (plan Task 13).
+    render(<SetupPage />);
+    expect(screen.getByRole("img", { name: "Novieri RMM" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Set up this installation" })).toBeInTheDocument();
+    expect(document.title).toBe("Set up this installation · Novieri RMM");
+  });
+
   it("stays out of the way once the platform has an owner", async () => {
     statusReply = { status: 200, body: { needed: false } };
     render(<App />);

@@ -17,11 +17,13 @@
  *
  * THIS PAGE IS NOT INSIDE THE APP SHELL, AND CANNOT BE. The shell asks
  * `/api/v1/me` for a session that does not exist yet, and every route inside it
- * is behind `RequireAuth`. So this is a standalone full-page form, styled from
- * the same tokens, reached from `App.tsx` above the auth gate. It is the
- * design's `.panel` on the design's page ground, with the page-title rung for
- * its headline and the form kernel's field and actions row: v3 draws no
- * screen for first boot, so it is composed from the kit alone.
+ * is behind `RequireAuth`. So this is a standalone full-page form, reached
+ * from `App.tsx` above the auth gate, in the frame every screen without a
+ * session stands in (`modules/auth/AuthCard.tsx`; redesign design §4, plan
+ * Task 13, 8.12): the Novieri RMM lockup above the card, the page-title rung
+ * for its headline, the language switch below, and the tab named "Set up
+ * this installation · Novieri RMM". It was its own copy of that frame, with
+ * no `<main>` and no way to change the language.
  *
  * THE OWNER'S PASSWORD IS CHOSEN HERE (own-auth design §7: «la pantalla con el
  * código de instalación … crea al dueño con contraseña»; own-auth Task 8). It is
@@ -33,15 +35,15 @@
  * invitation to mail and no screen in between.
  */
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef, useState } from "react";
 
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { Field, inputClass } from "../../components/ui";
 import { ApiError, requestHeaders } from "../../lib/api";
 import { SIGN_IN_PATH, navigation } from "../../lib/session";
-import { Btn, KIND_ICON } from "../../shell/components";
-import { Icon } from "../../shell/icons";
+import { Btn } from "../../shell/components";
+import { AuthAlert, AuthCard } from "../auth/AuthCard";
 import { checkNewPassword, describeAuthError } from "../auth/errors";
 import { NewPasswordFields } from "../auth/NewPasswordFields";
 
@@ -99,11 +101,6 @@ type Form = { code: string; name: string; email: string; password: string; again
 
 const EMPTY: Form = { code: "", name: "", email: "", password: "", again: "", organization: "" };
 
-/** The page ground and the one card on it: the pre-auth surface with room to breathe. */
-const GROUND: CSSProperties = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 32 };
-const CARD: CSSProperties = { width: "100%", maxWidth: 520, padding: 32, margin: 0 };
-/** The page-title rung (`.ph h1`), on a screen that has no `.ph`. */
-const HEADLINE: CSSProperties = { fontSize: "var(--t-h1)", fontWeight: 600, letterSpacing: "-.015em", margin: 0 };
 
 export function SetupPage() {
   const t = useT();
@@ -184,74 +181,62 @@ export function SetupPage() {
   }
 
   return (
-    <div style={GROUND}>
-      <div className="panel" style={CARD}>
-        <h1 style={HEADLINE}>{t("setup.page.title")}</h1>
-        <p className="note" style={{ marginTop: 6 }}>
-          {t("setup.page.intro")}
-        </p>
-
-        <form style={{ marginTop: 20 }} onSubmit={(event) => void submit(event)}>
-          <Field label={t("setup.page.installCode")}>
-            <input
-              className={inputClass}
-              value={form.code}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => set("code", event.target.value)}
-            />
-          </Field>
-          <Field label={t("setup.page.yourName")}>
-            <input
-              className={inputClass}
-              value={form.name}
-              onChange={(event) => set("name", event.target.value)}
-            />
-          </Field>
-          <Field label={t("setup.page.yourEmail")}>
-            <input
-              className={inputClass}
-              type="email"
-              autoComplete="username"
-              value={form.email}
-              onChange={(event) => set("email", event.target.value)}
-            />
-          </Field>
-          <NewPasswordFields
-            password={form.password}
-            again={form.again}
-            onPassword={(value) => set("password", value)}
-            onAgain={(value) => set("again", value)}
+    <AuthCard title={t("setup.page.title")} intro={t("setup.page.intro")}>
+      <form onSubmit={(event) => void submit(event)}>
+        <Field label={t("setup.page.installCode")}>
+          <input
+            className={inputClass}
+            value={form.code}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => set("code", event.target.value)}
           />
-          <Field label={t("setup.page.organizationName")}>
-            <input
-              className={inputClass}
-              value={form.organization}
-              onChange={(event) => set("organization", event.target.value)}
-            />
-          </Field>
+        </Field>
+        <Field label={t("setup.page.yourName")}>
+          <input
+            className={inputClass}
+            value={form.name}
+            onChange={(event) => set("name", event.target.value)}
+          />
+        </Field>
+        <Field label={t("setup.page.yourEmail")}>
+          <input
+            className={inputClass}
+            type="email"
+            autoComplete="username"
+            value={form.email}
+            onChange={(event) => set("email", event.target.value)}
+          />
+        </Field>
+        <NewPasswordFields
+          password={form.password}
+          again={form.again}
+          onPassword={(value) => set("password", value)}
+          onAgain={(value) => set("again", value)}
+        />
+        <Field label={t("setup.page.organizationName")}>
+          <input
+            className={inputClass}
+            value={form.organization}
+            onChange={(event) => set("organization", event.target.value)}
+          />
+        </Field>
 
-          {error ? (
-            <p role="alert" className="notice red">
-              <Icon name={KIND_ICON.crit} size={16} />
-              <span>{error}</span>
-            </p>
-          ) : null}
+        <AuthAlert text={error} />
 
-          <div className="form-actions">
-            <Btn
-              type="submit"
-              label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
-              icon="check"
-              variant="primary"
-              disabled={!complete || submitting}
-            />
-            <span className="form-hint">
-              {t("setup.page.passwordHint")}
-            </span>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="form-actions">
+          <Btn
+            type="submit"
+            label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
+            icon="check"
+            variant="primary"
+            disabled={!complete || submitting}
+          />
+          <span className="form-hint">
+            {t("setup.page.passwordHint")}
+          </span>
+        </div>
+      </form>
+    </AuthCard>
   );
 }

@@ -40,7 +40,7 @@ import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
 import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard } from "./AuthCard";
+import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
 import { describeMicrosoftError } from "./microsoft";
@@ -226,9 +226,7 @@ export function InvitePage() {
               onClick={withPasskey}
             />
           </div>
-          <p className="note" style={{ margin: 0 }}>
-            {t("auth.invite.or")}
-          </p>
+          <AuthOr />
         </>
       ) : null}
       {microsoft && kind === "contact" ? (
@@ -240,9 +238,7 @@ export function InvitePage() {
             variant={offerPasskey ? "secondary" : "primary"}
             guard={microsoftGuard}
           />
-          <p className="note" style={{ margin: 0 }}>
-            {t("auth.invite.or")}
-          </p>
+          <AuthOr />
         </>
       ) : null}
       <Form onSubmit={() => submit(kind, password_minimum)}>
