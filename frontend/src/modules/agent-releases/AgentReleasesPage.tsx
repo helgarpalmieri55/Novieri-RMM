@@ -583,10 +583,10 @@ export function AgentReleasesPage() {
           the versions and their channels, in the design's order (redesign
           Task 6, 1.11); it still waits for the site chosen above. */}
       {canManageLink && siteId !== "" && client.refused === null && (
-        // KEYED BY THE SITE (coordinator ruling 12): the site is chosen on
-        // this page without a change of route, and a draft that outlived the
-        // choice would save one site's settings onto another.
-        <InstallLinkPanel key={siteId} zone={zone} siteId={siteId} />
+        // The site is chosen on this page without a change of route; the
+        // panel keys itself by it, so nothing of one site's panel reaches
+        // another's (coordinator ruling 12).
+        <InstallLinkPanel zone={zone} siteId={siteId} />
       )}
 
       {/* Self-update (spec-self-update.md §8.6), for holders of the read code;

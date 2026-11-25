@@ -114,7 +114,19 @@ function statusLine(settings: InstallLinkSettings, zone?: string | null): string
   return `${parts.join(" · ")}.`;
 }
 
+/**
+ * ONE SITE'S PANEL, AND NOTHING OF ANOTHER'S (coordinator ruling 12; invariant
+ * 3 hygiene). The body holds an unsaved draft and, once, a freshly minted link;
+ * neither may survive a change of site. Keyed here, by the site, so the panel
+ * is safe on its own: a client's Sites tab mounts it without a key and
+ * switches its site in place, and a draft carried across would save one
+ * site's networks onto another, or show one site's link under another's name.
+ */
 export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteId: string }) {
+  return <SiteInstallLink key={siteId} zone={zone} siteId={siteId} />;
+}
+
+function SiteInstallLink({ zone, siteId }: { zone?: string | null; siteId: string }) {
   const t = useT();
   const api = useApi();
   const client = useQueryClient();

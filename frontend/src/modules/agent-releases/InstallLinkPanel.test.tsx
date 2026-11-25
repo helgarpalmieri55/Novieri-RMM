@@ -173,3 +173,66 @@ describe("the form's conversions", () => {
     expect(fromLocalInput("")).toBeNull();
   });
 });
+
+/*
+ * THE PANEL IS SAFE ON ITS OWN WHEN ITS SITE CHANGES (coordinator ruling 12,
+ * fix round 2 of wave O1; invariant 3 hygiene). A client's Sites tab mounts
+ * this panel without a key and switches its site in place, so nothing of one
+ * site's panel -- an unsaved draft, a link shown once -- may survive into
+ * another's. Re-rendered here with another `siteId` and no key, as that
+ * consumer does.
+ */
+describe("InstallLinkPanel, re-rendered for another site", () => {
+  const SITE_B = "00000000-0000-4000-8000-0000000000bb";
+  const ON_A: InstallLinkSettings = { ...OFF, enabled: true, has_code: true, networks: ["10.1.0.0/16"], enabled_at: "2026-09-28T08:00:00Z" };
+  const ON_B: InstallLinkSettings = { ...OFF, enabled: true, has_code: true, networks: ["10.2.0.0/16"], enabled_at: "2026-09-28T08:00:00Z" };
+
+  function renderFor(siteId: string, api: Partial<ApiClient>) {
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <InstallLinkPanel zone="Europe/Lisbon" siteId={siteId} />
+      </QueryClientProvider>,
+    );
+    const switchTo = (next: string) =>
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <InstallLinkPanel zone="Europe/Lisbon" siteId={next} />
+        </QueryClientProvider>,
+      );
+    return { switchTo };
+  }
+
+  it("shows site B's own settings, and Save sends nothing of site A's unsaved edit", async () => {
+    const saveInstallLink = vi.fn();
+    const getInstallLink = vi.fn((siteId: string) => Promise.resolve(siteId === SITE ? ON_A : ON_B));
+    const { switchTo } = renderFor(SITE, { getInstallLink, saveInstallLink });
+    const networks = await screen.findByLabelText("Networks the link answers");
+    expect(networks).toHaveValue("10.1.0.0/16");
+    await userEvent.type(networks, "{enter}192.168.9.0/24");
+
+    switchTo(SITE_B);
+
+    expect(await screen.findByDisplayValue("10.2.0.0/16")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/192\.168\.9\.0\/24/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    // B's settings as saved: nothing to send (ruling 13), and above all nothing of A's.
+    expect(saveInstallLink).not.toHaveBeenCalled();
+  });
+
+  it("does not carry site A's link, shown once, into site B's panel", async () => {
+    const saveInstallLink = vi.fn().mockResolvedValue({ ...ON_A, url: LINK });
+    const getInstallLink = vi.fn((siteId: string) => Promise.resolve(siteId === SITE ? OFF : ON_B));
+    const { switchTo } = renderFor(SITE, { getInstallLink, saveInstallLink });
+    await userEvent.type(await screen.findByLabelText("Networks the link answers"), "10.1.0.0/16");
+    await userEvent.click(screen.getByRole("switch", { name: "Accept new computers through the link" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    expect(await screen.findByText(LINK)).toBeInTheDocument();
+
+    switchTo(SITE_B);
+
+    expect(await screen.findByDisplayValue("10.2.0.0/16")).toBeInTheDocument();
+    expect(screen.queryByText(LINK)).toBeNull();
+  });
+});

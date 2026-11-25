@@ -915,6 +915,27 @@ describe("Discovered on the list kit", () => {
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
+  it("opens the subnets nobody can sweep under the chip's client, as it counted them (ruling 2)", async () => {
+    // The unsweepable count comes from the candidates read, which the chip
+    // narrows; the tile opens IPAM narrowed the same way.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: TWO, ready: true });
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: () => Promise.resolve(page({ unsweepable_subnets: 2 })),
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 0 }),
+        me: () => Promise.resolve({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    const tile = (await screen.findByText("Subnets nobody can sweep")).closest(".stat-card") as HTMLElement;
+    await waitFor(() => expect(within(tile).getByText("2")).toBeInTheDocument());
+    expect(tile.getAttribute("href")).toBe(`/ipam?client=${ANDES.id}`);
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
   it("draws no tile number or claim when the reads failed, and the list says why (coordinator ruling 10a)", async () => {
     // Both reads refused, for an account that may make them: no data is no
     // data, whether it is still coming or will not come.

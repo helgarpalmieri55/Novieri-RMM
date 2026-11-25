@@ -222,6 +222,9 @@ export function CandidatesPage() {
     enabled: canReadDevices && ready,
   });
   const sweptTo = client === null ? "/devices?provenance=sweep" : `/devices?provenance=sweep&client=${client}`;
+  // The unsweepable count is the narrowed candidates read's, so IPAM opens
+  // narrowed the same way (ruling 2); its subnet tree reads the Client chip.
+  const unsweepableTo = client === null ? "/ipam" : `/ipam?client=${client}`;
   // Each tile's one condition (ruling 10a): no data, pending or failed. The
   // kit's `pending` draws its absent mark; the adoption pass keeps these names.
   const noSwept = swept.data === undefined;
@@ -376,7 +379,7 @@ export function CandidatesPage() {
           value={noCandidates ? t("shell.viz.na") : String(unsweepable)}
           pending={noCandidates}
           icon="warning"
-          to="/ipam"
+          to={unsweepableTo}
           tone="gold"
           urgent
           /* NOT "every subnet is covered". Zero also happens when no sweep has
