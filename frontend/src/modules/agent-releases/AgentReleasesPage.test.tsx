@@ -180,7 +180,8 @@ describe("AgentReleasesPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(3);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });
@@ -191,7 +192,8 @@ describe("AgentReleasesPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(3);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });
@@ -700,7 +702,9 @@ describe("AgentReleasesPage", () => {
     await screen.findByText("Loading…");
 
     const values = [...document.querySelectorAll(".stat-value")].map((n) => n.textContent);
-    expect(values).toEqual(["\u2014", "\u2014", "\u2014"]);
+    // The kit's absent mark, no longer a dash (coordinator ruling 10a, corrected
+    // 2026-11-25: no em dash in the interface; DESIGN.md's Absent Zero Rule).
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
     expect(screen.queryByText("Nothing published yet")).not.toBeInTheDocument();
   });
 });

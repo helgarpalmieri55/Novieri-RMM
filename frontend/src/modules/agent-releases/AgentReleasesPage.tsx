@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
+import { translate } from "../../i18n/core";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { describeSubmitError } from "../../components/form";
@@ -73,7 +74,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "—";
+  // Unmeasured is the kit's absent mark, never a dash (DESIGN.md, Absent Zero Rule).
+  if (bytes <= 0) return translate("shell.viz.na");
   const units = ["B", "KiB", "MiB", "GiB"];
   let value = bytes;
   let unit = 0;
@@ -281,6 +283,9 @@ export function AgentReleasesPage() {
   // a console that kept them would be wrong on every deployment.
   const withArtifact = allItems.filter((release) => release.has_artifact).length;
   const platforms = new Set(allItems.map((release) => release.os)).size;
+  // The tiles' one condition (ruling 10a): no catalogue, pending or failed. The
+  // kit's `pending` draws its absent mark; the adoption pass keeps this name.
+  const noCatalogue = releases.data == null;
 
   useScrollToCatalogue(releases.data != null);
 
@@ -324,7 +329,8 @@ export function AgentReleasesPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("agentReleases.page.releases")}
-          value={releases.data ? String(allItems.length) : "—"}
+          value={noCatalogue ? t("shell.viz.na") : String(allItems.length)}
+          pending={noCatalogue}
           icon="package"
           to="/agent-packages#releases"
           tone="neutral"
@@ -332,7 +338,8 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.ready")}
-          value={releases.data ? String(withArtifact) : "—"}
+          value={noCatalogue ? t("shell.viz.na") : String(withArtifact)}
+          pending={noCatalogue}
           icon="check"
           to="/agent-packages#releases"
           tone="green"
@@ -343,7 +350,8 @@ export function AgentReleasesPage() {
         />
         <StatCard
           label={t("agentReleases.page.platforms")}
-          value={releases.data ? String(platforms) : "—"}
+          value={noCatalogue ? t("shell.viz.na") : String(platforms)}
+          pending={noCatalogue}
           icon="devices"
           to="/agent-packages#releases"
           tone="blue"

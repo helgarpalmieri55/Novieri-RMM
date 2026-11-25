@@ -659,8 +659,8 @@ describe("the tiles are links", () => {
     const card = (await screen.findByText("Subnets nobody can sweep")).closest(
       ".stat-card",
     ) as HTMLElement;
-    // Awaited: before the candidates answer the tile draws "—" and no zero
-    // sentence (coordinator ruling 10a), so the zero is the read's.
+    // Awaited: before the candidates answer the tile draws the absent mark and
+    // no zero sentence (coordinator ruling 10a), so the zero is the read's.
     expect(await within(card).findByText("No sweep has reported a missing agent")).toBeInTheDocument();
     // And only that line: the foot below is about a count that exists.
     expect(
@@ -927,7 +927,8 @@ describe("Discovered on the list kit", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(2);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });
@@ -941,7 +942,8 @@ describe("Discovered on the list kit", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(2);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });

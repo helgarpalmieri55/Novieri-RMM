@@ -222,6 +222,10 @@ export function CandidatesPage() {
     enabled: canReadDevices && ready,
   });
   const sweptTo = client === null ? "/devices?provenance=sweep" : `/devices?provenance=sweep&client=${client}`;
+  // Each tile's one condition (ruling 10a): no data, pending or failed. The
+  // kit's `pending` draws its absent mark; the adoption pass keeps these names.
+  const noSwept = swept.data === undefined;
+  const noCandidates = candidates.data === undefined;
 
   const promote = useMutation<PromoteOutcomes>({
     // THE CLIENT COMES FROM THE ROW (operator decision 2026-10-28). A
@@ -351,7 +355,8 @@ export function CandidatesPage() {
       <StatsGrid columns={4} keepTrackWidth>
         <StatCard
           label={t("devices.candidates.swept")}
-          value={swept.data ? String(swept.data.total) : "—"}
+          value={noSwept ? t("shell.viz.na") : String(swept.data.total)}
+          pending={noSwept}
           icon="network"
           to={sweptTo}
           tone="neutral"
@@ -366,9 +371,10 @@ export function CandidatesPage() {
         />
         <StatCard
           label={t("devices.candidates.unsweepable")}
-          // No number before the read (coordinator ruling 10a): "—", and no
-          // zero sentence, until the candidates answer.
-          value={data ? String(unsweepable) : "—"}
+          // No number without data (coordinator ruling 10a): the absent mark,
+          // and no zero sentence, until the candidates answer.
+          value={noCandidates ? t("shell.viz.na") : String(unsweepable)}
+          pending={noCandidates}
           icon="warning"
           to="/ipam"
           tone="gold"
@@ -387,7 +393,7 @@ export function CandidatesPage() {
              (backend/app/modules/ipam/candidates.py), which is a fact about
              the segment, not about the hosts on it. Omitted at zero, where
              `zeroLabel` is already the line and two would stack. */
-          foot={unsweepable > 0 ? t("devices.candidates.unsweepableFoot") : undefined}
+          foot={!noCandidates && unsweepable > 0 ? t("devices.candidates.unsweepableFoot") : undefined}
         />
       </StatsGrid>
 

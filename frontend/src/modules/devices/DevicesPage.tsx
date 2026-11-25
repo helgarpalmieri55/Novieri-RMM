@@ -137,7 +137,7 @@ function provenanceLabel(device: Device): string {
   // An unknown value renders as itself rather than as a blank cell: a row this
   // page cannot classify is a fact worth seeing, not one worth hiding.
   if (PROVENANCE_KNOWN.has(device.provenance)) return humaniseEnum(device.provenance, "DeviceProvenance");
-  return device.provenance ?? "—";
+  return device.provenance ?? translate("shell.viz.na");
 }
 
 /**
@@ -440,6 +440,9 @@ export function DevicesPage() {
   // `fleet` is counted with no filter applied at all (but within the client
   // the read is narrowed to: the chip decides whose estate this is).
   const fleet = devices.data?.fleet;
+  // The tiles' one condition (ruling 10a): no counts, pending or failed. The
+  // kit's `pending` draws its absent mark; the adoption pass keeps this name.
+  const noFleet = fleet === undefined;
   // What each chip would show FROM THIS SEARCH, counted in SQL. `total` is this
   // object's entry for the active chip, by construction on the server, so the
   // chips and the table under them cannot disagree.
@@ -547,15 +550,17 @@ export function DevicesPage() {
           fill it would have to be invented. No endpoint serves a history of
           these four counts. An absent trend is a gap; a drawn one would be a
           lie on the tile most likely to be believed. */}
-      {/* NO NUMBER BEFORE THE READ (coordinator ruling 10a): until the list
-          answers -- including while the Client chip's client is undecided --
-          each tile draws "—" and no line under it, never a "0" with its
-          zero sentence. Every foot below already waits for `fleet`. */}
+      {/* NO NUMBER WITHOUT DATA (coordinator ruling 10a): until the list
+          answers -- while it is pending, while the Client chip's client is
+          undecided, or when it failed -- each tile draws the kit's absent
+          mark and no line under it, never a "0" with its zero sentence.
+          Every foot below already waits for `fleet`. */}
       <h2 className="sr-only">{t("devices.page.fleetSummary")}</h2>
       <StatsGrid columns={4}>
         <StatCard
           label={t("devices.tiles.managed")}
-          value={fleet ? String(fleet.managed) : "—"}
+          value={noFleet ? t("shell.viz.na") : String(fleet.managed)}
+          pending={noFleet}
           icon="devices"
           to={tileTo("")}
           tone="blue"
@@ -564,7 +569,8 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.assets")}
-          value={fleet ? String(fleet.total) : "—"}
+          value={noFleet ? t("shell.viz.na") : String(fleet.total)}
+          pending={noFleet}
           icon="package"
           to={tileTo("")}
           tone="neutral"
@@ -573,7 +579,8 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.online")}
-          value={fleet ? String(fleet.online) : "—"}
+          value={noFleet ? t("shell.viz.na") : String(fleet.online)}
+          pending={noFleet}
           icon="activity"
           to={tileTo("online")}
           tone="green"
@@ -582,7 +589,8 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.cert")}
-          value={fleet ? String(fleet.cert_attention) : "—"}
+          value={noFleet ? t("shell.viz.na") : String(fleet.cert_attention)}
+          pending={noFleet}
           icon="certificate"
           to={tileTo("certs")}
           tone="gold"

@@ -178,7 +178,8 @@ describe("before /me answers (coordinator ruling 10)", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });
@@ -192,7 +193,8 @@ describe("before /me answers (coordinator ruling 10)", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     for (const tile of tiles) {
-      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
       expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
     }
   });
