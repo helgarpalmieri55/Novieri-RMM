@@ -34,9 +34,9 @@ import { Field, inputClass } from "../../components/ui";
 import { useLanguage, useT } from "../../i18n/context";
 import { resolveLanguage } from "../../i18n/resolve";
 import {
+  FormPage,
   FormSection,
   KIND_ICON,
-  PageHead,
   SaveBar,
   UnsavedGuard,
   useDraft,
@@ -114,14 +114,9 @@ export function ProfilePage() {
   }
 
   return (
-    <div className="form-page">
-      {/* The kit's form page with no back link: `FormPage` always draws one,
-          and this page is reached from the account menu, not from a list
-          (a kit request in the wave's report asks for `back` to be optional). */}
-      <PageHead
-        title={t("profile.page.title")}
-        description={t("profile.page.description")}
-      />
+    // The kit's form page with NO back link (batch 3, B3-2: `back` optional):
+    // this page is reached from the account menu, not from a list.
+    <FormPage title={t("profile.page.title")} description={t("profile.page.description")}>
       <UnsavedGuard dirty={dirty} />
 
       {me.isLoading ? (
@@ -226,6 +221,6 @@ export function ProfilePage() {
           </Link>
         </div>
       </FormSection>
-    </div>
+    </FormPage>
   );
 }
