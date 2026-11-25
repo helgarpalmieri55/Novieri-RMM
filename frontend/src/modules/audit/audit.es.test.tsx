@@ -160,10 +160,11 @@ describe("the audit log in Spanish", () => {
       verify: () => Promise.resolve({ ok: false, count: 1, broken_at: "evt-9" }),
     });
     const banners = await screen.findAllByRole("alert");
-    expect(banners[0]).toHaveTextContent("Ha FALLADO la verificación de la cadena de hashes.");
+    // No typed capitals (DESIGN.md; P3 adoption pass): same banner, same meaning.
+    expect(banners[0]).toHaveTextContent("La verificación de la cadena de hashes ha fallado.");
     expect(banners[0]).toHaveTextContent("a partir del evento evt-9.");
     expect(banners[1]).toHaveTextContent("La verificación recorrió 1 evento y se detuvo en evt-9.");
-    expect(screen.getByText("ROTA")).toBeInTheDocument();
+    expect(screen.getByText("Rota")).toBeInTheDocument();
     expectNoEnglish(broken.container);
     broken.unmount();
 

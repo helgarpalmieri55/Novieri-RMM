@@ -246,7 +246,7 @@ describe("AuditPage", () => {
     });
   });
 
-  it("renders a BROKEN chain unmistakably, on every tab", async () => {
+  it("renders a broken chain unmistakably, on every tab", async () => {
     renderPage({
       events: () => Promise.resolve({ items: [event()], total: 1 }),
       verify: () =>
@@ -254,15 +254,17 @@ describe("AuditPage", () => {
     });
     // The banner is above the tabs, so it is present while looking at events.
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/FAILED/);
+    // No typed capitals (DESIGN.md: "Don't type uppercase copy"; P3 adoption
+    // pass): the alert and the word carry the weight. Same element, same meaning.
+    expect(alert).toHaveTextContent("Hash-chain verification failed.");
     expect(alert).toHaveTextContent("cccccccc-0000-0000-0000-000000000009");
     expect(alert.className).toContain("red");
     // And the stat card does not soften it.
-    expect(screen.getByText("BROKEN")).toBeInTheDocument();
+    expect(screen.getByText("Broken")).toBeInTheDocument();
     expect(screen.queryByText("Verified")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Chain integrity/ }));
-    expect(await screen.findByText(/The chain is BROKEN/)).toBeInTheDocument();
+    expect(await screen.findByText("The chain is broken.")).toBeInTheDocument();
     // A count from a failed walk is never presented as events verified.
     const values = [...document.querySelectorAll(".stat-card")].map(
       (card) => card.querySelector(".stat-value")?.textContent,
@@ -300,7 +302,7 @@ describe("AuditPage", () => {
     await screen.findByText("job.dispatch");
     await screen.findByText("Unverified");
     expect(screen.queryByText("Verified")).not.toBeInTheDocument();
-    expect(screen.queryByText("BROKEN")).not.toBeInTheDocument();
+    expect(screen.queryByText("Broken")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Chain integrity/ }));
     const alert = await screen.findByRole("alert");
@@ -454,7 +456,7 @@ describe("AuditPage", () => {
         Promise.resolve({ ok: false, count: 3, broken_at: "cccccccc-0000-0000-0000-000000000009" }),
     });
 
-    expect(await screen.findByText(/The chain is BROKEN/)).toBeInTheDocument();
+    expect(await screen.findByText("The chain is broken.")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Chain integrity/ })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -518,7 +520,7 @@ describe("AuditPage", () => {
       verify: () =>
         Promise.resolve({ ok: false, count: 3, broken_at: "cccccccc-0000-0000-0000-000000000009" }),
     });
-    await screen.findByText("BROKEN");
+    await screen.findByText("Broken");
 
     const integrity = tileByLabel("Chain integrity");
     expect(integrity?.className).toContain("tone-red");

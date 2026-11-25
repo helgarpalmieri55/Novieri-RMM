@@ -72,7 +72,7 @@ export const onboarding = {
       thisNetwork: "this network",
       noAgent: "The last sweep of {network} could not run: no enrolled agent on that segment.",
       noAgentRemedy:
-        "A sweep is performed BY an agent inside the segment. This platform never probes a network itself. Install the agent by hand on one machine there (step 5 has the command), and it becomes the sweeper for the rest.",
+        "Only an agent inside the segment performs a sweep. This platform never probes a network itself. Install the agent by hand on one machine there (step 5 has the command), and it becomes the sweeper for the rest.",
       noAgentToLabel: "Get an install command",
       chooseNetwork: "Choose a network",
       open: "Open {prefix}",

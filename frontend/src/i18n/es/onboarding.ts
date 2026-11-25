@@ -73,7 +73,7 @@ export const onboarding: Shape<typeof en> = {
       thisNetwork: "esta red",
       noAgent: "El último barrido de {network} no pudo ejecutarse: no hay ningún agente inscrito en ese segmento.",
       noAgentRemedy:
-        "Un barrido lo realiza un agente que está dentro del segmento. Esta plataforma nunca sondea una red por sí misma. Instala el agente a mano en un equipo de esa red (el paso 5 tiene el comando) y ese equipo se encargará de barrer el resto.",
+        "Solo un agente que está dentro del segmento realiza un barrido. Esta plataforma nunca sondea una red por sí misma. Instala el agente a mano en un equipo de esa red (el paso 5 tiene el comando) y ese equipo se encargará de barrer el resto.",
       noAgentToLabel: "Obtener un comando de instalación",
       chooseNetwork: "Elegir una red",
       open: "Abrir {prefix}",
