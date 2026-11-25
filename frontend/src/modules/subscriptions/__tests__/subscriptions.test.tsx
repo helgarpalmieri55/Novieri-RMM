@@ -574,7 +574,8 @@ describe("SubscriptionsPage", () => {
     expect(await screen.findByText(/Client is required/)).toBeInTheDocument();
     expect(api.createSubscription).not.toHaveBeenCalled();
 
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    // The dialog's field: the list's Client chip carries the same name (Receta L, point 6).
+    await user.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.createSubscription).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" })));
   });
@@ -592,7 +593,8 @@ describe("SubscriptionsPage", () => {
     renderWithProviders(<SubscriptionsPage />);
     await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
     await user.click(screen.getByRole("button", { name: "New subscription" }));
-    const field = screen.getByLabelText("Client");
+    // The dialog's field: the list's Client chip carries the same name (Receta L, point 6).
+    const field = within(screen.getByRole("dialog")).getByLabelText("Client");
     expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Choose a client",
       "Novieri",
@@ -795,9 +797,11 @@ describe("SubscriptionDetail", () => {
 
     await screen.findByText("Acme SaaS");
 
-    const head = document.querySelector(".ph") as HTMLElement;
-    expect(head.querySelectorAll("[data-kind]")).toHaveLength(0);
-    expect(head).not.toHaveTextContent("Billed monthly");
+    // The record kit's head (redesign plan, Receta F) draws the status and the
+    // context in its meta row, under the title: still never in the button row.
+    const actions = document.querySelector(".ph .ph-act") as HTMLElement;
+    expect(actions.querySelectorAll("[data-kind]")).toHaveLength(0);
+    expect(actions).not.toHaveTextContent("Billed monthly");
 
     const cadence = screen.getByText("Billed monthly");
     // A chip, not a pill: no `data-kind`, so it claims no severity and carries
@@ -805,9 +809,10 @@ describe("SubscriptionDetail", () => {
     expect(cadence).toHaveClass("chip");
     expect(cadence.hasAttribute("data-kind")).toBe(false);
 
-    // The status and the cadence share ONE row, and it is not the head's.
-    const meta = cadence.parentElement as HTMLElement;
-    expect(meta.closest(".ph")).toBeNull();
+    // The status and the cadence share ONE row: the head's meta row.
+    const meta = cadence.closest(".detail-meta") as HTMLElement;
+    expect(meta).not.toBeNull();
+    expect(meta.closest(".ph-act")).toBeNull();
     const pills = [...meta.querySelectorAll<HTMLElement>("[data-kind]")];
     expect(pills).toHaveLength(1);
     expect(pills[0]).toHaveTextContent("Active");
@@ -1075,7 +1080,8 @@ describe("RenewalCalendar", () => {
     renderWithProviders(<RenewalCalendar />);
 
     await screen.findByText("Acme SaaS");
-    await user.selectOptions(screen.getByLabelText("Window"), "60");
+    // The window is a row of chips in the URL now (Task 10, 5.4: `?within=`).
+    await user.click(screen.getByRole("button", { name: "Next 60 days" }));
 
     expect(await screen.findByText("Globex CRM")).toBeInTheDocument();
     expect(api.renewals).toHaveBeenCalledWith(60);
@@ -1164,9 +1170,10 @@ describe("SpendDashboard", () => {
     });
     renderWithProviders(<SpendDashboard />);
 
-    const novieri = (await screen.findByText("Novieri")).closest("tr") as HTMLElement;
+    // The table's cells: the Client chip and the tiles name the clients too.
+    const novieri = (await screen.findByRole("cell", { name: "Novieri" })).closest("tr") as HTMLElement;
     expect(within(novieri).getByText("100.00")).toBeInTheDocument();
-    const globex = screen.getByText("Globex").closest("tr") as HTMLElement;
+    const globex = screen.getByRole("cell", { name: "Globex" }).closest("tr") as HTMLElement;
     expect(within(globex).getByText("40.00")).toBeInTheDocument();
     expect(screen.queryByText("140.00")).not.toBeInTheDocument();
   });
@@ -1524,7 +1531,8 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     await user.type(screen.getByLabelText("Notice period (days)"), "90");
     await user.click(screen.getByLabelText(/Renews automatically/));
     await pick(user, "Owner", /Priya Owner/);
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    // The page's one save bar saves the terms (Receta FO).
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateSubscription).toHaveBeenCalledWith("s1", {
       renews_at: "2026-08-01",
@@ -1540,7 +1548,7 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
 
     await screen.findByText("Renewal terms");
     await user.clear(screen.getByLabelText("Renews on"));
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateSubscription).toHaveBeenCalledWith(
       "s1",
@@ -1555,7 +1563,7 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     await screen.findByText("Renewal terms");
     await user.clear(screen.getByLabelText("Notice period (days)"));
     await user.type(screen.getByLabelText("Notice period (days)"), "400");
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/365 days or fewer/);
     expect(api.updateSubscription).not.toHaveBeenCalled();
@@ -1567,7 +1575,9 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     renderDetail();
 
     await screen.findByText("Renewal terms");
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    // The save bar appears with a change (Receta FO): one is made first.
+    await user.click(screen.getByLabelText(/Renews automatically/));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/service is unavailable right now/i);

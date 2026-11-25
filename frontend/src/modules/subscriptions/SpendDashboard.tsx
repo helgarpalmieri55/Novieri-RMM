@@ -1,10 +1,23 @@
+import { useQuery } from "@tanstack/react-query";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
 import { useClientScope } from "../../lib/clientScope";
-import { Panel, PageHead, QueryState } from "../../shell/components";
+import {
+  ClientFilter,
+  Panel,
+  PageHead,
+  QueryState,
+  StatCard,
+  StatsGrid,
+  useNarrowedApi,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useClientName } from "../settings/api";
 import { useIdleSeats, useSpend } from "./api";
+import { SubscriptionPageNav } from "./subscriptionsNav";
 import type { IdleSeatRow, SpendRow } from "./types";
 
 // Mirrors backend/app/modules/subscriptions/reporting.py's spend_summary:
@@ -149,8 +162,32 @@ function IdleSeatsTable({
 
 export function SpendDashboard() {
   const t = useT();
-  const spend = useSpend();
-  const idleSeats = useIdleSeats();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const canRead = (me.data?.permissions ?? []).includes("subscriptions.read");
+  // THE CLIENT CHIP (decision D6): the registry's run-rate tile links here
+  // with its client, so the page opens the spend that tile read, and a person
+  // with every client shown can narrow it. Both reports narrow alike.
+  const filters = useUrlFilters(["client"] as const);
+  const { client: narrowedTo } = useNarrowedApi(filters.values.client);
+  const spend = useSpend(filters.values.client);
+  const idleSeats = useIdleSeats(filters.values.client);
+  const clientName = useClientName();
+  const { selected, clients } = useClientScope();
+  const totals = spend.data?.by_currency ?? [];
+
+  // EACH TOTAL OPENS THE LIST THAT EXPLAINS IT: the subscriptions of the
+  // total's client, the registry narrowed to it by the Client chip (only a
+  // client of the person's, so the chip never drops it on arrival). With one
+  // client chosen at the top, or the chip already narrowing, every total is
+  // that client's and the registry already reads only its rows.
+  const listOf = (row: SpendRow): string => {
+    if (narrowedTo !== null) return `/subscriptions?client=${narrowedTo}`;
+    if (selected === null && clients.some((client) => client.id === row.client_id)) {
+      return `/subscriptions?client=${row.client_id}`;
+    }
+    return "/subscriptions";
+  };
 
   return (
     <div>
@@ -159,27 +196,63 @@ export function SpendDashboard() {
         description={t("subscriptions.spend.description")}
       />
 
+      <SubscriptionPageNav canRead={canRead} />
+
+      {/* The Client chip, on its own row: the page has no list toolbar to
+          hold it, and the chip draws only with every client and two or more
+          of them (shell/listKit.tsx), so no empty bar is left behind. */}
+      {selected === null && clients.length >= 2 ? (
+        <div className="list-chips" style={{ marginBottom: 16 }}>
+          <ClientFilter filters={filters} />
+        </div>
+      ) : null}
+
+      {/* THE TOTALS, ONE TILE EACH (Task 10, 5.4): the by-currency roll-up,
+          one row per (client, currency), never summed across either (module
+          docstring, invariant #6). Each tile is the row's monthly total in its
+          own currency, its annual total under it, and opens the subscriptions
+          behind it. The "By currency" table below keeps the same rows with
+          their client column, as the breakdown the tiles summarise. */}
+      {totals.length > 0 ? (
+        <StatsGrid columns={Math.min(4, Math.max(2, totals.length))}>
+          {totals.map((row) => (
+            <StatCard
+              key={`${row.client_id}-${row.currency}`}
+              label={
+                selected === null
+                  ? t("subscriptions.spend.tileMonthlyOf", { currency: row.currency, client: clientName(row.client_id) })
+                  : t("subscriptions.spend.tileMonthly", { currency: row.currency })
+              }
+              value={`${row.monthly_total} ${row.currency}`}
+              icon="wallet"
+              to={listOf(row)}
+              tone="primary"
+              foot={t("subscriptions.spend.tileAnnual", { amount: row.annual_total, currency: row.currency })}
+            />
+          ))}
+        </StatsGrid>
+      ) : null}
+
       {/* THE HEADER NAMES THE CELLS UNDER IT, which on this roll-up read "All
           subscriptions": the by-currency rows are the whole estate split by
-          currency, and the currency itself is the column next to them.
-          "Currency total" named the panel's grouping instead, so the first two
-          columns read as a contradiction. */}
+          currency, and the currency itself is the column next to them. */}
       <RollupTable
         title={t("subscriptions.spend.byCurrency")}
         subtitle={t("subscriptions.spend.neverSummed")}
         rows={spend.data?.by_currency}
-        loading={spend.isLoading}
+        loading={spend.isPending}
         error={spend.error}
         groupLabel={t("subscriptions.spend.scope")}
         glyph="wallet"
       />
+
       {/* Stacked, not three-up: each roll-up is a four-column table, and a
           third of the content width truncates its last two columns behind
           the scroller. */}
       <RollupTable
         title={t("subscriptions.spend.byVendor")}
         rows={spend.data?.by_vendor}
-        loading={spend.isLoading}
+        loading={spend.isPending}
         error={spend.error}
         groupLabel={t("subscriptions.spend.vendor")}
         glyph="building"
@@ -187,7 +260,7 @@ export function SpendDashboard() {
       <RollupTable
         title={t("subscriptions.spend.byCategory")}
         rows={spend.data?.by_category}
-        loading={spend.isLoading}
+        loading={spend.isPending}
         error={spend.error}
         groupLabel={t("subscriptions.spend.category")}
         glyph="tag"
@@ -195,12 +268,12 @@ export function SpendDashboard() {
       <RollupTable
         title={t("subscriptions.spend.byOwner")}
         rows={spend.data?.by_owner}
-        loading={spend.isLoading}
+        loading={spend.isPending}
         error={spend.error}
         groupLabel={t("subscriptions.spend.owner")}
         glyph="user"
       />
-      <IdleSeatsTable rows={idleSeats.data} loading={idleSeats.isLoading} error={idleSeats.error} />
+      <IdleSeatsTable rows={idleSeats.data} loading={idleSeats.isPending} error={idleSeats.error} />
     </div>
   );
 }

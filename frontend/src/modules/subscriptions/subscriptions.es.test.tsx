@@ -199,7 +199,8 @@ describe("the subscriptions register in Spanish", () => {
     expect(screen.getByText("Activa")).toBeInTheDocument();
     expect(screen.getByText("Mensual")).toBeInTheDocument();
     expect(screen.getByText("10 puestos · se renueva el 01 ago 2026")).toBeInTheDocument();
-    expect(screen.getByText("1 de 1")).toBeInTheDocument();
+    // The kit's count at the end of the toolbar (Receta L, point 2).
+    expect(screen.getByText("Mostrando 1 de 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar suscripciones")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
@@ -232,7 +233,8 @@ describe("the subscriptions register in Spanish", () => {
     await user.clear(screen.getByLabelText("Buscar suscripciones"));
     await user.type(screen.getByLabelText("Buscar suscripciones"), "trimestral");
     expect(screen.queryByRole("link", { name: "Acme SaaS" })).toBeNull();
-    expect(screen.getByText("Ninguna suscripción coincide con ese filtro.")).toBeInTheDocument();
+    // The kit's sentence for a filtered list, with its way out (Receta L, point 3).
+    expect(screen.getByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
   it("words the empty register", async () => {
@@ -353,7 +355,8 @@ describe("one subscription in Spanish", () => {
   it("words the details, the seats, the renewal terms and the history", async () => {
     const { container } = mountDetail();
     expect(await screen.findByRole("heading", { name: "Acme SaaS" })).toBeInTheDocument();
-    for (const label of ["Plan", "Categoría", "Costo", "Puestos", "Responsable", "Inicio", "Se renueva", "Días de aviso", "Renovación automática", "Ref. de pago"]) {
+    // The cost moved from Details to the record's tiles (Receta F), as "Costo por ciclo".
+    for (const label of ["Plan", "Categoría", "Costo por ciclo", "Puestos", "Responsable", "Inicio", "Se renueva", "Días de aviso", "Renovación automática", "Ref. de pago"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getByText("Sí")).toBeInTheDocument();
@@ -430,7 +433,8 @@ describe("one subscription in Spanish", () => {
     const notice = screen.getByLabelText("Plazo de aviso (días)");
     await user.clear(notice);
     await user.type(notice, "2.5");
-    await user.click(screen.getByRole("button", { name: "Guardar condiciones de renovación" }));
+    // The page's one save bar saves the terms (Receta FO).
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect((await screen.findByRole("alert")).textContent).toContain("El plazo de aviso debe ser un número entero de días, cero o más");
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("alert").textContent).toContain("Notice period must be a whole number of days, zero or more");
@@ -438,10 +442,23 @@ describe("one subscription in Spanish", () => {
 
   it("words the saved confirmation of the renewal terms", async () => {
     const user = userEvent.setup();
-    mockUseApi.mockReturnValue(api({ updateSubscription: vi.fn().mockResolvedValue(SUB) }));
+    // The save bar appears with a change and says "saved" once the server
+    // holds it (Receta FO): the server answers with the stored terms.
+    let current = SUB;
+    const stored = { ...SUB, auto_renew: !SUB.auto_renew };
+    mockUseApi.mockReturnValue(
+      api({
+        getSubscription: vi.fn(() => Promise.resolve(current)),
+        updateSubscription: vi.fn(() => {
+          current = stored;
+          return Promise.resolve(stored);
+        }),
+      }),
+    );
     mountDetail();
     await screen.findByText("Condiciones de renovación");
-    await user.click(screen.getByRole("button", { name: "Guardar condiciones de renovación" }));
+    await user.click(screen.getByLabelText(/Se renueva automáticamente/));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByText("Condiciones de renovación guardadas.")).toBeInTheDocument();
   });
 
@@ -481,8 +498,10 @@ describe("the renewal calendar in Spanish", () => {
     expect(screen.getByText("renovada hace 1 día")).toBeInTheDocument();
     expect(screen.getByText("Acción requerida")).toBeInTheDocument();
     expect(screen.getAllByText("En orden").length).toBe(2);
-    expect(screen.getByRole("option", { name: "Próximos 60 días" })).toBeInTheDocument();
-    expect(screen.getByText("Ventana")).toBeInTheDocument();
+    // The window is a row of chips in the URL now (Task 10, 5.4: `?within=`).
+    expect(screen.getByRole("button", { name: "Próximos 60 días" })).toBeInTheDocument();
+    // The chips' group carries the name the select's caption did.
+    expect(screen.getByRole("group", { name: "Ventana" })).toBeInTheDocument();
     expectNoEnglish(container, [...RECORDED, "Initech"]);
     act(() => setActiveLanguage("en"));
     expect(screen.getByText("3 in window · 1 action required")).toBeInTheDocument();
@@ -498,7 +517,8 @@ describe("the renewal calendar in Spanish", () => {
   it("words the empty calendar", async () => {
     mockUseApi.mockReturnValue(api({ renewals: vi.fn().mockResolvedValue([]) }));
     const { container } = mount(<RenewalCalendar />);
-    expect(await screen.findByText("No hay renovaciones próximas.")).toBeInTheDocument();
+    // The empty calendar says its cause: nothing renews in the window (Task 10, 5.4).
+    expect(await screen.findByText("Nada se renueva en los próximos 30 días.")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 });

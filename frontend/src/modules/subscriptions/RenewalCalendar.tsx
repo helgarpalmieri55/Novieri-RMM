@@ -1,11 +1,25 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
-import { FilterBar, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  ResultCount,
+  StatusPill,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useSubscriptionRenewals } from "./api";
 import { actionKind } from "./subscriptionState";
+import { SubscriptionPageNav } from "./subscriptionsNav";
 
 // The look-ahead windows offered by the control below.
 // backend/app/modules/subscriptions/api.py::renewals_route bounds
@@ -16,10 +30,20 @@ const WINDOWS = [30, 60, 90] as const;
 
 export function RenewalCalendar() {
   const t = useT();
-  // A day count, not money -- `Number()` on the select value is safe here
-  // (the Decimal money fields elsewhere in this module stay strings).
-  const [withinDays, setWithinDays] = useState<number>(WINDOWS[0]);
-  const renewals = useSubscriptionRenewals(withinDays);
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const canRead = (me.data?.permissions ?? []).includes("subscriptions.read");
+  // THE WINDOW IS IN THE URL (Task 10, 5.4): `?within=60` is a link and a
+  // reload keeps it; the default 30 days writes nothing. A value that is not
+  // one of the windows falls back to the default, so no request can leave the
+  // server's [1, 365] range. The Client chip (decision D6) is here because
+  // the registry's renewal tiles link to this page with their client.
+  const filters = useUrlFilters(["within", "client"] as const);
+  // A day count, not money -- `Number()` on it is safe here (the Decimal
+  // money fields elsewhere in this module stay strings).
+  const asked = Number(filters.values.within);
+  const withinDays: number = (WINDOWS as readonly number[]).includes(asked) ? asked : WINDOWS[0];
+  const renewals = useSubscriptionRenewals(withinDays, filters.values.client);
   const items = renewals.data ?? [];
   const dueCount = items.filter((row) => row.action_required).length;
 
@@ -30,46 +54,50 @@ export function RenewalCalendar() {
         description={t("subscriptions.renewals.description")}
       />
 
+      <SubscriptionPageNav canRead={canRead} />
+
       <Panel bare>
-        {/* The kit's filter bar, as the sibling list pages draw it: the filter
-            on the left, the count on the right. v3's `.tb` toolbar sits above
-            a panel, never inside one; inside a bare panel its zero padding put
-            the label and the count flush against the borders and clipped the
-            count at 390px. The window is a labelled `<select>` on the kit's
-            field class so it matches the search fields on the sibling pages. */}
-        <FilterBar>
-          <label className="flex items-center gap-2">
-            <span className="note">{t("subscriptions.renewals.window")}</span>
-            <select
-              className="select-field"
-              value={withinDays}
-              onChange={(e) => setWithinDays(Number(e.target.value))}
-            >
-              {WINDOWS.map((days) => (
-                <option key={days} value={days}>
-                  {t("subscriptions.renewals.nextDays", { count: days })}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span className="filter-spacer" />
-          {renewals.data ? (
-            <span className="note">
-              {t("subscriptions.renewals.summary", {
-                window: t("subscriptions.renewals.inWindow", { count: items.length }),
-                action: t("subscriptions.renewals.actionRequired", { count: dueCount }),
-              })}
-            </span>
-          ) : null}
-        </FilterBar>
-        <QueryState
-          loading={renewals.isLoading}
-          error={renewals.error}
-          empty={items.length === 0}
-          emptyLabel={t("subscriptions.renewals.empty")}
-          emptyIcon="clock"
-        >
-          <Table>
+        {/* The kit's list toolbar: the window as chips (one of three, so no
+            count: a count per window would be three more requests), the
+            Client chip, and the window's own summary at the end. */}
+        <ListToolbar
+          chips={
+            <>
+              <FilterChips
+                label={t("subscriptions.renewals.window")}
+                options={WINDOWS.map((days) => ({
+                  value: days === WINDOWS[0] ? "" : String(days),
+                  label: t("subscriptions.renewals.nextDays", { count: days }),
+                }))}
+                value={withinDays === WINDOWS[0] ? "" : String(withinDays)}
+                onChange={(value) => filters.set("within", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={
+            renewals.data ? (
+              <ResultCount>
+                {t("subscriptions.renewals.summary", {
+                  window: t("subscriptions.renewals.inWindow", { count: items.length }),
+                  action: t("subscriptions.renewals.actionRequired", { count: dueCount }),
+                })}
+              </ResultCount>
+            ) : null
+          }
+        />
+        <QueryState loading={renewals.isPending} error={renewals.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            /* The cause: nothing renews in this window. Under the Client chip,
+               the kit's sentence and the way out. */
+            <ListEmpty
+              filtered={filters.values.client !== ""}
+              onClear={filters.clear}
+              nothingYet={t("subscriptions.renewals.emptyWindow", { count: withinDays })}
+              icon="clock"
+            />
+          ) : (
+          <Table label={t("subscriptions.renewals.title")}>
             <thead>
               <tr>
                 <Th>{t("subscriptions.renewals.colService")}</Th>
@@ -116,6 +144,7 @@ export function RenewalCalendar() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
     </div>

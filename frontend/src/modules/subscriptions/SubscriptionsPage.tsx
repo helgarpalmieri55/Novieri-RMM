@@ -58,9 +58,28 @@ import {
 import { initialsOf, personIndex } from "../../lib/people";
 import { settingsHref } from "../settings/tabs";
 import { SubscriptionReadiness } from "./SubscriptionReadiness";
+import { SubscriptionPageNav } from "./subscriptionsNav";
 import { billingCycleLabel, statusKind } from "./subscriptionState";
 import type { BillingCycle, SubscriptionOut } from "./types";
-import { FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNarrowedApi,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Person } from "../../shell/viz";
 
@@ -167,8 +186,12 @@ export function SubscriptionsPage() {
   // The filter matches on worded labels, so it is rebuilt when the language changes.
   const { language } = useLanguage();
   const api = useApi();
-  const [creating, setCreating] = useState(false);
-  const [search, setSearch] = useState("");
+  // ON THE LIST KIT (redesign plan, Receta L; Task 10, 5.4): the search, the
+  // billing-cycle chip and the Client chip live in the URL, so a filtered view
+  // is a link and the client 360's "/subscriptions?client=<id>" opens this
+  // client's subscriptions. `?new=subscription` opens New subscription (D8).
+  const filters = useUrlFilters(["q", "cycle", "client"] as const);
+  const newSubscription = useNewParam("subscription");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -180,9 +203,19 @@ export function SubscriptionsPage() {
   const clientName = useClientName();
   const showClient = selected === null;
 
-  const subscriptions = useSubscriptions();
-  const renewals = useSubscriptionRenewals(RENEWAL_WINDOW_DAYS);
-  const spend = useSpend();
+  // THE CHIP NARROWS EVERY PER-CLIENT READ ON THE PAGE (decision D6): the
+  // registry and the two reports its tiles count, so no tile counts another
+  // client's subscriptions above this client's rows. The directory of people
+  // stays the console's read: it names owners, it is nobody's subscription.
+  const chip = filters.values.client;
+  // The client the chip narrowed to (`null` without one): a tile that counts
+  // that client's rows opens its page with the same `client=`, so it opens
+  // exactly the rows it counted (coordinator's ruling on the wave reviews).
+  const { client: narrowedTo } = useNarrowedApi(chip);
+  const withClient = (path: string) => (narrowedTo === null ? path : `${path}?client=${narrowedTo}`);
+  const subscriptions = useSubscriptions(chip);
+  const renewals = useSubscriptionRenewals(RENEWAL_WINDOW_DAYS, chip);
+  const spend = useSpend(chip);
   // Read only to put a name and a face on `owner_user_id`. `users.read` is
   // not implied by `subscriptions.read`, so this may 403 -- `ownerName` falls
   // back to the id rather than to a blank.
@@ -192,10 +225,27 @@ export function SubscriptionsPage() {
   const ownerOptions = ownerPickerOptions(users.data?.users ?? []);
 
   const items = subscriptions.data ?? [];
+  const cycle = filters.values.cycle;
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return items.filter((sub) => matchesSearch(sub, needle));
-  }, [items, search, language]);
+    const needle = filters.values.q.trim().toLowerCase();
+    return items.filter((sub) => (cycle === "" || sub.billing_cycle === cycle) && matchesSearch(sub, needle));
+  }, [items, filters.values.q, cycle, language]);
+  // THE CYCLE CHIP'S COUNTS ARE THE REGISTRY'S OWN: `GET /subscriptions`
+  // answers every subscription (no page), so a count over it is a total
+  // (Receta L, point 4). A registry billed on one cycle gets no chip row.
+  const cycleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const sub of items) counts.set(sub.billing_cycle, (counts.get(sub.billing_cycle) ?? 0) + 1);
+    return counts;
+  }, [items]);
+  const cycleOptions = [
+    { value: "", label: t("subscriptions.list.allCycles") },
+    ...BILLING_CYCLES.filter((key) => cycleCounts.has(key) || key === cycle).map((key) => ({
+      value: key,
+      label: billingCycleLabel(key),
+      count: cycleCounts.get(key) ?? 0,
+    })),
+  ];
 
   const activeCount = items.filter((sub) => sub.status === "active").length;
   const noticeDueCount = (renewals.data ?? []).filter((row) => row.action_required).length;
@@ -236,42 +286,21 @@ export function SubscriptionsPage() {
   // saying it twice is how a page teaches people to skip its alerts.
   const statsError = renewals.error ?? spend.error;
 
+  const primary = canManage ? (
+    <Btn label={t("subscriptions.list.newSubscription")} icon="plus" variant="primary" onClick={newSubscription.start} />
+  ) : undefined;
+
   return (
     <div>
+      {/* The two report pages are the section nav's now (subscriptionsNav.tsx):
+          the head keeps its one primary action (Receta L, point 1). */}
       <PageHead
         title={t("subscriptions.list.title")}
         description={t("subscriptions.list.description")}
-        actions={
-          <>
-            {/* This module contributes one top-level nav entry (App.tsx), so
-                these are the only way into its two report pages. ONE element
-                each, a link drawn as v3's secondary button, not a `<button>`
-                inside an `<a>`: two overlapping controls for one target broke
-                middle-click and "copy link address". The `subscriptions.read`
-                condition is the same one App.tsx's nav entry uses and is
-                presentational only: api.py's require_permission gates both
-                routes server-side. */}
-            {canRead && (
-              <Link className="btn" to="/subscriptions/spend">
-                <Icon name="chart-bar" size={14} />
-                <span>{t("subscriptions.list.spend")}</span>
-              </Link>
-            )}
-            {canRead && (
-              <Link className="btn" to="/subscriptions/renewals">
-                <Icon name="calendar-event" size={14} />
-                <span>{t("subscriptions.list.renewals")}</span>
-              </Link>
-            )}
-            {canManage && (
-              <Button onClick={() => setCreating(true)}>
-                <Icon name="plus" size={14} />
-                {t("subscriptions.list.newSubscription")}
-              </Button>
-            )}
-          </>
-        }
+        actions={primary}
       />
+
+      <SubscriptionPageNav canRead={canRead} />
 
       <SubscriptionReadiness />
 
@@ -291,7 +320,12 @@ export function SubscriptionsPage() {
 
           Weight goes to the notice deadlines alone: a renewal 90 days out is
           a thing to plan, a notice period closing is a thing to act on this
-          week or pay for another year. */}
+          week or pay for another year.
+
+          FIVE AT MOST, NOT THE BRIEF'S "SEIS": the design's "Savings
+          identified" has no definition behind it (module docstring), and a
+          tile with no list behind it is the dead tile the console stopped
+          shipping. */}
       <StatsGrid columns={monthlyRunRate ? 5 : 4}>
         {/* v3's order: the run rate leads the row when there is one to show
             (single currency), then the counts. */}
@@ -300,7 +334,7 @@ export function SubscriptionsPage() {
             label={t("subscriptions.list.tileRunRate")}
             value={`${monthlyRunRate.monthly_total} ${monthlyRunRate.currency}`}
             icon="budget"
-            to="/subscriptions/spend"
+            to={withClient("/subscriptions/spend")}
             tone="primary"
             /* The server's own annual figure for the same row -- not this
                one multiplied by twelve, which would be the browser doing
@@ -312,9 +346,10 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileActive")}
           value={subscriptions.error ? t("subscriptions.common.na") : String(activeCount)}
           icon="subscription"
-          to="/subscriptions"
+          to={withClient("/subscriptions")}
           tone="blue"
           zeroLabel={t("subscriptions.list.tileActiveZero")}
+          pending={subscriptions.isPending && !subscriptions.error}
           foot={
             !subscriptions.error && activeCount > 0 && items.length > activeCount
               ? t("subscriptions.list.ofRecorded", { count: items.length })
@@ -325,9 +360,10 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
           value={renewals.error ? t("subscriptions.common.na") : String(renewalRows.length)}
           icon="clock"
-          to="/subscriptions/renewals"
+          to={withClient("/subscriptions/renewals")}
           tone="gold"
           zeroLabel={t("subscriptions.list.tileRenewalsZero")}
+          pending={renewals.isPending && !renewals.error}
           foot={
             !renewals.error && nextRenewal?.renews_at
               ? t("subscriptions.list.nextRenewal", {
@@ -341,10 +377,11 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileNotice")}
           value={renewals.error ? t("subscriptions.common.na") : String(noticeDueCount)}
           icon="warning"
-          to="/subscriptions/renewals"
+          to={withClient("/subscriptions/renewals")}
           tone="orange"
           urgent={!renewals.error && noticeDueCount > 0}
           zeroLabel={t("subscriptions.list.tileNoticeZero")}
+          pending={renewals.isPending && !renewals.error}
           foot={
             !renewals.error && noticeDueCount > 0
               ? nameList(noticeDue.map((row) => row.service_name))
@@ -355,10 +392,11 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileNoOwner")}
           value={subscriptions.error ? t("subscriptions.common.na") : String(noOwnerCount)}
           icon="user"
-          to="/subscriptions"
+          to={withClient("/subscriptions")}
           tone="gold"
           urgent={!subscriptions.error && noOwnerCount > 0}
           zeroLabel={t("subscriptions.list.tileNoOwnerZero")}
+          pending={subscriptions.isPending && !subscriptions.error}
           foot={
             !subscriptions.error && noOwnerCount > 0
               ? nameList(noOwner.map((sub) => sub.service_name))
@@ -374,25 +412,42 @@ export function SubscriptionsPage() {
       ) : null}
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("subscriptions.list.searchPlaceholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("subscriptions.list.searchAria")}
-          />
-          <span className="filter-spacer" />
-          <span className="note">{t("subscriptions.list.range", { shown: filtered.length, total: items.length })}</span>
-        </FilterBar>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("subscriptions.list.searchPlaceholder")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+              aria-label={t("subscriptions.list.searchAria")}
+            />
+          }
+          chips={
+            <>
+              {cycleCounts.size > 1 || cycle !== "" ? (
+                <FilterChips
+                  label={t("subscriptions.list.cycleLabel")}
+                  options={cycleOptions}
+                  value={cycle}
+                  onChange={(value) => filters.set("cycle", value)}
+                />
+              ) : null}
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={<ShowingCount shown={filtered.length} total={subscriptions.data ? items.length : null} />}
+        />
 
-        <QueryState
-          loading={subscriptions.isLoading}
-          error={subscriptions.error}
-          empty={filtered.length === 0}
-          emptyLabel={items.length === 0 ? t("subscriptions.list.emptyNone") : t("subscriptions.list.emptyFiltered")}
-          emptyIcon="subscription"
-        >
-          <Table>
+        <QueryState loading={subscriptions.isPending} error={subscriptions.error} empty={false} emptyLabel="">
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("subscriptions.list.emptyNone")}
+              action={primary}
+              icon="subscription"
+            />
+          ) : (
+          <Table label={t("subscriptions.list.title")}>
             <thead>
               <tr>
                 <Th>{t("subscriptions.list.colService")}</Th>
@@ -457,10 +512,12 @@ export function SubscriptionsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <NewSubscriptionDialog open={creating} onClose={() => setCreating(false)} />
+      {/* Mounted only while open: each opening starts from an empty form. */}
+      {canManage && newSubscription.open ? <NewSubscriptionDialog open onClose={newSubscription.close} /> : null}
     </div>
   );
 }
@@ -503,6 +560,25 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
   // the rules and the values they were checked against, worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews; formKit's "A FORM IN THE DIALOG"): `?new=subscription`
+  // holds the form, so Back, Cancel or Escape with a change asks first. The
+  // dialog is mounted only while open, so every opening starts from the
+  // defaults below.
+  const dirty =
+    serviceName !== "" ||
+    billingCycle !== "monthly" ||
+    costPerCycle !== "0.00" ||
+    currency !== "USD" ||
+    seats !== "0" ||
+    renewsAt !== "" ||
+    vendorId !== "" ||
+    ownerUserId !== "" ||
+    noticeDaysValue !== "0" ||
+    autoRenew ||
+    clientField.picked !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
+
   function reset() {
     setServiceName("");
     setBillingCycle("monthly");
@@ -518,9 +594,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
     setAttempt(null);
   }
 
-  // SubscriptionsPage keeps this dialog mounted and toggles `open`, so a
-  // failure from one attempt would otherwise still be on screen when the
-  // form is next opened, describing a request the operator never made.
+  // Clearing the mutation on close keeps a failure from one attempt off the next.
   function close() {
     create.reset();
     setAttempt(null);
@@ -572,6 +646,8 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
       }),
       {
         onSuccess: () => {
+          // Saved: closing leaves without asking (useUnsavedGuard's release).
+          release();
           reset();
           close();
         },
@@ -580,6 +656,8 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={close} title={t("subscriptions.new.title")}>
       <Form onSubmit={submit}>
         {/* The contract terms, paired. `full` on the service name because it
@@ -760,5 +838,6 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }
