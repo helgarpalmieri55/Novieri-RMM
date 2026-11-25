@@ -14,7 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { describeSubmitError } from "../../components/form";
-import { setActiveLanguage } from "../../i18n/core";
+import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../lib/api";
@@ -912,6 +912,9 @@ describe("the SLA label tables and sentences", () => {
     setActiveLanguage("es");
     expect(describeSubmitError(error)).toBe("Ese servicio no está disponible en este momento. No se cambió nada: inténtalo de nuevo en breve.");
     setActiveLanguage("en");
-    expect(describeSubmitError(error)).toBe("That service is unavailable right now. Nothing was changed — try again shortly.");
+    // The shared catalogue's English 503 sentence, whatever its punctuation
+    // (validation.ts is territory D's; the adoption pass rewrites its dash).
+    expect(describeSubmitError(error)).toBe(translate("validation.serviceUnavailable"));
+    expect(describeSubmitError(error)).toMatch(/^That service is unavailable right now\. Nothing was changed/);
   });
 });
