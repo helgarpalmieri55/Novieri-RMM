@@ -73,7 +73,7 @@
  * | The "Patch policy" body v3 draws under Settings | It is the patch module's own policy editor (`/patch/policies`), which owns the maintenance-window painter. One server-side policy must not have two editors |
  */
 
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import type { MessageKey } from "../../i18n/core";
 
 import { useT } from "../../i18n/context";
@@ -131,11 +131,12 @@ function sectionState(enabled: boolean, data: { configured: boolean } | undefine
 }
 
 /**
- * THE STATE IS WORDS IN THE TAB, NEVER A DOT. "Set up" / "Not set up" follows
- * the tab's own name in its label ("Email · Not set up"), so it is real text
- * inside the tab and part of its accessible name: colour is never the only
- * carrier (SC 1.4.1), and the kit's `TabItem` carries a label and a count, no
- * third slot (a `note` is asked of the kit in the wave's report).
+ * THE STATE IS WORDS IN THE TAB, NEVER A DOT. "Set up" / "Not set up" is the
+ * tab's note (the kit's `TabItem.note`, P3 adoption pass), drawn after its
+ * name in `.tab-note`, so it is real text inside the tab and part of its
+ * accessible name ("Email Not set up"): colour is never the only carrier
+ * (SC 1.4.1). It was folded into the label ("Email · Not set up") until the
+ * kit's tab had the slot.
  */
 const STATE_LABEL: Record<SectionState, MessageKey> = {
   set: "settings.page.stateSet",
@@ -231,29 +232,16 @@ export function SettingsPage() {
   // so the active key is validated against what is actually offered. The URL
   // is left alone meanwhile: `?tab=users` opens Users once `/me` has answered.
   const current: TabKey = tabs.some((tab) => tab.key === active) ? active : DEFAULT_SETTINGS_TAB;
-  const items: { key: TabKey; label: string }[] = tabs.map((tab) => ({
-    key: tab.key as TabKey,
-    label: tab.state ? `${tab.label} · ${t(STATE_LABEL[tab.state])}` : tab.label,
+  // THE SELECTED TAB STAYS IN VIEW WHEN A NOTE ARRIVES. Three tabs gain one
+  // when their section's own query answers, which widens them; on a phone
+  // `?tab=sessions` opened with Sessions in view and then lost it to Email's
+  // note. The kit's `Tabs` re-scrolls when the text that can move the selected
+  // tab changes (batch 3, B3-3), so the page repeats nothing itself.
+  const items: TabItem[] = tabs.map((tab) => ({
+    key: tab.key,
+    label: tab.label,
+    ...(tab.state ? { note: t(STATE_LABEL[tab.state]) } : {}),
   }));
-  // THE SELECTED TAB STAYS IN VIEW WHEN A LABEL GROWS. Three labels lengthen
-  // when their section's own query answers ("Email · Set up"), and the kit's
-  // `Tabs` brings the selected tab into view only when the selection changes:
-  // on a phone `?tab=sessions` opened with Sessions in view and then lost it
-  // to the longer Email label. This repeats the kit's own sideways scroll when
-  // the labels change (a kit request in the wave's report asks `Tabs` to do it
-  // itself, and this effect then goes).
-  const stripHolder = useRef<HTMLDivElement>(null);
-  const labels = items.map((item) => item.label).join("|");
-  useLayoutEffect(() => {
-    const list = stripHolder.current?.querySelector<HTMLElement>('[role="tablist"]');
-    const tab = list?.querySelector<HTMLElement>(`[data-tab="${current}"]`);
-    if (!list || !tab) return;
-    const box = list.getBoundingClientRect();
-    const own = tab.getBoundingClientRect();
-    const margin = 16;
-    if (own.left < box.left) list.scrollLeft -= box.left - own.left + margin;
-    else if (own.right > box.right) list.scrollLeft += own.right - box.right + margin;
-  }, [labels, current]);
 
   return (
     <>
@@ -274,7 +262,7 @@ export function SettingsPage() {
         }
       />
 
-      <div ref={stripHolder}>
+      <div>
         <UrlTabs
           label={t("settings.page.sections")}
           items={items}
