@@ -78,9 +78,7 @@ export const provisioning = {
     targetRef: "Target ref (MAC / asset tag)",
     start: "Start",
     noProfilesYet: "No provisioning profiles exist yet. Create one on the Profiles tab first.",
-    confirmTitle: "Start provisioning run",
     confirmSubjectFallback: "this profile",
-    confirmLabel: "Start build",
     // The confirmation body is three sentences joined by a space.
     bodyLead: "{profile} will be laid down on {target}.",
     bodyProfileFallback: "This profile",

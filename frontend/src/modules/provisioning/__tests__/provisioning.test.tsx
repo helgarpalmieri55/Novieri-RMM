@@ -439,9 +439,23 @@ describe("the Build a computer modal", () => {
     return user;
   }
 
+  /**
+   * The cycle-8 confirmation. It names the act as the button and the form do
+   * (fix round 2: one name for one act), so it is the second dialog of that
+   * name, drawn over the form's.
+   */
+  async function confirmation(): Promise<HTMLElement> {
+    let dialogs: HTMLElement[] = [];
+    await waitFor(() => {
+      dialogs = screen.getAllByRole("dialog", { name: "Build a computer" });
+      expect(dialogs).toHaveLength(2);
+    });
+    return dialogs[1] as HTMLElement;
+  }
+
   /** Get past the cycle-8 confirmation, which every start now goes through. */
   async function confirmStart(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(await screen.findByRole("button", { name: "Start build" }));
+    await user.click(within(await confirmation()).getByRole("button", { name: "Build a computer" }));
   }
 
   it("names the unpicked Profile on submit rather than leaving Start disabled", async () => {
@@ -526,8 +540,9 @@ describe("the Build a computer modal", () => {
     await pickEntity(user, "Profile", /standard-workstation/);
     await user.click(screen.getByRole("button", { name: "Start" }));
 
-    const confirm = await screen.findByRole("dialog", { name: "Start provisioning run" });
+    const confirm = await confirmation();
     expect(within(confirm).getByText("standard-workstation")).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Build a computer" })).toBeInTheDocument();
     expect(within(confirm).getByText(/replaces the endpoint's disk contents/)).toBeInTheDocument();
     expect(api.startProvisionRun).not.toHaveBeenCalled();
 

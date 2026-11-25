@@ -9,7 +9,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry, type FixtureMap } from "../../fixtures/client";
+import { CUSTOMER_ID } from "../../fixtures/core";
 import type { ApiClient, Me } from "../../lib/api";
+import { setSelectedClient } from "../../lib/clientChoice";
 import { renderPage } from "../../test/renderPage";
 import { EnrollmentPage } from "./EnrollmentPage";
 
@@ -107,5 +109,63 @@ describe("enrollment on the kit (4.11)", () => {
     await waitFor(() => expect(router.state.location.search).toBe("?tab=certificates"));
     await act(() => router.navigate("/enrollment?new=token"));
     expect(await screen.findByLabelText("Token name")).toHaveValue("");
+  }, 15_000);
+
+  // FIX ROUND 2 (re-review 1, minor 1): the site and the Client field are the
+  // form too. A site picked and abandoned came back on the next opening, and
+  // a changed site alone was not asked about.
+  it("asks before another tab drops a site picked on its own, and opens with no site again (general rulings 3 and 4)", async () => {
+    // A client chosen at the top: the form asks no Client, so the site is the one thing changed.
+    setSelectedClient(CUSTOMER_ID);
+    const { router } = renderPage("/enrollment?new=token", <EnrollmentPage />, "/enrollment");
+    await screen.findByRole("option", { name: "Lisbon" });
+    await userEvent.selectOptions(screen.getByLabelText("Site"), "site-lisbon");
+    await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=token");
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?tab=certificates"));
+    await act(() => router.navigate("/enrollment?new=token"));
+    await screen.findByRole("option", { name: "Lisbon" });
+    expect(screen.getByLabelText("Site")).toHaveValue("");
+  }, 15_000);
+
+  it("asks before another tab drops a client picked in the form, and opens with no client again (general rulings 3 and 4)", async () => {
+    // Every client chosen at the top: the form asks which one.
+    const { router } = renderPage("/enrollment?new=token", <EnrollmentPage />, "/enrollment");
+    await screen.findByRole("option", { name: "Andes Logistics" });
+    await userEvent.selectOptions(screen.getByLabelText("Client"), CUSTOMER_ID);
+    await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?tab=certificates"));
+    await act(() => router.navigate("/enrollment?new=token"));
+    await screen.findByRole("option", { name: "Andes Logistics" });
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(screen.getByLabelText("Site")).toHaveValue("");
+  }, 15_000);
+
+  // FIX ROUND 2 (re-review 1, minor 2): an issue started on the Tokens tab
+  // closes its form by going Back, as every `?new=` dialog does, so the list
+  // is not left twice in history. From another tab it stays the one write in
+  // place that I1 needs (EnrollmentPage.test.tsx).
+  it("leaves the page on Back after an issue started on the Tokens tab", async () => {
+    setSelectedClient(CUSTOMER_ID);
+    const { router } = renderPage("/devices", <EnrollmentPage />, "/enrollment");
+    await act(() => router.navigate("/enrollment"));
+    await userEvent.click(await screen.findByRole("button", { name: "Create token" }));
+    expect(router.state.location.search).toBe("?new=token");
+    await userEvent.type(await screen.findByLabelText("Token name"), "Lisbon rollout");
+    await screen.findByRole("option", { name: "Lisbon" });
+    await userEvent.selectOptions(screen.getByLabelText("Site"), "site-lisbon");
+    await userEvent.click(screen.getByRole("button", { name: "Issue token…" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    expect(await screen.findByText("ENR-fixture-7Qm2xVb9Lk4pR8sT1wYz3nHc6dJf0gA5")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The person's Back comes once the closed form is drawn.
+    await waitFor(() => expect(screen.queryByLabelText("Token name")).toBeNull());
+    expect(screen.getByText("ENR-fixture-7Qm2xVb9Lk4pR8sT1wYz3nHc6dJf0gA5")).toBeInTheDocument();
+    await act(() => router.navigate(-1));
+    expect(router.state.location.pathname).toBe("/devices");
   }, 15_000);
 });

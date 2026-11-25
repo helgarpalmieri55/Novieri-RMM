@@ -145,7 +145,7 @@ export function CoveragePage() {
           // No count before the report has answered: "Showing 0 of 0" would be an invented zero.
           end={coverage.data ? <ShowingCount shown={rows.length} total={everyDevice} /> : null}
         />
-{/* `isPending`, not `isLoading` (general ruling 10): while the Client
+        {/* `isPending`, not `isLoading` (general ruling 10): while the Client
             chip's client is not decided the read is disabled, and a disabled
             query is not "loading" -- the empty state would show before any read. */}
         <QueryState loading={coverage.isPending} error={coverage.error} empty={false} emptyLabel="">

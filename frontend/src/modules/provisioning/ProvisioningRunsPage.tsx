@@ -499,12 +499,14 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
           unrecoverable but narrow — one endpoint — and asking for a typed name
           on every build is the kind of friction people learn to copy without
           reading, which is worse than the confirmation it replaced. */}
+      {/* ONE NAME FOR ONE ACT (fix round 2): the confirmation says what the
+          button that opened the form and the form itself say. */}
       <ConfirmDialog
         open={confirming}
-        title={t("provisioning.provisionDialog.confirmTitle")}
+        title={t("provisioning.runs.buildComputer")}
         subject={chosen?.label ?? t("provisioning.provisionDialog.confirmSubjectFallback")}
         body={confirmBody}
-        confirmLabel={t("provisioning.provisionDialog.confirmLabel")}
+        confirmLabel={t("provisioning.runs.buildComputer")}
         destructive
         onCancel={() => setConfirming(false)}
         onConfirm={() => {

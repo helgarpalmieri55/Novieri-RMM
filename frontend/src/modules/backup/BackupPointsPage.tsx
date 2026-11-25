@@ -336,7 +336,7 @@ export function BackupPointsPage() {
           // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
           end={points.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
         />
-{/* `isPending`, not `isLoading` (general ruling 10): while the Client
+        {/* `isPending`, not `isLoading` (general ruling 10): while the Client
             chip's client is not decided the read is disabled, and a disabled
             query is not "loading" -- the empty state would show before any read. */}
         <QueryState loading={points.isPending} error={points.error} empty={false} emptyLabel="">

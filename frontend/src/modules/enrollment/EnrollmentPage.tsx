@@ -127,6 +127,7 @@ import { ClientField } from "../../components/ClientField";
 import { SiteField } from "../../components/SiteField";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { useClientSites } from "../../lib/clientSites";
 import { useSitesOf } from "../devices/siteNames";
 import { useClientName } from "../settings/api";
 import { formatDate, formatDateTime } from "../../lib/datetime";
@@ -450,18 +451,6 @@ export function EnrollmentPage() {
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [confirmingDismiss, setConfirmingDismiss] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
-  // ONE GUARD FOR THE ISSUE FORM IN `?new=token` (general ruling 3): Cancel,
-  // Back, another tab or a link with a change in it asks first.
-  const formDirty = form.name !== BLANK_FORM.name || form.hours !== BLANK_FORM.hours || form.maxUses !== BLANK_FORM.maxUses;
-  const { guard: formGuard, release: releaseForm } = useUnsavedGuard(formOpen && formDirty, { search: ["new"] });
-  // AND IT OPENS EMPTY EVERY TIME (general ruling 4), however it was opened:
-  // what was typed into a form that closed without issuing is gone.
-  useEffect(() => {
-    if (!formOpen) {
-      setForm(BLANK_FORM);
-      setAttempt(null);
-    }
-  }, [formOpen]);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   /** The validated request, waiting on the confirmation. Nothing is sent while
    *  this is set — it is the state of "asked, not yet answered". */
@@ -480,6 +469,35 @@ export function EnrollmentPage() {
     if (journeySite !== null && siteId === "") setSiteId(journeySite);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
   }, [journeySite]);
+
+  // ONE GUARD FOR THE ISSUE FORM IN `?new=token` (general ruling 3): Cancel,
+  // Back, another tab or a link with a change in it asks first. The client
+  // and the site picked are the form too (fix round 2), but the site it opens
+  // with is no change: the journey's, or the client's only live site, which
+  // the Site field picks by itself (the same cached read as the field's).
+  const formSites = useClientSites(formOpen ? tokenClient : null);
+  const liveSites = (formSites.data ?? []).filter((site) => site.archived_at === null);
+  const openingSite = journeySite ?? (liveSites.length === 1 ? (liveSites[0]?.id ?? "") : "");
+  const formDirty =
+    form.name !== BLANK_FORM.name ||
+    form.hours !== BLANK_FORM.hours ||
+    form.maxUses !== BLANK_FORM.maxUses ||
+    client.picked !== "" ||
+    (siteId !== "" && siteId !== openingSite);
+  const { guard: formGuard, release: releaseForm } = useUnsavedGuard(formOpen && formDirty, { search: ["new"] });
+  // AND IT OPENS EMPTY EVERY TIME (general ruling 4), however it was opened:
+  // what was typed or picked in a form that closed without issuing is gone.
+  // The site goes back to the journey's where there is one (design §4.4);
+  // un-picking the client clears the site through `onPick` first.
+  const { setPicked } = client;
+  useEffect(() => {
+    if (!formOpen) {
+      setForm(BLANK_FORM);
+      setAttempt(null);
+      setPicked("");
+      setSiteId(journeySite ?? "");
+    }
+  }, [formOpen, setPicked, journeySite]);
 
   // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
   const create = useSecretMutation({
@@ -500,10 +518,14 @@ export function EnrollmentPage() {
       // drawn (fix round 1, I1). The form forces that tab while it is open,
       // but closing it went Back to whatever `?tab=` the issue started from,
       // so a token issued from Certificates was shown on a tab nobody was
-      // looking at. One write, in place: `new` goes and the tab is Tokens. The
-      // token itself stays in component state, never in the URL.
+      // looking at. From another tab, then, one write in place: `new` goes
+      // and the tab is Tokens. Started on Tokens, the form closes as every
+      // `?new=` dialog does, Back where it can (fix round 2), so the list is
+      // not left twice in history. The token itself stays in component
+      // state, never in the URL.
       releaseForm();
-      showIssuedOnTokens();
+      if (urlTab === "tokens") creating.close();
+      else showIssuedOnTokens();
       void queryClient.invalidateQueries({ queryKey: [ENROLLMENT_TOKENS_KEY] });
     },
   });

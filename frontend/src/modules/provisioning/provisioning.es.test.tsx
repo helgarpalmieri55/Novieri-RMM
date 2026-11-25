@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -270,6 +270,20 @@ describe("the provisioning runs page, in Spanish", () => {
 });
 
 describe("the Build a computer dialog, in Spanish", () => {
+  /**
+   * The build's confirmation. It names the act as the button and the form do
+   * (fix round 2: one name for one act), so it is the second dialog of that
+   * name, drawn over the form's.
+   */
+  async function confirmation(name: string): Promise<HTMLElement> {
+    let dialogs: HTMLElement[] = [];
+    await waitFor(() => {
+      dialogs = screen.getAllByRole("dialog", { name });
+      expect(dialogs).toHaveLength(2);
+    });
+    return dialogs[1] as HTMLElement;
+  }
+
   async function open(user: ReturnType<typeof userEvent.setup>) {
     renderPage(<ProvisioningRunsPage />);
     await screen.findByText("run1");
@@ -297,17 +311,17 @@ describe("the Build a computer dialog, in Spanish", () => {
     await user.click(await screen.findByRole("option", { name: /estación-estándar/ }));
     await user.type(within(dialog).getByRole("textbox", { name: /Referencia del destino/ }), "AA:BB:CC:00:11:22");
     await user.click(within(dialog).getByRole("button", { name: "Iniciar" }));
-    const confirm = await screen.findByRole("dialog", { name: "Iniciar una ejecución de aprovisionamiento" });
+    const confirm = await confirmation("Construir un equipo");
     expect(confirm).toHaveTextContent("estación-estándar");
     expect(confirm).toHaveTextContent("Windows 11 Estándar · habilitado se instalará en el equipo en AA:BB:CC:00:11:22.");
     expect(confirm).toHaveTextContent(
       "El aprovisionamiento sustituye el contenido del disco del equipo; todo lo que no tenga copia de seguridad se pierde.",
     );
     expect(confirm).toHaveTextContent("Una ejecución iniciada no se puede cancelar desde la consola.");
-    expect(within(confirm).getByRole("button", { name: "Iniciar la construcción" })).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
     expectNoEnglish(confirm);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("dialog", { name: "Start provisioning run" })).toHaveTextContent(
+    expect(await confirmation("Build a computer")).toHaveTextContent(
       "Windows 11 Estándar · enabled will be laid down on the machine at AA:BB:CC:00:11:22.",
     );
   });
@@ -318,7 +332,7 @@ describe("the Build a computer dialog, in Spanish", () => {
     await user.click(within(dialog).getByRole("combobox", { name: "Perfil" }));
     await user.click(await screen.findByRole("option", { name: /estación-estándar/ }));
     await user.click(within(dialog).getByRole("button", { name: "Iniciar" }));
-    const confirm = await screen.findByRole("dialog", { name: "Iniciar una ejecución de aprovisionamiento" });
+    const confirm = await confirmation("Construir un equipo");
     expect(confirm).toHaveTextContent("se instalará en el equipo que reclame esta construcción.");
     expectNoEnglish(confirm);
   });
