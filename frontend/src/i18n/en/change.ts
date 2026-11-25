@@ -85,7 +85,7 @@ export const change = {
     provisionRun: "Provisioning run",
     searchDeployments: "Search deployments…",
     searchRuns: "Search provisioning runs…",
-    invalidActionId: "Action ID must be a UUID like {example} — \"{value}\" is not one",
+    invalidActionId: "Action ID must be a UUID like {example}; \"{value}\" is not one",
     patchRunNote:
       "Patch runs are listed on each computer's Patching tab, but this form cannot pick one yet, so paste its id here.",
     patchApprovalNote:
@@ -139,7 +139,7 @@ export const change = {
     cancel: "Cancel",
     save: "Save",
     windowOrder:
-      "Window end must be after Window start ({start}) — a maintenance window cannot end before it opens",
+      "Window end must be after Window start ({start}): a maintenance window cannot end before it opens",
   },
   gates: {
     title: "Require an approved change",
@@ -224,7 +224,7 @@ export const change = {
     rejectRetroConfirm: "Reject retrospectively",
     beginTitle: "Begin implementing this change",
     beginBody:
-      "This records that work on the environment has started. The change can then only be completed — it cannot be cancelled or sent back for approval.",
+      "This records that work on the environment has started. The change can then only be completed: it cannot be cancelled or sent back for approval.",
     beginConfirm: "Begin implementation",
     completeTitle: "Complete this change",
     completeBody:
@@ -232,12 +232,12 @@ export const change = {
     completeConfirm: "Mark complete",
     cancelTitle: "Cancel this change",
     cancelBody:
-      "The change is closed without being carried out. A cancelled change cannot be reopened — a new request has to be raised instead.",
+      "The change is closed without being carried out. A cancelled change cannot be reopened: a new request has to be raised instead.",
     cancelConfirm: "Cancel change",
     noneCompleted:
       "This change is completed. Completed changes are closed for good and cannot be reopened.",
     noneCancelled:
-      "This change was cancelled. Cancelled changes cannot be reopened — raise a new change request instead.",
+      "This change was cancelled. Cancelled changes cannot be reopened: raise a new change request instead.",
     noneOther: "No transition is available from \"{state}\".",
     permissionApprove: "change.approve",
     permissionRequest: "change.request",

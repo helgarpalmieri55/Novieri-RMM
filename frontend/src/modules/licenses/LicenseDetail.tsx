@@ -163,14 +163,18 @@ function LicenseRecord() {
               value={String(license.data.entitlements)}
               icon="license"
             />
+            {/* No allocations read (pending or failed): the kit's `Tile pending`
+                draws the absent mark, no line under it, and says it is busy. */}
             <Tile
               label={t("licenses.detail.tileInUse")}
-              value={seatsNoData ? t("shell.viz.na") : String(inUse)}
+              value={inUse === null ? "" : String(inUse)}
+              pending={seatsNoData}
               icon="users"
             />
             <Tile
               label={t("licenses.detail.tileFree")}
-              value={seatsNoData || free === null ? t("shell.viz.na") : String(Math.max(0, free))}
+              value={free === null ? "" : String(Math.max(0, free))}
+              pending={seatsNoData || free === null}
               icon="circle-check"
               kind={free !== null && free < 0 ? "crit" : undefined}
               sub={free !== null && free < 0 ? t("licenses.detail.tileOver", { count: -free }) : undefined}

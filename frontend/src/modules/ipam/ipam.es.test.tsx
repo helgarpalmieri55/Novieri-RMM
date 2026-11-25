@@ -16,7 +16,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setActiveLanguage } from "../../i18n/core";
+import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError, type MeClient } from "../../lib/api";
 import { AddressDialog } from "./AddressDialog";
@@ -620,7 +620,7 @@ describe("a subnet's detail in Spanish", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Barridos" }));
     expect(await screen.findByText("No autorizada")).toBeInTheDocument();
-    expect(screen.getByText(/NO AUTORIZADA\. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo/)).toBeInTheDocument();
+    expect(screen.getByText(/No autorizada\. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Autorizar escaneo" })).toBeInTheDocument();
     expect(screen.getByText("No")).toBeInTheDocument();
     expectNoEnglish(body(), RUN_WORDS);
@@ -631,18 +631,18 @@ describe("a subnet's detail in Spanish", () => {
     renderDetail("subnet-1");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Barridos" }));
-    await screen.findByText(/NO AUTORIZADA\./);
+    await screen.findByText(/^No autorizada\. /);
     const interval = await screen.findByLabelText("Intervalo (horas)");
     await user.clear(interval);
     await user.type(interval, "0");
     await screen.findByText(/El intervalo mínimo es de 1 hora\./);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText(/^NOT AUTHORIZED\. No active scan authorization in this VRF covers this prefix/)).toBeInTheDocument();
+    expect(screen.getByText(/^Not authorized\. No active scan authorization in this VRF covers this prefix/)).toBeInTheDocument();
     expect(screen.getByText(/^The interval floor is 1 hour\./)).toBeInTheDocument();
     expect(screen.getByText("Not authorized")).toBeInTheDocument();
     expect(screen.getByText("Succeeded, 2 hours ago. 121 of 234 answered.")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
-    expect(screen.getByText(/^NO AUTORIZADA\./)).toBeInTheDocument();
+    expect(screen.getByText(/^No autorizada\. /)).toBeInTheDocument();
     expect(screen.getByText(/^Correcto, hace 2 horas\. 121 de 234 respondieron\./)).toBeInTheDocument();
   });
 
@@ -1031,16 +1031,16 @@ describe("the drift page in Spanish", () => {
   it("explains a class and its remedy when its chip is chosen", async () => {
     stub();
     renderPage(<DriftPage />, "/ipam/drift?class=conflict");
-    expect(await screen.findByText(/Dos cosas usan UNA misma dirección/)).toBeInTheDocument();
+    expect(await screen.findByText(/Dos cosas usan una misma dirección/)).toBeInTheDocument();
     expect(screen.getByText("Qué hacer:")).toBeInTheDocument();
-    expect(screen.getByText(/PRIMERO UNA SOLUCIÓN OPERATIVA/)).toBeInTheDocument();
+    expect(screen.getByText(/^Primero, una solución operativa: saca a uno de los dos de la dirección/)).toBeInTheDocument();
     expectNoEnglish(body());
   });
 
   it("lists what is dormant, apart from the drift", async () => {
     stub();
     renderPage(<DriftPage />, "/ipam/drift?class=dormant");
-    expect(await screen.findByText(/Documentada, no observada, y AHORA MISMO NO PODEMOS VERIFICARLA/)).toBeInTheDocument();
+    expect(await screen.findByText(/Documentada, no observada, y ahora mismo no podemos verificarla/)).toBeInTheDocument();
     expect(screen.getAllByText("En reposo").length).toBeGreaterThan(0);
     expectNoEnglish(body());
   });
@@ -1612,7 +1612,10 @@ describe("the import and export page in Spanish", () => {
     expect(spanish).toBeTruthy();
     expectNoEnglish(alert);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("alert").textContent).toBe("That service is unavailable right now. Nothing was changed — try again shortly.");
+    // Exactly the console's English sentence for a 503, read from its shared
+    // catalogue: the adoption pass rewrites that sentence's dash outside this
+    // module, and this test is about the switch, not the wording.
+    expect(screen.getByRole("alert").textContent).toBe(translate("validation.serviceUnavailable"));
     expect(screen.getByRole("alert").textContent).not.toBe(spanish);
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("alert").textContent).toBe(spanish);
@@ -1726,7 +1729,8 @@ describe("the state helpers' sentences in Spanish", () => {
     expect(allocationMethodPresentation({ allocation_method: "odd_one", allocation_method_source: "weird" as never }).meaning).toBe(
       "Método de asignación «odd_one» (origen no reconocido).",
     );
-    expect(allocationMethodPresentation({ allocation_method: "unknown", allocation_method_source: "unknown" })).toMatchObject({ label: "—" });
+    // Nobody has said: no word to draw (the grid draws NoValue), never a dash.
+    expect(allocationMethodPresentation({ allocation_method: "unknown", allocation_method_source: "unknown" })).toMatchObject({ label: null });
     setActiveLanguage("en");
     expect(allocationMethodPresentation({ allocation_method: "static", allocation_method_source: "documented" }).meaning).toBe(
       "Documented: an operator set this address's allocation method to \"static\".",
@@ -1768,7 +1772,7 @@ describe("the state helpers' sentences in Spanish", () => {
       two: effectiveSweepScope(subnet, [scopeRow("a", "10.0.0.0/24"), scopeRow("b", "10.0.0.0/8")], NOW),
     }));
     expect(es.none.authorized).toBe(false);
-    expect(es.none.explanation).toMatch(/^NO AUTORIZADA\. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo/);
+    expect(es.none.explanation).toMatch(/^No autorizada\. Ninguna autorización de escaneo activa en esta VRF cubre este prefijo/);
     expect(es.one.explanation).toMatch(/^Se puede barrer con 1 autorización activa\. Los destinos son 10\.0\.0\.0\/24 intersecado con 10\.0\.0\.0\/24,/);
     expect(es.two.explanation).toMatch(/^Se puede barrer con 2 autorizaciones activas\./);
     expect(en.two.explanation).toMatch(/^Sweepable under 2 active authorizations\./);

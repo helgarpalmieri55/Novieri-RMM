@@ -12,6 +12,7 @@ import { LicensePageNav } from "./licenseNav";
 import { dueKind } from "./licenseState";
 import {
   ClientFilter,
+  FilterChips,
   ListEmpty,
   ListToolbar,
   PageHead,
@@ -51,6 +52,16 @@ function byMonth(rows: readonly RenewalRow[]): { key: string; label: string; row
 import { Icon } from "../../shell/icons";
 import { useRecordTitle } from "../../shell/title";
 
+/**
+ * The look-ahead windows offered as chips, as on the subscriptions calendar.
+ * The first is the server's own default (`licenses/api.py::renewals_route`,
+ * `within_days` defaults to 30); the register's "Renewals in 90 days" tile
+ * opens this page on `?within=90`. A fixed set rather than a free field, so
+ * no value of anyone's choosing reaches the server.
+ */
+const WINDOWS = [30, 60, 90] as const;
+const DEFAULT_WINDOW = WINDOWS[0];
+
 export function RenewalCalendar() {
   const t = useT();
   // A sub-page without a rail entry names itself in the tab, as its h1 does
@@ -63,8 +74,15 @@ export function RenewalCalendar() {
   // THE CLIENT CHIP (decision D6): the register's renewal tile links here
   // with its client (`?client=`), so the calendar opens exactly the renewals
   // the tile counted, and a person with every client shown can narrow it.
-  const filters = useUrlFilters(["client"] as const);
-  const renewals = useRenewals(undefined, filters.values.client);
+  // THE WINDOW IS IN THE URL (adoption pass, O5 leftover 2): `?within=90` is
+  // the tile's 90 days, a reload keeps it, and the default writes nothing.
+  // A value that is not one of the windows falls back to the default.
+  const filters = useUrlFilters(["within", "client"] as const);
+  const asked = Number(filters.values.within);
+  const withinDays: number = (WINDOWS as readonly number[]).includes(asked) ? asked : DEFAULT_WINDOW;
+  // The default asks what this page always asked: no window, which the
+  // server reads as its own 30 days.
+  const renewals = useRenewals(withinDays === DEFAULT_WINDOW ? undefined : withinDays, filters.values.client);
   const products = useProducts();
   const clientName = useClientName();
   // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
@@ -91,13 +109,29 @@ export function RenewalCalendar() {
           long list. Nothing to show is a sentence with its cause. */}
       <Panel bare>
         <ListToolbar
-          chips={<ClientFilter filters={filters} />}
+          chips={
+            <>
+              {/* One of three windows, so no count: a count per window would be three more requests. */}
+              <FilterChips
+                label={t("licenses.renewals.window")}
+                options={WINDOWS.map((days) => ({
+                  value: days === DEFAULT_WINDOW ? "" : String(days),
+                  label: t("licenses.renewals.nextDays", { count: days }),
+                }))}
+                value={withinDays === DEFAULT_WINDOW ? "" : String(withinDays)}
+                onChange={(value) => filters.set("within", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
           end={renewals.data ? <ShowingCount shown={items.length} total={items.length} /> : null}
         />
         <QueryState loading={renewals.isPending} error={renewals.error} empty={false} emptyLabel="">
           {items.length === 0 ? (
+            /* "In this period" is the window's cause; the kit's filtered
+               sentence and its way out are the Client chip's. */
             <ListEmpty
-              filtered={filters.active}
+              filtered={filters.values.client !== ""}
               onClear={filters.clear}
               nothingYet={t("licenses.renewals.empty")}
               icon="calendar-event"

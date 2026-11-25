@@ -513,7 +513,7 @@ describe("CredentialsPage — a refused delete", () => {
 
     await waitFor(() => expect(deleteCredential).toHaveBeenCalled());
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/That credential was not deleted — it is still stored/);
+    expect(alert).toHaveTextContent(/That credential was not deleted: it is still stored/);
     expect(alert).toHaveTextContent(/That service is unavailable right now/);
   });
 
@@ -714,7 +714,7 @@ describe("CredentialsPage — credential types as a person reads them", () => {
 
     await user.selectOptions(screen.getByLabelText("Type"), "domain_join");
 
-    expect(screen.getByText(/used by provisioning — not by interactive remote sessions/i)).toBeInTheDocument();
+    expect(screen.getByText(/used by provisioning, not by interactive remote sessions/i)).toBeInTheDocument();
   });
 
   it("still submits the wire value, not the label", async () => {
@@ -926,7 +926,9 @@ describe("CredentialsPage — a Windows domain account", () => {
 
     await user.clear(account);
     await user.type(account, "CORP\\svc-push");
-    expect(within(dialog).queryByText(/Realm: CORP\b(?!\.)/)).toBeNull();
+    // "Realm: CORP" ends at a full stop now ("Realm: {realm}. Confirm…", no
+    // dash in the copy), so only a dot that carries on the name is excluded.
+    expect(within(dialog).queryByText(/Realm: CORP\b(?!\.\w)/)).toBeNull();
     // The old hint -- "each target's DNS domain" -- described the rule review
     // I1 removed. A NetBIOS account is now simply not accepted.
     expect(within(dialog).queryByText(/each target's DNS domain/i)).toBeNull();

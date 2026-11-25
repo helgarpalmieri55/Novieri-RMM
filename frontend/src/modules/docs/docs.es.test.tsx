@@ -263,7 +263,9 @@ describe("the article in Spanish", () => {
     // A link the sanitiser removed says so, in Spanish, in its tooltip.
     expect(container.querySelector("[data-link-removed]")).toHaveAttribute("title", "Vínculo eliminado: esquema de URL no admitido.");
     await user.click(screen.getByRole("button", { name: "Historial" }));
-    expect(await screen.findByText(/^v2 — /)).toBeInTheDocument();
+    // The history row: the version, then its date ("v2 · 30 jul 2026, 10:00"; no
+    // dash in the copy). The list row beside it reads "v2 · 1 vínculo".
+    expect(await screen.findByText(/^v2 · \d{1,2} \S+ \d{4}/)).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -473,7 +475,7 @@ describe("the document view in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Purgar v2" }));
     let dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Destruir estos bytes" })).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/Versión 2 — contrato-2026\.pdf, 2\.1 MiB/).length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText(/Versión 2 \(contrato-2026\.pdf, 2\.1 MiB\)/).length).toBeGreaterThan(0);
     expect(within(dialog).getByText(/^El archivo se elimina del almacenamiento/)).toBeInTheDocument();
     expectNoEnglish(dialog);
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
@@ -617,7 +619,7 @@ describe("the labels and sentences built outside React", () => {
     expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Vínculo eliminado: esquema de URL no admitido."');
     setActiveLanguage("en");
     expect(typeLabel("text/plain")).toBe("Text");
-    expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Link removed — unsupported URL scheme."');
+    expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Link removed: unsupported URL scheme."');
   });
 
   it("agrees every count with its number", () => {

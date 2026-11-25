@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -86,6 +86,16 @@ export function SweepPanel({
     enabled !== subnet.sweep_enabled ||
     deviceId !== (subnet.sweep_device_id ?? "") ||
     (intervalTouched && typedInterval !== subnet.sweep_interval_hours);
+
+  // A FAILED SAVE'S MESSAGE GOES WITH THE CHANGE IT TRIED TO SAVE (the
+  // coordinator's ruling 7; adoption pass, O5 leftover 1). Undone, the form
+  // is what is stored again: no Save is offered, so a 503 left under it would
+  // speak of an attempt with nothing on screen to retry.
+  const settingsFailed = settings.isError;
+  const resetSettings = settings.reset;
+  useEffect(() => {
+    if (!settingsChanged && settingsFailed) resetSettings();
+  }, [settingsChanged, settingsFailed, resetSettings]);
 
   const scope = effectiveSweepScope(subnet, scopes.data ?? []);
   const latest = runs.data?.[0];

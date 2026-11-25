@@ -45,6 +45,7 @@ import { useReportDirty } from "./dialogParams";
 import type { BudgetLineInput, BudgetLineOut, BudgetOut, BudgetUpdateStatus, Granularity } from "./types";
 import {
   Btn,
+  ChipSelect,
   FormSection,
   ListEmpty,
   PageHead,
@@ -187,24 +188,21 @@ export function BudgetPlannerPage() {
         description={t("budget.planner.description")}
         actions={
           <>
-            {/* THE BUDGET OPEN, AS A CHIP (the kit's `.chip-select`): a person's
+            {/* THE BUDGET OPEN, AS A CHIP (the kit's `ChipSelect`): a person's
                 choice is a new history entry, so Back returns to the last one. */}
             {items.length > 0 ? (
-              <span className={selected ? "chip chip-select on" : "chip chip-select"}>
-                <span aria-hidden="true">{t("budget.planner.budgetChip")}</span>
-                <select
-                  aria-label={t("budget.planner.budgetChip")}
-                  value={selected?.id ?? ""}
-                  onChange={(event) => filters.set("budget", event.target.value)}
-                >
-                  <option value="">{t("budget.planner.chooseBudget")}</option>
-                  {items.map((budget) => (
-                    <option key={budget.id} value={budget.id}>
-                      {t("budget.planner.budgetOption", { name: budget.name, year: budget.fiscal_year })}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <ChipSelect
+                label={t("budget.planner.budgetChip")}
+                options={[
+                  { value: "", label: t("budget.planner.chooseBudget") },
+                  ...items.map((budget) => ({
+                    value: budget.id,
+                    label: t("budget.planner.budgetOption", { name: budget.name, year: budget.fiscal_year }),
+                  })),
+                ]}
+                value={selected?.id ?? ""}
+                onChange={(value) => filters.set("budget", value)}
+              />
             ) : null}
             {newBudget}
           </>

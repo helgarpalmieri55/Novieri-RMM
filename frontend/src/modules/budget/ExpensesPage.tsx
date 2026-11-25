@@ -36,6 +36,7 @@ import {
 import type { ExpenseListFilters, ExpenseOut } from "./types";
 import {
   Btn,
+  ChipSelect,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -44,12 +45,13 @@ import {
   QueryState,
   ShowingCount,
   StatusPill,
+  useEditParam,
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
-import { useEditParam, useReportDirty } from "./dialogParams";
+import { useDropParam, useReportDirty } from "./dialogParams";
 import { Icon } from "../../shell/icons";
 import { humaniseEnum } from "../../lib/labels";
 
@@ -124,7 +126,7 @@ export function ExpensesPage() {
   const api = useApi();
   const filters = useUrlFilters(["status", "category", "from", "to"] as const);
   const created = useNewParam("expense");
-  const editing = useEditParam();
+  const editing = useEditParam("expense");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -152,7 +154,7 @@ export function ExpensesPage() {
   // the API is asked what it was asked before.
   const editNamesNothing =
     editing.id !== "" && expenses.data !== undefined && me.data !== undefined && editingExpense === undefined;
-  const dropEdit = editing.drop;
+  const dropEdit = useDropParam("edit");
   useEffect(() => {
     if (editNamesNothing) dropEdit();
   }, [editNamesNothing, dropEdit]);
@@ -208,21 +210,16 @@ export function ExpensesPage() {
                 onChange={(value) => filters.set("status", value)}
               />
               {/* The category as the kit's chip with a list, like the Client chip. */}
-              <span className={filters.values.category === "" ? "chip chip-select" : "chip chip-select on"}>
-                <span aria-hidden="true">{t("budget.common.category")}</span>
-                <select
-                  aria-label={t("budget.expenses.filterCategory")}
-                  value={filters.values.category}
-                  onChange={(e) => filters.set("category", e.target.value)}
-                >
-                  <option value="">{t("budget.expenses.allCategories")}</option>
-                  {categories.data?.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <ChipSelect
+                label={t("budget.common.category")}
+                ariaLabel={t("budget.expenses.filterCategory")}
+                options={[
+                  { value: "", label: t("budget.expenses.allCategories") },
+                  ...(categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                value={filters.values.category}
+                onChange={(value) => filters.set("category", value)}
+              />
               {/* The range: two calendar dates, sent as `date_from` and `date_to`. */}
               <label className="flex items-center gap-2">
                 <span className="note">{t("budget.expenses.filterFrom")}</span>

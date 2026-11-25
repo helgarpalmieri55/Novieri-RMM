@@ -107,11 +107,11 @@ export const credentials: Shape<typeof en> = {
       noun: "cuenta de unión a dominio",
     },
     push_install: {
-      description: "Una cuenta dedicada que se usa SOLO para instalar el agente en equipos que aún no están administrados, desde un servidor de sitio de su mismo segmento. Dale los permisos mínimos necesarios para instalar un servicio, no los de administrador de dominio. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
+      description: "Una cuenta dedicada a un único uso: instalar el agente en equipos que aún no están administrados, desde un servidor de sitio de su mismo segmento. Dale los permisos mínimos necesarios para instalar un servicio, no los de administrador de dominio. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
       noun: "cuenta de instalación remota",
     },
     windows_domain: {
-      description: "Una cuenta de dominio que se usa para instalar el agente en equipos Windows mediante WinRM, desde un servidor de sitio de su mismo segmento. La autenticación es solo Kerberos. Dale solo los permisos justos para instalar un servicio, NO los de administrador de dominio: un administrador de dominio aquí significa que un servidor de sitio comprometido durante una instalación remota es un dominio comprometido. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
+      description: "Una cuenta de dominio que se usa para instalar el agente en equipos Windows mediante WinRM, desde un servidor de sitio de su mismo segmento. La autenticación es solo Kerberos. Dale solo los permisos justos para instalar un servicio. Nunca le des los de administrador de dominio: un administrador de dominio aquí significa que un servidor de sitio comprometido durante una instalación remota es un dominio comprometido. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
       noun: "cuenta de dominio de Windows",
     },
   },

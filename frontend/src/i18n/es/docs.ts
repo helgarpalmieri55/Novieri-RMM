@@ -91,7 +91,7 @@ export const docs: Shape<typeof en> = {
       "No se pudo cargar el historial de versiones, así que esto no es una lista de las ediciones de este artículo. {reason}",
     loading: "Cargando…",
     noEarlier: "No hay versiones anteriores.",
-    version: "v{version} — {date}",
+    version: "v{version} · {date}",
     loadFailed: "No se pudo cargar el artículo. {reason}",
   },
   portal: {
@@ -148,7 +148,7 @@ export const docs: Shape<typeof en> = {
       "El documento sale de la biblioteca y de la búsqueda. Sus archivos se pueden seguir descargando y solo un administrador puede restaurarlo. No se destruye nada.",
     archiveConfirm: "Archivar documento",
     purgeTitle: "Destruir estos bytes",
-    purgeSubject: "Versión {version} — {filename}, {size}",
+    purgeSubject: "Versión {version} ({filename}, {size})",
     purgeBody:
       "El archivo se elimina del almacenamiento y no se puede recuperar: sin deshacer y sin ninguna copia de seguridad a la que llegue esta consola. El nombre del archivo, el tamaño, el hash y quién lo hizo se conservan en el historial de versiones y en el registro de auditoría.",
     purgeConfirm: "Destruir los bytes",

@@ -43,7 +43,7 @@ import {
 import { BudgetReadiness } from "./BudgetReadiness";
 import { BudgetPageNav, BudgetPickClient, useBudgetNeedsClient } from "./budgetState";
 import { chartFigure, compactMoney, exactMoney } from "./money";
-import { PageHead, Panel, Progress, QueryState, StatsGrid, useUrlFilters } from "../../shell/components";
+import { ChipSelect, PageHead, Panel, Progress, QueryState, StatsGrid, useUrlFilters } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Pill, Tile } from "../../shell/viz";
 
@@ -224,21 +224,15 @@ export function BudgetDashboard() {
         }
         actions={
           noBudgets || !budgets.data ? undefined : (
-            // THE BUDGET SHOWN, AS A CHIP (the kit's `.chip-select`), in the URL.
-            <span className="chip chip-select on">
-              <span aria-hidden="true">{t("budget.dashboard.budget")}</span>
-              <select
-                aria-label={t("budget.dashboard.budget")}
-                value={budgetId ?? ""}
-                onChange={(e) => filters.set("budget", e.target.value)}
-              >
-                {budgets.data.map((budget) => (
-                  <option key={budget.id} value={budget.id}>
-                    {budget.name} ({budget.fiscal_year})
-                  </option>
-                ))}
-              </select>
-            </span>
+            // THE BUDGET SHOWN, AS A CHIP (the kit's `ChipSelect`), in the URL.
+            // Always drawn chosen: the page shows one budget, the first by default.
+            <ChipSelect
+              label={t("budget.dashboard.budget")}
+              options={budgets.data.map((budget) => ({ value: budget.id, label: `${budget.name} (${budget.fiscal_year})` }))}
+              value={budgetId ?? ""}
+              onChange={(value) => filters.set("budget", value)}
+              selected
+            />
           )
         }
       />

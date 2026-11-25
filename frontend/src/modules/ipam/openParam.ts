@@ -5,17 +5,21 @@ import { writeQuery } from "../../shell/components";
 
 /**
  * ONE RECORD OPEN BESIDE A LIST, IN THE URL (`?finding=<id>` on the drift
- * page): a link opens it, a reload keeps it, Back closes it. Opening adds a
- * history entry; closing goes Back from the entry this page's `open` added and
- * otherwise (it arrived in a link) drops the key in place -- `useNewParam`'s
+ * page): a link opens it, a reload keeps it, Back closes it. Starting adds a
+ * history entry; closing goes Back from the entry this page's `start` added
+ * and otherwise (it arrived in a link) drops the key in place -- `useNewParam`'s
  * rule for `?new=`, so two copies of the list are never left behind.
+ *
+ * LOCAL, NOT THE KIT'S `useEditParam`: that one drives `?edit=` only, and this
+ * key is `?finding=`. Its verbs are the kit's (`{ id, start(id), close() }`,
+ * adoption pass), so the two read alike.
  */
-export function useOpenParam(key: string): { id: string; open: (id: string) => void; close: () => void } {
+export function useOpenParam(key: string): { id: string; start: (id: string) => void; close: () => void } {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
   const id = params.get(key) ?? "";
-  const open = useCallback(
+  const start = useCallback(
     (next: string) => {
       const query = new URLSearchParams(params);
       query.set(key, next);
@@ -34,5 +38,5 @@ export function useOpenParam(key: string): { id: string; open: (id: string) => v
     query.delete(key);
     writeQuery(params, query, setParams, { replace: true });
   }, [params, setParams, location.state, navigate, key]);
-  return { id, open, close };
+  return { id, start, close };
 }

@@ -58,6 +58,7 @@ import {
   useNarrowedApi,
   useNewParam,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 
 // The subnet tree (spec §12): the DERIVED hierarchy, per-node utilisation,
@@ -161,8 +162,6 @@ export function SubnetTreePage() {
   // The client the chip narrowed to: a tile counted for it opens its rows
   // with the same `client=` (coordinator's ruling on the wave reviews).
   const { client: narrowedTo } = useNarrowedApi(chip);
-  const withClient = (path: string): string =>
-    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
   const subnets = useIpamSubnets(serverFilters, chip);
   const vrfs = useIpamVrfs();
   const { selected } = useClientScope();
@@ -291,14 +290,14 @@ export function SubnetTreePage() {
             label={t("ipam.tree.managed")}
             value={String(allSubnets.length)}
             icon="network"
-            to={withClient("/ipam")}
+            to={withClient("/ipam", narrowedTo)}
             tone="neutral"
           />
           <StatCard
             label={t("ipam.tree.assignable")}
             value={String(assignableCount)}
             icon="database"
-            to={withClient("/ipam?state=assignable")}
+            to={withClient("/ipam?state=assignable", narrowedTo)}
             tone="blue"
             zeroLabel={t("ipam.tree.assignableZero")}
           />
@@ -306,7 +305,7 @@ export function SubnetTreePage() {
             label={t("ipam.tree.withDrift")}
             value={String(driftBySubnet.size)}
             icon="arrows-exchange"
-            to={withClient("/ipam/drift")}
+            to={withClient("/ipam/drift", narrowedTo)}
             tone="gold"
             urgent
             /* No data (pending, narrowing undecided or failed): the kit's
@@ -325,7 +324,7 @@ export function SubnetTreePage() {
             label={t("ipam.tree.neverSwept")}
             value={String(neverSweptCount)}
             icon="warning"
-            to={withClient("/ipam?state=never-swept")}
+            to={withClient("/ipam?state=never-swept", narrowedTo)}
             tone="orange"
             urgent
             zeroLabel={t("ipam.tree.neverSweptZero")}

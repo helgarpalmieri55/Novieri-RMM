@@ -287,7 +287,9 @@ const licenseCompliance: FixtureMap["licenseCompliance"] = () =>
 
 const reviewQueue: FixtureMap["reviewQueue"] = () => REVIEW_QUEUE;
 
-const licenseRenewals: FixtureMap["licenseRenewals"] = (withinDays = 90) => {
+// No window is the server's own 30 days (`licenses/api.py::renewals_route`,
+// `within_days` defaults to 30), so the calendar's default view is what it shows.
+const licenseRenewals: FixtureMap["licenseRenewals"] = (withinDays = 30) => {
   const rows: RenewalRow[] = [];
   for (const seed of LICENSE_SEEDS) {
     if (seed.renewsDays !== null && seed.renewsDays <= withinDays) {

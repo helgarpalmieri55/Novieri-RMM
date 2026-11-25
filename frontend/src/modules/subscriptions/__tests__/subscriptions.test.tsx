@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_DATE } from "../../../lib/datetime";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, ClientOut, Me, MeClient } from "../../../lib/api";
 import { RenewalCalendar } from "../RenewalCalendar";
@@ -874,7 +875,7 @@ describe("SubscriptionDetail", () => {
   // Cycle 5. `assigned_at`/`released_at` are `datetime` -- instants -- so they
   // take the operator's PROFILE zone, and a seat still held renders NO_DATE
   // rather than "Invalid Date".
-  it("renders seat instants in the profile timezone and an unreleased seat as an em dash", async () => {
+  it("renders seat instants in the profile timezone and an unreleased seat as the absent date", async () => {
     api.listSeats = vi
       .fn()
       .mockResolvedValue([{ ...SEATS[0], assigned_at: "2026-01-01T23:00:00.000Z" }]);
@@ -884,7 +885,7 @@ describe("SubscriptionDetail", () => {
     // cannot produce this string unless the runner happens to be in Tokyo.
     const row = (await screen.findByText("Jane Doe")).closest("tr") as HTMLElement;
     expect(within(row).getByText("02 Jan 2026, 08:00")).toBeInTheDocument();
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
     expect(row.textContent).not.toContain("Invalid Date");
   });
 
@@ -1077,16 +1078,16 @@ describe("RenewalCalendar", () => {
     expect(row.textContent).not.toContain("30 Jun 2026");
   });
 
-  // An absent deadline must be the em dash, never "Invalid Date" -- which is
-  // what `new Date(null).toLocaleDateString()` produces.
-  it("renders an absent notice deadline as an em dash, never Invalid Date", async () => {
+  // An absent deadline must be the absent date (`NO_DATE`), never "Invalid
+  // Date" -- which is what `new Date(null).toLocaleDateString()` produces.
+  it("renders an absent notice deadline as the absent date, never Invalid Date", async () => {
     api.renewals = vi
       .fn()
       .mockResolvedValue([{ ...NEAR, notice_deadline: null, renews_at: null }]);
     renderWithProviders(<RenewalCalendar />);
 
     const row = (await screen.findByText("Acme SaaS")).closest("tr") as HTMLElement;
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText(NO_DATE)).toHaveLength(2);
     expect(row.textContent).not.toContain("Invalid Date");
   });
 

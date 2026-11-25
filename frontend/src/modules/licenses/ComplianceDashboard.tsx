@@ -23,6 +23,7 @@ import {
   ShowingCount,
   StatusPill,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useRecordTitle } from "../../shell/title";
@@ -65,11 +66,11 @@ export function ComplianceDashboard() {
   // that product, and narrowed to the row's client when every client is
   // shown (the Client chip, `?client=`; only a client of this person's, so
   // the chip never drops it on arrival).
-  const licensesOf = (row: (typeof items)[number]): string => {
-    const query = new URLSearchParams({ q: row.name });
-    if (showClient && clients.some((client) => client.id === row.client_id)) query.set("client", row.client_id);
-    return `/licenses?${query.toString()}`;
-  };
+  const licensesOf = (row: (typeof items)[number]): string =>
+    withClient(
+      `/licenses?${new URLSearchParams({ q: row.name }).toString()}`,
+      showClient && clients.some((client) => client.id === row.client_id) ? row.client_id : null,
+    );
 
   return (
     <div>

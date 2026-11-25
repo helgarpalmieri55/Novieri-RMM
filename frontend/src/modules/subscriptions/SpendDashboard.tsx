@@ -13,6 +13,7 @@ import {
   StatsGrid,
   useNarrowedApi,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useClientName } from "../settings/api";
@@ -185,13 +186,11 @@ export function SpendDashboard() {
   // client of the person's, so the chip never drops it on arrival). With one
   // client chosen at the top, or the chip already narrowing, every total is
   // that client's and the registry already reads only its rows.
-  const listOf = (row: SpendRow): string => {
-    if (narrowedTo !== null) return `/subscriptions?client=${narrowedTo}`;
-    if (selected === null && clients.some((client) => client.id === row.client_id)) {
-      return `/subscriptions?client=${row.client_id}`;
-    }
-    return "/subscriptions";
-  };
+  const listOf = (row: SpendRow): string =>
+    withClient(
+      "/subscriptions",
+      narrowedTo ?? (selected === null && clients.some((client) => client.id === row.client_id) ? row.client_id : null),
+    );
 
   return (
     <div>

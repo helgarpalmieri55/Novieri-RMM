@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_DATE } from "../../../lib/datetime";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, ClientOut, Me, MeClient } from "../../../lib/api";
 import { complianceVariant, licenseTypeVariant } from "../licenseState";
@@ -517,14 +518,14 @@ describe("LicensesPage", () => {
     expect(await screen.findByText("01 Aug 2026")).toBeInTheDocument();
   });
 
-  // An absent renewal must be the em dash, never "Invalid Date" -- which is
-  // what `new Date(null).toLocaleDateString()` produces.
-  it("renders an absent renewal date as an em dash, never Invalid Date", async () => {
+  // An absent renewal must be the absent date (`NO_DATE`), never "Invalid
+  // Date" -- which is what `new Date(null).toLocaleDateString()` produces.
+  it("renders an absent renewal date as the absent date, never Invalid Date", async () => {
     renderWithProviders(<LicensesPage />);
 
     await screen.findByText("Acme Office Suite");
     const row = screen.getByText("Acme Office Suite").closest("tr") as HTMLElement;
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
     expect(row.textContent).not.toContain("Invalid Date");
   });
 
@@ -557,9 +558,11 @@ describe("LicensesPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     expect(tiles.map((tile) => tile.tagName)).toEqual(["A", "A", "A", "A"]);
+    // The renewal tile opens the calendar on the 90 days it counts (adoption
+    // pass, O5 leftover 2), as the subscriptions registry's does.
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/licenses/compliance",
-      "/licenses/renewals",
+      "/licenses/renewals?within=90",
       "/licenses/products",
       "/licenses/compliance",
     ]);
@@ -567,8 +570,9 @@ describe("LicensesPage", () => {
     const routes = staticRoutePaths();
     // Guard the guard: an empty route list would pass every href vacuously.
     expect(routes.length).toBeGreaterThan(10);
+    // The path is what App.tsx serves; a query (`?within=90`) is that page's filter.
     for (const tile of tiles) {
-      expect(isServedRoute(tile.getAttribute("href"), routes)).toBe(true);
+      expect(isServedRoute(tile.getAttribute("href")?.split("?")[0] ?? null, routes)).toBe(true);
     }
   });
 
@@ -985,7 +989,7 @@ describe("LicenseDetail", () => {
   // Cycle 5. `allocated_at`/`released_at` are `datetime` -- instants -- so
   // they take the operator's PROFILE zone, and an allocation still held
   // renders NO_DATE rather than "Invalid Date".
-  it("renders allocation instants in the profile timezone and an open one as an em dash", async () => {
+  it("renders allocation instants in the profile timezone and an open one as the absent date", async () => {
     const allocation: AllocationOut = {
       id: "a1",
       license_id: "l1",
@@ -1000,7 +1004,7 @@ describe("LicenseDetail", () => {
     // 23:00Z is 08:00 the next day in Asia/Tokyo.
     expect(await screen.findByText("02 Jan 2026, 08:00")).toBeInTheDocument();
     const row = screen.getByText("02 Jan 2026, 08:00").closest("tr") as HTMLElement;
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
     expect(row.textContent).not.toContain("Invalid Date");
   });
 
