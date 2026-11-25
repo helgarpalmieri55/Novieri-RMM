@@ -42,6 +42,7 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 /** `sha256 7c1d…e0a2`: the first and last four hex digits, as the design prints them. */
 function shortSha(sha: string): string {
@@ -50,6 +51,9 @@ function shortSha(sha: string): string {
 
 export function ImagesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("provisioning.images.title"));
   const api = useApi();
   // New image opens from `?new=image` (decision D8), and only for someone who
   // may manage images, whatever the URL asks (below).

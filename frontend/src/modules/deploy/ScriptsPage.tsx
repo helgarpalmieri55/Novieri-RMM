@@ -48,6 +48,7 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 // The design's `P['deploy/scripts']`: one bare panel of rows led by the
 // terminal glyph, the interpreter beside the name, a version in mono. The
@@ -74,6 +75,9 @@ const editRules = (): readonly FieldRule[] => [{ name: "body", label: translate(
 
 export function ScriptsPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("deploy.scripts.title"));
   const api = useApi();
   // New → Script (decision D8): `?new=script` opens the author dialog.
   const authoring = useNewParam("script");

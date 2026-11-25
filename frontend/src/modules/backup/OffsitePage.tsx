@@ -62,6 +62,7 @@ import {
 import { OFFSITE_TARGET_STATE_LABEL, offsiteTargetStateKind } from "./backupState";
 import { BackupPageNav } from "./backupNav";
 import type { OffsiteTarget, RecoveryKey, RetentionGfs } from "./types";
+import { useRecordTitle } from "../../shell/title";
 
 /** What each server-side test step checked, in the operator's words. */
 export const TEST_STEP_LABEL: Readonly<Record<string, string>> = lazyLabels({
@@ -75,6 +76,9 @@ export const TEST_STEP_LABEL: Readonly<Record<string, string>> = lazyLabels({
 
 export function OffsitePage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("backup.offsite.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];

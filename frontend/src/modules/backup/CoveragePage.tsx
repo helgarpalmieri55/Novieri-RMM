@@ -38,6 +38,7 @@ import {
 } from "./backupState";
 import { BackupPageNav } from "./backupNav";
 import { BackupReadiness } from "./BackupReadiness";
+import { useRecordTitle } from "../../shell/title";
 
 const VERDICTS = ["covered", "stale", "failing", "unprotected"] as const;
 
@@ -47,6 +48,9 @@ function text(value: unknown): string | null {
 
 export function CoveragePage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("backup.coverage.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("backup.read");

@@ -21,6 +21,7 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { formatDate } from "../../lib/datetime";
+import { useRecordTitle } from "../../shell/title";
 import { useOrgZone } from "../../lib/zone";
 import { Icon } from "../../shell/icons";
 import {
@@ -67,6 +68,11 @@ import { PUSH_CREDENTIAL_TYPE, type PushCredentialScopeOut } from "./types";
 // "include unbound" is the `?unbound=1` chip, so it survives a reload.
 export function PushCredentialScopesPage() {
   const t = useT();
+  // A SUB-PAGE WITHOUT A RAIL ENTRY TAKES ITS OWN NAME (general ruling 1b):
+  // the rail's "Push install" is the authorizations page, and this one sits
+  // under it. Its h1 and its tab say "Credential scopes", so the two pages
+  // never share a title: "Credential scopes · Push install · Novieri RMM".
+  useRecordTitle(t("agentPush.scopes.title"));
   const permissions = usePushPermissions();
   const filters = useUrlFilters(["unbound"] as const);
   const includeUnbound = filters.values.unbound === "1";
@@ -85,9 +91,10 @@ export function PushCredentialScopesPage() {
           sentence reads as prose to nobody and is a role name to an admin;
           both readers need the code, neither needs it unannounced. */}
       <PageHead
-        // The area's name in the navigation (coordinator ruling, fix round 1: a
-        // page's h1 is its rail label); the section nav under it says which page.
-        title={t("shell.nav.item.pushInstall")}
+        // Its own name (general ruling 1b): the rail entry is the
+        // authorizations page's, and the section nav under the head says
+        // which of the two this is.
+        title={t("agentPush.scopes.title")}
         description={t("agentPush.scopes.description")}
         actions={
           permissions.scopeManage ? (

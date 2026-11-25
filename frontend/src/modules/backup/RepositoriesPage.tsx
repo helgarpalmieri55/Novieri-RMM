@@ -57,9 +57,13 @@ import {
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 export function RepositoriesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("backup.repositories.title"));
   const api = useApi();
   // New repository opens from `?new=repository` (decision D8), so the New
   // menu and a link reach it.

@@ -29,6 +29,7 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 
 // The wire vocabulary is never|if_required|forced; "always" was offered here
 // and made every apply for the policy fail validation.
@@ -157,6 +158,9 @@ const NEW_POLICY = "new";
  */
 export function PatchPolicyEditor() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("patch.policy.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canManage = (me.data?.permissions ?? []).includes("patch.policy.manage");

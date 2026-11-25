@@ -45,6 +45,7 @@ import { Icon } from "../../shell/icons";
 import { useMe, useUpdateMeMutation } from "../settings/api";
 import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import type { MeProfileUpdate } from "../settings/types";
+import { useRecordTitle } from "../../shell/title";
 
 type ProfileForm = {
   display_name: string;
@@ -57,6 +58,10 @@ export function ProfilePage() {
   const me = useMe();
   const update = useUpdateMeMutation();
   const t = useT();
+  // Reached from the account menu, under no rail entry: the shell's half of
+  // the tab is the product alone, so the page names itself, as its h1 does
+  // (general ruling 1b): "<this page> · Novieri RMM".
+  useRecordTitle(t("profile.page.title"));
   const { language, setLanguage } = useLanguage();
   const [languagePicked, setLanguagePicked] = useState(false);
 

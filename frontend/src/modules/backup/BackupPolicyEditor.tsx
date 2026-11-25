@@ -82,9 +82,13 @@ import {
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 export function BackupPolicyEditor() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("backup.policies.title"));
   const api = useApi();
   // New policy is `?new=policy`, and the policy being edited `?edit=<id>`:
   // the dialog is a link, and a reload opens the same one. Closing either

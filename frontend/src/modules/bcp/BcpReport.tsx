@@ -20,6 +20,7 @@ import {
 import { usePeriodReport, useTestReport, useUserTimezone } from "./api";
 import { Btn, PageHead, Panel, StatsGrid, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 import { Facts, Tile } from "../../shell/viz";
 
 // Per-test SOC 2 evidence report (backend/app/modules/bcp/api.py's
@@ -53,6 +54,9 @@ function met(value: boolean | null): string {
 
 function TestReportView({ testId }: { testId: string }) {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("bcp.report.testTitle"));
   const report = useTestReport(testId);
   const zone = useUserTimezone();
   const test = report.data?.test ?? null;
@@ -195,6 +199,9 @@ function TestReportView({ testId }: { testId: string }) {
 
 function PeriodReportView() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("bcp.report.periodTitle"));
   const zone = useUserTimezone();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");

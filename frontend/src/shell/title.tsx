@@ -13,11 +13,26 @@ import { createContext, useContext, useEffect } from "react";
 
 import { PRODUCT_NAME } from "./names";
 
+const SEPARATOR = " · ";
+
 export function documentTitle(page?: string, record?: string): string {
   const parts = [record, page]
     .map((part) => part?.trim() ?? "")
     .filter((part) => part !== "" && part !== PRODUCT_NAME);
-  return [...parts, PRODUCT_NAME].join(" · ");
+  return [...parts, PRODUCT_NAME].join(SEPARATOR);
+}
+
+/**
+ * A RECORD SHOWN ON A SUB-PAGE names both, record first: "<record> · <sub-page>",
+ * which the page hands `useRecordTitle` and the shell puts before its rail
+ * entry ("lis-ws-041 · Session recording · Remote sessions · Novieri RMM").
+ * A sub-page with no rail entry of its own names itself (general ruling 1b);
+ * a record on it is named in front of that, so it never reads the same as the
+ * record's own page. Until the record is known, the sub-page alone.
+ */
+export function recordOnSubPage(subPage: string, record: string | undefined): string {
+  const name = record?.trim() ?? "";
+  return name === "" ? subPage : `${name}${SEPARATOR}${subPage}`;
 }
 
 const RecordTitle = createContext<((name: string | undefined) => void) | null>(null);

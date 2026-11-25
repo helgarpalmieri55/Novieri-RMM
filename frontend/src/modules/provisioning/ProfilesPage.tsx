@@ -38,9 +38,13 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 export function ProfilesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("provisioning.profiles.title"));
   const api = useApi();
   // The editor opens from the URL: `?new=profile` (decision D8) for a new
   // profile, `?edit=<id>` for an existing one, so either is a link. Closing

@@ -7,7 +7,7 @@ import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { Btn, DetailHead, Panel } from "../../shell/components";
-import { useRecordTitle } from "../../shell/title";
+import { recordOnSubPage, useRecordTitle } from "../../shell/title";
 import { humaniseEnum } from "../../lib/labels";
 import { sessionKind } from "./sessionState";
 import { useSessionDevice } from "./useSessionDevice";
@@ -114,7 +114,10 @@ export function RecordingPlayer() {
   // THE RECORD HEAD names the machine and the session's state (redesign
   // plan, Receta F; O3 3.6), from the same two reads the live viewer makes.
   const { session, deviceName } = useSessionDevice(sessionId);
-  useRecordTitle(deviceName ?? undefined);
+  // The machine, then that this is its recording (general ruling 1b): the
+  // live session's tab names the machine alone, and the two are different
+  // pages, so they never read the same.
+  useRecordTitle(recordOnSubPage(t("remote.recording.title"), deviceName ?? undefined));
   const head = (actions?: ReactNode) => (
     <DetailHead
       back={{ to: "/remote", label: t("remote.screen.back") }}

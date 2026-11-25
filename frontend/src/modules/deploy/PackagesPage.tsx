@@ -37,6 +37,7 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 // The design's `P['deploy/packages']`: one bare panel of rows led by the
 // package glyph, the sha256 under the name in mono, a platform pill and the
@@ -60,6 +61,9 @@ function shortSha(sha: string): string {
 
 export function PackagesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("deploy.packages.title"));
   const api = useApi();
   // New → Package (decision D8): `?new=package` opens the dialog.
   const created = useNewParam("package");
