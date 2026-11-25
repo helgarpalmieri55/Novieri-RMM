@@ -60,7 +60,6 @@ export const siteServers: Shape<typeof en> = {
     wakeTitle: "Encender un equipo",
     wakeSubtitle: "Difunde un paquete mágico en uno de los segmentos de este servidor.",
     fallbackTitle: "Servidor de sitio",
-    declaredFor: { one: "declarado para {count} segmento", other: "declarado para {count} segmentos" },
   },
   prerequisites: {
     title: "Antes de poder promover un servidor de sitio",

@@ -18,8 +18,7 @@
 //
 // ON THE RECORD KIT (redesign plan, Task 9, 4.10; Receta F, no tabs):
 // `DetailHead` with the way back to the list, the server's state, its client
-// (linked to the 360) beside the device and what it declares, and Wake a
-// computer as the head's action, which takes the person to the wake form
+// (linked to the 360), and Wake a machine as the head's action, which takes the person to the wake form
 // below (the same form, the same signed job, the same `wakeJobId` followed to
 // its end). The tab names the server: "<server> · Site servers · Novieri RMM".
 //
@@ -44,7 +43,6 @@ import { SiteServerDetail } from "./SiteServerDetail";
 import type { SiteWakeRequest } from "./types";
 import type { ApiError, Device } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { useClientScope } from "../../lib/clientScope";
 import { useOrgZone } from "../../lib/zone";
 import { Btn, ClientContext, DetailHead } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
@@ -84,18 +82,7 @@ export function SiteServerDetailPage() {
     );
   };
 
-  const segments = server.data?.segments.length ?? 0;
-  const description = [
-    device.data?.hostname ?? null,
-    device.data?.primary_ip ?? null,
-    server.data ? t("siteServers.detail.declaredFor", { count: segments }) : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
   useRecordTitle(server.data?.name);
-  // `ClientContext` draws the client only when it is one of the person's.
-  const { clients } = useClientScope();
-  const hasClient = server.data ? clients.some((client) => client.id === server.data?.client_id) : false;
 
   // THE HEAD'S ACTION LEADS TO THE FORM, it does not replace it: a wake needs
   // the machine's MAC (and, on a server with several segments, which one), so
@@ -118,15 +105,11 @@ export function SiteServerDetailPage() {
               : { kind: "mut", label: t("siteServers.list.disabledPill") }
             : undefined
         }
-        context={
-          server.data ? (
-            <>
-              <ClientContext clientId={server.data.client_id} />
-              {hasClient && description ? " · " : null}
-              {description || null}
-            </>
-          ) : undefined
-        }
+        // The client alone, linked to its 360: the device, its address and
+        // the declared segments are the facts strip's first lines below. A
+        // link set in a run of plain text is told apart by colour only (axe
+        // `link-in-text-block`, harmony 2026-11-25).
+        context={server.data ? <ClientContext clientId={server.data.client_id} /> : undefined}
         actions={
           canWake && server.data?.enabled ? (
             <Btn label={t("siteServers.detail.wakeTitle")} icon="bolt" variant="primary" onClick={toWakeForm} />

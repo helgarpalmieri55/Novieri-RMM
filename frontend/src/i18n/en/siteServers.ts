@@ -57,7 +57,6 @@ export const siteServers = {
     wakeTitle: "Wake a machine",
     wakeSubtitle: "Broadcast a magic packet on one of this server's segments.",
     fallbackTitle: "Site server",
-    declaredFor: { one: "declared for {count} segment", other: "declared for {count} segments" },
   },
   prerequisites: {
     title: "Before a site server can be promoted",

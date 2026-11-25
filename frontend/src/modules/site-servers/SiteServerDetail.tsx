@@ -104,10 +104,13 @@ export function SiteServerDetail({
           },
           {
             k: t("siteServers.detail.device"),
+            // The machine and its address: what the page head's sentence used
+            // to carry, now that the head names the client alone.
             v: device ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <OsIcon os={device.os_family ?? ""} size={16} />
                 <span className="mono">{device.hostname ?? device.id}</span>
+                {device.primary_ip ? <span className="mono">{device.primary_ip}</span> : null}
               </span>
             ) : (
               <span className="mono">{server.device_id}</span>
