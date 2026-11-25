@@ -4,6 +4,7 @@
  * severity vocabulary is one closed set.
  */
 
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -174,6 +175,31 @@ describe("Tile while its read has not answered (kit requests batch 2, K3; ruling
   it("is on /__preview, so the browser's a11y pass measures it", () => {
     const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
     expect(preview).toMatch(/<Tile\b[^>]*\bpending\b/);
+  });
+
+  it("is drawn pending after a failed read too, as pages pass it: pending={!q.data} (batch 2 review, H2)", async () => {
+    // Ruling 10a binds "pending or failed": a failed read has no figure and
+    // no claim either. `isPending` alone would draw the 0 and the claim after
+    // a failure, so the doc tells pages to pass `!q.data`.
+    function Deployed() {
+      const q = useQuery({ queryKey: ["deployed"], queryFn: () => Promise.reject(new Error("down")) });
+      return (
+        <>
+          <Tile label="Deployed" value={String(q.data ?? 0)} sub="Nothing has ever been deployed" pending={!q.data} />
+          <p>{q.isError ? "failed" : "reading"}</p>
+        </>
+      );
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <Deployed />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("failed")).toBeInTheDocument();
+    expect(container.querySelector(".tile .v")).toHaveTextContent(/^n\/a$/);
+    expect(screen.queryByText("Nothing has ever been deployed")).toBeNull();
+    expect(container.querySelector(".tile")).toHaveAttribute("aria-busy", "true");
   });
 
   it("is the tile as before once the read answers", () => {

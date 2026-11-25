@@ -210,9 +210,12 @@ export interface TileProps {
   parts?: { label?: string; value?: string; sub?: string };
   /**
    * THE TILE'S READ HAS NOT ANSWERED (kit requests batch 2, K3; general ruling
-   * 10a: no tile draws a number or a claim before its read answers). While
-   * `pending` (the query `isPending`, or narrowing not `ready`) the tile keeps
-   * its label, icon and destination and draws the kit's one absent mark
+   * 10a: no tile draws a number or a claim before its read answers). Pass it
+   * WHENEVER THERE IS NO DATA, pending or failed: `pending={!q.data}` (batch 2
+   * review, H2). `isPending` alone is wrong: after a failed read it is false,
+   * and the tile would draw its 0 and its claim over a request that never
+   * answered. Narrowing not `ready` is no data too. While `pending` the tile
+   * keeps its label, icon and destination and draws the kit's one absent mark
    * (`n/a`, the Absent Zero Rule; StatCard's `pending` draws the same), with
    * no unit, no sub-line ("Nothing has ever been deployed" is a claim), no
    * sparkline and no wash, and says `aria-busy`. Once the read answers, the
