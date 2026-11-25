@@ -190,9 +190,9 @@ export const devices = {
       one: "<strong>{count} subnet</strong> has no agent that can sweep it, so nothing below can be true of that subnet.",
       other: "<strong>{count} subnets</strong> have no agent that can sweep them, so nothing below can be true of those subnets.",
     },
-    truncated: "Showing {shown} of {total}. Narrow the sweep or promote what you recognise.",
-    count: { one: "{count} candidate", other: "{count} candidates" },
-    promote: "Promote",
+    // The list kit (redesign Task 6, 1.4): the search over address and name, and what a list that stops short says.
+    search: "Search the addresses found",
+    truncatedHint: "The list stops short of every address seen. Narrow the sweep or promote what you recognise.",
     promoteN: "Promote {count}",
     promoting: "Promoting…",
     emptySwept: "Nothing unaccounted for on the subnets that were swept.",

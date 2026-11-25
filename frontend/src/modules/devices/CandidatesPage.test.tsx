@@ -15,7 +15,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -23,6 +23,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, AssetCandidate, AssetCandidatePage, Me, MeClient } from "../../lib/api";
 import { ApiError } from "../../lib/api";
+import { recordingNarrowing } from "../../test/narrowing";
+import { renderPage as renderAt } from "../../test/renderPage";
 import { CandidatesPage } from "./CandidatesPage";
 
 const mockUseApi = vi.fn();
@@ -432,7 +434,9 @@ describe("CandidatesPage", () => {
     // into a request whose result the operator has no way to interpret.
     renderPage(() => Promise.resolve(page()));
     await screen.findByText("172.22.104.55");
-    expect(screen.getByRole("button", { name: /promote/i })).toBeDisabled();
+    // Not even drawn: Promote lives in the kit's bulk bar, which shows only
+    // with a selection (redesign Task 6, 1.4), so there is nothing to click.
+    expect(screen.queryByRole("button", { name: /promote/i })).toBeNull();
   });
 
   it("says how many candidates were not shown", async () => {
@@ -624,7 +628,8 @@ describe("the tiles are links", () => {
     // loss.
     const user = userEvent.setup();
     renderPage(() => Promise.resolve(page()));
-    expect(await screen.findByText(/1 candidate/i)).toBeInTheDocument();
+    // The kit's count (redesign Receta L): "Showing x of y".
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /172\.22\.104\.55/ }));
     expect(screen.getByRole("button", { name: /promote 1/i })).toBeInTheDocument();
   });
@@ -739,4 +744,106 @@ describe("once a sweep records what it finds", () => {
     expect(await within(dialog).findByRole("alert")).toBeInTheDocument();
   });
 
+});
+
+/* --- the list kit (redesign plan Task 6, 1.4; Receta L) ------------------------------ */
+
+describe("Discovered on the list kit", () => {
+  /** A UUID: the console reads back only a UUID as a client (`lib/clientChoice.ts`). */
+  const ANDES: MeClient = {
+    id: "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
+    name: "Andes Logistics",
+    kind: "customer",
+    enabled_modules: [],
+    permissions: [],
+  };
+  const TWO = [SCOPE_INTERNAL, ANDES];
+  const rows = () =>
+    Promise.resolve(
+      page({
+        items: [candidate(), candidate({ address: "10.9.9.9", hostname: "printer-3f", client_id: ANDES.id })],
+        total: 2,
+      }),
+    );
+
+  function under(path: string, api: Partial<ApiClient> = {}) {
+    mockUseApi.mockReturnValue({
+      listAssetCandidates: vi.fn(rows),
+      promoteAssetCandidates: promote,
+      listAssetSuggestions: vi.fn().mockResolvedValue({ items: [] }),
+      listIpamSubnets,
+      dispatchIpamSweep,
+      listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      ...api,
+    } as unknown as ApiClient);
+    return renderAt(path, <CandidatesPage />);
+  }
+
+  it("keeps its search in the URL, so a reload finds the same rows", async () => {
+    const { router } = under("/discovered");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Search the addresses found" }), "printer");
+    expect(router.state.location.search).toBe("?q=printer");
+    await act(() => router.navigate("/discovered?q=printer"));
+    expect(screen.getByRole("textbox", { name: "Search the addresses found" })).toHaveValue("printer");
+    expect(await screen.findByText("10.9.9.9")).toBeInTheDocument();
+    expect(screen.queryByText("172.22.104.55")).toBeNull();
+  });
+
+  it("says why the list is empty", async () => {
+    under("/discovered?q=nothing-is-called-this");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("offers Promote in the bulk bar only with a selection", async () => {
+    under("/discovered");
+    await screen.findByText("172.22.104.55");
+    expect(screen.queryByRole("region", { name: "Bulk actions" })).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "172.22.104.55" }));
+    const bar = screen.getByRole("region", { name: "Bulk actions" });
+    expect(within(bar).getByRole("button", { name: /promote 1/i })).toBeEnabled();
+  });
+
+  it("opens Scan a subnet from ?new=scan, as its head's primary action", async () => {
+    const { router } = under("/discovered");
+    const scan = await screen.findByRole("button", { name: /scan a subnet/i });
+    expect(scan).toHaveClass("primary");
+    await userEvent.click(scan);
+    expect(router.state.location.search).toBe("?new=scan");
+    expect(await screen.findByRole("dialog", { name: /scan a subnet/i })).toBeInTheDocument();
+  });
+
+  it("narrows the list and leaves the console's client alone (decision D20)", async () => {
+    const select = vi.fn();
+    mockClientScope.mockReturnValue({ selected: null, select, clients: TWO, ready: true });
+    // The page's other reads stay on the console's choice: the suggestions
+    // panel, the "Recorded by a sweep" tile (a count of the fleet list, which
+    // its link opens unnarrowed) and the Scan a subnet dialog's subnet picker,
+    // mounted with the page. None of them is this list.
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: rows,
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 0 }),
+        listIpamSubnets: () => Promise.resolve([]),
+        me: () => Promise.resolve({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions", "listDevices", "listIpamSubnets"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    expect(await screen.findByText("172.22.104.55")).toBeInTheDocument();
+    expect(narrowing.client(ANDES.id).listAssetCandidates).toHaveBeenCalledWith();
+    expect(narrowing.unnarrowed).toEqual([]);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("still takes the journey's client from ?journey_client=", async () => {
+    const select = vi.fn();
+    mockClientScope.mockReturnValue({ selected: null, select, clients: TWO, ready: true });
+    under(`/discovered?journey_client=${ANDES.id}`);
+    await screen.findByText("172.22.104.55");
+    await waitFor(() => expect(select).toHaveBeenCalledWith(ANDES.id));
+  });
 });

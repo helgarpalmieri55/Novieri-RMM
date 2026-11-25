@@ -43,7 +43,7 @@ import { Link } from "react-router-dom";
 
 import { NoValue } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
-import { Button, Td } from "../../components/ui";
+import { Td } from "../../components/ui";
 import type { AssetCandidate, Me, PromoteResult } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
@@ -55,14 +55,23 @@ import { ScanSubnetDialog } from "./ScanSubnetDialog";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import {
-  FilterBar,
+  Btn,
+  BulkBar,
+  ClientFilter,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  SearchField,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
   TableWrap,
+  useNarrowedApi,
+  useNewParam,
+  useUrlFilters,
   type Kind,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -161,11 +170,24 @@ export function CandidatesPage() {
   // server answers it per address ("not a candidate") instead of the page
   // silently dropping it.
   const [selected, setSelected] = useState<Map<string, Picked>>(new Map());
-  const [scanning, setScanning] = useState(false);
+  // `?new=scan` opens Scan a subnet (decision D8), so the dialog is a link.
+  const scan = useNewParam("scan");
+  /**
+   * ON THE LIST KIT (redesign plan Task 6, 1.4; Receta L): the search (`?q=`,
+   * over the address and the name each row carries: the server sends the
+   * whole list) and the Client chip live in the URL. THE CHIP NARROWS THE
+   * READ AND ONLY THE READ (decisions D6, D20): `?client=` reads this list
+   * through that client's narrowed API, keyed on it, and never changes the
+   * console's client -- that is `?journey_client=`'s job, above. Promote keeps
+   * `useApi()` and names each row's own client, as before.
+   */
+  const filters = useUrlFilters(["q", "client"] as const);
+  const { api: narrowed, client, ready } = useNarrowedApi(filters.values.client);
 
   const candidates = useQuery({
-    queryKey: ["asset-candidates"],
-    queryFn: () => api.listAssetCandidates(),
+    queryKey: ["asset-candidates", client],
+    queryFn: () => narrowed.listAssetCandidates(),
+    enabled: ready,
   });
   // Same `["me"]` key the shell already holds, so this is a cache read. The
   // zone is the profile's, not the browser's (cycle 5).
@@ -237,6 +259,15 @@ export function CandidatesPage() {
 
   const data = candidates.data;
   const items = data?.items ?? [];
+  const wanted = filters.values.q.trim().toLowerCase();
+  // The rows the search keeps: by address or by the name a reverse lookup gave.
+  const rows =
+    wanted === ""
+      ? items
+      : items.filter(
+          (candidate) =>
+            candidate.address.toLowerCase().includes(wanted) || (candidate.hostname ?? "").toLowerCase().includes(wanted),
+        );
   const unsweepable = data?.unsweepable_subnets ?? 0;
   // An address more than one client's rows show: those rows say whose they are.
   const seenAt = new Map<string, number>();
@@ -267,18 +298,15 @@ export function CandidatesPage() {
         actions={
           // THE OPERATOR ASKED FOR THIS HERE, and it is the right place: the
           // page that shows what discovery found is the page from which to ask
-          // it to look again. Ungated in the console -- the sweep route is
-          // gated `ipam.sweep.run` server-side, and hiding the button would
-          // only decide WHERE a caller without it learns they cannot, never
-          // whether they may (invariant 6).
-          <Button onClick={() => setScanning(true)}>
-            <Icon name="search" size={14} />
-            <span>{t("devices.candidates.scan")}</span>
-          </Button>
+          // it to look again -- the page's one primary action. Ungated in the
+          // console -- the sweep route is gated `ipam.sweep.run` server-side,
+          // and hiding the button would only decide WHERE a caller without it
+          // learns they cannot, never whether they may (invariant 6).
+          <Btn label={t("devices.candidates.scan")} icon="search" variant="primary" onClick={scan.start} />
         }
       />
 
-      <ScanSubnetDialog open={scanning} onClose={() => setScanning(false)} />
+      <ScanSubnetDialog open={scan.open} onClose={scan.close} />
 
       {/* Above the candidate list on purpose: a suggestion is a question the
           platform has already decided it cannot answer, and it is waiting on a
@@ -362,41 +390,62 @@ export function CandidatesPage() {
       )}
 
       <Panel bare>
-        <FilterBar>
-          <span className="note mono">
-            {data?.truncated
-              ? t("devices.candidates.truncated", { shown: items.length, total: data.total })
-              : t("devices.candidates.count", { count: items.length })}
-          </span>
-          <span className="filter-spacer" />
-          <Button
-            disabled={selected.size === 0 || promote.isPending}
-            onClick={() => promote.mutate()}
-          >
-            <Icon name="plus" size={14} />
-            <span>
-              {promote.isPending
-                ? t("devices.candidates.promoting")
-                : selected.size
-                  ? t("devices.candidates.promoteN", { count: selected.size })
-                  : t("devices.candidates.promote")}
-            </span>
-          </Button>
-        </FilterBar>
-
-        <QueryState
-          loading={candidates.isLoading}
-          error={candidates.error}
-          empty={items.length === 0}
-          emptyLabel={
-            unsweepable > 0
-              ? t("devices.candidates.emptySwept")
-              : t("devices.candidates.emptyAll")
+        <ListToolbar
+          search={
+            <SearchField
+              aria-label={t("devices.candidates.search")}
+              placeholder={t("devices.candidates.search")}
+              maxLength={128}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
           }
-          emptyIcon="network"
+          chips={<ClientFilter filters={filters} />}
+          // The server's total, which the list may stop short of (`truncated`);
+          // nothing before it has answered.
+          end={data ? <ShowingCount shown={rows.length} total={data.total} /> : null}
+        />
+        {/* A /16 sweep observes tens of thousands of addresses: a list that
+            stops short has to say so in words, with what to do about it. */}
+        {data?.truncated ? <p className="note px-4 pt-3">{t("devices.candidates.truncatedHint")}</p> : null}
+        {/* THE SELECTION, in the kit's bulk bar: only with a row ticked, so
+            Promote is never a dead button. One request per client the ticked
+            rows are of, as before. */}
+        <BulkBar
+          count={selected.size}
+          onClear={() => {
+            promote.reset();
+            setSelected(new Map());
+          }}
         >
+          <Btn
+            label={
+              promote.isPending
+                ? t("devices.candidates.promoting")
+                : t("devices.candidates.promoteN", { count: selected.size })
+            }
+            icon="plus"
+            small
+            disabled={promote.isPending}
+            onClick={() => promote.mutate()}
+          />
+        </BulkBar>
+
+        <QueryState loading={candidates.isLoading || !ready} error={candidates.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            /* WHICH EMPTY THIS IS: nothing matches the search or the chip, or
+               nothing is unaccounted for -- on the subnets that were swept, or
+               anywhere. Normally empty is the healthy state: a sweep records
+               what it finds as a device row (see the head of this file). */
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={unsweepable > 0 ? t("devices.candidates.emptySwept") : t("devices.candidates.emptyAll")}
+              icon="network"
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("devices.candidates.title")}>
               <thead>
                 <tr>
                   {/* NAMED "Select", NOT "Actions". This is the LEADING column
@@ -415,7 +464,7 @@ export function CandidatesPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((candidate) => {
+                {rows.map((candidate) => {
                   const seen = evidence(candidate);
                   return (
                     // Keyed by client AND address: two clients' 10.0.0.9
@@ -482,6 +531,7 @@ export function CandidatesPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
       </Panel>
 
