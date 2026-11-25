@@ -100,6 +100,21 @@ export interface FilterChipOption {
   readonly count?: number;
 }
 
+/**
+ * One chip of a filter group, the same for both modes, so the single and the
+ * multi-select rows can never be drawn two ways.
+ */
+function FilterChip({ option, on, onClick }: { option: FilterChipOption; on: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className={on ? "chip on" : "chip"} aria-pressed={on} onClick={onClick}>
+      {/* The second carrier: the selected chip says so by shape too. */}
+      {on ? <Icon name="circle-check" size={13} /> : null}
+      {option.label}
+      {option.count === undefined ? null : <span className="n">{option.count}</span>}
+    </button>
+  );
+}
+
 /** One filter as a row of toggles, each with its count (DESIGN.md v4, "Chips"). */
 export function FilterChips({
   label,
@@ -114,23 +129,89 @@ export function FilterChips({
 }) {
   return (
     <div className="chips" role="group" aria-label={label}>
-      {options.map((option) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value === "" ? "(all)" : option.value}
-            type="button"
-            className={on ? "chip on" : "chip"}
-            aria-pressed={on}
-            onClick={() => onChange(option.value)}
-          >
-            {/* The second carrier: the selected chip says so by shape too. */}
-            {on ? <Icon name="circle-check" size={13} /> : null}
-            {option.label}
-            {option.count === undefined ? null : <span className="n">{option.count}</span>}
-          </button>
-        );
-      })}
+      {options.map((option) => (
+        <FilterChip
+          key={option.value === "" ? "(all)" : option.value}
+          option={option}
+          on={option.value === value}
+          onClick={() => onChange(option.value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A MULTI-SELECT FILTER KEEPS ITS VALUES IN ONE KEY, AS A COMMA LIST (kit
+ * requests batch 1, item 4): `?severity=critical,important`, which
+ * `URLSearchParams` writes encoded (`critical%2Cimportant`) and reads back
+ * either way. One key rather than a repeated one (`?severity=critical&
+ * severity=important`) because `useUrlFilters` holds one string per key: the
+ * list goes through it unchanged, `set` drops `offset` and pushes an entry as
+ * for any chip, and `active` / `clear` count it like any other filter. A
+ * value therefore never contains a comma (the console's filter values are
+ * identifiers and enum names). Absent, or `""`, is every value.
+ *
+ *   const severities = parseUrlList(filters.values.severity);
+ *   <MultiFilterChips values={severities} onChange={(next) => filters.set("severity", formatUrlList(next))} ... />
+ */
+export function parseUrlList(value: string): string[] {
+  return [...new Set(value.split(",").filter((item) => item !== ""))];
+}
+
+/** The URL form of a multi-select filter's values: comma-joined, `""` (no key) for every value. */
+export function formatUrlList(values: readonly string[]): string {
+  return [...new Set(values.filter((item) => item !== ""))].join(",");
+}
+
+/**
+ * FilterChips' MULTI-SELECT MODE (kit requests batch 1, item 4): one filter
+ * that takes several values at once, drawn with `FilterChips`' own chip.
+ *
+ * - Each chip toggles its value; the `""` option is "every value", pressed
+ *   while none is chosen, and pressing it clears the choice.
+ * - The values it hands `onChange` are in the OPTIONS' ORDER, whatever order
+ *   they were pressed in, so one filter has one link (pressing Important then
+ *   Critical writes the same `?severity=critical,important` as the reverse).
+ * - A value it is handed that no option offers (options still loading, an
+ *   older link) is KEPT, after the offered ones, so a click never drops what
+ *   the row cannot show.
+ *
+ * Keep the values in the URL with `parseUrlList` / `formatUrlList`. Single
+ * select stays `FilterChips`.
+ */
+export function MultiFilterChips({
+  label,
+  options,
+  values,
+  onChange,
+}: {
+  label: string;
+  options: readonly FilterChipOption[];
+  values: readonly string[];
+  onChange: (values: string[]) => void;
+}) {
+  const toggle = (value: string) => {
+    if (value === "") return onChange([]);
+    const chosen = new Set(values);
+    if (chosen.has(value)) chosen.delete(value);
+    else chosen.add(value);
+    const offered = options.map((option) => option.value).filter((item) => item !== "");
+    onChange([
+      ...offered.filter((item) => chosen.has(item)),
+      ...values.filter((item) => item !== "" && chosen.has(item) && !offered.includes(item)),
+    ]);
+  };
+  return (
+    <div className="chips" role="group" aria-label={label}>
+      {options.map((option) => (
+        <FilterChip
+          key={option.value === "" ? "(all)" : option.value}
+          option={option}
+          on={option.value === "" ? values.length === 0 : values.includes(option.value)}
+          onClick={() => toggle(option.value)}
+        />
+      ))}
     </div>
   );
 }

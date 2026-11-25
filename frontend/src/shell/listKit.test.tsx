@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState, type ReactElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +21,7 @@ import {
 } from "./listKit";
 // The pieces kit requests batch 1 added, imported through `components.tsx`,
 // the kit's one door, so a piece that is not re-exported there fails here.
-import { useEditParam as useEditParamFromKit } from "./components";
+import { formatUrlList, MultiFilterChips, parseUrlList, useEditParam as useEditParamFromKit } from "./components";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
 const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
@@ -540,5 +542,127 @@ describe("useEditParam (kit requests batch 1, item 6)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Close editor" }));
     expect(router.state.location.search).toBe("?new=policy");
     expect(router.state.historyAction).toBe("PUSH");
+  });
+});
+
+/**
+ * FilterChips' MULTI-SELECT MODE (kit requests batch 1, item 4; O3's K1): one
+ * key, several values, in the URL as a comma list.
+ */
+const SEVERITY_OPTIONS = [
+  { value: "", label: "All severities", count: 40 },
+  { value: "critical", label: "Critical", count: 3 },
+  { value: "important", label: "Important", count: 12 },
+  { value: "low", label: "Low" },
+] as const;
+
+function Severities() {
+  const filters = useUrlFilters(["severity"] as const);
+  return (
+    <MultiFilterChips
+      label="Severity"
+      options={SEVERITY_OPTIONS}
+      values={parseUrlList(filters.values.severity)}
+      onChange={(values) => filters.set("severity", formatUrlList(values))}
+    />
+  );
+}
+
+const pressed = (name: RegExp) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
+
+/** The kit bench's source, where `a11y-browser.mjs` measures every visual piece of the kit. */
+const PREVIEW = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+/** The JSX element `<Name ...>` in the bench, from its opening to the end of its props. */
+function benchElement(name: string): string {
+  const at = PREVIEW.search(new RegExp(`<${name}\\s`));
+  return at === -1 ? "" : PREVIEW.slice(at, PREVIEW.indexOf(">", PREVIEW.indexOf("onChange", at)));
+}
+
+describe("MultiFilterChips (kit requests batch 1, item 4)", () => {
+  it("reads several values from one key, so a filtered view is still a link", () => {
+    renderPage("/patch?severity=critical,important", <Severities />);
+    expect(screen.getByRole("group", { name: "Severity" })).toBeInTheDocument();
+    expect(pressed(/Critical/)).toBe("true");
+    expect(pressed(/Important/)).toBe("true");
+    expect(pressed(/Low/)).toBe("false");
+    expect(pressed(/All severities/)).toBe("false");
+  });
+
+  it("is every value by default: no key in the URL, and the all chip pressed", () => {
+    renderPage("/patch", <Severities />);
+    expect(pressed(/All severities/)).toBe("true");
+    expect(pressed(/Critical/)).toBe("false");
+  });
+
+  it("adds a value per chip, written in the options' order whatever order they were pressed in", async () => {
+    const { router } = renderPage("/patch", <Severities />);
+    await userEvent.click(screen.getByRole("button", { name: /Important/ }));
+    expect(new URLSearchParams(router.state.location.search).get("severity")).toBe("important");
+    await userEvent.click(screen.getByRole("button", { name: /Critical/ }));
+    // One filter, one link: Critical then Important is the same URL as Important then Critical.
+    expect(new URLSearchParams(router.state.location.search).get("severity")).toBe("critical,important");
+    expect(router.state.historyAction).toBe("PUSH");
+  });
+
+  it("takes a pressed value out, and the last one out is every value again, which writes nothing", async () => {
+    const { router } = renderPage("/patch?severity=critical,low", <Severities />);
+    await userEvent.click(screen.getByRole("button", { name: /Low/ }));
+    expect(new URLSearchParams(router.state.location.search).get("severity")).toBe("critical");
+    await userEvent.click(screen.getByRole("button", { name: /Critical/ }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("clears every value from the all chip", async () => {
+    const { router } = renderPage("/patch?severity=critical,low&offset=50", <Severities />);
+    await userEvent.click(screen.getByRole("button", { name: /All severities/ }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("keeps a value the URL holds that it does not offer, so a click never drops what it cannot show", async () => {
+    const { router } = renderPage("/patch?severity=moderate", <Severities />);
+    await userEvent.click(screen.getByRole("button", { name: /Critical/ }));
+    expect(new URLSearchParams(router.state.location.search).get("severity")).toBe("critical,moderate");
+  });
+
+  it("draws FilterChips' own chip: a count only where the caller has one, the mark on a chosen one", () => {
+    renderPage("/patch?severity=critical", <Severities />);
+    expect(screen.getByRole("button", { name: /Important\s*12/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Low" })).toBeInTheDocument();
+    const critical = screen.getByRole("button", { name: /Critical/ });
+    expect(critical).toHaveClass("chip", "on");
+    // The second carrier: the chosen chip says so by shape as well as colour.
+    expect(critical.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Important/ }).querySelector("svg")).toBeNull();
+  });
+
+  it("is on /__preview with a chosen value, so the browser's a11y pass measures it", () => {
+    const element = benchElement("MultiFilterChips");
+    expect(element).not.toBe("");
+    expect(element).toMatch(/values=\{/);
+  });
+
+  it("lets Back undo a chip", async () => {
+    const { router } = renderPage("/patch", <Severities />);
+    await userEvent.click(screen.getByRole("button", { name: /Critical/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Low/ }));
+    await act(() => router.navigate(-1));
+    expect(new URLSearchParams(router.state.location.search).get("severity")).toBe("critical");
+  });
+});
+
+describe("the comma list a multi-select filter keeps in the URL", () => {
+  it("reads an absent or empty key as every value", () => {
+    expect(parseUrlList("")).toEqual([]);
+  });
+
+  it("splits on commas, dropping empty pieces and repeats", () => {
+    expect(parseUrlList("critical,important")).toEqual(["critical", "important"]);
+    expect(parseUrlList("critical,,important,critical,")).toEqual(["critical", "important"]);
+  });
+
+  it("joins with commas, and every value is the empty string, which useUrlFilters writes as no key", () => {
+    expect(formatUrlList(["critical", "important"])).toBe("critical,important");
+    expect(formatUrlList([])).toBe("");
+    expect(formatUrlList(["low", "low", ""])).toBe("low");
   });
 });

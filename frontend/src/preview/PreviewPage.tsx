@@ -62,6 +62,7 @@ import {
   FormSection,
   ListEmpty,
   ListToolbar,
+  MultiFilterChips,
   PageHead,
   Pager,
   Panel,
@@ -1012,7 +1013,8 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
  * THE PATTERN KIT (redesign plan, Task 3; DESIGN.md v4, "Lists", "Records",
  * "Forms"): every piece a list, a record or a form is built from, on the one
  * page the browser pass measures, each in the state that paints something the
- * others do not -- a selected chip with its count, a selection, both empty
+ * others do not -- a selected chip with its count, a multi-select row with two
+ * values chosen, a selection, both empty
  * states, a status beside a record's context, a tab strip, an open section,
  * the save bar with a change, failed, not allowed and saved. Three sections,
  * each drawn the way its pages draw it (critique answer 1): no card inside a
@@ -1031,6 +1033,7 @@ const KIT_TAB_LABEL: Record<(typeof KIT_TABS)[number], string> = {
 
 function KitPreview() {
   const [state, setState] = useState("online");
+  const [severities, setSeverities] = useState<string[]>(["critical", "important"]);
   const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
   return (
     <>
@@ -1040,16 +1043,30 @@ function KitPreview() {
         <ListToolbar
           search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
           chips={
-            <FilterChips
-              label="State"
-              options={[
-                { value: "", label: "All", count: 12 },
-                { value: "online", label: "Online", count: 9 },
-                { value: "offline", label: "Offline" },
-              ]}
-              value={state}
-              onChange={setState}
-            />
+            <>
+              <FilterChips
+                label="State"
+                options={[
+                  { value: "", label: "All", count: 12 },
+                  { value: "online", label: "Online", count: 9 },
+                  { value: "offline", label: "Offline" },
+                ]}
+                value={state}
+                onChange={setState}
+              />
+              {/* FilterChips' multi-select mode (kit requests batch 1, item 4). */}
+              <MultiFilterChips
+                label="Severity"
+                options={[
+                  { value: "", label: "All severities", count: 40 },
+                  { value: "critical", label: "Critical", count: 3 },
+                  { value: "important", label: "Important", count: 12 },
+                  { value: "low", label: "Low", count: 25 },
+                ]}
+                values={severities}
+                onChange={setSeverities}
+              />
+            </>
           }
           end={<ShowingCount shown={9} total={12} />}
         />
