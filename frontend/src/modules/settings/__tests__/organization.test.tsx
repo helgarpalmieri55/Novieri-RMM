@@ -136,7 +136,7 @@ describe("Settings — Organization tab", () => {
     expect(screen.queryByDisplayValue("dmy")).not.toBeInTheDocument();
 
     await user.click(within(group).getByRole("button", { name: /Year-month-day/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateCurrentOrg).toHaveBeenCalledTimes(1));
     expect(calls.updateCurrentOrg.mock.calls[0]?.[0]?.settings?.date_format).toBe("iso");
@@ -203,7 +203,7 @@ describe("Settings — Organization tab", () => {
     // from — no optimistic anything.
     calls.getCurrentOrg.mockResolvedValue({ ...ORG_FIXTURE, name: "Toeshee Holdings" });
     calls.updateCurrentOrg.mockResolvedValue({ ...ORG_FIXTURE, name: "Toeshee Holdings" });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await confirmRename(user);
 
     await screen.findByRole("status");
@@ -234,7 +234,7 @@ describe("Settings — Organization tab", () => {
     calls.updateCurrentOrg.mockRejectedValue(
       new ApiError(400, JSON.stringify({ detail: "name may not contain '!'" })),
     );
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await confirmRename(user);
 
     const alert = await screen.findByRole("alert");
@@ -273,7 +273,11 @@ describe("Settings — Organization tab", () => {
     const name = await loadedForm();
     expect(name).toBeDisabled();
     expect(screen.getByLabelText("Default timezone")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22: the kit's `SaveBar`): the reason is a
+    // notice above the form, and there is no bar and no Save, because a person
+    // who cannot edit makes no change to save.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
     expect(screen.getByText(/requires the orgs\.manage permission/i)).toBeInTheDocument();
   });
 
@@ -286,7 +290,9 @@ describe("Settings — Organization tab", () => {
     const name = screen.getByLabelText<HTMLInputElement>("Organization name");
     expect(name).toBeDisabled();
     expect(name.value).toBe("");
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    // RE-POINTED (decision D22): no Save at all rather than a disabled one;
+    // nothing can be typed, so there is never a change for the bar to offer.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
   // ----------------------------------------------------------------------
@@ -313,7 +319,7 @@ describe("Settings — Organization tab", () => {
 
     await user.clear(name);
     await user.type(name, "Toeshee Holdings");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("dialog");
     // The SUBJECT is what lets somebody notice they are renaming the wrong
@@ -341,17 +347,19 @@ describe("Settings — Organization tab", () => {
     renderSettings();
     const name = await loadedForm();
 
-    expect(screen.queryByText(/unsaved changes on this tab/i)).not.toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): the indicator is the kit's bar,
+    // "Unsaved changes", which replaced this tab's own line.
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
     await user.type(name, " Holdings");
-    expect(screen.getByText(/unsaved changes on this tab/i)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
 
     calls.getCurrentOrg.mockResolvedValue({ ...ORG_FIXTURE, name: "Toeshee Group Holdings" });
     calls.updateCurrentOrg.mockResolvedValue({ ...ORG_FIXTURE, name: "Toeshee Group Holdings" });
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await confirmRename(user);
 
     await screen.findByRole("status");
-    expect(screen.queryByText(/unsaved changes on this tab/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
   });
 
   it("does not ask when only a settings key changed — the modal is for identity", async () => {
@@ -364,7 +372,7 @@ describe("Settings — Organization tab", () => {
     const retention = screen.getByLabelText<HTMLInputElement>("Evidence retention days");
     await user.clear(retention);
     await user.type(retention, "400");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(patches()).toHaveLength(1));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -379,7 +387,7 @@ describe("Settings — Organization tab", () => {
     const name = await loadedForm();
 
     await user.clear(name);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Organization name is required");
     expect(patches()).toEqual([]);
@@ -397,7 +405,7 @@ describe("Settings — Organization tab", () => {
 
     await user.clear(retention);
     await user.type(retention, "-5");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "evidence_retention_days cannot be negative",
@@ -448,17 +456,20 @@ describe("Settings — Organization tab", () => {
     expect(body.name).toBe("Toeshee Holdings");
   });
 
-  it("says there is nothing to save rather than going dead on an untouched form", async () => {
-    // The other silent no-op: SaveBar disabled the button whenever the form was
-    // clean, which reads as "this page is broken", not "you changed nothing".
+  it("offers no Save on an untouched form, and sends nothing", async () => {
+    // Redesign decision D22: with no change there is no bar to press, which is how the kit avoids a dead control; requireDirty={false} went with the settings module's own SaveBar (deleted).
+    // (This replaced "says there is nothing to save rather than going dead on
+    // an untouched form": the dead control it guarded against cannot exist.)
     const user = userEvent.setup();
     renderSettings();
-    await loadedForm();
+    const name = await loadedForm();
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("There are no unsaved changes");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // Enter in the untouched form writes nothing either: no change, no audit entry.
+    await user.type(name, "{Enter}");
     expect(patches()).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("lets the field pair fold to one column instead of holding two at any width", async () => {
@@ -503,10 +514,66 @@ describe("Settings — Organization tab", () => {
     const retention = screen.getByLabelText<HTMLInputElement>("Evidence retention days");
     await user.clear(retention);
     await user.type(retention, "400");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateCurrentOrg).toHaveBeenCalledTimes(1));
     const body = calls.updateCurrentOrg.mock.calls[0]?.[0] as { settings?: Record<string, unknown> };
     expect(body.settings?.evidence_retention_days).toBe(400);
     expect(body.settings).not.toHaveProperty("mcp_enabled");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The form pattern (redesign plan, Task 12, 7.1; Receta FO; decisions D16 and
+// D22): one bar, drawn only with a change; Discard puts the form back; leaving
+// with a change asks, and so does switching tab, because in Settings the tab
+// IS the form being edited (`UnsavedGuard search={["tab"]}`).
+// ---------------------------------------------------------------------------
+
+describe("Settings — Organization on the form pattern", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await screen.findByLabelText("Default timezone");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await user.type(screen.getByLabelText("Organization name"), "x");
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("Organization name")).toHaveValue(ORG_FIXTURE.name);
+  });
+
+  it("asks before leaving with an unsaved organization name", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings();
+    await screen.findByLabelText("Default timezone");
+    await user.type(screen.getByLabelText("Organization name"), " Holdings");
+    // Leaving is a change of path (the shell's rail, a link elsewhere).
+    void router.navigate("/devices");
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings");
+  });
+
+  it("switching tab with an unsaved change asks first", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings();
+    await screen.findByLabelText("Default timezone");
+    await user.type(screen.getByLabelText("Organization name"), " Holdings");
+    await user.click(screen.getByRole("tab", { name: "Roles" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave without saving?" });
+    expect(router.state.location.search).toBe("");
+    expect(screen.getByRole("tab", { name: "Organization" })).toHaveAttribute("aria-selected", "true");
+    // Leaving drops the change and opens the tab asked for.
+    await user.click(within(dialog).getByRole("button", { name: "Leave without saving" }));
+    expect(router.state.location.search).toBe("?tab=roles");
+    expect(await screen.findByRole("tab", { name: "Roles" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("switches tab without asking when nothing changed", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings();
+    await screen.findByLabelText("Default timezone");
+    await user.click(screen.getByRole("tab", { name: "Roles" }));
+    expect(router.state.location.search).toBe("?tab=roles");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 });

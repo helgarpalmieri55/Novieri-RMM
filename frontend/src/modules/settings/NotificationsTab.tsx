@@ -13,6 +13,12 @@
 // does with an omitted `secret`, not a UI convention. The rendered state of a
 // credential on this page is the word "stored"/"none", forever.
 //
+// A CHANNEL IS EDITED IN ITS OWN DIALOG (redesign plan, Task 12, 7.1): its
+// name, whether it is active and, for a webhook, a new token, saved when the
+// dialog is confirmed. The table only lists. The rule switches keep saving on
+// the click, as they always did. No `SaveBar` on this tab: nothing here is a
+// form left half-saved on the page.
+//
 // A rule's event type, channel, recipient kind and queue are IMMUTABLE after
 // creation (`RuleUpdate` carries `active` only) — they together define what
 // the rule routes. So the rules table toggles `active` and nothing else, and a
@@ -26,12 +32,12 @@ import { Link } from "react-router-dom";
 import { describeSubmitError } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import type { PickerOption } from "../../components/picker";
-import { Badge, Button, Field, Table, Td, Th, inputClass } from "../../components/ui";
+import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { lazyFields } from "../../i18n/lazy";
 import { Trans } from "../../i18n/Trans";
 import { humaniseStatus } from "../../lib/labels";
-import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
+import { Btn, FieldGroup, KIND_ICON, Panel, QueryState, UnsavedGuard } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
 import {
@@ -59,6 +65,7 @@ import {
 } from "./api";
 import { isForbidden } from "./settingsState";
 import { FOLDING_FORM_GRID } from "./formGrid";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
 
 export const NOTIFICATION_READ = "notification.read";
 export const NOTIFICATION_ADMIN = "notification.admin";
@@ -115,6 +122,11 @@ interface ChannelEdit {
   secret: string;
 }
 
+/** The dialog's starting point: the channel as the server holds it, and no token. */
+function editOf(channel: ChannelOut): ChannelEdit {
+  return { name: channel.name, active: channel.active, secret: "" };
+}
+
 export function NotificationsTab({
   canRead,
   canAdmin,
@@ -133,7 +145,8 @@ export function NotificationsTab({
   const createRule = useCreateRuleMutation();
   const updateRule = useUpdateRuleMutation();
 
-  const [edits, setEdits] = useState<Record<string, ChannelEdit>>({});
+  // The channel open in the edit dialog, and what its fields hold.
+  const [editing, setEditing] = useState<{ channel: ChannelOut; edit: ChannelEdit } | null>(null);
   const [targetChannelId, setTargetChannelId] = useState<string | null>(null);
   const [testedChannelId, setTestedChannelId] = useState<string | null>(null);
 
@@ -170,22 +183,25 @@ export function NotificationsTab({
     ...(queues.data ?? []).map((queue) => ({ id: queue.id, label: queue.name, sublabel: queue.key })),
   ];
 
-  function editFor(channel: ChannelOut): ChannelEdit {
-    return edits[channel.id] ?? { name: channel.name, active: channel.active, secret: "" };
-  }
-
-  function setEdit(channel: ChannelOut, patch: Partial<ChannelEdit>) {
-    setEdits((current) => ({ ...current, [channel.id]: { ...editFor(channel), ...patch } }));
-  }
-
-  function channelDirty(channel: ChannelOut): boolean {
-    const edit = edits[channel.id];
-    if (!edit) return false;
+  function channelDirty(): boolean {
+    if (!editing) return false;
+    const { channel, edit } = editing;
     return edit.name !== channel.name || edit.active !== channel.active || edit.secret !== "";
   }
 
-  function saveChannel(channel: ChannelOut) {
-    const edit = editFor(channel);
+  function openChannel(channel: ChannelOut) {
+    updateChannel.reset();
+    setTargetChannelId(channel.id);
+    setEditing({ channel, edit: editOf(channel) });
+  }
+
+  function setEdit(patch: Partial<ChannelEdit>) {
+    setEditing((current) => (current ? { ...current, edit: { ...current.edit, ...patch } } : current));
+  }
+
+  function saveChannel() {
+    if (!editing) return;
+    const { channel, edit } = editing;
     setTargetChannelId(channel.id);
     updateChannel.mutate(
       {
@@ -199,15 +215,9 @@ export function NotificationsTab({
         },
       },
       {
-        onSuccess: () => {
-          // Drop the local edit so the row re-seeds from the server's answer,
-          // and the secret box empties.
-          setEdits((current) => {
-            const next = { ...current };
-            delete next[channel.id];
-            return next;
-          });
-        },
+        // The dialog closes on the server's answer, and the token it held goes
+        // with it; the row re-reads the channel the server stored.
+        onSuccess: () => setEditing(null),
       },
     );
   }
@@ -284,6 +294,10 @@ export function NotificationsTab({
 
   return (
     <>
+      {/* ONE GUARD FOR THE TAB (decision D16): a channel's dialog holding a
+          change asks before the tab, or the page, is left. */}
+      <UnsavedGuard dirty={channelDirty()} search={["tab"]} />
+      {!canAdmin && !forbidden ? <ReadOnlyNotice reason={reason} /> : null}
       <Panel
         title={t("settings.notifications.channels.title")}
         subtitle={t("settings.notifications.channels.subtitle")}
@@ -294,174 +308,174 @@ export function NotificationsTab({
             {t("settings.notifications.channels.forbidden", { code: NOTIFICATION_READ })}
           </p>
         ) : (
-          <>
-            {!canAdmin ? (
-              <p className="note" style={UNDER_TABLE}>{reason}</p>
-            ) : null}
-            {/* The design's three states. "No channel is configured" and "the
-                notification service is down" mean very different things to
-                someone about to rely on an alert reaching them. */}
-            <QueryState
-              loading={channels.isLoading}
-              error={failed ? channels.error : null}
-              empty={(channels.data ?? []).length === 0}
-              emptyIcon="bell"
-              emptyLabel={t("settings.notifications.channels.empty")}
-            >
-              <Table>
-                <thead>
-                  <tr>
-                    {/* Review finding: at 390px this cell's `<input>` measured
-                        24px wide against 125-147px of channel names, so three
-                        channels rendered as three empty boxes. The table is
-                        auto-layout (`Th`'s own doc), so this is a floor the
-                        column may exceed, never a cap -- the same fix
-                        `AddressGrid.tsx`'s `Hostname` column already uses for
-                        an identical text input in a narrow cell. 200px is
-                        measured, not guessed: a canvas `measureText` at the
-                        panel's own 13.5px font against the longest fixture
-                        name ("Helpdesk mail relay") clears it with margin, at
-                        both 390 and 1440 (verified with Playwright against
-                        `?__fixtures` -- jsdom has no layout to check this
-                        against). */}
-                    <Th width={200}>{t("settings.notifications.channels.columns.name")}</Th>
-                    <Th>{t("settings.notifications.channels.columns.kind")}</Th>
-                    <Th>{t("settings.notifications.channels.columns.credential")}</Th>
-                    <Th>{t("settings.notifications.channels.columns.active")}</Th>
-                    {/* At 1440px the box was 183px and "Leave blank to keep
-                        the current one" (the placeholder
-                        `docs/design/settings-language.md`'s Notifications
-                        rewrite section names verbatim) rendered truncated as
-                        "Leave blank to keep the c". The box earns its width
-                        instead of the placeholder losing its words -- 280px,
-                        the same measured-not-guessed floor as Name above,
-                        chosen so the table's total width lands exactly at the
-                        panel's own width at 1440 (no new horizontal scroll
-                        introduced there) while still clearing 390 with the
-                        panel's built-in "scroll for more columns" hint doing
-                        the rest. */}
-                    <Th width={280}>{t("settings.notifications.channels.columns.newToken")}</Th>
-                    <Th>{""}</Th>
+          // The design's three states. "No channel is configured" and "the
+          // notification service is down" mean very different things to
+          // someone about to rely on an alert reaching them.
+          <QueryState
+            loading={channels.isLoading}
+            error={failed ? channels.error : null}
+            empty={(channels.data ?? []).length === 0}
+            emptyIcon="bell"
+            emptyLabel={t("settings.notifications.channels.empty")}
+          >
+            <Table label={t("settings.notifications.channels.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("settings.notifications.channels.columns.name")}</Th>
+                  <Th>{t("settings.notifications.channels.columns.kind")}</Th>
+                  <Th>{t("settings.notifications.channels.columns.credential")}</Th>
+                  <Th>{t("settings.notifications.channels.columns.active")}</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {(channels.data ?? []).map((channel) => (
+                  <tr key={channel.id}>
+                    <Td lead={<Icon name={channel.kind === "email" ? "mail" : "link"} size={18} />}>
+                      <div className="cell-title">{channel.name}</div>
+                    </Td>
+                    <Td>{channelKindLabel(channel.kind)}</Td>
+                    <Td>
+                      {/* Invariant 3: existence only, never the credential. */}
+                      <Badge variant={channel.has_credential ? "success" : "muted"}>
+                        {channel.has_credential ? t("settings.notifications.channels.storedInVault") : t("settings.notifications.channels.noCredential")}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      <Badge variant={channel.active ? "success" : "muted"}>
+                        {channel.active ? t("settings.notifications.channels.active") : t("settings.notifications.channels.inactive")}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Btn
+                          small
+                          label={t("settings.notifications.channels.edit")}
+                          ariaLabel={t("settings.notifications.channels.editAria", { name: channel.name })}
+                          // Disabled for "you may not", with the reason in
+                          // the notice above the table.
+                          disabled={!canAdmin}
+                          onClick={() => openChannel(channel)}
+                        />
+                        <Button
+                          variant="outline"
+                          disabled={!canAdmin || testChannel.isPending}
+                          onClick={() => {
+                            setTestedChannelId(channel.id);
+                            testChannel.mutate(channel.id);
+                          }}
+                        >
+                          {t("settings.notifications.channels.sendTest")}
+                        </Button>
+                      </div>
+                      {targetChannelId === channel.id && updateChannel.isSuccess && editing == null ? (
+                        <p role="status" className="form-saved" style={{ marginTop: 4 }}>
+                          <Icon name={KIND_ICON.ok} size={13} /> {t("settings.notifications.channels.saved")}
+                        </p>
+                      ) : null}
+                      {testedChannelId === channel.id && testChannel.isSuccess ? (
+                        <p
+                          role="status"
+                          className={testChannel.data.delivered ? "form-saved" : "form-error"}
+                          style={{ marginTop: 4 }}
+                        >
+                          <Icon name={testChannel.data.delivered ? KIND_ICON.ok : KIND_ICON.crit} size={13} />{" "}
+                          {testChannel.data.delivered
+                            ? t("settings.notifications.channels.testDelivered", {
+                                code: testChannel.data.status_code ?? "ok",
+                              })
+                            : t("settings.notifications.channels.testNotDelivered", {
+                                reason: deliveryErrorMessage(testChannel.data.error),
+                              })}
+                        </p>
+                      ) : null}
+                      {testedChannelId === channel.id && testChannel.isError ? (
+                        <p role="alert" className="form-error" style={{ marginTop: 4 }}>
+                          <Icon name={KIND_ICON.crit} size={13} />{" "}
+                          {describeSubmitError(testChannel.error)}
+                        </p>
+                      ) : null}
+                    </Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(channels.data ?? []).map((channel) => {
-                    const edit = editFor(channel);
-                    return (
-                      <tr key={channel.id}>
-                        <Td lead={<Icon name={channel.kind === "email" ? "mail" : "link"} size={18} />}>
-                          <input
-                            aria-label={t("settings.notifications.channels.nameAria", { name: channel.name })}
-                            className={inputClass}
-                            value={edit.name}
-                            disabled={!canAdmin}
-                            onChange={(event) => setEdit(channel, { name: event.target.value })}
-                          />
-                        </Td>
-                        <Td>{channelKindLabel(channel.kind)}</Td>
-                        <Td>
-                          {/* Invariant 3: existence only, never the credential. */}
-                          <Badge variant={channel.has_credential ? "success" : "muted"}>
-                            {channel.has_credential ? t("settings.notifications.channels.storedInVault") : t("settings.notifications.channels.noCredential")}
-                          </Badge>
-                        </Td>
-                        <Td>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              aria-label={t("settings.notifications.channels.activeAria", { name: channel.name })}
-                              checked={edit.active}
-                              disabled={!canAdmin}
-                              onChange={(event) =>
-                                setEdit(channel, { active: event.target.checked })
-                              }
-                            />
-                            {edit.active ? t("settings.notifications.channels.active") : t("settings.notifications.channels.inactive")}
-                          </label>
-                        </Td>
-                        <Td>
-                          {channel.kind === "webhook" ? (
-                            <input
-                              type="password"
-                              aria-label={t("settings.notifications.channels.tokenAria", { name: channel.name })}
-                              placeholder={t("settings.notifications.channels.tokenPlaceholder")}
-                              className={inputClass}
-                              value={edit.secret}
-                              disabled={!canAdmin}
-                              onChange={(event) => setEdit(channel, { secret: event.target.value })}
-                            />
-                          ) : (
-                            // A mail sign-in is more than one value; it is
-                            // edited where all of them are.
-                            <span className="form-hint">{t("settings.notifications.channels.mailHint")}</span>
-                          )}
-                        </Td>
-                        <Td>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              disabled={
-                                !canAdmin || !channelDirty(channel) || updateChannel.isPending
-                              }
-                              onClick={() => saveChannel(channel)}
-                            >
-                              {t("common.actions.save")}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              disabled={!canAdmin || testChannel.isPending}
-                              onClick={() => {
-                                setTestedChannelId(channel.id);
-                                testChannel.mutate(channel.id);
-                              }}
-                            >
-                              {t("settings.notifications.channels.sendTest")}
-                            </Button>
-                          </div>
-                          {targetChannelId === channel.id && updateChannel.isError ? (
-                            <p role="alert" className="form-error" style={{ marginTop: 4 }}>
-                              <Icon name={KIND_ICON.crit} size={13} />{" "}
-                              {describeSubmitError(updateChannel.error)}
-                            </p>
-                          ) : null}
-                          {targetChannelId === channel.id &&
-                          updateChannel.isSuccess &&
-                          !channelDirty(channel) ? (
-                            <p role="status" className="form-saved" style={{ marginTop: 4 }}>
-                              <Icon name={KIND_ICON.ok} size={13} /> {t("settings.notifications.channels.saved")}
-                            </p>
-                          ) : null}
-                          {testedChannelId === channel.id && testChannel.isSuccess ? (
-                            <p
-                              role="status"
-                              className={testChannel.data.delivered ? "form-saved" : "form-error"}
-                              style={{ marginTop: 4 }}
-                            >
-                              <Icon name={testChannel.data.delivered ? KIND_ICON.ok : KIND_ICON.crit} size={13} />{" "}
-                              {testChannel.data.delivered
-                                ? t("settings.notifications.channels.testDelivered", {
-                                    code: testChannel.data.status_code ?? "ok",
-                                  })
-                                : t("settings.notifications.channels.testNotDelivered", {
-                                    reason: deliveryErrorMessage(testChannel.data.error),
-                                  })}
-                            </p>
-                          ) : null}
-                          {testedChannelId === channel.id && testChannel.isError ? (
-                            <p role="alert" className="form-error" style={{ marginTop: 4 }}>
-                              <Icon name={KIND_ICON.crit} size={13} />{" "}
-                              {describeSubmitError(testChannel.error)}
-                            </p>
-                          ) : null}
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            </QueryState>
-          </>
+                ))}
+              </tbody>
+            </Table>
+          </QueryState>
         )}
       </Panel>
+
+      {/* THE CHANNEL'S EDITOR: its name, whether it is active and, for a
+          webhook, a new token, saved when the dialog is confirmed. The
+          accessible names keep the channel's name ("Name for Ops chat"), so a
+          screen reader hears which channel each box belongs to. */}
+      <Dialog
+        open={editing != null}
+        onClose={() => setEditing(null)}
+        title={t("settings.notifications.channels.editTitle", { name: editing?.channel.name ?? "" })}
+      >
+        {editing ? (
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveChannel();
+            }}
+          >
+            <div className="form-grid">
+              <Field label={t("settings.notifications.channels.columns.name")}>
+                <input
+                  aria-label={t("settings.notifications.channels.nameAria", { name: editing.channel.name })}
+                  className={inputClass}
+                  value={editing.edit.name}
+                  onChange={(event) => setEdit({ name: event.target.value })}
+                />
+              </Field>
+              <div className="field">
+                <label className="flex items-center gap-2" style={{ marginTop: 22 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={t("settings.notifications.channels.activeAria", { name: editing.channel.name })}
+                    checked={editing.edit.active}
+                    onChange={(event) => setEdit({ active: event.target.checked })}
+                  />
+                  {t("settings.notifications.channels.columns.active")}
+                </label>
+              </div>
+              {editing.channel.kind === "webhook" ? (
+                <Field label={t("settings.notifications.channels.columns.newToken")} full>
+                  <input
+                    type="password"
+                    aria-label={t("settings.notifications.channels.tokenAria", { name: editing.channel.name })}
+                    placeholder={t("settings.notifications.channels.tokenPlaceholder")}
+                    className={inputClass}
+                    value={editing.edit.secret}
+                    autoComplete="new-password"
+                    onChange={(event) => setEdit({ secret: event.target.value })}
+                  />
+                </Field>
+              ) : (
+                // A mail sign-in is more than one value; it is edited where
+                // all of them are.
+                <p className="form-hint full">{t("settings.notifications.channels.mailHint")}</p>
+              )}
+            </div>
+            {updateChannel.isError ? (
+              <p role="alert" className="form-error" style={{ marginTop: 10 }}>
+                <Icon name={KIND_ICON.crit} size={13} /> {describeSubmitError(updateChannel.error)}
+              </p>
+            ) : null}
+            <div className="form-actions">
+              <Btn
+                type="submit"
+                variant="primary"
+                label={updateChannel.isPending ? t("settings.notifications.channels.saving") : t("common.actions.save")}
+                disabled={updateChannel.isPending}
+              />
+              <Btn label={t("common.actions.cancel")} onClick={() => setEditing(null)} />
+            </div>
+          </form>
+        ) : null}
+      </Dialog>
 
       {canRead ? (
         <Panel title={t("settings.notifications.add.title")} subtitle={t("settings.notifications.add.subtitle")}>

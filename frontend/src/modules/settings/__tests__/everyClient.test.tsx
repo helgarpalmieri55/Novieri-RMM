@@ -46,11 +46,12 @@ describe("Settings: configuration every client shares (phase 3 design §2)", () 
     holdOnSomeClients();
     renderSettings("/settings?tab=users");
     expect(await screen.findByRole("row", { name: /casey@example\.com/ })).toBeInTheDocument();
-    // RE-POINTED (own authentication design §7): "Create user" is "Send invitation".
-    expect(screen.getByRole("button", { name: "Send invitation" })).toBeDisabled();
-    // "Send invitation" is also disabled while the email is empty, for anyone:
-    // the field itself is what only `users.manage` on every client unlocks.
-    expect(screen.getByLabelText("Email")).toBeDisabled();
+    // RE-POINTED (own authentication design §7): "Create user" is "Send
+    // invitation"; and again (redesign plan, Task 12, 7.1): the invitation is
+    // a dialog, opened by "Invite a person", which only `users.manage` on
+    // every client unlocks; the reason is the notice above the list.
+    expect(screen.getByRole("button", { name: "Invite a person" })).toBeDisabled();
+    expect(screen.getByText(/requires the users\.manage permission on every client/)).toBeInTheDocument();
   });
 
   it("still offers and reads the Email tab for orgs.manage on some clients, read-only", async () => {

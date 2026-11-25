@@ -130,7 +130,7 @@ describe("Settings — every failure is said, once, in one voice", () => {
     await user.type(currency, "COP");
     calls.updateBudgetSettings.mockRejectedValue(new ApiError(503, ""));
 
-    await user.click(screen.getByRole("button", { name: "Save budget settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent?.trim().length ?? 0).toBeGreaterThan(20);
@@ -176,7 +176,7 @@ describe("Settings — every failure is said, once, in one voice", () => {
       ),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save budget settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     // The FIELD is named, in the user's words, and BOTH problems are listed —

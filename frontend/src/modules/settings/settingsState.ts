@@ -20,7 +20,7 @@
 // is diagnostic, not actionable, and one product speaking one way about
 // failure was the point of the cycle.
 
-import type { Attempt } from "../../components/form";
+import type { Attempt, Problem } from "../../components/form";
 import { translate, type MessageKey } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
 
@@ -80,4 +80,13 @@ export function parseIntegerField(raw: string): number | null {
  */
 export function refusal(name: string, key: MessageKey): Attempt {
   return { rules: () => [{ name, label: name, validate: () => translate(key) }], values: { [name]: "x" } };
+}
+
+/**
+ * A sentence of this module's catalogue as one of the kit `SaveBar`'s
+ * `problems`. The bar joins the problems with ". " and closes them with its
+ * own full stop, so the sentence's is dropped here rather than doubled.
+ */
+export function sentenceProblem(name: string, sentence: string): Problem {
+  return { name, message: sentence.replace(/\.\s*$/, "") };
 }

@@ -12,8 +12,9 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import type { ReactElement } from "react";
 import type { RenderResult } from "@testing-library/react";
-import { MemoryRouter, useLocation, type Location } from "react-router-dom";
+import { createMemoryRouter, RouterProvider, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../../lib/api";
@@ -719,21 +720,9 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
  * URL, and a tab held in React state is not one), but it still talks to the
  * same `/me` endpoint through the same client, so it keeps using this harness
  * rather than growing a second one to maintain in step. */
-export function renderProfilePage(): RenderResult {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <ProfilePage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+export function renderProfilePage(): HarnessRender {
+  return renderUnderDataRouter("/profile", <ProfilePage />);
 }
-
-/** A render, and the QueryClient it ran against, for asserting what the caches still hold. */
-export type HarnessRender = RenderResult & { queryClient: QueryClient };
 
 /**
  * Everything TanStack's mutation cache still holds -- each mutation's answer
@@ -753,20 +742,7 @@ export function mutationCacheText(queryClient: QueryClient): string {
 
 /** Your security (`/profile/security`), with the same mocked API surface. */
 export function renderSecurityPage(): HarnessRender {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return {
-    ...render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/profile/security"]}>
-          <SecurityPage />
-          <LocationProbe />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    ),
-    queryClient,
-  };
+  return renderUnderDataRouter("/profile/security", <SecurityPage />);
 }
 
 /**
@@ -785,19 +761,47 @@ function LocationProbe() {
  * otherwise (`/settings?tab=users`): the active tab lives in `?tab=`.
  */
 export function renderSettings(path = "/settings"): HarnessRender {
+  return renderUnderDataRouter(path, <SettingsPage />);
+}
+
+/** A render, its QueryClient, and the data router it ran under. */
+export type HarnessRender = RenderResult & {
+  queryClient: QueryClient;
+  router: ReturnType<typeof createMemoryRouter>;
+};
+
+/**
+ * A page under a DATA router (redesign, Receta FO): the kit's `UnsavedGuard`
+ * blocks a navigation only under one, so "switching tab with an unsaved change
+ * asks first" can be tested at all. Every path renders the page; any other
+ * path (`/elsewhere`, where a test leaves to) renders a line of text.
+ */
+function renderUnderDataRouter(path: string, page: ReactElement): HarnessRender {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  const pathname = path.split("?")[0] ?? path;
+  const element = (
+    <>
+      {page}
+      <LocationProbe />
+    </>
+  );
+  const router = createMemoryRouter(
+    [
+      { path: pathname, element },
+      { path: "*", element: <p data-route="elsewhere" /> },
+    ],
+    { initialEntries: [path] },
+  );
   return {
     ...render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[path]}>
-          <SettingsPage />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </QueryClientProvider>,
     ),
     queryClient,
+    router,
   };
 }
 

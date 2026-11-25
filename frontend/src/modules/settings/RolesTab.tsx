@@ -43,11 +43,20 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
-import { Btn, KIND_ICON, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  FormSection,
+  KIND_ICON,
+  Panel,
+  QueryState,
+  SaveBar,
+  UnsavedGuard,
+  useDraft,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import {
   useCreateRoleMutation,
@@ -58,7 +67,7 @@ import {
   useGlobalWriteReason,
 } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
-import { SaveBar } from "./SaveBar";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
 import { isForbidden } from "./settingsState";
 import { assignableRoles, groupPermissionsByModule, roleDisplayName } from "./types";
 import type { RoleOut } from "./types";
@@ -84,7 +93,6 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
   const deleteRole = useDeleteRoleMutation(stepUp.run);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [pendingDelete, setPendingDelete] = useState<RoleOut | null>(null);
@@ -98,30 +106,41 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
   );
 
   const editing = listed.find((role) => role.id === editingId) ?? null;
+  // THE MATRIX IS THE KIT'S DRAFT (redesign, Receta FO): the role's codes as
+  // the server holds them are the saved state, sorted because the body is a
+  // set; a save's answer (the role re-read, or its copy) becomes it.
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<string[]>(
+    editing ? [...editing.codes].sort() : undefined,
+  );
+  const checked: ReadonlySet<string> = new Set(draft ?? []);
+  // A create refused for a missing name, held as data and worded at render.
+  const [createAttempt, setCreateAttempt] = useState<Attempt | null>(null);
+  const createProblems = attemptProblems(createAttempt);
   const forbidden = isForbidden(roles.error);
   const loading = roles.isLoading || catalogue.isLoading;
   const reason = useGlobalWriteReason(ROLES_MANAGE);
 
   function openEditor(role: RoleOut) {
     setEditingId(role.id);
-    setChecked(new Set(role.codes));
+    // Another role's codes, not the last role's edits: opening a role starts
+    // from what the server holds for it.
+    setDraft([...role.codes].sort());
     setClonedFrom(null);
     setPermissions.reset();
   }
 
   function toggle(code: string) {
-    setChecked((current) => {
-      const next = new Set(current);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
+    const next = new Set(checked);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    setDraft([...next].sort());
   }
 
   function saveMatrix(role: RoleOut) {
     // Sorted, because the body is a SET and a stable order makes the audit
     // record and the diff between two saves readable.
     const codes = [...checked].sort();
+    markSent(codes);
     setPermissions.mutate(
       { roleId: role.id, codes },
       {
@@ -133,13 +152,34 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
             setEditingId(result.role_id);
           }
         },
+        onError: () => markSent(null),
       },
     );
   }
 
-  const dirty =
-    editing != null &&
-    (editing.codes.length !== checked.size || editing.codes.some((code) => !checked.has(code)));
+  function createNewRole() {
+    // A missing name is said on submit, never by a dead button (the kit's rule).
+    const found: Attempt = {
+      rules: () => [{ name: "name", label: t("settings.roles.create.name") }],
+      values: { name: newName },
+    };
+    setCreateAttempt(found);
+    if (attemptProblems(found).length > 0) return;
+    createRole.mutate(
+      { name: newName.trim(), description: newDescription.trim(), codes: [] },
+      {
+        onSuccess: () => {
+          setNewName("");
+          setNewDescription("");
+          setCreateAttempt(null);
+        },
+      },
+    );
+  }
+
+  // ONE GUARD FOR THE TAB (redesign, Receta FO; decision D16): the matrix's
+  // change, or a role half typed below it, asks before the tab is left.
+  const guardDirty = dirty || newName.trim() !== "" || newDescription.trim() !== "";
 
   if (forbidden) {
     return (
@@ -153,6 +193,8 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
 
   return (
     <>
+      <UnsavedGuard dirty={guardDirty} search={["tab"]} />
+      {!canManage ? <ReadOnlyNotice reason={reason} /> : null}
       {clonedFrom ? (
         <p role="status" className="notice" style={{ marginBottom: 16 }}>
           <Icon name={KIND_ICON.info} size={16} />
@@ -248,11 +290,9 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
       </Panel>
 
       {editing ? (
-        <Panel
-          title={t("settings.roles.permissionsFor", { name: editing.name })}
-          subtitle={t("settings.roles.permissionsSubtitle")}
-        >
-          <p className="note">
+        <FormSection title={t("settings.roles.permissionsFor", { name: editing.name })} icon="shield-lock">
+          <p className="note">{t("settings.roles.permissionsSubtitle")}</p>
+          <p className="note" style={{ marginTop: 6 }}>
             {t("settings.roles.holders", { count: editing.assigned_users, name: editing.name })}
           </p>
           {editing.is_global ? (
@@ -284,24 +324,15 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
               </fieldset>
             ))}
           </div>
-
-          <SaveBar
-            label={t("settings.roles.savePermissions")}
-            canEdit={canManage}
-            disabledReason={reason}
-            dirty={dirty}
-            pending={setPermissions.isPending}
-            error={setPermissions.error}
-            saved={setPermissions.isSuccess && !dirty}
-            onSave={() => saveMatrix(editing)}
-          />
-        </Panel>
+        </FormSection>
       ) : null}
 
-      <Panel
-        title={t("settings.roles.create.title")}
-        subtitle={t("settings.roles.create.subtitle")}
-      >
+      {/* CREATING A ROLE IS AN ACT, NOT A SETTING: its own section and its
+          own button, outside the matrix's draft and bar. */}
+      <FormSection title={t("settings.roles.create.title")} icon="plus">
+        <p className="note" style={{ marginBottom: 12 }}>
+          {t("settings.roles.create.subtitle")}
+        </p>
         <div className="form-grid" style={FOLDING_FORM_GRID}>
           <Field label={t("settings.roles.create.name")}>
             <input
@@ -324,19 +355,10 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
           <Btn
             label={createRole.isPending ? t("settings.roles.create.creating") : t("settings.roles.create.submit")}
             icon="plus"
-            variant="primary"
-            disabled={!canManage || newName.trim() === "" || createRole.isPending}
-            onClick={() =>
-              createRole.mutate(
-                { name: newName.trim(), description: newDescription.trim(), codes: [] },
-                {
-                  onSuccess: () => {
-                    setNewName("");
-                    setNewDescription("");
-                  },
-                },
-              )
-            }
+            // Disabled only for "you may not" and "not right now", with the
+            // reason beside it; a missing name is said on submit.
+            disabled={!canManage || createRole.isPending}
+            onClick={createNewRole}
           />
           {!canManage ? <span className="form-hint">{reason}</span> : null}
           {createRole.error ? (
@@ -344,9 +366,30 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
               <Icon name={KIND_ICON.crit} size={13} />
               {describeSubmitError(createRole.error)}
             </span>
+          ) : createProblems.length > 0 ? (
+            <span role="alert" className="form-error">
+              <Icon name={KIND_ICON.crit} size={13} />
+              {createProblems.map((problem) => problem.message).join(". ")}.
+            </span>
           ) : null}
         </div>
-      </Panel>
+      </FormSection>
+
+      {/* THE MATRIX'S ONE BAR (decision D22), drawn while a role's
+          permissions hold a change. */}
+      {editing ? (
+        <SaveBar
+          dirty={dirty}
+          saving={setPermissions.isPending}
+          error={setPermissions.error}
+          saved={setPermissions.isSuccess && !dirty}
+          onDiscard={() => {
+            discard();
+            setPermissions.reset();
+          }}
+          onSave={() => saveMatrix(editing)}
+        />
+      ) : null}
 
       <Dialog
         open={pendingDelete != null}

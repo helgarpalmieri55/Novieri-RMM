@@ -13,22 +13,22 @@
 // being changed, and the acknowledgement is sent only when it is ticked — a
 // permanently-on flag would be an acknowledgement nobody made.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
 import { useClientScope } from "../../lib/clientScope";
-import { KIND_ICON, Panel } from "../../shell/components";
+import { FormSection, KIND_ICON, SaveBar, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
 import type { SettingsOut, SettingsUpdate } from "../budget/types";
 import { useBudgetSettings, useMe, useUpdateBudgetSettingsMutation, useUsers } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField, permissionReason } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, parseIntegerField, permissionReason, sentenceProblem } from "./settingsState";
 
 export const BUDGET_READ = "budget.read";
 export const BUDGET_MANAGE = "budget.manage";
@@ -116,167 +116,174 @@ export function BudgetTab({
   const resolvedActor =
     settings.data?.updated_by != null ? actorName(directory.data?.users, settings.data.updated_by) : null;
 
+  // THE KIT'S DRAFT (redesign, Receta FO): the server's values are the saved
+  // state, and a save's answer becomes it (`markSent`).
   const seed = seedFrom(settings.data);
-  const [form, setForm] = useState<BudgetForm>(seed);
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<BudgetForm>(settings.data ? seed : undefined);
+  const form = draft ?? seed;
+  const setForm = (change: (current: BudgetForm) => BudgetForm) => setDraft(change(form));
+  // Asked for each currency change; a save or Discard asks again next time.
   const [acknowledged, setAcknowledged] = useState(false);
-
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as BudgetForm);
-    setAcknowledged(false);
-  }, [seedSignature]);
+  // A save refused for the month, said in the bar until it is fixed.
+  const [tried, setTried] = useState(false);
 
   const forbidden = isForbidden(settings.error);
   const failed = settings.error != null && !forbidden;
-  const dirty = isDirty(form, seed);
   const editable = canManage && settings.data != null;
   const currencyChanged = settings.data != null && form.baseCurrency !== settings.data.base_currency;
   const month = parseIntegerField(form.fiscalYearStartMonth);
   const monthValid = month != null && month >= 1 && month <= 12;
 
   function submit() {
+    // An invalid month keeps Save enabled and is said on submit (the kit's
+    // rule: `blockedReason` is a permission, never input to correct).
+    if (!monthValid) {
+      setTried(true);
+      return;
+    }
+    setTried(false);
     const body: SettingsUpdate = {
       base_currency: form.baseCurrency === "" ? null : form.baseCurrency.toUpperCase(),
       fiscal_year_start_month: month,
     };
     if (currencyChanged && acknowledged) body.acknowledge_mixed_basis = true;
-    update.mutate(body);
+    markSent(form);
+    update.mutate(body, {
+      onSuccess: () => setAcknowledged(false),
+      onError: () => markSent(null),
+    });
   }
 
+  if (needsClient) return <p className="note">{t("settings.budget.pickClient")}</p>;
+  if (settings.isLoading) return <p className="note">{t("settings.budget.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.budget.forbidden", { code: BUDGET_READ })}</p>;
+  if (failed) return <LoadFailure error={settings.error} />;
+
   return (
-    <Panel
-      title={t("settings.budget.title")}
-      subtitle={t("settings.budget.subtitle")}
-    >
-      {needsClient ? (
-        <p className="note">{t("settings.budget.pickClient")}</p>
-      ) : settings.isLoading ? (
-        <p className="note">{t("settings.budget.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">
-          {t("settings.budget.forbidden", { code: BUDGET_READ })}
+    <>
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      {!canManage ? <ReadOnlyNotice reason={permissionReason(BUDGET_MANAGE)} /> : null}
+      <FormSection title={t("settings.budget.title")} icon="budget">
+        <p className="note" style={{ marginBottom: 12 }}>
+          {t("settings.budget.subtitle")}
         </p>
-      ) : failed ? (
-        <LoadFailure error={settings.error} />
-      ) : (
-        <>
-          <div className="form-grid" style={FOLDING_FORM_GRID}>
-            <Field label={t("settings.budget.baseCurrency")} help={t("settings.budget.baseCurrencyHelp")}>
-              <input
-                className={inputClass}
-                value={form.baseCurrency}
-                maxLength={3}
-                disabled={!editable}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, baseCurrency: event.target.value }))
-                }
-              />
-            </Field>
-            {/* A CHOICE OF TWELVE, NOT A MENU. `<select>` is the browser's
-                own widget painted through the kit's box; the design draws a
-                short, fixed enumeration as `Chips`, now through the shared
-                `ChipsField` (`viz.tsx`) that closed this call site,
-                `EmailTab`'s and `OrganizationTab`'s into one -- a plain
-                `.field` `div` rather than `Field`'s `<label>` (a chip
-                button nested inside a `<label>` inherits that label's text
-                as ITS OWN accessible name; see `EmailTab`'s Encryption for
-                the same note), its caption named once through
-                `aria-labelledby`, and `disabled={!editable}` in place of
-                the `Field` + `<select disabled>` twin this used to need. */}
-            <ChipsField
-              caption={t("settings.budget.fiscalYear")}
-              items={MONTH_KEYS.map((key) => t(key))}
-              active={month != null ? month - 1 : -1}
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.budget.baseCurrency")} help={t("settings.budget.baseCurrencyHelp")}>
+            <input
+              className={inputClass}
+              value={form.baseCurrency}
+              maxLength={3}
               disabled={!editable}
-              onSelect={(at) =>
-                setForm((current) => ({
-                  ...current,
-                  fiscalYearStartMonth: String(at + 1),
-                }))
+              onChange={(event) =>
+                setForm((current) => ({ ...current, baseCurrency: event.target.value }))
               }
             />
-          </div>
-
-          {/* THE ONLY TIMESTAMP ON THE SETTINGS PAGE, and it used to be printed
-              raw: `Last changed 2026-08-01T00:00:00Z by admin.` — the wire
-              value, in UTC, in a format nobody reads at a glance. Now it goes
-              through the one formatter, in the zone the signed-in user set on
-              their profile, so "last changed" here agrees with every other time
-              in the product. `me` is read with the module's own `useMe` hook
-              rather than threaded down as a prop: the query is already cached
-              by `SettingsPage`, so this costs no extra request and no shared
-              file changes. An absent or unloaded zone falls back to the
-              browser's, and an absent date renders `NO_DATE` rather than
-              "Invalid Date" — though the guard above means it renders nothing
-              at all.
-
-              AND `by admin` STOPPED BEING THE ACTOR'S NAME. It was the raw
-              id, unstyled, in the one sentence on this panel that names a
-              human — design review, 2026-09-11: "usr-helgar is rendered as a
-              person". `actorName` above resolves it against the directory
-              when this session can read one and the fixture actually holds
-              the id; failing either, the id still prints, but as `.mono` —
-              the same mark every other raw wire handle in this console
-              carries — so it is never mistaken for a name again. */}
-          {settings.data?.updated_at ? (
-            <p className="note" style={{ marginTop: 10 }}>
-              {t("settings.budget.lastChanged", { when: formatDateTime(settings.data.updated_at, me.data?.timezone) })}
-              {settings.data.updated_by != null ? (
-                <>
-                  {` ${t("settings.budget.by")} `}
-                  {resolvedActor != null ? (
-                    resolvedActor
-                  ) : (
-                    // Not a name -- an id, and it looks like one: `.mono`,
-                    // the same treatment every other raw wire handle in this
-                    // console gets, so it is never mistaken for a person's
-                    // name the way it was before this fix.
-                    <span className="mono" title={settings.data.updated_by}>
-                      {settings.data.updated_by}
-                    </span>
-                  )}
-                </>
-              ) : null}
-              {"."}
-            </p>
-          ) : null}
-
-          {currencyChanged ? (
-            <label className="flex items-start gap-2" style={{ marginTop: 12 }}>
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                disabled={!editable}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-              />
-              <span>
-                {t("settings.budget.acknowledge")}
-              </span>
-            </label>
-          ) : null}
-
-          {!monthValid && form.fiscalYearStartMonth !== "" ? (
-            <p className="form-error" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.crit} size={13} /> {t("settings.budget.monthInvalid")}
-            </p>
-          ) : null}
-
-          <SaveBar
-            label={t("settings.budget.save")}
-            canEdit={editable && monthValid}
-            disabledReason={
-              canManage
-                ? t("settings.budget.correct")
-                : permissionReason(BUDGET_MANAGE)
+          </Field>
+          {/* A CHOICE OF TWELVE, NOT A MENU. `<select>` is the browser's
+              own widget painted through the kit's box; the design draws a
+              short, fixed enumeration as `Chips`, now through the shared
+              `ChipsField` (`viz.tsx`) that closed this call site,
+              `EmailTab`'s and `OrganizationTab`'s into one -- a plain
+              `.field` `div` rather than `Field`'s `<label>` (a chip
+              button nested inside a `<label>` inherits that label's text
+              as ITS OWN accessible name; see `EmailTab`'s Encryption for
+              the same note), its caption named once through
+              `aria-labelledby`, and `disabled={!editable}` in place of
+              the `Field` + `<select disabled>` twin this used to need. */}
+          <ChipsField
+            caption={t("settings.budget.fiscalYear")}
+            items={MONTH_KEYS.map((key) => t(key))}
+            active={month != null ? month - 1 : -1}
+            disabled={!editable}
+            onSelect={(at) =>
+              setForm((current) => ({
+                ...current,
+                fiscalYearStartMonth: String(at + 1),
+              }))
             }
-            dirty={dirty}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess && !dirty}
-            onSave={submit}
           />
-        </>
-      )}
-    </Panel>
+        </div>
+
+        {/* THE ONLY TIMESTAMP ON THE SETTINGS PAGE, and it used to be printed
+            raw: `Last changed 2026-08-01T00:00:00Z by admin.` — the wire
+            value, in UTC, in a format nobody reads at a glance. Now it goes
+            through the one formatter, in the zone the signed-in user set on
+            their profile, so "last changed" here agrees with every other time
+            in the product. `me` is read with the module's own `useMe` hook
+            rather than threaded down as a prop: the query is already cached
+            by `SettingsPage`, so this costs no extra request and no shared
+            file changes. An absent or unloaded zone falls back to the
+            browser's, and an absent date renders `NO_DATE` rather than
+            "Invalid Date" — though the guard above means it renders nothing
+            at all.
+
+            AND `by admin` STOPPED BEING THE ACTOR'S NAME. It was the raw
+            id, unstyled, in the one sentence on this panel that names a
+            human — design review, 2026-09-11: "usr-helgar is rendered as a
+            person". `actorName` above resolves it against the directory
+            when this session can read one and the fixture actually holds
+            the id; failing either, the id still prints, but as `.mono` —
+            the same mark every other raw wire handle in this console
+            carries — so it is never mistaken for a name again. */}
+        {settings.data?.updated_at ? (
+          <p className="note" style={{ marginTop: 10 }}>
+            {t("settings.budget.lastChanged", { when: formatDateTime(settings.data.updated_at, me.data?.timezone) })}
+            {settings.data.updated_by != null ? (
+              <>
+                {` ${t("settings.budget.by")} `}
+                {resolvedActor != null ? (
+                  resolvedActor
+                ) : (
+                  // Not a name -- an id, and it looks like one: `.mono`,
+                  // the same treatment every other raw wire handle in this
+                  // console gets, so it is never mistaken for a person's
+                  // name the way it was before this fix.
+                  <span className="mono" title={settings.data.updated_by}>
+                    {settings.data.updated_by}
+                  </span>
+                )}
+              </>
+            ) : null}
+            {"."}
+          </p>
+        ) : null}
+
+        {currencyChanged ? (
+          <label className="flex items-start gap-2" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              disabled={!editable}
+              onChange={(event) => setAcknowledged(event.target.checked)}
+            />
+            <span>
+              {t("settings.budget.acknowledge")}
+            </span>
+          </label>
+        ) : null}
+
+        {/* Said as it is chosen; once a save was refused, the bar says it. */}
+        {!monthValid && form.fiscalYearStartMonth !== "" && !tried ? (
+          <p className="form-error" style={{ marginTop: 10 }}>
+            <Icon name={KIND_ICON.crit} size={13} /> {t("settings.budget.monthInvalid")}
+          </p>
+        ) : null}
+      </FormSection>
+
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        problems={tried && !monthValid ? [sentenceProblem("month", t("settings.budget.monthInvalid"))] : []}
+        saved={update.isSuccess && !dirty}
+        onDiscard={() => {
+          discard();
+          setAcknowledged(false);
+          setTried(false);
+          update.reset();
+        }}
+        onSave={submit}
+      />
+    </>
   );
 }

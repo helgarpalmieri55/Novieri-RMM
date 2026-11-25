@@ -40,6 +40,17 @@ async function openTab(): Promise<void> {
 }
 
 /**
+ * Opens a channel's editor. RE-POINTED (redesign plan, Task 12, 7.1): a
+ * channel is edited in its own dialog, saved when the dialog is confirmed,
+ * instead of in boxes on its table row; the dialog's boxes keep their
+ * accessible names ("Name for <channel>").
+ */
+async function openChannel(user: ReturnType<typeof userEvent.setup>, name: string): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: `Edit ${name}` }));
+  return screen.getByRole("dialog", { name: `Edit ${name}` });
+}
+
+/**
  * Click one chip inside a named `ChipsField` group — `Kind` and `Recipients`
  * are both fixed, small enumerations now (docs/superpowers/specs/
  * 2026-09-10-settings-ui-rework-design.md §4), so this replaces
@@ -64,25 +75,31 @@ describe("Settings — Notifications tab", () => {
   // fixes it in a real viewport; this is the regression guard that a later
   // edit cannot drop the floor without going red here, even though it cannot
   // itself prove the overflow is gone.
-  it("gives the channel table's Name column a width floor, so a narrow viewport cannot collapse it to empty boxes", async () => {
+  // RE-POINTED (redesign plan, Task 12, 7.1): this pinned the width floors
+  // that kept the row editors' boxes from collapsing at 390px. The boxes left
+  // the table for the channel's dialog, so nothing in a row can collapse to
+  // an empty box any more; the property is now that the table holds no box.
+  it("keeps the channel table free of editor boxes, so a narrow viewport cannot collapse them", async () => {
     renderSettings();
     await openTab();
 
-    const nameHeader = await screen.findByRole("columnheader", { name: "Name" });
-    expect(nameHeader.style.minWidth).toBe("200px");
-
-    const tokenHeader = screen.getByRole("columnheader", { name: "New token" });
-    expect(tokenHeader.style.minWidth).toBe("280px");
+    const table = await screen.findByRole("table", { name: "Notification channels" });
+    expect(within(table).getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
+    expect(within(table).queryAllByRole("textbox")).toEqual([]);
+    expect(table.querySelectorAll("input")).toHaveLength(0);
   });
 
   it("loads the current channels and rules into editable controls", async () => {
+    const user = userEvent.setup();
     renderSettings();
     await openTab();
-    expect(
-      await screen.findByLabelText<HTMLInputElement>("Name for Operations mailbox"),
-    ).toHaveValue("Operations mailbox");
-    expect(screen.getByLabelText("Active for Operations mailbox")).toBeChecked();
-    expect(screen.getByText("stored in vault")).toBeInTheDocument();
+    expect(await screen.findByText("stored in vault")).toBeInTheDocument();
+    const dialog = await openChannel(user, "Operations mailbox");
+    expect(within(dialog).getByLabelText<HTMLInputElement>("Name for Operations mailbox")).toHaveValue(
+      "Operations mailbox",
+    );
+    expect(within(dialog).getByLabelText("Active for Operations mailbox")).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     // The rules table's own cell — "Ticket assigned" (the display name for
     // `ticket.assigned`) is also an option in the "add a rule" event-type
     // select, so the row is located by its table cell.
@@ -123,8 +140,10 @@ describe("Settings — Notifications tab", () => {
     renderSettings();
     await openTab();
 
-    const nameCell = await screen.findByLabelText<HTMLInputElement>("Name for Operations mailbox");
-    const row = nameCell.closest("tr") as HTMLElement;
+    // The row is found by its Edit (the name is text in the row now, and an
+    // editor box only in the channel's dialog: redesign plan, Task 12, 7.1).
+    const edit = await screen.findByRole("button", { name: "Edit Operations mailbox" });
+    const row = edit.closest("tr") as HTMLElement;
     expect(within(row).getByText("Email")).toBeInTheDocument();
     expect(within(row).queryByText("email")).not.toBeInTheDocument();
   });
@@ -175,7 +194,8 @@ describe("Settings — Notifications tab", () => {
     renderSettings();
     await openTab();
 
-    const name = await screen.findByLabelText<HTMLInputElement>("Name for Operations mailbox");
+    const dialog = await openChannel(user, "Operations mailbox");
+    const name = within(dialog).getByLabelText<HTMLInputElement>("Name for Operations mailbox");
     await user.clear(name);
     await user.type(name, "Ops mailbox");
     calls.listNotificationChannels.mockResolvedValue([
@@ -190,8 +210,7 @@ describe("Settings — Notifications tab", () => {
       },
     ]);
 
-    const row = name.closest("tr");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Save" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateNotificationChannel).toHaveBeenCalledTimes(1));
     expect(calls.updateNotificationChannel).toHaveBeenCalledWith("c1", {
@@ -212,10 +231,9 @@ describe("Settings — Notifications tab", () => {
     renderSettings();
     await openTab();
 
-    const secret = await screen.findByLabelText<HTMLInputElement>("New token for Ops chat");
-    await user.type(secret, "new-token");
-    const row = secret.closest("tr");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Save" }));
+    const dialog = await openChannel(user, "Ops chat");
+    await user.type(within(dialog).getByLabelText<HTMLInputElement>("New token for Ops chat"), "new-token");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateNotificationChannel).toHaveBeenCalledTimes(1));
     expect(calls.updateNotificationChannel).toHaveBeenCalledWith("c2", {
@@ -231,9 +249,9 @@ describe("Settings — Notifications tab", () => {
     const { queryClient } = renderSettings();
     await openTab();
 
-    const secret = await screen.findByLabelText<HTMLInputElement>("New token for Ops chat");
-    await user.type(secret, "new-token-xyz");
-    await user.click(within(secret.closest("tr") as HTMLElement).getByRole("button", { name: "Save" }));
+    const dialog = await openChannel(user, "Ops chat");
+    await user.type(within(dialog).getByLabelText<HTMLInputElement>("New token for Ops chat"), "new-token-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateNotificationChannel).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-token-xyz"));
@@ -244,14 +262,13 @@ describe("Settings — Notifications tab", () => {
     renderSettings();
     await openTab();
 
-    const name = await screen.findByLabelText<HTMLInputElement>("Name for Operations mailbox");
-    await user.type(name, " (renamed)");
+    const dialog = await openChannel(user, "Operations mailbox");
+    await user.type(within(dialog).getByLabelText<HTMLInputElement>("Name for Operations mailbox"), " (renamed)");
     calls.updateNotificationChannel.mockRejectedValue(
       new ApiError(422, JSON.stringify({ detail: "name must be unique in this organization" })),
     );
 
-    const row = name.closest("tr");
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Save" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("name must be unique in this organization");
@@ -269,9 +286,13 @@ describe("Settings — Notifications tab", () => {
 
   it("never renders a credential: the box is write-only and empty, and config is never echoed", async () => {
     calls.listNotificationChannels.mockResolvedValue([CHANNEL_FIXTURE, WEBHOOK_CHANNEL_FIXTURE]);
+    const user = userEvent.setup();
     renderSettings();
     await openTab();
-    const secret = await screen.findByLabelText<HTMLInputElement>("New token for Ops chat");
+    await screen.findAllByText("stored in vault");
+    const secret = within(await openChannel(user, "Ops chat")).getByLabelText<HTMLInputElement>(
+      "New token for Ops chat",
+    );
     // Invariant 3. The fixture's channel `config` carries a planted token,
     // which is what a server bug (or a config key the backend's own
     // `_reject_secret_keys` missed) would look like.
@@ -285,20 +306,22 @@ describe("Settings — Notifications tab", () => {
 
   // docs/design/settings-language.md, "Notifications": column `Replace
   // credential` -> `New token`; button `Test send` -> `Send a test`.
-  it("renames the credential column to 'New token' and the test button to 'Send a test'", async () => {
+  // RE-POINTED (redesign plan, Task 12, 7.1): the "New token" column left
+  // the table for the channel's dialog, where it is the field's caption.
+  it("renames the credential field to 'New token' and the test button to 'Send a test'", async () => {
     calls.listNotificationChannels.mockResolvedValue([WEBHOOK_CHANNEL_FIXTURE]);
+    const user = userEvent.setup();
     renderSettings();
     await openTab();
 
-    expect(
-      await screen.findByRole("columnheader", { name: "New token" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Replace credential" })).not.toBeInTheDocument();
-
-    const secret = screen.getByLabelText<HTMLInputElement>("New token for Ops chat");
-    const row = secret.closest("tr") as HTMLElement;
+    const row = (await screen.findByRole("button", { name: "Edit Ops chat" })).closest("tr") as HTMLElement;
     expect(within(row).getByRole("button", { name: "Send a test" })).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Test send" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Replace credential" })).not.toBeInTheDocument();
+
+    const dialog = await openChannel(user, "Ops chat");
+    expect(within(dialog).getByText("New token")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Replace credential")).not.toBeInTheDocument();
   });
 
   // Defect 2 (lang-notifications-reconcile report): the column header and
@@ -311,24 +334,28 @@ describe("Settings — Notifications tab", () => {
   // "Name for <channel>" and "Active for <channel>" already do.
   it("names the New token field's accessible name after the visible column, not the old 'Replace credential' wording", async () => {
     calls.listNotificationChannels.mockResolvedValue([WEBHOOK_CHANNEL_FIXTURE]);
+    const user = userEvent.setup();
     renderSettings();
     await openTab();
 
-    expect(
-      await screen.findByLabelText<HTMLInputElement>("New token for Ops chat"),
-    ).toHaveAttribute("placeholder", "Leave blank to keep the current one");
+    const dialog = await openChannel(user, "Ops chat");
+    expect(within(dialog).getByLabelText<HTMLInputElement>("New token for Ops chat")).toHaveAttribute(
+      "placeholder",
+      "Leave blank to keep the current one",
+    );
     expect(screen.queryByLabelText("Replace credential for Ops chat")).not.toBeInTheDocument();
   });
 
   it("sends an email channel's sign-in to the channel page instead of a one-box token", async () => {
     // A mail sign-in is a username and password, or three Microsoft 365
     // values; a single box here stored a bare string the sender could not use.
+    const user = userEvent.setup();
     renderSettings();
     await openTab();
 
-    await screen.findByLabelText("Name for Operations mailbox");
-    expect(screen.queryByLabelText("New token for Operations mailbox")).not.toBeInTheDocument();
-    expect(screen.getByText(/Change the mail sign-in under Notifications/)).toBeInTheDocument();
+    const dialog = await openChannel(user, "Operations mailbox");
+    expect(within(dialog).queryByLabelText("New token for Operations mailbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Change the mail sign-in under Notifications/)).toBeInTheDocument();
   });
 
   it("disables every write, with the reason, for a reader who lacks notification.admin", async () => {
@@ -337,9 +364,11 @@ describe("Settings — Notifications tab", () => {
     renderSettings();
     await openTab();
 
-    expect(await screen.findByLabelText("Name for Operations mailbox")).toBeDisabled();
-    expect(screen.getByLabelText("New token for Ops chat")).toBeDisabled();
-    expect(screen.getByLabelText("Active for Operations mailbox")).toBeDisabled();
+    // RE-POINTED (redesign plan, Task 12, 7.1): a channel is edited in its
+    // dialog, so the write a reader cannot make is the Edit that opens it,
+    // disabled with the reason in the notice above the table.
+    expect(await screen.findByRole("button", { name: "Edit Operations mailbox" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit Ops chat" })).toBeDisabled();
     // `Kind` and `Recipients` are chip groups now — each chip is disabled
     // individually (`Chips` has no group-level disabled attribute of its
     // own to assert on), the same shape `budget.test.tsx` and
@@ -605,30 +634,25 @@ describe("Settings — Notifications, grouped", () => {
    * turn and re-runs the same two checks against whatever is on screen,
    * which is also why the checks live inside the loop rather than after it.
    */
-  it("keeps every labelled control of the tab inside a group, in both Kind arms, except the channel table's own row editors", async () => {
+  it("keeps every labelled control of the tab inside a group, in both Kind arms, except the channel table and its rows", async () => {
     const user = userEvent.setup();
     renderSettings();
     await openTab();
 
-    // Wait for the existing-channels table to have loaded: its row editors
-    // are this tab's one documented exception, and the guard needs them to
-    // exist so it excludes them by name rather than by accident.
-    await screen.findByLabelText(`Name for ${CHANNEL_FIXTURE.name}`);
+    // Wait for the existing-channels table to have loaded: it is this tab's
+    // one documented exception, and the guard needs it to exist so it
+    // excludes it by name rather than by accident.
+    const table = await screen.findByRole("table", { name: "Notification channels" });
+    await within(table).findByRole("button", { name: `Edit ${CHANNEL_FIXTURE.name}` });
 
-    // The existing-channels table edits each row through its own
-    // `aria-label` ("Name for <channel>", "Active for <channel>", "New
-    // token for <channel>") — a table cell, not a `Field` inside a
-    // `FieldGroup`. It is a different UI pattern (a data table, editable in
-    // place) from the "grouped by what they are for" form fields, and it has
-    // its own dedicated coverage above ("PATCHes an edited channel", "sends
-    // a replacement credential only when one was typed", "disables every
-    // write..."). Named here explicitly, by exact label, so a stray field
-    // added anywhere else on this tab still fails below.
-    const rowEditorExceptions = new Set([
-      `Name for ${CHANNEL_FIXTURE.name}`,
-      `Active for ${CHANNEL_FIXTURE.name}`,
-      `New token for ${CHANNEL_FIXTURE.name}`,
-    ]);
+    // RE-POINTED (redesign plan, Task 12, 7.1): the table no longer edits in
+    // place; each row carries "Edit <channel>", which opens the channel's
+    // dialog (covered above: "PATCHes an edited channel", "sends a
+    // replacement credential only when one was typed", "disables every
+    // write..."). The table and what is inside it are a list, not form
+    // fields grouped by what they are for, so they are the exception;
+    // anything else on this tab still has to sit in a group.
+    const inTable = (control: Element): boolean => control === table || table.contains(control);
 
     const KIND_CHIP_LABEL: Record<"webhook" | "email", string> = {
       webhook: "Webhook",
@@ -639,9 +663,7 @@ describe("Settings — Notifications, grouped", () => {
       const panel = screen.getByRole("tabpanel");
 
       const controls = within(panel).getAllByLabelText(/.+/);
-      const checked = controls.filter(
-        (control) => !rowEditorExceptions.has(control.getAttribute("aria-label") ?? ""),
-      );
+      const checked = controls.filter((control) => !inTable(control));
       // More than just the documented exceptions excluded, or the loop below proves nothing.
       expect(checked.length).toBeGreaterThan(0);
       for (const control of checked) {

@@ -37,7 +37,7 @@
 // which is a silent type change on a key the server allowlisted. Both are now
 // said on submit, in the words on the screen, through the form kernel.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { attemptProblems, Form } from "../../components/form";
@@ -45,14 +45,14 @@ import type { Attempt, FieldRule } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Field, inputClass } from "../../components/ui";
-import { KIND_ICON, Panel, Toggle } from "../../shell/components";
+import { FormSection, KIND_ICON, SaveBar, Toggle, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
 import { useCurrentOrg, useUpdateCurrentOrgMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, isMissingRoute, refusal } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, isMissingRoute } from "./settingsState";
 import { orgSettingFields, orgSettingLabel, unrenderableOrgSettingKeys } from "./types";
 import type { CurrentOrgUpdate, OrgSettingValue } from "./types";
 
@@ -112,7 +112,12 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
   const fields = orgSettingFields(org.data?.settings);
   const unrenderable = unrenderableOrgSettingKeys(org.data?.settings);
   const seed = seedFrom(org.data?.name ?? "", fields);
-  const [form, setForm] = useState<OrgForm>(seed);
+  // THE KIT'S DRAFT (redesign, Receta FO): the server's answer is the saved
+  // state, a background refetch never overwrites typing, and a save's answer
+  // becomes the new saved state (`markSent`).
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<OrgForm>(org.data ? seed : undefined);
+  const form = draft ?? seed;
+  const setForm = (change: (current: OrgForm) => OrgForm) => setDraft(change(form));
   // On submit only. A "required" that fires while the org request is still in
   // flight would be complaining about the loading state. Held as DATA (the
   // rules and the values they were checked against) and worded at render, so a
@@ -125,8 +130,8 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
    * AUDIT [MEDIUM], /settings → Organization: "Renaming the organization is a
    * tenant-wide change with no confirmation ... Add a dirty-state indicator, a
    * confirmation for tenant-level identity changes, and a success message in a
-   * live region." The dirty state and the announced success came with the form
-   * kernel; this is the third part.
+   * live region." The dirty state (the kit's bar, "Unsaved changes") and the
+   * announced success came with the form kernel; this is the third part.
    *
    * ONLY THE NAME CONFIRMS. It is the tenant's identity — it appears on every
    * screen, every export and every notification this platform sends. The
@@ -136,34 +141,13 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
    */
   const [renameTo, setRenameTo] = useState<string | null>(null);
 
-  // Re-seed only when the server's values change — after a save, after a
-  // refetch. Typing is never overwritten by a background refetch of the same
-  // values, because the seed is only compared when it actually differs.
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as OrgForm);
-    // A complaint about values the server has since replaced is not a
-    // complaint about anything on screen.
-    setAttempt(null);
-  }, [seedSignature]);
-
   const missing = isMissingRoute(org.error);
   const forbidden = isForbidden(org.error);
   const failed = org.error != null && !missing && !forbidden;
-  const dirty = isDirty(form, seed);
+  // A 404, or values still in flight, leave every field disabled: the form is
+  // seeded EMPTY then, and a save would PATCH the org name to "". With no
+  // values there is no draft, so no bar either (decision D22).
   const editable = canManage && org.data != null && !missing;
-
-  // "You may not save at all", with the reason rendered beside the control.
-  // The third case is the one the old `canEdit={editable}` swallowed: while the
-  // org request is in flight the form is seeded EMPTY, so a save then would
-  // PATCH the org name to "".
-  const blockedReason = missing
-    ? t("settings.organization.blockedMissing")
-    : !canManage
-      ? reason
-      : org.data == null
-        ? t("settings.organization.blockedWaiting")
-        : undefined;
 
   function submit() {
     // The rules read only `fields` (the server's keys) and this submit's own
@@ -180,14 +164,10 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
       },
     };
     setAttempt(found);
-    if (attemptProblems(found).length > 0) return;
-    // A save with nothing to save is the other silent no-op: SaveBar disabled
-    // the button for it and said nothing. It writes an audit entry for a change
-    // that is not one, so it is still refused — out loud.
-    if (!dirty) {
-      setAttempt(refusal("name", "settings.saveBar.noChanges"));
-      return;
-    }
+    // Enter in an untouched form is not a save: with no change there is no
+    // bar to press, and no write (and no audit entry) for a change that is not
+    // one (decision D22; `requireDirty={false}` went with the settings module's own bar).
+    if (attemptProblems(found).length > 0 || !dirty) return;
 
     // The dialog holds the WHOLE write, not just the name: a submit that also
     // changed a settings key must not apply half of itself while the operator
@@ -196,7 +176,13 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
       setRenameTo(form.name);
       return;
     }
-    update.mutate(currentBody());
+    send();
+  }
+
+  /** The write, with the kit's bookkeeping: what is sent becomes saved when the server answers. */
+  function send() {
+    markSent(form);
+    update.mutate(currentBody(), { onError: () => markSent(null) });
   }
 
   /** The PATCH body for what is on screen, built once and used by both paths. */
@@ -222,15 +208,15 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
     return body;
   }
 
+  if (org.isLoading) return <p className="note">{t("settings.organization.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.organization.forbidden", { code: ORGS_MANAGE })}</p>;
+  if (failed) return <LoadFailure error={org.error} />;
+
   return (
-    <Panel
-      title={t("settings.organization.title")}
-      subtitle={t("settings.organization.subtitle")}
-    >
-      {org.isLoading ? (
-        <p className="note">{t("settings.organization.loading")}</p>
-      ) : missing ? (
-        <div className="notice gold">
+    <>
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      {missing ? (
+        <div className="notice gold" style={{ marginBottom: 14 }}>
           <Icon name={KIND_ICON.warn} size={16} />
           <div>
             <strong>{t("settings.organization.missingTitle")}</strong>
@@ -238,20 +224,20 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
             {t("settings.organization.missingBody")}
           </div>
         </div>
-      ) : forbidden ? (
-        <p className="note">
-          {t("settings.organization.forbidden", { code: ORGS_MANAGE })}
-        </p>
-      ) : failed ? (
-        <LoadFailure error={org.error} />
+      ) : !canManage ? (
+        <ReadOnlyNotice reason={reason} />
       ) : null}
 
-      {/* A REAL `<form>`, so Enter in the name box saves. There was none: the
+      {/* A REAL `<form>`, so Enter in the name box saves: the bar sits inside
+          it and its Save is the form's submit button. There was none: the
           tab was a `<div>` of inputs and a button, which is why every settings
           tab in the audit "does nothing on Enter". */}
-      {!forbidden && !failed ? (
-        <Form onSubmit={submit}>
-          <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: missing ? 14 : 0 }}>
+      <Form onSubmit={submit}>
+        <FormSection title={t("settings.organization.title")} icon="building">
+          <p className="note" style={{ marginBottom: 12 }}>
+            {t("settings.organization.subtitle")}
+          </p>
+          <div className="form-grid" style={FOLDING_FORM_GRID}>
             <Field label={t("settings.organization.name")}>
               <input
                 className={inputClass}
@@ -407,46 +393,33 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
               {t("settings.organization.unrenderable", { keys: unrenderable.join(", ") })}
             </p>
           ) : null}
+        </FormSection>
 
-          {/* THE DIRTY-STATE INDICATOR, audit [MEDIUM]'s first ask on this tab.
-              NOT a live region: it is the state of the form as the operator
-              arrives at it, not an interruption — the same distinction
-              `ai-automation/AutonomyDialPage` draws, and the reason the
-              announced roles here stay reserved for the outcome of a save. */}
-          {dirty && editable ? (
-            <p className="form-hint" style={{ marginTop: 12 }}>
-              {t("settings.organization.unsaved")}
-            </p>
-          ) : null}
+        {/* THE ONE BAR (redesign, decision D22): drawn only while there is a
+            change, a save in flight, a failure or "Saved.". `submit` keeps
+            Enter-in-the-name-box saving.
 
-          {/* THE SAME COMMIT CONTROL AS EVERY OTHER SECTION ON THIS PAGE.
-              This was `FormActions` with the label "Save" and no glyph, while
-              the eight sections below it saved through `SaveBar`: "Save
-              changes" with the check, which is what v3 draws. `submit` keeps
-              Enter-in-the-name-box saving, and `requireDirty={false}` keeps
-              this tab's own rule that a clean save is refused OUT LOUD rather
-              than by a dead button.
-
-              THE ERROR GOES IN RAW: `describeSubmitError` unwraps FastAPI's
-              `detail`, names the field on each validation problem, and answers
-              a bodyless 5xx with a sentence instead of a status. Wrapping it in
-              `new Error(...)` would downgrade the `ApiError` to a plain `Error`
-              and throw away the status the kernel reads. */}
-          <SaveBar
-            submit
-            canEdit={blockedReason === undefined}
-            disabledReason={blockedReason}
-            dirty={dirty}
-            requireDirty={false}
-            pending={update.isPending}
-            error={update.error}
-            problems={problems}
-            // Unchanged rule: `saved` is the server's 2xx and nothing else, and
-            // it disappears the moment the form is edited again.
-            saved={update.isSuccess && !dirty}
-          />
-        </Form>
-      ) : null}
+            THE ERROR GOES IN RAW: `describeSubmitError` unwraps FastAPI's
+            `detail`, names the field on each validation problem, and answers
+            a bodyless 5xx with a sentence instead of a status. Wrapping it in
+            `new Error(...)` would downgrade the `ApiError` to a plain `Error`
+            and throw away the status the kernel reads. */}
+        <SaveBar
+          submit
+          dirty={dirty}
+          saving={update.isPending}
+          error={update.error}
+          problems={problems}
+          // Unchanged rule: `saved` is the server's 2xx and nothing else, and
+          // it disappears the moment the form is edited again.
+          saved={update.isSuccess && !dirty}
+          onDiscard={() => {
+            discard();
+            setAttempt(null);
+            update.reset();
+          }}
+        />
+      </Form>
 
       <ConfirmDialog
         open={renameTo != null}
@@ -456,10 +429,10 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
         confirmLabel={t("settings.organization.rename.confirm")}
         onConfirm={() => {
           setRenameTo(null);
-          update.mutate(currentBody());
+          send();
         }}
         onCancel={() => setRenameTo(null)}
       />
-    </Panel>
+    </>
   );
 }

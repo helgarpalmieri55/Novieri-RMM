@@ -1,8 +1,8 @@
 /**
- * Your profile in Spanish: the form, the refusal of a clean save, the link to
- * your security, the loading and failed-to-load states. The save bar
- * (`modules/settings/SaveBar`) is shared with the Settings page and speaks
- * Spanish with it, so these renders take no allowance for it.
+ * Your profile in Spanish: the form, the save bar that appears with a change,
+ * the link to your security, the loading and failed-to-load states. The save
+ * bar (the kit's `SaveBar`, `shell/formKit`) is shared with the Settings page
+ * and speaks Spanish with it, so these renders take no allowance for it.
  *
  * RE-POINTED (own-auth Tasks 10 and 12): the three Keycloak credential steps
  * and their failure became one link to the platform's own page, first named
@@ -10,7 +10,7 @@
  * seguridad", after the page it opens.
  */
 
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,12 +51,18 @@ describe("your profile in Spanish", () => {
     expectNoEnglish(container, ["Operator"]);
   });
 
-  it("refuses a clean save in Spanish", async () => {
+  it("offers no save on a clean form, and words the bar a change brings, in Spanish", async () => {
+    // Redesign decision D22: with no change there is no bar to press; requireDirty={false} went with the settings module's own SaveBar (deleted).
+    // (This replaced "refuses a clean save in Spanish".)
     const user = userEvent.setup();
     renderProfilePage();
     await screen.findByLabelText("Nombre para mostrar");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No hay cambios sin guardar");
+    expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
+    await user.type(screen.getByLabelText("Teléfono"), "9");
+    const bar = screen.getByRole("region", { name: "Cambios sin guardar" });
+    expect(within(bar).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Descartar" })).toBeInTheDocument();
     expect(calls.updateMe).not.toHaveBeenCalled();
   });
 

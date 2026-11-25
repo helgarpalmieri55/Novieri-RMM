@@ -563,3 +563,28 @@ describe("the key this page shows is Task 11's setupKeyOf", () => {
     expect(setupKeyOf("not an address")).toBeNull();
   });
 });
+
+// The form pattern (redesign plan, Task 12, 7.3; Receta FO): four collapsible
+// sections by theme, in the order a person meets them, and one primary action
+// per section, so the eye lands on one thing to do in each.
+describe("your security on the form pattern", () => {
+  it("draws four sections by theme, in order", async () => {
+    renderSecurityPage();
+    await screen.findByRole("heading", { name: "Passkeys" });
+    const sections = Array.from(document.querySelectorAll("section.form-section")).map(
+      (section) => section.querySelector("h2")?.textContent,
+    );
+    expect(sections).toEqual(["How you sign in", "Authenticator app", "Recovery codes", "Where you are signed in"]);
+  });
+
+  it("keeps one primary action per section", async () => {
+    renderSecurityPage();
+    await screen.findByRole("heading", { name: "Passkeys" });
+    const sections = Array.from(document.querySelectorAll<HTMLElement>("section.form-section"));
+    expect(sections.length).toBe(4);
+    for (const section of sections) {
+      const primaries = section.querySelectorAll(".btn.primary");
+      expect(primaries.length, section.querySelector("h2")?.textContent ?? "").toBeLessThanOrEqual(1);
+    }
+  });
+});

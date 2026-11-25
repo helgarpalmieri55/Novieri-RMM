@@ -339,3 +339,23 @@ describe("Settings — AI connections tab", () => {
     expect(await screen.findByText("Revoked for everyone")).toBeInTheDocument();
   });
 });
+
+// The list pattern (redesign plan, Task 12, 7.1; Receta L, a list with no
+// filters): how many apps it shows, and an empty list that names its cause
+// without offering filters to clear.
+describe("Settings — AI connections on the list pattern", () => {
+  it("says how many apps it shows", async () => {
+    openTab();
+    expect(await screen.findByRole("table", { name: "AI apps with access" })).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+
+  it("says why the list is empty, with nothing to clear", async () => {
+    calls.getMcpConnections.mockResolvedValue({ ...MCP_CONNECTIONS_FIXTURE, apps: [] });
+    openTab();
+    expect(
+      await screen.findByText("No AI app has been used in this organization in the last 90 days, and none holds access."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+});

@@ -188,7 +188,7 @@ describe("Settings — Budget tab", () => {
       updated_at: "2026-08-16T00:00:00Z",
     });
 
-    await user.click(screen.getByRole("button", { name: "Save budget settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateBudgetSettings).toHaveBeenCalledTimes(1));
     // The selected client's settings: here the internal one, `org-1`.
@@ -216,7 +216,7 @@ describe("Settings — Budget tab", () => {
       ),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save budget settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("expenses already exist on the previous basis");
@@ -239,7 +239,7 @@ describe("Settings — Budget tab", () => {
 
     const group = await screen.findByRole("group", { name: "Fiscal year starts in" });
     await user.click(within(group).getByRole("button", { name: "April" }));
-    await user.click(screen.getByRole("button", { name: "Save budget settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateBudgetSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateBudgetSettings).toHaveBeenCalledWith("org-1", {
@@ -269,7 +269,9 @@ describe("Settings — Budget tab", () => {
     for (const button of within(fiscalYear).getAllByRole("button")) {
       expect(button).toBeDisabled();
     }
-    expect(screen.getByRole("button", { name: "Save budget settings" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): the reason is a notice above the
+    // form, and there is no bar: nothing can change, so nothing can be saved.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByText(/requires the budget\.manage permission/i)).toBeInTheDocument();
   });
 });

@@ -17,7 +17,7 @@
  *      write to.
  */
 
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -184,16 +184,35 @@ describe("SettingsPage", () => {
     renderSettings();
     for (const label of ALL_TABS) {
       await user.click(await screen.findByRole("tab", { name: new RegExp(label) }));
+      // A tab's own query answers after the click: wait for its first control.
+      await waitFor(() => expect(document.querySelectorAll("input, select, textarea").length).toBeGreaterThan(0));
       const controls = document.querySelectorAll("input, select, textarea");
       expect(controls.length, `${label} must be editable`).toBeGreaterThan(0);
       // RE-POINTED (own authentication design §7): the Users tab writes with
-      // "Send invitation" now, not "Create user".
+      // "Send invitation" now, not "Create user"; and again (redesign,
+      // decision D22): the Users tab opens that invitation with "Invite a
+      // person", and a form tab's Save is the kit's bar, drawn once a field
+      // changes -- so a tab with no act of its own is changed, and its bar's
+      // Save is what must appear.
+      const acts = screen.queryAllByRole("button", { name: /save|create|invit|edit/i });
+      if (acts.length === 0) {
+        const field = Array.from(
+          document.querySelectorAll<HTMLInputElement>('[role="tabpanel"] input[type="text"]:not([disabled]):not([readonly]), [role="tabpanel"] input:not([type]):not([disabled]):not([readonly]), [role="tabpanel"] input[type="number"]:not([disabled])'),
+        )[0];
+        expect(field, `${label} must have a field to change`).toBeDefined();
+        await user.clear(field as HTMLInputElement);
+        await user.type(field as HTMLInputElement, "1");
+      }
       expect(
-        screen.getAllByRole("button", { name: /save|create|invitation/i }).length,
+        screen.getAllByRole("button", { name: /save|create|invit|edit/i }).length,
         `${label} must be able to write`,
       ).toBeGreaterThan(0);
+      // Leave the change behind without the tab switch asking about it.
+      const discard = screen.queryByRole("button", { name: "Discard" });
+      if (discard) await user.click(discard);
     }
-  });
+    // Ten tabs, each loaded, changed and discarded: longer than one form's test.
+  }, 20_000);
 
   it("hides the tabs whose read permission the operator lacks, and fetches nothing for them", async () => {
     installDefaults(["notification.read"]);
@@ -251,10 +270,14 @@ describe("SettingsPage", () => {
       expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
     }
 
-    // Non-vacuity: the tabs that DO have endpoints are all reachable.
+    // Non-vacuity: the tabs that DO have endpoints are all reachable. (The
+    // tab is the URL's `?tab=` under the data router, written after the click:
+    // awaited, not read in the act.)
     for (const label of ALL_TABS) {
       await user.click(screen.getByRole("tab", { name: new RegExp(label) }));
-      expect(screen.getByRole("tab", { name: new RegExp(label) })).toHaveAttribute("aria-selected", "true");
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { name: new RegExp(label) })).toHaveAttribute("aria-selected", "true"),
+      );
     }
   });
 
@@ -278,9 +301,12 @@ describe("SettingsPage", () => {
       const tab = screen.getByRole("tab", { name: new RegExp(label) });
       expect(tab).toHaveAttribute("aria-controls", panel.id);
       // …and the panel says which tab it belongs to, so the relationship reads
-      // in both directions.
-      expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", tab.id);
-      expect(tab.id).not.toBe("");
+      // in both directions. RE-POINTED (redesign, Receta FO: the section list
+      // is the kit's `UrlTabs`): the kit names the panel with the selected
+      // tab's own label rather than through an id on the tab, so the panel's
+      // accessible name is asserted instead of an `aria-labelledby` pair.
+      expect(screen.getByRole("tabpanel")).toHaveAccessibleName(tab.textContent ?? "");
+      expect(tab.textContent).not.toBe("");
     }
   });
 
@@ -305,6 +331,11 @@ describe("SettingsPage", () => {
   // rather than one invented for this task.
   // ----------------------------------------------------------------------
 
+  // RE-POINTED (redesign, Receta FO): the section list is the kit's `UrlTabs`,
+  // whose tab carries one label, so the state follows the tab's name in it
+  // ("Email · Set up") instead of sitting in an element of its own. The text
+  // queries below match that tail; what they assert is unchanged: the state is
+  // real text inside the tab, and part of its accessible name.
   it("says which sections are not set up, before you click them", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     renderSettings();
@@ -327,7 +358,7 @@ describe("SettingsPage", () => {
     // -- so the "Set up" text is awaited per tab rather than asserted the
     // instant the tab appears.
     for (const tab of [email, sla, health]) {
-      expect(await within(tab).findByText("Set up")).toBeInTheDocument();
+      expect(await within(tab).findByText(/ · Set up$/)).toBeInTheDocument();
       expect(tab).toHaveAccessibleName(/(?<!not )set up/i);
     }
   });
@@ -339,11 +370,11 @@ describe("SettingsPage", () => {
     const sla = await screen.findByRole("tab", { name: /Service levels/ });
     const health = screen.getByRole("tab", { name: /Health/ });
     const email = screen.getByRole("tab", { name: /Email/ });
-    expect(await within(sla).findByText("Not set up")).toBeInTheDocument();
-    expect(await within(health).findByText("Not set up")).toBeInTheDocument();
+    expect(await within(sla).findByText(/ · Not set up$/)).toBeInTheDocument();
+    expect(await within(health).findByText(/ · Not set up$/)).toBeInTheDocument();
     // Email's own query was left on the happy-path fixture: its state must
     // not have been derived from a sibling tab's answer.
-    expect(await within(email).findByText("Set up")).toBeInTheDocument();
+    expect(await within(email).findByText(/ · Set up$/)).toBeInTheDocument();
     expect(sla).toHaveAccessibleName(/not set up/i);
     expect(health).toHaveAccessibleName(/not set up/i);
     expect(email).toHaveAccessibleName(/(?<!not )set up/i);

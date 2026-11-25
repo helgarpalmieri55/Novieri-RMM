@@ -71,7 +71,7 @@
 // (`useAddPasskeyMutation`). A refusal there is said as "not created, try
 // again", not as a prompt the person closed.
 
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError, Form } from "../../components/form";
@@ -82,7 +82,7 @@ import { useApi } from "../../lib/ApiContext";
 import { describeWhen, formatDate } from "../../lib/datetime";
 import { PORTAL_SIGN_IN_PATH, SIGN_IN_PATH, signOutEverywhere } from "../../lib/session";
 import { useOrgZone } from "../../lib/zone";
-import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
+import { Btn, FormSection, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { checkNewPassword } from "../auth/errors";
 import { setupKeyOf } from "../auth/flow";
@@ -132,6 +132,49 @@ async function copyToClipboard(text: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * ONE THING YOU CAN DO, INSIDE ITS SECTION (redesign plan, Task 12, 7.3;
+ * Receta FO). The page is four collapsible sections by theme; a section that
+ * holds more than one of these (how you sign in; where you are signed in)
+ * draws each as a `section` with its own `h3` under the section's `h2`, ruled
+ * off from the one before it. A panel inside a section would be a card inside
+ * a card. `first` draws no rule above.
+ */
+function Block({
+  title,
+  subtitle,
+  actions,
+  first = false,
+  children,
+}: {
+  title?: string;
+  subtitle?: string;
+  actions?: ReactNode;
+  first?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section style={first ? undefined : BLOCK_RULED}>
+      {title || actions ? (
+        <div style={BLOCK_HEAD}>
+          {title ? <h3 style={BLOCK_TITLE}>{title}</h3> : null}
+          {actions}
+        </div>
+      ) : null}
+      {subtitle ? (
+        <p className="note" style={{ margin: "2px 0 12px" }}>
+          {subtitle}
+        </p>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+const BLOCK_RULED: CSSProperties = { borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 16 };
+const BLOCK_HEAD: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 };
+const BLOCK_TITLE: CSSProperties = { fontSize: "var(--t-body)", fontWeight: 600, margin: 0 };
 
 function Failure({ message }: { message: string }) {
   return (
@@ -186,24 +229,38 @@ function SecurityBody({ zone, back, signIn }: { zone: string | null; back: strin
           </p>
         </Panel>
       ) : data ? (
+        // FOUR SECTIONS BY THEME, in the order a person meets them: how you
+        // sign in, your second factor, how you get back in, where you are
+        // signed in. Each action keeps its own dialog, confirmation and
+        // recent second factor, and each section offers one primary.
         <>
-          {data.has_password ? (
-            <PasswordPanel
-              run={stepUp.run}
-              minimum={contact ? 15 : 12}
-              contact={contact}
-              added={passwordAdded}
-              onChanging={() => setPasswordAdded(false)}
-            />
-          ) : (
-            <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} onAdded={() => setPasswordAdded(true)} />
-          )}
-          <PasskeysPanel security={data} run={stepUp.run} zone={zone} />
-          <MicrosoftPanel security={data} run={stepUp.run} zone={zone} back={back} />
-          <TotpPanel security={data} run={stepUp.run} />
-          {!contact || secondFactor ? <RecoveryPanel security={data} run={stepUp.run} /> : null}
-          <DevicesPanel security={data} run={stepUp.run} zone={zone} />
-          <SessionsPanel security={data} run={stepUp.run} zone={zone} signIn={signIn} />
+          <FormSection title={t("profile.securityPage.sections.signIn")} icon="key">
+            {data.has_password ? (
+              <PasswordPanel
+                run={stepUp.run}
+                minimum={contact ? 15 : 12}
+                contact={contact}
+                added={passwordAdded}
+                onChanging={() => setPasswordAdded(false)}
+              />
+            ) : (
+              <AddPasswordPanel run={stepUp.run} minimum={contact ? 15 : 12} onAdded={() => setPasswordAdded(true)} />
+            )}
+            <PasskeysPanel security={data} run={stepUp.run} zone={zone} />
+            <MicrosoftPanel security={data} run={stepUp.run} zone={zone} back={back} />
+          </FormSection>
+          <FormSection title={t("profile.securityPage.totp.title")} icon="shield-lock">
+            <TotpPanel security={data} run={stepUp.run} />
+          </FormSection>
+          {!contact || secondFactor ? (
+            <FormSection title={t("profile.securityPage.recovery.title")} icon="lock">
+              <RecoveryPanel security={data} run={stepUp.run} />
+            </FormSection>
+          ) : null}
+          <FormSection title={t("profile.securityPage.sections.signedIn")} icon="devices">
+            <DevicesPanel security={data} run={stepUp.run} zone={zone} />
+            <SessionsPanel security={data} run={stepUp.run} zone={zone} signIn={signIn} />
+          </FormSection>
         </>
       ) : null}
       {stepUp.dialog}
@@ -271,7 +328,8 @@ function PasswordPanel({
   }
 
   return (
-    <Panel
+    <Block
+      first
       title={t("profile.securityPage.password.title")}
       subtitle={t(contact ? "profile.securityPage.password.subtitleContact" : "profile.securityPage.password.subtitle")}
     >
@@ -342,7 +400,7 @@ function PasswordPanel({
           ) : null}
         </div>
       </Form>
-    </Panel>
+    </Block>
   );
 }
 
@@ -377,7 +435,8 @@ function AddPasswordPanel({ run, minimum, onAdded }: { run: StepUpRun; minimum: 
   }
 
   return (
-    <Panel
+    <Block
+      first
       title={t("profile.securityPage.password.title")}
       subtitle={t("profile.securityPage.password.addSubtitle", { min: minimum })}
     >
@@ -430,7 +489,7 @@ function AddPasswordPanel({ run, minimum, onAdded }: { run: StepUpRun; minimum: 
           ) : null}
         </div>
       </Form>
-    </Panel>
+    </Block>
   );
 }
 
@@ -484,7 +543,7 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
   }
 
   return (
-    <Panel
+    <Block
       title={t("profile.securityPage.passkeys.title")}
       subtitle={t(contact ? "profile.securityPage.passkeys.subtitleContact" : "profile.securityPage.passkeys.subtitle")}
     >
@@ -555,7 +614,9 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
           <Btn
             type="submit"
             icon="key"
-            variant={confirmed ? "primary" : "secondary"}
+            // One primary per section (redesign plan, Task 12, 7.3): the
+            // password's. "Create the passkey" is still the one click asked.
+            variant="secondary"
             label={
               add.isPending
                 ? t("profile.securityPage.passkeys.adding")
@@ -583,7 +644,7 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
         }}
         onCancel={() => setRemoving(null)}
       />
-    </Panel>
+    </Block>
   );
 }
 
@@ -637,8 +698,8 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   }
 
   return (
-    <Panel
-      title={t("profile.securityPage.totp.title")}
+    <Block
+      first
       subtitle={t(security.kind === "contact" ? "profile.securityPage.totp.subtitleContact" : "profile.securityPage.totp.subtitle")}
       actions={
         <Badge variant={security.has_totp ? "success" : "muted"}>
@@ -744,7 +805,7 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
         }}
         onCancel={() => setAsking(false)}
       />
-    </Panel>
+    </Block>
   );
 }
 
@@ -775,7 +836,7 @@ function MicrosoftPanel({
     security.kind === "contact" ? !security.has_password && security.passkeys.length === 0 : !security.has_password;
 
   return (
-    <Panel title={t("profile.securityPage.microsoft.title")} subtitle={t("profile.securityPage.microsoft.subtitle")}>
+    <Block title={t("profile.securityPage.microsoft.title")} subtitle={t("profile.securityPage.microsoft.subtitle")}>
       {link ? (
         <>
           <div style={ROW}>
@@ -825,7 +886,7 @@ function MicrosoftPanel({
         }}
         onCancel={() => setConfirming(false)}
       />
-    </Panel>
+    </Block>
   );
 }
 
@@ -839,8 +900,8 @@ function RecoveryPanel({ security, run }: { security: MySecurity; run: StepUpRun
   const left = security.recovery_codes_left;
 
   return (
-    <Panel
-      title={t("profile.securityPage.recovery.title")}
+    <Block
+      first
       subtitle={t(security.kind === "contact" ? "profile.securityPage.recovery.subtitleContact" : "profile.securityPage.recovery.subtitle")}
     >
       {codes ? (
@@ -929,7 +990,7 @@ function RecoveryPanel({ security, run }: { security: MySecurity; run: StepUpRun
         }}
         onCancel={() => setAsking(false)}
       />
-    </Panel>
+    </Block>
   );
 }
 
@@ -940,7 +1001,7 @@ function DevicesPanel({ security, run, zone }: { security: MySecurity; run: Step
   const label = (device: MyTrustedDevice): string => device.label || t("profile.securityPage.devices.unnamed");
 
   return (
-    <Panel title={t("profile.securityPage.devices.title")} subtitle={t("profile.securityPage.devices.subtitle")}>
+    <Block first title={t("profile.securityPage.devices.title")} subtitle={t("profile.securityPage.devices.subtitle")}>
       {security.trusted_devices.length === 0 ? (
         <p className="note">{t("profile.securityPage.devices.empty")}</p>
       ) : (
@@ -992,7 +1053,7 @@ function DevicesPanel({ security, run, zone }: { security: MySecurity; run: Step
         }}
         onCancel={() => setForgetting(null)}
       />
-    </Panel>
+    </Block>
   );
 }
 
@@ -1021,7 +1082,7 @@ function SessionsPanel({
   const where = (session: MySession): string => session.ip || browser(session);
 
   return (
-    <Panel title={t("profile.securityPage.sessions.title")} subtitle={t("profile.securityPage.sessions.subtitle")}>
+    <Block title={t("profile.securityPage.sessions.title")} subtitle={t("profile.securityPage.sessions.subtitle")}>
       <ul style={LIST}>
         {security.sessions.map((session) => (
           <li key={session.id} style={ROW}>
@@ -1104,6 +1165,6 @@ function SessionsPanel({
         }}
         onCancel={() => setEnding(null)}
       />
-    </Panel>
+    </Block>
   );
 }

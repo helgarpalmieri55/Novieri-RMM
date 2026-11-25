@@ -30,12 +30,6 @@ export const settings = {
       budget: "Budget",
     },
   },
-  saveBar: {
-    save: "Save changes",
-    saving: "Saving…",
-    saved: "Saved. Values below are what the server returned.",
-    noChanges: "There are no unsaved changes",
-  },
   loadFailure: "That did not load. {reason} Retry, or check the platform status page.",
   readOnly: "Read-only: this change requires the {code} permission. The server enforces it; this console only reflects it.",
   readOnlyEveryClient: "Read-only: this change requires the {code} permission on every client, because every client shares this configuration. The server enforces it; this console only reflects it.",
@@ -57,12 +51,9 @@ export const settings = {
     missingTitle: "Organization profile is not available on this server.",
     missingBody: "GET /api/v1/orgs/current answered 404. The form below is disabled until the route responds.",
     forbidden: "Organization profile not available (insufficient permissions: {code}).",
-    blockedMissing: "This server does not serve the organization profile, so there is nothing to save to.",
-    blockedWaiting: "Waiting for the current values; saving now would send an empty form.",
     name: "Organization name",
     noKeys: "This server allows no org settings keys beyond the name. Keys added to the server's allowlist appear here without a console change.",
     unrenderable: "Not editable here: {keys}. Either a structured value that needs a control designed for its shape, or a key whose name is credential-shaped. Those are never rendered, never pre-filled and never sent back (invariant 3). They are named rather than dropped silently, because a form that discards part of what the server holds is the defect this page exists to remove.",
-    unsaved: "Unsaved changes on this tab. Nothing is written until you press Save.",
     numberInvalid: "{key} must be a number, and \"{value}\" is not one",
     numberNegative: "{key} cannot be negative, and {value} is",
     rename: {
@@ -94,7 +85,6 @@ export const settings = {
     },
   },
   email: {
-    title: "Email",
     subtitle: "The mail server for invitations, password resets and notifications",
     loading: "Loading…",
     forbidden: "Email settings are not available (insufficient permissions: {code}).",
@@ -181,7 +171,6 @@ export const settings = {
       other: "{count} users hold {name} and will be affected by this change.",
     },
     globalNote: "{name} is platform-wide. Saving edits a copy for this organization; no other organization is touched.",
-    savePermissions: "Save permissions",
     create: {
       title: "Create a role",
       subtitle: "Created with no permissions. Give them access in the matrix above.",
@@ -208,7 +197,16 @@ export const settings = {
     emailMissing: "Email isn't set up, so invitations are not emailed (each link is shown to you once, to pass on yourself) and nobody can reset a forgotten password.",
     emailSetUp: "Set up email",
     subtitle: "Everyone who can sign in to this organization, and what each of them holds",
-    empty: "No users in this organization yet. Invite one below.",
+    empty: "No users in this organization yet.",
+    list: {
+      search: "Search people",
+      statusLabel: "Status",
+      all: "All",
+      active: "Active",
+      invited: "Invited",
+      disabled: "Disabled",
+      deleted: "Deleted",
+    },
     columns: {
       person: "Person",
       status: "Status",
@@ -340,7 +338,6 @@ export const settings = {
   },
   // How long a sign-in lasts (own authentication design §2.4, §2.6, §3).
   sessions: {
-    title: "Sessions",
     subtitle: "How long a sign-in lasts before it is asked for again",
     loading: "Loading…",
     forbidden: "Session settings are not available (insufficient permissions: {code}).",
@@ -363,12 +360,10 @@ export const settings = {
     rangeHours: "Between {min} and {max} hours.",
     rangeDays: "Between {min} and {max} days.",
     outOfRange: "Each value has to be within the range shown under it.",
-    correct: "Correct the values outside their range before saving.",
   },
   // Sign in with Microsoft (own-auth phase 2, Task 12; operator decision C4):
   // the application, the platform's certificate and Novieri's tenant.
   microsoft: {
-    title: "Sign in with Microsoft",
     subtitle: "One application registered in Microsoft Entra ID, for technicians and for clients' contacts",
     loading: "Loading…",
     forbidden: "Reading this needs {code}.",
@@ -411,10 +406,8 @@ export const settings = {
     contactsNote:
       "A client's contacts sign in from the organizations their client lists (Clients, Edit). Each organization's administrator may have to approve the application once.",
     badId: "Each identifier is a GUID, as Microsoft shows it: 8-4-4-4-12 hexadecimal digits.",
-    correct: "Correct the identifiers to save.",
   },
   assistant: {
-    title: "Assistant",
     subtitle: "How long conversations are kept, rate limits and the daily usage limit",
     loading: "Loading…",
     forbidden: "Assistant settings not available (insufficient permissions: {code}).",
@@ -435,7 +428,6 @@ export const settings = {
     dailyLimit: "Daily usage limit",
     noLimit: "Leave blank for no limit",
     serverNote: "Whether the assistant runs, and which model it uses, are server configuration (ITS_AI_*) and are the same for every organization on this deployment. Provider API keys and base URLs are never returned by the API, never shown here and never entered here.",
-    save: "Save assistant settings",
   },
   aiConnections: {
     title: "AI connections",
@@ -508,6 +500,10 @@ export const settings = {
       active: "active",
       inactive: "inactive",
       tokenAria: "New token for {name}",
+      edit: "Edit",
+      editAria: "Edit {name}",
+      editTitle: "Edit {name}",
+      saving: "Saving…",
       tokenPlaceholder: "Leave blank to keep the current one",
       mailHint: "Change the mail sign-in under Notifications → Channels.",
       sendTest: "Send a test",
@@ -577,11 +573,8 @@ export const settings = {
     autoClose: "Auto-close resolved tickets after",
     days: "Days",
     invalid: "Must be a whole number between 1 and {max}. The server re-checks this; the box is an affordance, not the validation.",
-    save: "Save service levels",
-    correct: "Correct the value above before saving.",
   },
   health: {
-    title: "Endpoint health",
     subtitle: "Org-wide alerting, escalation and ticketing behaviour",
     loading: "Loading…",
     forbidden: "Health settings not available (insufficient permissions: {code}).",
@@ -615,8 +608,6 @@ export const settings = {
     blankForNone: "Blank for none",
     autoResolve: "Auto-resolve alert tickets when the alert recovers",
     invalid: "Not a whole number: {keys}. Nothing is saved while a numeric field is blank or non-numeric; a blank box is not zero.",
-    save: "Save health settings",
-    correct: "Correct the numeric fields above before saving.",
   },
   budget: {
     title: "Budget",
@@ -645,7 +636,5 @@ export const settings = {
     by: "by",
     acknowledge: "I understand that expenses already converted on the previous basis keep the base amounts they were recorded with. The server refuses this change without the acknowledgement once any non-void expense carries a base amount.",
     monthInvalid: "The fiscal year start must be a month between 1 and 12.",
-    save: "Save budget settings",
-    correct: "Correct the fields above before saving.",
   },
 } as const;

@@ -150,7 +150,7 @@ describe("Microsoft sign-in", () => {
     await user.type(within(tab).getByLabelText("Application (client) ID"), APP);
     await user.type(within(tab).getByLabelText("Novieri's Microsoft organization (tenant ID)"), TENANT);
     await user.click(within(tab).getByRole("checkbox", { name: "Make a new certificate when I save" }));
-    await user.click(within(tab).getByRole("button", { name: "Save changes" }));
+    await user.click(within(tab).getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(calls.putMicrosoftSettings).toHaveBeenCalledExactlyOnceWith({
         enabled: true,
@@ -224,6 +224,10 @@ describe("Microsoft sign-in", () => {
     const tab = await screen.findByRole("tabpanel");
     await user.type(await within(tab).findByLabelText("Application (client) ID"), "not-a-guid");
     expect(within(tab).getByText("Each identifier is a GUID, as Microsoft shows it: 8-4-4-4-12 hexadecimal digits.")).toBeInTheDocument();
+    // The kit's bar (decision D22) keeps Save enabled for input to correct and
+    // refuses on submit, saying the same sentence; nothing is sent.
+    await user.click(within(tab).getByRole("button", { name: "Save" }));
+    expect(within(tab).getByRole("alert")).toHaveTextContent("Each identifier is a GUID");
     expect(calls.putMicrosoftSettings).not.toHaveBeenCalled();
   });
 
@@ -258,7 +262,7 @@ describe("Microsoft sign-in", () => {
     renderSettings("/settings?tab=microsoft");
     const tab = await screen.findByRole("tabpanel");
     await user.type(await within(tab).findByLabelText("Application (client) ID"), APP);
-    await user.click(within(tab).getByRole("button", { name: "Save changes" }));
+    await user.click(within(tab).getByRole("button", { name: "Save" }));
     expect(await within(tab).findByRole("alert")).toHaveTextContent(
       "another save happened at the same time; reload and try again",
     );
@@ -292,7 +296,7 @@ describe("Microsoft sign-in", () => {
     const tab = await screen.findByRole("tabpanel");
     await user.type(await within(tab).findByLabelText("Application (client) ID"), APP);
     await user.click(within(tab).getByRole("checkbox", { name: "Make a new certificate when I save" }));
-    await user.click(within(tab).getByRole("button", { name: "Save changes" }));
+    await user.click(within(tab).getByRole("button", { name: "Save" }));
 
     const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
     await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");

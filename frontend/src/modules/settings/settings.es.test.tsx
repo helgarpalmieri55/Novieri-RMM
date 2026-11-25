@@ -124,7 +124,10 @@ describe("the settings page in Spanish", () => {
     expect(screen.getByText("Configuración que se aplica en toda esta organización.")).toBeInTheDocument();
     expect(screen.getByText("Los demás módulos se configuran desde su propia página.")).toBeInTheDocument();
     const tablist = screen.getByRole("tablist", { name: "Secciones de la configuración" });
-    expect(within(tablist).getAllByRole("tab").map((tab) => tab.firstChild?.textContent)).toEqual([
+    // RE-POINTED (redesign, Receta FO: the kit's `UrlTabs`): a tab's state
+    // follows its name in its one label ("Salud · Configurado"), so the name is
+    // the label's text before " · ".
+    expect(within(tablist).getAllByRole("tab").map((tab) => tab.textContent?.split(" · ")[0])).toEqual([
       "Organización",
       "Correo electrónico",
       "Roles",
@@ -139,23 +142,23 @@ describe("the settings page in Spanish", () => {
       "Presupuesto",
     ]);
     // Email, Service levels and Health each say whether they are set up.
-    await waitFor(() => expect(within(tablist).getAllByText("Configurado")).toHaveLength(3));
+    await waitFor(() => expect(within(tablist).getAllByText(/ · Configurado$/)).toHaveLength(3));
     expectNoEnglish(container, RECORDED);
   });
 
   it("says a section is not set up", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     await openIn(null);
-    expect(await screen.findByText("Sin configurar")).toBeInTheDocument();
+    expect(await screen.findByText(/ · Sin configurar$/)).toBeInTheDocument();
   });
 
   it("re-words the section list and the heading on a live switch", async () => {
     await openIn(null);
-    await screen.findAllByText("Configurado");
+    await screen.findAllByText(/ · Configurado$/);
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeInTheDocument();
-    expect(screen.getAllByText("Set up")).toHaveLength(3);
+    expect(screen.getAllByText(/ · Set up$/)).toHaveLength(3);
     expect(screen.getByRole("tab", { name: /^Service levels/ })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("tab", { name: /^Niveles de servicio/ })).toBeInTheDocument();
@@ -213,7 +216,7 @@ describe("the organization tab in Spanish", () => {
     await openIn(null);
     const name = await screen.findByLabelText("Nombre de la organización");
     await user.clear(name);
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("El campo Nombre de la organización es obligatorio");
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("alert")).toHaveTextContent("Organization name is required");
@@ -228,20 +231,28 @@ describe("the organization tab in Spanish", () => {
     const days = await screen.findByLabelText("Evidence retention days");
     await user.clear(days);
     await user.type(days, "-3");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("evidence_retention_days no puede ser negativo, y -3 lo es");
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("alert")).toHaveTextContent("evidence_retention_days cannot be negative, and -3 is");
   });
 
-  it("refuses a save with nothing to save out loud, and re-words it", async () => {
+  it("offers no save with nothing to save, and words the bar that a change brings", async () => {
+    // Redesign decision D22: with no change there is no bar to press, which is how the kit avoids a dead control; requireDirty={false} went with the settings module's own SaveBar (deleted).
+    // (This replaced "refuses a save with nothing to save out loud, and
+    // re-words it": the refusal guarded a dead control that cannot exist now.)
     const user = userEvent.setup();
     await openIn(null);
-    await screen.findByLabelText("Nombre de la organización");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No hay cambios sin guardar");
+    const name = await screen.findByLabelText("Nombre de la organización");
+    expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
+    await user.type(name, " Holding");
+    const bar = screen.getByRole("region", { name: "Cambios sin guardar" });
+    expect(within(bar).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Descartar" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("alert")).toHaveTextContent("There are no unsaved changes");
+    expect(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(calls.updateCurrentOrg).not.toHaveBeenCalled();
   });
 
   it("says there are unsaved changes, then confirms the rename in Spanish", async () => {
@@ -250,8 +261,9 @@ describe("the organization tab in Spanish", () => {
     const name = await screen.findByLabelText("Nombre de la organización");
     await user.clear(name);
     await user.type(name, "Toeshee Holding");
-    expect(screen.getByText("Cambios sin guardar en esta pestaña. No se escribe nada hasta que pulses Guardar.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    // RE-POINTED (redesign, decision D22): the kit's bar says it now.
+    expect(screen.getByRole("region", { name: "Cambios sin guardar" })).toHaveTextContent("Cambios sin guardar");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog", { name: "Cambiar el nombre de esta organización" });
     expect(within(dialog).getByText("Toeshee Group → Toeshee Holding")).toBeInTheDocument();
     expect(within(dialog).getByText(/^El nuevo nombre aparece en todas partes a partir de ahora\./)).toBeInTheDocument();
@@ -262,7 +274,8 @@ describe("the organization tab in Spanish", () => {
     calls.getCurrentOrg.mockResolvedValue(renamed);
     await user.click(within(dialog).getByRole("button", { name: "Cambiar el nombre de la organización" }));
     await waitFor(() => expect(calls.updateCurrentOrg).toHaveBeenCalled());
-    expect(await screen.findByRole("status")).toHaveTextContent("Guardado. Los valores de abajo son los que devolvió el servidor.");
+    // RE-POINTED (decision D22): the kit's bar says "Guardado." after the 2xx.
+    expect(await screen.findByRole("status")).toHaveTextContent("Guardado.");
   });
 
   it("says the profile is not served, or not allowed", async () => {
@@ -270,7 +283,10 @@ describe("the organization tab in Spanish", () => {
     const first = await openIn(null);
     expect(await screen.findByText("El perfil de la organización no está disponible en este servidor.")).toBeInTheDocument();
     expect(screen.getByText(/^GET \/api\/v1\/orgs\/current respondió 404\./)).toBeInTheDocument();
-    expect(screen.getByText("Este servidor no ofrece el perfil de la organización, así que no hay dónde guardar.")).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): the blocked bar that said "nowhere
+    // to save" is gone with the settings module's own bar; with no values there is no
+    // change to make, so no bar and no Save at all.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     expectNoEnglish(first.container, RECORDED);
     first.unmount();
     calls.getCurrentOrg.mockRejectedValue(new ApiError(403, ""));
@@ -327,7 +343,14 @@ describe("the email tab in Spanish", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/^Contraseña: sin establecer\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enviar un mensaje de prueba" })).toBeDisabled();
-    expect(screen.getByText("Antes de guardar, indica un servidor de correo, una dirección del remitente y un puerto válido.")).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): what the form lacks is said in the
+    // bar on submit, not beside a disabled Save.
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Nombre del remitente"), "IT");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("alert")).toHaveTextContent(
+      "Antes de guardar, indica un servidor de correo, una dirección del remitente y un puerto válido.",
+    );
     expectNoEnglish(container, RECORDED);
   });
 
@@ -345,7 +368,11 @@ describe("the email tab in Spanish", () => {
     // RE-POINTED (Task 3): the box is no longer "solo para una nube
     // gubernamental o nacional" -- there is no address but Microsoft's.
     expect(screen.getByText("Avanzado")).toBeInTheDocument();
-    expect(screen.getByText(/^Antes de guardar, indica un servidor de correo, una dirección del remitente, un puerto válido, el nombre de usuario/)).toBeInTheDocument();
+    // RE-POINTED (decision D22): said in the bar on submit.
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("alert")).toHaveTextContent(
+      /^Antes de guardar, indica un servidor de correo, una dirección del remitente, un puerto válido, el nombre de usuario/,
+    );
     expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "Novieri RMM", "itms", "smtp.office365.com"]);
   });
 
@@ -417,7 +444,8 @@ describe("the roles tab in Spanish", () => {
     expect(screen.getByText("7 usuarios tienen technician y se verán afectados por este cambio.")).toBeInTheDocument();
     expect(screen.getByText(/^technician es de toda la plataforma\. Al guardar se edita una copia para esta organización/)).toBeInTheDocument();
     expect(screen.getByText("Todos los códigos de permiso que define esta plataforma, agrupados por módulo")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar permisos" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): no bar until a permission changes.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     // The role and permission descriptions are server text, recorded; so are the module names.
     expectNoEnglish(container, [...RECORDED, "Day", "day", "fleet", "operations", "Read", "only", "across", "platform", "View", "Manage", "Redefine", "devices", "roles", "users", "budgets", "budget"]);
     await user.click(screen.getByRole("button", { name: "Editar los permisos de auditor" }));
@@ -430,7 +458,7 @@ describe("the roles tab in Spanish", () => {
     await openIn("roles");
     await user.click(await screen.findByRole("button", { name: "Editar los permisos de technician" }));
     await user.click(screen.getByRole("checkbox", { name: /devices\.manage/ }));
-    await user.click(screen.getByRole("button", { name: "Guardar permisos" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByText("technician se copió en tu organización y estás editando la copia. Ninguna otra organización se ve afectada.")).toBeInTheDocument();
   });
 
@@ -611,7 +639,9 @@ describe("the users tab in Spanish", () => {
     const user = userEvent.setup();
     calls.inviteUser.mockResolvedValue({ user_id: "u-new", invite_link: "https://itms.example.test/invite#one-time-token" });
     const { container } = await openIn("users");
-    const invite = await screen.findByRole("region", { name: "Invitar a una persona" });
+    // RE-POINTED (redesign plan, Task 12, 7.1): the invitation is a dialog.
+    await user.click(await screen.findByRole("button", { name: "Invitar a una persona" }));
+    const invite = screen.getByRole("dialog", { name: "Invitar a una persona" });
     expect(
       within(invite).getByText(
         "La persona elige su propia contraseña y su segundo factor desde un enlace que funciona una sola vez y caduca a las 72 horas",
@@ -737,7 +767,13 @@ describe("the sessions tab in Spanish", () => {
     );
     expect(screen.getAllByText("Entre 5 y 480 minutos.")).toHaveLength(2);
     expect(screen.getByText(/^En un equipo recordado no se pide el segundo factor/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): the kit's bar, worded, once a
+    // value changes.
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Cerrar la sesión tras la inactividad"), "0");
+    const bar = screen.getByRole("region", { name: "Cambios sin guardar" });
+    expect(within(bar).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Descartar" })).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 
@@ -769,7 +805,8 @@ describe("the assistant tab in Spanish", () => {
     expect(screen.getByLabelText("Límite diario de uso")).toHaveValue(null);
     expect(screen.getByText("Déjalo en blanco para no poner límite")).toBeInTheDocument();
     expect(screen.getByText(/^Que el asistente funcione y qué modelo use son configuración del servidor \(ITS_AI_\*\)/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar configuración del asistente" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): no bar until something changes.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     expect(container.textContent).not.toContain(PLANTED_SECRET);
     expectNoEnglish(container, RECORDED);
   });
@@ -950,19 +987,27 @@ describe("the notifications tab in Spanish", () => {
   });
 
   it("words the channel table, its credential state and the row actions", async () => {
+    const user = userEvent.setup();
     const { container } = await openIn("notifications");
     expect(await screen.findByText("Canales de notificación")).toBeInTheDocument();
-    await screen.findByLabelText("Nombre de Operations mailbox");
     expect(screen.getByText("Adónde van las notificaciones salientes: un webhook o un servidor de correo")).toBeInTheDocument();
-    for (const header of ["Nombre", "Tipo", "Credencial", "Activo", "Token nuevo"]) {
-      expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
+    // RE-POINTED (redesign plan, Task 12, 7.1): a channel is edited in its own
+    // dialog, so the table lists and the editor's words are the dialog's.
+    for (const header of ["Nombre", "Tipo", "Credencial", "Activo"]) {
+      expect(await screen.findByRole("columnheader", { name: header })).toBeInTheDocument();
     }
     expect(screen.getAllByText("guardada en la bóveda")).toHaveLength(2);
     expect(screen.getAllByText("activo").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("Nombre de Operations mailbox")).toHaveValue("Operations mailbox");
-    expect(screen.getByLabelText("Token nuevo de Ops chat")).toHaveAttribute("placeholder", "Déjalo en blanco para conservar el actual");
-    expect(screen.getByText("Cambia el inicio de sesión del correo en Notificaciones → Canales.")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Enviar una prueba" })).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Editar Operations mailbox" }));
+    let dialog = screen.getByRole("dialog", { name: "Editar Operations mailbox" });
+    expect(within(dialog).getByLabelText("Nombre de Operations mailbox")).toHaveValue("Operations mailbox");
+    expect(within(dialog).getByText("Cambia el inicio de sesión del correo en Notificaciones → Canales.")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    await user.click(screen.getByRole("button", { name: "Editar Ops chat" }));
+    dialog = screen.getByRole("dialog", { name: "Editar Ops chat" });
+    expect(within(dialog).getByText("Token nuevo")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Token nuevo de Ops chat")).toHaveAttribute("placeholder", "Déjalo en blanco para conservar el actual");
     expect(container.textContent).not.toContain(PLANTED_SECRET);
     expectNoEnglish(container, [...RECORDED, "Ops chat", "Operations mailbox"]);
   });
@@ -1050,7 +1095,8 @@ describe("the service levels tab in Spanish", () => {
     expect(screen.getByText("Tickets sin SLA:")).toBeInTheDocument();
     expect(screen.getByText("Plazos desactualizados:")).toBeInTheDocument();
     expect(screen.getByText("configurado")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Guardar niveles de servicio" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): no bar until the value changes.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     expectNoEnglish(container, RECORDED);
   });
 
@@ -1069,7 +1115,12 @@ describe("the service levels tab in Spanish", () => {
     await user.clear(days);
     await user.type(days, "0");
     expect(screen.getByText(/^Debe ser un número entero entre 1 y \d+\. El servidor lo vuelve a comprobar/)).toBeInTheDocument();
-    expect(screen.getByText("Corrige el valor de arriba antes de guardar.")).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): Save stays enabled for a value to
+    // correct, and the bar says the same sentence on submit.
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("alert")).toHaveTextContent(
+      /^Debe ser un número entero entre 1 y \d+\. El servidor lo vuelve a comprobar/,
+    );
   });
 
   it("is not available without the permission", async () => {
@@ -1086,7 +1137,9 @@ describe("the health tab in Spanish", () => {
     calls.listTicketQueues.mockResolvedValue([QUEUE_FIXTURE, { ...QUEUE_FIXTURE, id: "queue-8", key: "legacy", name: "Legacy", active: false }]);
     calls.listTicketCategories.mockResolvedValue([CATEGORY_FIXTURE]);
     const { container } = await openIn("health");
-    expect(await screen.findByText("Salud de los equipos")).toBeInTheDocument();
+    // RE-POINTED (redesign, Receta FO): the tab names its form ("Salud"); the
+    // panel title that repeated it ("Salud de los equipos") went with the panel.
+    expect(await screen.findByRole("tab", { name: /^Salud/, selected: true })).toBeInTheDocument();
     await screen.findByText("configurado");
     expect(screen.getByText("Comportamiento de alertas, escalado y tickets en toda la organización")).toBeInTheDocument();
     expect(screen.getByText("configurado")).toBeInTheDocument();
@@ -1100,7 +1153,8 @@ describe("the health tab in Spanish", () => {
     expect(screen.getByLabelText("Plantilla de enlace directo a la monitorización")).toBeInTheDocument();
     expect(screen.getByText("En blanco para ninguna")).toBeInTheDocument();
     expect(screen.getByLabelText("Resolver automáticamente los tickets de alerta cuando la alerta se recupera")).toBeChecked();
-    expect(screen.getByRole("button", { name: "Guardar configuración de salud" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): no bar until something changes.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     expectNoEnglish(container, [...RECORDED, "Legacy", "legacy", "escalations"]);
   });
 
@@ -1138,7 +1192,11 @@ describe("the health tab in Spanish", () => {
     await user.clear(retention);
     const note = await screen.findByText(/^No es un número entero: alert_retention_days\./);
     expect(note).toHaveTextContent("un campo en blanco no es cero.");
-    expect(screen.getByText("Corrige los campos numéricos de arriba antes de guardar.")).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22): said in the bar on submit.
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("alert")).toHaveTextContent(
+      /^No es un número entero: alert_retention_days\./,
+    );
   });
 
   it("is not available without the permission", async () => {
@@ -1163,7 +1221,8 @@ describe("the budget tab in Spanish", () => {
     expect(within(months).getByRole("button", { name: "Enero" })).toHaveAttribute("aria-pressed", "true");
     const changed = screen.getByText(/^Último cambio: /);
     expect(changed.textContent).toMatch(/^Último cambio: .* por admin\.$/);
-    expect(screen.getByRole("button", { name: "Guardar configuración del presupuesto" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): no bar until something changes.
+    expect(screen.queryByRole("button", { name: "Guardar" })).toBeNull();
     expectNoEnglish(container, [...RECORDED, "admin"]);
   });
 
