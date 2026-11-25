@@ -50,6 +50,7 @@ import {
   useNarrowedApi,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
 
@@ -112,8 +113,6 @@ export function DriftPage() {
   const tab = filters.values.class || "all";
   const chip = filters.values.client;
   const { client: narrowedTo } = useNarrowedApi(chip);
-  const withClient = (path: string): string =>
-    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
 
   // Three separate reads, because they are three separate kinds of fact. The
   // default `/drift` list already excludes `dormant`; it is fetched by name so
@@ -216,7 +215,7 @@ export function DriftPage() {
           label={t("ipam.fields.drift")}
           value={String(counts.drift)}
           icon="arrows-exchange"
-          to={withClient("/ipam/drift")}
+          to={withClient("/ipam/drift", narrowedTo)}
           tone="gold"
           urgent
           /* No data (pending, narrowing undecided or failed): the kit's absent
@@ -234,7 +233,7 @@ export function DriftPage() {
           label={t("ipam.fields.dormant")}
           value={String(counts.dormant)}
           icon="clock"
-          to={withClient("/ipam/drift?class=dormant")}
+          to={withClient("/ipam/drift?class=dormant", narrowedTo)}
           tone="neutral"
           pending={!dormantCounted}
           foot={dormantCounted ? <span>{t("ipam.drift.tileDormantFoot")}</span> : undefined}
@@ -244,7 +243,7 @@ export function DriftPage() {
           label={t("ipam.fields.orphans")}
           value={String(counts.orphans)}
           icon="eye"
-          to={withClient("/ipam/drift?class=orphans")}
+          to={withClient("/ipam/drift?class=orphans", narrowedTo)}
           tone="blue"
           pending={!orphansCounted}
           foot={orphansCounted ? <span>{t("ipam.drift.tileOrphansFoot")}</span> : undefined}

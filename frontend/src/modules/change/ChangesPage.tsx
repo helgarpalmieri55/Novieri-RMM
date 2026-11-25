@@ -51,6 +51,7 @@ import {
   StatusPill,
   useNewParam,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -189,7 +190,7 @@ export function ChangesPage() {
   // UNDER THE CLIENT CHIP A TILE COUNTS ONE CLIENT'S ROWS, AND OPENS THEM:
   // its link carries the chip, so the list it opens is the one it counted.
   const chip = filters.values.client;
-  const listOf = (query: string) => `/changes?${query}${chip ? `&client=${encodeURIComponent(chip)}` : ""}`;
+  const listOf = (query: string) => withClient(`/changes?${query}`, chip);
 
   const newChange = canRequest ? (
     <Btn label={t("change.list.newChange")} icon="plus" variant="primary" onClick={created.start} />

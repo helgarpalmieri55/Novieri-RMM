@@ -79,6 +79,7 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Person } from "../../shell/viz";
@@ -212,8 +213,6 @@ export function SubscriptionsPage() {
   // that client's rows opens its page with the same `client=`, so it opens
   // exactly the rows it counted (coordinator's ruling on the wave reviews).
   const { client: narrowedTo } = useNarrowedApi(chip);
-  const withClient = (path: string) =>
-    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
   // The renewal tiles count a 90-day window, so they open the calendar on it
   // (its default is 30 days): the rows they open are the rows they counted.
   const renewalsWindow = `/subscriptions/renewals?within=${RENEWAL_WINDOW_DAYS}`;
@@ -346,7 +345,7 @@ export function SubscriptionsPage() {
             label={t("subscriptions.list.tileRunRate")}
             value={`${monthlyRunRate.monthly_total} ${monthlyRunRate.currency}`}
             icon="budget"
-            to={withClient("/subscriptions/spend")}
+            to={withClient("/subscriptions/spend", narrowedTo)}
             tone="primary"
             /* The server's own annual figure for the same row -- not this
                one multiplied by twelve, which would be the browser doing
@@ -358,7 +357,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileActive")}
           value={String(activeCount)}
           icon="subscription"
-          to={withClient("/subscriptions")}
+          to={withClient("/subscriptions", narrowedTo)}
           tone="blue"
           zeroLabel={t("subscriptions.list.tileActiveZero")}
           pending={activeNoData}
@@ -372,7 +371,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
           value={String(renewalRows.length)}
           icon="clock"
-          to={withClient(renewalsWindow)}
+          to={withClient(renewalsWindow, narrowedTo)}
           tone="gold"
           zeroLabel={t("subscriptions.list.tileRenewalsZero")}
           pending={renewalsNoData}
@@ -389,7 +388,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileNotice")}
           value={String(noticeDueCount)}
           icon="warning"
-          to={withClient(renewalsWindow)}
+          to={withClient(renewalsWindow, narrowedTo)}
           tone="orange"
           urgent={noticeDueCount > 0}
           zeroLabel={t("subscriptions.list.tileNoticeZero")}
@@ -404,7 +403,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileNoOwner")}
           value={String(noOwnerCount)}
           icon="user"
-          to={withClient("/subscriptions")}
+          to={withClient("/subscriptions", narrowedTo)}
           tone="gold"
           urgent={noOwnerCount > 0}
           zeroLabel={t("subscriptions.list.tileNoOwnerZero")}

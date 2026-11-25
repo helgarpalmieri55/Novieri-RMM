@@ -48,6 +48,7 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
   writeQuery,
 } from "../../shell/components";
 
@@ -280,13 +281,7 @@ export function CredentialsPage() {
   // UNDER THE CLIENT CHIP A TILE COUNTS ONE CLIENT'S ROWS, AND OPENS THEM
   // (coordinator ruling 2): its link carries the chip.
   const chip = filters.values.client;
-  const listOf = (state: string) => {
-    const query = new URLSearchParams();
-    if (state) query.set("state", state);
-    if (chip) query.set("client", chip);
-    const text = query.toString();
-    return text ? `/credentials?${text}` : "/credentials";
-  };
+  const listOf = (state: string) => withClient(state ? `/credentials?state=${state}` : "/credentials", chip);
   const newCredential = canManage ? (
     <Btn label={t("credentials.page.newCredential")} icon="plus" variant="primary" onClick={created.start} />
   ) : undefined;
