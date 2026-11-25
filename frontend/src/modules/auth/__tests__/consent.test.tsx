@@ -68,6 +68,19 @@ describe("approving an AI app", () => {
     expect(screen.queryByText(/only answers on this computer/)).toBeNull();
   });
 
+  it("puts what approving allows in a warning beside Approve", async () => {
+    // Plan Task 13 (8.11), invariant 1c: the claim that the app acts with the
+    // person's whole authority is the control's own warning, in the card, next
+    // to the button that grants it (copy voice: the security statement goes on
+    // the control, not trimmed).
+    renderAuth(PAGE);
+    await screen.findByRole("heading", { name: "Connect the app at claude.ai" });
+    const grants = screen.getByText(/everything your role allows/);
+    expect(grants).toHaveTextContent("act as you in Novieri RMM");
+    expect(grants.closest(".notice")).toHaveClass("gold");
+    expect(grants.closest(".panel")).toContainElement(screen.getByRole("button", { name: "Approve" }));
+  });
+
   it("names the host that publishes a client metadata document, and where it answers", async () => {
     calls.oauthAuthorizeDetails.mockResolvedValue({
       ...CONSENT,
