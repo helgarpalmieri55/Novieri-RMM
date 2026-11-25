@@ -31,6 +31,10 @@ export function MyWorkPage() {
 
   const tickets = useTickets({ scope: "mine", sort: "due", limit: 200 });
   const items = tickets.data?.items ?? [];
+  // The tiles' one condition (ruling 10a): no tickets read, pending or
+  // failed. StatCard's `pending` draws the kit's absent mark, never a 0 and
+  // its "nothing assigned" sentence over a read that has not answered.
+  const noTickets = tickets.data === undefined;
   const urgentCount = useMemo(
     () => items.filter((t) => URGENT_PRIORITIES.has(t.priority)).length,
     [items],
@@ -57,6 +61,7 @@ export function MyWorkPage() {
         <StatCard
           label={t("serviceDesk.myWork.assignedToYou")}
           value={String(items.length)}
+          pending={noTickets}
           icon="ticket"
           to={myTicketsHref}
           tone="neutral"
@@ -65,6 +70,7 @@ export function MyWorkPage() {
         <StatCard
           label={t("serviceDesk.common.highOrUrgentPriority")}
           value={String(urgentCount)}
+          pending={noTickets}
           icon="alert-triangle"
           to={`${myTicketsHref}&priority=high,urgent`}
           tone="red"
