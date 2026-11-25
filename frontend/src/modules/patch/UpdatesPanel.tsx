@@ -436,7 +436,7 @@ function SeverityChips({
         <button
           key={chip.key}
           type="button"
-          className={chip.on ? "chip on" : "chip"}
+          className={`${chip.on ? "chip on" : "chip"} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
           aria-pressed={chip.on}
           onClick={chip.onClick}
         >

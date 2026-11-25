@@ -458,7 +458,7 @@ export function SecurityPage() {
                       // DRAWN AS THE KIT'S CHIPS (DESIGN.md, "Chips"): the
                       // selected one in the cobalt wash with the check glyph,
                       // not a filled primary button beside the page's others.
-                      className={active ? "chip on" : "chip"}
+                      className={`${active ? "chip on" : "chip"} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
                       onClick={() => setFilters({ [HOURS_PARAM]: String(option.hours) })}
                     >
                       {active ? <Icon name="circle-check" size={13} /> : null}
