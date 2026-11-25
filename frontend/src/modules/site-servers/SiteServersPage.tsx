@@ -62,16 +62,8 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
-
-/**
- * A tile's link, carrying the Client chip when the page has one (general
- * ruling 2): the tile counts the chip's client's rows, so it opens them.
- */
-function withChip(path: string, client: string): string {
-  if (client === "") return path;
-  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
-}
 
 export function SiteServersPage() {
   const t = useT();
@@ -154,7 +146,7 @@ export function SiteServersPage() {
           label={t("siteServers.page.registered")}
           value={String(servers.length)}
           icon="server"
-          to={withChip("/site-servers", filters.values.client)}
+          to={withClient("/site-servers", filters.values.client)}
           tone="neutral"
           zeroLabel={t("siteServers.page.registeredZero")}
           foot={<span>{t("siteServers.page.registeredFoot")}</span>}
@@ -163,7 +155,7 @@ export function SiteServersPage() {
           label={t("siteServers.page.enabled")}
           value={String(enabledCount)}
           icon="check"
-          to={withChip("/site-servers?state=enabled", filters.values.client)}
+          to={withClient("/site-servers?state=enabled", filters.values.client)}
           tone="green"
           zeroLabel={
             servers.length === 0
@@ -186,7 +178,7 @@ export function SiteServersPage() {
           label={t("siteServers.page.segments")}
           value={String(segmentCount)}
           icon="network"
-          to={withChip("/site-servers", filters.values.client)}
+          to={withClient("/site-servers", filters.values.client)}
           tone="blue"
           zeroLabel={t("siteServers.page.segmentsZero")}
           /* WHAT IT DOES NOT COUNT, because the number invites the opposite

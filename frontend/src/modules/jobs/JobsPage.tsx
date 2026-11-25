@@ -32,6 +32,7 @@ import {
   StatusPill,
   useNarrowedApi,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Drawer } from "../../shell/Drawer";
 import { Icon } from "../../shell/icons";
@@ -267,10 +268,8 @@ export function JobsPage() {
   // invalidate `["jobs"]`, which reaches every copy, and stop and retry keep
   // `useApi()`. The open job is read by id, as before.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
-  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
-  // as Alerts' `withClient`): the tiles below count the chip's client.
-  const underChip = (to: string): string =>
-    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2):
+  // the tiles below count the chip's client, so each links with `withClient`.
   const jobs = useQuery({
     queryKey: client === null ? ["jobs"] : ["jobs", { client }],
     queryFn: () => readApi.listJobs(),
@@ -518,7 +517,7 @@ export function JobsPage() {
           value={jobs.isPending ? NO_DATE : String(total)}
           icon="jobs"
           // The whole queue: from a filtered view this is the way back to it.
-          to={underChip("/jobs")}
+          to={withClient("/jobs", client)}
           tone="neutral"
           zeroLabel={t("jobs.tiles.jobsZero")}
           foot={jobs.isPending ? undefined : totalFoot}
@@ -527,7 +526,7 @@ export function JobsPage() {
           label={t("jobs.tiles.running")}
           value={jobs.isPending ? NO_DATE : String(running)}
           icon="progress"
-          to={underChip("/jobs?status=running")}
+          to={withClient("/jobs?status=running", client)}
           tone="violet"
           zeroLabel={t("jobs.tiles.runningZero")}
           foot={jobs.isPending ? undefined : runningFoot}
@@ -536,7 +535,7 @@ export function JobsPage() {
           label={t("jobs.tiles.failed")}
           value={jobs.isPending ? NO_DATE : String(failed)}
           icon="circle-x"
-          to={underChip("/jobs?status=failed")}
+          to={withClient("/jobs?status=failed", client)}
           tone="red"
           urgent={failed > 0}
           zeroLabel={t("jobs.tiles.failedZero")}
@@ -546,7 +545,7 @@ export function JobsPage() {
           label={t("jobs.tiles.waiting")}
           value={jobs.isPending ? NO_DATE : String(stuck)}
           icon="clock-exclamation"
-          to={underChip("/jobs?status=stuck")}
+          to={withClient("/jobs?status=stuck", client)}
           tone="gold"
           urgent={stuck > 0}
           zeroLabel={t("jobs.tiles.waitingZero")}

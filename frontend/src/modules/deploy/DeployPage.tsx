@@ -61,6 +61,7 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 
 // The design's `P['deploy']` (docs/design/itms-prototype-v3.html): the head
@@ -160,10 +161,8 @@ export function DeployPage() {
   const deployments = useDeployments(filters.values.client);
   // The client the list was read for (null without a chip, or before `/me`).
   const { client } = useNarrowedApi(filters.values.client);
-  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
-  // as Alerts' `withClient`): the tiles below count the chip's client.
-  const underChip = (to: string): string =>
-    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2):
+  // the tiles below count the chip's client, so each links with `withClient`.
   const execute = useExecuteDeploymentMutation();
 
   // Fetched by the PAGE, not only by the create dialog: the table rendered
@@ -341,7 +340,7 @@ export function DeployPage() {
           value={counted(String(stats.total))}
           icon="package"
           // Every deployment: from a filtered view, the way back.
-          to={underChip("/deploy")}
+          to={withClient("/deploy", client)}
           tone="neutral"
           zeroLabel={t("deploy.deployments.tileDeploymentsZero")}
           foot={
@@ -356,7 +355,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileWeek")}
           value={counted(String(stats.thisWeek))}
           icon="calendar-event"
-          to={underChip("/deploy?state=week")}
+          to={withClient("/deploy?state=week", client)}
           tone="blue"
           zeroLabel={t("deploy.deployments.tileWeekZero")}
           foot={unanswered || stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
@@ -365,7 +364,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileRate")}
           value={counted(stats.successRate)}
           icon="circle-check"
-          to={underChip("/deploy?state=complete")}
+          to={withClient("/deploy?state=complete", client)}
           tone="green"
           // NO `zeroLabel`: this tile's "nothing measured" case is "—", not 0,
           // and `rateFoot` already says which: "No completed runs yet".
@@ -385,7 +384,7 @@ export function DeployPage() {
           label={t("deploy.deployments.tileFailed")}
           value={counted(String(stats.failed))}
           icon="circle-x"
-          to={underChip("/deploy?state=failed")}
+          to={withClient("/deploy?state=failed", client)}
           tone="red"
           urgent={stats.failed > 0}
           zeroLabel={t("deploy.deployments.tileFailedZero")}

@@ -3,7 +3,7 @@ import { describeSubmitError } from "../../components/form";
 import { Badge } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
-import { Panel, StatCard, StatsGrid, useNarrowedApi } from "../../shell/components";
+import { Panel, StatCard, StatsGrid, useNarrowedApi, withClient } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 import { useHealthAlerts } from "./api";
@@ -64,16 +64,6 @@ const MACHINE_RESOLVED_ALERTS = "/health?state=cleared&resolution=machine";
 const HUMAN_CLOSED_ALERTS = "/health?state=cleared&resolution=human";
 const EXCLUDED_ALERTS = "/health?state=cleared&resolution=excluded";
 
-/**
- * A figure's destination under the Client chip keeps the chip (redesign plan,
- * O3 3.1): the figure counted that client's alerts, so the rows it opens are
- * that client's too. `client` is the client actually read, `null` without one.
- */
-export function withClient(to: string, client: string | null): string {
-  if (client === null) return to;
-  return `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
-}
-
 export function HealthReportPanel({ chip = "" }: { chip?: string }) {
   const t = useT();
   // The console's own list, unfiltered: `summariseAlerts` needs cleared rows,
@@ -81,6 +71,9 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
   // list and no other (O3 3.1: no number on the page counts another client).
   const alerts = useHealthAlerts({}, chip);
   const { client } = useNarrowedApi(chip);
+  // A figure's destination under the Client chip keeps the chip (redesign
+  // plan, O3 3.1): the figure counted that client's alerts, so the rows it
+  // opens are that client's too.
   const to = (path: string) => withClient(path, client);
   const forbidden = alerts.error instanceof ApiError && alerts.error.status === 403;
 

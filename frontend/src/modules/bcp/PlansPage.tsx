@@ -36,6 +36,7 @@ import {
   StatusPill,
   useNewParam,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -89,15 +90,6 @@ function LastTest({ status }: { status: PlanStatusOut | undefined }) {
       label={outcomeLabel(status.last_test_outcome)}
     />
   );
-}
-
-/**
- * A tile's link, carrying the Client chip when the page has one (general
- * ruling 2): the tile counts the chip's client's rows, so it opens them.
- */
-function withChip(path: string, client: string): string {
-  if (client === "") return path;
-  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
 }
 
 export function PlansPage() {
@@ -211,7 +203,7 @@ export function PlansPage() {
           label={t("bcp.plans.tileActive")}
           value={measured ? String(activeCount) : "—"}
           icon="shield-check"
-          to={withChip(`/bcp?${STATE_PARAM}=active`, filters.values.client)}
+          to={withClient(`/bcp?${STATE_PARAM}=active`, filters.values.client)}
           tone="blue"
           zeroLabel={t("bcp.plans.noneActive")}
           foot={measured && activeCount > 0 ? t("bcp.plans.ofOnRecord", { count: items.length }) : undefined}
@@ -220,7 +212,7 @@ export function PlansPage() {
           label={t("bcp.plans.tileOverdue")}
           value={measured ? String(overdueCount) : "—"}
           icon="clock"
-          to={withChip(`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`, filters.values.client)}
+          to={withClient(`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`, filters.values.client)}
           tone="gold"
           urgent
           /* WHICH zero this is, and the two are not the same claim: with the
