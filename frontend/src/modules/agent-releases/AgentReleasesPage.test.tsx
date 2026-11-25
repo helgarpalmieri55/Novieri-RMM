@@ -758,6 +758,31 @@ describe("Agent packages on the kit", () => {
     expect(router.state.location.search).toBe("?new=release");
   });
 
+  it("asks before Cancel drops a release with a version typed in it (coordinator ruling 3)", async () => {
+    // The form lives in the `?new=release` dialog, so Cancel, Close and Back
+    // are a change of `new`: with something in it, each asks first.
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Publish a release" });
+    await userEvent.type(within(dialog).getByLabelText(/^Version/), "1.6.0");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=release");
+    expect(within(dialog).getByLabelText(/^Version/)).toHaveValue("1.6.0");
+  });
+
+  it("closes an untouched Publish a release without asking", async () => {
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Publish a release" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("keeps the older versions behind a chip in the URL, and counts what it shows", async () => {
     stub([
       release({ id: "old-mac", version: "1.4.0", os: "darwin", arch: "arm64" }),
@@ -773,10 +798,30 @@ describe("Agent packages on the kit", () => {
   });
 
   it("draws its sections in the order of the design: versions, channels, the install link, updates", async () => {
+    // Fix round 1 of wave O1: the title named four sections and the body
+    // checked two. Each section is now asked for, and each follows the last.
     stub([release()], ["agent.release.manage", "enrollment.link.manage", "agent.update.read"]);
+    const api = mockUseApi() as Record<string, unknown>;
+    mockUseApi.mockReturnValue({
+      ...api,
+      getInstallLink: () =>
+        Promise.resolve({
+          enabled: false, has_code: false, networks: [], disable_at: null,
+          hourly_limit: 50, enabled_at: null, joined_since_enabled: 0,
+        }),
+      getFleetVersions: () =>
+        Promise.resolve({ total: 0, versions: {}, latest_stable: null, update_available: 0, needs_manual_update: [] }),
+      listUpdateRollouts: () => Promise.resolve([]),
+    } as unknown as ApiClient);
     renderRouted("/agent-packages", <AgentReleasesPage />);
-    const versions = await screen.findByRole("heading", { name: "Published releases" });
-    const channels = await screen.findByRole("heading", { name: "Release channels" });
-    expect(versions.compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const order = [
+      await screen.findByRole("heading", { name: "Published releases" }),
+      await screen.findByRole("heading", { name: "Release channels" }),
+      await screen.findByRole("heading", { name: "Install link" }),
+      await screen.findByRole("heading", { name: "Fleet versions" }),
+    ];
+    for (let at = 1; at < order.length; at += 1) {
+      expect(order[at - 1]!.compareDocumentPosition(order[at]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 });

@@ -6,7 +6,7 @@ import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../componen
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
-import { StatusPill } from "../../shell/components";
+import { StatusPill, useUnsavedGuard } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useInvalidateAgentReleases } from "./api";
 import { archLabel, osLabel, platformLabel } from "./platform";
@@ -108,6 +108,17 @@ export function PublishReleaseDialog({ onClose }: { onClose: () => void }) {
   const problems = planProblems(version.trim(), items);
   const finished = outcomes != null && !running;
   const locked = running || finished;
+  /**
+   * A HALF-BUILT RELEASE ASKS BEFORE IT IS DROPPED (coordinator ruling 3).
+   * The dialog lives in `?new=release`, so Cancel, Close and Back are all a
+   * change of `new`: with a version typed, binaries or signatures chosen and
+   * nothing published yet, each asks first. A finished publish has nothing
+   * left to lose.
+   */
+  const { guard } = useUnsavedGuard(
+    !finished && (version !== "" || items.length > 0 || signatures !== null),
+    { search: ["new"] },
+  );
 
   async function readSignatures(file: File) {
     const text = await file.text();
@@ -155,6 +166,7 @@ export function PublishReleaseDialog({ onClose }: { onClose: () => void }) {
     // NOT CLOSABLE WHILE RUNNING. The run carries on without the dialog, and
     // an operator who closed it would not see which files failed.
     <Dialog open title={t("agentReleases.publish.title")} onClose={running ? () => {} : onClose} dismissible={!running}>
+      {guard}
       <p>
         <Trans k="agentReleases.publish.intro" components={{ mono: <span className="mono" /> }} />
       </p>
