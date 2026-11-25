@@ -17,7 +17,6 @@ import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../componen
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
-import { useSearchParams } from "react-router-dom";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
@@ -28,13 +27,18 @@ import { osFamilyLabel, osImageStateLabel } from "./pickerOptions";
 import { ProvisioningPageNav } from "./provisioningNav";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
@@ -46,11 +50,13 @@ function shortSha(sha: string): string {
 export function ImagesPage() {
   const t = useT();
   const api = useApi();
-  const [createOpen, setCreateOpen] = useState(false);
+  // New image opens from `?new=image` (decision D8), and only for someone who
+  // may manage images, whatever the URL asks (below).
+  const create = useNewParam("image");
   // In the URL, so the "Active" tile hands over the rows it counted instead
   // of linking back to the page the reader is already on.
-  const [params, setParams] = useSearchParams();
-  const stateFilter = params.get("state") ?? "";
+  const filters = useUrlFilters(["state"] as const);
+  const stateFilter = filters.values.state;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -83,7 +89,7 @@ export function ImagesPage() {
         description={t("provisioning.images.description")}
         actions={
           canManage ? (
-            <Btn label={t("provisioning.images.newImage")} icon="upload" variant="primary" onClick={() => setCreateOpen(true)} />
+            <Btn label={t("provisioning.images.newImage")} icon="upload" variant="primary" onClick={create.start} />
           ) : undefined
         }
       />
@@ -145,34 +151,39 @@ export function ImagesPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              if (event.target.value === "") next.delete("state");
-              else next.set("state", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("provisioning.images.filterAria")}
-          >
-            <option value="">{t("provisioning.images.allImages")}</option>
-            <option value="active">{t("provisioning.images.tileActive")}</option>
-            <option value="inactive">{t("provisioning.images.tileNotActive")}</option>
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={images.isLoading}
-          error={images.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0 ? t("provisioning.images.emptyNone") : t("provisioning.images.emptyFiltered")
+        <ListToolbar
+          chips={
+            // No counts on the chips (redesign plan, Task 9, 4.7): the tiles
+            // above carry the numbers.
+            <FilterChips
+              label={t("provisioning.images.filterAria")}
+              options={[
+                { value: "", label: t("provisioning.images.allImages") },
+                { value: "active", label: t("provisioning.images.tileActive") },
+                { value: "inactive", label: t("provisioning.images.tileNotActive") },
+              ]}
+              value={stateFilter}
+              onChange={(value) => filters.set("state", value)}
+            />
           }
-          emptyIcon="photo"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={images.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={images.isLoading} error={images.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("provisioning.images.emptyNone")}
+              icon="photo"
+              action={
+                canManage ? (
+                  <Btn label={t("provisioning.images.newImage")} icon="upload" small onClick={create.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("provisioning.images.title")}>
             <thead>
               <tr>
                 <Th>{t("provisioning.images.colName")}</Th>
@@ -221,6 +232,7 @@ export function ImagesPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -229,9 +241,9 @@ export function ImagesPage() {
           closed), so a failed create left its alert sitting there for the next
           opening, describing a request the operator had abandoned. */}
       <CreateImageDialog
-        key={createOpen ? "open" : "closed"}
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        key={create.open && canManage ? "open" : "closed"}
+        open={create.open && canManage}
+        onClose={create.close}
       />
     </div>
   );

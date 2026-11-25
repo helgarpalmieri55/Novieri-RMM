@@ -176,10 +176,13 @@ describe("the provisioning runs page, in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Aprovisionamiento e imágenes de disco" })).toBeInTheDocument();
     await screen.findByText("run1");
     expect(screen.getByRole("button", { name: "Aprovisionar" })).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "Aprovisionamiento" })).toBeInTheDocument();
+    // The section menu is a navigation of links now (redesign plan, waves'
+    // common rules: `SectionNav`), the current page marked `aria-current`.
+    const nav = screen.getByRole("navigation", { name: "Aprovisionamiento" });
     for (const tab of ["Ejecuciones", "Imágenes", "Perfiles"]) {
-      expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: tab })).toBeInTheDocument();
     }
+    expect(within(nav).getByRole("link", { name: "Ejecuciones" })).toHaveAttribute("aria-current", "page");
     // The tiles.
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
     expect(screen.getByText("50 %")).toBeInTheDocument();
@@ -188,10 +191,11 @@ describe("the provisioning runs page, in Spanish", () => {
     expect(screen.getByText("Mediana del tiempo de construcción")).toBeInTheDocument();
     expect(screen.getByText("12 min")).toBeInTheDocument();
     // The filter.
-    const filter = screen.getByRole("combobox", { name: "Filtrar las ejecuciones por estado" });
-    expect(within(filter).getByRole("option", { name: "Todas las ejecuciones" })).toBeInTheDocument();
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar las ejecuciones por estado" });
+    expect(within(filter).getByRole("button", { name: "Todas las ejecuciones" })).toBeInTheDocument();
     for (const state of ["Pendiente", "Esperando inscripción", "Inscrita", "Completada", "Fallida"]) {
-      expect(within(filter).getByRole("option", { name: state })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: state })).toBeInTheDocument();
     }
     // The table.
     for (const header of ["Destino", "Perfil", "Estado", "Iniciada", "Finalizada", "Error"]) {
@@ -227,8 +231,12 @@ describe("the provisioning runs page, in Spanish", () => {
     const { container } = renderPage(<ProvisioningRunsPage />);
     await screen.findByText("run1");
     expect(screen.getByText("Ninguna construcción ha fallado")).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filtrar las ejecuciones por estado" }), "failed");
-    expect(await screen.findByText("Ninguna ejecución coincide con ese filtro.")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("group", { name: "Filtrar las ejecuciones por estado" })).getByRole("button", { name: "Fallida" }),
+    );
+    // The list kit's filtered-empty sentence, with its way out (Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -249,8 +257,8 @@ describe("the provisioning runs page, in Spanish", () => {
     expect(screen.getByText("Success rate")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("12m")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filter runs by state" });
-    expect(within(filter).getByRole("option", { name: "Awaiting enrollment" })).toBeInTheDocument();
+    const filter = screen.getByRole("group", { name: "Filter runs by state" });
+    expect(within(filter).getByRole("button", { name: "Awaiting enrollment" })).toBeInTheDocument();
     expect(within(screen.getByText("run5").closest("tr") as HTMLElement).getByText("Failed")).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
@@ -336,9 +344,10 @@ describe("the images page, in Spanish", () => {
     expect(screen.getByText("En 2 plataformas")).toBeInTheDocument();
     expect(screen.getByText("Listas para construir a partir de ellas")).toBeInTheDocument();
     expect(screen.getByText("Registradas pero sin poder construir a partir de ellas")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar las imágenes por estado" });
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar las imágenes por estado" });
     for (const option of ["Todas las imágenes", "Activas", "No activas"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: option })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Plataforma", "Tipo", "Estado", "Añadida"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
@@ -412,9 +421,10 @@ describe("the profiles page, in Spanish", () => {
     expect(screen.getByText("Usan 1 imagen")).toBeInTheDocument();
     expect(screen.getByText("Listos para aprovisionar")).toBeInTheDocument();
     expect(screen.getByText("Configurados pero sin aprovisionar nada")).toBeInTheDocument();
-    const filter = screen.getByRole("combobox", { name: "Filtrar los perfiles por estado" });
+    // A row of chips now (Receta L: `FilterChips`), same values, same words.
+    const filter = screen.getByRole("group", { name: "Filtrar los perfiles por estado" });
     for (const option of ["Todos los perfiles", "Habilitados", "Deshabilitados"]) {
-      expect(within(filter).getByRole("option", { name: option })).toBeInTheDocument();
+      expect(within(filter).getByRole("button", { name: option })).toBeInTheDocument();
     }
     for (const header of ["Nombre", "Credenciales", "Estado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();

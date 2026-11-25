@@ -699,7 +699,8 @@ describe("provisioning failure paths say what went wrong", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -926,7 +927,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     const create = screen.getByRole("button", { name: "Create" });
     expect(create).not.toBeDisabled();
     await user.click(create);
@@ -939,7 +941,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard");
     await user.clear(screen.getByLabelText("Kind"));
     await user.click(screen.getByRole("button", { name: "Create" }));
@@ -953,7 +956,8 @@ describe("the New OS image dialog names what it is missing", () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagesPage />);
 
-    await user.click(await screen.findByRole("button", { name: "New image" }));
+    // The page head's New image (an empty list offers the same action: Receta L, 3).
+    await user.click((await screen.findAllByRole("button", { name: "New image" }))[0]!);
     await user.type(screen.getByLabelText("Name"), "Windows 11 Standard{Enter}");
 
     await waitFor(() =>
@@ -1121,7 +1125,8 @@ describe("every provisioning tile opens the rows it counted", () => {
   it("distinguishes a filter that matched nothing from having no runs", async () => {
     renderWithProviders(<ProvisioningRunsPage />, "/provisioning?state=enrolled");
 
-    expect(await screen.findByText("No run matches that filter.")).toBeInTheDocument();
+    // The list kit's filtered-empty sentence (redesign plan, Receta L, 3).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     expect(screen.queryByText("No provisioning runs yet.")).not.toBeInTheDocument();
   });
 

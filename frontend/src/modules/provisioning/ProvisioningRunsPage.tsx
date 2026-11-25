@@ -24,7 +24,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { Form, FormActions, attemptProblems } from "../../components/form";
@@ -51,13 +51,18 @@ import { provisionRunStateKind, provisionRunStateLabel } from "./provisioningSta
 import { ProvisioningPageNav } from "./provisioningNav";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUrlFilters,
 } from "../../shell/components";
 import { ProvisioningPrerequisites } from "./ProvisioningPrerequisites";
 import type { ProvisionRunState } from "./types";
@@ -102,12 +107,14 @@ const RUN_STATE_FILTERS: ReadonlyArray<ProvisionRunState> = [
 export function ProvisioningRunsPage() {
   const t = useT();
   const api = useApi();
-  const [provisionOpen, setProvisionOpen] = useState(false);
+  // Provision a device opens from `?new=run` (decision D8). No Client chip:
+  // imaging works in the client chosen at the top (redesign plan, Task 9, 4.6).
+  const provision = useNewParam("run");
   // The filter lives in the URL because the tiles above link into it: "Failed
   // runs 2" opens those two rows. Held in component state the tile would be
   // an anchor to the page the reader is already standing on.
-  const [params, setParams] = useSearchParams();
-  const stateFilter = params.get("state") ?? "";
+  const filters = useUrlFilters(["state"] as const);
+  const stateFilter = filters.values.state;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -154,7 +161,7 @@ export function ProvisioningRunsPage() {
         description={t("provisioning.runs.description")}
         actions={
           canRun ? (
-            <Btn label={t("provisioning.runs.provision")} icon="plus" variant="primary" onClick={() => setProvisionOpen(true)} />
+            <Btn label={t("provisioning.runs.provision")} icon="plus" variant="primary" onClick={provision.start} />
           ) : undefined
         }
       />
@@ -219,38 +226,38 @@ export function ProvisioningRunsPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              // An empty value is ABSENT, not `?state=`.
-              if (event.target.value === "") next.delete("state");
-              else next.set("state", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("provisioning.runs.filterAria")}
-          >
-            <option value="">{t("provisioning.runs.allRuns")}</option>
-            {RUN_STATE_FILTERS.map((value) => (
-              <option key={value} value={value}>
-                {humaniseEnum(value, "ProvisionRunState")}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={runs.isLoading}
-          error={runs.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0 ? t("provisioning.runs.emptyNone") : t("provisioning.runs.emptyFiltered")
+        <ListToolbar
+          chips={
+            // No counts: the brief keeps these chips bare (redesign plan, Task
+            // 9, 4.6), and the Absent Zero rule never draws one it was not given.
+            <FilterChips
+              label={t("provisioning.runs.filterAria")}
+              options={[
+                { value: "", label: t("provisioning.runs.allRuns") },
+                ...RUN_STATE_FILTERS.map((value) => ({ value, label: humaniseEnum(value, "ProvisionRunState") })),
+              ]}
+              value={stateFilter}
+              onChange={(value) => filters.set("state", value)}
+            />
           }
-          emptyIcon="image"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={runs.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={runs.isLoading} error={runs.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("provisioning.runs.emptyNone")}
+              icon="image"
+              action={
+                canRun ? (
+                  <Btn label={t("provisioning.runs.provision")} icon="plus" small onClick={provision.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("provisioning.runs.title")}>
             <thead>
               <tr>
                 <Th>{t("provisioning.runs.colTarget")}</Th>
@@ -314,10 +321,13 @@ export function ProvisioningRunsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <ProvisionDialog open={provisionOpen} onClose={() => setProvisionOpen(false)} />
+      {/* Open only for someone who may start a run, whatever the URL asks: a
+          courtesy, the server checks `provisioning.run` (invariant 6). */}
+      <ProvisionDialog open={provision.open && canRun} onClose={provision.close} />
     </div>
   );
 }
