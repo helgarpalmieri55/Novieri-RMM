@@ -442,8 +442,8 @@ export function DevicesPage() {
   // `fleet` is counted with no filter applied at all (but within the client
   // the read is narrowed to: the chip decides whose estate this is).
   const fleet = devices.data?.fleet;
-  // The tiles' one condition (ruling 10a): no counts, pending or failed. The
-  // kit's `pending` draws its absent mark; the adoption pass keeps this name.
+  // The tiles' one condition (ruling 10a): no counts, pending or failed.
+  // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
   const noFleet = fleet === undefined;
   // What each chip would show FROM THIS SEARCH, counted in SQL. `total` is this
   // object's entry for the active chip, by construction on the server, so the
@@ -555,7 +555,7 @@ export function DevicesPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("devices.tiles.managed")}
-          value={noFleet ? t("shell.viz.na") : String(fleet.managed)}
+          value={noFleet ? "" : String(fleet.managed)}
           pending={noFleet}
           icon="devices"
           to={tileTo("")}
@@ -565,7 +565,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.assets")}
-          value={noFleet ? t("shell.viz.na") : String(fleet.total)}
+          value={noFleet ? "" : String(fleet.total)}
           pending={noFleet}
           icon="package"
           to={tileTo("")}
@@ -575,7 +575,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.online")}
-          value={noFleet ? t("shell.viz.na") : String(fleet.online)}
+          value={noFleet ? "" : String(fleet.online)}
           pending={noFleet}
           icon="activity"
           to={tileTo("online")}
@@ -585,7 +585,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.cert")}
-          value={noFleet ? t("shell.viz.na") : String(fleet.cert_attention)}
+          value={noFleet ? "" : String(fleet.cert_attention)}
           pending={noFleet}
           icon="certificate"
           to={tileTo("certs")}

@@ -226,8 +226,8 @@ export function CandidatesPage() {
   // The unsweepable count is the narrowed candidates read's, so IPAM opens
   // narrowed the same way (ruling 2); its subnet tree reads the Client chip.
   const unsweepableTo = withClient("/ipam", client);
-  // Each tile's one condition (ruling 10a): no data, pending or failed. The
-  // kit's `pending` draws its absent mark; the adoption pass keeps these names.
+  // Each tile's one condition (ruling 10a): no data, pending or failed.
+  // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
   const noSwept = swept.data === undefined;
   const noCandidates = candidates.data === undefined;
 
@@ -359,7 +359,7 @@ export function CandidatesPage() {
       <StatsGrid columns={4} keepTrackWidth>
         <StatCard
           label={t("devices.candidates.swept")}
-          value={noSwept ? t("shell.viz.na") : String(swept.data.total)}
+          value={noSwept ? "" : String(swept.data.total)}
           pending={noSwept}
           icon="network"
           to={sweptTo}
@@ -377,7 +377,7 @@ export function CandidatesPage() {
           label={t("devices.candidates.unsweepable")}
           // No number without data (coordinator ruling 10a): the absent mark,
           // and no zero sentence, until the candidates answer.
-          value={noCandidates ? t("shell.viz.na") : String(unsweepable)}
+          value={noCandidates ? "" : String(unsweepable)}
           pending={noCandidates}
           icon="warning"
           to={unsweepableTo}
