@@ -205,6 +205,8 @@ describe("ChangesPage", () => {
     await user.type(within(dialog).getByLabelText(/^Title/), "Swap the core switch");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=change");
     await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
@@ -236,6 +238,23 @@ describe("the changes list behind the Client chip (decisions D6, D17)", () => {
     expect(listChanges).not.toHaveBeenCalled();
     expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
     expect(screen.queryByText("No changes yet.")).toBeNull();
+  });
+
+  it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    mockUseApi.mockReturnValue({
+      me: vi.fn(() => new Promise<Me>(() => {})),
+      listChanges: vi.fn().mockResolvedValue([]),
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as ApiClient);
+    renderPage("/changes?client=5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57", <ChangesPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+    expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
   });
 
   const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
@@ -1728,7 +1747,8 @@ describe("ChangeDetail link action picker", () => {
     await user.selectOptions(await screen.findByLabelText("Action type"), "deployment");
     await user.click(screen.getByRole("combobox", { name: "Deployment" }));
 
-    expect(await screen.findByText(/Fleet → Software deployment/)).toBeInTheDocument();
+    // The page by its rail label now: "Software" (coordinator, 2026-11-25).
+    expect(await screen.findByText(/once one is created in Software;/)).toBeInTheDocument();
   });
 
   it("names the unchosen deployment on submit rather than doing nothing", async () => {

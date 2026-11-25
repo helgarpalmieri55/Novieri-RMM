@@ -350,7 +350,8 @@ export function CredentialsPage() {
           icon="shield-lock"
           to={listOf("")}
           tone="blue"
-          foot={t("credentials.tiles.typesAvailable", { count: CREDENTIAL_TYPES.length })}
+          // Nothing under a tile before its read answers (ruling 10a), not even this.
+          foot={credentials.data ? t("credentials.tiles.typesAvailable", { count: CREDENTIAL_TYPES.length }) : undefined}
           zeroLabel={t("credentials.tiles.typesInUseZero")}
         />
       </StatsGrid>
@@ -722,7 +723,6 @@ function CreateCredentialDialog({
 
   return (
     <>
-      {guard}
       <Dialog open={open} onClose={onClose} title={t("credentials.create.title")}>
         <Form onSubmit={storeCredential}>
           {/* AUDIT [HIGH], /credentials → New credential: "The Secret input is
@@ -894,6 +894,8 @@ function CreateCredentialDialog({
           </div>
         </Form>
       </Dialog>
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </>
   );
 }

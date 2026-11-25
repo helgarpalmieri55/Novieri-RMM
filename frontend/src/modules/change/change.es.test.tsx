@@ -614,7 +614,8 @@ describe("ChangeDetail in Spanish", () => {
     const { container } = renderDetail("?tab=links");
     await user.selectOptions(await screen.findByLabelText("Tipo de acción"), "deployment");
     await user.click(screen.getByRole("combobox", { name: "Despliegue" }));
-    expect(await screen.findByText(/Flota → Despliegue de software/)).toBeInTheDocument();
+    // The page by its rail label now: «Software» (coordinator, 2026-11-25).
+    expect(await screen.findByText(/cuando se crea uno en Software;/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Buscar despliegues…")).toBeInTheDocument();
     expectNoEnglish(container);
     await user.click(screen.getByRole("button", { name: "Vincular" }));
@@ -845,8 +846,9 @@ describe("label tables built outside React", () => {
     );
     expect(run?.label).toBe("prof1");
     expect(run?.sublabel).toMatch(/^completada · /);
-    expect(deploymentPickerEmptyHint()).toMatch(/Flota → Despliegue de software/);
-    expect(provisionRunPickerEmptyHint()).toMatch(/Flota → Aprovisionamiento/);
+    // Each page by where the console now draws it: the rail's «Software», Administración → Imágenes de sistema.
+    expect(deploymentPickerEmptyHint()).toMatch(/cuando se crea uno en Software;/);
+    expect(provisionRunPickerEmptyHint()).toMatch(/Administración → Imágenes de sistema/);
     setActiveLanguage("en");
     expect(deploymentPickerEmptyHint()).toBe(translate("change.picker.deploymentEmptyHint"));
     expect(deploymentPickerOptions([deployment], [pkg], "UTC")[0]?.sublabel).toMatch(/^complete · /);

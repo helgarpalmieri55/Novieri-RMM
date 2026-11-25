@@ -174,7 +174,6 @@ export function BudgetPlannerPage() {
 
   return (
     <div>
-      {guard}
       <PageHead
         title={t("budget.planner.title")}
         description={t("budget.planner.description")}
@@ -280,6 +279,8 @@ export function BudgetPlannerPage() {
           writeQuery(params, next, setParams, { replace: true });
         }}
       />
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
 }

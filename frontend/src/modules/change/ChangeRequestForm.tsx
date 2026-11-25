@@ -228,7 +228,6 @@ export function ChangeRequestForm({
 
   return (
     <>
-      {guard}
       <Dialog open={change != null} onClose={close} title={change === "new" ? t("change.form.newTitle") : t("change.form.editTitle")}>
         {/* A real <form>, so Enter in the Title field saves instead of doing
             nothing — the other half of the same finding. */}
@@ -345,6 +344,8 @@ export function ChangeRequestForm({
           </div>
         </Form>
       </Dialog>
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </>
   );
 }

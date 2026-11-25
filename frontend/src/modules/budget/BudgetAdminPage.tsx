@@ -138,7 +138,6 @@ export function BudgetAdminPage() {
 
   return (
     <div>
-      {guard}
       <PageHead title={t("budget.admin.title")} description={t("budget.admin.description")} />
 
       <BudgetPageNav canRead={canRead} />
@@ -172,6 +171,8 @@ export function BudgetAdminPage() {
         }}
         onSave={general.submit}
       />
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
 }

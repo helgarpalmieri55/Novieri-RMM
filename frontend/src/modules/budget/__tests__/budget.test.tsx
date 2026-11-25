@@ -2379,6 +2379,8 @@ describe("ExpensesPage on the list kit", () => {
     await user.type(within(dialog).getByLabelText("Description"), "Renewal");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await act(() => router.navigate("/budget/expenses?new=expense"));

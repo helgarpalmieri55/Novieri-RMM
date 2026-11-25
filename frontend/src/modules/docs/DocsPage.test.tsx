@@ -1185,6 +1185,17 @@ describe("DocsPage on the kit", () => {
       expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
     });
 
+    it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
+      mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+      mockUseApi.mockReturnValue(kitApi({ me: vi.fn(() => new Promise<Me>(() => {})) }));
+      renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");
+      expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+      expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+      expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+    });
+
     it("keeps the chip in a tile's link, so a tile opens the rows it counted", async () => {
       mockUseApi.mockReturnValue(kitApi());
       renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");

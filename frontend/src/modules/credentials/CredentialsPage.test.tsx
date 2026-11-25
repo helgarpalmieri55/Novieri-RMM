@@ -1198,6 +1198,8 @@ describe("CredentialsPage on the list kit", () => {
     await user.type(within(dialog).getByLabelText("Name"), "Branch admin");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn over the form: later in the DOM than the dialog it guards, which shares its layer (ruling 3a).
+    expect(dialog.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await act(() => router.navigate("/credentials?new=credential"));
@@ -1235,6 +1237,20 @@ describe("CredentialsPage on the list kit", () => {
       expect(screen.queryByText("No credentials stored.")).toBeNull();
       expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
       expect(screen.getByText("Loading…")).toBeInTheDocument();
+    });
+
+    it("draws no number and no claim on a tile while the chip's client is not yet known (ruling 10a)", async () => {
+      mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+      mockUseApi.mockReturnValue(
+        consoleApi({ me: vi.fn(() => new Promise<Me>(() => {})), listCredentials: vi.fn().mockResolvedValue([]) }),
+      );
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      expect(await screen.findByText("Loading…")).toBeInTheDocument();
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+      expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+      // Not even "5 types available": a tile says nothing before its read answers.
+      expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
     });
 
     it("leads each tile to exactly the rows it counted, the chip included", async () => {

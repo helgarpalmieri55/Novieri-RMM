@@ -167,7 +167,6 @@ export function ExpensesPage() {
 
   return (
     <div>
-      {guard}
       <PageHead
         title={t("budget.expenses.title")}
         description={t("budget.expenses.description")}
@@ -316,6 +315,8 @@ export function ExpensesPage() {
           }}
         />
       )}
+      {/* After the dialogs: the leave question shares their `.modal` layer, so it must come later in the DOM to be drawn on top (ruling 3a). */}
+      {guard}
     </div>
   );
 }

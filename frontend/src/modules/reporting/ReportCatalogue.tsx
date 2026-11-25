@@ -234,9 +234,12 @@ export function ReportCataloguePage() {
           capability you have; what you cannot is the one number on this page a
           person can act on (ask for the codes), so it is the only one carrying
           weight. */}
+      {/* Before the catalogue answers, no tile says a number or its zero's
+          claim ("you can run none of them"): unmeasured, n/a (ruling 10a). */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("reporting.catalogue.tiles.templates")}
+          pending={catalogue.data === undefined}
           value={String(reports.length)}
           icon="chart-bar"
           to="/reports"
@@ -245,6 +248,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.runnable")}
+          pending={catalogue.data === undefined}
           value={String(entitledCount)}
           icon="circle-check"
           to={`/reports?${ACCESS_PARAM}=runnable`}
@@ -253,6 +257,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.blocked")}
+          pending={catalogue.data === undefined}
           value={String(blockedCount)}
           icon="lock"
           to={`/reports?${ACCESS_PARAM}=blocked`}

@@ -245,8 +245,8 @@ export const change: Shape<typeof en> = {
   },
   picker: {
     deploymentEmptyHint:
-      "No hay despliegues que vincular. Aparecen aquí cuando se crea uno en Flota → Despliegue de software; también puede que no tengas permiso para listarlos.",
+      "No hay despliegues que vincular. Aparecen aquí cuando se crea uno en Software; también puede que no tengas permiso para listarlos.",
     runEmptyHint:
-      "No hay ejecuciones de aprovisionamiento que vincular. Aparecen aquí cuando se ejecuta un perfil en Flota → Aprovisionamiento; también puede que no tengas permiso para listarlas.",
+      "No hay ejecuciones de aprovisionamiento que vincular. Aparecen aquí cuando se ejecuta un perfil en Administración → Imágenes de sistema; también puede que no tengas permiso para listarlas.",
   },
 };

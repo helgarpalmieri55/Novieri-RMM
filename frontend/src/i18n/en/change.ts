@@ -249,8 +249,8 @@ export const change = {
   },
   picker: {
     deploymentEmptyHint:
-      "No deployments to link. They appear here once one is created under Fleet → Software deployment; you may also not have permission to list them.",
+      "No deployments to link. They appear here once one is created in Software; you may also not have permission to list them.",
     runEmptyHint:
-      "No provisioning runs to link. They appear here once a profile is run under Fleet → Provisioning; you may also not have permission to list them.",
+      "No provisioning runs to link. They appear here once a profile is run in Admin → Imaging; you may also not have permission to list them.",
   },
 } as const;

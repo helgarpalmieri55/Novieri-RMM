@@ -345,6 +345,16 @@ describe("the report catalogue", () => {
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
   });
 
+  it("draws no number and no claim on a tile before the catalogue answers (ruling 10a)", async () => {
+    renderCatalogue(client({ listReports: vi.fn().mockImplementation(() => new Promise<never>(() => {})) }));
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
+    expect(screen.queryByText("this deployment publishes none")).toBeNull();
+    expect(screen.queryByText("you can run none of them")).toBeNull();
+    expect(screen.queryByText("nothing is withheld from you")).toBeNull();
+  });
+
   it("says the deployment publishes no reports, distinctly from still loading", async () => {
     renderCatalogue(client({ listReports: vi.fn().mockResolvedValue({ reports: [] }) }));
     expect(await screen.findByText("This deployment publishes no reports.")).toBeInTheDocument();
