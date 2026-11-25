@@ -9,7 +9,7 @@ import { PoliciesPanel } from "./PoliciesPanel";
 import { PolicyResolverPanel } from "./PolicyResolverPanel";
 import { SlaPrerequisites } from "./SlaPrerequisites";
 import { SlaSettingsPanel } from "./SlaSettingsPanel";
-import { PageHead, StatCard, StatsGrid, useNewParam, useUrlFilters } from "../../shell/components";
+import { PageHead, StatCard, StatsGrid, useNewParam, useUrlFilters, withClient } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §9.1's admin surface: business calendars (with the weekly window grid
@@ -144,7 +144,7 @@ export function SlaAdminPage() {
           value={count(policies.data !== undefined, activePolicyCount)}
           icon="shield-check"
           // Counted on the chip's narrowed read, it opens that client's (general ruling 2).
-          to={filters.values.client === "" ? "/sla" : `/sla?client=${encodeURIComponent(filters.values.client)}`}
+          to={withClient("/sla", filters.values.client)}
           tone="blue"
           foot={policyFoot}
           zeroLabel={t("sla.admin.policiesZero")}

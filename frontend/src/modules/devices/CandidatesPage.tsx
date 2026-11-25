@@ -72,6 +72,7 @@ import {
   useNarrowedApi,
   useNewParam,
   useUrlFilters,
+  withClient,
   type Kind,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -221,10 +222,10 @@ export function CandidatesPage() {
     queryFn: () => narrowed.listDevices({ provenance: "sweep", limit: 1 }),
     enabled: canReadDevices && ready,
   });
-  const sweptTo = client === null ? "/devices?provenance=sweep" : `/devices?provenance=sweep&client=${client}`;
+  const sweptTo = withClient("/devices?provenance=sweep", client);
   // The unsweepable count is the narrowed candidates read's, so IPAM opens
   // narrowed the same way (ruling 2); its subnet tree reads the Client chip.
-  const unsweepableTo = client === null ? "/ipam" : `/ipam?client=${client}`;
+  const unsweepableTo = withClient("/ipam", client);
   // Each tile's one condition (ruling 10a): no data, pending or failed. The
   // kit's `pending` draws its absent mark; the adoption pass keeps these names.
   const noSwept = swept.data === undefined;

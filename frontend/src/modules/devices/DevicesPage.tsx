@@ -69,6 +69,7 @@ import {
   useNarrowedApi,
   useNewParam,
   useUrlFilters,
+  withClient,
   type Kind,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -454,13 +455,7 @@ export function DevicesPage() {
   // THE TILES COUNT THE CHIP'S CLIENT'S MACHINES when the chip is set (the
   // read is narrowed), so the list each one opens keeps that client: without
   // it a tile counting Andes' offline machines opened every client's.
-  const tileTo = (state: string) => {
-    const query = new URLSearchParams();
-    if (state) query.set("state", state);
-    if (client) query.set("client", client);
-    const search = query.toString();
-    return search ? `/devices?${search}` : "/devices";
-  };
+  const tileTo = (state: string) => withClient(state ? `/devices?state=${state}` : "/devices", client);
 
   // ONE "ADD A COMPUTER" ENTRY, the same page as the New menu's: the page
   // offers the one-machine install first and the network sweep below it

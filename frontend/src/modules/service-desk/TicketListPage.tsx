@@ -36,6 +36,7 @@ import {
   StatsGrid,
   useNewParam,
   useUrlFilters,
+  withClient,
   writeQuery,
 } from "../../shell/components";
 import { intlLocale } from "../../lib/datetime";
@@ -298,10 +299,6 @@ export function TicketListPage() {
 
   // One clock for every relative time in the table.
   const now = Date.now();
-  // A TILE COUNTED ON A NARROWED READ OPENS THE SAME CLIENT'S ROWS (general
-  // ruling 2): with the Client chip set, every tile's link carries it.
-  const withClient = (to: string): string =>
-    clientChip === "" ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(clientChip)}`;
   const newTicket = canWrite ? (
     <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={created.start} />
   ) : undefined;
@@ -313,13 +310,15 @@ export function TicketListPage() {
       <TicketReadiness />
 
       {/* Each tile counts rows on screen and links at the URL that shows
-          exactly those rows. */}
+          exactly those rows. A TILE COUNTED ON A NARROWED READ OPENS THE SAME
+          CLIENT'S ROWS (general ruling 2): with the Client chip set, the kit's
+          `withClient` adds it to every tile's link. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("serviceDesk.list.shown")}
           value={String(stats.total)}
           icon="ticket"
-          to={withClient("/service-desk")}
+          to={withClient("/service-desk", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="neutral"
@@ -330,7 +329,7 @@ export function TicketListPage() {
           label={t("serviceDesk.common.unassigned")}
           value={String(stats.unassigned)}
           icon="help-circle"
-          to={withClient("/service-desk?scope=unassigned")}
+          to={withClient("/service-desk?scope=unassigned", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="gold"
@@ -342,7 +341,7 @@ export function TicketListPage() {
           label={t("serviceDesk.common.highOrUrgentPriority")}
           value={String(stats.urgent)}
           icon="alert-triangle"
-          to={withClient("/service-desk?priority=high,urgent")}
+          to={withClient("/service-desk?priority=high,urgent", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="red"
@@ -354,7 +353,7 @@ export function TicketListPage() {
           label={t("serviceDesk.list.fromAlerts")}
           value={String(stats.fromAlerts)}
           icon="bell-ringing"
-          to={withClient("/service-desk?origin=alert")}
+          to={withClient("/service-desk?origin=alert", clientChip)}
           // Not counted before the read (general ruling 10): "n/a", never 0.
           pending={!dataReady}
           tone="blue"
