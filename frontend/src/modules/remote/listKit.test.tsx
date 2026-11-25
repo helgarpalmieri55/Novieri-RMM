@@ -4,7 +4,7 @@
  * from `?new=session`, and under the Client chip the sessions are read for
  * that client alone. Over the fixture session, with the real client scope.
  */
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,9 +46,13 @@ describe("Remote sessions on the list kit", () => {
     // assertion on it, not this allowance, is what holds the rows' names.
     const narrowing = recordingNarrowing(fixtureClient(), { console: ["listDevices"] });
     mockUseApi.mockReturnValue(narrowing.api);
-    renderPage(`/remote?client=${ANDES}`, <SessionsPage />, "/remote");
+    const { queryClient } = renderPage(`/remote?client=${ANDES}`, <SessionsPage />, "/remote");
     expect(await screen.findByRole("table", { name: "Remote sessions" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).listRemoteSessions).toHaveBeenCalledWith();
+    // Kept under an unambiguous key, `{ client }` as Job history's: a bare id
+    // after "devices" is a device's own record (`["devices", deviceId]`).
+    expect(queryClient.getQueryData(["remote-sessions", { client: ANDES }])).toBeDefined();
+    await waitFor(() => expect(queryClient.getQueryData(["devices", { client: ANDES }])).toBeDefined());
     // The machines that name the rows and the online tile are the same client's.
     expect(narrowing.client(ANDES).listDevices).toHaveBeenCalledWith();
     expect(narrowing.unnarrowed).toEqual([]);

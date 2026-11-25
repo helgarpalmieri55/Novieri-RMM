@@ -207,7 +207,7 @@ function AlertsView({
      under each figure and the fourteen-day line on the warning tile, and
      only when that list is complete rather than a page of a larger one. */
   const summary = useQuery<AlertSummary>({
-    queryKey: sent === null ? ["health-alert-summary"] : ["health-alert-summary", sent],
+    queryKey: sent === null ? ["health-alert-summary"] : ["health-alert-summary", { client: sent }],
     queryFn: () => summaryApi.getHealthAlertSummary(),
     enabled: canRead && ready,
   });

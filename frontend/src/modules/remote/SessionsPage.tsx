@@ -99,16 +99,18 @@ export function SessionsPage() {
   // UNDER THE CLIENT CHIP (decisions D6, D20) the sessions and the devices
   // that name them are that client's: the same calls, read through
   // `useNarrowedApi` and kept under the client's key (today's key without a
-  // chip). `["remote-sessions"]` still reaches every copy.
+  // chip). `["remote-sessions"]` still reaches every copy. The client goes in
+  // as `{ client }`, never bare: `["remote-sessions", id]` is one session
+  // (useSessionDevice) and `["devices", id]` one device.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
   const sessions = useQuery({
-    queryKey: client === null ? ["remote-sessions"] : ["remote-sessions", client],
+    queryKey: client === null ? ["remote-sessions"] : ["remote-sessions", { client }],
     queryFn: () => readApi.listRemoteSessions(),
     enabled: ready,
   });
 
   const devices = useQuery({
-    queryKey: client === null ? ["devices"] : ["devices", client],
+    queryKey: client === null ? ["devices"] : ["devices", { client }],
     queryFn: () => readApi.listDevices(),
     enabled: ready,
   });

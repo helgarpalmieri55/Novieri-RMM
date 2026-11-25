@@ -154,7 +154,7 @@ export function useDeletePackageMutation() {
 export function useDeployments(chip = "") {
   const { api, client, ready } = useNarrowedApi(chip);
   return useQuery({
-    queryKey: client === null ? ["deploy-deployments"] : ["deploy-deployments", client],
+    queryKey: client === null ? ["deploy-deployments"] : ["deploy-deployments", { client }],
     queryFn: () => api.listDeployments(),
     enabled: ready,
   });

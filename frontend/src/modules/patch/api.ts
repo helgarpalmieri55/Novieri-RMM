@@ -60,10 +60,11 @@ export const PATCH_APPROVALS_QUERY_KEY = "patch-approvals";
  * sends, `null` without a chip. WITHOUT ONE THE KEY IS TODAY'S, exactly: the
  * report readiness panel shares `["patch-fleet"]`, and the `/__preview` bench
  * seeds these keys by value, so a list with no chip must not move them. A
- * mutation's prefix still reaches both.
+ * mutation's prefix still reaches both. The client goes in as `{ client }`,
+ * never bare, so it cannot be read as a record id.
  */
 export function narrowedKey(key: readonly unknown[], client: string | null): unknown[] {
-  return client === null ? [...key] : [...key, client];
+  return client === null ? [...key] : [...key, { client }];
 }
 
 export function usePatchRings() {

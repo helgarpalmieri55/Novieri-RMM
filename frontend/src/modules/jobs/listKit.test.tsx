@@ -4,7 +4,7 @@
  * drawer from `?job=`, and the queue read under the Client chip's client.
  * Over the fixture session, with the real client scope.
  */
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -44,10 +44,14 @@ describe("Job history on the list kit", () => {
     // D20). The machines that name the rows are read narrowed, asserted below.
     const narrowing = recordingNarrowing(fixtureClient(), { console: ["listDevices"] });
     mockUseApi.mockReturnValue(narrowing.api);
-    renderPage(`/jobs?client=${ANDES}`, <JobsPage />, "/jobs");
+    const { queryClient } = renderPage(`/jobs?client=${ANDES}`, <JobsPage />, "/jobs");
     expect(await screen.findByRole("table", { name: "Job queue" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).listJobs).toHaveBeenCalledWith();
     expect(narrowing.client(ANDES).listDevices).toHaveBeenCalledWith();
+    // Kept under unambiguous keys: a bare id after "devices" is a device's own
+    // record (`["devices", deviceId]`).
+    expect(queryClient.getQueryData(["jobs", { client: ANDES }])).toBeDefined();
+    await waitFor(() => expect(queryClient.getQueryData(["devices", { client: ANDES }])).toBeDefined());
     expect(narrowing.unnarrowed).toEqual([]);
   });
 

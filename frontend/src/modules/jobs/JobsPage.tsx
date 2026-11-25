@@ -262,7 +262,8 @@ export function JobsPage() {
 
   // UNDER THE CLIENT CHIP (decisions D6, D20) the queue and the machines that
   // name it are that client's: the same calls, through `useNarrowedApi`, kept
-  // under the client's key (today's key without a chip). The mutations still
+  // under the client's key (today's key without a chip; the client as
+  // `{ client }`, since `["devices", id]` is one device). The mutations still
   // invalidate `["jobs"]`, which reaches every copy, and stop and retry keep
   // `useApi()`. The open job is read by id, as before.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
@@ -282,7 +283,7 @@ export function JobsPage() {
   // console fills; a device the join cannot resolve keeps its id, which is
   // still the thing to search the backend for.
   const devices = useQuery({
-    queryKey: client === null ? ["devices"] : ["devices", client],
+    queryKey: client === null ? ["devices"] : ["devices", { client }],
     queryFn: () => readApi.listDevices(),
     enabled: ready,
   });
