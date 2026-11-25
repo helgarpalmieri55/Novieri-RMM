@@ -21,6 +21,7 @@ import { TicketTable } from "./TicketTable";
 import type { TicketOut, TicketScope, TicketSort } from "./types";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterBar,
   FilterChips,
@@ -395,7 +396,7 @@ export function TicketListPage() {
                   this page, P1): a row of every status wrapped to three lines at
                   1440 and pushed the first ticket below the fold. Still the
                   closed vocabulary, in the first row beside the scope. */}
-              <FilterSelect
+              <ChipSelect
                 label={t("serviceDesk.list.statusAria")}
                 value={statusFilter}
                 onChange={(value) => filters.set("status", value)}
@@ -411,7 +412,7 @@ export function TicketListPage() {
           end={dataReady ? <ShowingCount shown={visibleTickets.length} total={shownTotal} /> : null}
         />
         <FilterBar>
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.queueAria")}
             value={queueFilter}
             onChange={(value) => filters.set("queue", value)}
@@ -420,7 +421,7 @@ export function TicketListPage() {
               ...(queues.data ?? []).map((q) => ({ value: q.id, label: q.name })),
             ]}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.priorityAria")}
             value={priorityFilter}
             onChange={(value) => filters.set("priority", value)}
@@ -430,7 +431,7 @@ export function TicketListPage() {
                 p.value === "" ? t("serviceDesk.list.allPriorities") : p.label ? t(p.label) : ticketPriorityLabel(p.value),
             }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.typeAria")}
             value={typeFilter}
             onChange={(value) => filters.set("type", value)}
@@ -439,13 +440,13 @@ export function TicketListPage() {
               label: type === "" ? t("serviceDesk.list.allTypes") : ticketTypeLabel(type),
             }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.originAria")}
             value={originFilter}
             onChange={(value) => filters.set("origin", value)}
             options={ORIGIN_FILTERS.map((o) => ({ value: o.value, label: t(o.label) }))}
           />
-          <FilterSelect
+          <ChipSelect
             label={t("serviceDesk.list.assigneeAria")}
             value={assigneeFilter}
             onChange={setAssigneeFilter}
@@ -504,35 +505,5 @@ export function TicketListPage() {
           button checks, so a bare `?new=ticket` opens nothing for a reader. */}
       <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} guardNew />
     </div>
-  );
-}
-
-/**
- * One of the list's other filters as a chip with its name on it (the kit's
- * `.chip-select`, as the Client chip is drawn): the caption is what a person
- * reads, and the select carries the same name for assistive technology.
- */
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: readonly { value: string; label: string }[];
-}) {
-  return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{label}</span>
-      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </span>
   );
 }

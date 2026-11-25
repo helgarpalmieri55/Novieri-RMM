@@ -51,6 +51,7 @@ import { useSitesOf } from "./siteNames";
 import {
   Btn,
   BulkBar,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -677,21 +678,16 @@ export function DevicesPage() {
                   choice to make: more than one site, or a site already chosen
                   (so it can be undone). */}
               {siteClient !== null && ((clientSites?.length ?? 0) > 1 || siteFilter !== "") ? (
-                <span className={siteFilter === "" ? "chip chip-select" : "chip chip-select on"}>
-                  <span aria-hidden="true">{t("devices.table.site")}</span>
-                  <select
-                    value={siteFilter}
-                    onChange={(event) => filters.set("site", event.target.value)}
-                    aria-label={t("devices.filters.siteAria")}
-                  >
-                    <option value="">{t("devices.filters.siteAny")}</option>
-                    {(clientSites ?? []).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                </span>
+                <ChipSelect
+                  label={t("devices.table.site")}
+                  ariaLabel={t("devices.filters.siteAria")}
+                  options={[
+                    { value: "", label: t("devices.filters.siteAny") },
+                    ...(clientSites ?? []).map((item) => ({ value: item.id, label: item.name })),
+                  ]}
+                  value={siteFilter}
+                  onChange={(value) => filters.set("site", value)}
+                />
               ) : null}
             </>
           }
