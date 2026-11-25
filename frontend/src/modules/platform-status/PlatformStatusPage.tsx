@@ -372,9 +372,9 @@ export function PlatformStatusPage() {
           A PENDING PROBE IS NOT A PASSING PROBE: `probes` defaults to `[]`, so
           before the first read every one of these rendered "0" and the row read
           as a clean bill of health for a platform nothing had measured. That is
-          the exact shape the audit filed nine times over. Undefined data gets
-          the kit's pending tile, the absent mark (clarification 10a); a zero
-          here is now always a measured zero, and its `zeroLabel` always true. */}
+          the exact shape the audit filed nine times over. Undefined data is
+          the kit's `pending` (the absent mark, ruling 10a); a zero here is now
+          always a measured zero, and its `zeroLabel` always true. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("platformStatus.tiles.probes")}

@@ -43,6 +43,29 @@ describe("DetailHead (design §2, Ficha)", () => {
 });
 
 describe("UrlTabs and useUrlTab (design §2: tabs that change the URL)", () => {
+  // `TabItem.note` through `UrlTabs` (P3 adoption pass): its items type took no
+  // `note`, so Settings, the one caller, could pass one only by widening its
+  // array. The note is drawn by `Tabs`; the panel keeps the tab's NAME.
+  it("draws a tab's note, and names the panel after the tab's name alone", () => {
+    function Noted() {
+      const [tab, setTab] = useUrlTab<Tab>(TABS, "overview");
+      return (
+        <UrlTabs
+          label="Computer"
+          items={TABS.map((key) => ({ key, label: LABEL[key], ...(key === "hardware" ? { note: "Not collected" } : {}) }))}
+          active={tab}
+          onSelect={setTab}
+        >
+          <p>{tab} panel</p>
+        </UrlTabs>
+      );
+    }
+    renderPage("/devices/dev-1?tab=hardware", <Noted />);
+    const hardware = screen.getByRole("tab", { name: "Hardware Not collected" });
+    expect(hardware.querySelector(".tab-note")).toHaveTextContent("Not collected");
+    expect(screen.getByRole("tabpanel", { name: "Hardware" })).toHaveTextContent("hardware panel");
+  });
+
   it("opens the tab the URL names", () => {
     renderPage("/devices/dev-1?tab=hardware", <Device />);
     expect(screen.getByRole("tab", { name: "Hardware" })).toHaveAttribute("aria-selected", "true");
@@ -139,5 +162,29 @@ describe("DetailGrid asideFirst (B3-6)", () => {
   it("is on /__preview, so the browser's a11y pass measures it", () => {
     const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
     expect(preview).toMatch(/<DetailGrid\s[^>]*\basideFirst\b/);
+  });
+
+  /*
+   * NOTHING OPEN BESIDE THE LIBRARY (P3 adoption pass, territory C's request
+   * R1): /docs draws its library alone until a document is opened. With no
+   * `main`, the main column is empty, takes no track and no gap, and the aside
+   * spans the whole row; without this the closed state is a third-wide list
+   * beside an empty column. No API change: `main={null}`.
+   */
+  it("leaves the main column empty with no main, and draws the aside alone across the row (kit.css)", () => {
+    const { container } = render(<DetailGridFromKit main={null} aside={<p>library</p>} asideFirst />);
+    const grid = container.querySelector(".detail-grid.aside-first");
+    expect([...(grid?.children ?? [])].map((child) => child.className)).toEqual(["detail-aside", "detail-main"]);
+    expect(grid?.querySelector(".detail-main")).toBeEmptyDOMElement();
+    const kit = readFileSync(resolve(import.meta.dirname, "./kit.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(kit).toMatch(
+      /\.detail-grid\.aside-first:has\(> \.detail-main:empty\)\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\);?\s*\}/,
+    );
+    expect(kit).toMatch(/\.detail-grid\.aside-first > \.detail-main:empty\s*\{\s*display:\s*none;?\s*\}/);
+  });
+
+  it("has the library-alone case on /__preview, so the browser measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<DetailGrid\s+asideFirst\s+main=\{null\}/);
   });
 });

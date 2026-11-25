@@ -4,12 +4,12 @@ export const validation = {
   // What a submit error says when the server gave nothing better.
   unexplained: "The server refused this and gave no reason. Please try again.",
   unauthorized: "unauthorized",
-  serviceUnavailable: "That service is unavailable right now. Nothing was changed — try again shortly.",
+  serviceUnavailable: "That service is unavailable right now. Nothing was changed. Try again shortly.",
   csrf: "That request did not come from this console's address, so the server refused it. Check the console address setting.",
   forbidden: "You do not have permission to do that.",
   notFound: "That no longer exists. It may have been deleted.",
   conflict: "That conflicts with something that already exists.",
-  serverFailed: "The server failed on this request. Nothing was changed — try again shortly.",
+  serverFailed: "The server failed on this request. Nothing was changed. Try again shortly.",
   // Pydantic 422 errors by `type` (components/form.tsx `describeValidation`).
   // While the console is in English it shows the server's own message, which is
   // already English and which existing screens and tests pin; these sentences

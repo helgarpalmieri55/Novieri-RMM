@@ -135,10 +135,10 @@ export function Btn({
    *  cannot be used because of what its own row is, not because of anything
    *  the operator can do about it, needs a place to say so. */
   title?: string;
-  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): a
-   *  step's one action in the sign-in frame, which drew the markup by hand
-   *  (`AuthWideBtn`) because `.btn` is `inline-flex` with its content at the
-   *  start. */
+  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): every
+   *  step action of a card in the sign-in frame (P3 adoption pass), which drew
+   *  the markup by hand (`AuthWideBtn`, gone) because `.btn` is `inline-flex`
+   *  with its content at the start. */
   wide?: boolean;
 }) {
   const tone = variant === "secondary" || variant === "gold" ? "" : variant;
@@ -272,6 +272,7 @@ export function StatCard({
   foot,
   spark,
   pending = false,
+  absent = false,
 }: {
   label: string;
   value: string;
@@ -299,21 +300,40 @@ export function StatCard({
    * unmeasured renders `n/a`, never `0`. This is that rule, in the one place
    * every page inherits it from; the label, the tone and the destination are
    * unchanged, because the tile is still about the same thing.
+   *
+   * IT IS `Tile`'s `pending` (coordinator, P3 adoption pass; ruling 10a): the
+   * card hands it to the Tile it renders, so it says `aria-busy` and draws
+   * nothing under the mark: no zero label, no trend, no sparkline and no
+   * `foot`, which can be a claim about the data it does not have yet. Pass it
+   * whenever there is no data, pending or failed (`pending={!q.data}`).
    */
   pending?: boolean;
+  /**
+   * THE READ ANSWERED AND THERE IS NO FIGURE (coordinator, P3 adoption pass):
+   * `Tile`'s `absent`. The mark, not busy, and the `foot` KEPT, because once
+   * the read has answered the foot says why there is no figure ("No completed
+   * runs yet"). Not a zero (no zero label), not urgent, no trend. Keep it out
+   * of `pending`, which would hide that reason while claiming a read is on its
+   * way. `pending` wins when both are set.
+   */
+  absent?: boolean;
 }) {
   // A measured zero is not urgent, whatever the caller said. Neither is an
   // unmeasured one, and an unmeasured one is not a zero at all.
   const t = useT();
-  const isZero = !pending && value.trim() === "0";
-  const loud = urgent && !isZero && !pending;
-  const kind = pending ? "mut" : tileKind(tone, loud);
+  const noFigure = pending || absent;
+  const isZero = !noFigure && value.trim() === "0";
+  const loud = urgent && !isZero && !noFigure;
+  const kind = noFigure ? "mut" : tileKind(tone, loud);
 
+  // Nothing under the mark while pending: `Tile` draws no sub then. With an
+  // absent figure only the foot, the reason, is drawn.
+  const showTrend = trend !== undefined && !isZero && !noFigure;
   const sub =
-    (isZero && zeroLabel) || (trend && !isZero && !pending) || foot ? (
+    !pending && ((isZero && zeroLabel) || showTrend || foot) ? (
       <>
         {isZero && zeroLabel ? <span className="stat-zero">{zeroLabel}</span> : null}
-        {trend && !isZero && !pending ? (
+        {trend && showTrend ? (
           <span className={`trend stat-trend ${trend.direction}`}>
             <Icon name={trend.direction === "up" ? "arrow-up" : "arrow-down"} size={12} />
             <span className="sr-only">{trend.direction === "up" ? t("shell.ui.statUp") : t("shell.ui.statDown")}</span>
@@ -329,12 +349,14 @@ export function StatCard({
       className={`stat-card tone-${tone}${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={pending ? t("shell.viz.na") : value}
+      value={value}
       icon={icon}
       to={to}
       kind={kind}
-      spark={pending ? undefined : spark}
+      spark={spark}
       sub={sub}
+      pending={pending}
+      absent={absent}
     />
   );
 }
@@ -394,7 +416,16 @@ export function Tabs({
   // the tabs before the selected one and pushes it past the edge, as Settings'
   // "Set up" did on a phone. Their text is the layout's input, so it is the
   // effect's.
-  const text = items.map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000")).join("\u0001");
+  //
+  // ONLY THE SELECTED TAB'S TEXT AND THE TEXT BEFORE IT (P3 adoption pass;
+  // batch 3 review, Minor 2): a tab after the selected one cannot move it, so
+  // a count refetched there must not undo a person's sideways look along the
+  // strip.
+  const through = items.findIndex((item) => item.key === active);
+  const text = items
+    .slice(0, through + 1)
+    .map((item) => [item.label, item.count ?? "", item.note ?? ""].join("\u0000"))
+    .join("\u0001");
   useLayoutEffect(() => {
     const list = strip.current;
     if (!scroll || !list) return;

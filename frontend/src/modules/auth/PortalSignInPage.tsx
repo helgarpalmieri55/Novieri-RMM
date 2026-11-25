@@ -29,7 +29,8 @@ import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
 import { enterConsole, safeNext } from "../../lib/session";
-import { AuthAlert, AuthCard, AuthOr, AuthWideBtn } from "./AuthCard";
+import { Btn } from "../../shell/components";
+import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
@@ -99,7 +100,8 @@ export function PortalSignInPage() {
     <AuthCard title={t("auth.portalSignIn.title")} intro={t("auth.portalSignIn.intro")}>
       {passkey ? (
         <>
-          <AuthWideBtn
+          <Btn
+            wide
             variant="primary"
             icon="key"
             label={t("auth.portalSignIn.usePasskey")}
@@ -131,7 +133,8 @@ export function PortalSignInPage() {
         </Field>
         <AuthAlert text={error} />
         <div className="form-actions">
-          <AuthWideBtn
+          <Btn
+            wide
             type="submit"
             variant={passkey ? "secondary" : "primary"}
             icon="lock"

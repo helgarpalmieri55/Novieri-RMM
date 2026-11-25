@@ -44,6 +44,11 @@
  * one above. */
 .detail-grid.aside-first { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
 @media (max-width: 1024px) { .detail-grid.aside-first { grid-template-columns: minmax(0, 1fr); } }
+/* A library with nothing open beside it (/docs; P3 adoption pass, C's request
+ * R1): `main={null}` leaves the main column empty, so the aside is drawn
+ * alone, across the row, and the empty column takes no track and no gap. */
+.detail-grid.aside-first:has(> .detail-main:empty) { grid-template-columns: minmax(0, 1fr); }
+.detail-grid.aside-first > .detail-main:empty { display: none; }
 
 /* THE LEAVE QUESTION'S OWN LAYER (kit requests batch 2, G1). The question is
  * portalled to the end of <body> inside this div, a stacking context above

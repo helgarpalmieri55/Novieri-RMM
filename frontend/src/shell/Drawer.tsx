@@ -68,7 +68,7 @@ export interface DrawerProps {
 
 export function Drawer({ open, onClose, title, subtitle, children, footer }: DrawerProps) {
   const t = useT();
-  const panel = useRef<HTMLElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   // Initial focus, the focus trap, scroll lock and focus return are the
   // shared modal's. Escape is handled below instead, because a drawer hosts
   // confirmations whose own Escape it must not also answer.
@@ -93,7 +93,10 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
   return (
     <>
       <div className="overlay open" onClick={onClose} />
-      <aside
+      {/* A `div`, not the prototype's `<aside>`: ARIA in HTML allows no
+          `dialog` role on `aside` (axe `aria-allowed-role`, P3 adoption pass).
+          Same class, same dialog semantics. */}
+      <div
         className="drawer open"
         role="dialog"
         aria-modal="true"
@@ -114,7 +117,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
         </div>
         <div className="drawer-body">{children}</div>
         {footer ? <div className="drawer-foot">{footer}</div> : null}
-      </aside>
+      </div>
     </>
   );
 }

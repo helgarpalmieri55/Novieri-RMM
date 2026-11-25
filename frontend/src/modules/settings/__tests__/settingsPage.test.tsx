@@ -17,14 +17,15 @@
  *      write to.
  */
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   apiClient,
   currentLocation,
   calls,
+  EMAIL_SETTINGS_FIXTURE,
   EMAIL_UNCONFIGURED_FIXTURE,
   HEALTH_SETTINGS_FIXTURE,
   installDefaults,
@@ -305,7 +306,11 @@ describe("SettingsPage", () => {
       // is the kit's `UrlTabs`): the kit names the panel with the selected
       // tab's own label rather than through an id on the tab, so the panel's
       // accessible name is asserted instead of an `aria-labelledby` pair.
-      expect(screen.getByRole("tabpanel")).toHaveAccessibleName(tab.textContent ?? "");
+      // RE-POINTED AGAIN (P3 adoption pass): the panel is named after the
+      // tab's NAME, which no longer carries the section's state: that is the
+      // tab's note now ("Email" + "Set up"), not part of its label.
+      expect(screen.getByRole("tabpanel")).toHaveAccessibleName(label);
+      expect(tab.textContent?.startsWith(label)).toBe(true);
       expect(tab.textContent).not.toBe("");
     }
   });
@@ -331,11 +336,11 @@ describe("SettingsPage", () => {
   // rather than one invented for this task.
   // ----------------------------------------------------------------------
 
-  // RE-POINTED (redesign, Receta FO): the section list is the kit's `UrlTabs`,
-  // whose tab carries one label, so the state follows the tab's name in it
-  // ("Email · Set up") instead of sitting in an element of its own. The text
-  // queries below match that tail; what they assert is unchanged: the state is
-  // real text inside the tab, and part of its accessible name.
+  // RE-POINTED TWICE. The redesign (Receta FO) folded the state into the
+  // kit tab's one label ("Email · Set up"); the adoption pass gives it the
+  // kit's `TabItem.note` (batch 3, B3-1), its own `.tab-note` after the name.
+  // The queries below find that note; what they assert is unchanged: the state
+  // is real text inside the tab, and part of its accessible name.
   it("says which sections are not set up, before you click them", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     renderSettings();
@@ -358,7 +363,7 @@ describe("SettingsPage", () => {
     // -- so the "Set up" text is awaited per tab rather than asserted the
     // instant the tab appears.
     for (const tab of [email, sla, health]) {
-      expect(await within(tab).findByText(/ · Set up$/)).toBeInTheDocument();
+      expect(await within(tab).findByText("Set up", { selector: ".tab-note" })).toBeInTheDocument();
       expect(tab).toHaveAccessibleName(/(?<!not )set up/i);
     }
   });
@@ -370,11 +375,11 @@ describe("SettingsPage", () => {
     const sla = await screen.findByRole("tab", { name: /Service levels/ });
     const health = screen.getByRole("tab", { name: /Health/ });
     const email = screen.getByRole("tab", { name: /Email/ });
-    expect(await within(sla).findByText(/ · Not set up$/)).toBeInTheDocument();
-    expect(await within(health).findByText(/ · Not set up$/)).toBeInTheDocument();
+    expect(await within(sla).findByText("Not set up", { selector: ".tab-note" })).toBeInTheDocument();
+    expect(await within(health).findByText("Not set up", { selector: ".tab-note" })).toBeInTheDocument();
     // Email's own query was left on the happy-path fixture: its state must
     // not have been derived from a sibling tab's answer.
-    expect(await within(email).findByText(/ · Set up$/)).toBeInTheDocument();
+    expect(await within(email).findByText("Set up", { selector: ".tab-note" })).toBeInTheDocument();
     expect(sla).toHaveAccessibleName(/not set up/i);
     expect(health).toHaveAccessibleName(/not set up/i);
     expect(email).toHaveAccessibleName(/(?<!not )set up/i);
@@ -415,5 +420,67 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("tab", { name: "Health" })).not.toBeInTheDocument();
     expect(calls.getSlaSettings).not.toHaveBeenCalled();
     expect(calls.getHealthSettings).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * THE SECTION'S STATE IS THE TAB'S NOTE, AND THE KIT KEEPS THE TAB IN VIEW (P3
+ * adoption pass). The state was folded into the label ("Email · Set up")
+ * because the kit's tab had no third slot; it has `TabItem.note` now (batch 3,
+ * B3-1). And the page repeated the kit's sideways scroll itself when a label
+ * grew; the kit's `Tabs` does that now (B3-3), so the page's own effect went.
+ */
+describe("the section list's states (TabItem.note)", () => {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const scrolled = new WeakMap<Element, number>();
+
+  /** jsdom lays nothing out: a tab is 20px per character of its text, side by side in a 300px strip. */
+  function layOutByText() {
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockImplementation(function (this: HTMLElement) {
+      return scrolled.get(this) ?? 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "set").mockImplementation(function (this: HTMLElement, value: number) {
+      scrolled.set(this, value);
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("role") === "tablist") return DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 40 });
+      if (this.getAttribute("role") !== "tab") return original.call(this);
+      const strip = this.parentElement as HTMLElement;
+      const before = Array.from(strip.children).slice(0, Array.from(strip.children).indexOf(this));
+      const x = before.reduce((sum, tab) => sum + (tab.textContent ?? "").length * 20, 0);
+      return DOMRect.fromRect({ x: x - (scrolled.get(strip) ?? 0), y: 0, width: (this.textContent ?? "").length * 20, height: 40 });
+    });
+  }
+
+  function inView(strip: HTMLElement, tab: HTMLElement): boolean {
+    const box = strip.getBoundingClientRect();
+    const own = tab.getBoundingClientRect();
+    return own.left >= box.left && own.right <= box.right;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("draws a section's state as the tab's note, apart from its name", async () => {
+    renderSettings();
+    const email = await screen.findByRole("tab", { name: /Email/ });
+    const note = await within(email).findByText("Set up");
+    expect(note).toHaveClass("tab-note");
+    expect(email).toHaveAccessibleName("Email Set up");
+    expect(email.textContent).not.toContain(" · ");
+  });
+
+  it("keeps the selected tab in view when a state arrives in a tab before it", async () => {
+    layOutByText();
+    let answer: (value: typeof EMAIL_SETTINGS_FIXTURE) => void = () => {};
+    calls.getEmailSettings.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderSettings(settingsHref("sessions"));
+    const strip = await screen.findByRole("tablist", { name: "Settings sections" });
+    const sessions = await screen.findByRole("tab", { name: /Sessions/, selected: true });
+    const email = screen.getByRole("tab", { name: /Email/ });
+    expect(within(email).queryByText("Set up")).toBeNull();
+    expect(inView(strip, sessions)).toBe(true);
+    await act(async () => answer(EMAIL_SETTINGS_FIXTURE));
+    await within(email).findByText("Set up");
+    expect(inView(strip, sessions)).toBe(true);
   });
 });

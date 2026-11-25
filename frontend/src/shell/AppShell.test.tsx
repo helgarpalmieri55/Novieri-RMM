@@ -324,8 +324,9 @@ describe("AppShell", () => {
       expect(mark()).toHaveTextContent("AL");
       // The monogram is a picture of the name; the name itself is spoken.
       expect(mark()).toHaveAttribute("aria-hidden", "true");
-      const toggle = screen.getByRole("button", { name: "Open navigation — client: Andes Logistics" });
-      expect(toggle).toHaveAttribute("title", "Open navigation — client: Andes Logistics");
+      // No em dash in UI text (P3 adoption pass): a period where it was.
+      const toggle = screen.getByRole("button", { name: "Open navigation. Client: Andes Logistics" });
+      expect(toggle).toHaveAttribute("title", "Open navigation. Client: Andes Logistics");
       expect(toggle).toContainElement(mark() as HTMLElement);
     });
 
@@ -334,7 +335,7 @@ describe("AppShell", () => {
       setActiveLanguage("es");
       renderMarked({ short: "SA", name: "Sin asignar" });
       expect(
-        screen.getByRole("button", { name: "Abrir la navegación — cliente: Sin asignar" }),
+        screen.getByRole("button", { name: "Abrir la navegación. Cliente: Sin asignar" }),
       ).toBeInTheDocument();
     });
 
@@ -361,9 +362,9 @@ describe("AppShell", () => {
     it("is still the drawer toggle: tapping it opens the drawer, which says so", async () => {
       handset(true);
       renderMarked(ANDES);
-      await user.click(screen.getByRole("button", { name: "Open navigation — client: Andes Logistics" }));
+      await user.click(screen.getByRole("button", { name: "Open navigation. Client: Andes Logistics" }));
       expect(document.body).toHaveClass("nav-open");
-      const toggle = screen.getByRole("button", { name: "Close navigation — client: Andes Logistics" });
+      const toggle = screen.getByRole("button", { name: "Close navigation. Client: Andes Logistics" });
       expect(toggle).toHaveAttribute("aria-expanded", "true");
       expect(mark()).toHaveTextContent("AL");
     });

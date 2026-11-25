@@ -126,6 +126,12 @@ describe("scripts/routes.mjs covers App.tsx", () => {
     expect(ROUTES).toContain("/enrollment?tab=certificates");
   });
 
+  it("walks the license renewal calendar at the 90 days the register's tile opens (P3 adoption pass, C's request R6)", () => {
+    // The register's "Renewals in 90 days" tile links `?within=90`; the plain
+    // route draws the calendar's default window, so the tile's is a variant.
+    expect(ROUTES).toContain("/licenses/renewals?within=90");
+  });
+
   it("has no duplicates", () => {
     expect(new Set(ROUTES).size).toBe(ROUTES.length);
   });

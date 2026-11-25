@@ -28,13 +28,20 @@
  * `jsx-tokens.test.ts` guards them where they are, and the CSS guards read
  * only `src/shell/*.css` and `index.css`.
  *
+ * EVERY CARD'S ACTIONS ARE ACROSS IT (P3 adoption pass; the coordinator's
+ * answer to the wave's Q3): each step action, the primary and any other way
+ * through the same step, is the kit's `Btn wide` (or `.btn.wide` on a link),
+ * one column of full-width actions per card. A tool on something in the card
+ * ("Copy the codes") keeps its own width. An address the person cannot change
+ * is the kit's `.input-field[readonly]`, with no style of the page's own.
+ *
  * THE LANGUAGE SWITCH IS HERE because nothing else on these pages can change
  * it, and a person who chose Spanish on another computer has no saved
  * language this browser knows of yet. The choice is kept in this browser
  * (`itms.lang`); it is not saved to an account, because there is no session
  * to save it with (`App.tsx`'s `LanguageBridge`, plan decision D20).
  */
-import { useId, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 import { useLanguage, useT } from "../../i18n/context";
 import { LANGUAGES } from "../../i18n/types";
@@ -76,25 +83,10 @@ const SECTION_HEADING: CSSProperties = { fontSize: "var(--t-h2)", fontWeight: 60
 const OR: CSSProperties = { display: "flex", alignItems: "center", gap: 12, margin: 0 };
 const OR_RULE: CSSProperties = { flex: "1 1 auto", borderTop: "1px solid var(--line)" };
 /**
- * A step's action at the card's full width. `.btn` is `inline-flex` with its
- * content at the start, so a stretched one needs its content centred, and
- * `Btn` takes no style: this is the kit's button, drawn as `Btn` draws it,
- * until `Btn` takes `wide` (kit request, plan Task 13 report).
- */
-const WIDE: CSSProperties = { width: "100%", justifyContent: "center" };
-/**
  * Prose in the card wraps without a one-word last line (the detector's
  * `straggler`, found under the enrolment's app hint on 2026-11-25).
  */
 const PROSE: CSSProperties = { textWrap: "pretty" };
-
-/**
- * A value the person cannot change, drawn in a field because a password
- * manager reads it there (`autocomplete="username"` on the invitation and the
- * recovery link): on the sunken surface, so it does not look editable. Until
- * the kit styles `.input-field[readonly]` (kit request, plan Task 13 report).
- */
-export const READ_ONLY: CSSProperties = { background: "var(--surface-2)" };
 
 /** The tab, named after the screen's headline while the screen is up. */
 function TabTitle({ page }: { page: string }) {
@@ -209,39 +201,5 @@ export function AuthOr() {
       <span>{t("auth.common.or")}</span>
       <span aria-hidden="true" style={OR_RULE} />
     </p>
-  );
-}
-
-/**
- * A step's action across the card (the sign-in pages' "Continue", the
- * passkey, Microsoft): the same `.btn` as `Btn` -- its height, radius,
- * weight, hover, focus ring and disabled state -- stretched to the card.
- */
-export function AuthWideBtn({
-  label,
-  icon,
-  variant = "secondary",
-  type = "button",
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  icon?: string;
-  variant?: "primary" | "secondary";
-  type?: "button" | "submit";
-  disabled?: boolean;
-  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
-}) {
-  return (
-    <button
-      type={type}
-      className={variant === "primary" ? "btn primary" : "btn"}
-      style={WIDE}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {icon ? <Icon name={icon} size={14} /> : null}
-      <span>{label}</span>
-    </button>
   );
 }

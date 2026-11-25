@@ -85,10 +85,12 @@ describe("formatDateTime", () => {
   });
 
   it("says so when there is no date, rather than printing Invalid Date", () => {
+    // The kit's absent mark, "n/a", where this was an em dash (P3 adoption
+    // pass; DESIGN.md: no em dash in UI text). Same element, same meaning.
     for (const empty of ["", null, undefined]) {
-      expect(formatDateTime(empty, BOGOTA)).toBe("—");
+      expect(formatDateTime(empty, BOGOTA)).toBe("n/a");
     }
-    expect(formatDateTime("not-a-date", BOGOTA)).toBe("—");
+    expect(formatDateTime("not-a-date", BOGOTA)).toBe("n/a");
   });
 
   it("falls back to the browser's zone when the profile has none", () => {

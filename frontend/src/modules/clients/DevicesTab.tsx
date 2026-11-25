@@ -11,7 +11,7 @@ import { RelTime } from "../../components/reltime";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
-import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi, withClient } from "../../shell/components";
 import { OsIcon } from "../../shell/viz";
 
 export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
@@ -28,7 +28,7 @@ export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: bo
       title={t("clients.devices.title")}
       bare
       actions={
-        <Link className="btn small" to={`/devices?client=${client.id}`}>
+        <Link className="btn small" to={withClient("/devices", client.id)}>
           {/* The server's total once it has answered; never an invented 0 before (The Absent Zero Rule). */}
           {devices.data ? t("clients.devices.seeAll", { count: devices.data.total }) : t("clients.devices.seeAllUncounted")}
         </Link>

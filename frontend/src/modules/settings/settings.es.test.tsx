@@ -124,10 +124,16 @@ describe("the settings page in Spanish", () => {
     expect(screen.getByText("Configuración que se aplica en toda esta organización.")).toBeInTheDocument();
     expect(screen.getByText("Los demás módulos se configuran desde su propia página.")).toBeInTheDocument();
     const tablist = screen.getByRole("tablist", { name: "Secciones de la configuración" });
-    // RE-POINTED (redesign, Receta FO: the kit's `UrlTabs`): a tab's state
-    // follows its name in its one label ("Salud · Configurado"), so the name is
-    // the label's text before " · ".
-    expect(within(tablist).getAllByRole("tab").map((tab) => tab.textContent?.split(" · ")[0])).toEqual([
+    // RE-POINTED (P3 adoption pass): a tab's state is its `.tab-note`, after
+    // its name (it was folded into the label, "Salud · Configurado"), so the
+    // name is the tab's text without its note.
+    const nameOf = (tab: HTMLElement) =>
+      [...tab.childNodes]
+        .filter((node) => !(node instanceof Element && node.classList.contains("tab-note")))
+        .map((node) => node.textContent)
+        .join("")
+        .trim();
+    expect(within(tablist).getAllByRole("tab").map(nameOf)).toEqual([
       "Organización",
       "Correo electrónico",
       "Roles",
@@ -142,23 +148,23 @@ describe("the settings page in Spanish", () => {
       "Presupuesto",
     ]);
     // Email, Service levels and Health each say whether they are set up.
-    await waitFor(() => expect(within(tablist).getAllByText(/ · Configurado$/)).toHaveLength(3));
+    await waitFor(() => expect(within(tablist).getAllByText("Configurado", { selector: ".tab-note" })).toHaveLength(3));
     expectNoEnglish(container, RECORDED);
   });
 
   it("says a section is not set up", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     await openIn(null);
-    expect(await screen.findByText(/ · Sin configurar$/)).toBeInTheDocument();
+    expect(await screen.findByText("Sin configurar", { selector: ".tab-note" })).toBeInTheDocument();
   });
 
   it("re-words the section list and the heading on a live switch", async () => {
     await openIn(null);
-    await screen.findAllByText(/ · Configurado$/);
+    await screen.findAllByText("Configurado", { selector: ".tab-note" });
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeInTheDocument();
-    expect(screen.getAllByText(/ · Set up$/)).toHaveLength(3);
+    expect(screen.getAllByText("Set up", { selector: ".tab-note" })).toHaveLength(3);
     expect(screen.getByRole("tab", { name: /^Service levels/ })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("tab", { name: /^Niveles de servicio/ })).toBeInTheDocument();
@@ -394,7 +400,8 @@ describe("the email tab in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Enviar un mensaje de prueba" }));
     expect(await screen.findByText("Enviado a support@toeshee.com: revisa ese buzón. Un servidor de correo puede aceptar un mensaje y aun así descartarlo.")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("Sent to support@toeshee.com — check that mailbox. A mail server can accept a message and still drop it.")).toBeInTheDocument();
+    // No em dash in UI text (P3 adoption pass): a period where it was.
+    expect(screen.getByText("Sent to support@toeshee.com. Check that mailbox. A mail server can accept a message and still drop it.")).toBeInTheDocument();
   });
 
   it("holds a failed test send and re-words it", async () => {

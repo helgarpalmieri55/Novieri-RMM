@@ -1048,6 +1048,9 @@ function KitPreview() {
       <div className="tiles" style={{ marginBottom: 24 }}>
         <Tile label="Deployed this week" icon="cpu" value="14" sub="3 failed, 11 installed" to="/deploy" />
         <Tile label="Waiting for a reboot" icon="heartbeat" value="0" sub="Every machine is up to date" to="/patch" pending />
+        {/* The read answered with no figure (P3 adoption pass): the mark, and
+            the line that says why, kept; not busy. */}
+        <Tile label="Success rate" icon="chart" value="0" unit="%" sub="No completed runs yet" to="/jobs" absent />
       </div>
       {/* A LIST: one bare panel, as every list page draws it, so the toolbar
           and the bulk bar run flush to its edges. */}
@@ -1164,6 +1167,20 @@ function KitPreview() {
           main={
             <Panel title="Reader">
               <div style={{ padding: 14 }}>Restoring a domain controller from the nightly backup, step by step.</div>
+            </Panel>
+          }
+        />
+      </div>
+
+      {/* NOTHING OPEN BESIDE THE LIBRARY (P3 adoption pass, C's request R1):
+          with no main, the library is drawn alone across the row. */}
+      <div style={{ marginTop: 24 }} data-bench="library-alone">
+        <DetailGrid
+          asideFirst
+          main={null}
+          aside={
+            <Panel title="Library, nothing open">
+              <div style={{ padding: 14 }}>Open a runbook, a diagram or a contract to read it beside the list.</div>
             </Panel>
           }
         />

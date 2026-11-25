@@ -26,7 +26,7 @@
  * each say which zone they are reading it in.
  */
 
-import { getLanguage, translate } from "../i18n/core";
+import { getLanguage, subscribe, translate } from "../i18n/core";
 
 /**
  * The `Intl` locale for the active language. English keeps `en-GB` exactly as
@@ -37,8 +37,30 @@ export function intlLocale(): "en-GB" | "es" {
   return getLanguage() === "es" ? "es" : "en-GB";
 }
 
-/** Shown where a date is absent. An em dash, not "Invalid Date", not "null". */
-export const NO_DATE = "—";
+/**
+ * Shown where a date is absent: the kit's one absent mark, `shell.viz.na`
+ * ("n/a", Spanish "n/d"), the same text `NoValue` and a pending `Tile` draw.
+ * Not "Invalid Date", not "null", and no longer an em dash (P3 adoption pass:
+ * DESIGN.md bars an em dash from UI text, and its Absent Zero Rule draws the
+ * unmeasured as "n/a").
+ *
+ * A LIVE BINDING THAT FOLLOWS THE LANGUAGE. Eighty-five files print what the
+ * formatters below return, and a few import `NO_DATE` itself to print or
+ * compare; a `const` would freeze the language this module loaded in. An ES
+ * module export is live, so reassigning it on every switch keeps each
+ * `import { NO_DATE }` current with none of those files changed. The switch
+ * runs this listener synchronously, before any component re-renders. Read it
+ * where it is drawn; never copy it into module scope, state or a memo.
+ *
+ * NO FILE CARRIES IT. Every export the console offers (devices and software
+ * `.xlsx`, the access-evidence, patch, IPAM and report `.csv`) is built by the
+ * server and saved byte for byte; no formatter here writes a cell, so there is
+ * no spreadsheet cell that could read "n/a" where an empty one was meant.
+ */
+export let NO_DATE: string = translate("shell.viz.na");
+subscribe(() => {
+  NO_DATE = translate("shell.viz.na");
+});
 
 /**
  * The offset of `zone` at `instant`, in minutes.

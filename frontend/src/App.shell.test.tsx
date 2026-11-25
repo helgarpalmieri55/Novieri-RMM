@@ -280,7 +280,7 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
           </MemoryRouter>
         </QueryClientProvider>,
       );
-      const toggle = await screen.findByRole("button", { name: "Open navigation — client: Andes Logistics" });
+      const toggle = await screen.findByRole("button", { name: "Open navigation. Client: Andes Logistics" });
       expect(toggle).toHaveTextContent("AL");
     } finally {
       vi.unstubAllGlobals();
@@ -326,5 +326,66 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
     await screen.findByText("Ada");
     await user.click(await rail().findByRole("button", { name: "More" }));
     expect(await rail().findByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
+  });
+});
+
+/**
+ * THE TENANT CARD'S NAME BEFORE AND WITHOUT AN ORGANIZATION (P3 adoption pass;
+ * DESIGN.md: no em dash in UI text). It drew "—" whenever `/me` had not named
+ * an organization, which is also every first paint before `/me` answers. Now
+ * a name still on its way is the ellipsis it already was once `/me` had
+ * answered, and a name that is absent once both reads answered is the kit's
+ * absent mark, `shell.viz.na`.
+ */
+const { setActiveLanguage } = await import("./i18n/core");
+const { ApiError } = await import("./lib/api");
+
+describe("the tenant card's name", () => {
+  afterEach(() => setActiveLanguage("en"));
+
+  function renderWithOrg(api: ReturnType<typeof fakeApi>) {
+    apiRef.current = api;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/devices"]}>
+          <Shell>
+            <Where />
+          </Shell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return () => screen.getByTestId("tenant-identity").querySelector(".tenant-name")?.textContent;
+  }
+
+  function noOrganization() {
+    const api = fakeApi(OPERATOR);
+    api.me.mockResolvedValue({ user_id: "u1", display_name: "Ada", email: "ada@example.test", org_id: null, roles: [], permissions: OPERATOR });
+    api.getCurrentOrg.mockRejectedValue(new ApiError(404, '{"detail":"not found"}'));
+    return api;
+  }
+
+  it("is an ellipsis while /me and the organization are still on their way, never a dash", () => {
+    const api = fakeApi(OPERATOR);
+    api.me.mockReturnValue(new Promise(() => {}));
+    api.getCurrentOrg.mockReturnValue(new Promise(() => {}));
+    const name = renderWithOrg(api);
+    expect(name()).toBe("…");
+  });
+
+  it("is the absent mark, n/a, once both reads answered with no organization", async () => {
+    const name = renderWithOrg(noOrganization());
+    await waitFor(() => expect(name()).toBe("n/a"));
+    expect(screen.getByTestId("tenant-identity")).not.toHaveTextContent("—");
+  });
+
+  it("is n/d in Spanish", async () => {
+    setActiveLanguage("es");
+    const name = renderWithOrg(noOrganization());
+    await waitFor(() => expect(name()).toBe("n/d"));
+  });
+
+  it("is the organization's own name once it is read", async () => {
+    const name = renderWithOrg(fakeApi(OPERATOR));
+    await waitFor(() => expect(name()).toBe("Toeshee"));
   });
 });

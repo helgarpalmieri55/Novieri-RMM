@@ -1,11 +1,49 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { describeWhen, formatDate, formatDateTime } from "./datetime";
+import { describeWhen, formatDate, formatDateTime, NO_DATE } from "./datetime";
 import { describeSeconds, formatCount } from "./format";
 import { humaniseEnum } from "./labels";
-import { setActiveLanguage } from "../i18n/core";
+import { setActiveLanguage, translate } from "../i18n/core";
 import { exactMoney } from "../modules/budget/money";
 
 const ISO = "2026-10-09T14:05:00Z";
+
+/**
+ * AN ABSENT DATE IS THE KIT'S ONE ABSENT MARK (P3 adoption pass; DESIGN.md:
+ * "Don't type ... an em dash into UI text"; the Absent Zero Rule, "unmeasured
+ * is drawn as absent: n/a"). It was "—", so every page that printed a
+ * formatted null drew an em dash beside `NoValue`'s and `Tile pending`'s
+ * "n/a". It is now `shell.viz.na` in each language, and the `NO_DATE` export
+ * that pages print and tests compare against follows the language with it.
+ */
+describe("an absent date is the kit's absent mark, in each language", () => {
+  afterEach(() => setActiveLanguage("en"));
+  const absent = () => [
+    formatDateTime(null),
+    formatDateTime(undefined),
+    formatDateTime("not a date"),
+    formatDate(null),
+    formatDate(""),
+    describeWhen(null),
+    describeWhen("not a date"),
+  ];
+
+  it("is n/a in English, exactly shell.viz.na, and never an em dash", () => {
+    expect(translate("shell.viz.na")).toBe("n/a");
+    expect(NO_DATE).toBe("n/a");
+    for (const text of absent()) expect(text).toBe("n/a");
+    expect(absent().join("")).not.toContain("—");
+  });
+
+  it("is n/d in Spanish, and NO_DATE follows a switch both ways", () => {
+    setActiveLanguage("es");
+    expect(translate("shell.viz.na")).toBe("n/d");
+    expect(NO_DATE).toBe("n/d");
+    for (const text of absent()) expect(text).toBe("n/d");
+    setActiveLanguage("en");
+    expect(NO_DATE).toBe("n/a");
+    expect(formatDate(null)).toBe("n/a");
+  });
+});
 describe("dates follow the language", () => {
   afterEach(() => setActiveLanguage("en"));
   it("English is unchanged (en-GB)", () => {

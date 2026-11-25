@@ -174,6 +174,9 @@ export const ROUTES = [
   "/licenses/compliance",
   "/licenses/review-queue",
   "/licenses/renewals",
+  // The register's "Renewals in 90 days" tile opens the calendar at its own
+  // window (P3 adoption pass, C's request R6).
+  "/licenses/renewals?within=90",
   "/licenses",
   "/licenses/lic-1",
   "/subscriptions/spend",

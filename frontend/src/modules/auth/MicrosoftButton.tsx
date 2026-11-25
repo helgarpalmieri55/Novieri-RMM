@@ -38,7 +38,7 @@ import type { MicrosoftStartIn } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { navigation } from "../../lib/session";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthWideBtn } from "./AuthCard";
+import { AuthAlert } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { checkedAuthorizeUrl, describeMicrosoftError, rememberMicrosoftReturn } from "./microsoft";
 
@@ -137,7 +137,7 @@ export function MicrosoftButton({
   return (
     <>
       {wide ? (
-        <AuthWideBtn {...button} />
+        <Btn {...button} wide />
       ) : (
         <div className="form-actions">
           <Btn {...button} />

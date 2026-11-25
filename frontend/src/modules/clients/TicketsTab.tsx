@@ -11,7 +11,7 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
-import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi, withClient } from "../../shell/components";
 
 export function TicketsTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
   const t = useT();
@@ -30,7 +30,7 @@ export function TicketsTab({ client, enabled }: { client: ClientOut; enabled: bo
       title={t("clients.tickets.title")}
       bare
       actions={
-        <Link className="btn small" to={`/service-desk?client=${client.id}`}>
+        <Link className="btn small" to={withClient("/service-desk", client.id)}>
           {t("clients.tickets.seeAll")}
         </Link>
       }

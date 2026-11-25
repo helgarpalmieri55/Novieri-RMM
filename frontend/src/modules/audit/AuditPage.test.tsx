@@ -25,7 +25,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient } from "../../lib/api";
-import { NO_DATE } from "../../lib/datetime";
 import { AuditPage } from "./AuditPage";
 import type { AuditEventOut, AuditListResponse, AuditVerifyResponse } from "./types";
 
@@ -196,7 +195,7 @@ describe("AuditPage", () => {
     expect(await screen.findByText("16 Aug 2026, 14:32")).toBeInTheDocument();
   });
 
-  it("renders NO_DATE for an event with no timestamp, never 'Invalid Date'", async () => {
+  it("renders the absent mark for an event with no timestamp, never 'Invalid Date'", async () => {
     // A row whose `ts` did not survive the wire is a defect worth seeing as a
     // gap, not as the words "Invalid Date" in an evidence table.
     renderPage({
@@ -208,7 +207,9 @@ describe("AuditPage", () => {
     // The When cell is the row's THIRD cell on the v3 kit (action, actor,
     // when, hash: the action leads, as the design draws it).
     const cells = [...document.querySelectorAll("tbody td")].map((cell) => cell.textContent);
-    expect(cells[2]).toBe(NO_DATE);
+    // The kit's absent mark, n/a, where this was an em dash (P3 adoption pass:
+    // `NO_DATE` is `shell.viz.na`). Same cell, same meaning.
+    expect(cells[2]).toBe("n/a");
   });
 
   it("filters the loaded page client-side and distinguishes no-match from empty", async () => {
@@ -245,7 +246,7 @@ describe("AuditPage", () => {
     });
   });
 
-  it("renders a BROKEN chain unmistakably, on every tab", async () => {
+  it("renders a broken chain unmistakably, on every tab", async () => {
     renderPage({
       events: () => Promise.resolve({ items: [event()], total: 1 }),
       verify: () =>
@@ -253,6 +254,8 @@ describe("AuditPage", () => {
     });
     // The banner is above the tabs, so it is present while looking at events.
     const alert = await screen.findByRole("alert");
+    // No typed capitals (DESIGN.md: "Don't type uppercase copy"; P3 adoption
+    // pass): the alert and the word carry the weight. Same element, same meaning.
     expect(alert).toHaveTextContent("Hash-chain verification failed.");
     expect(alert).toHaveTextContent("cccccccc-0000-0000-0000-000000000009");
     expect(alert.className).toContain("red");
@@ -262,12 +265,59 @@ describe("AuditPage", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: /Chain integrity/ }));
     expect(await screen.findByText("The chain is broken.")).toBeInTheDocument();
-    // A count from a failed walk is never presented as events verified: the
-    // tile draws the kit's absent mark.
+    // A count from a failed walk is never presented as events verified.
     const values = [...document.querySelectorAll(".stat-card")].map(
       (card) => card.querySelector(".stat-value")?.textContent,
     );
+    // The kit's absent mark, n/a (StatCard `pending`), where this was an em
+    // dash (P3 adoption pass; ruling 10a). Same tile, same meaning.
     expect(values[2]).toBe("n/a");
+  });
+
+  // RULING 10a, THROUGH THE KIT (P3 adoption pass): a tile with no figure,
+  // because its read is on its way, failed, or is not this account's to make,
+  // draws the kit's one absent mark through StatCard's `pending`, muted, and
+  // never an em dash or a 0.
+  //
+  // TWO KINDS OF NO FIGURE (coordinator, P3 adoption pass): a read on its way
+  // or failed is `pending`, busy; a read this account may not make is never
+  // coming, so the tile is `absent` and says nothing is loading.
+  it.each([
+    ["still on its way", { events: () => new Promise<never>(() => {}) }, true],
+    ["failed", { events: () => Promise.reject(new Error("boom")) }, true],
+    ["not this account's to read", { permissions: [] as string[] }, false],
+  ])("draws the absent mark on the log's tiles while the log is %s", async (_, options, busy) => {
+    renderPage(options);
+    await waitFor(() => expect(tileByLabel("Audit events")).toBeDefined());
+    if (!busy) await waitFor(() => expect(tileByLabel("Audit events")).not.toHaveAttribute("aria-busy"));
+    for (const label of ["Audit events", "Action types in view"]) {
+      const tile = tileByLabel(label) as HTMLElement;
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.className).toContain("mut");
+      expect(tile).not.toHaveTextContent("—");
+      if (busy) expect(tile).toHaveAttribute("aria-busy", "true");
+      else expect(tile).not.toHaveAttribute("aria-busy");
+    }
+  });
+
+  it("draws no verified count for a broken chain, and does not call it loading", async () => {
+    renderPage({
+      events: () => Promise.resolve({ items: [event()], total: 1 }),
+      verify: () => Promise.resolve({ ok: false, count: 41, broken_at: "cccccccc-0000-0000-0000-000000000009" }),
+    });
+    await screen.findByText("Broken");
+    const verified = tileByLabel("Events in verified chain") as HTMLElement;
+    expect(verified.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(verified).not.toHaveAttribute("aria-busy");
+  });
+
+  it("calls the verified count loading while the chain is still being walked", async () => {
+    renderPage({
+      events: () => Promise.resolve({ items: [event()], total: 1 }),
+      verify: () => new Promise<never>(() => {}),
+    });
+    await waitFor(() => expect(tileByLabel("Chain integrity")).toHaveTextContent("Verifying…"));
+    expect(tileByLabel("Events in verified chain")).toHaveAttribute("aria-busy", "true");
   });
 
   it("never says verified for a verification that did not come back", async () => {

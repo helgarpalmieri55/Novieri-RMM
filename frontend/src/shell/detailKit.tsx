@@ -81,7 +81,8 @@ export function UrlTabs<K extends string>({
   label,
   children,
 }: {
-  items: readonly { key: K; label: string; count?: number }[];
+  /** `note` is the kit's `TabItem.note` (batch 3, B3-1), drawn by `Tabs`. */
+  items: readonly { key: K; label: string; count?: number; note?: string }[];
   active: K;
   onSelect: (key: K) => void;
   label: string;

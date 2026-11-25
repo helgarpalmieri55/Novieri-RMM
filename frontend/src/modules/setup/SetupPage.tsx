@@ -249,6 +249,7 @@ export function SetupPage() {
 
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
             icon="check"

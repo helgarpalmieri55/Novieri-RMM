@@ -12,7 +12,7 @@ export const audit: Shape<typeof en> = {
     unknown: "desconocido",
   },
   broken: {
-    title: "Ha fallado la verificación de la cadena de hashes.",
+    title: "La verificación de la cadena de hashes ha fallado.",
     body: "La cadena de solo anexado no se verifica a partir del evento <mono>{id}</mono>. No se puede confiar en la evidencia de auditoría posterior a ese eslabón. Trátalo como un incidente de seguridad.",
   },
   tiles: {

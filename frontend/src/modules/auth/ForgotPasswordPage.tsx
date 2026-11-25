@@ -67,6 +67,7 @@ export function ForgotPasswordPage() {
           <AuthAlert text={error} />
           <div className="form-actions">
             <Btn
+              wide
               type="submit"
               variant="primary"
               icon="mail"

@@ -101,11 +101,17 @@ export function vocabularyCell(column: string, value: string): string | null {
 }
 
 /**
- * Server prose as typography: backticks stripped, ` -- ` promoted to an em
- * dash. Anything else is left exactly as written.
+ * Server prose as typography: backticks stripped, and ` -- ` read as the
+ * Spanish the server sends already reads it: an aside between two of them in
+ * one sentence in brackets, a single one as a colon. Never an em dash, which
+ * DESIGN.md bars from UI text (P3 adoption pass). Anything else is left
+ * exactly as written. UI only: the CSV export is the server's own bytes.
  */
 export function reportProse(text: string): string {
-  return text.replace(/`([^`\n]+)`/g, "$1").replace(/ -- /g, " — ");
+  return text
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/ -- ([^.?!]*?) -- /g, " ($1) ")
+    .replace(/ -- /g, ": ");
 }
 
 /**

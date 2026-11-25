@@ -69,6 +69,7 @@
  */
 
 import { spawnGroup } from "./devServer.mjs";
+import { isEntryPoint } from "./entryPoint.mjs";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -1136,8 +1137,9 @@ async function main() {
   process.exit(failures.length ? 1 : 0);
 }
 
-// RUN ONLY WHEN EXECUTED (`node scripts/a11y-browser.mjs`), as harmony.mjs:
-// imported by a test, the module starts no server and no browser.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// RUN ONLY WHEN EXECUTED (`node scripts/a11y-browser.mjs`, by any path to it,
+// a symlink included: ./entryPoint.mjs), as harmony.mjs: imported by a test,
+// the module starts no server and no browser.
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   await main();
 }
