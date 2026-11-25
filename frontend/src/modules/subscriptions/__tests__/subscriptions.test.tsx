@@ -479,6 +479,28 @@ describe("SubscriptionsPage", () => {
   // Pins the NewSubscriptionDialog submit path: the dialog is driven the way
   // a user drives it (by label and role) and the exact create body is
   // asserted, so a form that renders but is wired to nothing fails here.
+  // The coordinator's ruling 7 (review I2): the 503 of the last attempt used to
+  // stay on screen over the next attempt's missing field.
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createSubscription = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    await user.type(screen.getByLabelText("Service name"), "Globex CRM");
+    await user.clear(screen.getByLabelText("Cost per cycle"));
+    await user.type(screen.getByLabelText("Cost per cycle"), "1200.00");
+    await user.clear(screen.getByLabelText("Currency"));
+    await user.type(screen.getByLabelText("Currency"), "EUR");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Service name"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Service name/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
+
   it("wires the New subscription dialog to the real createSubscription mutation with the entered values", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SubscriptionsPage />);
@@ -1586,6 +1608,23 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     expect(alert).toHaveTextContent(/service is unavailable right now/i);
     expect(alert.textContent).not.toContain("ApiError");
     expect(screen.queryByText("Renewal terms saved.")).not.toBeInTheDocument();
+  });
+
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a field problem", async () => {
+    const user = userEvent.setup();
+    api.updateSubscription = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderDetail();
+    await screen.findByText("Renewal terms");
+    await user.click(screen.getByLabelText(/Renews automatically/));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Notice period (days)"));
+    await user.type(screen.getByLabelText("Notice period (days)"), "400");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/365 days or fewer/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
   });
 
   it("is not offered on a cancelled subscription, whose terms no longer apply", async () => {

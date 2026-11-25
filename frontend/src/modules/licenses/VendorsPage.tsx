@@ -168,7 +168,12 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   function submit() {
     const next: Attempt = { rules: vendorRules, values: { name } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      create.reset();
+      return;
+    }
 
     create.mutate(
       { name: name.trim(), website: website.trim() || null },

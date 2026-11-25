@@ -72,13 +72,20 @@ export function SweepPanel({
   const [interval, setInterval] = useState(
     String(subnet.sweep_interval_hours ?? DEFAULT_SWEEP_INTERVAL_HOURS),
   );
+  // Whether the interval box was edited. A stored interval of null means
+  // "on demand only", yet the box shows the weekly default for it, so the box
+  // alone cannot say whether 168 was typed or merely shown.
+  const [intervalTouched, setIntervalTouched] = useState(false);
 
-  // The settings as stored: an untouched Save sends nothing (the coordinator's
-  // ruling 13), so no PATCH records a change that is not one.
+  // CHANGED AGAINST WHAT IS STORED, never against the default shown (the
+  // coordinator's ruling 13): an untouched form has nothing to save, so it
+  // offers no Save (the kit's save-bar convention) and no PATCH records a
+  // change that is not one; typing 168 on an on-demand subnet IS a change.
+  const typedInterval = interval === "" ? null : Number(interval);
   const settingsChanged =
     enabled !== subnet.sweep_enabled ||
     deviceId !== (subnet.sweep_device_id ?? "") ||
-    interval !== String(subnet.sweep_interval_hours ?? DEFAULT_SWEEP_INTERVAL_HOURS);
+    (intervalTouched && typedInterval !== subnet.sweep_interval_hours);
 
   const scope = effectiveSweepScope(subnet, scopes.data ?? []);
   const latest = runs.data?.[0];
@@ -213,7 +220,10 @@ export function SweepPanel({
                   type="number"
                   min={MIN_SWEEP_INTERVAL_HOURS}
                   value={interval}
-                  onChange={(e) => setInterval(e.target.value)}
+                  onChange={(e) => {
+                    setInterval(e.target.value);
+                    setIntervalTouched(true);
+                  }}
                 />
               </Field>
               <label className="full" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -230,25 +240,26 @@ export function SweepPanel({
                 {t("ipam.sweep.intervalTooShort", { count: MIN_SWEEP_INTERVAL_HOURS })}
               </p>
             )}
-            <div className="form-actions">
-              <Btn
-                label={t("ipam.sweep.save")}
-                icon="check"
-                variant="primary"
-                disabled={settings.isPending || intervalTooShort}
-                onClick={() =>
-                  settingsChanged &&
-                  settings.mutate({
-                    subnetId: subnet.id,
-                    body: {
-                      sweep_enabled: enabled,
-                      sweep_device_id: deviceId || null,
-                      sweep_interval_hours: interval === "" ? null : Number(interval),
-                    },
-                  })
-                }
-              />
-            </div>
+            {settingsChanged ? (
+              <div className="form-actions">
+                <Btn
+                  label={t("ipam.sweep.save")}
+                  icon="check"
+                  variant="primary"
+                  disabled={settings.isPending || intervalTooShort}
+                  onClick={() =>
+                    settings.mutate({
+                      subnetId: subnet.id,
+                      body: {
+                        sweep_enabled: enabled,
+                        sweep_device_id: deviceId || null,
+                        sweep_interval_hours: typedInterval,
+                      },
+                    })
+                  }
+                />
+              </div>
+            ) : null}
             {settings.isError && <ErrorLine error={settings.error} />}
           </div>
         )}

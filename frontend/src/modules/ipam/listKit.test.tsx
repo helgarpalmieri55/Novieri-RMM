@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../fixtures/client";
+import { ApiError } from "../../lib/api";
 import { selectedClient, setSelectedClient } from "../../lib/clientChoice";
 import { recordingNarrowing } from "../../test/narrowing";
 import { renderPage } from "../../test/renderPage";
@@ -283,12 +284,40 @@ describe("a subnet on the record kit", () => {
     expect(updateIpamAddress).not.toHaveBeenCalled();
   });
 
-  it("sends nothing when the sweep settings are saved untouched (coordinator's ruling 13)", async () => {
+  it("offers no sweep-settings Save until something changed (coordinator's ruling 13, the kit's save-bar convention)", async () => {
     const updateIpamSweepSettings = vi.fn();
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSweepSettings } as never));
     renderPage("/ipam/subnets/subnet-1?tab=sweeps", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
-    await userEvent.click(await screen.findByRole("button", { name: "Save sweep settings" }));
+    const interval = await screen.findByLabelText("Interval (hours)");
+    // Untouched: nothing to save, so no Save to press (and nothing is sent).
+    expect(screen.queryByRole("button", { name: "Save sweep settings" })).toBeNull();
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "48");
+    expect(screen.getByRole("button", { name: "Save sweep settings" })).toBeInTheDocument();
+    // Typed back to what is stored: nothing changed again.
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "24");
+    expect(screen.queryByRole("button", { name: "Save sweep settings" })).toBeNull();
     expect(updateIpamSweepSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // An empty stored interval is "on demand only"; the box shows the weekly
+    // default (168 h) for it, and typing that default IS a change to save.
+    ["168 h on an on-demand subnet", "subnet-3", "168", 168],
+    ["24 h on an on-demand subnet", "subnet-3", "24", 24],
+    ["24 h on a weekly subnet", "subnet-4", "24", 24],
+  ])("sends %s", async (_what, id, typed, sent) => {
+    const updateIpamSweepSettings = vi.fn((subnetId: string) => fixtureRegistry().getIpamSubnet!(subnetId));
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSweepSettings } as never));
+    renderPage(`/ipam/subnets/${id}?tab=sweeps`, <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    const interval = await screen.findByLabelText("Interval (hours)");
+    await userEvent.clear(interval);
+    await userEvent.type(interval, typed);
+    await userEvent.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    await waitFor(() =>
+      expect(updateIpamSweepSettings).toHaveBeenCalledWith(id, expect.objectContaining({ sweep_interval_hours: sent })),
+    );
   });
 
   it("a sweep-settings edit left on one subnet does not reach the next (coordinator's ruling 12)", async () => {
@@ -304,10 +333,62 @@ describe("a subnet on the record kit", () => {
     await userEvent.type(interval, "48");
     await act(() => router.navigate("/ipam/subnets/subnet-2?tab=sweeps"));
     await screen.findByRole("heading", { level: 1, name: "10.20.4.0/24" });
-    // Its own 24 hours, and Save writes nothing of the other subnet's edit.
+    // Its own 24 hours, nothing of the other subnet's edit to save, and nothing sent.
     expect(await screen.findByLabelText("Interval (hours)")).toHaveValue(24);
-    await userEvent.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    expect(screen.queryByRole("button", { name: "Save sweep settings" })).toBeNull();
     expect(updateIpamSweepSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("a new attempt clears the last one's outcome (coordinator's ruling 7)", () => {
+  const unavailable = () => Promise.reject(new ApiError(503, ""));
+
+  it("Register a subnet: the last 503 does not hide a malformed prefix", async () => {
+    // A client chosen at the top, so the form needs no Client field.
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), createIpamSubnet: unavailable } as never));
+    renderPage("/ipam?new=subnet", <SubnetTreePage />, "/ipam");
+    const form = await screen.findByRole("dialog", { name: "Register a subnet" });
+    await userEvent.type(within(form).getByLabelText("Prefix"), "10.9.9.0/24");
+    await userEvent.click(within(form).getByRole("button", { name: "Register" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await userEvent.clear(within(form).getByLabelText("Prefix"));
+    await userEvent.type(within(form).getByLabelText("Prefix"), "nope");
+    await userEvent.click(within(form).getByRole("button", { name: "Register" }));
+    const alert = await within(form).findByRole("alert");
+    expect(alert).toHaveTextContent(/nope/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
+
+  it("Register a subnet: the last success's note does not stand beside a refused attempt", async () => {
+    setSelectedClient(ANDES);
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage("/ipam?new=subnet", <SubnetTreePage />, "/ipam");
+    const form = await screen.findByRole("dialog", { name: "Register a subnet" });
+    await userEvent.type(within(form).getByLabelText("Prefix"), "10.9.9.0/24");
+    await userEvent.click(within(form).getByRole("button", { name: "Register" }));
+    // The dialog stays open after a registration, as it always did.
+    expect(await within(form).findByText("Subnet registered.")).toBeInTheDocument();
+    await userEvent.type(within(form).getByLabelText("Prefix"), "nope");
+    await userEvent.click(within(form).getByRole("button", { name: "Register" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(/nope/);
+    expect(within(form).queryByText("Subnet registered.")).toBeNull();
+  });
+
+  it("Edit subnet: the last 503 does not hide a malformed gateway", async () => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSubnet: unavailable } as never));
+    renderPage("/ipam/subnets/subnet-1", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit subnet 10.20.9.0/24" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), " 2");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    const gateway = within(dialog).getByLabelText("Gateway");
+    await userEvent.clear(gateway);
+    await userEvent.type(gateway, "nope");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent(/Gateway must be an IP address/));
+    expect(within(dialog).getByRole("alert")).not.toHaveTextContent(/unavailable/i);
   });
 });
 

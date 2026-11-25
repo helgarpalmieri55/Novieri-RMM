@@ -304,6 +304,24 @@ describe("VendorsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Name is required");
     expect(api.createVendor).not.toHaveBeenCalled();
   });
+
+  // The coordinator's ruling 7 (review I2): the 503 of the last attempt used to
+  // stay on screen over the next attempt's missing field.
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createVendor = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<VendorsPage />);
+    await screen.findByText("Acme Software");
+    await user.click(screen.getByRole("button", { name: "New vendor" }));
+    await user.type(screen.getByLabelText("Name"), "Globex");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Name"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Name is required");
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
 });
 
 describe("ProductsPage", () => {
@@ -320,6 +338,24 @@ describe("ProductsPage", () => {
   it("lists products from the mocked api", async () => {
     renderWithProviders(<ProductsPage />);
     expect(await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).toBeInTheDocument();
+  });
+
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createProduct = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<ProductsPage />);
+    await screen.findByText("Acme Office Suite", { selector: ".cell-title" });
+    await user.click(screen.getAllByRole("button", { name: "New product" })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "New product" });
+    await user.type(within(dialog).getByLabelText("Name"), "Globex Suite");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(within(dialog).getByLabelText("Name"));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("Name is required");
+    expect(alert).not.toHaveTextContent(/unavailable/i);
   });
 
   // The compliance report is one row per (client, product) since MSP clients
@@ -823,6 +859,20 @@ describe("LicensesPage", () => {
 
   // The valid path, so the rules above cannot be satisfied by a form that
   // refuses everything: money travels as the typed STRING, never a number.
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    api.createLicense = vi.fn().mockRejectedValue(bodylessUnavailable());
+    const user = await openNewLicense();
+    await pick(user, "Product", /Acme Office Suite/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Entitlements"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Entitlements/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
+
   it("sends the entered values once they are valid, with money as a string", async () => {
     const user = await openNewLicense();
 

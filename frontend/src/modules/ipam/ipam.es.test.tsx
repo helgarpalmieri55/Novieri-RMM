@@ -563,6 +563,10 @@ describe("a subnet's detail in Spanish", () => {
     expect(screen.getByText(/Solo equipos con agente del cliente de esta subred/)).toBeInTheDocument();
     expect(screen.getByLabelText("Intervalo (horas)")).toBeInTheDocument();
     expect(screen.getByLabelText("Barridos programados habilitados")).toBeInTheDocument();
+    // Save appears once a setting changed (the kit's save-bar convention; the
+    // coordinator's ruling 13): nothing to save, nothing to press.
+    expect(screen.queryByRole("button", { name: "Guardar la configuración del barrido" })).toBeNull();
+    await user.click(screen.getByLabelText("Barridos programados habilitados"));
     expect(screen.getByRole("button", { name: "Guardar la configuración del barrido" })).toBeInTheDocument();
     expect(screen.getByText("Ejecuciones recientes")).toBeInTheDocument();
     for (const header of ["Resultado", "Origen", "Destinos", "Respondieron", "Iniciado"]) {

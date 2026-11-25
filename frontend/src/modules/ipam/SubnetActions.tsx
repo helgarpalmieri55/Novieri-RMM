@@ -85,7 +85,12 @@ function EditSubnetDialog({ subnet, onClose }: { subnet: SubnetOut; onClose: () 
       ? { rules: () => [gatewayRule()], values: { gateway } }
       : null;
     setAttempt(snapshot);
-    if (snapshot !== null && attemptProblems(snapshot).length > 0) return;
+    if (snapshot !== null && attemptProblems(snapshot).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      update.reset();
+      return;
+    }
     const body: SubnetUpdate = {
       name: name.trim(),
       description: description.trim(),

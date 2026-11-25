@@ -648,7 +648,12 @@ function CreateSubnetForm({ onClose }: { onClose: () => void }) {
     const values = { prefix, gateway, client };
     const next: Attempt = { rules: () => [...clientRule(newRow), ...subnetRules(values.gateway)], values };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      create.reset();
+      return;
+    }
     create.mutate(
       {
         // Trimmed to match what was validated: `requiredProblems` trims before

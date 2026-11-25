@@ -632,7 +632,12 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
       },
     };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      create.reset();
+      return;
+    }
 
     create.mutate(
       () => ({
