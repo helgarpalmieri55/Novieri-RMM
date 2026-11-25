@@ -40,7 +40,7 @@ import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
 import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
-import { AuthAlert, AuthCard, AuthOr } from "./AuthCard";
+import { AuthAlert, AuthCard, AuthOr, READ_ONLY } from "./AuthCard";
 import { checkNewPassword, describeAuthError, isDeadLink } from "./errors";
 import { useLinkToken } from "./flow";
 import { describeMicrosoftError } from "./microsoft";
@@ -242,9 +242,10 @@ export function InvitePage() {
         </>
       ) : null}
       <Form onSubmit={() => submit(kind, password_minimum)}>
-        {/* For the password manager: the account the new password belongs to. */}
+        {/* For the password manager: the account the new password belongs to.
+            Read-only, so drawn on the sunken surface. */}
         <Field label={t("auth.common.email")}>
-          <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
+          <input className={inputClass} type="email" autoComplete="username" value={email} readOnly style={READ_ONLY} />
         </Field>
         <NewPasswordFields
           password={password}

@@ -232,6 +232,10 @@ export function SetupPage() {
             variant="primary"
             disabled={!complete || submitting}
           />
+          {/* WHY THE BUTTON IS OFF, ON SCREEN (coordinator ruling 8): none of
+              the seven fields is marked, and a grey button was all a person
+              who missed one saw. */}
+          {complete ? null : <span className="form-hint">{t("setup.page.incomplete")}</span>}
           <span className="form-hint">
             {t("setup.page.passwordHint")}
           </span>

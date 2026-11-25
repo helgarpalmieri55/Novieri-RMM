@@ -2,8 +2,9 @@
  * Fixtures for the pages reached without a session (own-auth Task 11), for
  * the harmony gate and `?__fixtures` in development.
  *
- * Only `getInvite` and `getRecovery` are called when a page loads (`/invite`,
- * `/recover`, with any token -- harmony cannot add a fragment); the rest
+ * Only `getInvite`, `getRecovery` and `oauthAuthorizeDetails` are called when
+ * a page loads (`/invite`, `/recover`, with any token -- harmony cannot add a
+ * fragment -- and `/oauth/authorize`, with any query); the rest
  * answer a person clicking through in fixture mode, the way the server would:
  * a password step that asks for a factor, a factor that is accepted, a setup
  * key, ten codes. The codes and the key are INVENTED and follow the shapes the
@@ -67,6 +68,23 @@ export const fixtures: FixtureMap = {
   invitePasskey: () => ({ state: "signed_in" as const }),
   getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
+  // The consent page, `/oauth/authorize` (redesign plan Task 13): the gate
+  // cannot walk it, so it is photographed by hand in fixture mode, with any
+  // query. An app that publishes its client metadata document. No decision is
+  // answered: approving in a demo would leave for the app.
+  oauthAuthorizeDetails: () => ({
+    outcome: "consent" as const,
+    client: {
+      name: "Claude",
+      client_id: "https://claude.ai/oauth/mcp-client-metadata.json",
+      kind: "metadata_document" as const,
+      client_host: "claude.ai",
+      redirect_host: "claude.ai",
+      loopback_only: false,
+    },
+    scope: "mcp",
+    account: "helgar.palmieri@toeshee.example",
+  }),
   // Sign in with Microsoft (own-auth phase 2, Task 12): switched off, as the
   // server answers when it is (409 `microsoft_unavailable`), so a click in a
   // demo says one sentence instead of taking the whole page to Microsoft's

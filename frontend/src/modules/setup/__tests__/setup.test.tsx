@@ -130,6 +130,19 @@ describe("the setup screen", () => {
     expect(document.title).toBe("Set up this installation · Novieri RMM");
   });
 
+  it("says why Finish setup is off while a field is empty, and stops saying it once all are filled", async () => {
+    // Coordinator ruling 8 (a disabled control shows its reason on screen),
+    // critique of 2026-11-25 (P1): seven fields, none marked, and a grey
+    // button was all a person who missed one saw.
+    const user = userEvent.setup();
+    render(<SetupPage />);
+    expect(screen.getByRole("button", { name: /finish setup/i })).toBeDisabled();
+    expect(screen.getByText("Fill in every field to finish.")).toBeInTheDocument();
+    await fillTheForm(user, "install-code");
+    expect(screen.getByRole("button", { name: /finish setup/i })).toBeEnabled();
+    expect(screen.queryByText("Fill in every field to finish.")).toBeNull();
+  });
+
   it("stays out of the way once the platform has an owner", async () => {
     statusReply = { status: 200, body: { needed: false } };
     render(<App />);

@@ -82,6 +82,19 @@ const OR_RULE: CSSProperties = { flex: "1 1 auto", borderTop: "1px solid var(--l
  * until `Btn` takes `wide` (kit request, plan Task 13 report).
  */
 const WIDE: CSSProperties = { width: "100%", justifyContent: "center" };
+/**
+ * Prose in the card wraps without a one-word last line (the detector's
+ * `straggler`, found under the enrolment's app hint on 2026-11-25).
+ */
+const PROSE: CSSProperties = { textWrap: "pretty" };
+
+/**
+ * A value the person cannot change, drawn in a field because a password
+ * manager reads it there (`autocomplete="username"` on the invitation and the
+ * recovery link): on the sunken surface, so it does not look editable. Until
+ * the kit styles `.input-field[readonly]` (kit request, plan Task 13 report).
+ */
+export const READ_ONLY: CSSProperties = { background: "var(--surface-2)" };
 
 /** The tab, named after the screen's headline while the screen is up. */
 function TabTitle({ page }: { page: string }) {
@@ -121,7 +134,7 @@ export function AuthCard({
           {title}
         </h1>
         {intro ? (
-          <p className="note" style={{ marginTop: 6 }}>
+          <p className="note" style={{ ...PROSE, marginTop: 6 }}>
             {intro}
           </p>
         ) : null}
@@ -178,7 +191,7 @@ export function AuthSection({ title, hint, children }: { title: string; hint?: s
         {title}
       </h2>
       {hint ? (
-        <p className="note" style={{ margin: 0 }}>
+        <p className="note" style={{ ...PROSE, margin: 0 }}>
           {hint}
         </p>
       ) : null}
