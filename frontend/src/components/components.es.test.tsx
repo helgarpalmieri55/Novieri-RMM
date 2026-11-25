@@ -39,6 +39,8 @@ describe("empty states and dialogs in Spanish", () => {
       </div>,
     );
     expect(screen.getByRole("heading", { name: "Aún no hay dispositivos" })).toBeInTheDocument();
+    // NoValue's absent mark is the kit's, in Spanish (kit requests batch 3, B3-9).
+    expect(container.querySelector('.no-value [aria-hidden="true"]')?.textContent).toBe("n/d");
     expectNoEnglish(container);
   });
 

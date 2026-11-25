@@ -18,6 +18,7 @@
 
 import type { ReactNode } from "react";
 
+import { useT } from "../i18n/context";
 import { Icon, type IconProps } from "../shell/icons";
 
 export interface EmptyStateProps {
@@ -66,17 +67,23 @@ export function EmptyState({ icon, title, body, action, headingLevel = 3 }: Empt
 /**
  * A single missing value, inside a cell or a field.
  *
- * THE DASH ON ITS OWN IS THE BUG. "Screen readers announce this as 'em dash'
+ * A MARK ON ITS OWN IS THE BUG. "Screen readers announce this as 'em dash'
  * or skip it; sighted users cannot tell which field is empty" -- the audit, on
- * a placeholder that appeared eight times on one page. The dash stays as the
- * visual token, because a column of prose where the data should be is
- * unreadable, but it is `aria-hidden` and carries the real sentence beside it
- * for anything that is not looking at pixels.
+ * a placeholder that appeared eight times on one page. A short visual token
+ * stays, because a column of prose where the data should be is unreadable,
+ * but it is `aria-hidden` and carries the real sentence beside it for
+ * anything that is not looking at pixels.
+ *
+ * THE TOKEN IS THE KIT'S ABSENT MARK, `n/a` / `n/d` (`shell.viz.na`; kit
+ * requests batch 3, B3-9), as `Tile` and `StatCard` draw it: DESIGN.md's
+ * Absent Zero Rule ("unmeasured is drawn as absent: n/a") and the global
+ * constraint (no em dash in the interface). It was "—".
  */
 export function NoValue({ label }: { label: string }) {
+  const t = useT();
   return (
     <span className="no-value">
-      <span aria-hidden="true">—</span>
+      <span aria-hidden="true">{t("shell.viz.na")}</span>
       <span className="sr-only">{label}</span>
     </span>
   );

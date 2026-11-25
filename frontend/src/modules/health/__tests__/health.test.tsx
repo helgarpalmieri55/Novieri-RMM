@@ -257,16 +257,17 @@ describe("AlertConsole", () => {
     expect(within(cleared).getByText("Cleared")).toBeInTheDocument();
 
     // The acknowledged and muted rows carry NO clear outcome -- they are open.
-    // The em-dash placeholder is what makes "open" visible rather than an empty
-    // cell that could equally mean "we did not load it".
-    expect(within(ack).getByText("—")).toBeInTheDocument();
-    expect(within(muted).getByText("—")).toBeInTheDocument();
+    // The placeholder (NoValue's absent mark, n/a since kit requests batch 3,
+    // B3-9) is what makes "open" visible rather than an empty cell that could
+    // equally mean "we did not load it".
+    expect(within(ack).getByText("n/a")).toBeInTheDocument();
+    expect(within(muted).getByText("n/a")).toBeInTheDocument();
     // ... and the muted row says WHEN the silence ends, so it cannot read as
     // permanently handled.
     expect(within(muted).getByText(/^until/)).toBeInTheDocument();
     // Only the cleared row names an outcome.
     expect(within(cleared).getByText(/Cleared — Recovered/)).toBeInTheDocument();
-    expect(within(cleared).queryByText("—")).not.toBeInTheDocument();
+    expect(within(cleared).queryByText("n/a")).not.toBeInTheDocument();
 
     // "1 open of 3 shown": the acknowledged and muted rows count as OPEN.
     expect(screen.getByText("2 open of 3 shown")).toBeInTheDocument();

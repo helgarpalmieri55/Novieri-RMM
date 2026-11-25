@@ -694,7 +694,8 @@ describe("what the detail page owes the operator", () => {
       NY,
     );
     const row = (await screen.findByText("cpu0")).closest("tr") as HTMLElement;
-    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
+    // A NoValue: the kit's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(within(row).getByText("n/a")).toBeInTheDocument();
     expect(row.textContent).not.toContain("{}");
   });
 });

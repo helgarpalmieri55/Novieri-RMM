@@ -651,7 +651,9 @@ describe("a subnet's detail in Spanish", () => {
     expect(screen.getByText(/Un prefijo contenedor no contiene direcciones: ni utilización, ni cuadrícula, ni asignador\./)).toBeInTheDocument();
     expect(screen.getByText("Un contenedor no contiene direcciones")).toBeInTheDocument();
     // Registered and seen by sweep have no figure for a container: "n/d", never "n/a".
-    expect(screen.getAllByText("n/d").length).toBe(2);
+    // Counted in the page's own marks (`.mono`): NoValue's absent mark is "n/d"
+    // too since kit requests batch 3, B3-9.
+    expect(screen.getAllByText("n/d").filter((mark) => mark.classList.contains("mono")).length).toBe(2);
     expect(screen.queryByText("n/a")).toBeNull();
     expectNoEnglish(body());
   });

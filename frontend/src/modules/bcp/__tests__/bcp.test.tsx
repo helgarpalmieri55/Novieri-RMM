@@ -608,7 +608,7 @@ describe("BCP instants are rendered in the reader's profile zone", () => {
     expect(screen.queryByText(/1\/1\/2026/)).not.toBeInTheDocument();
   });
 
-  it("renders an absent test date as an em dash, never Invalid Date", async () => {
+  it("renders an absent test date as the absent mark, never Invalid Date", async () => {
     api.getPlan = vi.fn().mockResolvedValue(PLANS[0]);
     api.listPlanTests = vi.fn().mockResolvedValue([TEST_FIXTURE]);
     mockUseApi.mockReturnValue(api as ApiClient);
@@ -622,7 +622,8 @@ describe("BCP instants are rendered in the reader's profile zone", () => {
 
     // scheduled_for is 19:00Z, which is 14:00 in New York; executed_at is null.
     expect(await screen.findByText("15 Jan 2026, 14:00")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // NoValue's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(screen.getByText("n/a")).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });

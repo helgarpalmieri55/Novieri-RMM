@@ -21,7 +21,6 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Credential, type Me, type MeClient } from "../../lib/api";
 import { ClientNotChosen } from "../../lib/clientSelection";
-import { NO_DATE } from "../../lib/datetime";
 import { CredentialsPage } from "./CredentialsPage";
 
 const mockUseApi = vi.fn();
@@ -474,14 +473,15 @@ describe("CredentialsPage — last used", () => {
   // BREAKS AGAINST: `new Date(null).toLocaleString()` -- "Invalid Date" --
   // and against the bespoke word "never" this column used, which no other
   // absent date in the product uses.
-  it("renders a credential never checked out as NO_DATE, never Invalid Date", async () => {
+  it("renders a credential never checked out as the absent mark, never Invalid Date", async () => {
     renderPage({
       me: vi.fn().mockResolvedValue(ME_ZONED),
       listCredentials: () => Promise.resolve([credential({ last_used_at: null })]),
     });
 
     await screen.findByText("Domain support admin");
-    expect(screen.getByText(NO_DATE)).toBeInTheDocument();
+    // The cell is a NoValue: the kit's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(screen.getByText("n/a")).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });

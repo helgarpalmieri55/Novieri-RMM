@@ -240,9 +240,10 @@ describe("ErrorMonitorPage", () => {
     // org_id/user_id/device_id are null for this event -- rendered as an
     // explicit placeholder, not blank, and not fabricated. Exactly three:
     // occurred_at, request_id and job_id all have real values, so a
-    // regression that renders "—" for job_id too would still need to be
-    // caught, not just outnumbered.
-    const placeholders = within(eventRow).getAllByText("—");
+    // regression that renders the placeholder for job_id too would still need
+    // to be caught, not just outnumbered. The placeholder is NoValue's absent
+    // mark, n/a (kit requests batch 3, B3-9), no longer a dash.
+    const placeholders = within(eventRow).getAllByText("n/a");
     expect(placeholders).toHaveLength(3);
     expect(within(eventRow).getByText("44444444-4444-4444-4444-444444444444")).toBeInTheDocument();
   });
@@ -728,9 +729,9 @@ describe("ErrorMonitorPage correlation cells", () => {
     expect(
       within(eventRow).getByText(/No device was in scope when this occurrence was captured/i),
     ).toBeInTheDocument();
-    // The dash stays as the visual token; it is the sentence beside it that
-    // is new.
-    expect(within(eventRow).getAllByText("—")).toHaveLength(3);
+    // The absent mark stays as the visual token (n/a since kit requests batch
+    // 3, B3-9); it is the sentence beside it that is new.
+    expect(within(eventRow).getAllByText("n/a")).toHaveLength(3);
   });
 });
 

@@ -106,11 +106,15 @@ describe("describeValue", () => {
 });
 
 describe("NoValue", () => {
-  it("hides the dash from assistive tech and names the missing field", () => {
+  it("draws the kit's absent mark, hidden from assistive tech, and names the missing field", () => {
     // "Screen readers announce this as 'em dash' or skip it; sighted users
-    // cannot tell which field is empty."
+    // cannot tell which field is empty." The mark is the kit's one absent
+    // mark, n/a (kit requests batch 3, B3-9): DESIGN.md's Absent Zero Rule
+    // ("unmeasured is drawn as absent: n/a") and the global constraint (no em
+    // dash in the interface); it was "—".
     const { container } = render(<NoValue label="No FQDN recorded" />);
-    expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe("—");
+    expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe("n/a");
+    expect(container).not.toHaveTextContent("—");
     expect(screen.getByText("No FQDN recorded")).toBeInTheDocument();
   });
 });
