@@ -525,7 +525,6 @@ export const ipam = {
     tabRanges: "Ranges",
     tabSweeps: "Sweeps",
     tabDrift: "Drift",
-    gateway: "gateway {gateway}",
     allSubnets: "All subnets",
     usable: "Usable",
     registered: "Registered",

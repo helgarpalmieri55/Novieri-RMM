@@ -516,7 +516,6 @@ export const ipam: Shape<typeof en> = {
     tabRanges: "Rangos",
     tabSweeps: "Barridos",
     tabDrift: "Deriva",
-    gateway: "puerta de enlace {gateway}",
     allSubnets: "Todas las subredes",
     usable: "Utilizables",
     registered: "Registradas",

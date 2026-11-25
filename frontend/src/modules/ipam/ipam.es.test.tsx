@@ -478,8 +478,8 @@ describe("a subnet's detail in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "10.20.9.0/24" })).toBeInTheDocument();
     // The site's name is the client's site list's, which waits for `/me` (the client).
     // The record head's context (Receta F): the client and the site first, then
-    // the name, the VRF, the VLAN and the gateway.
-    expect(await screen.findByText(/Lisbon · Workstations · VRF global · VLAN 90 Workstations · puerta de enlace 10\.20\.9\.1/)).toBeInTheDocument();
+    // the name, the VRF and the VLAN; the gateway is the facts' (no repeat).
+    expect(await screen.findByText(/Lisbon · Workstations · VRF global · VLAN 90 Workstations/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Todas las subredes/ })).toBeInTheDocument();
     for (const fact of ["Utilizables", "Registradas", "Vistas por barrido", "Deriva", "Puerta de enlace", "DNS", "Agente de barrido", "Escaneo autorizado", "Último barrido"]) {
       expect(screen.getAllByText(fact).length).toBeGreaterThan(0);

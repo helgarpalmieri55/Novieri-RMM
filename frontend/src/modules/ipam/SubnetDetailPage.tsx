@@ -38,6 +38,7 @@ import { MAX_NEXT_FREE } from "./types";
 import type { DriftOut, SubnetOut } from "./types";
 import { Icon } from "../../shell/icons";
 import { Facts } from "../../shell/viz";
+import { useClientScope } from "../../lib/clientScope";
 import { humaniseEnum } from "../../lib/labels";
 import { Btn, ClientContext, DetailHead, Panel, StatusPill, UrlTabs, useUrlTab } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
@@ -78,6 +79,7 @@ export function SubnetDetailPage() {
   const scopes = useIpamScanAuthorizations();
   const drift = useIpamDrift(subnetId ? { subnet: subnetId } : {});
   const vrfs = useIpamVrfs();
+  const { clients } = useClientScope();
   const [tab, setTab] = useUrlTab<Tab>(TAB_KEYS, "addresses");
   // The tab names the record (Receta F): "<prefix> · IP addresses · Novieri RMM".
   useRecordTitle(subnet.data?.prefix);
@@ -125,7 +127,9 @@ export function SubnetDetailPage() {
   const vlan = row.vlan_id ? vlans.data?.find((item) => item.id === row.vlan_id) : undefined;
   const vrfName = row.vrf_id ? (vrfs.data?.find((item) => item.id === row.vrf_id)?.name ?? null) : null;
   // THE HEAD'S CONTEXT (Receta F; Task 10, 5.6): the client (linked to its 360
-  // page) and the site, then the VRF, the VLAN, the name and the gateway.
+  // page) and the site, then the name, the VRF and the VLAN. The gateway is
+  // the facts' (the coordinator's answer on the client 360, point 5: what one
+  // place on the page says, another does not repeat).
   const subline = [
     row.name || null,
     vrfName ? t("ipam.subnet.inVrf", { vrf: vrfName }) : null,
@@ -134,8 +138,11 @@ export function SubnetDetailPage() {
         ? t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })
         : t("ipam.vlan.label", { vid: vlan.vid })
       : null,
-    row.gateway ? t("ipam.subnet.gateway", { gateway: row.gateway }) : null,
   ].filter((part): part is string => part !== null);
+  // The head's context after the client: the site, then the subline's facts.
+  const facts = [siteName, ...subline].filter((part): part is string => Boolean(part));
+  // ClientContext draws a client this person's scope lists; with none, no separator leads.
+  const clientKnown = clients.some((client) => client.id === row.client_id);
 
   return (
     <div>
@@ -148,8 +155,17 @@ export function SubnetDetailPage() {
         }}
         context={
           <>
-            <ClientContext clientId={row.client_id} siteName={siteName} />
-            {subline.length > 0 ? ` · ${subline.join(" · ")}` : null}
+            {/* THE CLIENT LINK IN A BLOCK OF ITS OWN: beside running text a
+                link told apart by its colour alone fails WCAG 1.4.1 (axe
+                link-in-text-block); alone in its box it is a link among
+                facts, as on every other record head. */}
+            {clientKnown ? (
+              <span style={{ display: "inline-block" }}>
+                <ClientContext clientId={row.client_id} />
+              </span>
+            ) : null}
+            {clientKnown && facts.length > 0 ? " · " : null}
+            {facts.join(" · ")}
           </>
         }
         actions={permissions.manage ? <SubnetActions subnet={row} /> : undefined}

@@ -200,8 +200,6 @@ export const subscriptions: Shape<typeof en> = {
     notResolved: "Sin resolver",
     allSubscriptions: "Todas las suscripciones",
     neverSummed: "Nunca se suma entre clientes ni entre monedas.",
-    byCurrency: "Por moneda",
-    scope: "Ámbito",
     byVendor: "Por proveedor",
     vendor: "Proveedor",
     byCategory: "Por categoría",

@@ -1130,11 +1130,14 @@ describe("SpendDashboard", () => {
     ],
   };
 
+  // The by-currency totals are tiles now (Task 10, 5.4), so "whose" is said in
+  // each tile's label: the client named with every client, not with one.
   it("hides the Client column while one client is chosen at the top", async () => {
     selectClient("c-x");
     api.spend = vi.fn().mockResolvedValue(ONE_ROW);
     renderWithProviders(<SpendDashboard />);
-    await screen.findByText("100.00");
+    await screen.findByText("100.00 USD");
+    expect(screen.getByText("Monthly spend in USD")).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
   });
 
@@ -1142,7 +1145,7 @@ describe("SpendDashboard", () => {
     selectClient(null);
     api.spend = vi.fn().mockResolvedValue(ONE_ROW);
     renderWithProviders(<SpendDashboard />);
-    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(await screen.findByText(/: monthly spend in USD$/)).toBeInTheDocument();
   });
 
   // MSP clients phase 2: a subscription is one client's, so every roll-up
@@ -1170,12 +1173,12 @@ describe("SpendDashboard", () => {
     });
     renderWithProviders(<SpendDashboard />);
 
-    // The table's cells: the Client chip and the tiles name the clients too.
-    const novieri = (await screen.findByRole("cell", { name: "Novieri" })).closest("tr") as HTMLElement;
-    expect(within(novieri).getByText("100.00")).toBeInTheDocument();
-    const globex = screen.getByRole("cell", { name: "Globex" }).closest("tr") as HTMLElement;
-    expect(within(globex).getByText("40.00")).toBeInTheDocument();
-    expect(screen.queryByText("140.00")).not.toBeInTheDocument();
+    // Each total is a tile naming its client (Task 10, 5.4).
+    const novieri = (await screen.findByText("Novieri: monthly spend in USD")).closest("a") as HTMLElement;
+    expect(within(novieri).getByText("100.00 USD")).toBeInTheDocument();
+    const globex = screen.getByText("Globex: monthly spend in USD").closest("a") as HTMLElement;
+    expect(within(globex).getByText("40.00 USD")).toBeInTheDocument();
+    expect(screen.queryByText(/140\.00/)).not.toBeInTheDocument();
   });
 
   it("renders the idle-seat rows from the mocked api", async () => {

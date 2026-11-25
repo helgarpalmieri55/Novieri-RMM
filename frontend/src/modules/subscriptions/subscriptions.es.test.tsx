@@ -527,14 +527,18 @@ describe("the spend roll-ups in Spanish", () => {
   it("words the four roll-ups, an unresolved group and the idle seats", async () => {
     const { container } = mount(<SpendDashboard />);
     expect(await screen.findByText("Gasto en suscripciones", { selector: "h1" })).toBeInTheDocument();
-    expect(await screen.findByText("Por moneda")).toBeInTheDocument();
+    // The by-currency totals are tiles now, one per client and currency, with the
+    // rule under them (Task 10, 5.4); the table that drew them again is gone.
+    expect(await screen.findByText("Gasto mensual en USD")).toBeInTheDocument();
+    expect(screen.getByText("99.00 USD")).toBeInTheDocument();
+    expect(screen.getByText("1188.00 USD al año")).toBeInTheDocument();
     expect(screen.getByText("Nunca se suma entre clientes ni entre monedas.")).toBeInTheDocument();
-    expect(screen.getByText("Todas las suscripciones")).toBeInTheDocument();
     expect(screen.getByText("Sin resolver")).toBeInTheDocument();
     expect(screen.getByText("Por proveedor")).toBeInTheDocument();
     expect(screen.getByText("Por categoría")).toBeInTheDocument();
     expect(screen.getByText("Por responsable")).toBeInTheDocument();
-    expect(screen.getAllByText("Total mensual", { selector: "th" }).length).toBe(3);
+    // Two tables hold rows here (vendor and category; owner is empty): the by-currency totals are tiles.
+    expect(screen.getAllByText("Total mensual", { selector: "th" }).length).toBe(2);
     expect(await screen.findByText("Puestos sin asignar", { selector: ".panel-title" })).toBeInTheDocument();
     expect(screen.getByText("Costo mensual de puestos sin asignar")).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);

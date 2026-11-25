@@ -211,9 +211,16 @@ export function SpendDashboard() {
           one row per (client, currency), never summed across either (module
           docstring, invariant #6). Each tile is the row's monthly total in its
           own currency, its annual total under it, and opens the subscriptions
-          behind it. The "By currency" table below keeps the same rows with
-          their client column, as the breakdown the tiles summarise. */}
-      {totals.length > 0 ? (
+          behind it. They ARE the "By currency" roll-up (its client, currency,
+          monthly and annual figures), so the table that drew the same rows
+          again is gone (the wave's critique, P1). */}
+      <QueryState
+        loading={spend.isPending}
+        error={spend.error}
+        empty={totals.length === 0}
+        emptyLabel={t("subscriptions.spend.empty")}
+        emptyIcon="chart-bar"
+      >
         <StatsGrid columns={Math.min(4, Math.max(2, totals.length))}>
           {totals.map((row) => (
             <StatCard
@@ -231,20 +238,10 @@ export function SpendDashboard() {
             />
           ))}
         </StatsGrid>
-      ) : null}
-
-      {/* THE HEADER NAMES THE CELLS UNDER IT, which on this roll-up read "All
-          subscriptions": the by-currency rows are the whole estate split by
-          currency, and the currency itself is the column next to them. */}
-      <RollupTable
-        title={t("subscriptions.spend.byCurrency")}
-        subtitle={t("subscriptions.spend.neverSummed")}
-        rows={spend.data?.by_currency}
-        loading={spend.isPending}
-        error={spend.error}
-        groupLabel={t("subscriptions.spend.scope")}
-        glyph="wallet"
-      />
+        <p className="note" style={{ margin: "-4px 0 16px" }}>
+          {t("subscriptions.spend.neverSummed")}
+        </p>
+      </QueryState>
 
       {/* Stacked, not three-up: each roll-up is a four-column table, and a
           third of the content width truncates its last two columns behind

@@ -206,8 +206,6 @@ export const subscriptions = {
     notResolved: "Not resolved",
     allSubscriptions: "All subscriptions",
     neverSummed: "Never summed across clients or currencies.",
-    byCurrency: "By currency",
-    scope: "Scope",
     byVendor: "By vendor",
     vendor: "Vendor",
     byCategory: "By category",
