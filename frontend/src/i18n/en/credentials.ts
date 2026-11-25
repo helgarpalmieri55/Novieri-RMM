@@ -106,11 +106,11 @@ export const credentials = {
       noun: "domain join account",
     },
     push_install: {
-      description: "A dedicated account used ONLY to install the agent on machines that are not yet managed, from a site server on their own segment. Give it the minimum rights needed to install a service, not Domain Admin. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
+      description: "A dedicated account with one use only: installing the agent on machines that are not yet managed, from a site server on their own segment. Give it the minimum rights needed to install a service, not Domain Admin. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
       noun: "push install",
     },
     windows_domain: {
-      description: "A domain account used to push the agent onto Windows machines over WinRM, from a site server on their own segment. Authentication is Kerberos only. Give it just enough rights to install a service, NOT Domain Admin: a Domain Admin here means a site server compromised during a push is a compromised domain. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
+      description: "A domain account used to push the agent onto Windows machines over WinRM, from a site server on their own segment. Authentication is Kerberos only. Give it just enough rights to install a service. Never give it Domain Admin: a Domain Admin here means a site server compromised during a push is a compromised domain. It cannot be used for remote control or provisioning, and it is refused unless bound to a prefix under Push Install → Credential scopes.",
       noun: "windows domain account",
     },
   },

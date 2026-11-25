@@ -697,10 +697,11 @@ describe("the drift page", () => {
     const mismatchRow = screen.getByText("10.4.7.10").closest("tr") as HTMLElement;
     const remedyOf = (row: HTMLElement, pillLabel: string) =>
       within(row).getByText(pillLabel).closest("[title]")?.getAttribute("title") ?? "";
-    expect(remedyOf(conflictRow, "Conflict")).toMatch(/operational fix first/i);
-    expect(remedyOf(mismatchRow, "MAC mismatch")).toMatch(/documentation correction/i);
+    // The copy carries its emphasis in plain words now (no typed capitals, DESIGN.md).
+    expect(remedyOf(conflictRow, "Conflict")).toMatch(/^First, an operational fix:/);
+    expect(remedyOf(mismatchRow, "MAC mismatch")).toMatch(/correction to the documentation/i);
     // The two must not carry the same instruction.
-    expect(remedyOf(mismatchRow, "MAC mismatch")).not.toMatch(/operational fix first/i);
+    expect(remedyOf(mismatchRow, "MAC mismatch")).not.toMatch(/operational fix/i);
   });
 
   it("shows the evidence for each finding as facts, not as JSON", async () => {
