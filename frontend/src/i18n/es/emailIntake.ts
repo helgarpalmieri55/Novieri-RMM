@@ -176,6 +176,7 @@ export const emailIntake: Shape<typeof en> = {
     title: "Cómo crea tickets {address}",
     categoryMissing: "{address} necesita una categoría para sus tickets",
     reopenHint: "Una respuesta dentro de estos días reabre el ticket al que contesta en lugar de abrir uno nuevo.",
+    unlisted: "Una categoría que no está en la lista ({id})",
   },
   oauth: {
     title: "Inicio de sesión de Microsoft 365",

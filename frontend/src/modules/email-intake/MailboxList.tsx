@@ -126,7 +126,7 @@ export function MailboxList({ canAdmin, zone }: { canAdmin: boolean; zone?: stri
         bare
         actions={
           canAdmin ? (
-            <Btn label={t("emailIntake.mailboxes.add")} icon="plus" variant="primary" onClick={() => setForm({ mailbox: null })} />
+            <Btn label={t("emailIntake.mailboxes.add")} icon="plus" onClick={() => setForm({ mailbox: null })} />
           ) : undefined
         }
       >

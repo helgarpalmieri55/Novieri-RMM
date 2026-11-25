@@ -213,11 +213,7 @@ describe("the ticket queue in Spanish", () => {
     expect(screen.getByPlaceholderText("Buscar tickets")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Ordenar" })).toHaveDisplayValue("Vencimiento más próximo");
     expect(screen.getByRole("combobox", { name: "Tipo" })).toHaveDisplayValue("Todos los tipos");
-    // The status is a row of chips on the list kit (redesign plan, Task 7, 2.2), not a select.
-    expect(within(screen.getByRole("group", { name: "Estado" })).getByRole("button", { name: "Cualquier estado" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("combobox", { name: "Estado" })).toHaveDisplayValue("Cualquier estado");
     expect(screen.getByRole("combobox", { name: "Cola" })).toHaveDisplayValue("Todas las colas");
     expect(screen.getByRole("combobox", { name: "Prioridad" })).toHaveDisplayValue("Todas las prioridades");
     expect(screen.getByRole("combobox", { name: "Origen" })).toHaveDisplayValue("Cualquier origen");
@@ -272,8 +268,7 @@ describe("the ticket queue in Spanish", () => {
       "Urgente",
     ]);
     expect(options("Tipo")).toEqual(["Todos los tipos", "Incidente", "Solicitud"]);
-    // The status chips (redesign plan, Task 7, 2.2), in the same order as the select's options were.
-    expect(within(screen.getByRole("group", { name: "Estado" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+    expect(options("Estado")).toEqual([
       "Cualquier estado",
       "Nuevo",
       "Abierto",

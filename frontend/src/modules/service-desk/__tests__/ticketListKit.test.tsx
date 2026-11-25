@@ -30,10 +30,12 @@ function emptyQueue(): ApiClient {
 
 describe("the ticket queue on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
-    const { router } = renderPage("/service-desk?status=pending_approval", <TicketListPage />);
-    const status = await screen.findByRole("group", { name: "Status" });
-    expect(within(status).getByRole("button", { name: /Pending approval/ })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(within(status).getByRole("button", { name: /^Open$/ }));
+    const { router } = renderPage("/service-desk?scope=all", <TicketListPage />);
+    const show = await screen.findByRole("group", { name: "Show" });
+    expect(within(show).getByRole("button", { name: /^All$/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(show).getByRole("button", { name: /Unassigned/ }));
+    expect(router.state.location.search).toContain("scope=unassigned");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Status" }), "open");
     expect(router.state.location.search).toContain("status=open");
     // The other filters keep their keys: a chip with its name on it.
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Origin" }), "email");

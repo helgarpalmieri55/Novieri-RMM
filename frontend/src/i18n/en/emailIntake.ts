@@ -181,6 +181,7 @@ export const emailIntake = {
     title: "How {address} files tickets",
     categoryMissing: "{address} needs a category for its tickets",
     reopenHint: "A reply within this many days reopens the ticket it answers instead of opening a new one.",
+    unlisted: "A category not in the list ({id})",
   },
   oauth: {
     title: "Microsoft 365 sign-in",

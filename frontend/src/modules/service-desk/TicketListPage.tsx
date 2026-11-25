@@ -350,7 +350,7 @@ export function TicketListPage() {
         {/* THE LIST'S TOOLBAR (Receta L; Atera's "Tickets": search, then the
             filters): the search, the scope (the question an operator asks
             before any filter: "mine, or what nobody has picked up?"), the
-            status and the Client chip; the count at the end. The rest of the
+            status (a named select) and the Client chip; the count at the end. The rest of the
             filters sit in a second row of the same panel, each with its
             name on it, and the sort on the right. */}
         <ListToolbar
@@ -374,14 +374,18 @@ export function TicketListPage() {
                 value={scope === DEFAULT_SCOPE ? "" : scope}
                 onChange={(value) => setScope(parseScope(value || null))}
               />
-              <FilterChips
+              {/* THE STATUS IS A NAMED SELECT, NOT ELEVEN CHIPS (the critique of
+                  this page, P1): a row of every status wrapped to three lines at
+                  1440 and pushed the first ticket below the fold. Still the
+                  closed vocabulary, in the first row beside the scope. */}
+              <FilterSelect
                 label={t("serviceDesk.list.statusAria")}
+                value={statusFilter}
+                onChange={(value) => filters.set("status", value)}
                 options={[
                   { value: "", label: t("serviceDesk.list.anyStatus") },
                   ...ALL_STATUSES.map((status) => ({ value: status, label: ticketStatusLabel(status) })),
                 ]}
-                value={statusFilter}
-                onChange={(value) => filters.set("status", value)}
               />
               <ClientFilter filters={filters} />
             </>

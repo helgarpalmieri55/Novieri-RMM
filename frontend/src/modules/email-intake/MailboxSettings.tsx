@@ -148,7 +148,11 @@ export function MailboxSettings({ canAdmin }: { canAdmin: boolean }) {
                     disabled={!canAdmin}
                     onChange={(e) => change(mailbox.id, { category: e.target.value })}
                   >
-                    {known || setting.category === "" ? null : <option value={setting.category}>{setting.category}</option>}
+                    {known || setting.category === "" ? null : (
+                      // A category the list does not carry (inactive, or not yet
+                      // listed): named as such, never as a bare id.
+                      <option value={setting.category}>{t("emailIntake.settings.unlisted", { id: setting.category })}</option>
+                    )}
                     {choices.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
