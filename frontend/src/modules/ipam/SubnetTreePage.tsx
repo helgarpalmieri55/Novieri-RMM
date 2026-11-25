@@ -306,13 +306,15 @@ export function SubnetTreePage() {
             to={withClient("/ipam/drift")}
             tone="gold"
             urgent
-            pending={drift.isPending && !drift.error}
+            pending={drift.data === undefined}
             /* The zero this module most needs to disambiguate: the drift list
                answered and no subnet is in it. The "nothing has been measured"
                zero never reaches a tile at all; the whole row is replaced by
                the first-run sentence below. */
             zeroLabel={t("ipam.tree.withDriftZero")}
-            foot={<span>{t("ipam.tree.withDriftFoot")}</span>}
+            /* Until the drift answers (or when it failed) no figure and no line
+               under it (coordinator's ruling 10a): never a zero it did not count. */
+            foot={drift.data === undefined ? undefined : <span>{t("ipam.tree.withDriftFoot")}</span>}
           />
           <StatCard
             label={t("ipam.tree.neverSwept")}
@@ -504,9 +506,7 @@ export function SubnetTreePage() {
 
       {/* Mounted only while open (`?new=subnet`): each opening starts empty. */}
       {permissions.manage && newSubnet.open ? (
-        <Dialog open onClose={newSubnet.close} title={t("ipam.tree.registerTitle")}>
-          <CreateSubnetForm />
-        </Dialog>
+        <CreateSubnetForm onClose={newSubnet.close} />
       ) : null}
     </div>
   );
@@ -594,7 +594,7 @@ function invalidPrefix(value: string): string | null {
   return null;
 }
 
-function CreateSubnetForm() {
+function CreateSubnetForm({ onClose }: { onClose: () => void }) {
   const t = useT();
   const create = useCreateIpamSubnetMutation();
   const vrfs = useIpamVrfs();
@@ -667,117 +667,122 @@ function CreateSubnetForm() {
 
   return (
     <>
+      <Dialog open onClose={onClose} title={t("ipam.tree.registerTitle")}>
+        <p className="note" style={{ marginBottom: 14 }}>
+          {t("ipam.tree.registerNote")}
+        </p>
+        {/* A real `<form>`, so Enter submits from any field. The audit found the
+            product had six of them in total and this was not one. */}
+        <Form onSubmit={submit}>
+          <div className="form-grid">
+            <Field label={t("ipam.fields.prefix")}>
+              <input
+                className={inputClass}
+                placeholder="10.4.7.0/24"
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value)}
+              />
+            </Field>
+            <Field label={t("ipam.fields.name")}>
+              <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <Field label={t("ipam.fields.kind")}>
+              <select
+                className={inputClass}
+                value={kind}
+                onChange={(e) => setKind(e.target.value as SubnetKind)}
+              >
+                {/* The wire value stays the value; only the LABEL is humanised.
+                    `assignable` and `container` reached the screen as the
+                    identifiers they are: the raw-enum defect lib/labels.ts was
+                    written to end. */}
+                {SUBNET_KINDS.map((value) => (
+                  <option key={value} value={value}>
+                    {humaniseEnum(value, "SubnetKind")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("ipam.fields.vrf")}>
+              <select
+                className={inputClass}
+                value={vrfId}
+                onChange={(e) => {
+                  setVrfId(e.target.value);
+                  // Another VRF can be another client: its sites and VLANs differ.
+                  setSiteId("");
+                  setVlanId("");
+                }}
+              >
+                <option value="">{t("ipam.fields.defaultGlobal")}</option>
+                {vrfs.data?.map((vrf) => (
+                  <option key={vrf.id} value={vrf.id}>
+                    {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {newRow.needsField ? <ClientField field={newRow} /> : null}
+            <Field label={t("ipam.fields.site")}>
+              <select
+                className={inputClass}
+                value={siteId}
+                onChange={(e) => setSiteId(e.target.value)}
+              >
+                <option value="">{t("ipam.fields.none")}</option>
+                {sites.data?.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("ipam.fields.vlan")}>
+              <select
+                className={inputClass}
+                value={vlanId}
+                onChange={(e) => setVlanId(e.target.value)}
+              >
+                <option value="">{t("ipam.fields.none")}</option>
+                {clientVlans.map((vlan) => (
+                  <option key={vlan.id} value={vlan.id}>
+                    {t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("ipam.fields.gateway")}>
+              <input
+                className={inputClass}
+                placeholder="10.4.7.1"
+                value={gateway}
+                onChange={(e) => setGateway(e.target.value)}
+              />
+            </Field>
+          </div>
+          {/* Enabled with an empty or impossible Prefix ON PURPOSE. The disabled
+              button WAS the silent no-op the auditor hit: the click moved
+              nothing and named no field. Now the click produces the reason.
+              With Unassigned chosen at the top and no VRF to decide, nothing
+              new can be filed: the form says so instead (a VRF still can). */}
+          {newRow.refused === "unassigned" ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("ipam.tree.register")}
+              pending={create.isPending}
+              error={create.error}
+              saved={create.isSuccess}
+              problems={attemptProblems(attempt)}
+              savedMessage={t("ipam.tree.registered")}
+            />
+          )}
+        </Form>
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top, and inside the dialog's transformed box the
+          question would be placed and clipped by it (coordinator's ruling 3a). */}
       <UnsavedGuard dirty={dirty} search={["new"]} />
-      <p className="note" style={{ marginBottom: 14 }}>
-        {t("ipam.tree.registerNote")}
-      </p>
-      {/* A real `<form>`, so Enter submits from any field. The audit found the
-          product had six of them in total and this was not one. */}
-      <Form onSubmit={submit}>
-        <div className="form-grid">
-          <Field label={t("ipam.fields.prefix")}>
-            <input
-              className={inputClass}
-              placeholder="10.4.7.0/24"
-              value={prefix}
-              onChange={(e) => setPrefix(e.target.value)}
-            />
-          </Field>
-          <Field label={t("ipam.fields.name")}>
-            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-          <Field label={t("ipam.fields.kind")}>
-            <select
-              className={inputClass}
-              value={kind}
-              onChange={(e) => setKind(e.target.value as SubnetKind)}
-            >
-              {/* The wire value stays the value; only the LABEL is humanised.
-                  `assignable` and `container` reached the screen as the
-                  identifiers they are: the raw-enum defect lib/labels.ts was
-                  written to end. */}
-              {SUBNET_KINDS.map((value) => (
-                <option key={value} value={value}>
-                  {humaniseEnum(value, "SubnetKind")}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("ipam.fields.vrf")}>
-            <select
-              className={inputClass}
-              value={vrfId}
-              onChange={(e) => {
-                setVrfId(e.target.value);
-                // Another VRF can be another client: its sites and VLANs differ.
-                setSiteId("");
-                setVlanId("");
-              }}
-            >
-              <option value="">{t("ipam.fields.defaultGlobal")}</option>
-              {vrfs.data?.map((vrf) => (
-                <option key={vrf.id} value={vrf.id}>
-                  {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {newRow.needsField ? <ClientField field={newRow} /> : null}
-          <Field label={t("ipam.fields.site")}>
-            <select
-              className={inputClass}
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-            >
-              <option value="">{t("ipam.fields.none")}</option>
-              {sites.data?.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("ipam.fields.vlan")}>
-            <select
-              className={inputClass}
-              value={vlanId}
-              onChange={(e) => setVlanId(e.target.value)}
-            >
-              <option value="">{t("ipam.fields.none")}</option>
-              {clientVlans.map((vlan) => (
-                <option key={vlan.id} value={vlan.id}>
-                  {t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t("ipam.fields.gateway")}>
-            <input
-              className={inputClass}
-              placeholder="10.4.7.1"
-              value={gateway}
-              onChange={(e) => setGateway(e.target.value)}
-            />
-          </Field>
-        </div>
-        {/* Enabled with an empty or impossible Prefix ON PURPOSE. The disabled
-            button WAS the silent no-op the auditor hit: the click moved
-            nothing and named no field. Now the click produces the reason.
-            With Unassigned chosen at the top and no VRF to decide, nothing
-            new can be filed: the form says so instead (a VRF still can). */}
-        {newRow.refused === "unassigned" ? (
-          <UnassignedRefusal />
-        ) : (
-          <FormActions
-            label={t("ipam.tree.register")}
-            pending={create.isPending}
-            error={create.error}
-            saved={create.isSuccess}
-            problems={attemptProblems(attempt)}
-            savedMessage={t("ipam.tree.registered")}
-          />
-        )}
-      </Form>
     </>
   );
 }

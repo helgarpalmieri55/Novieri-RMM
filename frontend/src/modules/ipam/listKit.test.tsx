@@ -35,6 +35,83 @@ function meHeld() {
   return fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) });
 }
 
+describe("no empty state before the narrowed read (coordinator's ruling 10)", () => {
+  it("the drift page draws loading while the Client chip's client is still being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    renderPage(`/ipam/drift?client=${ANDES}`, <DriftPage />, "/ipam/drift");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("No drift: what is registered and what was seen agree.")).toBeNull();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+  });
+});
+
+/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+function expectNoFigure(tile: HTMLElement) {
+  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".z")).toBeNull();
+}
+
+describe("no tile figure before its read (coordinator's ruling 10a)", () => {
+  it("draws no tile and no claim on the tree while the chip's client is being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    const { container } = renderPage(`/ipam?client=${ANDES}`, <SubnetTreePage />, "/ipam");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(container.querySelector(".stat-card")).toBeNull();
+    expect(screen.queryByText(/No subnet is registered, so there is no drift figure/)).toBeNull();
+  });
+
+  it("draws no drift count and no line under it on the tree until the drift answers", async () => {
+    mockUseApi.mockReturnValue(
+      fixtureClient({ ...fixtureRegistry(), listIpamDrift: () => new Promise<never>(() => {}) } as never),
+    );
+    renderPage("/ipam", <SubnetTreePage />, "/ipam");
+    const tile = await screen.findByRole("link", { name: /With drift/ });
+    expectNoFigure(tile);
+    expect(screen.queryByText("No subnet has an unresolved finding")).toBeNull();
+  });
+
+  it("draws no count and no claim on the drift page's tiles while the chip's client is being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    const { container } = renderPage(`/ipam/drift?client=${ANDES}`, <DriftPage />, "/ipam/drift");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    // Drift, Dormant and Orphans (the nav's own "Drift" link shares a name).
+    const tiles = [...container.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) expectNoFigure(tile);
+    for (const claim of [
+      "No unresolved finding",
+      "Every documented address was verifiable",
+      "Every observed address is inside a registered subnet",
+    ]) {
+      expect(screen.queryByText(claim)).toBeNull();
+    }
+  });
+});
+
+/**
+ * The coordinator's ruling 3a: the leave question is drawn AFTER its form's
+ * dialog, never before it or inside it. Both are `.modal`s at one z-index, so
+ * the later one in the document paints on top; drawn inside it, it was also
+ * placed and clipped by the dialog's own box (`.modal.open` is transformed).
+ */
+describe("the leave question is drawn on top of its dialog (coordinator's ruling 3a)", () => {
+  it.each([
+    ["Register a subnet", "/ipam?new=subnet", <SubnetTreePage key="t" />, "/ipam", "Register a subnet", "Prefix"],
+    ["New VRF", "/ipam/registry?new=vrf", <RegistryPage key="v" />, "/ipam/registry", "New VRF", "Name"],
+    ["New VLAN", "/ipam/registry?new=vlan", <RegistryPage key="l" />, "/ipam/registry", "New VLAN", "VID"],
+    ["Authorize a prefix", "/ipam/scan-authorizations?new=grant", <ScanAuthorizationsPage key="g" />, "/ipam/scan-authorizations", "Authorize a prefix", "Prefix"],
+  ])("%s", async (_name, path, page, pattern, title, field) => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(path, page, pattern);
+    const form = await screen.findByRole("dialog", { name: title });
+    await userEvent.type(within(form).getByLabelText(field), "10");
+    await userEvent.click(within(form).getByRole("button", { name: "Close" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(form.contains(question)).toBe(false);
+    expect(form.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+});
+
 describe("the subnet tree on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());

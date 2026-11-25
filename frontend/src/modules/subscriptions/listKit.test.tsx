@@ -28,6 +28,63 @@ function meHeld() {
   return fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) });
 }
 
+describe("no empty state before the narrowed read (coordinator's ruling 10)", () => {
+  it.each([
+    ["spend", `/subscriptions/spend?client=${ANDES}`, <SpendDashboard key="s" />, "/subscriptions/spend", "No spend data yet."],
+    ["the renewal calendar", `/subscriptions/renewals?client=${ANDES}`, <RenewalCalendar key="r" />, "/subscriptions/renewals", "Nothing renews in the next 30 days."],
+  ])("%s draws loading while the Client chip's client is still being decided", async (_name, path, page, pattern, empty) => {
+    mockUseApi.mockReturnValue(meHeld());
+    renderPage(path, page, pattern);
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    expect(screen.queryByText(empty)).toBeNull();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+  });
+});
+
+/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+function expectNoFigure(tile: HTMLElement) {
+  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".z")).toBeNull();
+}
+
+describe("no tile figure before its read (coordinator's ruling 10a)", () => {
+  it("draws no count and no claim on the registry's tiles while the chip's client is being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    renderPage(`/subscriptions?client=${ANDES}`, <SubscriptionsPage />, "/subscriptions");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    const tiles = [/Active subscriptions/, /Renewals in 90 days/, /Notice deadlines due/, /No owner/];
+    for (const name of tiles) expectNoFigure(screen.getByRole("link", { name }));
+    // The run rate has no tile until the spend answers.
+    expect(screen.queryByRole("link", { name: /Monthly run rate/ })).toBeNull();
+    for (const claim of ["none active", "nothing renews in this window", "no notice period closing", "every subscription has an owner"]) {
+      expect(screen.queryByText(claim)).toBeNull();
+    }
+  });
+
+  it("draws no spend total while the chip's client is being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    const { container } = renderPage(`/subscriptions/spend?client=${ANDES}`, <SpendDashboard />, "/subscriptions/spend");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    expect(container.querySelector(".stat-card")).toBeNull();
+    expect(screen.queryByText("Never summed across clients or currencies.")).toBeNull();
+  });
+});
+
+describe("the leave question is drawn on top of its dialog (coordinator's ruling 3a)", () => {
+  it("New subscription", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage("/subscriptions?new=subscription", <SubscriptionsPage />, "/subscriptions");
+    const form = await screen.findByRole("dialog", { name: "New subscription" });
+    await userEvent.type(within(form).getByLabelText("Service name"), "Globex CRM");
+    await userEvent.click(within(form).getByRole("button", { name: "Close" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never before it or inside it: both are
+    // `.modal`s at one z-index, so the later one paints on top.
+    expect(form.contains(question)).toBe(false);
+    expect(form.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+});
+
 describe("the subscriptions registry on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());

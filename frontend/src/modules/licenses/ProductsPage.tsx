@@ -279,7 +279,6 @@ function ProductEditor({
 
   return (
     <>
-    {guard}
     <Dialog
       open={product != null}
       onClose={close}
@@ -363,6 +362,9 @@ function ProductEditor({
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
     </>
   );
 }

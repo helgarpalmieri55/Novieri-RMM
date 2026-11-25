@@ -185,7 +185,6 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
 
   return (
     <>
-    {guard}
     <Dialog open={open} onClose={close} title={t("licenses.vendors.newTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -221,6 +220,9 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
     </>
   );
 }

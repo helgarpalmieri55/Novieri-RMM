@@ -657,7 +657,6 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <>
-    {guard}
     <Dialog open={open} onClose={close} title={t("subscriptions.new.title")}>
       <Form onSubmit={submit}>
         {/* The contract terms, paired. `full` on the service name because it
@@ -838,6 +837,9 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
     </>
   );
 }

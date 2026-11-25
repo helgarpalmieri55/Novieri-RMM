@@ -58,6 +58,10 @@ export function LicenseDetail() {
   // the allocations have answered, so no tile counts what was not read.
   const inUse = allocations.data ? allocations.data.filter((row) => row.released_at === null).length : null;
   const free = inUse === null || !license.data ? null : license.data.entitlements - inUse;
+  // Until they answer the two seat tiles draw a dash and no line under it
+  // (coordinator's ruling 10a); "n/a" is kept for a read that failed.
+  const seatValue = (n: number | null) =>
+    n !== null ? String(n) : allocations.isPending ? "—" : t("licenses.common.na");
   // The tab names the record (Receta F): "<Product> · Licenses · Novieri RMM".
   useRecordTitle(product.data?.name);
   const reveal = useRevealLicenseKeyMutation();
@@ -151,12 +155,12 @@ export function LicenseDetail() {
             />
             <Tile
               label={t("licenses.detail.tileInUse")}
-              value={inUse === null ? t("licenses.common.na") : String(inUse)}
+              value={seatValue(inUse)}
               icon="users"
             />
             <Tile
               label={t("licenses.detail.tileFree")}
-              value={free === null ? t("licenses.common.na") : String(Math.max(0, free))}
+              value={seatValue(free === null ? null : Math.max(0, free))}
               icon="circle-check"
               kind={free !== null && free < 0 ? "crit" : undefined}
               sub={free !== null && free < 0 ? t("licenses.detail.tileOver", { count: -free }) : undefined}

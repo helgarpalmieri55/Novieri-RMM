@@ -660,15 +660,17 @@ describe("the drift page", () => {
     expect(driftCard).toHaveAttribute("href", "/ipam/drift");
     expect(await within(driftCard).findByText("2")).toBeInTheDocument();
 
-    const dormantCard = screen
-      .getByText(/Cannot currently be verified\./)
-      .closest("a") as HTMLElement;
+    // A card draws its line once its own list has answered (coordinator's
+    // ruling 10a), so each is awaited.
+    const dormantCard = (
+      await screen.findByText(/Cannot currently be verified\./)
+    ).closest("a") as HTMLElement;
     expect(dormantCard).toHaveAttribute("href", "/ipam/drift?class=dormant");
     expect(await within(dormantCard).findByText("3")).toBeInTheDocument();
 
-    const orphanCard = screen
-      .getByText(/Observed addresses inside no registered subnet\./)
-      .closest("a") as HTMLElement;
+    const orphanCard = (
+      await screen.findByText(/Observed addresses inside no registered subnet\./)
+    ).closest("a") as HTMLElement;
     expect(orphanCard).toHaveAttribute("href", "/ipam/drift?class=orphans");
     expect(await within(orphanCard).findByText("24")).toBeInTheDocument();
 

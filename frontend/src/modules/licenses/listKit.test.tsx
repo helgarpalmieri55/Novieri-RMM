@@ -44,6 +44,63 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
+/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+function expectNoFigure(tile: HTMLElement) {
+  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".z")).toBeNull();
+}
+
+describe("no tile figure before its read (coordinator's ruling 10a)", () => {
+  it("draws no count and no claim on the register's narrowed tiles while the chip's client is being decided", async () => {
+    mockUseApi.mockReturnValue(meHeld());
+    renderPage(`/licenses?client=${ANDES}`, <LicensesPage />, "/licenses");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    for (const name of [/Over-deployed/, /Renewals in 90 days/, /Compliant/]) expectNoFigure(screen.getByRole("link", { name }));
+    for (const claim of ["nothing over-deployed", "nothing renews in this window", "nothing reconciled yet"]) {
+      expect(screen.queryByText(claim)).toBeNull();
+    }
+  });
+
+  it("draws no seat count on a license's record before its allocations answer", async () => {
+    mockUseApi.mockReturnValue(
+      fixtureClient({ ...fixtureRegistry(), listAllocations: () => new Promise<never>(() => {}) } as never),
+    );
+    renderPage("/licenses/lic-1", <LicenseDetail />, "/licenses/:licenseId");
+    const inUse = (await screen.findByText("In use", { selector: ".k" })).closest(".tile") as HTMLElement;
+    expect(inUse.querySelector(".v")).toHaveTextContent("—");
+    const free = screen.getByText("Free", { selector: ".k" }).closest(".tile") as HTMLElement;
+    expect(free.querySelector(".v")).toHaveTextContent("—");
+    expect(free.querySelector(".z")).toBeNull();
+  });
+});
+
+/**
+ * The coordinator's ruling 3a: the leave question is drawn AFTER its form's
+ * dialog, never before it or inside it. Both are `.modal`s at one z-index, so
+ * the later one in the document paints on top; drawn first, the form covered
+ * the question in a real browser.
+ */
+function expectDrawnAbove(question: HTMLElement, form: HTMLElement) {
+  expect(form.contains(question)).toBe(false);
+  expect(form.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+}
+
+describe("the leave question is drawn on top of its dialog (coordinator's ruling 3a)", () => {
+  it.each([
+    ["New license", "/licenses?new=license", <LicensesPage key="l" />, "/licenses", "New license", "Cost (optional)"],
+    ["New product", "/licenses/products?new=product", <ProductsPage key="p" />, "/licenses/products", "New product", "Name"],
+    ["Edit product", "/licenses/products?edit=prod-visio", <ProductsPage key="e" />, "/licenses/products", "Edit product", "Name"],
+    ["New vendor", "/licenses/vendors?new=vendor", <VendorsPage key="v" />, "/licenses/vendors", "New vendor", "Name"],
+  ])("%s", async (_name, path, page, pattern, title, field) => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(path, page, pattern);
+    const form = await screen.findByRole("dialog", { name: title });
+    await userEvent.type(within(form).getByLabelText(field), "12");
+    await userEvent.click(within(form).getByRole("button", { name: "Close" }));
+    expectDrawnAbove(await screen.findByRole("dialog", { name: "Leave without saving?" }), form);
+  });
+});
+
 describe("the license register on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());

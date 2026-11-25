@@ -215,8 +215,10 @@ export function DriftPage() {
           to={withClient("/ipam/drift")}
           tone="gold"
           urgent
-          pending={!driftCounted && !drift.error}
-          foot={<span>{t("ipam.drift.tileDriftFoot")}</span>}
+          pending={!driftCounted}
+          /* Until its list answers (or when it failed) a tile draws no figure and no
+             line under it (coordinator's ruling 10a): never a zero it did not count. */
+          foot={driftCounted ? <span>{t("ipam.drift.tileDriftFoot")}</span> : undefined}
           /* A MEASURED zero, and it says so: the drift list answered. This
              page never renders the other zero: "nothing has been looked at"
              produces no findings and no tile row on /ipam either. */
@@ -228,8 +230,8 @@ export function DriftPage() {
           icon="clock"
           to={withClient("/ipam/drift?class=dormant")}
           tone="neutral"
-          pending={!dormantCounted && !dormant.error}
-          foot={<span>{t("ipam.drift.tileDormantFoot")}</span>}
+          pending={!dormantCounted}
+          foot={dormantCounted ? <span>{t("ipam.drift.tileDormantFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileDormantZero")}
         />
         <StatCard
@@ -238,8 +240,8 @@ export function DriftPage() {
           icon="eye"
           to={withClient("/ipam/drift?class=orphans")}
           tone="blue"
-          pending={!orphansCounted && !orphans.error}
-          foot={<span>{t("ipam.drift.tileOrphansFoot")}</span>}
+          pending={!orphansCounted}
+          foot={orphansCounted ? <span>{t("ipam.drift.tileOrphansFoot")}</span> : undefined}
           zeroLabel={t("ipam.drift.tileOrphansZero")}
         />
       </StatsGrid>

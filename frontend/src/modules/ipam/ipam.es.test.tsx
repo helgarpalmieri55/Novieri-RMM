@@ -977,9 +977,10 @@ describe("the drift page in Spanish", () => {
     renderPage(<DriftPage />, "/ipam/drift");
     expect(await screen.findByRole("heading", { name: "Deriva" })).toBeInTheDocument();
     expect(screen.getByText("Dónde el plan registrado y el parque no coinciden sobre una dirección.")).toBeInTheDocument();
-    expect(screen.getByText("Hallazgos sin resolver. Las direcciones en reposo y las huérfanas no se cuentan aquí.")).toBeInTheDocument();
-    expect(screen.getByText("No se pueden verificar ahora mismo. No es deriva, no se cuenta como deriva y nunca se publica.")).toBeInTheDocument();
-    expect(screen.getByText("Direcciones observadas dentro de ninguna subred registrada. El plan falta, no es erróneo.")).toBeInTheDocument();
+    // Each tile's line appears once its list has answered (coordinator's ruling 10a).
+    expect(await screen.findByText("Hallazgos sin resolver. Las direcciones en reposo y las huérfanas no se cuentan aquí.")).toBeInTheDocument();
+    expect(await screen.findByText("No se pueden verificar ahora mismo. No es deriva, no se cuenta como deriva y nunca se publica.")).toBeInTheDocument();
+    expect(await screen.findByText("Direcciones observadas dentro de ninguna subred registrada. El plan falta, no es erróneo.")).toBeInTheDocument();
     // The chip row, with its counts.
     const chips = screen.getByRole("group", { name: "Clase de deriva" });
     for (const label of [/^Toda la deriva\s*6$/, /^Documentada, ausente\s*1$/, /^Presente, sin documentar\s*1$/, /^MAC distinta\s*1$/, /^Titular distinto\s*1$/, /^Dispositivo movido\s*1$/, /^Conflicto\s*1$/, /^En reposo\s*3$/, /^Huérfanas\s*8$/]) {

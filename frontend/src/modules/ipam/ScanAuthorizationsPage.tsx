@@ -225,9 +225,7 @@ export function ScanAuthorizationsPage() {
 
       {/* Mounted only while open (`?new=grant`): each opening starts empty. */}
       {permissions.scopeManage && grant.open ? (
-        <Dialog open onClose={grant.close} title={t("ipam.scans.grantTitle")}>
-          <GrantForm subnets={subnets.data ?? []} />
-        </Dialog>
+        <GrantForm subnets={subnets.data ?? []} onClose={grant.close} />
       ) : null}
     </div>
   );
@@ -340,7 +338,7 @@ function ScopeRow({
   );
 }
 
-function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
+function GrantForm({ subnets, onClose }: { subnets: SubnetOut[]; onClose: () => void }) {
   const t = useT();
   const create = useCreateIpamScanAuthorizationMutation();
   const zone = useUserTimezone();
@@ -383,189 +381,196 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
         });
 
   return (
-    <div>
-      {guard}
-      <p className="note" style={{ marginBottom: 14 }}>
-        {t("ipam.scans.grantNote")}
-      </p>
-
-      <div className="form-grid">
-        {/* AUTHORISE A SUBNET YOU ALREADY FILED WITHOUT RETYPING ITS PREFIX
-            (operator, 2026-08-26: "double work there"). Picking a registered
-            subnet fills the Prefix below and matches its VRF. It does NOT
-            grant anything, because filing a subnet is deliberately not
-            authorising a scan of it (§0.12). The free-typed Prefix stays: a
-            scan authorization is a prefix, not a subnet row, so a scope that is
-            not a registered subnet is authorised by typing it. */}
-        <Field label={t("ipam.scans.fillFrom")} full>
-          <select
-            className={inputClass}
-            aria-label={t("ipam.scans.fillFrom")}
-            value={selectedSubnetId}
-            onChange={(e) => {
-              const chosen = subnets.find((subnet) => subnet.id === e.target.value);
-              if (!chosen) return;
-              setPrefix(chosen.prefix);
-              // Match the subnet's VRF so the grant actually covers it. A
-              // named VRF is selectable; the implicit global default (a
-              // vrf_id absent from the list) maps back to "Default (global)".
-              setVrfId(vrfs.data?.some((vrf) => vrf.id === chosen.vrf_id) ? chosen.vrf_id : "");
-            }}
-          >
-            <option value="">{t("ipam.scans.typePrefix")}</option>
-            {subnets.map((subnet) => (
-              <option key={subnet.id} value={subnet.id}>
-                {subnet.prefix}
-                {subnet.name ? ` (${subnet.name})` : ""}
-              </option>
-            ))}
-          </select>
-          {/* THE DENY-BY-DEFAULT SENTENCE, ON THE CONTROL THAT INVITES THE
-              ASSUMPTION. Filing a subnet is deliberately not authorising a
-              scan of it; this picker is where somebody would expect otherwise. */}
-          <p className="note" style={{ marginTop: 6 }}>
-            {t("ipam.scans.fillNote")}
+    <>
+      <Dialog open onClose={onClose} title={t("ipam.scans.grantTitle")}>
+        <div>
+          <p className="note" style={{ marginBottom: 14 }}>
+            {t("ipam.scans.grantNote")}
           </p>
-        </Field>
-        <Field label={t("ipam.fields.prefix")}>
-          <input
-            className={inputClass}
-            placeholder="10.4.7.0/24"
-            value={prefix}
-            onChange={(e) => setPrefix(e.target.value)}
-          />
-        </Field>
-        <Field label={t("ipam.fields.vrf")}>
-          <select className={inputClass} value={vrfId} onChange={(e) => setVrfId(e.target.value)}>
-            <option value="">{t("ipam.fields.defaultGlobal")}</option>
-            {vrfs.data?.map((vrf) => (
-              <option key={vrf.id} value={vrf.id}>
-                {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {newRow.needsField ? <ClientField field={newRow} /> : null}
-        <Field label={t("ipam.scans.noteWhy")}>
-          <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
-        </Field>
-        <Field label={t("ipam.scans.expiresOptional")}>
-          <input
-            className={inputClass}
-            type="date"
-            value={expiresAt}
-            onChange={(e) => setExpiresAt(e.target.value)}
-          />
-          {/* THE DATE, READ BACK IN THE CONSOLE'S OWN FORMAT, in the same
-              words as the push grant on `/agent-push/authorizations` --
-              which is the same decision about the same kind of expiry, and
-              was the one page in the console already drawing this echo. A
-              native date input draws the USER AGENT'S mask and no CSS
-              reorders it, so this field reads `09/22/2026` to a US-locale
-              browser on a console that renders every other date
-              `22 Sept 2026` (design review M1). */}
-        </Field>
-      </div>
-      {expiresAt !== "" ? (
-        <p className="note" style={{ marginTop: 14 }}>
-          {t("ipam.scans.lapses", { date: formatDate(toInstant(`${expiresAt}T00:00`, zone), zone) })}
-        </p>
-      ) : null}
 
-      {parsed !== null && (
-        <div className="notice gold" style={{ marginTop: 14 }}>
-          <Icon name="alert-triangle" size={16} />
-          {/* ONE CHILD, because `.notice` is a flex row shaped icon-then-body.
-              Three stacked paragraphs handed to it directly would lay out as
-              three columns. */}
-          <div>
-            <p>
-              <b>
-                {t("ipam.scans.probes", {
-                  total: formatCount(prefixSize(parsed)),
-                  count: prefixSize(parsed) === 1n ? 1 : 2,
-                })}
-              </b>
-            </p>
-            <p style={{ marginTop: 4 }}>
-              {covered.length === 0
-                ? t("ipam.scans.coveredNone")
-                : t("ipam.scans.coveredSome", {
-                    count: covered.length,
-                    list: covered.map((subnet) => subnet.prefix).join(", "),
-                  })}
-            </p>
-            {expiresAt === "" && (
-              <p style={{ marginTop: 4 }}>{t("ipam.scans.noExpiryNotice")}</p>
-            )}
+          <div className="form-grid">
+            {/* AUTHORISE A SUBNET YOU ALREADY FILED WITHOUT RETYPING ITS PREFIX
+                (operator, 2026-08-26: "double work there"). Picking a registered
+                subnet fills the Prefix below and matches its VRF. It does NOT
+                grant anything, because filing a subnet is deliberately not
+                authorising a scan of it (§0.12). The free-typed Prefix stays: a
+                scan authorization is a prefix, not a subnet row, so a scope that is
+                not a registered subnet is authorised by typing it. */}
+            <Field label={t("ipam.scans.fillFrom")} full>
+              <select
+                className={inputClass}
+                aria-label={t("ipam.scans.fillFrom")}
+                value={selectedSubnetId}
+                onChange={(e) => {
+                  const chosen = subnets.find((subnet) => subnet.id === e.target.value);
+                  if (!chosen) return;
+                  setPrefix(chosen.prefix);
+                  // Match the subnet's VRF so the grant actually covers it. A
+                  // named VRF is selectable; the implicit global default (a
+                  // vrf_id absent from the list) maps back to "Default (global)".
+                  setVrfId(vrfs.data?.some((vrf) => vrf.id === chosen.vrf_id) ? chosen.vrf_id : "");
+                }}
+              >
+                <option value="">{t("ipam.scans.typePrefix")}</option>
+                {subnets.map((subnet) => (
+                  <option key={subnet.id} value={subnet.id}>
+                    {subnet.prefix}
+                    {subnet.name ? ` (${subnet.name})` : ""}
+                  </option>
+                ))}
+              </select>
+              {/* THE DENY-BY-DEFAULT SENTENCE, ON THE CONTROL THAT INVITES THE
+                  ASSUMPTION. Filing a subnet is deliberately not authorising a
+                  scan of it; this picker is where somebody would expect otherwise. */}
+              <p className="note" style={{ marginTop: 6 }}>
+                {t("ipam.scans.fillNote")}
+              </p>
+            </Field>
+            <Field label={t("ipam.fields.prefix")}>
+              <input
+                className={inputClass}
+                placeholder="10.4.7.0/24"
+                value={prefix}
+                onChange={(e) => setPrefix(e.target.value)}
+              />
+            </Field>
+            <Field label={t("ipam.fields.vrf")}>
+              <select className={inputClass} value={vrfId} onChange={(e) => setVrfId(e.target.value)}>
+                <option value="">{t("ipam.fields.defaultGlobal")}</option>
+                {vrfs.data?.map((vrf) => (
+                  <option key={vrf.id} value={vrf.id}>
+                    {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {newRow.needsField ? <ClientField field={newRow} /> : null}
+            <Field label={t("ipam.scans.noteWhy")}>
+              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+            <Field label={t("ipam.scans.expiresOptional")}>
+              <input
+                className={inputClass}
+                type="date"
+                value={expiresAt}
+                onChange={(e) => setExpiresAt(e.target.value)}
+              />
+              {/* THE DATE, READ BACK IN THE CONSOLE'S OWN FORMAT, in the same
+                  words as the push grant on `/agent-push/authorizations` --
+                  which is the same decision about the same kind of expiry, and
+                  was the one page in the console already drawing this echo. A
+                  native date input draws the USER AGENT'S mask and no CSS
+                  reorders it, so this field reads `09/22/2026` to a US-locale
+                  browser on a console that renders every other date
+                  `22 Sept 2026` (design review M1). */}
+            </Field>
           </div>
-        </div>
-      )}
-      {prefix.trim() !== "" && parsed === null && (
-        <p className="form-error" style={{ marginTop: 10 }}>
-          {t("ipam.scans.notPrefix")}
-        </p>
-      )}
-
-      {/* With Unassigned chosen at the top and no VRF to decide, nothing new
-          can be filed: the form says so instead (a VRF still can). */}
-      {newRow.refused === "unassigned" ? (
-        <UnassignedRefusal />
-      ) : (
-        <div className="form-actions">
-          <Btn
-            label={t("ipam.scans.authorize")}
-            icon="shield-check"
-            variant="primary"
-            disabled={create.isPending || parsed === null}
-            onClick={() => {
-              const next: Attempt = { rules: () => clientRule(newRow), values: { client } };
-              setAttempt(next);
-              if (attemptProblems(next).length > 0) {
-                create.reset();
-                return;
-              }
-              create.mutate(
-                {
-                  prefix,
-                  vrf_id: vrfId || null,
-                  client_id: client,
-                  note,
-                  // THE FIELD IS A WALL CLOCK; the API stores an instant.
-                  // `new Date("2026-08-25").toISOString()` reads it as UTC
-                  // midnight, so an operator at UTC-5 gets a grant that expires
-                  // five hours before the date they typed begins. This one is
-                  // security-critical in the other direction too: east of UTC
-                  // the same arithmetic EXTENDS the window past the date on the
-                  // screen, and a scan authorization is deny-by-default
-                  // precisely so that nobody has to guess when it lapses.
-                  expires_at: expiresAt === "" ? null : toInstant(`${expiresAt}T00:00`, zone),
-                },
-                {
-                  onSuccess: () => {
-                    setPrefix("");
-                    setNote("");
-                    setExpiresAt("");
-                  },
-                },
-              );
-            }}
-          />
-          {/* A DISABLED AUTHORIZE SAYS WHY (coordinator's ruling 8): with no
-              prefix there is nothing to size, and a grant nobody can size is
-              not offered. A prefix that does not parse says so above. */}
-          {prefix.trim() === "" && !create.isSuccess ? (
-            <span className="note">{t("ipam.scans.needsPrefix")}</span>
+          {expiresAt !== "" ? (
+            <p className="note" style={{ marginTop: 14 }}>
+              {t("ipam.scans.lapses", { date: formatDate(toInstant(`${expiresAt}T00:00`, zone), zone) })}
+            </p>
           ) : null}
-          {create.isSuccess && (
-            <span className="form-saved" role="status">
-              {t("ipam.scans.authorized")}
-            </span>
+
+          {parsed !== null && (
+            <div className="notice gold" style={{ marginTop: 14 }}>
+              <Icon name="alert-triangle" size={16} />
+              {/* ONE CHILD, because `.notice` is a flex row shaped icon-then-body.
+                  Three stacked paragraphs handed to it directly would lay out as
+                  three columns. */}
+              <div>
+                <p>
+                  <b>
+                    {t("ipam.scans.probes", {
+                      total: formatCount(prefixSize(parsed)),
+                      count: prefixSize(parsed) === 1n ? 1 : 2,
+                    })}
+                  </b>
+                </p>
+                <p style={{ marginTop: 4 }}>
+                  {covered.length === 0
+                    ? t("ipam.scans.coveredNone")
+                    : t("ipam.scans.coveredSome", {
+                        count: covered.length,
+                        list: covered.map((subnet) => subnet.prefix).join(", "),
+                      })}
+                </p>
+                {expiresAt === "" && (
+                  <p style={{ marginTop: 4 }}>{t("ipam.scans.noExpiryNotice")}</p>
+                )}
+              </div>
+            </div>
           )}
-          <ProblemLine problems={attemptProblems(attempt)} />
-          {create.isError && <ErrorLine error={create.error} />}
+          {prefix.trim() !== "" && parsed === null && (
+            <p className="form-error" style={{ marginTop: 10 }}>
+              {t("ipam.scans.notPrefix")}
+            </p>
+          )}
+
+          {/* With Unassigned chosen at the top and no VRF to decide, nothing new
+              can be filed: the form says so instead (a VRF still can). */}
+          {newRow.refused === "unassigned" ? (
+            <UnassignedRefusal />
+          ) : (
+            <div className="form-actions">
+              <Btn
+                label={t("ipam.scans.authorize")}
+                icon="shield-check"
+                variant="primary"
+                disabled={create.isPending || parsed === null}
+                onClick={() => {
+                  const next: Attempt = { rules: () => clientRule(newRow), values: { client } };
+                  setAttempt(next);
+                  if (attemptProblems(next).length > 0) {
+                    create.reset();
+                    return;
+                  }
+                  create.mutate(
+                    {
+                      prefix,
+                      vrf_id: vrfId || null,
+                      client_id: client,
+                      note,
+                      // THE FIELD IS A WALL CLOCK; the API stores an instant.
+                      // `new Date("2026-08-25").toISOString()` reads it as UTC
+                      // midnight, so an operator at UTC-5 gets a grant that expires
+                      // five hours before the date they typed begins. This one is
+                      // security-critical in the other direction too: east of UTC
+                      // the same arithmetic EXTENDS the window past the date on the
+                      // screen, and a scan authorization is deny-by-default
+                      // precisely so that nobody has to guess when it lapses.
+                      expires_at: expiresAt === "" ? null : toInstant(`${expiresAt}T00:00`, zone),
+                    },
+                    {
+                      onSuccess: () => {
+                        setPrefix("");
+                        setNote("");
+                        setExpiresAt("");
+                      },
+                    },
+                  );
+                }}
+              />
+              {/* A DISABLED AUTHORIZE SAYS WHY (coordinator's ruling 8): with no
+                  prefix there is nothing to size, and a grant nobody can size is
+                  not offered. A prefix that does not parse says so above. */}
+              {prefix.trim() === "" && !create.isSuccess ? (
+                <span className="note">{t("ipam.scans.needsPrefix")}</span>
+              ) : null}
+              {create.isSuccess && (
+                <span className="form-saved" role="status">
+                  {t("ipam.scans.authorized")}
+                </span>
+              )}
+              <ProblemLine problems={attemptProblems(attempt)} />
+              {create.isError && <ErrorLine error={create.error} />}
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top, and inside the dialog's transformed box the
+          question would be placed and clipped by it (coordinator's ruling 3a). */}
+      {guard}
+    </>
   );
 }

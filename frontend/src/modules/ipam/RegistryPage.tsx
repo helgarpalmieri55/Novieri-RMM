@@ -78,14 +78,10 @@ export function RegistryPage() {
 
       {/* Mounted only while open: each opening starts from an empty form. */}
       {permissions.manage && newVrf.open ? (
-        <Dialog open onClose={newVrf.close} title={t("ipam.registry.newVrf")}>
-          <VrfForm onClose={newVrf.close} />
-        </Dialog>
+        <VrfForm onClose={newVrf.close} />
       ) : null}
       {permissions.manage && newVlan.open ? (
-        <Dialog open onClose={newVlan.close} title={t("ipam.registry.newVlan")}>
-          <VlanForm onClose={newVlan.close} />
-        </Dialog>
+        <VlanForm onClose={newVlan.close} />
       ) : null}
     </div>
   );
@@ -195,26 +191,35 @@ function VrfForm({ onClose }: { onClose: () => void }) {
     );
   }
 
-  if (client.refused === "unassigned") return <UnassignedRefusal />;
   return (
-    <Form onSubmit={add}>
+    <>
+      <Dialog open onClose={onClose} title={t("ipam.registry.newVrf")}>
+        {client.refused === "unassigned" ? (
+          <UnassignedRefusal />
+        ) : (
+          <Form onSubmit={add}>
+            <div className="form-grid">
+              {client.needsField ? <ClientField field={client} /> : null}
+              <Field label={t("ipam.fields.name")}>
+                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label={t("ipam.registry.routeDistinguisher")}>
+                <input className={inputClass} value={rd} onChange={(e) => setRd(e.target.value)} />
+              </Field>
+            </div>
+            <FormActions
+              label={t("ipam.registry.addVrf")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          </Form>
+        )}
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top (coordinator's ruling 3a). */}
       {guard}
-      <div className="form-grid">
-        {client.needsField ? <ClientField field={client} /> : null}
-        <Field label={t("ipam.fields.name")}>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label={t("ipam.registry.routeDistinguisher")}>
-          <input className={inputClass} value={rd} onChange={(e) => setRd(e.target.value)} />
-        </Field>
-      </div>
-      <FormActions
-        label={t("ipam.registry.addVrf")}
-        pending={create.isPending}
-        error={create.error}
-        problems={attemptProblems(attempt)}
-      />
-    </Form>
+    </>
   );
 }
 
@@ -375,42 +380,51 @@ function VlanForm({ onClose }: { onClose: () => void }) {
     );
   }
 
-  if (client.refused === "unassigned") return <UnassignedRefusal />;
   return (
-    <Form onSubmit={add}>
+    <>
+      <Dialog open onClose={onClose} title={t("ipam.registry.newVlan")}>
+        {client.refused === "unassigned" ? (
+          <UnassignedRefusal />
+        ) : (
+          <Form onSubmit={add}>
+            <div className="form-grid">
+              {client.needsField ? <ClientField field={client} /> : null}
+              <Field label={t("ipam.registry.vid")}>
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={1}
+                  max={4094}
+                  value={vid}
+                  onChange={(e) => setVid(e.target.value)}
+                />
+              </Field>
+              <Field label={t("ipam.fields.site")}>
+                <select className={inputClass} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+                  <option value="">{t("ipam.registry.clientWideNoSite")}</option>
+                  {sites.data?.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t("ipam.fields.name")}>
+                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+            </div>
+            <FormActions
+              label={t("ipam.registry.addVlan")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          </Form>
+        )}
+      </Dialog>
+      {/* After the dialog, never inside it: both are `.modal`s at one z-index, so
+          the later one paints on top (coordinator's ruling 3a). */}
       {guard}
-      <div className="form-grid">
-        {client.needsField ? <ClientField field={client} /> : null}
-        <Field label={t("ipam.registry.vid")}>
-          <input
-            className={inputClass}
-            type="number"
-            min={1}
-            max={4094}
-            value={vid}
-            onChange={(e) => setVid(e.target.value)}
-          />
-        </Field>
-        <Field label={t("ipam.fields.site")}>
-          <select className={inputClass} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-            <option value="">{t("ipam.registry.clientWideNoSite")}</option>
-            {sites.data?.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t("ipam.fields.name")}>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-      </div>
-      <FormActions
-        label={t("ipam.registry.addVlan")}
-        pending={create.isPending}
-        error={create.error}
-        problems={attemptProblems(attempt)}
-      />
-    </Form>
+    </>
   );
 }
