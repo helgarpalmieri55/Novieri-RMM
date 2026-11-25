@@ -51,11 +51,16 @@ const inDays = (days: number): string => new Date(Date.now() + days * DAY).toISO
  * predates MSP clients, so the fixture session could not see New client or a
  * client's Add contact, the two creates the New menu leads to (`rbac.py`
  * lists it beside `clients.read`).
+ *
+ * `backup.offsite.manage` and `backup.recovery.manage` were added on
+ * 2026-11-25 (kit requests batch 1, item 7): without them /backup/offsite's
+ * storage editor and the recovery key's controls were drawn in no capture
+ * (`rbac.py` lists both beside `backup.policy.manage`).
  */
 const CATALOGUE = [
   "agent.push.run", "agent.push.scope.manage", "agent.release.manage", "agent.release.read",
   "ai.act.confirm", "ai.act.propose", "ai.admin", "ai.use", "assets.manage", "audit.read",
-  "backup.policy.manage", "backup.read", "backup.restore", "backup.run",
+  "backup.offsite.manage", "backup.policy.manage", "backup.read", "backup.recovery.manage", "backup.restore", "backup.run",
   "bcp.approve", "bcp.manage", "bcp.read", "budget.manage", "budget.read",
   "change.approve", "change.manage", "change.read", "change.request", "clients.manage",
   "credentials.checkout", "credentials.manage", "credentials.read",

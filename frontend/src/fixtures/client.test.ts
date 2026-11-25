@@ -89,6 +89,14 @@ describe("fixtureRegistry", () => {
     expect(held).toContain("platform.status.read");
   });
 
+  it("signs the fixture session in with what /backup/offsite's editors need, so the gate can see them", async () => {
+    // Kit requests batch 1, item 7 (O4): without these the off-site storage
+    // editor and the recovery key's controls were in no capture.
+    const me = await fixtureClient().me();
+    expect(me.permissions).toContain("backup.offsite.manage");
+    expect(me.permissions).toContain("backup.recovery.manage");
+  });
+
   it("signs the fixture session in on every client, listing the clients the settings fixtures list", async () => {
     const me = await fixtureClient().me();
     expect(me.permissions_everywhere).toEqual(me.permissions);
