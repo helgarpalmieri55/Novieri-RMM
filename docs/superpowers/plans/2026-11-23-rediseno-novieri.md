@@ -328,7 +328,9 @@ Y la del título de pestaña, en toda ficha (la de una ficha sin pestañas es so
 it("names the record in the browser tab", async () => {
   renderPage("/<ruta>/<id>", <Page />, "/<ruta>/:<param>", { page: "shell.nav.item.<entrada del riel>" });
   await screen.findByRole("heading", { level: 1, name: "<nombre del registro>" });
-  expect(document.title).toBe("<nombre del registro> · <etiqueta del riel en inglés> · Novieri RMM");
+  // El título se escribe en un efecto, después del render del encabezado: se espera, no se lee en el acto
+  // (lo encontró la Task 5 el 2026-11-25; `waitFor` viene de @testing-library/react).
+  await waitFor(() => expect(document.title).toBe("<nombre del registro> · <etiqueta del riel en inglés> · Novieri RMM"));
 });
 ```
 
