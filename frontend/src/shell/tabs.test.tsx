@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Tabs } from "./components";
 
@@ -118,5 +118,57 @@ describe("Tabs", () => {
     );
     await user.click(screen.getByRole("tab", { name: /Online/ }));
     expect(submitted).toBe(false);
+  });
+});
+
+/**
+ * A STRIP THAT SCROLLS SHOWS ITS SELECTED TAB (Task 5 review, fix round 1):
+ * `/clients/<id>?tab=alerts` at 390px opened on Summary to Tickets with no
+ * selected tab in sight. jsdom lays nothing out, so the boxes are given: a
+ * 300px strip, and tabs 100px wide side by side, moved by the strip's scroll.
+ */
+describe("Tabs that scroll", () => {
+  const scrolled = new WeakMap<Element, number>();
+  const WIDE = [
+    { key: "summary", label: "Summary" },
+    { key: "sites", label: "Sites" },
+    { key: "contacts", label: "Contacts" },
+    { key: "devices", label: "Devices" },
+    { key: "tickets", label: "Tickets" },
+    { key: "alerts", label: "Alerts" },
+  ];
+
+  function layOut() {
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockImplementation(function (this: HTMLElement) {
+      return scrolled.get(this) ?? 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "set").mockImplementation(function (this: HTMLElement, value: number) {
+      scrolled.set(this, value);
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("role") === "tablist") return DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 40 });
+      const strip = this.parentElement as HTMLElement;
+      const index = Array.from(strip.children).indexOf(this);
+      return DOMRect.fromRect({ x: index * 100 - (scrolled.get(strip) ?? 0), y: 0, width: 100, height: 40 });
+    });
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("brings the selected tab into view when it opens past the strip's edge", () => {
+    layOut();
+    render(<Tabs items={WIDE} active="alerts" onSelect={() => {}} scroll label="Client" />);
+    const strip = screen.getByRole("tablist", { name: "Client" });
+    // Alerts spans 500-600; the strip shows 0-300: scrolled by 300 plus the 16px margin.
+    expect(strip.scrollLeft).toBe(316);
+  });
+
+  it("leaves the strip alone when the selected tab is already in view, and a strip that wraps", () => {
+    layOut();
+    const { unmount } = render(<Tabs items={WIDE} active="sites" onSelect={() => {}} scroll label="Client" />);
+    expect(screen.getByRole("tablist", { name: "Client" }).scrollLeft).toBe(0);
+    unmount();
+    render(<Tabs items={WIDE} active="alerts" onSelect={() => {}} label="Client" />);
+    expect(screen.getByRole("tablist", { name: "Client" }).scrollLeft).toBe(0);
   });
 });

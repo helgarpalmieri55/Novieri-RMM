@@ -122,7 +122,7 @@ export function OnboardPage() {
   // CLIENT AND SITE FIRST (design §4.4). The client is the console's: chosen
   // above, or chosen here, which switches the console to it (plan decision).
   // With one site nothing is asked; the pair then rides on every link below.
-  // A `?site=` left by another client (a change of client starts this page
+  // A `?journey_site=` left by another client (a change of client starts this page
   // again on the same URL) is not one of this client's, so it is not used.
   useAdoptJourneyClient();
   const { selected: chosenClient, select, clients } = useClientScope();

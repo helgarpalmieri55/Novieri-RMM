@@ -90,6 +90,14 @@ describe("a page opened from the journey", () => {
     expect(clientScope.select).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves a bare `?client=` and `?site=` alone: they narrow a list, never switch the console (decision D20)", () => {
+    renderAt("/enrollment?client=c-andes&site=s-north");
+    expect(clientScope.select).not.toHaveBeenCalled();
+    clientScope.selected = "c-andes";
+    renderAt("/enrollment?client=c-andes&site=s-north", "second");
+    expect(screen.getAllByText("none").length).toBeGreaterThan(0);
+  });
+
   it("never overrides a client chosen above, and ignores that client's site", () => {
     clientScope.selected = "c-other";
     renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");

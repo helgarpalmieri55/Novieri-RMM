@@ -2,6 +2,10 @@
  * A client's details and the health profile its devices fall back to (design
  * §5.1), read-only. Its edit and its archive are in the page's head
  * (`ClientActions.tsx`, redesign design §2).
+ *
+ * NOTHING THE PAGE ALREADY SAYS ABOVE (coordinator, Task 5 fix round 1): the
+ * kind and the status are in the head, the device and site counts in the
+ * tiles, so Details holds only what is nowhere else on the page.
  */
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -13,7 +17,7 @@ import { useClientScope } from "../../lib/clientScope";
 import { Panel, QueryState } from "../../shell/components";
 import { KV } from "../../shell/viz";
 import { useHealthAssignments } from "../health/api";
-import { clientHealthDefault, clientKindLabel, clientStatusLabel } from "./labels";
+import { clientHealthDefault } from "./labels";
 
 export function SummaryTab({ client }: { client: ClientOut }) {
   const t = useT();
@@ -24,15 +28,11 @@ export function SummaryTab({ client }: { client: ClientOut }) {
   // Typed as tuples: an array literal of pairs would be inferred as arrays,
   // which `KV`'s `readonly [ReactNode, ReactNode]` does not accept.
   const facts: (readonly [string, ReactNode])[] = [
-    [t("clients.summary.kind"), clientKindLabel(client.kind)],
-    [t("clients.summary.status"), clientStatusLabel(client.status)],
     [t("clients.summary.emailDomains"), client.email_domains.length > 0 ? client.email_domains.join(", ") : notSet],
     [t("clients.summary.phone"), client.phone || notSet],
     [t("clients.summary.address"), client.address || notSet],
     [t("clients.summary.website"), client.website || notSet],
     [t("clients.summary.notes"), client.notes || notSet],
-    [t("clients.summary.devices"), String(client.device_count)],
-    [t("clients.summary.sites"), String(client.site_count)],
   ];
 
   return (

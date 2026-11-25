@@ -10,6 +10,13 @@ import { ClientDetailPage } from "../ClientDetailPage";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57"; // src/fixtures/core.ts CUSTOMER_ID
 
+/**
+ * What the 360 may read on the console's own API, un-narrowed: `/me` (always
+ * allowed by the double) and the client's own record (a global route). Every
+ * tab's read must go through `forClient(ANDES)`, or the double rejects it.
+ */
+const CONSOLE = ["getClientRecord"];
+
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
@@ -63,7 +70,8 @@ describe("the client 360 (redesign design §1.3)", () => {
       "Summary",
       "Sites",
       "Contacts",
-      "Computers",
+      // English keeps the rail's word (coordinator, Task 5 fix round 1); Spanish says «Equipos».
+      "Devices",
       "Tickets",
       "Alerts",
       "Assets",
@@ -87,26 +95,47 @@ describe("the client 360 (redesign design §1.3)", () => {
   it("puts the tab in the URL, so a tab reloads and links", async () => {
     const { router } = page("?tab=alerts");
     expect(await screen.findByRole("tab", { name: "Alerts" })).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(screen.getByRole("tab", { name: "Computers" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Devices" }));
     expect(router.state.location.search).toBe("?tab=devices");
   });
 
-  it("lists the client's computers and leads to the fleet list narrowed to it", async () => {
+  it("lists the client's devices and leads to the fleet list narrowed to it", async () => {
     page("?tab=devices");
-    const link = await screen.findByRole("link", { name: /See every computer of this client/ });
+    const link = await screen.findByRole("link", { name: /See every device of this client/ });
     expect(link).toHaveAttribute("href", `/devices?client=${ANDES}`);
+    // The fixtures give Andes the Porto office's machines, so the tab is not
+    // empty under its non-zero tile (Task 5 review, fix round 1).
+    expect(await screen.findByRole("link", { name: "por-ws-008" })).toHaveAttribute("href", "/devices/dev-4");
+    expect(link).toHaveTextContent("(3)");
   });
 
-  it("reads the tickets tab narrowed to the client, its open tickets, and leads to the ticket list narrowed to it", async () => {
-    const listTickets = vi.fn().mockResolvedValue({ items: [], total: 0 });
-    const { api, narrowedTo } = recordingNarrowing(holding(["ticket.read", "ticket.write"], { listTickets }));
-    mockUseApi.mockReturnValue(api);
+  it("reads the devices tab only through the client's narrowed API (decision D6)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
+    page("?tab=devices");
+    expect(await screen.findByRole("link", { name: /See every device of this client \(\d+\)/ })).toBeInTheDocument();
+    expect(narrowing.client(ANDES).listDevices).toHaveBeenCalledWith({ clientId: ANDES, limit: 25 });
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("counts nothing before the devices have answered, rather than an invented 0", async () => {
+    mockUseApi.mockReturnValue(holding(["devices.read"], { listDevices: () => new Promise(() => {}) }));
+    page("?tab=devices");
+    expect(await screen.findByRole("link", { name: "See every device of this client" })).toBeInTheDocument();
+  });
+
+  it("reads the tickets tab only through the client's narrowed API, its open tickets, and leads to the ticket list narrowed to it", async () => {
+    const narrowing = recordingNarrowing(
+      holding(["ticket.read", "ticket.write"], { listTickets: () => ({ items: [], total: 0 }) }),
+      { console: CONSOLE },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
     page("?tab=tickets");
     expect(await screen.findByText("This client has no open tickets.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "See this client's tickets" })).toHaveAttribute("href", `/service-desk?client=${ANDES}`);
     expect(screen.getByRole("link", { name: "New ticket" })).toHaveAttribute("href", "/service-desk?new=ticket");
-    expect(listTickets).toHaveBeenCalledWith({ client_id: ANDES, scope: "open", limit: 25 });
-    expect(narrowedTo).toContain(ANDES);
+    expect(narrowing.client(ANDES).listTickets).toHaveBeenCalledWith({ client_id: ANDES, scope: "open", limit: 25 });
+    expect(narrowing.unnarrowed).toEqual([]);
   });
 
   it("counts what is open for the client in the summary tiles, each leading to its tab", async () => {
@@ -115,13 +144,16 @@ describe("the client 360 (redesign design §1.3)", () => {
     expect(screen.getByRole("link", { name: /Open alerts/ })).toHaveAttribute("href", `/clients/${ANDES}?tab=alerts`);
   });
 
-  it("reads the alerts tab narrowed to the client, the active ones, and leads to the alert list narrowed to it (D19)", async () => {
-    const { api, narrowedTo } = recordingNarrowing(fixtureClient());
-    mockUseApi.mockReturnValue(api);
+  it("reads the alerts tab only through the client's narrowed API, the active ones, and leads to the alert list narrowed to it (D19)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
     page("?tab=alerts");
     expect(await screen.findByRole("heading", { level: 2, name: "Active alerts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "See this client's alerts" })).toHaveAttribute("href", `/health?client=${ANDES}`);
-    expect(narrowedTo).toContain(ANDES);
+    expect((await screen.findAllByText("CPU busy")).length).toBeGreaterThan(0);
+    expect(narrowing.client(ANDES).listHealthAlerts).toHaveBeenCalledWith({ state: "active" });
+    expect(narrowing.client(ANDES).getHealthAlertSummary).toHaveBeenCalled();
+    expect(narrowing.unnarrowed).toEqual([]);
   });
 
   it("names each alert's check in words, as the alert console does, not by its wire key (critique P1)", async () => {
@@ -135,5 +167,35 @@ describe("the client 360 (redesign design §1.3)", () => {
     expect(await screen.findByRole("link", { name: /Licenses/ })).toHaveAttribute("href", `/licenses?client=${ANDES}`);
     expect(screen.getByRole("link", { name: /Subscriptions/ })).toHaveAttribute("href", `/subscriptions?client=${ANDES}`);
     expect(screen.getByRole("link", { name: /Networks/ })).toHaveAttribute("href", `/ipam?client=${ANDES}`);
+  });
+
+  it("counts the assets only through the client's narrowed API (decision D6)", async () => {
+    const narrowing = recordingNarrowing(fixtureClient(), { console: CONSOLE });
+    mockUseApi.mockReturnValue(narrowing.api);
+    page("?tab=assets");
+    // Measured, not `n/a`: each count arrived through the narrowed double.
+    await waitFor(() => expect(screen.getByRole("link", { name: /Licenses/ })).not.toHaveTextContent("n/a"));
+    await waitFor(() => expect(screen.getByRole("link", { name: /Networks/ })).not.toHaveTextContent("n/a"));
+    expect(narrowing.client(ANDES).listLicenses).toHaveBeenCalled();
+    expect(narrowing.client(ANDES).listSubscriptions).toHaveBeenCalled();
+    expect(narrowing.client(ANDES).listIpamSubnets).toHaveBeenCalled();
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("waits for /me before choosing the tab, so a cold ?tab=alerts never draws Summary first", async () => {
+    let answer: (me: Me) => void = () => {};
+    const registry = fixtureRegistry();
+    const me = registry.me as () => Me;
+    const listHealthAssignments = vi.fn(registry.listHealthAssignments);
+    mockUseApi.mockReturnValue(
+      fixtureClient({ ...registry, me: () => new Promise<Me>((resolve) => (answer = resolve)), listHealthAssignments }),
+    );
+    page("?tab=alerts");
+    await screen.findByRole("heading", { level: 1, name: "Andes Logistics" });
+    expect(screen.queryByRole("tablist", { name: "Client" })).toBeNull();
+    answer(me());
+    expect(await screen.findByRole("tab", { name: "Alerts" })).toHaveAttribute("aria-selected", "true");
+    // Summary was never drawn: its health read never ran.
+    expect(listHealthAssignments).not.toHaveBeenCalled();
   });
 });

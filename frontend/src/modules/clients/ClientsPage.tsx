@@ -101,7 +101,8 @@ export function ClientsPage() {
               onChange={(value) => filters.set("archived", value)}
             />
           }
-          end={<ShowingCount shown={rows.length} total={all.length} />}
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={clients.data ? <ShowingCount shown={rows.length} total={all.length} /> : null}
         />
         <QueryState loading={clients.isLoading} error={clients.error} empty={false} emptyLabel="">
           {rows.length === 0 ? (

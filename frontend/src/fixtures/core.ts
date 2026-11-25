@@ -299,6 +299,17 @@ const matchesQuery = (d: Device, q: string) => {
     .some((v) => v.toLowerCase().includes(needle));
 };
 
+/**
+ * WHOSE MACHINE EACH IS, for a read narrowed to one client (`?client_id=`):
+ * the Porto office's machines are the fixture customer's (Andes Logistics),
+ * every other one the internal client's (Task 5 review, fix round 1). Before,
+ * every machine was the internal client's, so the client 360's Devices tab
+ * drew "no devices yet" under a non-zero tile. The records carry no
+ * `client_id` of their own: the Devices list reads as it did.
+ */
+const CUSTOMER_DEVICES: ReadonlySet<string> = new Set(["dev-4", "dev-8", "dev-14"]);
+const clientOfDevice = (id: string): string => (CUSTOMER_DEVICES.has(id) ? CUSTOMER_ID : ORG_ID);
+
 const listDevices: FixtureMap["listDevices"] = (params = {}) => {
   const all = devices();
   const filtered = (rows: Device[]) =>
@@ -307,8 +318,7 @@ const listDevices: FixtureMap["listDevices"] = (params = {}) => {
         matchesQuery(d, params.q ?? "") &&
         (!params.provenance || d.provenance === params.provenance) &&
         (!params.osFamily || d.os_family === params.osFamily) &&
-        // Every fixture machine is the internal client's (id = the org's).
-        (!params.clientId || params.clientId === ORG_ID),
+        (!params.clientId || params.clientId === clientOfDevice(d.id)),
     );
   const searched = filtered(all);
   // In the review tab and its count, and nowhere else -- as on the server.

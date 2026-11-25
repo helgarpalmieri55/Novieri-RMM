@@ -270,6 +270,14 @@ describe("the Clients list", () => {
     expect(screen.queryByRole("link", { name: "Andes Logistics" })).toBeNull();
   });
 
+  it("counts nothing before the list has answered, rather than Showing 0 of 0", async () => {
+    mockUseApi.mockReturnValue(api({ listClients: vi.fn(() => new Promise<ClientOut[]>(() => {})) }));
+    renderAt("/clients");
+    expect(await screen.findByRole("button", { name: "Including archived" })).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).toBeNull();
+  });
+
   it("offers New client only to a person holding clients.manage on every client", async () => {
     const without = vi.fn().mockResolvedValue(me(["clients.read"]));
     mockUseApi.mockReturnValue(api({ me: without }));

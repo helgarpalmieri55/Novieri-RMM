@@ -137,7 +137,10 @@ export function ClientDetailPage() {
         context={data ? clientKindLabel(data.kind) : undefined}
         actions={data ? <ClientActions client={data} /> : undefined}
       />
-      <QueryState loading={client.isLoading} error={client.error} empty={false} emptyLabel="">
+      {/* NOT BEFORE `/me` HAS ANSWERED (Task 5 fix round 1): the tabs and the
+          tiles a person may see are this client's codes, and until `/me` lists
+          them a cold `?tab=alerts` would draw Summary first and then jump. */}
+      <QueryState loading={client.isLoading || !ready} error={client.error} empty={false} emptyLabel="">
         {data ? (
           <>
             {data.status === "archived" ? (

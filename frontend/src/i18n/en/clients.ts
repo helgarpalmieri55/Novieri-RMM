@@ -64,7 +64,7 @@ export const clients = {
       summary: "Summary",
       sites: "Sites",
       contacts: "Contacts",
-      devices: "Computers",
+      devices: "Devices",
       tickets: "Tickets",
       alerts: "Alerts",
       assets: "Assets",
@@ -72,7 +72,7 @@ export const clients = {
     },
     // The 360's summary tiles (redesign design §1.3), each leading to its tab.
     tiles: {
-      devices: "Computers",
+      devices: "Devices",
       sites: "Sites",
       openTickets: "Open tickets",
       openAlerts: "Open alerts",
@@ -86,16 +86,11 @@ export const clients = {
     title: "Details",
     edit: "Edit",
     archive: "Archive client",
-    kind: "Kind",
-    status: "Status",
     emailDomains: "Email domains",
     phone: "Phone",
     address: "Address",
     website: "Website",
     notes: "Notes",
-    // The 360's word for a client's machines: its tile and its tab say "Computers" too.
-    devices: "Computers",
-    sites: "Sites",
     notSet: "Not set",
     archiveTitle: "Archive this client",
     archiveBody:
@@ -115,7 +110,7 @@ export const clients = {
     add: "Add site",
     tableLabel: "Sites",
     colSite: "Site",
-    colDevices: "Computers",
+    colDevices: "Devices",
     colStatus: "Status",
     inUse: "In use",
     archivedOn: "Archived {date}",
@@ -203,15 +198,19 @@ export const clients = {
     },
   },
   // The 360's tabs that read other modules (redesign design §1.3).
+  // English keeps the rail's word, "Devices" (coordinator, Task 5 fix round 1);
+  // "Add a computer" is the journey's own name.
   devices: {
-    title: "Computers",
+    title: "Devices",
     seeAll: {
-      one: "See every computer of this client ({count})",
-      other: "See every computer of this client ({count})",
+      one: "See every device of this client ({count})",
+      other: "See every device of this client ({count})",
     },
-    empty: "This client has no computers yet.",
+    // Before the list has answered: no count rather than an invented 0.
+    seeAllUncounted: "See every device of this client",
+    empty: "This client has no devices yet.",
     add: "Add a computer",
-    colComputer: "Computer",
+    colComputer: "Device",
     colAgent: "Agent",
     colLastSeen: "Last seen",
     noAgent: "No agent",
@@ -235,7 +234,7 @@ export const clients = {
     },
     seeAll: "See this client's alerts",
     empty: "No alert is active for this client.",
-    colComputer: "Computer",
+    colComputer: "Device",
     colCheck: "Check",
     colSeverity: "Severity",
     colOpened: "Opened",

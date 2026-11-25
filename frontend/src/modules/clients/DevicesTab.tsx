@@ -1,6 +1,7 @@
 /**
- * The client's computers (design §1.3), the first 25 by the fleet list's own
+ * The client's devices (design §1.3), the first 25 by the fleet list's own
  * order, and the way to all of them: the fleet list with its Client chip set.
+ * Read only through `useNarrowedApi` (decision D6), with `enabled: ready`.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -28,7 +29,8 @@ export function DevicesTab({ client, enabled }: { client: ClientOut; enabled: bo
       bare
       actions={
         <Link className="btn small" to={`/devices?client=${client.id}`}>
-          {t("clients.devices.seeAll", { count: devices.data?.total ?? 0 })}
+          {/* The server's total once it has answered; never an invented 0 before (The Absent Zero Rule). */}
+          {devices.data ? t("clients.devices.seeAll", { count: devices.data.total }) : t("clients.devices.seeAllUncounted")}
         </Link>
       }
     >

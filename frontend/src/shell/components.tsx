@@ -16,6 +16,7 @@
  * caller needs one import.
  */
 
+import { useLayoutEffect, useRef } from "react";
 import type {
   CSSProperties,
   InputHTMLAttributes,
@@ -368,6 +369,23 @@ export function Tabs({
    *  between, for assistive technology. Omitted, the list is unnamed as before. */
   label?: string;
 }) {
+  const strip = useRef<HTMLDivElement>(null);
+  // THE SELECTED TAB IS ON SCREEN (Task 5 review, fix round 1). A strip that
+  // scrolls opened at its start, so `/clients/<id>?tab=alerts` on a phone
+  // showed Summary to Tickets and no selected tab at all. Sideways only:
+  // `scrollIntoView` would also scroll the page down to a strip below the
+  // fold. Before paint, so the strip never draws at its start first.
+  useLayoutEffect(() => {
+    const list = strip.current;
+    if (!scroll || !list) return;
+    const tab = Array.from(list.children).find((child) => child.getAttribute("data-tab") === active);
+    if (!(tab instanceof HTMLElement)) return;
+    const box = list.getBoundingClientRect();
+    const own = tab.getBoundingClientRect();
+    const margin = 16;
+    if (own.left < box.left) list.scrollLeft -= box.left - own.left + margin;
+    else if (own.right > box.right) list.scrollLeft += own.right - box.right + margin;
+  }, [scroll, active]);
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     const jump = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
@@ -385,7 +403,7 @@ export function Tabs({
   };
 
   return (
-    <div className={scroll ? "tabs scroll" : "tabs"} role="tablist" aria-label={label} onKeyDown={move}>
+    <div ref={strip} className={scroll ? "tabs scroll" : "tabs"} role="tablist" aria-label={label} onKeyDown={move}>
       {items.map((item) => (
         <button
           type="button"

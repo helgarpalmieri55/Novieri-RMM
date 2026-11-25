@@ -181,3 +181,13 @@ zanjan (punto 5) va al coordinador en el informe de la tarea.
 - **Sin respuesta en las fuentes.** `DESIGN.md` («Records») dice qué lleva la cabecera, las tarjetas y las
   pestañas, no qué lleva la pestaña Resumen. Opciones: (a) Datos conserva todos sus datos, como ahora; (b) Datos
   quita los cuatro que ya están arriba. Sube al coordinador en el informe de la Task 5.
+
+### Ronda 1 de correcciones de la Task 5: lo que decidió el coordinador (2026-11-25)
+
+- **Punto 5, respuesta del coordinador: (b).** Datos quita el tipo, el estado y los dos números: la cabecera y
+  las tarjetas ya los dicen. Queda lo que no está en ninguna otra parte de la página.
+- **Punto 2, en inglés: «Devices».** El diseño conserva el catálogo inglés y el riel dice «Devices», así que la
+  ficha 360 también dice «Devices» (pestaña, tarjeta, columnas, «See every device of this client»); «Add a
+  computer» sigue siendo el nombre del recorrido. En español, «Equipos» en todas partes, como en el punto 2.
+- **Punto 4, hecho en el kit.** `Tabs` con `scroll` lleva la pestaña elegida a la vista, solo de lado (sin
+  desplazar la página) y antes de pintar.
