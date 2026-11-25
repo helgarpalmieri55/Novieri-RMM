@@ -79,6 +79,21 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Resolve group" })).not.toHaveClass("danger");
   });
 
+  it("draws the destructive control in the secondary shape, critical edge and ink, never on the filled primary (K9)", () => {
+    // DESIGN.md "Danger: critical edge and text"; components.css: the
+    // destructive button "keeps the secondary shape". On the filled primary,
+    // `.btn.danger`'s ink drew red on the accent, about 1.1:1 (kit requests
+    // batch 2, K9).
+    open();
+    const confirm = screen.getByRole("button", { name: "Delete profile" });
+    expect(confirm.className.split(/\s+/).sort()).toEqual(["btn", "danger"]);
+  });
+
+  it("keeps a reversible action's confirm the filled primary (K9)", () => {
+    open({ destructive: false, confirmLabel: "Resolve group" });
+    expect(screen.getByRole("button", { name: "Resolve group" }).className.split(/\s+/).sort()).toEqual(["btn", "primary"]);
+  });
+
   it("cancels on Escape, which is the reflex people already have", async () => {
     const { onConfirm, onCancel } = open();
 

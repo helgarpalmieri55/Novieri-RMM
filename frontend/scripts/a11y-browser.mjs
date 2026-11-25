@@ -631,6 +631,18 @@ const STATES = {
     await page.getByRole("button", { name: /Delete device/ }).first().click();
     await page.waitForTimeout(400);
   },
+  // AN ARMED DESTRUCTIVE CONFIRMATION (kit requests batch 2, K9). `dialog`
+  // grades the delete confirmation as it opens, when its confirm is disabled
+  // until the subject is typed, so the enabled destructive button was never
+  // graded -- and every destructive confirmation without `requireTyping`
+  // (the leave question among them) drew it as red ink on the filled accent,
+  // about 1.1:1. Typing the subject arms it.
+  armed: async (page) => {
+    await page.getByRole("button", { name: /Delete device/ }).first().click();
+    await page.waitForTimeout(400);
+    await page.locator("section.modal.open .confirm-typing input").fill("ws-alpha.corp.local");
+    await page.waitForTimeout(200);
+  },
   palette: async (page) => {
     await page.keyboard.press("/");
     await page.waitForTimeout(400);
