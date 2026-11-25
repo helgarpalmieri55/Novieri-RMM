@@ -68,8 +68,13 @@ describe("InstallLinkPanel", () => {
     renderPanel({ getInstallLink: vi.fn().mockResolvedValue(OFF), saveInstallLink });
     expect(await screen.findByText(/No link has been generated yet/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("switch", { name: "Accept new computers through the link" }));
+    // Save stays enabled and the missing network is said on submit
+    // (coordinator clarification 8a: a form of several inputs reports on
+    // submit); the attempt sends nothing.
+    const save = screen.getByRole("button", { name: "Save install link" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
     expect(screen.getByRole("alert")).toHaveTextContent("List at least one network");
-    expect(screen.getByRole("button", { name: "Save install link" })).toBeDisabled();
     expect(saveInstallLink).not.toHaveBeenCalled();
   });
 

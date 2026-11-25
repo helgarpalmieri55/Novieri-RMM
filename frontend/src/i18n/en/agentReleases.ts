@@ -225,6 +225,7 @@ export const agentReleases = {
     perHour: "Most computers per hour",
     perHourHelp: "Between 1 and 500. Beyond it, the link asks the next computer to try later.",
     noNetwork: "List at least one network before switching the link on.",
+    unchanged: "Nothing has changed, so nothing was saved.",
     notChanged: "The install link was not changed. {detail}",
     save: "Save install link",
     regenerate: "Generate a new link…",

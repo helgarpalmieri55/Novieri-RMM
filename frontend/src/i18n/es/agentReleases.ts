@@ -225,6 +225,7 @@ export const agentReleases: Shape<typeof en> = {
     perHour: "Máximo de equipos por hora",
     perHourHelp: "Entre 1 y 500. Por encima, el enlace pide al siguiente equipo que lo intente más tarde.",
     noNetwork: "Indica al menos una red antes de activar el enlace.",
+    unchanged: "No ha cambiado nada, así que no se ha guardado nada.",
     notChanged: "No se cambió el enlace de instalación. {detail}",
     save: "Guardar el enlace de instalación",
     regenerate: "Generar un enlace nuevo…",

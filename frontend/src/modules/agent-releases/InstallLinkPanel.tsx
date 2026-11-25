@@ -125,6 +125,11 @@ export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteI
   const [revealed, setRevealed] = useState<string | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  // Populated on Save, never while typing (clarification 8a: a form of several
+  // inputs keeps Save enabled and reports what is missing on submit).
+  const [tried, setTried] = useState(false);
+  // The draft a Save found unchanged: said while the draft is still that one.
+  const [unchangedAt, setUnchangedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (link.data && draft === null) setDraft(draftFrom(link.data));
@@ -175,7 +180,20 @@ export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteI
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              save.mutate(bodyFrom(draft));
+              // A refusal of the last attempt goes first (ruling 7).
+              save.reset();
+              setTried(true);
+              if (noNetwork) return;
+              // NO WRITE WITHOUT A CHANGE (coordinator ruling 13): a save of
+              // the settings as saved would write an audit entry for a change
+              // nobody made.
+              const body = bodyFrom(draft);
+              if (JSON.stringify(body) === JSON.stringify(bodyFrom(draftFrom(link.data)))) {
+                setUnchangedAt(JSON.stringify(draft));
+                return;
+              }
+              setUnchangedAt(null);
+              save.mutate(body);
             }}
           >
             <p className="note">{statusLine(link.data, zone)}</p>
@@ -219,9 +237,14 @@ export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteI
                 onChange={(event) => setDraft({ ...draft, hourlyLimit: event.target.value })}
               />
             </Field>
-            {noNetwork ? (
+            {tried && noNetwork ? (
               <p role="alert" className="form-error">
                 {t("agentReleases.link.noNetwork")}
+              </p>
+            ) : null}
+            {unchangedAt === JSON.stringify(draft) ? (
+              <p role="status" className="note">
+                {t("agentReleases.link.unchanged")}
               </p>
             ) : null}
             {failure ? (
@@ -234,7 +257,7 @@ export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteI
                 type="submit"
                 variant="primary"
                 label={t("agentReleases.link.save")}
-                disabled={save.isPending || noNetwork}
+                disabled={save.isPending}
               />
               {link.data.has_code ? (
                 <Btn

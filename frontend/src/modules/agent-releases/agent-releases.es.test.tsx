@@ -413,6 +413,8 @@ describe("agent packages in Spanish", () => {
     expect(await screen.findByText("Desactivado. Aún no se ha generado ningún enlace.")).toBeInTheDocument();
     expect(screen.getByText("Activa el enlace para descargar el MSI: los equipos se unen a través de él.")).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Aceptar equipos nuevos a través del enlace" }));
+    // Said on submit, not while typing (coordinator clarification 8a).
+    await user.click(screen.getByRole("button", { name: "Guardar el enlace de instalación" }));
     expect(await screen.findByText("Indica al menos una red antes de activar el enlace.")).toBeInTheDocument();
     expectNoEnglish(container);
     await user.type(screen.getByLabelText("Redes a las que responde el enlace"), "10.20.0.0/16");

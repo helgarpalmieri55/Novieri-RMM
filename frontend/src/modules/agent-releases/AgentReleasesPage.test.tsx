@@ -742,6 +742,81 @@ describe("the install link panel on Agent packages", () => {
     await waitFor(() => expect(getInstallLink).toHaveBeenCalledWith("s-1"));
   });
 
+  /** Two sites, each with its own link settings, for the tests below. */
+  function renderTwoSites(saveInstallLink = vi.fn()) {
+    const BRANCH: ClientSiteOut = { ...PRINCIPAL_SITE, id: "s-2", name: "Branch" };
+    const settings = (networks: string[]) => ({
+      enabled: true, has_code: false, networks, disable_at: null,
+      hourly_limit: 50, enabled_at: "2026-11-20T09:00:00Z", joined_since_enabled: 0,
+    });
+    const getInstallLink = vi.fn((siteId: string) =>
+      Promise.resolve(settings(siteId === "s-1" ? ["10.1.0.0/16"] : ["10.2.0.0/16"])),
+    );
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue({
+        user_id: "u", org_id: "o", email: "a@example.com", display_name: "A",
+        permissions: ["enrollment.link.manage"], timezone: null,
+      }),
+      listAgentReleases: () => Promise.resolve([]),
+      getInstallLink,
+      saveInstallLink,
+      listClientSites: () => Promise.resolve([PRINCIPAL_SITE, BRANCH]),
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE, BRANCH]);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AgentReleasesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { saveInstallLink, getInstallLink };
+  }
+
+  it("drops an unsaved edit of one site's link when another site is chosen (coordinator ruling 12)", async () => {
+    // The site is chosen on this page, without a change of route: a draft
+    // that outlived the choice would save one site's networks onto another.
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.type(networks, "{enter}10.9.0.0/16");
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Site" }), "s-2");
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /Networks the link answers/ })).toHaveValue("10.2.0.0/16"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    expect(saveInstallLink).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when Save is pressed on settings nobody changed (coordinator ruling 13)", async () => {
+    // An unchanged save would write an audit entry for a change nobody made.
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    expect(saveInstallLink).not.toHaveBeenCalled();
+    expect(screen.getByText("Nothing has changed, so nothing was saved.")).toBeInTheDocument();
+  });
+
+  it("keeps Save enabled and says a network is missing on submit (clarification 8a)", async () => {
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.clear(networks);
+    // Not said while typing: the form reports on submit.
+    expect(screen.queryByText("List at least one network before switching the link on.")).toBeNull();
+    const save = screen.getByRole("button", { name: "Save install link" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(screen.getByRole("alert")).toHaveTextContent("List at least one network before switching the link on.");
+    expect(saveInstallLink).not.toHaveBeenCalled();
+  });
+
   it("is not offered, and not asked for, without that permission", async () => {
     const { me, getInstallLink } = renderWith(["agent.release.read"]);
     await waitFor(() => expect(me).toHaveBeenCalled());
