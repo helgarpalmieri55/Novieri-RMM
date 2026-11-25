@@ -13,6 +13,9 @@ import { SubnetTreePage } from "../SubnetTreePage";
 import { SweepPanel } from "../SweepPanel";
 import type { GridEntryOut, ScopeOut, SubnetOut, VlanOut, VrfOut } from "../types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 // EVERY IPAM ROW IS ONE CLIENT'S (MSP clients phase 2, migration 0240). A create
 // takes its client from its VRF, or a VLAN from its site, and the server refuses
 // a body that contradicts that parent -- so the console names a client only
@@ -151,6 +154,8 @@ describe("the registry names the client where nothing above a row does", () => {
     const user = userEvent.setup();
     renderWithProviders(<RegistryPage />, "/ipam/registry");
 
+    // New VRF opens its dialog (`?new=vrf`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VRF" }));
     await user.type((await screen.findAllByLabelText("Name"))[0]!, "lan");
     await user.click(screen.getByRole("button", { name: "Add VRF" }));
 
@@ -170,7 +175,9 @@ describe("the registry names the client where nothing above a row does", () => {
     // IPAM creates no sites: an office is the client's.
     expect(screen.queryByRole("button", { name: "Add site" })).toBeNull();
 
-    await user.type(screen.getByLabelText("VID"), "40");
+    // New VLAN opens its dialog (`?new=vlan`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VLAN" }));
+    await user.type(await screen.findByLabelText("VID"), "40");
     await user.selectOptions(screen.getByLabelText("Site"), SITE.id);
     await user.click(screen.getByRole("button", { name: "Add VLAN" }));
 
@@ -200,6 +207,8 @@ describe("the registry names the client where nothing above a row does", () => {
     const user = userEvent.setup();
     renderWithProviders(<RegistryPage />, "/ipam/registry");
 
+    // New VLAN opens its dialog (`?new=vlan`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VLAN" }));
     await user.type(await screen.findByLabelText("VID"), "10");
     await user.click(screen.getByRole("button", { name: "Add VLAN" }));
 
@@ -214,7 +223,7 @@ describe("a subnet, an address and a scan authorization", () => {
     stubApi({ createIpamSubnet });
     const user = userEvent.setup();
     renderWithProviders(<SubnetTreePage />);
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     if (vrf !== null) {
@@ -242,7 +251,7 @@ describe("a subnet, an address and a scan authorization", () => {
     stubApi({ createIpamScanAuthorization, listIpamSubnets: vi.fn().mockResolvedValue([subnet()]) });
     const user = userEvent.setup();
     renderWithProviders(<ScanAuthorizationsPage />);
-    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
     await user.type(await screen.findByLabelText("Prefix"), "10.4.7.0/24");
     await user.click(screen.getByRole("button", { name: "Authorize" }));
 
@@ -398,7 +407,7 @@ describe("pickers follow the row's client", () => {
     });
     const user = userEvent.setup();
     renderWithProviders(<SubnetTreePage />);
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const dialog = await screen.findByRole("dialog");
 
     // The VRF decides the new subnet's client, so it says whose it is.
@@ -419,7 +428,7 @@ describe("pickers follow the row's client", () => {
     });
     const user = userEvent.setup();
     const { unmount } = renderWithProviders(<ScanAuthorizationsPage />);
-    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
     const picker = await screen.findByLabelText("VRF");
     await within(picker).findByRole("option", { name: "acme-lan · Acme" });
     expect(within(picker).getByRole("option", { name: "lab · Novieri" })).toBeInTheDocument();
@@ -694,11 +703,12 @@ describe("the subnet tree opened from the add-a-computer journey (design §4.4)"
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    const views = screen.getByLabelText("Filter by view") as HTMLSelectElement;
-    await user.selectOptions(views, "assignable");
-    expect(views.value).toBe("assignable");
-    await user.selectOptions(views, "never-swept");
-    expect(views.value).toBe("never-swept");
+    // The view is a row of chips in the URL now (Task 10, 5.5), still `?state=`.
+    const views = screen.getByRole("group", { name: "Filter by view" });
+    await user.click(within(views).getByRole("button", { name: /Assignable only/ }));
+    expect(within(views).getByRole("button", { name: /Assignable only/ })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(views).getByRole("button", { name: /Never swept/ }));
+    expect(within(views).getByRole("button", { name: /Never swept/ })).toHaveAttribute("aria-pressed", "true");
     expect(select).toHaveBeenCalledTimes(1);
   });
 });

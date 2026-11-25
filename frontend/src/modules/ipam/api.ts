@@ -32,6 +32,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError, ClientSiteOut, Device, DevicePage, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import { useClientScope } from "../../lib/clientScope";
 import { loadingUntilClient, requireKnown } from "../../lib/clientSelection";
 import type {
@@ -278,11 +279,19 @@ export function useCreateIpamVlanMutation() {
 // Subnets and the derived hierarchy
 // --------------------------------------------------------------------------
 
-export function useIpamSubnets(filters: SubnetFilters = {}) {
-  const api = useApi();
+/**
+ * THE SUBNET LIST, NARROWED BY THE CLIENT CHIP (decision D6; redesign plan,
+ * Receta L, point 7). `chip` is `?client=` ("" without one, which is how every
+ * other caller reads it): the same call with the same filters, read through
+ * `useNarrowedApi` and keyed by the client it narrowed to. The mutations above
+ * still invalidate the `[SUBNETS_KEY]` prefix, which reaches every key.
+ */
+export function useIpamSubnets(filters: SubnetFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<SubnetOut[], ApiError>({
-    queryKey: [SUBNETS_KEY, filters],
+    queryKey: [SUBNETS_KEY, filters, client],
     queryFn: () => api.listIpamSubnets(filters),
+    enabled: ready,
     ...NO_RETRY,
   });
 }
@@ -381,12 +390,13 @@ export function useIpamSubnetAddresses(
   });
 }
 
-export function useIpamSubnetUtilization(subnetId: string | undefined, enabled = true) {
-  const api = useApi();
+/** `chip`: the tree's Client chip, so a row of the narrowed tree reads its figure the same way the row was read. */
+export function useIpamSubnetUtilization(subnetId: string | undefined, enabled = true, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<UtilizationOut, ApiError>({
-    queryKey: [UTILIZATION_KEY, subnetId],
+    queryKey: [UTILIZATION_KEY, subnetId, client],
     queryFn: () => api.getIpamSubnetUtilization(subnetId as string),
-    enabled: enabled && subnetId != null && subnetId !== "",
+    enabled: ready && enabled && subnetId != null && subnetId !== "",
     ...NO_RETRY_ENUMERATION,
   });
 }
@@ -545,11 +555,13 @@ export function useIpamSearch(q: string) {
 // Drift and orphans
 // --------------------------------------------------------------------------
 
-export function useIpamDrift(filters: DriftFilters = {}) {
-  const api = useApi();
+/** Narrowed like `useIpamSubnets`: the tree's drift tile and the drift page read the chip's client. */
+export function useIpamDrift(filters: DriftFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<DriftOut[], ApiError>({
-    queryKey: [DRIFT_KEY, filters],
+    queryKey: [DRIFT_KEY, filters, client],
     queryFn: () => api.listIpamDrift(filters),
+    enabled: ready,
     ...NO_RETRY,
   });
 }
@@ -557,11 +569,12 @@ export function useIpamDrift(filters: DriftFilters = {}) {
 /** Orphans are a SEPARATE query because they are separate information (§4.2):
  * observed addresses inside no registered subnet. Nothing is wrong with the
  * plan; the plan is absent. */
-export function useIpamOrphans() {
-  const api = useApi();
+export function useIpamOrphans(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<OrphanOut[], ApiError>({
-    queryKey: ["ipam-orphans"],
+    queryKey: ["ipam-orphans", client],
     queryFn: () => api.listIpamOrphans(),
+    enabled: ready,
     ...NO_RETRY,
   });
 }

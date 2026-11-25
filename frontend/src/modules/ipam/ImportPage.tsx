@@ -31,14 +31,17 @@ import { variantKind } from "./kinds";
 import type { ImportRowOut, VrfOut } from "./types";
 import { IMPORT_FIELDS, IPAM_MANAGE, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from "./types";
 import { Icon } from "../../shell/icons";
-import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
+import { Btn, FormSection, PageHead, StatusPill, UnsavedGuard } from "../../shell/components";
+import { Steps, type StepState } from "../../shell/viz";
 
 // Import is TWO STEPS BOUND BY A DIGEST, and this page cannot be used any other
 // way.
 //
-// ON THE v3 KIT (`P['ipam/import']` in docs/design/itms-prototype-v3.html):
-// one panel with the file field, its help line and the primary preview
-// action; the verdict table under it once a preview exists. The design's
+// ON THE KIT (redesign plan, Receta O; Task 10, 5.11): the wizard's steps at
+// the top (`Steps`), one folding section per step -- the file and where it
+// goes, its columns, the preview, the apply -- and the three exports as the
+// head's secondary actions. A file chosen and not applied asks before the
+// page is left. The design's
 // source chips (CSV, Windows DHCP, phpIPAM) are not drawn: CSV is the one
 // source the API accepts, and a chip row with one chip is a control that
 // switches nothing.
@@ -58,17 +61,35 @@ import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
 export function ImportPage() {
   const t = useT();
   const permissions = useIpamPermissions();
+  const exports = useCsvExport();
   return (
     <div>
       <PageHead
         title={t("ipam.importExport.title")}
         description={t("ipam.importExport.description")}
+        actions={
+          <>
+            <Btn label={t("ipam.importExport.subnetsCsv")} icon="download" onClick={() => void exports.download("subnets")} />
+            <Btn label={t("ipam.importExport.addressesCsv")} icon="download" onClick={() => void exports.download("addresses")} />
+            <Btn label={t("ipam.importExport.driftCsv")} icon="download" onClick={() => void exports.download("drift")} />
+          </>
+        }
       />
       <IpamNav />
+      {/* What the head's three exports hold, once, under them. */}
+      <p className="note" style={{ marginBottom: 16 }}>
+        {t("ipam.importExport.exportSubtitle")}{" "}
+        <Trans k="ipam.importExport.dormantNote" components={{ b: <b /> }} />
+      </p>
+      {exports.error !== null && (
+        <p role="alert" className="form-error" style={{ marginBottom: 16 }}>
+          {describeSubmitError(exports.error)}
+        </p>
+      )}
       {permissions.manage ? (
         <>
-          <CsvImportPanel />
-          <DocRecordPanel />
+          <CsvImportWizard />
+          <DocRecordSection />
         </>
       ) : (
         <div className="notice" style={{ marginBottom: 16 }}>
@@ -76,7 +97,6 @@ export function ImportPage() {
           <p>{t("ipam.importExport.needsManage")}</p>
         </div>
       )}
-      <ExportPanel />
     </div>
   );
 }
@@ -94,7 +114,7 @@ function defaultImportVrf(vrfs: readonly VrfOut[], selected: string | null): str
   return selectedGlobal?.id ?? vrfs[0]?.id ?? null;
 }
 
-function CsvImportPanel() {
+function CsvImportWizard() {
   const t = useT();
   const preview = usePreviewIpamImportMutation();
   const apply = useApplyIpamImportMutation();
@@ -161,14 +181,33 @@ function CsvImportPanel() {
       : null);
   const mappingNamesAddress = Object.values(mapping).includes("address");
 
+  // WHERE THE WIZARD STANDS, said three ways by the kit's steps (the bar, the
+  // pill and the words), from the same state the buttons are enabled by.
+  const step = (done: boolean, reached: boolean): StepState => (done ? "done" : reached ? "now" : "todo");
+  const steps = [
+    { label: t("ipam.importExport.stepFile"), state: step(file !== null, true) },
+    { label: t("ipam.importExport.stepMap"), state: step(file !== null && mappingNamesAddress, file !== null) },
+    { label: t("ipam.importExport.preview"), state: step(previewed !== null, file !== null && mappingNamesAddress) },
+    { label: t("ipam.importExport.apply"), state: step(apply.data !== undefined, previewed !== null) },
+  ];
+
   return (
-    <Panel
-      title={t("ipam.importExport.csvTitle")}
-      subtitle={t("ipam.importExport.csvSubtitle", {
-        megabytes: (MAX_IMPORT_BYTES / (1024 * 1024)).toFixed(0),
-        rows: formatCount(MAX_IMPORT_ROWS),
-      })}
-    >
+    <>
+      {/* A FILE CHOSEN AND NOT APPLIED ASKS BEFORE THE PAGE IS LEFT: the
+          mapping and the verdict read would be lost with it. Applied, it
+          leaves without asking. */}
+      <UnsavedGuard dirty={file !== null && apply.data === undefined} />
+      <div style={{ marginBottom: 16 }}>
+        <Steps items={steps} />
+      </div>
+
+      <FormSection title={t("ipam.importExport.csvTitle")} icon="upload">
+      <p className="note">
+        {t("ipam.importExport.csvSubtitle", {
+          megabytes: (MAX_IMPORT_BYTES / (1024 * 1024)).toFixed(0),
+          rows: formatCount(MAX_IMPORT_ROWS),
+        })}
+      </p>
       <p className="note" style={{ marginBottom: 14 }}>
         {t("ipam.importExport.csvNote")}
       </p>
@@ -245,15 +284,16 @@ function CsvImportPanel() {
           <span>{file === null ? t("ipam.importExport.drop") : file.name}</span>
         </button>
       </Field>
-      <p className="note" style={{ marginTop: -8, marginBottom: 14 }}>
+      <p className="note" style={{ marginTop: -8 }}>
         {t("ipam.importExport.columns", { fields: IMPORT_FIELDS.join(", ") })}
       </p>
+      </FormSection>
 
-      {columns.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <h3 className="panel-title" style={{ marginBottom: 8 }}>
-            {t("ipam.importExport.mapping")}
-          </h3>
+      <FormSection title={t("ipam.importExport.mapping")} icon="list">
+      {columns.length === 0 ? (
+        <p className="note">{t("ipam.importExport.mapAfterFile")}</p>
+      ) : (
+        <div>
           <div className="form-grid">
             {columns.map((column) => (
               <Field key={column} label={column || t("ipam.importExport.unnamed")}>
@@ -288,6 +328,9 @@ function CsvImportPanel() {
           )}
         </div>
       )}
+      </FormSection>
+
+      <FormSection title={t("ipam.importExport.stepPreviewApply")} icon="eye">
 
       {namesClient && newRow.refused === "unassigned" ? null : (
         <div className="form-actions" style={{ marginTop: 0 }}>
@@ -387,7 +430,8 @@ function CsvImportPanel() {
           <RowTable rows={apply.data.rows} />
         </div>
       )}
-    </Panel>
+      </FormSection>
+    </>
   );
 }
 
@@ -458,14 +502,14 @@ function RowTable({ rows }: { rows: ImportRowOut[] }) {
 // The documentation absorption. NOT a data migration: a silent conversion would
 // hit unparseable CIDRs and duplicate prefixes with no operator to ask, so it is
 // operator-invoked and dry-runs by default.
-function DocRecordPanel() {
+function DocRecordSection() {
   const t = useT();
   const convert = useConvertIpamDocRecordsMutation();
   return (
-    <Panel
-      title={t("ipam.importExport.convertTitle")}
-      subtitle={t("ipam.importExport.convertSubtitle")}
-    >
+    <FormSection title={t("ipam.importExport.convertTitle")} icon="file-text">
+      <p className="note" style={{ marginBottom: 12 }}>
+        {t("ipam.importExport.convertSubtitle")}
+      </p>
       <div className="form-actions" style={{ marginTop: 0 }}>
         <Btn
           label={t("ipam.importExport.dryRun")}
@@ -509,12 +553,12 @@ function DocRecordPanel() {
           </ul>
         </div>
       )}
-    </Panel>
+    </FormSection>
   );
 }
 
-function ExportPanel() {
-  const t = useT();
+/** The three CSV exports, as the head's actions: each downloads, and a refusal is said once under the head. */
+function useCsvExport(): { download: (kind: "subnets" | "addresses" | "drift") => Promise<void>; error: unknown } {
   const api = useApi();
   // The failure itself, not its sentence: the sentence is worded at render, so a
   // language switch re-words a refusal that is already on screen.
@@ -540,24 +584,5 @@ function ExportPanel() {
     }
   }
 
-  return (
-    <Panel
-      title={t("ipam.importExport.exportTitle")}
-      subtitle={t("ipam.importExport.exportSubtitle")}
-    >
-      <p className="note" style={{ marginBottom: 12 }}>
-        <Trans k="ipam.importExport.dormantNote" components={{ b: <b /> }} />
-      </p>
-      <div className="form-actions" style={{ marginTop: 0 }}>
-        <Btn label={t("ipam.importExport.subnetsCsv")} icon="download" onClick={() => void download("subnets")} />
-        <Btn label={t("ipam.importExport.addressesCsv")} icon="download" onClick={() => void download("addresses")} />
-        <Btn label={t("ipam.importExport.driftCsv")} icon="download" onClick={() => void download("drift")} />
-      </div>
-      {error !== null && (
-        <p role="alert" className="form-error" style={{ marginTop: 10 }}>
-          {describeSubmitError(error)}
-        </p>
-      )}
-    </Panel>
-  );
+  return { download, error };
 }

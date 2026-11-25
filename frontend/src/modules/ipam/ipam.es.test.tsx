@@ -62,6 +62,9 @@ import { SubnetDetailPage } from "./SubnetDetailPage";
 import { SubnetTreePage } from "./SubnetTreePage";
 import type { GridEntryOut, ScopeOut, SubnetOut, SweepRunOut, UtilizationOut } from "./types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
@@ -178,7 +181,8 @@ describe("the subnet tree in Spanish", () => {
   it("shows the tiles, the filters, the rows and the readiness panel in Spanish", async () => {
     stub();
     renderPage(<SubnetTreePage />);
-    expect(await screen.findByRole("heading", { name: "Administración de direcciones IP" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator's ruling 1).
+    expect(await screen.findByRole("heading", { name: "Direcciones IP" })).toBeInTheDocument();
     expect(screen.getByText("Subredes, lo que hay en ellas y lo que el parque vio realmente.")).toBeInTheDocument();
     expect(await screen.findByText("Subredes administradas")).toBeInTheDocument();
     expect(screen.getByText("Asignables")).toBeInTheDocument();
@@ -215,12 +219,14 @@ describe("the subnet tree in Spanish", () => {
     expect(screen.getByRole("option", { name: "Todas las VLAN" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "VLAN 90 Workstations" })).toBeInTheDocument();
     expect(screen.getByLabelText("Filtrar por dirección contenida")).toBeInTheDocument();
-    const view = screen.getByLabelText("Filtrar por vista");
-    expect(within(view).getByRole("option", { name: "Todas las subredes" })).toBeInTheDocument();
-    expect(within(view).getByRole("option", { name: "Solo asignables" })).toBeInTheDocument();
-    expect(within(view).getByRole("option", { name: "Nunca barridas" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Limpiar" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Nueva subred" })).toBeInTheDocument();
+    // The view is a row of chips (Task 10, 5.5), counted over the fetched plan.
+    const view = screen.getByRole("group", { name: "Filtrar por vista" });
+    expect(within(view).getByRole("button", { name: /Todas las subredes/ })).toBeInTheDocument();
+    expect(within(view).getByRole("button", { name: /Solo asignables/ })).toBeInTheDocument();
+    expect(within(view).getByRole("button", { name: /Nunca barridas/ })).toBeInTheDocument();
+    // No Clear in the toolbar: an empty list offers the kit's "Quitar filtros" (Receta L, point 3).
+    expect(screen.queryByRole("button", { name: "Limpiar" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Nueva subred" })[0]!).toBeInTheDocument();
     // The readiness panel: nothing is told about drift, no site server serves the subnets.
     expect(await screen.findByText("Antes de poder barrer subredes")).toBeInTheDocument();
     expect(screen.getByText("Un barrido necesita permiso para sondear y un agente en la red desde el que hacerlo.")).toBeInTheDocument();
@@ -232,12 +238,16 @@ describe("the subnet tree in Spanish", () => {
     renderPage(<SubnetTreePage />);
     const user = userEvent.setup();
     await screen.findByRole("table");
-    await user.selectOptions(screen.getByLabelText("Filtrar por vista"), "never-swept");
+    // The view is a row of chips (Task 10, 5.5).
+    const views = screen.getByRole("group", { name: "Filtrar por vista" });
+    await user.click(within(views).getByRole("button", { name: /Nunca barridas/ }));
     expect(within(screen.getByRole("table")).queryByText("Barrida")).toBeNull();
-    await user.selectOptions(screen.getByLabelText("Filtrar por vista"), "assignable");
+    await user.click(within(views).getByRole("button", { name: /Solo asignables/ }));
     expect(within(screen.getByRole("table")).queryByText("contenedor")).toBeNull();
     await user.type(screen.getByLabelText("Buscar subredes"), "zzzz");
-    expect(await screen.findByText("Ninguna subred coincide con estos filtros.")).toBeInTheDocument();
+    // The kit's sentence for a filtered list, with its way out (Receta L, point 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(body());
   });
 
@@ -336,9 +346,10 @@ describe("the subnet tree in Spanish", () => {
     stub();
     renderPage(<SubnetTreePage />);
     await screen.findByRole("table");
-    expect(screen.getByRole("heading", { name: "Administración de direcciones IP" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator's ruling 1).
+    expect(screen.getByRole("heading", { name: "Direcciones IP" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "IP address management" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "IP addresses" })).toBeInTheDocument();
     expect(within(screen.getByRole("table")).getAllByText("2 hours ago").length).toBeGreaterThan(0);
     act(() => setActiveLanguage("es"));
     expect(within(screen.getByRole("table")).getAllByText("hace 2 horas").length).toBeGreaterThan(0);
@@ -466,7 +477,9 @@ describe("a subnet's detail in Spanish", () => {
     renderDetail("subnet-1");
     expect(await screen.findByRole("heading", { name: "10.20.9.0/24" })).toBeInTheDocument();
     // The site's name is the client's site list's, which waits for `/me` (the client).
-    expect(await screen.findByText(/Workstations · Lisbon · VLAN 90 Workstations · puerta de enlace 10\.20\.9\.1/)).toBeInTheDocument();
+    // The record head's context (Receta F): the client and the site first, then
+    // the name, the VRF, the VLAN and the gateway.
+    expect(await screen.findByText(/Lisbon · Workstations · VRF global · VLAN 90 Workstations · puerta de enlace 10\.20\.9\.1/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Todas las subredes/ })).toBeInTheDocument();
     for (const fact of ["Utilizables", "Registradas", "Vistas por barrido", "Deriva", "Puerta de enlace", "DNS", "Agente de barrido", "Escaneo autorizado", "Último barrido"]) {
       expect(screen.getAllByText(fact).length).toBeGreaterThan(0);
@@ -969,7 +982,7 @@ describe("the drift page in Spanish", () => {
     expect(screen.getByText("Direcciones observadas dentro de ninguna subred registrada. El plan falta, no es erróneo.")).toBeInTheDocument();
     // The chip row, with its counts.
     const chips = screen.getByRole("group", { name: "Clase de deriva" });
-    for (const label of [/^Toda la deriva \(6\)$/, /^Documentada, ausente \(1\)$/, /^Presente, sin documentar \(1\)$/, /^MAC distinta \(1\)$/, /^Titular distinto \(1\)$/, /^Dispositivo movido \(1\)$/, /^Conflicto \(1\)$/, /^En reposo \(3\)$/, /^Huérfanas \(8\)$/]) {
+    for (const label of [/^Toda la deriva\s*6$/, /^Documentada, ausente\s*1$/, /^Presente, sin documentar\s*1$/, /^MAC distinta\s*1$/, /^Titular distinto\s*1$/, /^Dispositivo movido\s*1$/, /^Conflicto\s*1$/, /^En reposo\s*3$/, /^Huérfanas\s*8$/]) {
       expect(await within(chips).findByRole("button", { name: label })).toBeInTheDocument();
     }
     // The table.
@@ -1034,7 +1047,8 @@ describe("the drift page in Spanish", () => {
   it("says there is nothing to show, view by view", async () => {
     stub({ listIpamDrift: vi.fn().mockResolvedValue([]), listIpamOrphans: vi.fn().mockResolvedValue([]) });
     renderPage(<DriftPage />, "/ipam/drift");
-    expect(await screen.findByText("No hay nada en esta vista.")).toBeInTheDocument();
+    // Nothing drifts: the cause, said (Task 10, 5.7).
+    expect(await screen.findByText("No hay deriva: lo registrado y lo visto coinciden.")).toBeInTheDocument();
     expect(screen.getByText("Ningún hallazgo sin resolver")).toBeInTheDocument();
     expect(screen.getByText("Todas las direcciones documentadas se pudieron verificar")).toBeInTheDocument();
     expect(screen.getByText("Todas las direcciones observadas están dentro de una subred registrada")).toBeInTheDocument();
@@ -1113,10 +1127,10 @@ describe("the drift page in Spanish", () => {
     renderPage(<DriftPage />, "/ipam/drift");
     await screen.findByRole("table");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("button", { name: /^All drift \(6\)$/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Orphans \(8\)$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^All drift\s*6$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Orphans\s*8$/ })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
-    expect(screen.getByRole("button", { name: /^Toda la deriva \(6\)$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Toda la deriva\s*6$/ })).toBeInTheDocument();
   });
 });
 
@@ -1222,18 +1236,23 @@ describe("the registry page in Spanish", () => {
     expect(screen.getByRole("columnheader", { name: "RD" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Ámbito" })).toBeInTheDocument();
     expect(screen.getAllByText("Todo el cliente").length).toBeGreaterThan(0);
-    for (const label of ["Route distinguisher", "Distinguidor de ruta", "VID", "Sede"]) {
-      if (label === "Route distinguisher") continue;
-      expect(screen.getAllByLabelText(label).length).toBeGreaterThan(0);
-    }
-    expect(screen.getByRole("option", { name: "Todo el cliente (sin sede)" })).toBeInTheDocument();
-    for (const button of ["Añadir VRF", "Añadir VLAN"]) {
-      expect(screen.getByRole("button", { name: button })).toBeInTheDocument();
-    }
+    // Each add form is its dialog now (`?new=vlan`, `?new=vrf`; Task 10, 5.9),
+    // opened from its section's New button, with the add row's fields.
     expect(screen.queryByRole("button", { name: "Añadir sitio" })).toBeNull();
     const user = userEvent.setup();
-    await user.type(screen.getAllByLabelText("Nombre")[0]!, "lab2");
-    await user.click(screen.getByRole("button", { name: "Añadir VRF" }));
+    await user.click(screen.getByRole("button", { name: "Nueva VLAN" }));
+    let dialog = await screen.findByRole("dialog", { name: "Nueva VLAN" });
+    for (const label of ["VID", "Sede"]) {
+      expect(within(dialog).getAllByLabelText(label).length).toBeGreaterThan(0);
+    }
+    expect(within(dialog).getByRole("option", { name: "Todo el cliente (sin sede)" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Añadir VLAN" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cerrar" }));
+    await user.click(screen.getByRole("button", { name: "Nuevo VRF" }));
+    dialog = await screen.findByRole("dialog", { name: "Nuevo VRF" });
+    expect(within(dialog).getByLabelText("Distinguidor de ruta")).toBeInTheDocument();
+    await user.type(within(dialog).getAllByLabelText("Nombre")[0]!, "lab2");
+    await user.click(within(dialog).getByRole("button", { name: "Añadir VRF" }));
     await waitFor(() => expect(api.createIpamVrf).toHaveBeenCalled());
     // El cliente elegido arriba: aquí el interno, `o1` (`selectClient` del arnés).
     expect(api.createIpamVrf).toHaveBeenCalledWith(expect.objectContaining({ name: "lab2", client_id: "o1" }));
@@ -1250,6 +1269,7 @@ describe("the registry page in Spanish", () => {
     expect(await screen.findByText("Todavía no hay VRF.")).toBeInTheDocument();
     expect(await screen.findByText("Este cliente todavía no tiene sedes.")).toBeInTheDocument();
     expect(screen.getByText("Todavía no hay VLAN.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nuevo VRF" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Añadir VRF" })).toBeNull();
     expectNoEnglish(body());
   });
@@ -1259,7 +1279,9 @@ describe("the registry page in Spanish", () => {
     renderPage(<RegistryPage />, "/ipam/registry");
     const user = userEvent.setup();
     await screen.findByText("65000:20");
-    await user.type(screen.getAllByLabelText("Nombre")[0]!, "lab2");
+    // New VRF opens its dialog (`?new=vrf`, Task 10, 5.9).
+    await user.click(screen.getByRole("button", { name: "Nuevo VRF" }));
+    await user.type((await screen.findAllByLabelText("Nombre"))[0]!, "lab2");
     await user.click(screen.getByRole("button", { name: "Añadir VRF" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     // "build" is a recorded VRF / site name in the registry fixture.
@@ -1282,8 +1304,9 @@ describe("the scan authorizations page in Spanish", () => {
     renderPage(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
     expect(await screen.findByRole("heading", { name: "Autorizaciones de escaneo" })).toBeInTheDocument();
     expect(screen.getByText("Los rangos de direcciones que un barrido de red puede sondear.")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Autorizar una subred" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Mostrar las autorizaciones revocadas y caducadas")).toBeInTheDocument();
+    expect((await screen.findAllByRole("button", { name: "Autorizar una subred" }))[0]!).toBeInTheDocument();
+    // Whether revoked grants are listed is a chip in the URL now (Task 10, 5.10: `?revoked=`).
+    expect(screen.getByRole("button", { name: "También revocadas y vencidas" })).toBeInTheDocument();
     expect(
       screen.getByText(/Una autorización activa permite que los barridos sondeen \(ping y ARP\) cualquier dirección dentro de su rango, en su VRF\. Un barrido sigue acotado por la subred a la que apunta/),
     ).toBeInTheDocument();
@@ -1358,7 +1381,7 @@ describe("the scan authorizations page in Spanish", () => {
     const api = stub();
     renderPage(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Autorizar una subred" }));
+    await user.click((await screen.findAllByRole("button", { name: "Autorizar una subred" }))[0]!);
     const dialog = await screen.findByRole("dialog", { name: "Autorizar un prefijo" });
     expect(within(dialog).getByText(/Esto decide a qué direcciones puede enviar sondas de red esta plataforma\./)).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Rellenar desde una subred registrada")).toBeInTheDocument();
@@ -1405,7 +1428,7 @@ describe("the scan authorizations page in Spanish", () => {
     stub();
     renderPage(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Autorizar una subred" }));
+    await user.click((await screen.findAllByRole("button", { name: "Autorizar una subred" }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.20.9.0/24");
     expect(within(dialog).getByText("Esto permite que los barridos sondeen 256 direcciones (ping y ARP).")).toBeInTheDocument();
@@ -1440,7 +1463,8 @@ describe("the import and export page in Spanish", () => {
     expect(screen.getByText("Convertir los registros de red de la documentación")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Simulación" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Convertir de verdad" })).toBeInTheDocument();
-    expect(screen.getByText("Exportar")).toBeInTheDocument();
+    // The three exports are the head's secondary actions now (Task 10, 5.11), with no section of their own.
+    expect(document.querySelector(".ph-act")).toContainElement(screen.getByRole("button", { name: "CSV de deriva" }));
     expect(screen.getByText("Las direcciones en reposo no están incluidas")).toBeInTheDocument();
     for (const button of ["CSV de subredes", "CSV de direcciones", "CSV de deriva"]) {
       expect(screen.getByRole("button", { name: button })).toBeInTheDocument();

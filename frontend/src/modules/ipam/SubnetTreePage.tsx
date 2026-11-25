@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { Link, useSearchParams } from "react-router-dom";
@@ -39,7 +39,25 @@ import { UtilizationBar } from "./UtilizationBar";
 import type { SubnetFilters, SubnetKind, SubnetOut } from "./types";
 import { IPAM_MANAGE, SUBNET_KINDS } from "./types";
 import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  UnsavedGuard,
+  useNarrowedApi,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 
 // The subnet tree (spec §12): the DERIVED hierarchy, per-node utilisation,
 // site/VLAN under the name, a drift badge, and filters by VRF, site and VLAN.
@@ -61,12 +79,12 @@ import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, Sta
 // addresses at all; a bar at 0% would say it is empty, which is a different
 // claim from "this row exists so the tree reads".
 
-function UtilizationCell({ subnet }: { subnet: SubnetOut }) {
+function UtilizationCell({ subnet, chip }: { subnet: SubnetOut; chip: string }) {
   const t = useT();
   // Only assignable subnets have a utilisation to fetch. The query is disabled
   // for containers rather than fetched-and-discarded.
   const enabled = hasUtilization(subnet);
-  const utilization = useIpamSubnetUtilization(subnet.id, enabled);
+  const utilization = useIpamSubnetUtilization(subnet.id, enabled, chip);
   if (!enabled) {
     return (
       <span className="note" title={t("ipam.tree.containerTitle")}>
@@ -96,41 +114,55 @@ function UtilizationCell({ subnet }: { subnet: SubnetOut }) {
  * the indent honest: a node whose parent is not in the filtered set is promoted
  * to a root (see `buildSubnetTree`), so "assignable only" renders a flat list
  * of assignable prefixes rather than children indented under absent parents.
+ *
+ * ON THE LIST KIT (Task 10, 5.5) the view is a chip row: "" is every subnet.
  */
 const VIEWS: ReadonlyArray<{ key: string; label: MessageKey }> = [
-  { key: "all", label: "ipam.tree.viewAll" },
+  { key: "", label: "ipam.tree.viewAll" },
   { key: "assignable", label: "ipam.tree.viewAssignable" },
   { key: "never-swept", label: "ipam.tree.viewNeverSwept" },
 ];
 
+/** The filters the server applies, from the URL: an empty value is no filter. */
+const SERVER_FILTERS = ["q", "vrf", "site", "vlan", "contains"] as const;
+
 export function SubnetTreePage() {
-  // Opened from the add-a-computer journey: its client (design §4.4).
+  // Opened from the add-a-computer journey: its client (design §4.4), from
+  // `?journey_client=` (Task 5), so `client` and `site` are free for the list.
   useAdoptJourneyClient();
   const t = useT();
   const permissions = useIpamPermissions();
-  const [filters, setFilters] = useState<SubnetFilters>({});
+  // ON THE LIST KIT (redesign plan, Receta L; Task 10, 5.5): every filter is in
+  // the URL, so a filtered tree is a link and the client 360's
+  // "/ipam?client=<id>" opens this client's networks. `?client=` only narrows
+  // the list: it never changes the console's client (decision D20).
+  const filters = useUrlFilters([...SERVER_FILTERS, "state", "client"] as const);
+  const newSubnet = useNewParam("subnet");
+  // AN OLD LINK STILL OPENS THE DIALOG. `?register=1` was how the drift page's
+  // orphans and the site servers' prerequisites opened it, and saved links
+  // carry it: it becomes `?new=subnet` once, in place.
   const [params, setParams] = useSearchParams();
-  // `?register=1` opens the register dialog on arrival: the drift page's
-  // orphans link lands here with the form already open, as it did when the
-  // form lived in the page body. Closing clears the param so a reload does
-  // not reopen it.
-  const [registering, setRegistering] = useState(params.get("register") === "1");
-  const closeRegister = () => {
-    setRegistering(false);
-    if (params.get("register") !== null) {
-      const next = new URLSearchParams(params);
-      next.delete("register");
-      setParams(next, { replace: true });
-    }
-  };
-  const view = params.get("state") ?? "all";
-  const setView = (key: string) => {
+  useEffect(() => {
+    if (params.get("register") !== "1") return;
     const next = new URLSearchParams(params);
-    if (key === "all") next.delete("state");
-    else next.set("state", key);
-    setParams(next);
-  };
-  const subnets = useIpamSubnets(filters);
+    next.delete("register");
+    next.set("new", "subnet");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+  const view = filters.values.state;
+
+  const serverFilters = useMemo<SubnetFilters>(() => {
+    const out: SubnetFilters = {};
+    for (const key of SERVER_FILTERS) if (filters.values[key] !== "") out[key] = filters.values[key];
+    return out;
+  }, [filters.values]);
+  const chip = filters.values.client;
+  // The client the chip narrowed to: a tile counted for it opens its rows
+  // with the same `client=` (coordinator's ruling on the wave reviews).
+  const { client: narrowedTo } = useNarrowedApi(chip);
+  const withClient = (path: string): string =>
+    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
+  const subnets = useIpamSubnets(serverFilters, chip);
   const vrfs = useIpamVrfs();
   const { selected } = useClientScope();
   const clientName = useClientName();
@@ -140,7 +172,8 @@ export function SubnetTreePage() {
   // The default drift list already excludes `dormant` and resolved items
   // server-side; `isDriftFinding` is applied anyway so the badge cannot start
   // counting a dormant row if a future filter change puts one in this list.
-  const drift = useIpamDrift();
+  // Narrowed with the tree, so its tile counts the chip's client's subnets.
+  const drift = useIpamDrift({}, chip);
 
   const driftBySubnet = useMemo(() => {
     const counts = new Map<string, number>();
@@ -179,30 +212,50 @@ export function SubnetTreePage() {
   const allSubnets = subnets.data ?? [];
   const assignableCount = allSubnets.filter((s) => s.kind === "assignable").length;
   const neverSweptCount = allSubnets.filter((s) => s.last_swept_at === null).length;
-  // The SERVER-side filters only: this flag explains an empty *fetch*, and the
-  // view below narrows what was fetched. Folding them together would blame the
-  // VRF picker for a "never swept" view that legitimately holds nothing.
-  const hasFilters = Object.values(filters).some((value) => value !== undefined && value !== "");
+  // THE SERVER-SIDE FILTERS AND THE CHIP: this flag explains an empty *fetch*,
+  // and the view below narrows what was fetched. Folding the view in would
+  // blame the VRF picker for a "never swept" view that legitimately holds
+  // nothing.
+  const hasFilters = Object.keys(serverFilters).length > 0 || chip !== "";
+  // The view's counts are the fetched list's own: `GET /ipam/subnets` answers
+  // every subnet the filters match (no page), so these are totals.
+  const viewCount: Readonly<Record<string, number>> = {
+    "": allSubnets.length,
+    assignable: assignableCount,
+    "never-swept": neverSweptCount,
+  };
+
+  const primary = permissions.manage ? (
+    <Btn label={t("ipam.tree.newSubnet")} icon="plus" variant="primary" onClick={newSubnet.start} />
+  ) : undefined;
+
+  /** A filter with many values, as the kit's chip-shaped select (`.chip-select`). */
+  const chipSelect = (
+    key: "vrf" | "site" | "vlan",
+    caption: string,
+    aria: string,
+    all: string,
+    options: readonly { id: string; label: string }[],
+  ) => (
+    <span className={filters.values[key] === "" ? "chip chip-select" : "chip chip-select on"}>
+      <span aria-hidden="true">{caption}</span>
+      <select aria-label={aria} value={filters.values[key]} onChange={(e) => filters.set(key, e.target.value)}>
+        <option value="">{all}</option>
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
 
   return (
     <div>
-      <PageHead
-        title={t("ipam.tree.title")}
-        description={t("ipam.tree.description")}
-        actions={
-          permissions.manage ? (
-            <Btn
-              label={t("ipam.tree.newSubnet")}
-              icon="plus"
-              variant="primary"
-              onClick={() => setRegistering(true)}
-            />
-          ) : undefined
-        }
-      />
+      <PageHead title={t("ipam.tree.title")} description={t("ipam.tree.description")} actions={primary} />
       <IpamNav />
 
-      <IpamReadiness />
+      <IpamReadiness chip={chip} />
 
       {/* AUDITOR B [MEDIUM]: "With zero subnets the tiles read `Managed
           subnets 0`, `Assignable 0`, `With drift 0`, `Never swept 0` ...
@@ -218,42 +271,34 @@ export function SubnetTreePage() {
 
           Not shown while the request is still in flight or has failed: a
           sentence claiming nothing is registered is its own false statement
-          when the truth is that nothing has been fetched. `QueryState` below
-          owns both of those. */}
+          when the truth is that nothing has been fetched. The list below owns
+          both of those. */}
       {allSubnets.length > 0 ? (
         /* EVERY TILE OPENS THE ROWS IT COUNTED. Three of the four are views
            of the tree below, carried in the URL (`?state=`); "With drift" is
            the reconciliation list, which is a different page because a drift
            finding is about an ADDRESS, not about the subnet that contains it.
+           Under the Client chip each carries its `client=`, so it opens the
+           rows it counted.
 
-           "With drift" and "Never swept" are both `urgent`, and the second one
-           had to become so. It read `tone="orange"` alone, which draws NOTHING:
-           `tileKind` (`shell/components.tsx`) only returns a kind when `loud`
-           is also set, so the tile that carries the warn alert-triangle sat on
-           a plain white card immediately beside "With drift", tinted amber for
-           the same class of problem. v3's own /ipam tints its UNSWEPT tile
-           amber, and amber IS the "worth fixing, not an incident" treatment
-           here -- crit red is the incident, and neither of these takes it. A
-           tone that draws nothing is worse than either choice, because the next
-           reader believes the hue was considered.
-
-           `urgent` still cannot shout about a measured zero: `StatCard` drops
-           the wash when the value is "0", so a fleet with every subnet swept
-           gets the plain card and `zeroLabel`, which is the whole point of the
-           tile row above. */
+           "With drift" and "Never swept" are both `urgent`: amber IS the
+           "worth fixing, not an incident" treatment here -- crit red is the
+           incident, and neither of these takes it. `urgent` still cannot shout
+           about a measured zero: `StatCard` drops the wash when the value is
+           "0". */
         <StatsGrid columns={4}>
           <StatCard
             label={t("ipam.tree.managed")}
             value={String(allSubnets.length)}
             icon="network"
-            to="/ipam"
+            to={withClient("/ipam")}
             tone="neutral"
           />
           <StatCard
             label={t("ipam.tree.assignable")}
             value={String(assignableCount)}
             icon="database"
-            to="/ipam?state=assignable"
+            to={withClient("/ipam?state=assignable")}
             tone="blue"
             zeroLabel={t("ipam.tree.assignableZero")}
           />
@@ -261,9 +306,10 @@ export function SubnetTreePage() {
             label={t("ipam.tree.withDrift")}
             value={String(driftBySubnet.size)}
             icon="arrows-exchange"
-            to="/ipam/drift"
+            to={withClient("/ipam/drift")}
             tone="gold"
             urgent
+            pending={drift.isPending && !drift.error}
             /* The zero this module most needs to disambiguate: the drift list
                answered and no subnet is in it. The "nothing has been measured"
                zero never reaches a tile at all; the whole row is replaced by
@@ -275,134 +321,107 @@ export function SubnetTreePage() {
             label={t("ipam.tree.neverSwept")}
             value={String(neverSweptCount)}
             icon="warning"
-            to="/ipam?state=never-swept"
+            to={withClient("/ipam?state=never-swept")}
             tone="orange"
             urgent
             zeroLabel={t("ipam.tree.neverSweptZero")}
             foot={<span>{t("ipam.tree.neverSweptFoot")}</span>}
           />
         </StatsGrid>
-      ) : subnets.isLoading || subnets.error ? null : (
+      ) : subnets.isPending || subnets.error ? null : (
         <div className="notice" style={{ marginBottom: 16 }}>
           <Icon name="info" size={16} />
-          <p>
-            {hasFilters ? t("ipam.tree.clearFilters") : t("ipam.tree.noneRegistered")}
-          </p>
+          <p>{hasFilters ? t("ipam.tree.clearFilters") : t("ipam.tree.noneRegistered")}</p>
         </div>
       )}
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("ipam.tree.searchPlaceholder")}
-            value={filters.q ?? ""}
-            onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
-            aria-label={t("ipam.tree.searchAria")}
-          />
-          <select
-            className="select-field"
-            aria-label={t("ipam.tree.vrfAria")}
-            value={filters.vrf ?? ""}
-            onChange={(e) => setFilters({ ...filters, vrf: e.target.value || undefined })}
-          >
-            <option value="">{t("ipam.tree.allVrfs")}</option>
-            {vrfs.data?.map((vrf) => (
-              <option key={vrf.id} value={vrf.id}>
-                {vrf.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("ipam.tree.siteAria")}
-            value={filters.site ?? ""}
-            onChange={(e) => setFilters({ ...filters, site: e.target.value || undefined })}
-          >
-            <option value="">{t("ipam.tree.allSites")}</option>
-            {directory.sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {showClient
-                  ? t("ipam.fields.siteOfClient", { site: site.name, client: clientName(site.client_id) })
-                  : site.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("ipam.tree.vlanAria")}
-            value={filters.vlan ?? ""}
-            onChange={(e) => setFilters({ ...filters, vlan: e.target.value || undefined })}
-          >
-            <option value="">{t("ipam.tree.allVlans")}</option>
-            {vlans.data?.map((vlan) => (
-              <option key={vlan.id} value={vlan.id}>
-                {t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })}
-              </option>
-            ))}
-          </select>
-          <SearchField
-            /* NO GEOMETRY OF ITS OWN (design review I5). This field carried
-               `wrapperStyle={{ flex: "0 1 280px" }}` -- a bound meant to stop
-               the second search box claiming a wrap line beside the first on a
-               desktop toolbar. It was the ONLY `wrapperStyle` in the console,
-               and at 390 it was the bug it was written to prevent: below the
-               kit's 640px fold every control in a `.filterbar` takes the whole
-               line, and a box that cannot grow stops at its 280px basis while
-               its five siblings run to the panel's edge. One ragged control in
-               a stack of six.
-
-               `flex-grow: 0` is what does that, and no width can fix it: the
-               floor and the fold are decided by the kit's `.srch-wrap`
-               (`flex: 1 1 230px`), which is what the other ~20 search boxes in
-               this console use and what the first field on this very row uses.
-               An exception here was a fork of the kit's one growing control. */
-            placeholder={t("ipam.tree.containsPlaceholder")}
-            value={filters.contains ?? ""}
-            onChange={(e) => setFilters({ ...filters, contains: e.target.value || undefined })}
-            aria-label={t("ipam.tree.containsAria")}
-          />
-          {/* The view the tiles link to. A `<select>` rather than a second tab
-              strip: the strip at the top of this page switches ROUTES, and two
-              tab strips on one screen switching different things is how an
-              operator learns to trust neither. */}
-          <select
-            className="select-field"
-            aria-label={t("ipam.tree.viewAria")}
-            value={view}
-            onChange={(e) => setView(e.target.value)}
-          >
-            {VIEWS.map((item) => (
-              <option key={item.key} value={item.key}>
-                {t(item.label)}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-          <Btn
-            label={t("ipam.tree.clear")}
-            onClick={() => {
-              setFilters({});
-              setView("all");
-            }}
-          />
-        </FilterBar>
-
-        <QueryState
-          loading={subnets.isLoading}
-          error={subnets.error}
-          empty={rows.length === 0}
-          emptyLabel={
-            hasFilters
-              ? t("ipam.tree.emptyFiltered")
-              : view === "all"
-                ? t("ipam.tree.emptyAll")
-                : view === "assignable"
-                  ? t("ipam.tree.emptyAssignable")
-                  : t("ipam.tree.emptyUnswept")
+        <ListToolbar
+          search={
+            <>
+              <SearchField
+                placeholder={t("ipam.tree.searchPlaceholder")}
+                value={filters.values.q}
+                onChange={(e) => filters.set("q", e.target.value)}
+                aria-label={t("ipam.tree.searchAria")}
+              />
+              {/* NO GEOMETRY OF ITS OWN (design review I5): the kit's
+                  `.srch-wrap` decides the floor and the fold for both search
+                  boxes, so the stack cannot go ragged at 390. It writes its
+                  key like any filter (a new history entry per change). */}
+              <SearchField
+                placeholder={t("ipam.tree.containsPlaceholder")}
+                value={filters.values.contains}
+                onChange={(e) => filters.set("contains", e.target.value, { replace: true })}
+                aria-label={t("ipam.tree.containsAria")}
+              />
+            </>
           }
-          emptyIcon="network"
-        >
-          <Table>
+          chips={
+            <>
+              <FilterChips
+                label={t("ipam.tree.viewAria")}
+                options={VIEWS.map((item) => ({
+                  value: item.key,
+                  label: t(item.label),
+                  count: subnets.data ? viewCount[item.key] : undefined,
+                }))}
+                value={view}
+                onChange={(value) => filters.set("state", value)}
+              />
+              {chipSelect(
+                "vrf",
+                t("ipam.fields.vrf"),
+                t("ipam.tree.vrfAria"),
+                t("ipam.tree.allVrfs"),
+                (vrfs.data ?? []).map((vrf) => ({ id: vrf.id, label: vrf.name })),
+              )}
+              {chipSelect(
+                "site",
+                t("ipam.fields.site"),
+                t("ipam.tree.siteAria"),
+                t("ipam.tree.allSites"),
+                directory.sites.map((site) => ({
+                  id: site.id,
+                  label: showClient
+                    ? t("ipam.fields.siteOfClient", { site: site.name, client: clientName(site.client_id) })
+                    : site.name,
+                })),
+              )}
+              {chipSelect(
+                "vlan",
+                t("ipam.fields.vlan"),
+                t("ipam.tree.vlanAria"),
+                t("ipam.tree.allVlans"),
+                (vlans.data ?? []).map((vlan) => ({ id: vlan.id, label: t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name }) })),
+              )}
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={<ShowingCount shown={rows.length} total={subnets.data ? allSubnets.length : null} />}
+        />
+
+        <QueryState loading={subnets.isPending} error={subnets.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            /* Nothing fetched under the filters or the chip: the kit's sentence
+               and its way out. Nothing in the chosen view of an unfiltered
+               plan: that view's own sentence. Nothing at all: the first
+               subnet's action. */
+            <ListEmpty
+              filtered={hasFilters}
+              onClear={filters.clear}
+              nothingYet={
+                view === ""
+                  ? t("ipam.tree.emptyAll")
+                  : view === "assignable"
+                    ? t("ipam.tree.emptyAssignable")
+                    : t("ipam.tree.emptyUnswept")
+              }
+              action={view === "" ? primary : undefined}
+              icon="network"
+            />
+          ) : (
+          <Table label={t("ipam.tree.title")}>
             <thead>
               <tr>
                 <Th>{t("ipam.tree.colName")}</Th>
@@ -448,7 +467,7 @@ export function SubnetTreePage() {
                     </Td>
                     {showClient ? <Td>{clientName(node.subnet.client_id)}</Td> : null}
                     <Td>
-                      <UtilizationCell subnet={node.subnet} />
+                      <UtilizationCell subnet={node.subnet} chip={chip} />
                     </Td>
                     <Td>
                       {driftCount > 0 ? (
@@ -482,17 +501,20 @@ export function SubnetTreePage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      {permissions.manage && (
-        <Dialog open={registering} onClose={closeRegister} title={t("ipam.tree.registerTitle")}>
+      {/* Mounted only while open (`?new=subnet`): each opening starts empty. */}
+      {permissions.manage && newSubnet.open ? (
+        <Dialog open onClose={newSubnet.close} title={t("ipam.tree.registerTitle")}>
           <CreateSubnetForm />
         </Dialog>
-      )}
+      ) : null}
     </div>
   );
 }
+
 
 // Auditor B (HIGH): "An impossible CIDR (999.999.999.999/99) is accepted by the
 // field and Register is a silent no-op" — post-click DOM read `{live: 0, err:
@@ -602,6 +624,13 @@ function CreateSubnetForm() {
   const sites = useIpamSites(client);
   const clientVlans = (vlans.data ?? []).filter((vlan) => vlan.client_id === client);
   const [gateway, setGateway] = useState("");
+  // A PREFIX, NAME OR GATEWAY TYPED AND NOT REGISTERED ASKS BEFORE IT IS LEFT
+  // (coordinator's ruling on the wave reviews): `?new=subnet` holds the form.
+  // The VRF, site, VLAN and kind are where the next subnet goes, and stay set
+  // after a registration (the dialog stays open for the next one), so they are
+  // not what is lost. The page mounts the dialog only while open, so every
+  // opening starts empty.
+  const dirty = prefix !== "" || name !== "" || gateway !== "";
   // Populated ON SUBMIT, never while typing — "10.4" is not yet wrong, it is
   // unfinished, and a form that says so mid-keystroke is its own kind of noise.
   // Held as the rules and the values they refused, and worded at render, so a
@@ -641,6 +670,7 @@ function CreateSubnetForm() {
 
   return (
     <>
+      <UnsavedGuard dirty={dirty} search={["new"]} />
       <p className="note" style={{ marginBottom: 14 }}>
         {t("ipam.tree.registerNote")}
       </p>

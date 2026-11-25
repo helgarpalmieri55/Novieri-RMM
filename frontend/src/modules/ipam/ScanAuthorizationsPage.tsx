@@ -43,11 +43,17 @@ import { Icon } from "../../shell/icons";
 import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
 } from "../../shell/components";
 
 // THE MODULE'S CONTROL SURFACE.
@@ -85,8 +91,14 @@ export function ScanAuthorizationsPage() {
   useAdoptJourneyClient();
   const t = useT();
   const permissions = useIpamPermissions();
-  const [includeRevoked, setIncludeRevoked] = useState(false);
-  const [granting, setGranting] = useState(false);
+  // ON THE LIST KIT (Receta L; Task 10, 5.10): whether revoked and expired
+  // grants are listed is a chip in the URL (`?revoked=include`), and Grant
+  // opens from `?new=grant` (decision D8), so both are links. No Client chip:
+  // a scan authorization is the client chosen at the top's (invariant
+  // 2a(d)), and this page reads in that scope.
+  const filters = useUrlFilters(["revoked"] as const);
+  const includeRevoked = filters.values.revoked === "include";
+  const grant = useNewParam("grant");
   const [revoking, setRevoking] = useState<{ id: string; prefix: string } | null>(null);
   const scopes = useIpamScanAuthorizations(includeRevoked);
   const subnets = useIpamSubnets();
@@ -95,36 +107,36 @@ export function ScanAuthorizationsPage() {
   const { selected } = useClientScope();
   const clientName = useClientName();
   const showClient = selected === null;
+  const items = scopes.data ?? [];
+
+  const primary = permissions.scopeManage ? (
+    <Btn label={t("ipam.scans.authorizeSubnet")} icon="plus" variant="primary" onClick={grant.start} />
+  ) : undefined;
 
   return (
     <div>
       <PageHead
         title={t("ipam.scans.title")}
         description={t("ipam.scans.description")}
-        actions={
-          permissions.scopeManage ? (
-            <Btn
-              label={t("ipam.scans.authorizeSubnet")}
-              icon="plus"
-              variant="primary"
-              onClick={() => setGranting(true)}
-            />
-          ) : undefined
-        }
+        actions={primary}
       />
       <IpamNav />
 
       <Panel bare>
-        <FilterBar>
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={includeRevoked}
-              onChange={(e) => setIncludeRevoked(e.target.checked)}
+        <ListToolbar
+          chips={
+            <FilterChips
+              label={t("ipam.scans.revokedLabel")}
+              options={[
+                { value: "", label: t("ipam.scans.activeOnly") },
+                { value: "include", label: t("ipam.scans.withRevoked") },
+              ]}
+              value={filters.values.revoked}
+              onChange={(value) => filters.set("revoked", value)}
             />
-            {t("ipam.scans.showRevoked")}
-          </label>
-        </FilterBar>
+          }
+          end={<ShowingCount shown={items.length} total={scopes.data ? items.length : null} />}
+        />
         {/* WHAT A GRANT MEANS, AND THE SAFEGUARD, ONCE EACH. Both are the same
             sentences under every prefix, and in a table cell they made each row
             about 500px tall at 390px, pushing the state, the note and the row's
@@ -146,14 +158,19 @@ export function ScanAuthorizationsPage() {
             </>
           )}
         </p>
-        <QueryState
-          loading={scopes.isLoading}
-          error={scopes.error}
-          empty={(scopes.data ?? []).length === 0}
-          emptyLabel={t("ipam.scans.empty")}
-          emptyIcon="shield"
-        >
-          <Table>
+        <QueryState loading={scopes.isPending} error={scopes.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            /* No grant at all: what that means (nothing will be swept), and the
+               way to make the first one. None under the chip: its way out. */
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("ipam.scans.empty")}
+              action={primary}
+              icon="shield-check"
+            />
+          ) : (
+          <Table label={t("ipam.scans.title")}>
             <thead>
               <tr>
                 {/* STATE BEFORE THE PROSE, as v3 draws this row (its cells
@@ -183,6 +200,7 @@ export function ScanAuthorizationsPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
         {revoke.isError && (
           <div className="panel-b">
@@ -205,11 +223,12 @@ export function ScanAuthorizationsPage() {
         onCancel={() => setRevoking(null)}
       />
 
-      {permissions.scopeManage && (
-        <Dialog open={granting} onClose={() => setGranting(false)} title={t("ipam.scans.grantTitle")}>
+      {/* Mounted only while open (`?new=grant`): each opening starts empty. */}
+      {permissions.scopeManage && grant.open ? (
+        <Dialog open onClose={grant.close} title={t("ipam.scans.grantTitle")}>
           <GrantForm subnets={subnets.data ?? []} />
         </Dialog>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -338,6 +357,11 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
   const client = newRow.clientId;
   // Populated on Authorize, never while typing (the form kernel's rule).
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A prefix, note or expiry typed and not authorized asks before it is left
+  // (coordinator's ruling on the wave reviews): `?new=grant` holds the form.
+  // The VRF stays chosen after a grant (the dialog stays open for the next
+  // one), so it is not what would be lost.
+  const { guard } = useUnsavedGuard(prefix !== "" || note !== "" || expiresAt !== "", { search: ["new"] });
 
   const parsed = parsePrefix(prefix);
   // Which registered subnet, if any, the Prefix currently names, so the picker
@@ -360,6 +384,7 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
 
   return (
     <div>
+      {guard}
       <p className="note" style={{ marginBottom: 14 }}>
         {t("ipam.scans.grantNote")}
       </p>
@@ -526,6 +551,12 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
               );
             }}
           />
+          {/* A DISABLED AUTHORIZE SAYS WHY (coordinator's ruling 8): with no
+              prefix there is nothing to size, and a grant nobody can size is
+              not offered. A prefix that does not parse says so above. */}
+          {prefix.trim() === "" && !create.isSuccess ? (
+            <span className="note">{t("ipam.scans.needsPrefix")}</span>
+          ) : null}
           {create.isSuccess && (
             <span className="form-saved" role="status">
               {t("ipam.scans.authorized")}

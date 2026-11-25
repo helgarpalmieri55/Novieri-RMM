@@ -17,9 +17,9 @@ import {
   useIpamSubnet,
   useIpamSubnetUtilization,
   useIpamVlans,
+  useIpamVrfs,
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
-import { IpamNav } from "./IpamNav";
 import {
   driftClassPresentation,
   effectiveSweepScope,
@@ -38,7 +38,9 @@ import { MAX_NEXT_FREE } from "./types";
 import type { DriftOut, SubnetOut } from "./types";
 import { Icon } from "../../shell/icons";
 import { Facts } from "../../shell/viz";
-import { Btn, PageHead, Panel, StatusPill, Tabs } from "../../shell/components";
+import { humaniseEnum } from "../../lib/labels";
+import { Btn, ClientContext, DetailHead, Panel, StatusPill, UrlTabs, useUrlTab } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // One subnet: the facts strip, then the address grid, ranges, sweeps and drift
 // behind v3's four tabs (`P['ipam/subnets/:subnetId']` in
@@ -51,12 +53,17 @@ import { Btn, PageHead, Panel, StatusPill, Tabs } from "../../shell/components";
 // container prefix has no utilisation, so those cells say so rather than
 // showing a zero.
 
-const TABS: ReadonlyArray<{ key: string; label: MessageKey }> = [
-  { key: "addresses", label: "ipam.subnet.tabAddresses" },
-  { key: "ranges", label: "ipam.subnet.tabRanges" },
-  { key: "sweeps", label: "ipam.subnet.tabSweeps" },
-  { key: "drift", label: "ipam.subnet.tabDrift" },
-];
+// THE TAB IS IN THE URL (redesign plan, Receta F; Task 10, 5.6): `?tab=sweeps`
+// reloads on Sweeps and is a link; the default writes nothing and an unknown
+// tab opens it. This was the console's one page with its tabs in `useState`.
+const TAB_KEYS = ["addresses", "ranges", "sweeps", "drift"] as const;
+type Tab = (typeof TAB_KEYS)[number];
+const TAB_LABEL: Readonly<Record<Tab, MessageKey>> = {
+  addresses: "ipam.subnet.tabAddresses",
+  ranges: "ipam.subnet.tabRanges",
+  sweeps: "ipam.subnet.tabSweeps",
+  drift: "ipam.subnet.tabDrift",
+};
 
 export function SubnetDetailPage() {
   const t = useT();
@@ -70,17 +77,23 @@ export function SubnetDetailPage() {
   const vlans = useIpamVlans();
   const scopes = useIpamScanAuthorizations();
   const drift = useIpamDrift(subnetId ? { subnet: subnetId } : {});
-  const [tab, setTab] = useState<string>("addresses");
+  const vrfs = useIpamVrfs();
+  const [tab, setTab] = useUrlTab<Tab>(TAB_KEYS, "addresses");
+  // The tab names the record (Receta F): "<prefix> · IP addresses · Novieri RMM".
+  useRecordTitle(subnet.data?.prefix);
 
   const findings = useMemo(
     () => (drift.data ?? []).filter((item) => isDriftFinding(item)),
     [drift.data],
   );
 
+  // The way back, before the record is known: a subnet that did not load still
+  // leaves the person one click from the tree.
+  const back = { to: "/ipam", label: t("ipam.subnet.allSubnets") };
   if (subnet.error) {
     return (
       <div>
-        <IpamNav />
+        <DetailHead back={back} title={t("ipam.subnet.titleFallback")} />
         <ErrorLine error={subnet.error} />
       </div>
     );
@@ -88,7 +101,7 @@ export function SubnetDetailPage() {
   if (!subnet.data || !subnetId) {
     return (
       <div>
-        <IpamNav />
+        <DetailHead back={back} title={t("ipam.subnet.titleFallback")} />
         <div className="empty">
           <Icon name="clock" size={26} />
           <b>{t("ipam.fields.loading")}</b>
@@ -99,7 +112,7 @@ export function SubnetDetailPage() {
 
   const row = subnet.data;
   // Worded here, on every render: a memoised list would keep the language it was built in.
-  const tabs = TABS.map((item) => ({ key: item.key, label: t(item.label) }));
+  const tabs = TAB_KEYS.map((key) => ({ key, label: t(TAB_LABEL[key]) }));
   // A 422 on utilisation is the enumeration ceiling, and the grid renders the
   // panel that explains it, so no error is shown twice.
   const utilizationTooLarge =
@@ -110,34 +123,37 @@ export function SubnetDetailPage() {
     ? (sites.data?.find((site) => site.id === row.site_id)?.name ?? row.site_id)
     : null;
   const vlan = row.vlan_id ? vlans.data?.find((item) => item.id === row.vlan_id) : undefined;
+  const vrfName = row.vrf_id ? (vrfs.data?.find((item) => item.id === row.vrf_id)?.name ?? null) : null;
+  // THE HEAD'S CONTEXT (Receta F; Task 10, 5.6): the client (linked to its 360
+  // page) and the site, then the VRF, the VLAN, the name and the gateway.
   const subline = [
     row.name || null,
-    siteName,
+    vrfName ? t("ipam.subnet.inVrf", { vrf: vrfName }) : null,
     vlan
       ? vlan.name
         ? t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })
         : t("ipam.vlan.label", { vid: vlan.vid })
       : null,
     row.gateway ? t("ipam.subnet.gateway", { gateway: row.gateway }) : null,
-    row.kind === "container" ? t("ipam.subnet.containerPrefix") : null,
   ].filter((part): part is string => part !== null);
 
   return (
     <div>
-      <PageHead
+      <DetailHead
+        back={back}
         title={row.prefix}
-        description={subline.length > 0 ? subline.join(" · ") : undefined}
-        actions={
+        status={{
+          kind: row.kind === "container" ? "mut" : "info",
+          label: humaniseEnum(row.kind, "SubnetKind"),
+        }}
+        context={
           <>
-            <Link className="btn" to="/ipam">
-              <Icon name="chevron-left" size={14} />
-              <span>{t("ipam.subnet.allSubnets")}</span>
-            </Link>
-            {permissions.manage && <SubnetActions subnet={row} />}
+            <ClientContext clientId={row.client_id} siteName={siteName} />
+            {subline.length > 0 ? ` · ${subline.join(" · ")}` : null}
           </>
         }
+        actions={permissions.manage ? <SubnetActions subnet={row} /> : undefined}
       />
-      <IpamNav />
 
       <Facts
         items={[
@@ -229,9 +245,7 @@ export function SubnetDetailPage() {
         </div>
       )}
 
-      <Tabs items={tabs} active={tab} onSelect={setTab} panelId="subnet-tabpanel" />
-
-      <div id="subnet-tabpanel" role="tabpanel" aria-label={tabs.find((item) => item.key === tab)?.label} tabIndex={-1}>
+      <UrlTabs label={t("ipam.subnet.tabsLabel")} items={tabs} active={tab} onSelect={setTab}>
         {tab === "addresses" && (
           <>
             {assignable && permissions.assign && <AllocatePanel subnetId={subnetId} />}
@@ -258,8 +272,8 @@ export function SubnetDetailPage() {
             canManage={permissions.sweepManage}
           />
         )}
-        {tab === "drift" && <SubnetDriftPanel subnet={row} findings={findings} loading={drift.isLoading} error={drift.error} />}
-      </div>
+        {tab === "drift" && <SubnetDriftPanel subnet={row} findings={findings} loading={drift.isPending} error={drift.error} />}
+      </UrlTabs>
     </div>
   );
 }

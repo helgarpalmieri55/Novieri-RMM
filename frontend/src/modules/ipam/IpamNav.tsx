@@ -1,6 +1,6 @@
-import { Link, useLocation } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 
 // The module's six surfaces, in one place so App.tsx's Shell nav and every
 // in-page nav cannot fall out of sync (the precedent SlaNav and
@@ -25,6 +25,11 @@ import type { MessageKey } from "../../i18n/core";
 // ARIA at all. It is navigation, so it is announced as navigation: a named
 // `<nav>` of links, with `aria-current="page"` on the one you are on.
 //
+// ON THE KIT'S SECTION NAV (redesign plan, waves' common rules): `SectionNav`
+// draws the same named `<nav>` of links with `aria-current="page"`. A subnet's
+// own page is a record now (Receta F): it goes back to the tree from its head
+// and draws no strip, so "Subnets" is current on /ipam alone (`end`).
+//
 // RENDERED AFTER THE PAGE HEAD, never before it. Every page in this console
 // draws crumb, then h1, then description, then its tab strip (v3's `head()`
 // then `tabs()`); a strip between the crumb and the h1 sits exactly where the
@@ -41,25 +46,10 @@ const IPAM_NAV_ITEMS: ReadonlyArray<{ to: string; label: MessageKey }> = [
 
 export function IpamNav() {
   const t = useT();
-  const location = useLocation();
   return (
-    <nav aria-label={t("ipam.nav.label")} className="tabs">
-      {IPAM_NAV_ITEMS.map((item) => {
-        const active =
-          item.to === "/ipam"
-            ? location.pathname === "/ipam" || location.pathname.startsWith("/ipam/subnets")
-            : location.pathname.startsWith(item.to);
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={`tab ${active ? "active" : ""}`}
-            aria-current={active ? "page" : undefined}
-          >
-            {t(item.label)}
-          </Link>
-        );
-      })}
-    </nav>
+    <SectionNav
+      label={t("ipam.nav.label")}
+      items={IPAM_NAV_ITEMS.map((item) => ({ to: item.to, label: t(item.label), end: item.to === "/ipam" }))}
+    />
   );
 }

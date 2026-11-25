@@ -79,11 +79,16 @@ export function siteServerServes(
     );
 }
 
-export function IpamReadiness() {
+/**
+ * `chip` is the subnet tree's Client chip (`?client=`, "" without one): the
+ * subnets this panel counts are the ones the tree lists under it, read through
+ * the same narrowed API and cache entry (decision D6).
+ */
+export function IpamReadiness({ chip = "" }: { chip?: string } = {}) {
   const t = useT();
   const api = useApi();
   const me = useMePermissions();
-  const subnets = useIpamSubnets();
+  const subnets = useIpamSubnets({}, chip);
   const scopes = useIpamScanAuthorizations();
   // The Discovered page's key and shape, so a sweep that refreshes it refreshes this.
   const candidates = useQuery<AssetCandidatePage, ApiError>({
