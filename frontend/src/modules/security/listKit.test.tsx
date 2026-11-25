@@ -56,6 +56,21 @@ describe("Security logs on the list kit", () => {
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
+  it("draws no empty state while the Client chip waits for /me (general ruling 10)", async () => {
+    // General ruling 10: with the chip set and `/me` unanswered the narrowed
+    // reads are disabled (`ready` false), and a disabled query is not
+    // "loading" in TanStack v5 -- the page must still draw loading, not empty.
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    renderPage(`/security?client=${ANDES}`, <SecurityPage />, "/security");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    for (const empty of [
+      "No events in this window",
+      "No events match these filters",
+    ]) {
+      expect(screen.queryByText(empty)).toBeNull();
+    }
+  });
+
   it("opens an event from ?event=", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/security?event=sec-1", <SecurityPage />, "/security");

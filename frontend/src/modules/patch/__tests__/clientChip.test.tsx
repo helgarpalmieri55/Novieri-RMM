@@ -66,6 +66,29 @@ describe("FleetPatchPage under the Client chip", () => {
     expect(router.state.location.search).toBe("?os=macos");
   });
 
+  it("draws no empty state in any list while the Client chip waits for /me (general ruling 10)", async () => {
+    // With the chip set and `/me` unanswered every narrowed read is disabled
+    // (`ready` false), and a disabled query is not "loading" in TanStack v5:
+    // each list must still draw loading, not "nothing outstanding".
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    renderPage(`/patch?client=${ANDES}`, <FleetPatchPage />, "/patch");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    for (const empty of [
+      "No scan has completed, so no device has reported an outstanding update yet.",
+      "Nothing is outstanding on any reporting device.",
+      "No scan has completed, so no device's exposure is known yet.",
+      "Every reporting device is up to date.",
+      "No machine is waiting to restart after updates.",
+      "No update is approved into a ring yet. Approve one from the Updates panel.",
+    ]) {
+      expect(screen.queryByText(empty)).toBeNull();
+    }
+    expect(screen.queryByText(/^No update matches these filters/)).toBeNull();
+    // A patch list with no answer draws no table at all: an empty table is
+    // this page's "nothing outstanding" (its sentences need an answer first).
+    expect(screen.queryAllByRole("table")).toEqual([]);
+  });
+
   it("says why the list is empty", async () => {
     // Nothing rated low: the filter is the cause, and the sentence says what it hides.
     const registry = fixtureRegistry();

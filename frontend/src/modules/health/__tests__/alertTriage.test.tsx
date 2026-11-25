@@ -436,6 +436,24 @@ describe("the alert queue on the list kit (redesign plan, Receta L)", () => {
     expect(narrowing.unnarrowed).toEqual([]);
   });
 
+  it("draws no empty state while the Client chip waits for /me (general ruling 10)", async () => {
+    // With the chip set and `/me` unanswered the narrowed reads are disabled
+    // (`ready` false): TanStack reports such a query as not loading with no
+    // data, which drew "no alert has opened yet" before any read was made.
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    renderPage(`/health?client=${ANDES}`, <HealthPage />, "/health");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    for (const empty of [
+      "No alert has opened yet.",
+      "No computer reports its health yet.",
+      "Nothing matches these filters.",
+      "Nothing critical is open",
+      "No warning is open",
+    ]) {
+      expect(screen.queryByText(empty)).toBeNull();
+    }
+  });
+
   it("counts the chips for the Client chip's client, not every client", async () => {
     const forAndes = fixtureClient(withSummary(1));
     const everyone = fixtureClient(withSummary(7));
