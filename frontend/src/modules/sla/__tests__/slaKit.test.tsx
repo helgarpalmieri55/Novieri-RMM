@@ -193,3 +193,84 @@ describe("the SLA page on the form kit", () => {
     expect(write).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * THE WEEK EDITOR IS PART OF THE PAGE'S ONE GUARD (general ruling 3; final
+ * review M5). It keeps its own Save week and Revert (coordinator, O2 Q1: a
+ * save replaces the whole week), and a week with unsaved hours asks before
+ * the page is left, through the same guard as the `?new=` dialogs, fed their
+ * combined `dirty`. The week lives on the page, not in `?new=`, so opening a
+ * dialog over it is not leaving it.
+ */
+describe("the SLA week editor and the page's one guard", () => {
+  /** The first calendar's week, with a Saturday window added: unsaved. */
+  async function editTheWeek() {
+    const view = renderPage("/sla", <SlaAdminPage />, "/sla");
+    const section = (await screen.findByRole("heading", { name: "Business calendars" })).closest("section") as HTMLElement;
+    await userEvent.click((await within(section).findAllByRole("button", { name: "Hours & holidays" }))[0] as HTMLElement);
+    await userEvent.click(await screen.findByRole("button", { name: "Add window (Saturday)" }));
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    return view;
+  }
+
+  /** Navigates and returns once the held navigation's act warnings are checked. */
+  async function go(router: ReturnType<typeof renderPage>["router"], to: string | number) {
+    // React reports a held navigation's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx); anything else, such as two guards holding
+    // changes at once, fails here.
+    const held = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => (typeof to === "number" ? router.navigate(to) : router.navigate(to)));
+    expect(held.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    held.mockRestore();
+  }
+
+  it("asks before the page is left with an unsaved week, and stays with it", async () => {
+    const { router } = await editTheWeek();
+    await go(router, "/elsewhere");
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Cancel" }));
+    expect(router.state.location.pathname).toBe("/sla");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("keeps its own Save week, and a saved week leaves without asking", async () => {
+    // Not the fixture's own write: it would change the calendar for every later test.
+    const replace = vi.fn((id: string, windows: readonly { weekday: number; start_time: string; end_time: string }[]) =>
+      windows.map((window, at) => ({ id: `${id}-w${at}`, ...window })),
+    );
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), replaceSlaCalendarWindows: replace }));
+    const { router } = await editTheWeek();
+    await userEvent.click(screen.getByRole("button", { name: "Save week" }));
+    await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
+    expect(replace).toHaveBeenCalledTimes(1);
+    await go(router, "/elsewhere");
+    expect(await screen.findByText("elsewhere")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("does not ask when a dialog opens over an unsaved week: the week is still on the page", async () => {
+    const { router } = await editTheWeek();
+    const section = screen.getByRole("heading", { name: "Business calendars" }).closest("section") as HTMLElement;
+    await userEvent.click(within(section).getByRole("button", { name: "Add calendar" }));
+    expect(await screen.findByRole("dialog", { name: "Add calendar" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=calendar");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("is one guard with a half-written dialog over the week: Back asks for the dialog, and leaving still asks for the week", async () => {
+    const { router } = await editTheWeek();
+    const section = screen.getByRole("heading", { name: "Business calendars" }).closest("section") as HTMLElement;
+    await userEvent.click(within(section).getByRole("button", { name: "Add calendar" }));
+    await userEvent.type(within(await screen.findByRole("dialog", { name: "Add calendar" })).getByLabelText("Name"), "Porto");
+    // Back drops the dialog's form: the one question asks.
+    await go(router, -1);
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Leave without saving?" })).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add calendar" })).toBeNull());
+    expect(router.state.location.search).toBe("");
+    // The week is still unsaved, and leaving the page still asks for it.
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    await go(router, "/elsewhere");
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/sla");
+  });
+});

@@ -18,9 +18,12 @@ import { WorkingWindowsEditor } from "./WorkingWindowsEditor";
 export function CalendarDetailPanel({
   calendarId,
   canAdmin,
+  onWeekDirty,
 }: {
   calendarId: string;
   canAdmin: boolean;
+  /** Whether the week holds unsaved hours, for the page's one guard. */
+  onWeekDirty: (dirty: boolean) => void;
 }) {
   const t = useT();
   const calendar = useSlaCalendar(calendarId);
@@ -61,6 +64,7 @@ export function CalendarDetailPanel({
         timezone={calendar.data.timezone}
         windows={calendar.data.windows}
         canAdmin={canAdmin}
+        onDirty={onWeekDirty}
       />
       <HolidaysPanel calendarId={calendarId} canAdmin={canAdmin} />
     </div>

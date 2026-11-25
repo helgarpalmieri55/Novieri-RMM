@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
@@ -9,7 +10,7 @@ import { PoliciesPanel } from "./PoliciesPanel";
 import { PolicyResolverPanel } from "./PolicyResolverPanel";
 import { SlaPrerequisites } from "./SlaPrerequisites";
 import { SlaSettingsPanel } from "./SlaSettingsPanel";
-import { PageHead, StatCard, StatsGrid, useNewParam, useUrlFilters, withClient } from "../../shell/components";
+import { PageHead, StatCard, StatsGrid, useNewParam, useUnsavedGuard, useUrlFilters, withClient } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §9.1's admin surface: business calendars (with the weekly window grid
@@ -65,6 +66,15 @@ export function SlaAdminPage() {
   // calendars' own create dialog, through the URL (`?new=calendar` in place
   // of `?new=policy`); Back reopens Add policy, with an empty form (ruling 4).
   const calendarCreate = useNewParam("calendar");
+  // ONE GUARD FOR THE PAGE (general ruling 3; `./pageGuard`): Add policy, Add
+  // calendar and the open calendar's week each say whether they hold changes,
+  // and this guard asks for all of them. Closing an add dialog is leaving it
+  // (`?new=`); the week lives on the page, so only leaving the page leaves it.
+  const [policyDirty, setPolicyDirty] = useState(false);
+  const [calendarDirty, setCalendarDirty] = useState(false);
+  const [weekDirty, setWeekDirty] = useState(false);
+  const newDirty = policyDirty || calendarDirty;
+  const { guard, release } = useUnsavedGuard(newDirty || weekDirty, { search: newDirty ? ["new"] : false });
   const activePolicyCount = (policies.data ?? []).filter((policy) => policy.active).length;
   // WHAT THE TWO CONFIGURATION FIGURES ARE MADE OF. The two consequence tiles
   // beside them carry a sentence at a non-zero count and these carried
@@ -201,9 +211,12 @@ export function SlaAdminPage() {
           canAdmin={canAdmin}
           queueName={queueName}
           onCreateCalendar={canConfigure ? calendarCreate.start : undefined}
+          pageGuard={{ onDirty: setPolicyDirty, release }}
         />
-        <CalendarsPanel canAdmin={canConfigure} />
+        <CalendarsPanel canAdmin={canConfigure} pageGuard={{ onDirty: setCalendarDirty, release }} onWeekDirty={setWeekDirty} />
       </div>
+      {/* After the dialogs: the leave question is drawn on top of them. */}
+      {guard}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { describeSubmitError } from "../../components/form";
 import { Badge, Button, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useReplaceSlaWindowsMutation } from "./api";
+import { useReportDirty } from "./pageGuard";
 import {
   formatMinutes,
   formatTimeOfDay,
@@ -63,16 +64,23 @@ export function WorkingWindowsEditor({
   timezone,
   windows,
   canAdmin,
+  onDirty,
 }: {
   calendarId: string;
   timezone: string;
   windows: ReadonlyArray<WindowOut>;
   canAdmin: boolean;
+  /** Whether the week holds unsaved hours, for the page's one guard. */
+  onDirty: (dirty: boolean) => void;
 }) {
   const t = useT();
   const replace = useReplaceSlaWindowsMutation();
   const [draft, setDraft] = useState<WindowIn[]>(() => fromRows(windows));
   const [dirty, setDirty] = useState(false);
+  // AN UNSAVED WEEK ASKS BEFORE THE PAGE IS LEFT (general ruling 3; final
+  // review M5), through the page's one guard. Its own Save week and Revert
+  // stay (coordinator, O2 Q1): a save replaces the whole week.
+  useReportDirty(dirty, onDirty);
 
   // Adopt the server's week whenever it changes underneath an untouched
   // editor (another admin's save, or a refetch after this one's). A dirty

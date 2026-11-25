@@ -90,7 +90,9 @@ function stubApi(overrides: Partial<Record<keyof ApiClient, ReturnType<typeof vi
   return api;
 }
 
-function renderPanel(node: ReactNode = <PoliciesPanel canAdmin queueName={() => "Helpdesk"} />) {
+function renderPanel(
+  node: ReactNode = <PoliciesPanel canAdmin queueName={() => "Helpdesk"} pageGuard={{ onDirty: () => {}, release: () => {} }} />,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
