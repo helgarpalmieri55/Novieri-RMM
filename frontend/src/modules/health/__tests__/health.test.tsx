@@ -430,7 +430,8 @@ describe("AlertConsole", () => {
     });
     renderWithProviders(<AlertConsole onSelect={() => {}} />, "/health?state=opne&resolution=nope");
     expect(await screen.findByText("WS-01")).toBeInTheDocument();
-    expect(screen.queryByText(/No alerts match this filter/)).toBeNull();
+    // The kit's empty sentences replaced "No alerts match this filter" (Receta L).
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet/)).toBeNull();
   });
 
   it("says so when the caller cannot read alerts, instead of showing an empty list", async () => {
@@ -441,7 +442,7 @@ describe("AlertConsole", () => {
     expect(
       await screen.findByText(/Alerts not available \(insufficient permissions\)/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/No alerts match this filter/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet/)).not.toBeInTheDocument();
   });
 
   // ------------------------------------------------------------------
@@ -1968,8 +1969,9 @@ describe("failures reach the operator — loads", () => {
     const failure = await screen.findByRole("alert");
     expect(failure).toHaveTextContent(/could not be loaded/);
     expect(failure).toHaveTextContent(/Nothing was changed/);
-    // THE POINT: the console must not say the fleet is quiet.
-    expect(screen.queryByText(/No alerts match this filter/)).toBeNull();
+    // THE POINT: the console must not say the fleet is quiet (in the kit's
+    // words now, Receta L: either of the empty list's two sentences).
+    expect(screen.queryByText(/Nothing matches these filters|No alert has opened yet|No computer reports/)).toBeNull();
     expect(screen.queryByText(/0 open of 0 shown/)).toBeNull();
   });
 

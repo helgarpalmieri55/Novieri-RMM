@@ -25,6 +25,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiError, Device, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type {
   AlertDetailOut,
   AlertFilters,
@@ -254,11 +255,20 @@ export function useDeleteHealthAssignmentMutation() {
 // Alerts
 // --------------------------------------------------------------------------
 
-export function useHealthAlerts(filters: AlertFilters = {}) {
-  const api = useApi();
+/**
+ * The alert list, NARROWED TO THE CLIENT CHIP'S CLIENT (redesign plan, Receta
+ * L point 7; decision D6). `chip` is `?client=`'s value, `""` without the
+ * chip: the same call with the same filters, read through `useNarrowedApi` and
+ * kept under that client's key, so a change of chip reads again and never
+ * leaves another client's rows on screen. `["health-alerts"]` still reaches
+ * every copy, which is what the mutations below invalidate.
+ */
+export function useHealthAlerts(filters: AlertFilters = {}, chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
   return useQuery<AlertOut[], ApiError>({
-    queryKey: ["health-alerts", filters],
+    queryKey: ["health-alerts", filters, client],
     queryFn: () => api.listHealthAlerts(filters),
+    enabled: ready,
     refetchInterval: ALERT_POLL_MS,
     ...NO_RETRY,
   });

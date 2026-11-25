@@ -354,14 +354,24 @@ describe("the alert console, in Spanish", () => {
     for (const header of ["Dispositivo", "Estado", "Gravedad", "Comprobación", "Cierre", "Observado", "Visto"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
-    const state = screen.getByRole("combobox", { name: "Filtrar por estado" });
-    for (const option of ["Cualquier estado", "Abiertas (cualquier estado)", "Activa", "Reconocida", "Silenciada", "Cerrada"]) {
-      expect(within(state).getByRole("option", { name: option })).toBeInTheDocument();
-    }
-    const severity = screen.getByRole("combobox", { name: "Filtrar por gravedad" });
-    for (const option of ["Cualquier gravedad", "Crítica", "Advertencia", "Información"]) {
-      expect(within(severity).getByRole("option", { name: option })).toBeInTheDocument();
-    }
+    // The state and severity selects are chips now (redesign plan, Receta L;
+    // O3 3.1): one chip per option of the old select, each in words.
+    const state = screen.getByRole("group", { name: "Estado" });
+    expect(within(state).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "Cualquier estado",
+      "Abiertas",
+      "Activa",
+      "Reconocida",
+      "Silenciada",
+      "Cerrada",
+    ]);
+    const severity = screen.getByRole("group", { name: "Gravedad" });
+    expect(within(severity).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "Cualquier gravedad",
+      "Crítica",
+      "Advertencia",
+      "Información",
+    ]);
     const resolution = screen.getByRole("combobox", { name: "Filtrar por resolución" });
     for (const option of ["Cualquier resolución", "Contadas como resueltas", "Resueltas por la máquina", "Cerradas por una persona", "Cerradas, pero sin corrección"]) {
       expect(within(resolution).getByRole("option", { name: option })).toBeInTheDocument();
@@ -387,8 +397,9 @@ describe("the alert console, in Spanish", () => {
     const user = userEvent.setup();
     stubApi({ listHealthAlerts: vi.fn().mockResolvedValue([]) });
     const { container } = renderUi(<AlertConsole onSelect={() => {}} />, "/health?device=d1&state=open");
-    expect(await screen.findByText("Ninguna alerta coincide con este filtro.")).toBeInTheDocument();
-    expect(screen.getByText("Amplía los filtros de estado, gravedad o resolución de arriba.")).toBeInTheDocument();
+    // The kit's empty list (redesign plan, Receta L): with filters on, it says so and offers the way out.
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expect(screen.getByText(/Un dispositivo:/)).toBeInTheDocument();
     expect(screen.getByText("este dispositivo")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mostrar todos los dispositivos" })).toBeInTheDocument();
@@ -421,7 +432,7 @@ describe("the alert console, in Spanish", () => {
     const row = screen.getByText("REC-HOST").closest("tr") as HTMLElement;
     expect(within(row).getByText("Cleared — Recovered")).toBeInTheDocument();
     expect(within(screen.getByText("ACT-HOST").closest("tr") as HTMLElement).getByText("CPU busy")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Filter by state" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "State" })).toBeInTheDocument();
   });
 });
 
@@ -585,11 +596,25 @@ describe("the health page, in Spanish", () => {
     expect(screen.getByText("Por 2 personas")).toBeInTheDocument();
     expect(screen.getByText(/^Hasta el /)).toBeInTheDocument();
     expect(screen.getByText("Antes de que las alertas lleguen a alguien")).toBeInTheDocument();
-    expect(await screen.findByText("Perfiles de estado")).toBeInTheDocument();
-    expect(await screen.findByText("Acciones aprobadas")).toBeInTheDocument();
-    expect(await screen.findByText("Configuración de salud")).toBeInTheDocument();
     expect(screen.getByText("Informes de alertas")).toBeInTheDocument();
-    expectNoEnglish(container, [...STORED, "Base de oficina", "Para los puestos", "Reiniciar la cola", "script.run", "ops"]);
+    // Redesign decision D21: the configuration panels live in their own views, each a tab of the page.
+    const views = screen.getByRole("tablist", { name: "Salud y alertas" });
+    expect(within(views).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Alertas",
+      "Perfiles",
+      "Acciones aprobadas",
+      "Configuración",
+    ]);
+    expectNoEnglish(container, [...STORED, "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Perfiles" }));
+    expect(await screen.findByText("Perfiles de estado")).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "Base de oficina", "Para los puestos", "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Acciones aprobadas" }));
+    expect(await screen.findByRole("heading", { name: "Acciones aprobadas" })).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "Reiniciar la cola", "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Configuración" }));
+    expect(await screen.findByText("Configuración de salud")).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "script.run", "ops"]);
   });
 
   it("says what it cannot show without permission", async () => {
