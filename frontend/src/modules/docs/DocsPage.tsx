@@ -693,20 +693,24 @@ export function DocsPage() {
           empty pane, which had the toolbar, the chips and the count wrapping
           inside a third of the width. */}
       {/* ON A PHONE THE READER IS THE PAGE (redesign Task 11, 6.1): with an
-          article, a document or the editor open, the list steps aside below
-          1024 px and the pane leads back to it; on a desktop the two share the
-          row, the list on the left. */}
+          article, a document or the editor open, the list steps aside at
+          1024 px and below and the pane leads back to it; on a desktop the two
+          share the row, the list on the left. */}
       {/* ON THE KIT'S `DetailGrid asideFirst` (adoption pass; C's swap, on
           D's 56188d7): the library is the aside and the reader the main.
           BOTH ARE ALWAYS RENDERED, the main empty (`null`) with nothing open,
           which the kit draws as the library alone across the row. That keeps
           the library the same mounted list whether a reader is open or not,
           so the row just chosen keeps the keyboard (C's 76650f7); drawing the
-          grid only while a reader is open would mount the list anew. */}
+          grid only while a reader is open would mount the list anew.
+          THE LIBRARY STEPS ASIDE AT THE KIT'S BREAKPOINT, 1024 px and below,
+          where `DetailGrid` is one column, not at Tailwind's `lg` (1024 px and
+          above): with `hidden lg:block` both applied at exactly 1024, and an
+          opened article landed under the whole library. */}
       <DetailGrid
         asideFirst
         aside={
-        <div className={paneOpen ? "min-w-0 hidden lg:block" : "min-w-0"}>
+        <div className={paneOpen ? "min-w-0 [@media(max-width:1024px)]:hidden" : "min-w-0"}>
           {/* The Articles and Linked references tiles land here: this list is
               where each of those numbers decomposes. v3 draws it as the
               toolbar (search, chips, count) over one list of rows. */}

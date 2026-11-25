@@ -1135,21 +1135,23 @@ describe("DocsPage on the kit", () => {
     expect(main).toHaveClass("detail-main");
     expect(aside.contains(row)).toBe(true);
     expect(main).toBeEmptyDOMElement();
-    expect(aside.firstElementChild).not.toHaveClass("hidden");
+    expect(aside.firstElementChild).not.toHaveClass("[@media(max-width:1024px)]:hidden");
 
     await userEvent.click(row);
     await waitFor(() => expect(router.state.location.search).toBe("?article=a1"));
     const heading = await screen.findByRole("heading", { level: 2, name: "Finance share recovery runbook" });
     expect(main.contains(heading)).toBe(true);
     expect(aside.contains(row)).toBe(true);
-    expect(aside.firstElementChild).toHaveClass("hidden", "lg:block");
+    // It steps aside where the kit's grid is one column (1024 px and below),
+    // so an opened article never lands under the whole library.
+    expect(aside.firstElementChild).toHaveClass("[@media(max-width:1024px)]:hidden");
 
     await userEvent.click(screen.getByRole("button", { name: "All articles" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
     expect(row.isConnected).toBe(true);
     expect(aside.contains(row)).toBe(true);
     expect(main).toBeEmptyDOMElement();
-    expect(aside.firstElementChild).not.toHaveClass("hidden");
+    expect(aside.firstElementChild).not.toHaveClass("[@media(max-width:1024px)]:hidden");
   });
 
   it("says why the list is empty", async () => {
