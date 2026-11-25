@@ -518,6 +518,28 @@ describe("archiving", () => {
     ).toBeNull();
   });
 
+  it("sends a health-profile assignment to Health's profiles view, where assignments live (D21)", async () => {
+    // Fix round 1 of wave O1: assignments moved into Health's profiles view,
+    // so the blocker opens that view rather than Health's alert list.
+    archiveDeviceGroup.mockRejectedValue(
+      new ApiError(
+        409,
+        JSON.stringify({ detail: "this group is still in use", blocked_by: references({ health_assignments: 2 }) }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("servers");
+
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    await user.click(screen.getByRole("button", { name: "Archive group" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "servers is still in use" });
+    expect(
+      within(dialog).getByRole("link", { name: /2 health profile assignments/ }).getAttribute("href"),
+    ).toBe("/health?view=profiles");
+  });
+
   it("offers unarchive on an archived row, and nothing else", async () => {
     listDeviceGroups.mockResolvedValue(
       page([group({ archived_at: "2026-08-22T09:00:00Z" })]),

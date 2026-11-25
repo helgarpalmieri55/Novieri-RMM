@@ -217,7 +217,8 @@ const BLOCKERS: readonly {
   { key: "patch_policies", to: "/patch" },
   { key: "backup_policies", to: "/backup" },
   { key: "remote_policies", to: "/remote" },
-  { key: "health_assignments", to: "/health" },
+  // Assignments live in Health's profiles view (D21).
+  { key: "health_assignments", to: "/health?view=profiles" },
   { key: "credentials", to: "/credentials" },
 ];
 
