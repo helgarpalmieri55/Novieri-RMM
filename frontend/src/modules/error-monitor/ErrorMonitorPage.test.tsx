@@ -35,6 +35,19 @@ function renderWithProviders(ui: ReactElement, entry = "/error-monitor") {
   );
 }
 
+/**
+ * A filter is the kit's chip group now (redesign plan, Receta L; O3 3.8):
+ * press the chip a select option was, or read which chip is pressed.
+ */
+async function pick(user: ReturnType<typeof userEvent.setup>, group: string, chip: string) {
+  await user.click(within(screen.getByRole("group", { name: group })).getByRole("button", { name: chip }));
+}
+function pressed(group: string): string | undefined {
+  return within(screen.getByRole("group", { name: group }))
+    .getAllByRole("button")
+    .find((button) => button.getAttribute("aria-pressed") === "true")?.textContent ?? undefined;
+}
+
 /** Step two of the resolve flow: the dialog that now stands between the
  *  Resolve button and the write. */
 async function confirmResolve(user: ReturnType<typeof userEvent.setup>) {
@@ -573,7 +586,7 @@ describe("ErrorMonitorPage filters", () => {
     renderWithProviders(<ErrorMonitorPage />);
     await screen.findByText("ValueError");
 
-    await user.selectOptions(screen.getByLabelText("Filter by triage state"), "open");
+    await pick(user, "Filter by triage state", "Open");
 
     expect(screen.queryByText("TimeoutError")).not.toBeInTheDocument();
     expect(screen.getByTestId("search").textContent).toContain("state=open");
@@ -584,7 +597,7 @@ describe("ErrorMonitorPage filters", () => {
     renderWithProviders(<ErrorMonitorPage />);
     await screen.findByText("ValueError");
 
-    await user.selectOptions(screen.getByLabelText("Filter by triage state"), "resolved");
+    await pick(user, "Filter by triage state", "Resolved");
 
     expect(await screen.findByText("TimeoutError")).toBeInTheDocument();
     expect(screen.queryByText("ValueError")).not.toBeInTheDocument();
@@ -595,7 +608,7 @@ describe("ErrorMonitorPage filters", () => {
 
     expect(await screen.findByText("TimeoutError")).toBeInTheDocument();
     expect(screen.queryByText("ValueError")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Filter by triage state")).toHaveValue("resolved");
+    expect(pressed("Filter by triage state")).toBe("Resolved");
   });
 
   it("filters by capture seam", async () => {
@@ -603,7 +616,7 @@ describe("ErrorMonitorPage filters", () => {
     renderWithProviders(<ErrorMonitorPage />);
     await screen.findByText("ValueError");
 
-    await user.selectOptions(screen.getByLabelText("Filter by capture seam"), "api");
+    await pick(user, "Filter by capture seam", "API");
 
     expect(typeCells()).toEqual(["IntegrityError"]);
   });
@@ -638,7 +651,8 @@ describe("ErrorMonitorPage filters", () => {
 
     await user.type(screen.getByLabelText("Search error groups"), "nothing-matches-this");
 
-    expect(await screen.findByText(/no error group matches these filters/i)).toBeInTheDocument();
+    // The kit's empty list says the filters did it (redesign plan, Receta L).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /clear filters/i }));
     expect(await screen.findByText("ValueError")).toBeInTheDocument();
     expect(screen.getByTestId("search").textContent).toBe("");
@@ -667,7 +681,7 @@ describe("ErrorMonitorPage filters", () => {
       renderWithProviders(<ErrorMonitorPage />);
       await screen.findByText("ValueError");
 
-      await user.selectOptions(screen.getByLabelText("Filter by last seen"), "1");
+      await pick(user, "Filter by last seen", "24 hours");
 
       expect(typeCells()).toEqual(["ValueError"]);
       expect(screen.getByTestId("search").textContent).toContain("since=1");
@@ -790,7 +804,7 @@ describe("ErrorMonitorPage stat tiles", () => {
 
     expect(await screen.findByText("ValueError")).toBeInTheDocument();
     expect(screen.queryByText("TimeoutError")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Filter by triage state")).toHaveValue("open");
+    expect(pressed("Filter by triage state")).toBe("Open");
   });
 
   it("labels its zeroes so an empty page cannot read as a clean one", async () => {

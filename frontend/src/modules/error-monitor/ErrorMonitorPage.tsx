@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { Badge, Table, Td, Th } from "../../components/ui";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
@@ -20,7 +19,20 @@ import { humaniseEnum } from "../../lib/labels";
 import type { ErrorEvent, ErrorGroup } from "./types";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid } from "../../shell/components";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  useUrlFilters,
+} from "../../shell/components";
 
 // The operator-facing page for app/api/v1/errors.py: a fingerprinted-error
 // registry, not a log viewer. v3 draws it (`P['error-monitor']`) as a tile
@@ -118,16 +130,6 @@ export const DEFAULT_FILTERS: GroupFilters = {
   since: "",
 };
 
-function isDefault(filters: GroupFilters): boolean {
-  return (
-    filters.query.trim() === "" &&
-    filters.state === DEFAULT_FILTERS.state &&
-    filters.where === DEFAULT_FILTERS.where &&
-    filters.sort === DEFAULT_FILTERS.sort &&
-    filters.since === DEFAULT_FILTERS.since
-  );
-}
-
 /**
  * The list, filtered and sorted.
  *
@@ -171,7 +173,15 @@ export function selectErrorGroups(groups: ErrorGroup[], filters: GroupFilters): 
 export function ErrorMonitorPage() {
   const t = useT();
   const groups = useErrorGroups();
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  // THE LIST KIT (redesign plan, O3 3.8): the filters, as before, in the
+  // URL, now drawn as chips; the order is not a filter, so it is its own key
+  // and "Clear filters" leaves it alone; the group open below the list is
+  // `?group=`, so it is a link too. No Client chip: these errors are the
+  // platform's, not a client's.
+  const url = useUrlFilters(["q", "state", "where", "since"] as const);
+  const order = useUrlFilters(["sort"] as const);
+  const opened = useUrlFilters(["group"] as const);
+  const selectedId = opened.values.group === "" ? undefined : opened.values.group;
   const detail = useErrorGroupDetail(selectedId);
   const resolve = useResolveErrorGroupMutation();
   const reopen = useUnresolveErrorGroupMutation();
@@ -181,42 +191,27 @@ export function ErrorMonitorPage() {
   // hand-rolled `new Date(iso).toLocaleString()` this replaces did not.
   const zone = useProfileZone();
 
-  const [params, setParams] = useSearchParams();
+  // A URL IS UNTRUSTED INPUT: a value this page does not know reads as its
+  // default, never as a filter matching nothing.
   const filters: GroupFilters = {
-    query: params.get("q") ?? "",
-    state: (["all", "open", "resolved"] as const).includes(
-      (params.get("state") ?? "") as StateFilter,
-    )
-      ? (params.get("state") as StateFilter)
+    query: url.values.q,
+    state: (["all", "open", "resolved"] as const).includes(url.values.state as StateFilter)
+      ? (url.values.state as StateFilter)
       : DEFAULT_FILTERS.state,
-    where: WHERE_VALUES.includes((params.get("where") ?? "") as (typeof WHERE_VALUES)[number])
-      ? (params.get("where") as string)
-      : "",
-    sort: (["last_seen", "first_seen", "events"] as const).includes(
-      (params.get("sort") ?? "") as SortKey,
-    )
-      ? (params.get("sort") as SortKey)
+    where: WHERE_VALUES.includes(url.values.where as (typeof WHERE_VALUES)[number]) ? url.values.where : "",
+    sort: (["last_seen", "first_seen", "events"] as const).includes(order.values.sort as SortKey)
+      ? (order.values.sort as SortKey)
       : DEFAULT_FILTERS.sort,
-    since: Object.hasOwn(SINCE_DAYS, params.get("since") ?? "")
-      ? (params.get("since") as string)
-      : DEFAULT_FILTERS.since,
+    since: Object.hasOwn(SINCE_DAYS, url.values.since) ? url.values.since : DEFAULT_FILTERS.since,
   };
 
-  /** One writer for the query string; a key set to its default is dropped
-   *  rather than written, so a URL says only what was actually chosen. */
-  function setFilter(key: "q" | "state" | "where" | "sort" | "since", value: string) {
-    const next = new URLSearchParams(params);
-    const defaults: Record<string, string> = {
-      q: "",
-      state: "all",
-      where: "",
-      sort: "last_seen",
-      since: "",
-    };
-    if (value === "" || value === defaults[key]) next.delete(key);
-    else next.set(key, value);
-    setParams(next, { replace: true });
+  /** A key set to its default is dropped rather than written, so a URL says
+   *  only what was actually chosen. */
+  function setFilter(key: "q" | "state" | "where" | "since", value: string) {
+    const defaults: Record<string, string> = { q: "", state: "all", where: "", since: "" };
+    url.set(key, value === defaults[key] ? "" : value);
   }
+  const setSort = (value: string) => order.set("sort", value === DEFAULT_FILTERS.sort ? "" : value);
 
   /** The group awaiting confirmation. Nothing is written while this is set. */
   const [pendingResolve, setPendingResolve] = useState<ErrorGroup | null>(null);
@@ -228,7 +223,6 @@ export function ErrorMonitorPage() {
   const openCount = allGroups.filter((group) => group.resolved_at == null).length;
   const totalEvents = allGroups.reduce((sum, group) => sum + group.event_count, 0);
   const shown = useMemo(() => selectErrorGroups(allGroups, filters), [allGroups, filters]);
-  const filtered = !isDefault(filters);
   // Whichever write last failed. `reset()` is called on the other one when a
   // control is pressed, so this cannot show a stale complaint about the
   // opposite direction.
@@ -347,82 +341,81 @@ export function ErrorMonitorPage() {
         subtitle={t("errorMonitor.groups.subtitle")}
         bare
       >
-        <FilterBar>
-          <SearchField
-            placeholder={t("errorMonitor.groups.searchPlaceholder")}
-            /* Bounded, like every other search field in the console: a
-               dotted module path is well under this. */
-            maxLength={128}
-            value={filters.query}
-            onChange={(event) => setFilter("q", event.target.value)}
-            aria-label={t("errorMonitor.groups.searchAria")}
-          />
-          <select
-            className="select-field"
-            value={filters.state}
-            onChange={(event) => setFilter("state", event.target.value)}
-            aria-label={t("errorMonitor.groups.stateAria")}
-          >
-            <option value="all">{t("errorMonitor.groups.allStates")}</option>
-            <option value="open">{t("errorMonitor.groups.open")}</option>
-            <option value="resolved">{t("errorMonitor.groups.resolved")}</option>
-          </select>
-          <select
-            className="select-field"
-            value={filters.where}
-            onChange={(event) => setFilter("where", event.target.value)}
-            aria-label={t("errorMonitor.groups.seamAria")}
-          >
-            <option value="">{t("errorMonitor.groups.allSeams")}</option>
-            {WHERE_VALUES.map((where) => (
-              <option key={where} value={where}>
-                {humaniseEnum(where, "ErrorWhere")}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            value={filters.since}
-            onChange={(event) => setFilter("since", event.target.value)}
-            aria-label={t("errorMonitor.groups.sinceAria")}
-          >
-            <option value="">{t("errorMonitor.groups.anyTime")}</option>
-            <option value="1">{t("errorMonitor.groups.since1")}</option>
-            <option value="7">{t("errorMonitor.groups.since7")}</option>
-            <option value="30">{t("errorMonitor.groups.since30")}</option>
-          </select>
-          <select
-            className="select-field"
-            value={filters.sort}
-            onChange={(event) => setFilter("sort", event.target.value)}
-            aria-label={t("errorMonitor.groups.sortAria")}
-          >
-            <option value="last_seen">{t("errorMonitor.groups.sortLastSeen")}</option>
-            <option value="first_seen">{t("errorMonitor.groups.sortFirstSeen")}</option>
-            <option value="events">{t("errorMonitor.groups.sortEvents")}</option>
-          </select>
-          <span className="filter-spacer" />
-          {filtered ? (
-            <Btn
-              label={t("errorMonitor.groups.clearFilters")}
-              small
-              onClick={() => setParams(new URLSearchParams(), { replace: true })}
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("errorMonitor.groups.searchPlaceholder")}
+              /* Bounded, like every other search field in the console: a
+                 dotted module path is well under this. */
+              maxLength={128}
+              value={filters.query}
+              onChange={(event) => setFilter("q", event.target.value)}
+              aria-label={t("errorMonitor.groups.searchAria")}
             />
-          ) : null}
-        </FilterBar>
-
-        <QueryState
-          loading={groups.isLoading}
-          error={groups.error}
-          empty={shown.length === 0}
-          emptyLabel={
-            allGroups.length === 0
-              ? t("errorMonitor.groups.emptyNone")
-              : t("errorMonitor.groups.emptyFiltered")
           }
-          emptyIcon="warning"
-        >
-          <Table>
+          chips={
+            <>
+              {/* The three filters as the kit's chips; no counts, since the
+                  list's answer carries none by state, seam or age. */}
+              <FilterChips
+                label={t("errorMonitor.groups.stateAria")}
+                options={[
+                  { value: "", label: t("errorMonitor.groups.allStates") },
+                  { value: "open", label: t("errorMonitor.groups.open") },
+                  { value: "resolved", label: t("errorMonitor.groups.resolved") },
+                ]}
+                value={filters.state === "all" ? "" : filters.state}
+                onChange={(value) => setFilter("state", value)}
+              />
+              <FilterChips
+                label={t("errorMonitor.groups.seamAria")}
+                options={[
+                  { value: "", label: t("errorMonitor.groups.allSeams") },
+                  ...WHERE_VALUES.map((where) => ({ value: where, label: humaniseEnum(where, "ErrorWhere") })),
+                ]}
+                value={filters.where}
+                onChange={(value) => setFilter("where", value)}
+              />
+              <FilterChips
+                label={t("errorMonitor.groups.sinceAria")}
+                options={[
+                  { value: "", label: t("errorMonitor.groups.anyTime") },
+                  { value: "1", label: t("errorMonitor.groups.since1") },
+                  { value: "7", label: t("errorMonitor.groups.since7") },
+                  { value: "30", label: t("errorMonitor.groups.since30") },
+                ]}
+                value={filters.since}
+                onChange={(value) => setFilter("since", value)}
+              />
+              {/* THE ORDER IS NOT A FILTER: a chip that opens a choice
+                  (`.chip-select`, the kit's Client chip shape). */}
+              <span className="chip chip-select">
+                <span aria-hidden="true">{t("errorMonitor.groups.sortLabel")}</span>
+                <select
+                  value={filters.sort}
+                  onChange={(event) => setSort(event.target.value)}
+                  aria-label={t("errorMonitor.groups.sortAria")}
+                >
+                  <option value="last_seen">{t("errorMonitor.groups.sortLastSeen")}</option>
+                  <option value="first_seen">{t("errorMonitor.groups.sortFirstSeen")}</option>
+                  <option value="events">{t("errorMonitor.groups.sortEvents")}</option>
+                </select>
+              </span>
+            </>
+          }
+          end={data ? <ShowingCount shown={shown.length} total={allGroups.length} /> : null}
+        />
+
+        <QueryState loading={groups.isPending} error={groups.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={url.active}
+              onClear={url.clear}
+              icon="warning"
+              nothingYet={t("errorMonitor.groups.emptyNone")}
+            />
+          ) : (
+          <Table label={t("errorMonitor.groups.title")}>
             <thead>
               <tr>
                 <Th>{t("errorMonitor.groups.type")}</Th>
@@ -441,7 +434,7 @@ export function ErrorMonitorPage() {
                     key={group.id}
                     group={group}
                     selected={group.id === selectedId}
-                    onSelect={() => setSelectedId(group.id)}
+                    onSelect={() => opened.set("group", group.id)}
                     onResolve={() => {
                       resolve.reset();
                       reopen.reset();
@@ -456,6 +449,7 @@ export function ErrorMonitorPage() {
                 ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
