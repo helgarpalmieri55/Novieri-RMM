@@ -601,3 +601,43 @@ a 8) van al coordinador en el informe de la tarea.
 
 - El encargo dice «Sin chip» (invariante 2a(d)); el mensaje del coordinador nombra `/ipam/scan-authorizations`
   entre las páginas cuyo `?client=` es del chip. La página no lo dibuja. Sube al coordinador.
+
+---
+
+## La vuelta de Microsoft a Entrada de correo (revisión final, I1)
+
+Crítica `.impeccable/critique/2026-11-25T14-44-17Z__rc-modules-email-intake-oauthcallback-tsx-e4bf2506.md`
+(`frontend/src/modules/email-intake/OAuthCallback.tsx`, `/settings/email-intake/oauth/callback`; 27/40, cerrada por
+su pulido). La pantalla E1 del Apéndice B, que la oleada O2 adaptó a `FormPage` y nunca criticó. Harmony excluye la
+ruta, así que la crítica se escribió desde el código, un render en jsdom de sus cuatro estados (en y es, axe sin
+infracciones) y capturas de Chromium contra un vite en su propio grupo de procesos (1440 y 390). Las tres preguntas
+las zanjan `DESIGN.md`, las reglas generales y las páginas que ya existen; la que no zanjan del todo (el punto 1,
+qué ilumina el panel de Administración) se lee como la página más cercana y queda escrita aquí.
+
+### 1. ¿Dónde vive la página en el armazón?
+
+- **Respuesta: bajo Entrada de correo.** Una entrada de `NAV_UNLISTED` bajo Administración con el nombre de Entrada
+  de correo, como `/agent-push` y `/provisioning`; la página pone su nombre delante (regla general 1b). La pestaña
+  dice «Inicio de sesión de Microsoft 365 · Entrada de correo · Novieri RMM» y deja de decir «Configuración», que era
+  la de `/settings`. La dirección no se mueve: es la de vuelta registrada en Microsoft.
+- **Regla.** `DESIGN.md` («a unique tab title on every page»), `PRODUCT.md` principio 1 y la regla general 1b; el
+  precedente de `NAV_UNLISTED`.
+- **Lo que no zanjan las fuentes, leído como la página más cercana.** El panel de Administración ilumina por la
+  dirección, así que sigue iluminando «Configuración». `/agent-push/credential-scopes` tiene la misma propiedad (no
+  ilumina nada). Cambiarlo es del armazón, no de esta página; queda para el coordinador.
+
+### 2. ¿Cómo se dice el resultado?
+
+- **Respuesta: con la familia de avisos y el icono de su clase.** Conectado, `notice` con el círculo con marca;
+  cancelado, `notice` con el círculo de información; fallido, `notice red` con el círculo con aspa. Los mismos roles
+  (`status`, `alert`), el paso de cuerpo y la medida de 76ch, en lugar de la línea de 12px de la barra de guardado.
+- **Regla.** The Second Carrier Rule (`DESIGN.md`); `AuthDone` y `notice red` en las pantallas de acceso, y la
+  vuelta de Microsoft del inicio de sesión, que dicen así un resultado.
+
+### 3. ¿Cómo se vuelve?
+
+- **Respuesta: un enlace con la piel del botón, secundario.** «Volver a Entrada de correo» es un enlace a
+  `/email-intake` (`Link className="btn"`, como la vuelta de `BcpReport`): se abre en otra pestaña, se copia y se
+  anuncia como lo que es. Mismo texto, mismo sitio, mismo peso.
+- **Regla.** La del propio código (`PushNav`): una ruta es un enlace. El pulido conserva el control y su peso; solo
+  cambia el elemento.

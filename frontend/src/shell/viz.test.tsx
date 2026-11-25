@@ -551,6 +551,17 @@ describe("StatCard renders a Tile", () => {
     expect(container.querySelector(".stat-card .stat-label")).toHaveTextContent("At risk");
   });
 
+  it("with `to={null}`, links nowhere on purpose and keeps its figure and hooks", () => {
+    // A tile counted under a Client chip whose only destination lists every
+    // client's rows (general ruling 2): the caller says "nowhere" in so many
+    // words, and the type still refuses a tile that says nothing.
+    const { container } = card({ to: null });
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector(".stat-card")).toHaveClass("tile");
+    expect(container.querySelector(".stat-card")).not.toHaveAttribute("href");
+    expect(container.querySelector(".stat-card .stat-value")).toHaveTextContent("18");
+  });
+
   it("says `n/a` while the figure is unmeasured, rather than a confident zero", () => {
     // A tile above a `QueryState` renders while its list is still loading, so
     // `String(items.length)` is 0 -- a measurement nobody made, on every stat

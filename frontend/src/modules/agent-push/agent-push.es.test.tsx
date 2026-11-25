@@ -356,8 +356,8 @@ describe("push install pages in Spanish", () => {
     stubApi();
     // The bind form opens in a dialog from `?new=` (redesign Task 6, 1.10).
     const { container } = renderPage(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
-    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
-    expect(await screen.findByRole("heading", { level: 1, name: "Instalación remota" })).toBeInTheDocument();
+    // A sub-page without a rail entry takes its own name as h1 (ruling 1b).
+    expect(await screen.findByRole("heading", { level: 1, name: "Ámbitos de credenciales" })).toBeInTheDocument();
     expect(await screen.findByText(/WinRM respondió en 1 de 2 equipos Windows sondeados/)).toBeInTheDocument();
     expect(screen.getByText("(credencial eliminada)")).toBeInTheDocument();
     expect(screen.getByText("Desvinculado")).toBeInTheDocument();
@@ -582,7 +582,10 @@ describe("push install pages in Spanish", () => {
     expect(within(table).getByText("No está listo")).toBeInTheDocument();
     expect(screen.getByText(/3 equipos de esta subred no aparecen en la lista porque nadie los ha avalado/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reclámalos en Descubiertos" })).toBeInTheDocument();
-    expect(screen.getByText(/1 equipo de esta subred no aparece en la lista porque está pendiente de revisión/)).toBeInTheDocument();
+    // The machine list is «Equipos» in the rail and on its page (D13).
+    expect(
+      screen.getByText("1 equipo de esta subred no aparece en la lista porque está pendiente de revisión. Apruébalo en Equipos para incluirlo."),
+    ).toBeInTheDocument();
     expectNoEnglish(container);
 
     await user.click(await screen.findByRole("button", { name: "Iniciar la instalación remota en 2 equipos" }));

@@ -159,6 +159,25 @@ describe("the plans list on the list kit (4.5)", () => {
     expect(hrefs).toContain(`/bcp?review=overdue&client=${ANDES}`);
   });
 
+  it("under the chip, keeps the client's count of open findings and links nowhere, since the report lists every client's (general ruling 2)", async () => {
+    renderPage(`/bcp?client=${ANDES}`, <PlansPage />);
+    await screen.findByRole("table", { name: "Continuity tests" });
+    const findings = screen.getByText("Open findings").closest(".stat-card") as HTMLElement;
+    // The count is still drawn: it is the narrowed status rows' sum.
+    await waitFor(() => expect(findings.querySelector(".stat-value")).toHaveTextContent(/^\d+$/));
+    // `/bcp/report` has no chip and reads the top bar's scope, so a link there
+    // would open every client's findings under one client's count.
+    expect(findings.tagName).not.toBe("A");
+    expect(findings).not.toHaveAttribute("href");
+    expect(screen.queryByRole("link", { name: /Open findings/ })).toBeNull();
+  });
+
+  it("without the chip, the Open findings tile still opens the period report", async () => {
+    renderPage("/bcp", <PlansPage />);
+    await screen.findByRole("table", { name: "Continuity tests" });
+    expect(screen.getByRole("link", { name: /Open findings/ })).toHaveAttribute("href", "/bcp/report");
+  });
+
   it("asks before Cancel drops a change in New plan, and opens it empty again (general rulings 3 and 4)", async () => {
     const { router } = renderPage("/bcp?new=plan", <PlansPage />, "/bcp");
     let dialog = await screen.findByRole("dialog", { name: "New plan" });

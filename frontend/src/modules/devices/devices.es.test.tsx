@@ -251,6 +251,8 @@ describe("the devices page in Spanish", () => {
     await user.click(screen.getByRole("button", { name: "Rechazar DESKTOP-7Q2M4KD" }));
     const dialog = await screen.findByRole("dialog", { name: "Rechazar este equipo" });
     expect(within(dialog).getByRole("button", { name: "Rechazar y desinstalar" })).toBeInTheDocument();
+    // It leaves the list the rail calls «Equipos» (D13), not «Dispositivos».
+    expect(dialog).toHaveTextContent("Desde ahora deja de aparecer en Equipos.");
     expectNoEnglish(dialog, ["DESKTOP-7Q2M4KD"]);
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
   });

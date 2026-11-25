@@ -242,8 +242,11 @@ export function PlansPage() {
           icon="alert-triangle"
           /* The period report is the only surface that lists findings across
              plans (`GET /bcp/report/period` — "Open findings by severity");
-             a plan row does not carry them. */
-          to="/bcp/report"
+             a plan row does not carry them. It has no Client chip and reads
+             the top bar's scope, so under this page's chip the tile keeps the
+             client's count and links nowhere (general ruling 2): a link there
+             would open every client's findings. */
+          to={filters.values.client ? null : "/bcp/report"}
           tone="orange"
           zeroLabel={t("bcp.plans.noneOpen")}
           foot={

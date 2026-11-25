@@ -192,6 +192,10 @@ function Failure({ message }: { message: string }) {
 /** `/profile/security`, in the console's frame, under the console's own name. */
 export function SecurityPage() {
   const t = useT();
+  // Reached from the account menu, under no rail entry: the shell's half of
+  // the tab is the product alone, so the page names itself, as its h1 does
+  // (general ruling 1b): "<this page> · Novieri RMM".
+  useRecordTitle(t("profile.securityPage.title"));
   const zone = useOrgZone();
   return (
     <SecurityBody

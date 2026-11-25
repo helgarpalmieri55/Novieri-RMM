@@ -183,7 +183,6 @@ export const serviceDesk: Shape<typeof en> = {
     originIntegration: "De una integración",
     assigneeAria: "Responsable",
     anyone: "Cualquiera",
-    shownCount: { one: "{n} mostrado", other: "{n} mostrados" },
     truncated:
       "Se muestran {shown} de {total} tickets que coinciden. Acota los filtros de arriba para ver el resto.",
     empty: "No hay tickets abiertos.",

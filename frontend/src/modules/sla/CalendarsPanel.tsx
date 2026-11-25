@@ -4,7 +4,8 @@ import { attemptProblems, describeSubmitError, Form, FormActions } from "../../c
 import type { Attempt, FieldRule } from "../../components/form";
 import { Badge, Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Icon } from "../../shell/icons";
-import { Btn, FormSection, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
+import { Btn, FormSection, StatusPill, useNewParam } from "../../shell/components";
+import { useReportDirty, type SlaGuardWiring } from "./pageGuard";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
@@ -109,7 +110,17 @@ const calendarRules = (): readonly FieldRule[] => [
   { name: "timezone", label: translate("sla.calendars.timezoneLabel"), validate: invalidTimezone },
 ];
 
-export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
+export function CalendarsPanel({
+  canAdmin,
+  pageGuard,
+  onWeekDirty,
+}: {
+  canAdmin: boolean;
+  /** The page's one guard (`./pageGuard`): Add calendar reports to it. */
+  pageGuard: SlaGuardWiring;
+  /** Whether the open calendar's week holds unsaved hours, for the same guard. */
+  onWeekDirty: (dirty: boolean) => void;
+}) {
   const t = useT();
   const calendars = useSlaCalendars();
   const create = useCreateSlaCalendarMutation();
@@ -159,14 +170,12 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creating]);
 
-  // ONE GUARD FOR THE FORM IN THE `?new=` DIALOG (general ruling 3): Back,
-  // or any change of `new`, asks before a half-written form is dropped.
-  // Cancel and a successful save are the person's own act, so they release
-  // the guard first.
-  const { guard, release } = useUnsavedGuard(
-    creating && (name.trim() !== "" || timezone !== DEFAULT_TIMEZONE || !active),
-    { search: ["new"] },
-  );
+  // THE FORM IN THE `?new=` DIALOG REPORTS TO THE PAGE'S ONE GUARD (general
+  // ruling 3, `./pageGuard`): Back, or any change of `new`, asks before a
+  // half-written form is dropped. Cancel and a successful save are the
+  // person's own act, so they release the guard first.
+  useReportDirty(creating && (name.trim() !== "" || timezone !== DEFAULT_TIMEZONE || !active), pageGuard.onDirty);
+  const release = pageGuard.release;
   function closeCreate() {
     release();
     created.close();
@@ -224,7 +233,6 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
     // "Add calendar" (secondary: the open dialog's Save is the primary), then
     // the list. No Client chip: calendars are the organisation's.
     <>
-      {guard}
       <FormSection title={t("sla.calendars.title")} icon="calendar">
         <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: 12 }}>
           <p className="note" style={{ margin: 0 }}>
@@ -368,7 +376,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
 
         {selectedId && (
           <div style={{ paddingTop: 16, marginTop: 16, borderTop: "1px solid var(--line)" }}>
-            <CalendarDetailPanel calendarId={selectedId} canAdmin={canAdmin} />
+            <CalendarDetailPanel calendarId={selectedId} canAdmin={canAdmin} onWeekDirty={onWeekDirty} />
           </div>
         )}
 

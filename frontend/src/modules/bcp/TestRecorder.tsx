@@ -50,6 +50,7 @@ import {
   useDraft,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { recordOnSubPage, useRecordTitle } from "../../shell/title";
 import { Facts, KV } from "../../shell/viz";
 
 type TriState = "" | "true" | "false";
@@ -105,6 +106,11 @@ export function TestRecorder() {
 
   const test = useTest(testId);
   const recordTest = useRecordTestMutation();
+  // A RECORD ON A SUB-PAGE NAMES BOTH (general ruling 1b): the test, as the
+  // plan's list of tests names it (its type), then this page, then the rail
+  // entry: "Restore drill · DR test · Continuity tests · Novieri RMM". A test
+  // has no name of its own, and the plan's name is the plan page's tab.
+  useRecordTitle(recordOnSubPage(t("bcp.recorder.title"), test.data ? testTypeLabel(test.data.type) : undefined));
 
   // WHAT WAS LAST RECORDED FROM THIS FORM, as the form holds it: what the
   // draft is compared with. It starts blank and becomes the values sent once

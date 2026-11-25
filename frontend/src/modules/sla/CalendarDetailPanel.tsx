@@ -18,9 +18,12 @@ import { WorkingWindowsEditor } from "./WorkingWindowsEditor";
 export function CalendarDetailPanel({
   calendarId,
   canAdmin,
+  onWeekDirty,
 }: {
   calendarId: string;
   canAdmin: boolean;
+  /** Whether the week holds unsaved hours, for the page's one guard. */
+  onWeekDirty: (dirty: boolean) => void;
 }) {
   const t = useT();
   const calendar = useSlaCalendar(calendarId);
@@ -56,13 +59,25 @@ export function CalendarDetailPanel({
       </div>
       {explanation && <p className="notice red">{explanation}</p>}
 
+      {/* KEYED BY THE CALENDAR (general ruling 12): the calendar is a
+          selection that changes without a route change, and a calendar read
+          once is cached, so without the key the editor stayed mounted with the
+          last calendar's unsaved hours and Save week sent them to this one.
+          A new calendar starts a new editor: the unsaved week is dropped, and
+          its report to the page's one guard goes with it. */}
       <WorkingWindowsEditor
+        key={calendarId}
         calendarId={calendarId}
         timezone={calendar.data.timezone}
         windows={calendar.data.windows}
         canAdmin={canAdmin}
+        onDirty={onWeekDirty}
       />
-      <HolidaysPanel calendarId={calendarId} canAdmin={canAdmin} />
+      {/* Keyed for the same reason: a half-typed holiday belongs to the
+          calendar it was typed for, and Add holiday must never send it to the
+          next one (general ruling 12). Its own key: it is the week editor's
+          sibling, and two siblings with one key are drawn twice. */}
+      <HolidaysPanel key={`holidays-${calendarId}`} calendarId={calendarId} canAdmin={canAdmin} />
     </div>
   );
 }

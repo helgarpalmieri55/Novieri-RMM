@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
-import { documentTitle, RecordTitleProvider, useDocumentTitle, useRecordTitle } from "./title";
+import { documentTitle, recordOnSubPage, RecordTitleProvider, useDocumentTitle, useRecordTitle } from "./title";
 
 describe("documentTitle (design §5: 'Página · Novieri RMM')", () => {
   it("names the page, then the product", () => {
@@ -17,6 +17,20 @@ describe("documentTitle (design §5: 'Página · Novieri RMM')", () => {
     expect(documentTitle()).toBe("Novieri RMM");
     expect(documentTitle("  ")).toBe("Novieri RMM");
     expect(documentTitle("Novieri RMM")).toBe("Novieri RMM");
+  });
+});
+
+describe("recordOnSubPage (ruling 1b: a record shown on a sub-page)", () => {
+  it("names the record, then the sub-page, for the shell to put before its rail entry", () => {
+    expect(recordOnSubPage("Session recording", "lis-ws-041")).toBe("lis-ws-041 · Session recording");
+    expect(documentTitle("Remote sessions", recordOnSubPage("Session recording", "lis-ws-041"))).toBe(
+      "lis-ws-041 · Session recording · Remote sessions · Novieri RMM",
+    );
+  });
+
+  it("is the sub-page alone until the record is known", () => {
+    expect(recordOnSubPage("DR test", undefined)).toBe("DR test");
+    expect(recordOnSubPage("DR test", "  ")).toBe("DR test");
   });
 });
 

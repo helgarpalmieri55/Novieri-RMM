@@ -277,8 +277,13 @@ export function StatCard({
   label: string;
   value: string;
   icon: string;
-  /** Where the number lives. Required: see above. */
-  to: string;
+  /**
+   * Where the number lives. Required: see above. `null` is the one way to say
+   * "nowhere", and it has to be said: a tile counted under a Client chip whose
+   * only destination lists every client's rows (general ruling 2) keeps its
+   * figure and drops the link rather than open rows it did not count.
+   */
+  to: string | null;
   tone?: StatTone;
   /** Needs a person. The crit or warn wash, and the trend slot is honoured. */
   urgent?: boolean;
@@ -351,7 +356,7 @@ export function StatCard({
       label={label}
       value={value}
       icon={icon}
-      to={to}
+      to={to ?? undefined}
       kind={kind}
       spark={spark}
       sub={sub}

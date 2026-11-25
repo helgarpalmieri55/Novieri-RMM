@@ -180,7 +180,6 @@ export const serviceDesk = {
     originIntegration: "From an integration",
     assigneeAria: "Assignee",
     anyone: "Anyone",
-    shownCount: { one: "{n} shown", other: "{n} shown" },
     truncated: "Showing {shown} of {total} matching tickets. Narrow the filters above to see the rest.",
     empty: "No open tickets.",
   },

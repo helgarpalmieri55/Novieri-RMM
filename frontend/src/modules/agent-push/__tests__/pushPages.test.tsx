@@ -484,8 +484,8 @@ describe("PushNav", () => {
     // then strip.
     stubApi();
     const { container } = renderWithProviders(<PushCredentialScopesPage />);
-    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
-    const heading = await screen.findByRole("heading", { level: 1, name: "Push install" });
+    // A sub-page without a rail entry takes its own name as h1 (ruling 1b).
+    const heading = await screen.findByRole("heading", { level: 1, name: "Credential scopes" });
     const strip = screen.getByRole("navigation", { name: "Push install" });
     expect(
       heading.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -878,8 +878,8 @@ describe("Credential scopes on the list kit", () => {
   it("opens New scope from its button and from ?new=scope, with its safety text", async () => {
     stubApi();
     const { router } = renderRouted("/agent-push/credential-scopes", <PushCredentialScopesPage />);
-    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
-    const head = (await screen.findByRole("heading", { level: 1, name: "Push install" })).closest("section") as HTMLElement;
+    // A sub-page without a rail entry takes its own name as h1 (ruling 1b).
+    const head = (await screen.findByRole("heading", { level: 1, name: "Credential scopes" })).closest("section") as HTMLElement;
     await userEvent.click(await within(head).findByRole("button", { name: "New scope" }));
     expect(router.state.location.search).toBe("?new=scope");
     const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });

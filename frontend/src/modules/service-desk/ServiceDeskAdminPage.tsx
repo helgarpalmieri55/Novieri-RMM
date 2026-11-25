@@ -23,6 +23,7 @@ import { ticketTypeLabel } from "./serviceDeskState";
 import type { TicketType } from "./types";
 import { Btn, FormSection, PageHead, QueryState, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 // Auditor B, cross-cutting: "Same silent-no-op failure repeats on every form
 // in the module." `disabled={create.isPending || !key || !name}` on both
@@ -59,6 +60,9 @@ const categoryRules = (): readonly FieldRule[] => [
 // row, saved when its dialog is confirmed.
 export function ServiceDeskAdminPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("serviceDesk.admin.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
