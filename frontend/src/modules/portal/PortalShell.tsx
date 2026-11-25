@@ -33,8 +33,10 @@ import { useApi } from "../../lib/ApiContext";
 import { PORTAL_SIGN_IN_PATH, signOut } from "../../lib/session";
 import { sessionPerson } from "../../lib/sessionEnd";
 import { setSelectedClient } from "../../lib/clientChoice";
+import { NovieriLockup } from "../../shell/brand";
 import { Btn, KIND_ICON } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { PortalNamesTab } from "./portalTitle";
 import { ContactFrameContext, usePortalMe } from "./usePortalMe";
 
 export function PortalShell({ children, embedded = false }: { children: ReactNode; embedded?: boolean }) {
@@ -58,28 +60,38 @@ export function PortalShell({ children, embedded = false }: { children: ReactNod
   const Body = embedded ? "section" : "main";
 
   return (
-    <div data-testid="portal-shell" className={embedded ? undefined : "min-h-screen"}>
-      <header className="flex flex-wrap items-center gap-4 border-b border-[var(--line)] px-6 py-3">
-        <Link to="/portal" className="font-semibold">
-          {t("portal.shell.brand")}
-        </Link>
-        {/* The contact's own sign-in security (own-auth phase 2, Task 11). */}
-        <Link to="/portal/security" className="text-sm">
-          {t("portal.shell.security")}
-        </Link>
-        <span className="ml-auto text-sm text-[var(--muted)]">
-          {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}
-        </span>
-        {embedded ? null : (
-          <Btn
-            small
-            label={t("shell.accountMenu.signOut")}
-            onClick={() => {
-              setSignOutFailed(false);
-              signOut(api, PORTAL_SIGN_IN_PATH).catch(() => setSignOutFailed(true));
-            }}
-          />
-        )}
+    // THE NOVIERI BRAND IN THE PORTAL'S OWN FRAME (design §4: "El portal del
+    // usuario final ... recibe la misma marca dentro de su propio marco"): the
+    // lockup on a white bar with the line below it, the section's name beside
+    // it in the secondary ink, and the person with "Sign out" on the right;
+    // the pages on the page ground, as wide as the console's workspace.
+    <div data-testid="portal-shell" className={embedded ? "bg-[var(--bg)]" : "min-h-screen bg-[var(--bg)]"}>
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--line)] bg-[var(--surface)] px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link to="/portal" className="inline-flex items-center rounded-[var(--r-ctl)] text-[var(--ink)]">
+            <NovieriLockup height={20} />
+          </Link>
+          <span className="border-l border-[var(--line)] pl-3 text-[var(--muted)]">{t("portal.shell.brand")}</span>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* The contact's own sign-in security (own-auth phase 2, Task 11). */}
+          <Link to="/portal/security" className="text-sm">
+            {t("portal.shell.security")}
+          </Link>
+          <span className="text-sm text-[var(--muted)]">
+            {me.data ? me.data.display_name || me.data.email : me.isError ? "" : "…"}
+          </span>
+          {embedded ? null : (
+            <Btn
+              small
+              label={t("shell.accountMenu.signOut")}
+              onClick={() => {
+                setSignOutFailed(false);
+                signOut(api, PORTAL_SIGN_IN_PATH).catch(() => setSignOutFailed(true));
+              }}
+            />
+          )}
+        </div>
       </header>
       {signOutFailed ? (
         <p role="alert" className="notice red">
@@ -94,8 +106,14 @@ export function PortalShell({ children, embedded = false }: { children: ReactNod
           <Btn small label={t("common.actions.retry")} onClick={() => void me.refetch()} />
         </div>
       ) : null}
-      <Body className="px-6 py-6" aria-label={embedded ? t("portal.shell.brand") : undefined}>
-        <ContactFrameContext.Provider value={true}>{children}</ContactFrameContext.Provider>
+      <Body
+        className="max-w-[1440px] px-4 pb-10 pt-[22px] sm:px-6"
+        aria-label={embedded ? t("portal.shell.brand") : undefined}
+      >
+        {/* Its pages name the tab here; embedded, nothing touches it (portalTitle.tsx). */}
+        <PortalNamesTab.Provider value={!embedded}>
+          <ContactFrameContext.Provider value={true}>{children}</ContactFrameContext.Provider>
+        </PortalNamesTab.Provider>
       </Body>
     </div>
   );

@@ -348,7 +348,8 @@ function renderDetail(detail: PortalTicketDetail = DETAIL, permissions = ME.perm
 describe("a portal ticket's page in Spanish", () => {
   it("words the head, the updates, the details, the attachments and the status history", async () => {
     const { container } = renderDetail();
-    expect(await screen.findByRole("heading", { name: "INC-1: La VPN no conecta" })).toBeInTheDocument();
+    // The record's head (redesign plan, Task 7, 2.11): "#<number> <subject>", as the service desk's.
+    expect(await screen.findByRole("heading", { name: "#INC-1 La VPN no conecta" })).toBeInTheDocument();
     expect(screen.getByText(/^Abierto el .+, última actualización el .+\.$/)).toBeInTheDocument();
     expect(screen.getAllByText("En curso").length).toBeGreaterThan(0);
     expect(screen.getByText("Urgente")).toBeInTheDocument();

@@ -72,6 +72,9 @@ export const portal = {
     status: "Status",
     lastUpdate: "Last update",
     opened: "opened {age}",
+    stateLabel: "Show",
+    stateOpen: "Open",
+    stateAll: "All",
   },
   newTicket: {
     title: "New ticket",
@@ -87,6 +90,7 @@ export const portal = {
     attachments: "Attachments (optional)",
     drop: "Drop files here or click to choose",
     submit: "Submit",
+    section: "Your request",
     noCategory: "You cannot file a ticket without a category, and the catalog is unavailable.",
   },
   help: {

@@ -10,7 +10,7 @@ import { ApiError } from "../../lib/api";
 import { useCreatePortalTicketMutation, usePortalCategories, useUploadPortalAttachmentMutation } from "./api";
 import { usePortalMe } from "./usePortalMe";
 import { HelpArticleDialog, HelpSuggestions } from "./HelpSuggestions";
-import { PortalNav } from "./PortalNav";
+import { PortalTitle } from "./portalTitle";
 import {
   PORTAL_PRIORITY_OPTIONS,
   attachmentLimitHint,
@@ -18,7 +18,7 @@ import {
   oversizedAttachmentMessage,
 } from "./portalState";
 import type { PortalTicketPriority } from "./types";
-import { PageHead, Panel } from "../../shell/components";
+import { DetailGrid, FormPage, FormSection, useUnsavedGuard } from "../../shell/components";
 import { Chips } from "../../shell/viz";
 
 // "New ticket" (spec §7): category, subject, description, optional
@@ -108,6 +108,12 @@ export function NewTicketPage() {
   // rules and the values they were checked against, so the sentences are
   // worded at render and follow a language switch.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A HALF-WRITTEN TICKET ASKS BEFORE IT IS LEFT (redesign plan, Task 7,
+  // 2.10; Receta FO, 6): losing a long description is what the question is
+  // for. Filing it leaves for the new ticket, so the guard is released after
+  // the server took it, right before that navigation (decision D16), never
+  // before sending and never when it fails.
+  const { guard, release } = useUnsavedGuard(subject.trim() !== "" || description.trim() !== "");
 
   async function fileTicket() {
     // RESUME, DO NOT RE-FILE. The ticket is created first and the attachment
@@ -137,6 +143,8 @@ export function NewTicketPage() {
       await upload.mutateAsync({ id: ticketId, file: next });
       uploadedCount.current = at + 1;
     }
+    // Filed, and every file landed: leaving for the ticket is not leaving it unsaved.
+    release();
     navigate(`/portal/tickets/${ticketId}`);
   }
 
@@ -161,196 +169,204 @@ export function NewTicketPage() {
   }
 
   return (
-    <div>
-      <PageHead
-        title={t("portal.newTicket.title")}
-        description={t("portal.newTicket.description")}
-      />
-      <PortalNav canRead={canRead} />
-
-      <Panel>
-        {/* A real <form>, so Enter in Subject files the ticket instead of
-            doing nothing -- the other half of the same finding. */}
-        <Form onSubmit={submit}>
-          {/* `required` states the same fact for assistive tech; it blocks
-              nothing, because <Form> is noValidate -- a native bubble that
-              vanishes on the next click is the silent no-op wearing a hat.
-              No "*" markers: this form already declares optionality the other
-              way round ("Attachment (optional)"), and two conventions for one
-              fact in one form is worse than either. */}
-          <Field label={t("portal.newTicket.category")}>
-            <select
-              className={inputClass}
-              required
-              value={categoryId}
-              disabled={categoriesForbidden}
-              onChange={(e) => setCategoryId(e.target.value)}
-            >
-              <option value="">{t("portal.newTicket.selectCategory")}</option>
-              {/* Grouped, not flat: see portalState.groupPortalCategories --
-                  the flat alphabetical list put "Software" directly beside
-                  "Software request" with nothing to tell them apart. */}
-              {groupPortalCategories(categories.data ?? []).map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
+    // A FORM PAGE THAT LEAVES WHEN IT IS SENT (redesign plan, Task 7, 2.10):
+    // back to My tickets, one section, the help that matches the subject on
+    // the right on a desktop. A form that is sent once keeps its own Submit
+    // (no save bar: there is nothing to discard back to).
+    <FormPage
+      back={{ to: "/portal", label: t("portal.nav.myTickets") }}
+      title={t("portal.newTicket.title")}
+      description={t("portal.newTicket.description")}
+    >
+      <PortalTitle page={t("portal.newTicket.title")} />
+      {guard}
+      <DetailGrid
+        main={
+          <FormSection title={t("portal.newTicket.section")} icon="ticket">
+            {/* A real <form>, so Enter in Subject files the ticket instead of
+                doing nothing -- the other half of the same finding. */}
+            <Form onSubmit={submit}>
+              {/* `required` states the same fact for assistive tech; it blocks
+                  nothing, because <Form> is noValidate -- a native bubble that
+                  vanishes on the next click is the silent no-op wearing a hat.
+                  No "*" markers: this form already declares optionality the other
+                  way round ("Attachment (optional)"), and two conventions for one
+                  fact in one form is worse than either. */}
+              <Field label={t("portal.newTicket.category")}>
+                <select
+                  className={inputClass}
+                  required
+                  value={categoryId}
+                  disabled={categoriesForbidden}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                >
+                  <option value="">{t("portal.newTicket.selectCategory")}</option>
+                  {/* Grouped, not flat: see portalState.groupPortalCategories --
+                      the flat alphabetical list put "Software" directly beside
+                      "Software request" with nothing to tell them apart. */}
+                  {groupPortalCategories(categories.data ?? []).map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
-                </optgroup>
-              ))}
-            </select>
-          </Field>
-          {categoriesForbidden && (
-            <p className="form-hint" style={{ marginBottom: 12 }}>
-              {t("portal.newTicket.categoriesForbidden")}
-            </p>
-          )}
+                </select>
+              </Field>
+              {categoriesForbidden && (
+                <p className="form-hint" style={{ marginBottom: 12 }}>
+                  {t("portal.newTicket.categoriesForbidden")}
+                </p>
+              )}
 
-          <Field label={t("portal.newTicket.subject")}>
-            <input
-              className={inputClass}
-              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
-              data-keep
-              required
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            />
-          </Field>
-          <HelpSuggestions subject={subject} enabled={canRead} onOpen={setHelpArticle} />
+              <Field label={t("portal.newTicket.subject")}>
+                <input
+                  className={inputClass}
+                  // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+                  data-keep
+                  required
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                />
+              </Field>
 
-          {/* Auditor A (HIGH): "Ticket Description is a single-line <input>
-              here too -- the defect is systemic to ticket creation ... This
-              is the *end-user* reporting form -- the page where a
-              non-technical employee describes what is broken, pastes an
-              error message, or lists what they tried. A single-line input
-              cannot hold or display that, accepts no newlines, and signals
-              'a few words will do'." */}
-          <Field label={t("portal.newTicket.descriptionLabel")}>
-            <textarea
-              className={inputClass}
-              rows={6}
-              placeholder={t("portal.newTicket.descriptionPlaceholder")}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Field>
+              {/* Auditor A (HIGH): "Ticket Description is a single-line <input>
+                  here too -- the defect is systemic to ticket creation ... This
+                  is the *end-user* reporting form -- the page where a
+                  non-technical employee describes what is broken, pastes an
+                  error message, or lists what they tried. A single-line input
+                  cannot hold or display that, accepts no newlines, and signals
+                  'a few words will do'." */}
+              <Field label={t("portal.newTicket.descriptionLabel")}>
+                <textarea
+                  className={inputClass}
+                  rows={6}
+                  placeholder={t("portal.newTicket.descriptionPlaceholder")}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
 
-          {/* v3 draws urgency as a CHIP ROW of plain sentences
-              (`P['portal/new']`: "I can work around it" / "It is slowing me
-              down" / "I cannot work"), not as a dropdown. Four chips rather
-              than the mock's three, because the wire has four priorities and
-              this port loses no control; `Chips` renders each as a real
-              button carrying `aria-pressed`, inside a `role="group"` named by
-              the field.
+              {/* v3 draws urgency as a CHIP ROW of plain sentences
+                  (`P['portal/new']`: "I can work around it" / "It is slowing me
+                  down" / "I cannot work"), not as a dropdown. Four chips rather
+                  than the mock's three, because the wire has four priorities and
+                  this port loses no control; `Chips` renders each as a real
+                  button carrying `aria-pressed`, inside a `role="group"` named by
+                  the field.
 
-              The grade the chosen sentence maps to is named under the row.
-              Without it the requester could not tell that "I cannot work at
-              all" files an urgent ticket, which is the one thing about this
-              control they might reasonably want to know. */}
-          {/* A `div.field`, not `Field`: `Field` renders a real `<label>`,
-              and a label wrapping a group of buttons labels nothing. The
-              caption is the same `.field > span` the other fields draw, and
-              the group carries its own accessible name through `Chips`. */}
-          <div className="field">
-            <span>{t("portal.newTicket.urgent")}</span>
-            <Chips
-              label={t("portal.newTicket.urgent")}
-              items={PORTAL_PRIORITY_OPTIONS.map((option) => option.label)}
-              active={priorityIndex}
-              onSelect={(index) => {
-                const option = PORTAL_PRIORITY_OPTIONS[index];
-                if (option) setPriority(option.value as PortalTicketPriority);
-              }}
-            />
-            <p className="form-hint" style={{ marginTop: 6 }}>
-              {t("portal.newTicket.filedAs", { name: chosenPriority?.name ?? "" })}
-            </p>
-          </div>
+                  The grade the chosen sentence maps to is named under the row.
+                  Without it the requester could not tell that "I cannot work at
+                  all" files an urgent ticket, which is the one thing about this
+                  control they might reasonably want to know. */}
+              {/* A `div.field`, not `Field`: `Field` renders a real `<label>`,
+                  and a label wrapping a group of buttons labels nothing. The
+                  caption is the same `.field > span` the other fields draw, and
+                  the group carries its own accessible name through `Chips`. */}
+              <div className="field">
+                <span>{t("portal.newTicket.urgent")}</span>
+                <Chips
+                  label={t("portal.newTicket.urgent")}
+                  items={PORTAL_PRIORITY_OPTIONS.map((option) => option.label)}
+                  active={priorityIndex}
+                  onSelect={(index) => {
+                    const option = PORTAL_PRIORITY_OPTIONS[index];
+                    if (option) setPriority(option.value as PortalTicketPriority);
+                  }}
+                />
+                <p className="form-hint" style={{ marginTop: 6 }}>
+                  {t("portal.newTicket.filedAs", { name: chosenPriority?.name ?? "" })}
+                </p>
+              </div>
 
-          <Field label={t("portal.newTicket.attachments")}>
-            {/* The native input stays (it is what the browser's picker and
-                the tests drive) but is hidden; the drop target below is what
-                the requester sees. */}
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              className="hidden"
-              aria-label={t("portal.newTicket.attachments")}
-              onChange={(e) => {
-                // A NEW selection is a new batch: whatever was uploaded for
-                // the previous one says nothing about this one, so the
-                // resume counter goes back to the start.
-                uploadedCount.current = 0;
-                setFiles(Array.from(e.target.files ?? []));
-              }}
-            />
-            {/* v3's dashed drop target (`P['portal/new']`: a `.inp` with
-                `border-style:dashed`, centred, muted, "Drop a file or click"),
-                in place of a plain secondary button. IT REALLY TAKES A DROP.
-                Saying "drop files here" over a control that only opens a
-                picker is a promise the page does not keep, so `onDrop` reads
-                `dataTransfer.files` through the same setter the picker uses --
-                one batch, one reset of the resume counter, one list below.
+              <Field label={t("portal.newTicket.attachments")}>
+                {/* The native input stays (it is what the browser's picker and
+                    the tests drive) but is hidden; the drop target below is what
+                    the requester sees. */}
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  aria-label={t("portal.newTicket.attachments")}
+                  onChange={(e) => {
+                    // A NEW selection is a new batch: whatever was uploaded for
+                    // the previous one says nothing about this one, so the
+                    // resume counter goes back to the start.
+                    uploadedCount.current = 0;
+                    setFiles(Array.from(e.target.files ?? []));
+                  }}
+                />
+                {/* v3's dashed drop target (`P['portal/new']`: a `.inp` with
+                    `border-style:dashed`, centred, muted, "Drop a file or click"),
+                    in place of a plain secondary button. IT REALLY TAKES A DROP.
+                    Saying "drop files here" over a control that only opens a
+                    picker is a promise the page does not keep, so `onDrop` reads
+                    `dataTransfer.files` through the same setter the picker uses --
+                    one batch, one reset of the resume counter, one list below.
 
-                A real `<button>`, so it is a tab stop, takes the global focus
-                ring and is operable from the keyboard; the dashed edge is the
-                only thing it borrows from `.inp`. */}
-            <button
-              type="button"
-              className="inp focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-              style={{
-                borderStyle: "dashed",
-                justifyContent: "center",
-                color: "var(--muted)",
-                font: "inherit",
-                cursor: "pointer",
-              }}
-              onClick={() => fileInput.current?.click()}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                const dropped = Array.from(event.dataTransfer.files);
-                if (dropped.length === 0) return;
-                uploadedCount.current = 0;
-                setFiles(dropped);
-              }}
-            >
-              <Icon name="paperclip" size={14} />
-              <span>{t("portal.newTicket.drop")}</span>
-            </button>
-            {files.length > 0 && (
-              <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none" }}>
-                {files.map((file) => (
-                  <li key={`${file.name}-${file.size}`} className="cell-sub">
-                    {file.name}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Field>
-          <p className="form-hint" style={{ marginBottom: 12 }}>{attachmentLimitHint()}</p>
+                    A real `<button>`, so it is a tab stop, takes the global focus
+                    ring and is operable from the keyboard; the dashed edge is the
+                    only thing it borrows from `.inp`. */}
+                <button
+                  type="button"
+                  className="inp focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                  style={{
+                    borderStyle: "dashed",
+                    justifyContent: "center",
+                    color: "var(--muted)",
+                    font: "inherit",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => fileInput.current?.click()}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const dropped = Array.from(event.dataTransfer.files);
+                    if (dropped.length === 0) return;
+                    uploadedCount.current = 0;
+                    setFiles(dropped);
+                  }}
+                >
+                  <Icon name="paperclip" size={14} />
+                  <span>{t("portal.newTicket.drop")}</span>
+                </button>
+                {files.length > 0 && (
+                  <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none" }}>
+                    {files.map((file) => (
+                      <li key={`${file.name}-${file.size}`} className="cell-sub">
+                        {file.name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Field>
+              <p className="form-hint" style={{ marginBottom: 12 }}>{attachmentLimitHint()}</p>
 
-          {/* Enabled with the fields empty ON PURPOSE -- the refusal is what
-              the requester gets to read, and a control that will not move is
-              not. The only disable left is the one case where no input could
-              help: without the category list there is no valid category id to
-              send, and now that reason is rendered beside the button instead
-              of being left for the requester to infer. The server failure
-              comes from here too, so the bodyless 503 that
-              `{String(create.error)}` rendered as nothing now produces a
-              sentence under `role="alert"`. */}
-          <FormActions
-            label={t("portal.newTicket.submit")}
-            pending={create.isPending || upload.isPending}
-            error={create.error ?? upload.error}
-            problems={attemptProblems(attempt)}
-            disabledReason={categoriesForbidden ? t("portal.newTicket.noCategory") : undefined}
-          />
-        </Form>
-      </Panel>
+              {/* Enabled with the fields empty ON PURPOSE -- the refusal is what
+                  the requester gets to read, and a control that will not move is
+                  not. The only disable left is the one case where no input could
+                  help: without the category list there is no valid category id to
+                  send, and now that reason is rendered beside the button instead
+                  of being left for the requester to infer. The server failure
+                  comes from here too, so the bodyless 503 that
+                  `{String(create.error)}` rendered as nothing now produces a
+                  sentence under `role="alert"`. */}
+              <FormActions
+                label={t("portal.newTicket.submit")}
+                pending={create.isPending || upload.isPending}
+                error={create.error ?? upload.error}
+                problems={attemptProblems(attempt)}
+                disabledReason={categoriesForbidden ? t("portal.newTicket.noCategory") : undefined}
+              />
+            </Form>
+          </FormSection>
+        }
+        aside={<HelpSuggestions subject={subject} enabled={canRead} onOpen={setHelpArticle} />}
+      />
       <HelpArticleDialog articleId={helpArticle} onClose={() => setHelpArticle(null)} />
-    </div>
+    </FormPage>
   );
 }
