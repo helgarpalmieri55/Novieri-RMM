@@ -540,9 +540,15 @@ function EditExpenseDialog({
   const update = useUpdateExpenseMutation();
   const [description, setDescription] = useState(expense.description);
   const [invoiceRef, setInvoiceRef] = useState(expense.invoice_ref ?? "");
-  useReportDirty(description !== expense.description || invoiceRef !== (expense.invoice_ref ?? ""), onDirty);
+  const dirty = description !== expense.description || invoiceRef !== (expense.invoice_ref ?? "");
+  useReportDirty(dirty, onDirty);
 
   function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
     update.mutate({ id: expense.id, body: { description, invoice_ref: invoiceRef || null } }, { onSuccess: onSaved });
   }
 

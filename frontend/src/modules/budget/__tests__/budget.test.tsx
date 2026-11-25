@@ -1012,6 +1012,24 @@ describe("BudgetAdminPage wiring", () => {
 
     expect(api.updateFxRate).toHaveBeenCalledWith("fx1", { rate: "1.25000000" });
   });
+
+  // GENERAL RULING 13: a Save on an untouched record sends nothing (an
+  // unchanged PATCH writes a false entry to the audit log); it closes.
+  it.each([
+    ["a category", { listBudgetCategories: vi.fn().mockResolvedValue(CATEGORIES) }, "Edit category", "updateBudgetCategory"],
+    ["a cost center", { listCostCenters: vi.fn().mockResolvedValue(COST_CENTER_ONE) }, "Edit cost center", "updateCostCenter"],
+    ["an FX rate", { listFxRates: vi.fn().mockResolvedValue(FX_RATE_ONE) }, /^Edit the exchange rate/, "updateFxRate"],
+  ] as const)("sends nothing when %s is saved untouched (ruling 13)", async (_what, reads, title, write) => {
+    const user = userEvent.setup();
+    const api = baseApi({ ...reads, [write]: vi.fn().mockResolvedValue({}) });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<BudgetAdminPage />);
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: title });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api[write]).not.toHaveBeenCalled();
+  });
 });
 
 describe("budget state vocabulary", () => {
@@ -2314,6 +2332,28 @@ describe("BudgetPlannerPage on the form kit", () => {
     expect(api.updateBudget).not.toHaveBeenCalled();
   });
 
+  // GENERAL RULING 12: the budget is `?budget=`, a selection that changes
+  // without a route change. Leaving a budget with changes asks, and leaving
+  // drops them: nothing typed for one budget is saved onto the next.
+  it("drops an edit typed for one budget when the planner moves to another (ruling 12)", async () => {
+    const OTHER: BudgetOut = { ...BUDGETS[0]!, id: "b2", name: "FY27 IT Budget", fiscal_year: 2027 };
+    const api = kitApi({
+      listBudgets: vi.fn().mockResolvedValue([...BUDGETS, OTHER]),
+      listBudgetLines: vi.fn((id: string) => Promise.resolve(id === "b2" ? [] : BUDGET_LINES)),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
+    await userEvent.type(await screen.findByLabelText("Software licenses period 2"), "75.00");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Budget" }), "b2");
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Budget" })).toHaveValue("b2"));
+    // The second budget's own values, and no save bar: nothing of the first one's edit is left to send.
+    await waitFor(() => expect(screen.getByLabelText("Software licenses period 2")).toHaveValue(""));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(api.putBudgetLines).not.toHaveBeenCalled();
+  });
+
   it("keeps the budget open in the URL, so a reload opens it again", async () => {
     mockUseApi.mockReturnValue(kitApi() as ApiClient);
     renderPage("/budget/planner?budget=b1", <BudgetPlannerPage />, "/budget/planner");
@@ -2394,6 +2434,16 @@ describe("ExpensesPage on the list kit", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     expect(router.state.location.search).toBe("?edit=e1");
     expect(await screen.findByRole("dialog", { name: "Edit expense" })).toBeInTheDocument();
+  });
+
+  it("sends nothing when an expense is saved untouched (ruling 13)", async () => {
+    const api = kitApi({ updateExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED) });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage("/budget/expenses?edit=e1", <ExpensesPage />, "/budget/expenses");
+    const dialog = await screen.findByRole("dialog", { name: "Edit expense" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(api.updateExpense).not.toHaveBeenCalled();
   });
 });
 

@@ -1124,6 +1124,28 @@ describe("DocsPage on the kit", () => {
     expect(screen.getByLabelText("Title")).toHaveValue("Finance share recovery runbook");
   });
 
+  // GENERAL RULING 12: the article is `?article=`, and Back or Forward to
+  // another one is a change of query that keeps the page (D16, no question);
+  // the edit typed for the first must be dropped, never saved onto the second.
+  it("drops an edit typed for one article when the page moves to another (ruling 12)", async () => {
+    const OTHER = { ...ARTICLE, id: "a2", title: "Windows workstation build standard", category: "Procedure" };
+    const updateArticle = vi.fn().mockResolvedValue(OTHER);
+    mockUseApi.mockReturnValue(
+      kitApi({ getArticle: vi.fn((id: string) => Promise.resolve(id === "a2" ? OTHER : ARTICLE)), updateArticle }),
+    );
+    const { router } = renderKitPage("/docs?article=a1", <DocsPage />, "/docs");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Title"), " typed for a1");
+    await act(() => router.navigate("/docs?article=a2"));
+    expect(await screen.findByRole("heading", { name: "Windows workstation build standard" })).toBeInTheDocument();
+    // The editor went with the first article: nothing of its edit is on screen or can be saved.
+    expect(screen.queryByDisplayValue(/typed for a1/)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Windows workstation build standard");
+    expect(updateArticle).not.toHaveBeenCalled();
+  });
+
   it("asks before leaving with unsaved changes", async () => {
     mockUseApi.mockReturnValue(kitApi());
     // Leave as a person does: through a link to another page (the rail's, here

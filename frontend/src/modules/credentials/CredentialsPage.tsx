@@ -230,6 +230,8 @@ export function CredentialsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["credentials"] }),
   });
 
+  // No data, pending or failed: the tiles read n/a and say nothing under them (ruling 10a).
+  const noData = !credentials.data;
   const items = credentials.data ?? [];
   const neverUsed = items.filter((credential) => credential.last_used_at == null).length;
   const distinctTypes = new Set(items.map((credential) => credential.type)).size;
@@ -308,7 +310,7 @@ export function CredentialsPage() {
         <StatCard
           label={t("credentials.tiles.stored")}
           value={String(items.length)}
-          pending={!credentials.data}
+          pending={noData}
           icon="lock"
           to={listOf("")}
           tone="neutral"
@@ -318,7 +320,7 @@ export function CredentialsPage() {
         <StatCard
           label={t("credentials.tiles.neverUsed")}
           value={String(neverUsed)}
-          pending={!credentials.data}
+          pending={noData}
           icon="clock"
           to={listOf("never-used")}
           tone="blue"
@@ -334,7 +336,7 @@ export function CredentialsPage() {
         <StatCard
           label={t("credentials.tiles.used")}
           value={String(items.length - neverUsed)}
-          pending={!credentials.data}
+          pending={noData}
           icon="eye"
           to={listOf("used")}
           tone="neutral"
@@ -346,12 +348,12 @@ export function CredentialsPage() {
         <StatCard
           label={t("credentials.tiles.typesInUse")}
           value={String(distinctTypes)}
-          pending={!credentials.data}
+          pending={noData}
           icon="shield-lock"
           to={listOf("")}
           tone="blue"
-          // Nothing under a tile before its read answers (ruling 10a), not even this.
-          foot={credentials.data ? t("credentials.tiles.typesAvailable", { count: CREDENTIAL_TYPES.length }) : undefined}
+          // Nothing under a tile without data (ruling 10a), not even this.
+          foot={noData ? undefined : t("credentials.tiles.typesAvailable", { count: CREDENTIAL_TYPES.length })}
           zeroLabel={t("credentials.tiles.typesInUseZero")}
         />
       </StatsGrid>

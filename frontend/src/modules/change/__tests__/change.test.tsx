@@ -1279,6 +1279,26 @@ describe("ChangeDetail lifecycle controls", () => {
     await waitFor(() => expect(api.submitChange).toHaveBeenCalledWith(CHANGE_ID));
   });
 
+  // GENERAL RULING 12: the change is the route's, and another change under the
+  // same route does not remount the page by itself; a comment typed for one
+  // decision must never be sent with another change's.
+  it("drops a decision comment typed for one change when the page moves to another (ruling 12)", async () => {
+    const user = userEvent.setup();
+    const OTHER_ID = "06a85c19-55e2-7f3c-8000-831c7bdba358";
+    api.getChange = vi.fn((id: string) =>
+      Promise.resolve(changeIn("submitted", id === OTHER_ID ? { id: OTHER_ID, title: "Rotate VPN certificates" } : {})),
+    );
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const { router } = renderPage(`/changes/${CHANGE_ID}`, <ChangeDetail />, "/changes/:changeId");
+    await user.type(await screen.findByLabelText(/^Decision comment/), "Typed for the firmware change");
+    await act(() => router.navigate(`/changes/${OTHER_ID}`));
+    expect(await screen.findByRole("heading", { level: 1, name: "Rotate VPN certificates" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Decision comment/)).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(await screen.findByRole("button", { name: "Approve change" }));
+    await waitFor(() => expect(api.approveChange).toHaveBeenCalledWith(OTHER_ID, { comment: null }));
+  });
+
   it("asks before approving, and does not approve until the dialog is confirmed", async () => {
     // Cycle 8. The decision is written to the immutable audit log against the
     // approver's account and cannot be withdrawn, so the click that fires it

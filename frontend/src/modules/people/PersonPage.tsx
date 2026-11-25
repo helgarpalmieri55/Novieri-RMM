@@ -80,6 +80,16 @@ const TAB_LABEL: Record<Tab, MessageKey> = {
 };
 
 export function PersonPage() {
+  const { personId } = useParams<{ personId: string }>();
+  // ONE PERSON, ONE PAGE (general ruling 12). Another person under the same
+  // route keeps the element mounted, and with it an open Edit and what was
+  // typed there, which Save would then write onto the person now shown.
+  // Keyed by the person, the page starts again: nothing typed for one person
+  // carries to the next.
+  return <PersonRecord key={personId} />;
+}
+
+function PersonRecord() {
   const t = useT();
   const { personId } = useParams<{ personId: string }>();
   const person = usePerson(personId);
@@ -601,23 +611,34 @@ function EditPersonDialog({
   const [startDate, setStartDate] = useState(person.start_date ?? "");
   const [endDate, setEndDate] = useState(person.end_date ?? "");
 
+  function submit() {
+    const body = {
+      display_name: name.trim(),
+      email: email.trim() || null,
+      department: department.trim() || null,
+      job_title: jobTitle.trim() || null,
+      start_date: startDate || null,
+      end_date: endDate || null,
+    };
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit
+    // entry (general ruling 13). Compared as the server would store it.
+    const unchanged =
+      body.display_name === person.display_name &&
+      body.email === (person.email ?? null) &&
+      body.department === (person.department ?? null) &&
+      body.job_title === (person.job_title ?? null) &&
+      body.start_date === (person.start_date ?? null) &&
+      body.end_date === (person.end_date ?? null);
+    if (unchanged) {
+      onClose();
+      return;
+    }
+    update.mutate(body, { onSuccess: onClose });
+  }
+
   return (
     <Dialog open={open} onClose={onClose} title={t("people.edit.title")}>
-      <Form
-        onSubmit={() =>
-          update.mutate(
-            {
-              display_name: name.trim(),
-              email: email.trim() || null,
-              department: department.trim() || null,
-              job_title: jobTitle.trim() || null,
-              start_date: startDate || null,
-              end_date: endDate || null,
-            },
-            { onSuccess: onClose },
-          )
-        }
-      >
+      <Form onSubmit={submit}>
         <div className="form-grid">
           <Field label={t("people.edit.name")}>
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />

@@ -131,6 +131,15 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function ChangeDetail() {
+  const { changeId } = useParams<{ changeId: string }>();
+  // ONE CHANGE, ONE PAGE (general ruling 12). Another change under the same
+  // route keeps the element mounted, and with it the decision comment and the
+  // link being typed, which the next approval would then send with the change
+  // now shown. Keyed by the change, the page starts again.
+  return <ChangeRecord key={changeId} />;
+}
+
+function ChangeRecord() {
   const t = useT();
   const { changeId } = useParams<{ changeId: string }>();
   const api = useApi();

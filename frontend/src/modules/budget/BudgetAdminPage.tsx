@@ -522,9 +522,15 @@ function EditCategoryDialog({
   const [name, setName] = useState(category.name);
   const [active, setActive] = useState(category.active);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-  useReportDirty(name !== category.name || active !== category.active, onDirty);
+  const dirty = name !== category.name || active !== category.active;
+  useReportDirty(dirty, onDirty);
 
   function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
     // A name cleared to nothing used to disable Save in silence; it is named now.
     const next: Attempt = { rules: nameRules, values: { name } };
     setAttempt(next);
@@ -708,9 +714,15 @@ function EditCostCenterDialog({
   const [name, setName] = useState(costCenter.name);
   const [active, setActive] = useState(costCenter.active);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-  useReportDirty(name !== costCenter.name || active !== costCenter.active, onDirty);
+  const dirty = name !== costCenter.name || active !== costCenter.active;
+  useReportDirty(dirty, onDirty);
 
   function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
     const next: Attempt = { rules: nameRules, values: { name } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -938,9 +950,15 @@ function EditFxRateDialog({
   const update = useUpdateFxRateMutation();
   const [value, setValue] = useState(rate.rate);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
-  useReportDirty(value !== rate.rate, onDirty);
+  const dirty = value !== rate.rate;
+  useReportDirty(dirty, onDirty);
 
   function submit() {
+    // Saved untouched, nothing is sent: an unchanged PATCH is a false audit entry (general ruling 13).
+    if (!dirty) {
+      onClose();
+      return;
+    }
     const next: Attempt = {
       rules: () => [{ name: "rate", label: translate("budget.common.rate"), validate: decimalRate }],
       values: { rate: value },

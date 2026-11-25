@@ -287,6 +287,18 @@ export function DocsPage() {
     [setSearchParams],
   );
   const [editing, setEditing] = useState(false);
+  // AN EDIT NEVER CARRIES TO ANOTHER ARTICLE (general ruling 12). The editor
+  // is for the article it opened on (`null`: a new one). Back or Forward to
+  // another `?article=` changes only the query, which keeps the page and does
+  // not ask (D16); left open, the editor would show the first article's edit
+  // over the second and Save would write it there. So a move to another
+  // selection closes the editor, and the edit typed for the first goes with it.
+  const [editTarget, setEditTarget] = useState<string | null>(null);
+  const [seenArticle, setSeenArticle] = useState(selectedId);
+  if (seenArticle !== selectedId) {
+    setSeenArticle(selectedId);
+    if (editing && editTarget !== selectedId) setEditing(false);
+  }
   // Every client's only when the person asks (MSP clients plan 2026-10-26
   // Task 14). Set at creation only: an article's client never changes.
   const [forEveryClient, setForEveryClient] = useState(false);
@@ -449,6 +461,7 @@ export function DocsPage() {
     articleClient.setPicked("");
     setAttempt(null);
     save.reset();
+    setEditTarget(null);
     setEditing(true);
   };
   // New → Document (redesign decision D8): the editor is inline, not a
@@ -471,6 +484,7 @@ export function DocsPage() {
     });
     setAttempt(null);
     save.reset();
+    setEditTarget(selectedId);
     setEditing(true);
   };
 
@@ -521,6 +535,10 @@ export function DocsPage() {
 
   // `undefined` until the articles query has answered — see `count` below.
   const linkedCount = articles.data?.items.reduce((total, item) => total + item.link_count, 0);
+  // NO DATA, PENDING OR FAILED: the tile reads the kit's absent mark (n/a) and says nothing under it (ruling 10a).
+  const noArticleData = articles.data === undefined;
+  const noRecordData = records.data === undefined;
+  const noDocumentData = documents.data === undefined;
 
   const link = useStatLinks("/docs");
 
@@ -610,7 +628,7 @@ export function DocsPage() {
         <StatCard
           label={t("docs.page.tiles.articles")}
           value={String(articles.data?.total ?? 0)}
-          pending={articles.data === undefined}
+          pending={noArticleData}
           icon="book"
           to={link("articles")}
           tone="blue"
@@ -620,7 +638,7 @@ export function DocsPage() {
         <StatCard
           label={t("docs.page.tiles.records")}
           value={String(records.data?.total ?? 0)}
-          pending={records.data === undefined}
+          pending={noRecordData}
           icon="database"
           to={link("records")}
           tone="blue"
@@ -630,7 +648,7 @@ export function DocsPage() {
         <StatCard
           label={t("docs.page.tiles.linked")}
           value={String(linkedCount ?? 0)}
-          pending={linkedCount === undefined}
+          pending={noArticleData}
           icon="link"
           /* The link counts are rendered per article in the library list, so
              that list is where this total decomposes. */
@@ -650,7 +668,7 @@ export function DocsPage() {
         <StatCard
           label={t("docs.page.tiles.documents")}
           value={String(documents.data?.total ?? 0)}
-          pending={documents.data === undefined}
+          pending={noDocumentData}
           icon="file-text"
           to={link("documents")}
           tone="blue"

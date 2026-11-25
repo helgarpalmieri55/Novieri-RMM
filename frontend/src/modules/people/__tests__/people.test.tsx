@@ -226,6 +226,50 @@ describe("PersonPage", () => {
     expect(screen.getByRole("link", { name: /Licences\s*0/ })).toHaveAttribute("href", "/people/p1?tab=licenses");
   });
 
+  // GENERAL RULING 13: a Save on an untouched person sends nothing (an
+  // unchanged PATCH is a false audit entry); it closes.
+  it("sends nothing when the person is saved untouched (ruling 13)", async () => {
+    const user = userEvent.setup();
+    const updatePerson = vi.fn().mockResolvedValue(MARIA);
+    mockUseApi.mockReturnValue(
+      api({ getPerson: vi.fn().mockResolvedValue(detail()), updatePerson }, ["people.read", "people.manage"]),
+    );
+    renderPage("/people/p1", <PersonPage />, "/people/:personId");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit person" });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updatePerson).not.toHaveBeenCalled();
+  });
+
+  // GENERAL RULING 12: the person is the route's, and another person under the
+  // same route does not remount the page by itself; an edit typed for one must
+  // never be saved onto the next.
+  it("drops an edit typed for one person when the page moves to another (ruling 12)", async () => {
+    const user = userEvent.setup();
+    const ANA = { ...MARIA, id: "p2", display_name: "Ana Ruiz", email: "ana@corp.example" };
+    const getPerson = vi.fn((id: string) =>
+      Promise.resolve(id === "p2" ? detail({ person: (({ device_count: _c, ...rest }) => rest)(ANA) }) : detail()),
+    );
+    const updatePerson = vi.fn().mockResolvedValue(ANA);
+    mockUseApi.mockReturnValue(api({ getPerson, updatePerson }, ["people.read", "people.manage"]));
+    const { router } = renderPage("/people/p1", <PersonPage />, "/people/:personId");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit person" });
+    await user.clear(within(dialog).getByLabelText("Name"));
+    await user.type(within(dialog).getByLabelText("Name"), "Typed for Maria");
+    await act(() => router.navigate("/people/p2"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Ana Ruiz" })).toBeInTheDocument();
+    // The dialog went with Maria's page; Ana's opens with Ana's values.
+    expect(screen.queryByDisplayValue("Typed for Maria")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const again = await screen.findByRole("dialog", { name: "Edit person" });
+    expect(within(again).getByLabelText("Name")).toHaveValue("Ana Ruiz");
+    await user.click(within(again).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updatePerson).not.toHaveBeenCalled();
+  });
+
   it("names the record in the browser tab", async () => {
     mockUseApi.mockReturnValue(api({ getPerson: vi.fn().mockResolvedValue(detail()) }, ["people.read"]));
     renderPage("/people/p1", <PersonPage />, "/people/:personId", { page: "shell.nav.page.person" });

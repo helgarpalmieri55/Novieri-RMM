@@ -195,6 +195,8 @@ export function ReportCataloguePage() {
   const access = readAccess(filters.values[ACCESS_PARAM]);
   const catalogue = useReportCatalogue();
   const reports = catalogue.data?.reports ?? [];
+  // No data, pending or failed: the tiles read n/a and say nothing under them (ruling 10a).
+  const noData = catalogue.data === undefined;
   const entitledCount = reports.filter((entry) => entry.entitled).length;
   const blockedCount = reports.length - entitledCount;
   const byAccess =
@@ -234,12 +236,13 @@ export function ReportCataloguePage() {
           capability you have; what you cannot is the one number on this page a
           person can act on (ask for the codes), so it is the only one carrying
           weight. */}
-      {/* Before the catalogue answers, no tile says a number or its zero's
-          claim ("you can run none of them"): unmeasured, n/a (ruling 10a). */}
+      {/* Before the catalogue answers, or when it fails, no tile says a
+          number or its zero's claim ("you can run none of them"): the kit's
+          absent mark, n/a (ruling 10a). */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("reporting.catalogue.tiles.templates")}
-          pending={catalogue.data === undefined}
+          pending={noData}
           value={String(reports.length)}
           icon="chart-bar"
           to="/reports"
@@ -248,7 +251,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.runnable")}
-          pending={catalogue.data === undefined}
+          pending={noData}
           value={String(entitledCount)}
           icon="circle-check"
           to={`/reports?${ACCESS_PARAM}=runnable`}
@@ -257,7 +260,7 @@ export function ReportCataloguePage() {
         />
         <StatCard
           label={t("reporting.catalogue.tiles.blocked")}
-          pending={catalogue.data === undefined}
+          pending={noData}
           value={String(blockedCount)}
           icon="lock"
           to={`/reports?${ACCESS_PARAM}=blocked`}

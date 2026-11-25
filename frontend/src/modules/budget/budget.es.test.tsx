@@ -617,6 +617,8 @@ describe("the budget admin page in Spanish", () => {
     mount(<BudgetAdminPage />);
     await screen.findByText("Herramientas de oficina");
     await user.click((await screen.findAllByRole("button", { name: "Editar" }))[0]!);
+    // A rename, not an untouched Save: an untouched record sends nothing (general ruling 13).
+    await user.type(await screen.findByLabelText("Nombre de la categoría"), " 2");
     await user.click(await screen.findByRole("button", { name: "Guardar" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/no está disponible/i);
     act(() => setActiveLanguage("en"));

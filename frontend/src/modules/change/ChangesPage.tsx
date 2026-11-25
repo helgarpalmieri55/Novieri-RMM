@@ -162,7 +162,9 @@ export function ChangesPage() {
   // "The list answered" is a different fact from "the list is empty", and the
   // KPIs below must not read 0 for the first one: nine tiles reading 0 on a
   // page where nothing had been measured is what this console is unlearning.
-  const measured = changes.data !== undefined;
+  // No data, pending or failed: the tiles read n/a and say nothing under them (ruling 10a).
+  const noData = changes.data === undefined;
+  const measured = !noData;
 
   const stateFilter = filters.values.state;
   const typeFilter = filters.values.type;
@@ -213,7 +215,7 @@ export function ChangesPage() {
         <StatCard
           label={t("change.list.openChanges")}
           value={String(openCount)}
-          pending={!measured}
+          pending={noData}
           icon="git-branch"
           to={listOf(`state=${OPEN_VIEW}`)}
           tone="violet"
@@ -222,7 +224,7 @@ export function ChangesPage() {
         <StatCard
           label={t("change.list.awaitingApproval")}
           value={String(awaitingApproval)}
-          pending={!measured}
+          pending={noData}
           icon="clock"
           /* The dedicated queue, not `?state=submitted`: the approve/reject
              controls and the segregation-of-duties guard live there, and this
@@ -238,7 +240,7 @@ export function ChangesPage() {
         <StatCard
           label={t("change.list.implementing")}
           value={String(implementing)}
-          pending={!measured}
+          pending={noData}
           icon="progress"
           to={listOf("state=implementing")}
           zeroLabel={t("change.list.nothingImplementing")}
@@ -246,7 +248,7 @@ export function ChangesPage() {
         <StatCard
           label={t("change.list.emergencyChanges")}
           value={String(emergencyCount)}
-          pending={!measured}
+          pending={noData}
           icon="alert-triangle"
           to={listOf("type=emergency")}
           tone="red"
