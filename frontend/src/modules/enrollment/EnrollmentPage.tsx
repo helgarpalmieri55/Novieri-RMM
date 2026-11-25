@@ -348,6 +348,15 @@ export function EnrollmentPage() {
   const creating = useNewParam("token");
   const formOpen = creating.open && canManage;
   const tab = formOpen ? "tokens" : urlTab;
+  /** Closes the issue form onto the Tokens tab, in one write that replaces the entry. */
+  function showIssuedOnTokens() {
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    if ((tabKeys[0] ?? "flow") === "tokens") next.delete("tab");
+    else next.set("tab", "tokens");
+    writeQuery(params, next, setParams, { replace: true });
+  }
+
   function setRequestedTab(key: string) {
     const next = new URLSearchParams(params);
     if (key === (tabKeys[0] ?? "flow")) next.delete("tab");
@@ -473,7 +482,14 @@ export function EnrollmentPage() {
       setAttempt(null);
       // The form closes on success: leaving it open with the fields cleared
       // invites a second click that would issue a second live credential.
-      creating.close();
+      //
+      // AND THE PAGE LANDS ON THE TOKENS TAB, where the one-time plaintext is
+      // drawn (fix round 1, I1). The form forces that tab while it is open,
+      // but closing it went Back to whatever `?tab=` the issue started from,
+      // so a token issued from Certificates was shown on a tab nobody was
+      // looking at. One write, in place: `new` goes and the tab is Tokens. The
+      // token itself stays in component state, never in the URL.
+      showIssuedOnTokens();
       void queryClient.invalidateQueries({ queryKey: [ENROLLMENT_TOKENS_KEY] });
     },
   });

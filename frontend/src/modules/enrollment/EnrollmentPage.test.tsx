@@ -23,7 +23,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -400,6 +400,29 @@ describe("EnrollmentPage", () => {
     expect(await screen.findByText(/Token name is required/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(createEnrollmentToken).not.toHaveBeenCalled();
+  });
+
+  // FIX ROUND 1, I1 (wave O4 review). Create token in the head works from
+  // any tab, and the one-time plaintext must be on screen after the issue
+  // whichever tab it started from: closing the form used to go Back to
+  // `?tab=certificates`, which hid the token on a tab nobody was looking at.
+  it("shows the issued token on the Tokens tab, whichever tab the issue started from", async () => {
+    createEnrollmentToken.mockResolvedValue({
+      id: "new",
+      token: "ENR-ISSUED-FROM-CERTIFICATES",
+      name: "Bogota rollout",
+      expires_at: FUTURE,
+      max_uses: 1,
+    });
+    renderPage({ entry: "/enrollment?tab=certificates" });
+    expect(await screen.findByRole("tab", { name: /Certificates/ })).toHaveAttribute("aria-selected", "true");
+    await issueToken({ name: "Bogota rollout" });
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    expect(await screen.findByText("ENR-ISSUED-FROM-CERTIFICATES")).toBeInTheDocument();
+    // Still there once the form's close has landed (a Back is a later task).
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByText("ENR-ISSUED-FROM-CERTIFICATES")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Enrollment tokens/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("asks for confirmation, naming the token and its limit, before issuing anything", async () => {
