@@ -63,7 +63,7 @@ export function SlaAdminPage() {
   // The policy form's escape hatch out of the first-run dead end (cycle 7):
   // "Add a business calendar" inside the Add-policy dialog opens the
   // calendars' own create dialog, through the URL (`?new=calendar` in place
-  // of `?new=policy`), so Back returns to the policy.
+  // of `?new=policy`); Back reopens Add policy, with an empty form (ruling 4).
   const calendarCreate = useNewParam("calendar");
   const activePolicyCount = (policies.data ?? []).filter((policy) => policy.active).length;
   // WHAT THE TWO CONFIGURATION FIGURES ARE MADE OF. The two consequence tiles

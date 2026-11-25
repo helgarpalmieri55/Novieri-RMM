@@ -198,4 +198,20 @@ describe("My work on the list kit", () => {
     const tiles = document.querySelector(".stats-grid") as HTMLElement;
     expect(nav.compareDocumentPosition(tiles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  // FIX ROUND 2, M3: the New ticket guard counts the requester too.
+  it("asks before Back drops a New ticket whose only change is its requester", async () => {
+    const { router } = renderPage("/service-desk", <TicketListPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "New ticket" }));
+    const dialog = await screen.findByRole("dialog", { name: "New ticket" });
+    // The requester picker's own list (the queue's filters hold <option>s of the same people).
+    await userEvent.click(within(dialog).getByLabelText("Requester"));
+    const list = await screen.findByRole("listbox", { name: "Requester" });
+    await userEvent.click(await within(list).findByRole("option", { name: /Adaeze Okonkwo/ }));
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+  });
 });

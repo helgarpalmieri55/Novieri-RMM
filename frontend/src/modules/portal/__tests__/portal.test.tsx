@@ -157,6 +157,23 @@ describe("MyTicketsPage", () => {
     expect(screen.getByRole("link", { name: "New ticket" })).toHaveAttribute("href", "/portal/new");
   });
 
+  // General ruling 1a (fix round 2): drawn in the console, the page takes the
+  // console rail's label for /portal -- "End-user portal" for an operator,
+  // "My tickets" for an account holding only portal codes (its rail is the
+  // portal's); in the contact's frame, "My tickets" (App.portal.test.tsx).
+  it("in the console, names itself as the console rail does for an operator", async () => {
+    api.me = vi.fn().mockResolvedValue({ ...ME_REQUESTER, permissions: ["ticket.read", "portal.ticket.read"] });
+    renderWithProviders(<MyTicketsPage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "End-user portal" })).toBeInTheDocument();
+  });
+
+  it("in the console, names itself My tickets for an account holding only portal codes", async () => {
+    renderWithProviders(<MyTicketsPage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "My tickets" })).toBeInTheDocument();
+  });
+
   it("hides portal navigation entirely without portal.ticket.read", async () => {
     api.portalMe = vi.fn().mockResolvedValue(portalMeOf({ ...ME_REQUESTER, permissions: [] }));
     renderWithProviders(<MyTicketsPage />);

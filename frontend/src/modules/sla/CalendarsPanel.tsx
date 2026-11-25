@@ -123,7 +123,7 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Add calendar opens from the URL (`?new=calendar`, decision D8): so does
   // the policy form's "Add a business calendar" (cycle 7), which puts it in
-  // the policy dialog's place, and Back returns to that dialog.
+  // the policy dialog's place; Back reopens Add policy, empty (ruling 4).
   const created = useNewParam("calendar");
   const creating = canAdmin && created.open;
   const [editing, setEditing] = useState<CalendarOut | null>(null);

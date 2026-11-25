@@ -1,3 +1,4 @@
+import { useContext, type ComponentProps } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -9,6 +10,9 @@ import { usePortalMe } from "./usePortalMe";
 import { PortalNav } from "./PortalNav";
 import { PortalPrerequisites } from "./PortalPrerequisites";
 import { PortalTitle } from "./portalTitle";
+import { ContactFrameContext } from "./usePortalMe";
+import { useMePermissions } from "../../lib/mePermissions";
+import { isPortalOnly } from "../../shell/nav";
 import { isPortalTicketOpen, portalTicketStatusLabel, portalTicketStatusVariant } from "./portalState";
 import {
   FilterChips,
@@ -80,8 +84,7 @@ export function MyTicketsPage() {
           Hidden with the nav when the reader cannot read the portal, for the
           same reason the nav is: the server is the authority either way
           (invariant 6); this is only what is worth offering. */}
-      <PageHead
-        title={t("shell.nav.item.myTickets")}
+      <FramedHead
         description={t("portal.myTickets.description")}
         actions={
           canRead ? (
@@ -173,4 +176,33 @@ export function MyTicketsPage() {
       </Panel>
     </div>
   );
+}
+
+/**
+ * THE PAGE IS NAMED BY THE FRAME IT IS DRAWN IN (general ruling 1a; fix round
+ * 2). In the contact's own portal frame it is the portal's "My tickets". In
+ * the console it is the console rail's entry for `/portal`, the label the
+ * shell also gives the tab: "End-user portal" for an operator (Admin), and
+ * "My tickets" for an account that holds only portal codes, whose console
+ * rail is the portal's (`isPortalOnly`, the same test `App.tsx` makes). The
+ * frame is known from `ContactFrameContext`; the console's `/me` is read only
+ * outside the contact frame, where a contact may not ask for it.
+ */
+type HeadProps = Omit<ComponentProps<typeof PageHead>, "title">;
+
+function FramedHead(props: HeadProps) {
+  const contactFrame = useContext(ContactFrameContext);
+  return contactFrame ? <ContactHead {...props} /> : <ConsoleHead {...props} />;
+}
+
+function ContactHead(props: HeadProps) {
+  const t = useT();
+  return <PageHead title={t("shell.nav.item.myTickets")} {...props} />;
+}
+
+function ConsoleHead(props: HeadProps) {
+  const t = useT();
+  const me = useMePermissions();
+  const portalOnly = me.status === "ready" && isPortalOnly(me.codes);
+  return <PageHead title={t(portalOnly ? "shell.nav.item.myTickets" : "shell.nav.item.endUserPortal")} {...props} />;
 }

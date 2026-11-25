@@ -151,4 +151,20 @@ describe("the SLA page on the form kit", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add calendar" })).toBeNull());
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
+
+  // FIX ROUND 2, M3: the guard counts the Client field too.
+  it("asks before Back drops an Add policy whose only change is its client", async () => {
+    const { router } = renderPage("/sla", <SlaAdminPage />);
+    const section = (await screen.findByRole("heading", { name: "SLA policies" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(section).findByRole("button", { name: "Add policy" }, { timeout: 5000 }));
+    const dialog = await screen.findByRole("dialog", { name: "Add policy" });
+    const client = await within(dialog).findByRole("combobox", { name: "Client" });
+    const choice = [...client.querySelectorAll("option")].find((option) => option.value !== "");
+    await userEvent.selectOptions(client, choice?.value ?? "");
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+  });
 });

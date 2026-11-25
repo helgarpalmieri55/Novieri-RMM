@@ -251,7 +251,8 @@ describe("the rules in Spanish", () => {
     expect(within(dialog).getByRole("combobox", { name: "Canal" })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Ámbito de cola (opcional: en blanco significa cualquier cola)")).toBeInTheDocument();
     expect(within(dialog).getByRole("option", { name: "Cualquier cola" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeDisabled();
+    // Save stays pressable and names what is missing on submit (general ruling 8; fix round 2).
+    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeEnabled();
     expectNoEnglish(dialog, ["Soporte general"]);
   });
 

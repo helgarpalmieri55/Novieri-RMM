@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { RowMenu } from "../../components/rowmenu";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
+import type { Attempt } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
@@ -74,6 +75,8 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   // name what is being deleted rather than asking "are you sure?" about
   // nothing in particular (components/confirm.tsx).
   const [pendingDelete, setPendingDelete] = useState<RuleOut | null>(null);
+  // Set ON SUBMIT, never while choosing.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const forbidden = rules.error instanceof ApiError && rules.error.status === 403;
   const failed = rules.error != null && !forbidden;
@@ -88,6 +91,14 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
       : RECIPIENT_KINDS;
 
   function submit() {
+    // SAVE STAYS PRESSABLE (general ruling 8; fix round 2): a rule with no
+    // channel is named on Save instead of a dead button.
+    const next: Attempt = {
+      rules: () => [{ name: "channelId", label: t("notification.rules.channel") }],
+      values: { channelId },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
     create.mutate(
       {
         event_type: eventType,
@@ -120,6 +131,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
     setChannelId("");
     setRecipientKind("queue_members");
     setQueueId("");
+    setAttempt(null);
     create.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creating]);
@@ -131,7 +143,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
     return () => reportDialog(false);
   }, [dialogDirty, reportDialog]);
   function closeCreate() {
-    switches.release();
+    // Only the rule form's own change is the person's to drop by Cancel: with
+    // the form untouched, the page's one guard still holds the thrown switches
+    // (fix round 2, M2), and leaving afterwards still asks.
+    if (dialogDirty) switches.release();
     created.close();
   }
   const activeOf = (rule: RuleOut): boolean => switches.active("rule", rule.id, rule.active);
@@ -303,6 +318,7 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
 
       </FormSection>
         <Dialog open={creating} onClose={closeCreate} title={t("notification.rules.addTitle")}>
+          <Form onSubmit={submit}>
           <div className="form-grid">
             <Field label={t("notification.rules.eventType")} full>
               <select className={inputClass} value={eventType} onChange={(e) => setEventType(e.target.value)}>
@@ -360,19 +376,20 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
               )}
             </Field>
           </div>
-          {create.isError && (
-            <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
-              {describeSubmitError(create.error)}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={closeCreate}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* `type="button"`: inside a <form>, an untyped button submits. */}
+            <Button type="button" variant="ghost" onClick={closeCreate}>
               {t("notification.rules.cancel")}
             </Button>
-            <Button onClick={submit} disabled={create.isPending || !channelId}>
-              {create.isPending ? t("notification.common.saving") : t("notification.rules.save")}
-            </Button>
+            <FormActions
+              label={t("notification.rules.save")}
+              pendingLabel={t("notification.common.saving")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
           </div>
+          </Form>
         </Dialog>
     </div>
   );

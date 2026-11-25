@@ -203,7 +203,8 @@ export function PoliciesPanel({
   // Cancel and a successful save are the person's own act, so they release
   // the guard first.
   const { guard, release } = useUnsavedGuard(
-    creating && (forEveryClient || JSON.stringify(draft) !== JSON.stringify(emptyDraft())),
+    // Every field the person can change counts, the Client field too (fix round 2, M3).
+    creating && (forEveryClient || policyClient.picked !== "" || JSON.stringify(draft) !== JSON.stringify(emptyDraft())),
     { search: ["new"] },
   );
   function closeCreate() {
@@ -490,7 +491,10 @@ export function PoliciesPanel({
               canAdmin && onCreateCalendar
                 ? () => {
                     // The calendar's dialog takes this one's place in the URL
-                    // (`?new=calendar`), so Back comes back to the policy.
+                    // (`?new=calendar`). Back from it reopens Add policy, and
+                    // that form starts empty, as every add form does when its
+                    // dialog opens (general ruling 4): what was typed here is
+                    // not kept, so the guard asks first when there is any.
                     onCreateCalendar();
                   }
                 : undefined

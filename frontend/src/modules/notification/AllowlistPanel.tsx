@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
+import type { Attempt, FieldRule } from "../../components/form";
+import { translate } from "../../i18n/core";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { RowMenu } from "../../components/rowmenu";
 import { NoValue } from "../../components/emptystate";
@@ -19,6 +21,12 @@ import type { AllowlistEntryOut } from "./types";
 // `port` a required part of the entry (an admin allowlists
 // `mattermost.lan:8065`, not a host and every port on it), and this form
 // must both collect it and make unmistakable what adding one means.
+/** What an allowlist entry needs, named as the form names it (worded when read). */
+const allowlistRules = (): readonly FieldRule[] => [
+  { name: "host", label: translate("notification.common.host") },
+  { name: "port", label: translate("notification.common.port") },
+];
+
 export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
   const t = useT();
   const allowlist = useNotificationAllowlist();
@@ -38,11 +46,32 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
   const forbidden = allowlist.error instanceof ApiError && allowlist.error.status === 403;
   const failed = allowlist.error != null && !forbidden;
 
+  // Set ON SUBMIT, so a field being typed is not called missing before it is done.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+
+  // THE FORM STARTS EMPTY WHENEVER THE DIALOG OPENS (general ruling 4; fix
+  // round 2): a failed Save, then Cancel, then Add host again showed the last
+  // host and its refusal. `create.reset()` because mutation state outlives
+  // the dialog. Before paint, so nothing stale flashes.
+  useLayoutEffect(() => {
+    if (!creating) return;
+    setHost("");
+    setPort("443");
+    setNote("");
+    setAttempt(null);
+    create.reset();
+    // The opening is what counts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creating]);
+
   function submit() {
-    create.mutate(
-      { host, port: Number(port), note },
-      { onSuccess: () => { setHost(""); setPort("443"); setNote(""); setCreating(false); } },
-    );
+    // SAVE STAYS PRESSABLE (general ruling 8; fix round 2): an empty host or
+    // port is named on Save, as every other dialog does, instead of a dead
+    // button that says nothing.
+    const next: Attempt = { rules: allowlistRules, values: { host: host.trim(), port: port.trim() } };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
+    create.mutate({ host, port: Number(port), note }, { onSuccess: () => setCreating(false) });
   }
 
   return (
@@ -154,6 +183,7 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
               {t("notification.allowlist.addWarning")}
             </span>
           </p>
+          <Form onSubmit={submit}>
           <div className="form-grid">
             <Field label={t("notification.common.host")}>
               <input
@@ -177,19 +207,20 @@ export function AllowlistPanel({ canAdmin }: { canAdmin: boolean }) {
               <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
           </div>
-          {create.isError && (
-            <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
-              {describeSubmitError(create.error)}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreating(false)}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* `type="button"`: inside a <form>, an untyped button submits. */}
+            <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
               {t("notification.allowlist.cancel")}
             </Button>
-            <Button onClick={submit} disabled={create.isPending || !host || !port}>
-              {create.isPending ? t("notification.common.saving") : t("notification.allowlist.save")}
-            </Button>
+            <FormActions
+              label={t("notification.allowlist.save")}
+              pendingLabel={t("notification.common.saving")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
           </div>
+          </Form>
         </Dialog>
       </FormSection>
     </div>

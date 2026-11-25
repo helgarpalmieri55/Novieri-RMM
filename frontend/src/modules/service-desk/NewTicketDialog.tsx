@@ -149,7 +149,10 @@ export function NewTicketDialog({
     subject !== (initialSubject ?? "") ||
     description !== "" ||
     assignedTo !== "" ||
-    deviceId !== (initialDeviceId ?? "");
+    deviceId !== (initialDeviceId ?? "") ||
+    // Every field the person can change counts (fix round 2, M3).
+    requesterId !== (myUserId ?? "") ||
+    ticketClient.picked !== "";
   const { guard, release } = useUnsavedGuard(guardNew && open && changed, { search: ["new"] });
 
   function close() {

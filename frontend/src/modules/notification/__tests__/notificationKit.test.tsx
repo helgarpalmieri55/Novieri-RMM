@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fixtureClient, fixtureRegistry } from "../../../fixtures/client";
+import { ApiError } from "../../../lib/api";
 import { renderPage } from "../../../test/renderPage";
 import { NotificationAdminPage } from "../NotificationAdminPage";
 
@@ -156,5 +157,61 @@ describe("notifications on the form kit", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "Add rule" })).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add rule" })).toBeNull());
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  // FIX ROUND 2 (re-review, rulings 4 and 8): the Add host form starts empty
+  // on every open, and both Saves stay pressable, naming what is missing.
+  it("opens Add host empty and without the error of a failed attempt", async () => {
+    mockUseApi.mockReturnValue(
+      fixtureClient({ ...fixtureRegistry(), createNotificationAllowlistEntry: () => Promise.reject(new ApiError(503, "")) }),
+    );
+    renderPage("/notifications", <NotificationAdminPage />);
+    const section = (await screen.findByRole("heading", { name: "Allowlist" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(section).findByRole("button", { name: "Add host" }));
+    let dialog = screen.getByRole("dialog", { name: "Add allowlist entry" });
+    await userEvent.type(within(dialog).getByLabelText("Host"), "intranet.lan");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/unavailable/i);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(section).getByRole("button", { name: "Add host" }));
+    dialog = screen.getByRole("dialog", { name: "Add allowlist entry" });
+    expect(within(dialog).getByLabelText("Host")).toHaveValue("");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps Add host's Save pressable and names the missing host", async () => {
+    renderPage("/notifications", <NotificationAdminPage />);
+    const section = (await screen.findByRole("heading", { name: "Allowlist" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(section).findByRole("button", { name: "Add host" }));
+    const dialog = screen.getByRole("dialog", { name: "Add allowlist entry" });
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Host is required");
+  });
+
+  it("keeps Add rule's Save pressable and names the missing channel", async () => {
+    renderPage("/notifications?new=rule", <NotificationAdminPage />);
+    const dialog = await screen.findByRole("dialog", { name: "Add rule" });
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Channel is required");
+  });
+
+  // FIX ROUND 2, M2: Cancel on an untouched Add rule does not release the
+  // page's one guard, which still holds the thrown switches.
+  it("still asks before leaving with switches thrown after an untouched Add rule is cancelled", async () => {
+    const { router } = renderPage("/notifications", <NotificationAdminPage />, "/notifications");
+    const rules = await rulesSection();
+    await userEvent.click((await within(rules).findAllByRole("switch"))[0] as HTMLElement);
+    await userEvent.click(await within(rules).findByRole("button", { name: "Add rule" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Add rule" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add rule" })).toBeNull());
+    act(() => {
+      void router.navigate("/devices");
+    });
+    await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(router.state.location.pathname).toBe("/notifications");
   });
 });
