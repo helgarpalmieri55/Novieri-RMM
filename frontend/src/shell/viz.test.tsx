@@ -521,6 +521,41 @@ describe("StatCard renders a Tile", () => {
     expect(container.querySelector(".stat-zero")).toBeNull();
   });
 
+  /*
+   * PENDING IS TILE'S PENDING (coordinator, P3 adoption pass; ruling 10a).
+   * StatCard drew the absent mark itself and kept everything else: no
+   * `aria-busy`, and its `foot` stayed under the mark, though a foot can be a
+   * claim about the data the card does not have yet ("Mostly “Job sent”, 2 of
+   * 3"). It now hands `pending` to the Tile it renders, so the two pendings are
+   * one: the label, the destination and the n/a mark, and nothing else.
+   */
+  it("while pending says it is busy, draws no foot, no trend and no sparkline, and keeps its label, link and the n/a mark", () => {
+    const { container } = card({
+      value: "3",
+      pending: true,
+      foot: "Mostly “Job sent”, 2 of 3",
+      trend: { direction: "up", label: "+4 since yesterday" },
+      spark: [1, 2, 3, 4],
+    });
+    const link = screen.getByRole("link", { name: /At risk/ });
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("href", "/devices?state=at-risk");
+    expect(container.querySelector(".stat-value")).toHaveTextContent(/^n\/a$/);
+    expect(container.querySelector(".stat-label")).toHaveTextContent("At risk");
+    expect(screen.queryByText("Mostly “Job sent”, 2 of 3")).toBeNull();
+    expect(container.querySelector(".stat-foot")).toBeNull();
+    expect(container.querySelector(".z")).toBeNull();
+    expect(container.querySelector(".stat-trend")).toBeNull();
+    expect(container.querySelector("svg.sp")).toBeNull();
+    expect(container.querySelector(".tile")).toHaveClass("mut");
+  });
+
+  it("once its read answers, is not busy and draws its foot", () => {
+    const { container } = card({ value: "3", foot: "Mostly “Job sent”, 2 of 3" });
+    expect(container.querySelector(".tile")).not.toHaveAttribute("aria-busy");
+    expect(container.querySelector(".stat-foot")).toHaveTextContent("Mostly “Job sent”, 2 of 3");
+  });
+
   it("wears the crit wash only when urgent and red, and never for a measured zero", () => {
     const { container, rerender } = card({ tone: "red", urgent: true });
     expect(container.querySelector(".tile")).toHaveClass("crit", "urgent");

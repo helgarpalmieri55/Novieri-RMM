@@ -299,6 +299,12 @@ export function StatCard({
    * unmeasured renders `n/a`, never `0`. This is that rule, in the one place
    * every page inherits it from; the label, the tone and the destination are
    * unchanged, because the tile is still about the same thing.
+   *
+   * IT IS `Tile`'s `pending` (coordinator, P3 adoption pass; ruling 10a): the
+   * card hands it to the Tile it renders, so it says `aria-busy` and draws
+   * nothing under the mark: no zero label, no trend, no sparkline and no
+   * `foot`, which can be a claim about the data it does not have yet. Pass it
+   * whenever there is no data, pending or failed (`pending={!q.data}`).
    */
   pending?: boolean;
 }) {
@@ -309,11 +315,12 @@ export function StatCard({
   const loud = urgent && !isZero && !pending;
   const kind = pending ? "mut" : tileKind(tone, loud);
 
+  // Nothing under the mark while pending: `Tile` draws no sub then.
   const sub =
-    (isZero && zeroLabel) || (trend && !isZero && !pending) || foot ? (
+    !pending && ((isZero && zeroLabel) || (trend && !isZero) || foot) ? (
       <>
         {isZero && zeroLabel ? <span className="stat-zero">{zeroLabel}</span> : null}
-        {trend && !isZero && !pending ? (
+        {trend && !isZero ? (
           <span className={`trend stat-trend ${trend.direction}`}>
             <Icon name={trend.direction === "up" ? "arrow-up" : "arrow-down"} size={12} />
             <span className="sr-only">{trend.direction === "up" ? t("shell.ui.statUp") : t("shell.ui.statDown")}</span>
@@ -329,12 +336,13 @@ export function StatCard({
       className={`stat-card tone-${tone}${loud ? " urgent" : ""}`}
       parts={{ label: "stat-label", value: "stat-value" }}
       label={label}
-      value={pending ? t("shell.viz.na") : value}
+      value={value}
       icon={icon}
       to={to}
       kind={kind}
-      spark={pending ? undefined : spark}
+      spark={spark}
       sub={sub}
+      pending={pending}
     />
   );
 }
