@@ -7,7 +7,7 @@ export const health: Shape<typeof en> = {
     acknowledged: {
       label: "Reconocida",
       meaning:
-        "Asignada a una persona, y SIGUE ABIERTA. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
+        "Asignada a una persona, pero sigue abierta. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
     },
     muted: {
       label: "Silenciada",
@@ -41,7 +41,7 @@ export const health: Shape<typeof en> = {
         "La cerró una persona. Eso no demuestra que se corrigiera nada, y por eso se cuenta aparte de una recuperación.",
     },
   },
-  statusCleared: "{state} — {reason}",
+  statusCleared: "{state} · {reason}",
   severity: { critical: "Crítica", warning: "Advertencia", info: "Información" },
   comparator: {
     gt: "por encima de",
@@ -251,6 +251,7 @@ export const health: Shape<typeof en> = {
     notFix: "no cuenta como corrección",
     factDevice: "Dispositivo",
     factProfile: "Perfil",
+    factProfileNone: "Sin perfil registrado",
     factCheck: "Comprobación",
     factObserved: "Observado",
     factOpened: "Abierta",
@@ -258,6 +259,7 @@ export const health: Shape<typeof en> = {
     factOccurrences: "Repeticiones",
     factEscalated: "Escalada",
     factTicket: "Ticket",
+    factTicketNone: "Sin ticket",
     factMutedUntil: "Silenciada hasta",
     factAcknowledged: "Reconocida",
     reopened: "Reabierta tras una alerta anterior",
@@ -335,7 +337,7 @@ export const health: Shape<typeof en> = {
     colGrantedBy: "Concedida por",
     colGranted: "Concedida",
     colReason: "Motivo",
-    noReason: "— (sin motivo registrado)",
+    noReason: "Sin motivo registrado",
     revoke: "Revocar",
     failedActivate: "Activar/desactivar",
     failedExempt: "Conceder exención",
@@ -354,7 +356,7 @@ export const health: Shape<typeof en> = {
     deactivateBody:
       "La acción deja de poder enviarse. Cualquier comprobación que la declare deja de corregir, y no falla nada: simplemente la corrección nunca se declara.",
     activateAutoBody:
-      "Esta acción se ejecuta AUTOMÁTICAMENTE, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
+      "Esta acción se ejecuta automáticamente, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
     activateBody:
       "La acción pasa a poder enviarse. Cada ejecución sigue esperando la aprobación de una persona en la alerta que la declara.",
     exemptField: "Eximir {key} ({script} v{version})",
@@ -612,6 +614,7 @@ export const health: Shape<typeof en> = {
     matrixType: "Tipo de comprobación",
     matrixCadence: "Cadencia",
     matrixSelector: "Selector",
+    matrixSelectorNone: "No admite selector",
     answersOn: "{type} responde en {family}",
     unavailableOnFamily: "{type} no está disponible en {family}",
     yes: "sí",

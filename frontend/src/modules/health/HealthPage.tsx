@@ -6,8 +6,8 @@ import { translate, type MessageKey } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useScrollToHash } from "../../lib/useScrollToHash";
-import { NO_DATE, formatDate } from "../../lib/datetime";
-import { PageHead, UrlTabs, useNarrowedApi, useUrlFilters, useUrlTab } from "../../shell/components";
+import { formatDate } from "../../lib/datetime";
+import { PageHead, UrlTabs, useNarrowedApi, useUrlFilters, useUrlTab, withClient } from "../../shell/components";
 import { Drawer } from "../../shell/Drawer";
 import { Icon } from "../../shell/icons";
 import { KIND_ICON, Tile, type Kind } from "../../shell/viz";
@@ -16,7 +16,7 @@ import { AlertConsole } from "./AlertConsole";
 import { AlertReadiness } from "./AlertReadiness";
 import { AlertDetail } from "./AlertDetail";
 import { ApprovedActionList } from "./ApprovedActionList";
-import { HealthReportPanel, withClient } from "./HealthReportPanel";
+import { HealthReportPanel } from "./HealthReportPanel";
 import { HealthSettingsPanel } from "./HealthSettingsPanel";
 import { ProfileAssignments } from "./ProfileAssignments";
 import { ProfileEditor } from "./ProfileEditor";
@@ -246,7 +246,11 @@ function AlertsView({
   };
 
   const counts = summary.data;
-  const figure = (value: number | undefined) => (value === undefined ? NO_DATE : String(value));
+  // NO NUMBER AND NO CLAIM WITHOUT THE SUMMARY (clarification 10a): while it
+  // is pending (under the chip, the wait for `/me` too) or after it failed,
+  // each tile is the kit's pending tile, the absent mark with no line under it.
+  const noData = !counts;
+  const figure = (value: number | undefined) => String(value ?? 0);
   const loud = (value: number | undefined, kind: Kind): Kind | undefined =>
     value !== undefined && value > 0 ? kind : undefined;
   const ackPeople = new Set(acknowledged.map((alert) => alert.acknowledged_by).filter(Boolean)).size;
@@ -270,6 +274,7 @@ function AlertsView({
             label={t("health.page.tileCritical")}
             icon="alert-triangle"
             value={figure(counts?.by_severity.critical)}
+            pending={noData}
             kind={loud(counts?.by_severity.critical, "crit")}
             sub={
               counts === undefined
@@ -289,6 +294,7 @@ function AlertsView({
             label={t("health.page.tileWarning")}
             icon="clock-exclamation"
             value={figure(counts?.by_severity.warning)}
+            pending={noData}
             kind={loud(counts?.by_severity.warning, "warn")}
             sub={
               counts === undefined
@@ -304,6 +310,7 @@ function AlertsView({
             label={t("health.page.tileAcknowledged")}
             icon="check"
             value={figure(counts?.by_state.acknowledged)}
+            pending={noData}
             sub={
               counts === undefined
                 ? undefined
@@ -319,6 +326,7 @@ function AlertsView({
             label={t("health.page.tileMuted")}
             icon="bell"
             value={figure(counts?.by_state.muted)}
+            pending={noData}
             sub={
               counts === undefined
                 ? undefined

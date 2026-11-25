@@ -5,12 +5,14 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import {
   ListToolbar,
+  MultiFilterChips,
   Pager,
   Panel,
   QueryState,
   ResultCount,
   SearchField,
   StatusPill,
+  type FilterChipOption,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { DecisionBar, type RingOption } from "./DecisionBar";
@@ -183,11 +185,10 @@ export function UpdatesPanel({
                 severities are the same on every tab; only which are on by
                 default differs (`defaultSeveritiesFor`). */}
             {severityFilter ? (
-            <SeverityChips
+            <MultiFilterChips
               label={t("patch.updates.filterAria", { scope })}
-              selected={filters.severities}
-              counts={query.data?.severity_counts}
-              allCount={query.data?.total_unfiltered}
+              options={severityOptions(t("patch.updates.optAll"), query.data?.severity_counts, query.data?.total_unfiltered)}
+              values={filters.severities}
               onChange={(severities) => onFilterChange({ severities, offset: 0 })}
             />
             ) : null}
@@ -389,62 +390,31 @@ const SEVERITY_ORDER = ["critical", "important", "moderate", "low", "unknown"] a
 
 /**
  * THE SEVERITY FILTER, ONE CHIP PER SEVERITY AND SEVERAL AT ONCE (redesign
- * plan, O3 3.2). The URL keeps its list format (`?severity=critical,important`,
- * `all`); every chip pressed is one more severity in it, and "All severities"
- * is the empty list. Each count is the server's (`severity_counts`, which sums
- * to `total_unfiltered`), never a count of the page in hand.
+ * plan, O3 3.2), drawn by the kit's `MultiFilterChips`: every chip pressed is
+ * one more severity, "All severities" is the empty list, and each count is
+ * the server's (`severity_counts`, which sums to `total_unfiltered`), never a
+ * count of the page in hand.
  *
- * DRAWN AS THE KIT'S `FilterChips` DRAWS ITS CHIPS (`.chips`, `.chip`,
- * `aria-pressed`, the check on a pressed chip, `.n` for the count), because
- * the kit's group selects one value and this filter selects several: the wave
- * asks the kit for a multi-select `FilterChips` (report, kit request K1), and
- * this goes when it lands.
+ * THE URL KEEPS THIS MODULE'S OWN LIST FORMAT, not the kit's
+ * `parseUrlList`/`formatUrlList`: here an ABSENT `severity` is the tab's
+ * default (`defaultSeveritiesFor`) and every severity is the explicit `all`
+ * (`severitiesFromParam`/`severityParamFor`), where the kit reads absent as
+ * every value. The chips hand back the severities in this order, worst first.
  */
-function SeverityChips({
-  label,
-  selected,
-  counts,
-  allCount,
-  onChange,
-}: {
-  label: string;
-  selected: readonly string[];
-  counts: Record<string, number> | undefined;
-  allCount: number | undefined;
-  onChange: (severities: string[]) => void;
-}) {
-  const t = useT();
+function severityOptions(
+  allLabel: string,
+  counts: Record<string, number> | undefined,
+  allCount: number | undefined,
+): FilterChipOption[] {
   const extra = Object.keys(counts ?? {}).filter((key) => !(SEVERITY_ORDER as readonly string[]).includes(key));
-  const severities = [...SEVERITY_ORDER, ...extra.sort()];
   // A loaded answer counts every severity: one it leaves out has none.
   const countOf = (severity: string) => (counts === undefined ? undefined : (counts[severity] ?? 0));
-  const toggle = (severity: string) =>
-    onChange(selected.includes(severity) ? selected.filter((value) => value !== severity) : [...selected, severity]);
-  const chips = [
-    { key: "(all)", label: t("patch.updates.optAll"), on: selected.length === 0, count: allCount, onClick: () => onChange([]) },
-    ...severities.map((severity) => ({
-      key: severity,
+  return [
+    { value: "", label: allLabel, count: allCount },
+    ...[...SEVERITY_ORDER, ...extra.sort()].map((severity) => ({
+      value: severity,
       label: severityLabel(severity),
-      on: selected.includes(severity),
       count: countOf(severity),
-      onClick: () => toggle(severity),
     })),
   ];
-  return (
-    <div className="chips" role="group" aria-label={label}>
-      {chips.map((chip) => (
-        <button
-          key={chip.key}
-          type="button"
-          className={`${chip.on ? "chip on" : "chip"} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
-          aria-pressed={chip.on}
-          onClick={chip.onClick}
-        >
-          {chip.on ? <Icon name="circle-check" size={13} /> : null}
-          {chip.label}
-          {chip.count === undefined ? null : <span className="n">{chip.count}</span>}
-        </button>
-      ))}
-    </div>
-  );
 }

@@ -29,7 +29,7 @@ export function consentModeLabel(mode: string): string {
 }
 
 export function formatDuration(startedAt: string | null, endedAt: string | null): string {
-  if (!startedAt) return "—";
+  if (!startedAt) return translate("shell.viz.na");
   const start = new Date(startedAt).getTime();
   const end = endedAt ? new Date(endedAt).getTime() : Date.now();
   const totalSeconds = Math.max(0, Math.floor((end - start) / 1000));

@@ -70,6 +70,7 @@ import { BackupPageNav } from "./backupNav";
 import { BackupReadiness } from "./BackupReadiness";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -203,6 +204,9 @@ export function BackupPointsPage() {
   // as an alert state rather than a neutral statistic". `gold` is the
   // attention treatment the Failed-jobs card beside it already uses.
   const unprotected = report.data ? report.data.devices_total - report.data.devices_covered : 0;
+  // The tiles count the report: until it answers, or once it failed, each is
+  // the kit's pending tile, the absent mark (clarification 10a).
+  const noReport = !report.data;
 
   return (
     <div>
@@ -260,19 +264,19 @@ export function BackupPointsPage() {
         <StatCard
           label={t("backup.points.tileSuccess")}
           value={
-            report.data
-              ? totalRuns === 0
-                ? t("backup.points.neverRun")
-                : t("backup.points.percent", { percent: Math.round(report.data.success_rate * 100) })
-              : "—"
+            totalRuns === 0
+              ? t("backup.points.neverRun")
+              : t("backup.points.percent", { percent: Math.round((report.data?.success_rate ?? 0) * 100) })
           }
+          pending={noReport}
           icon="circle-check"
           to="/jobs?q=backup"
           tone="green"
         />
         <StatCard
           label={t("backup.points.tileProtected")}
-          value={report.data ? `${report.data.devices_covered} / ${report.data.devices_total}` : "—"}
+          value={`${report.data?.devices_covered ?? 0} / ${report.data?.devices_total ?? 0}`}
+          pending={noReport}
           icon="shield-check"
           to="/devices"
           /* GOLD IS THE COVERAGE GAP, and it stays gold when the gap is
@@ -286,7 +290,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileFailed")}
-          value={report.data ? String(failedRuns) : "—"}
+          value={String(failedRuns)}
+          pending={noReport}
           icon="circle-x"
           to="/jobs?status=failed&q=backup"
           tone="red"
@@ -297,7 +302,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileNeedsVerification")}
-          value={report.data ? String(needsVerification) : "—"}
+          value={String(needsVerification)}
+          pending={noReport}
           icon="clock-exclamation"
           to="/backup?verify=pending"
           tone="gold"
@@ -649,11 +655,11 @@ function RunBackupDialog({
 }
 
 /**
- * THE DEVICE CHIP: the points of one computer. A select drawn as the kit's
- * Client chip is (`chip chip-select`, shell/listKit.tsx), because a fleet has
- * too many computers for a row of toggles. It offers only the computers the
- * list has points for, and draws nothing while there is fewer than two to
- * choose between, unless one is already chosen (so it can be cleared).
+ * THE DEVICE CHIP: the points of one computer. The kit's `ChipSelect` (the
+ * Client chip's shape), because a fleet has too many computers for a row of
+ * toggles. It offers only the computers the list has points for, and draws
+ * nothing while there is fewer than two to choose between, unless one is
+ * already chosen (so it can be cleared).
  */
 function DeviceFilter({
   filters,
@@ -666,20 +672,14 @@ function DeviceFilter({
   const value = filters.values.device;
   if (devices.length < 2 && value === "") return null;
   return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{t("backup.points.deviceChip")}</span>
-      <select
-        aria-label={t("backup.points.deviceChip")}
-        value={value}
-        onChange={(event) => filters.set("device", event.target.value)}
-      >
-        <option value="">{t("backup.points.allDevices")}</option>
-        {devices.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}
-          </option>
-        ))}
-      </select>
-    </span>
+    <ChipSelect
+      label={t("backup.points.deviceChip")}
+      options={[
+        { value: "", label: t("backup.points.allDevices") },
+        ...devices.map((item) => ({ value: item.id, label: item.name })),
+      ]}
+      value={value}
+      onChange={(next) => filters.set("device", next)}
+    />
   );
 }

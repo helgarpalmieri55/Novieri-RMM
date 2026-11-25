@@ -316,10 +316,10 @@ describe("the fleet patch page in Spanish", () => {
     mockUseApi.mockReturnValue({});
     renderPage(<FleetPatchPage />);
     await screen.findByText("Acumulativa de octubre");
-    expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones — actualizaciones de Windows" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones (actualizaciones de Windows)" })).toBeInTheDocument();
     // The reach of THIS approval, the internal client's 2 of the ring's 3.
     expect(screen.getByText("Una aprobación aquí abarca los 2 dispositivos del cliente propio de tu organización en el anillo test.")).toBeInTheDocument();
-    const ring = screen.getByLabelText("Anillo en el que aprobar — actualizaciones de Windows");
+    const ring = screen.getByLabelText("Anillo en el que aprobar (actualizaciones de Windows)");
     expect(within(ring).getByRole("option", { name: "pilot, 1 dispositivo" })).toBeInTheDocument();
     expect(within(ring).getByRole("option", { name: "broad, 220 dispositivos" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar KB5031354"));
@@ -328,7 +328,7 @@ describe("the fleet patch page in Spanish", () => {
     expect(screen.getByRole("checkbox", { name: /Para todos los clientes/ }).closest("label")).toHaveTextContent(
       "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo test. Sin marcar, solo en los del cliente propio de tu organización.",
     );
-    expect(screen.getByLabelText("Cambio que implementa esta aprobación — actualizaciones de Windows")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cambio que implementa esta aprobación (actualizaciones de Windows)")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sin solicitud de cambio" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Aprobar 1 actualización en el anillo test/ }));
     const dialog = await screen.findByRole("dialog", { name: "Aprobar actualizaciones en un anillo de despliegue" });
@@ -378,7 +378,7 @@ describe("the fleet patch page in Spanish", () => {
     expect(screen.getByText("Lo que les falta a estos equipos")).toBeInTheDocument();
     expect(screen.getByText(/En apt, «importante» significa que la versión viene del repositorio de seguridad/)).toBeInTheDocument();
     expect(screen.getByText(/Las actualizaciones aprobadas se instalan solas en la próxima ventana de mantenimiento de cada equipo\./)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Seleccionar 1 equipo con actualizaciones pendientes — Linux" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seleccionar 1 equipo con actualizaciones pendientes (Linux)" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar ubuntu-01"));
     expect(screen.getByText("1 equipo seleccionado de 1.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Instalar las actualizaciones aprobadas en ubuntu-01" }));
@@ -757,7 +757,7 @@ describe("a live language switch on the patch pages", () => {
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Patching", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–2 of 2 updates.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select all 2 updates — Windows updates" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select all 2 updates (Windows updates)" })).toBeInTheDocument();
     expect(screen.getByText("An approval here covers the 2 devices of your organisation's own client in the test ring.")).toBeInTheDocument();
     expect(screen.getByText("Policy auto-approval")).toBeInTheDocument();
     expect(screen.getByText("Restart booked")).toBeInTheDocument();
@@ -781,7 +781,7 @@ describe("a live language switch on the patch pages", () => {
     await user.click(screen.getByRole("button", { name: "Escanear" }));
     expect(await screen.findByText("Escaneo en cola: se enviaron 2 tareas.")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("Scan queued — 2 jobs dispatched.")).toBeInTheDocument();
+    expect(screen.getByText("Scan queued: 2 jobs dispatched.")).toBeInTheDocument();
   });
 
   it("re-words an export failure already on screen", async () => {

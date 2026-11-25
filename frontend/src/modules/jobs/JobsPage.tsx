@@ -11,7 +11,7 @@ import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
 import { Prerequisites } from "../../components/prerequisites";
 import { useFleetPrerequisite } from "../../lib/detectors";
-import { NO_DATE, formatDateTime, intlLocale } from "../../lib/datetime";
+import { formatDateTime, intlLocale } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { getLanguage } from "../../i18n/core";
@@ -32,6 +32,7 @@ import {
   StatusPill,
   useNarrowedApi,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { Drawer } from "../../shell/Drawer";
 import { Icon } from "../../shell/icons";
@@ -267,10 +268,8 @@ export function JobsPage() {
   // invalidate `["jobs"]`, which reaches every copy, and stop and retry keep
   // `useApi()`. The open job is read by id, as before.
   const { api: readApi, client, ready } = useNarrowedApi(filters.values.client);
-  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
-  // as Alerts' `withClient`): the tiles below count the chip's client.
-  const underChip = (to: string): string =>
-    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2):
+  // the tiles below count the chip's client, so each links with `withClient`.
   const jobs = useQuery({
     queryKey: client === null ? ["jobs"] : ["jobs", { client }],
     queryFn: () => readApi.listJobs(),
@@ -398,6 +397,8 @@ export function JobsPage() {
    * make.
    */
   const total = jobs.data?.total ?? 0;
+  // The queue has not answered yet, or failed: no tile counts it (clarification 10a).
+  const noData = !jobs.data;
   const succeeded = items.filter((job) => job.status === "succeeded").length;
   const totalFoot =
     items.length === 0
@@ -508,49 +509,53 @@ export function JobsPage() {
           that need a person are loud. The zero labels are the other half:
           "0 failed" and "0 because nothing has run" are the same glyph, and
           only one of them is good news. */}
-      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
-          read a tile counts has answered -- under the Client chip that
-          includes the wait for `/me` -- it reads "—" with no line under it,
-          as Alerts' tiles do. */}
+      {/* NO NUMBER AND NO CLAIM WITHOUT THE READ (clarification 10a): until
+          the queue has answered -- under the Client chip that includes the
+          wait for `/me` -- or once it failed, each tile is the kit's pending
+          tile (the absent mark) with no line under it, as Alerts' tiles are. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("jobs.tiles.jobs")}
-          value={jobs.isPending ? NO_DATE : String(total)}
+          value={String(total)}
+          pending={noData}
           icon="jobs"
           // The whole queue: from a filtered view this is the way back to it.
-          to={underChip("/jobs")}
+          to={withClient("/jobs", client)}
           tone="neutral"
           zeroLabel={t("jobs.tiles.jobsZero")}
-          foot={jobs.isPending ? undefined : totalFoot}
+          foot={noData ? undefined : totalFoot}
         />
         <StatCard
           label={t("jobs.tiles.running")}
-          value={jobs.isPending ? NO_DATE : String(running)}
+          value={String(running)}
+          pending={noData}
           icon="progress"
-          to={underChip("/jobs?status=running")}
+          to={withClient("/jobs?status=running", client)}
           tone="violet"
           zeroLabel={t("jobs.tiles.runningZero")}
-          foot={jobs.isPending ? undefined : runningFoot}
+          foot={noData ? undefined : runningFoot}
         />
         <StatCard
           label={t("jobs.tiles.failed")}
-          value={jobs.isPending ? NO_DATE : String(failed)}
+          value={String(failed)}
+          pending={noData}
           icon="circle-x"
-          to={underChip("/jobs?status=failed")}
+          to={withClient("/jobs?status=failed", client)}
           tone="red"
           urgent={failed > 0}
           zeroLabel={t("jobs.tiles.failedZero")}
-          foot={jobs.isPending ? undefined : failedFoot}
+          foot={noData ? undefined : failedFoot}
         />
         <StatCard
           label={t("jobs.tiles.waiting")}
-          value={jobs.isPending ? NO_DATE : String(stuck)}
+          value={String(stuck)}
+          pending={noData}
           icon="clock-exclamation"
-          to={underChip("/jobs?status=stuck")}
+          to={withClient("/jobs?status=stuck", client)}
           tone="gold"
           urgent={stuck > 0}
           zeroLabel={t("jobs.tiles.waitingZero")}
-          foot={jobs.isPending ? undefined : stuckFoot}
+          foot={noData ? undefined : stuckFoot}
         />
       </StatsGrid>
 

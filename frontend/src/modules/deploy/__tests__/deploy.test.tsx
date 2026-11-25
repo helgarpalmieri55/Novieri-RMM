@@ -372,8 +372,9 @@ describe("DeployPage", () => {
     const values = [...stats].map((card) => card.querySelector(".stat-value")?.textContent);
     // total=1; DEPLOYMENTS[0].created_at is far in the past relative to
     // `now`, so "this week" is 0; state is "pending" (not terminal), so
-    // success rate has no terminal deployments yet ("—"); failed=0.
-    expect(values).toEqual(["1", "0", "—", "0"]);
+    // success rate has no terminal deployments yet (the kit's absent mark,
+    // "n/a"); failed=0.
+    expect(values).toEqual(["1", "0", "n/a", "0"]);
     // The design's own stat cards read 64 / 31 / 96% / 5 -- mock figures
     // that would be wrong on every deployment if they survived the port.
     expect(values).not.toContain("64");
@@ -1806,13 +1807,13 @@ describe("the stat cards use one convention for 'nothing to divide by'", () => {
     return label.closest(".stat-card") as HTMLElement;
   }
 
-  it("says WHY the rate is a dash instead of leaving it beside three zeros", async () => {
+  it("says WHY the rate is absent instead of leaving it beside three zeros", async () => {
     mockUseApi.mockReturnValue(withDeployments([]) as ApiClient);
     renderWithProviders(<DeployPage />);
 
     await screen.findByText("No deployments yet.");
     const card = successCard();
-    expect(card.querySelector(".stat-value")?.textContent).toBe("—");
+    expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(card).toHaveTextContent("No completed runs yet");
   });
 
@@ -1841,7 +1842,7 @@ describe("the stat cards use one convention for 'nothing to divide by'", () => {
     const values = [...document.querySelectorAll(".stat-card")].map(
       (card) => card.querySelector(".stat-value")?.textContent,
     );
-    expect(values).toEqual(["0", "0", "—", "0"]);
+    expect(values).toEqual(["0", "0", "n/a", "0"]);
   });
 });
 

@@ -74,19 +74,20 @@ import type { ProvisionRunState } from "./types";
 // draw a progress bar and a time remaining; `ProvisionRun` carries neither,
 // so both are OMITTED rather than faked.
 
+/** The median build time in words, or `null` when no run has both ends (unmeasured). */
 function medianDurationLabel(
   runs: ReadonlyArray<{ started_at: string | null; finished_at: string | null }>,
-): string {
+): string | null {
   const durations = runs
     .filter((run) => run.started_at && run.finished_at)
     .map((run) => new Date(run.finished_at as string).getTime() - new Date(run.started_at as string).getTime())
     .filter((ms) => ms >= 0)
     .sort((a, b) => a - b);
-  if (durations.length === 0) return NO_DATE;
+  if (durations.length === 0) return null;
   const mid = Math.floor(durations.length / 2);
   const lower = durations[mid - 1];
   const upper = durations[mid];
-  if (upper === undefined) return NO_DATE;
+  if (upper === undefined) return null;
   const medianMs = durations.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper;
   return translate("provisioning.runs.minutes", { minutes: Math.round(medianMs / 60_000) });
 }
@@ -145,6 +146,10 @@ export function ProvisioningRunsPage() {
     (sum, count) => sum + count,
     0,
   );
+  // Three tiles count the report: until it answers, or once it failed, each is
+  // the kit's pending tile, the absent mark (clarification 10a).
+  const noReport = !report.data;
+  const median = medianDurationLabel(items);
 
   // Otherwise the table names each run's profile by UUID, the same raw-id
   // defect the pickers close on the writing side, seen on the reading side.
@@ -189,19 +194,19 @@ export function ProvisioningRunsPage() {
         <StatCard
           label={t("provisioning.runs.successRate")}
           value={
-            report.data
-              ? totalRuns === 0
-                ? t("provisioning.runs.neverRun")
-                : t("provisioning.runs.percent", { percent: Math.round(report.data.success_rate * 100) })
-              : "—"
+            totalRuns === 0
+              ? t("provisioning.runs.neverRun")
+              : t("provisioning.runs.percent", { percent: Math.round((report.data?.success_rate ?? 0) * 100) })
           }
+          pending={noReport}
           icon="circle-check"
           to="/provisioning?state=complete"
           tone="green"
         />
         <StatCard
           label={t("provisioning.runs.machinesProvisioned")}
-          value={report.data ? String(report.data.machines_provisioned) : "—"}
+          value={String(report.data?.machines_provisioned ?? 0)}
+          pending={noReport}
           icon="devices"
           to="/devices"
           tone="blue"
@@ -209,7 +214,8 @@ export function ProvisioningRunsPage() {
         />
         <StatCard
           label={t("provisioning.runs.failedRuns")}
-          value={report.data ? String(failedRuns) : "—"}
+          value={String(failedRuns)}
+          pending={noReport}
           icon="circle-x"
           to="/provisioning?state=failed"
           tone="red"
@@ -220,10 +226,12 @@ export function ProvisioningRunsPage() {
         />
         {/* Computed from the runs this page holds (see `medianDurationLabel`),
             so the list it opens is exactly the set it was measured over: no
-            filter, because a median spans the failed builds too. */}
+            filter, because a median spans the failed builds too. With no run
+            that has both ends it is unmeasured: the kit's absent mark. */}
         <StatCard
           label={t("provisioning.runs.medianBuildTime")}
-          value={medianDurationLabel(items)}
+          value={median ?? ""}
+          pending={median === null}
           icon="clock"
           to="/provisioning"
           tone="neutral"

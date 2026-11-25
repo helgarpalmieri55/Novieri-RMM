@@ -71,6 +71,9 @@ export function ImagesPage() {
 
   const images = useOsImages();
   const items = images.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !images.data;
   const activeCount = items.filter((image) => image.state === "active").length;
   // What the totals are made of, for the tiles' second lines: the platforms
   // the catalog covers, and how much of the active set is a golden image
@@ -113,6 +116,7 @@ export function ImagesPage() {
         <StatCard
           label={t("provisioning.images.tileImages")}
           value={String(items.length)}
+          pending={noData}
           icon="photo"
           to="/provisioning/images"
           tone="neutral"
@@ -126,6 +130,7 @@ export function ImagesPage() {
         <StatCard
           label={t("provisioning.images.tileActive")}
           value={String(activeCount)}
+          pending={noData}
           icon="circle-check"
           to="/provisioning/images?state=active"
           tone="green"
@@ -139,6 +144,7 @@ export function ImagesPage() {
         <StatCard
           label={t("provisioning.images.tileNotActive")}
           value={String(items.length - activeCount)}
+          pending={noData}
           icon="minus"
           to="/provisioning/images?state=inactive"
           tone="neutral"

@@ -27,6 +27,7 @@ import {
   StatsGrid,
   StatusPill,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 import { useBackupCoverage } from "./api";
 import {
@@ -44,15 +45,6 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-/**
- * A tile's link, carrying the Client chip when the page has one (general
- * ruling 2): the tile counts the chip's client's rows, so it opens them.
- */
-function withChip(path: string, client: string): string {
-  if (client === "") return path;
-  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
-}
-
 export function CoveragePage() {
   const t = useT();
   const api = useApi();
@@ -66,6 +58,9 @@ export function CoveragePage() {
   const filter = filters.values.coverage;
   const coverage = useBackupCoverage(filter, filters.values.client);
   const totals = coverage.data?.totals ?? {};
+  // The tiles count the report: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !coverage.data;
   const rows = coverage.data?.rows ?? [];
   // The report's totals are the server's, over every device of the answer
   // (not the rows shown, which `limit` may cut), so the chips' counts are
@@ -90,24 +85,27 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileProtected")}
           value={String(totals.covered ?? 0)}
+          pending={noData}
           icon="circle-check"
-          to={withChip("/backup/coverage?coverage=covered", filters.values.client)}
+          to={withClient("/backup/coverage?coverage=covered", filters.values.client)}
           tone="green"
           zeroLabel={t("backup.coverage.noneRecent")}
         />
         <StatCard
           label={t("backup.coverage.tileStale")}
           value={String(totals.stale ?? 0)}
+          pending={noData}
           icon="clock"
-          to={withChip("/backup/coverage?coverage=stale", filters.values.client)}
+          to={withClient("/backup/coverage?coverage=stale", filters.values.client)}
           tone="gold"
           zeroLabel={t("backup.coverage.noneBehind")}
         />
         <StatCard
           label={t("backup.coverage.tileFailing")}
           value={String(totals.failing ?? 0)}
+          pending={noData}
           icon="alert-triangle"
-          to={withChip("/backup/coverage?coverage=failing", filters.values.client)}
+          to={withClient("/backup/coverage?coverage=failing", filters.values.client)}
           tone="red"
           urgent={(totals.failing ?? 0) > 0}
           zeroLabel={t("backup.coverage.noneFailing")}
@@ -115,8 +113,9 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileUnprotected")}
           value={String(totals.unprotected ?? 0)}
+          pending={noData}
           icon="minus"
-          to={withChip("/backup/coverage?coverage=unprotected", filters.values.client)}
+          to={withClient("/backup/coverage?coverage=unprotected", filters.values.client)}
           tone="red"
           zeroLabel={t("backup.coverage.everyPolicy")}
         />

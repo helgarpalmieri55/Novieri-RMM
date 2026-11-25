@@ -21,6 +21,7 @@ import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 import {
   Btn,
+  ChipSelect,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -285,12 +286,14 @@ export function ErrorMonitorPage() {
           three of these read "0" during the first paint and after a failed
           load — "nothing has broken" and "we have not been told" printed
           identically, which is the defect `zeroLabel` exists to close. An
-          unresolved query gets an em dash; a zero on screen is then always a
-          measured zero. */}
+          unresolved query gets the kit's pending tile, the absent mark
+          (clarification 10a); a zero on screen is then always a measured
+          zero. */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("errorMonitor.tiles.groups")}
-          value={data ? String(allGroups.length) : "—"}
+          value={String(allGroups.length)}
+          pending={!data}
           icon="warning"
           to="/error-monitor"
           tone="neutral"
@@ -298,7 +301,8 @@ export function ErrorMonitorPage() {
         />
         <StatCard
           label={t("errorMonitor.tiles.open")}
-          value={data ? String(openCount) : "—"}
+          value={String(openCount)}
+          pending={!data}
           icon="clock"
           to="/error-monitor?state=open"
           tone="red"
@@ -307,7 +311,8 @@ export function ErrorMonitorPage() {
         />
         <StatCard
           label={t("errorMonitor.tiles.events")}
-          value={data ? String(totalEvents) : "—"}
+          value={String(totalEvents)}
+          pending={!data}
           icon="logs"
           to="/error-monitor?sort=events"
           tone="blue"
@@ -388,20 +393,20 @@ export function ErrorMonitorPage() {
                 value={filters.since}
                 onChange={(value) => setFilter("since", value)}
               />
-              {/* THE ORDER IS NOT A FILTER: a chip that opens a choice
-                  (`.chip-select`, the kit's Client chip shape). */}
-              <span className="chip chip-select">
-                <span aria-hidden="true">{t("errorMonitor.groups.sortLabel")}</span>
-                <select
-                  value={filters.sort}
-                  onChange={(event) => setSort(event.target.value)}
-                  aria-label={t("errorMonitor.groups.sortAria")}
-                >
-                  <option value="last_seen">{t("errorMonitor.groups.sortLastSeen")}</option>
-                  <option value="first_seen">{t("errorMonitor.groups.sortFirstSeen")}</option>
-                  <option value="events">{t("errorMonitor.groups.sortEvents")}</option>
-                </select>
-              </span>
+              {/* THE ORDER IS NOT A FILTER: a chip that opens a choice, never
+                  drawn selected (`selected={false}`). */}
+              <ChipSelect
+                label={t("errorMonitor.groups.sortLabel")}
+                ariaLabel={t("errorMonitor.groups.sortAria")}
+                options={[
+                  { value: "last_seen", label: t("errorMonitor.groups.sortLastSeen") },
+                  { value: "first_seen", label: t("errorMonitor.groups.sortFirstSeen") },
+                  { value: "events", label: t("errorMonitor.groups.sortEvents") },
+                ]}
+                value={filters.sort}
+                onChange={setSort}
+                selected={false}
+              />
             </>
           }
           end={data ? <ShowingCount shown={shown.length} total={allGroups.length} /> : null}
@@ -510,7 +515,7 @@ export function ErrorMonitorPage() {
         open={pendingResolve != null}
         title={t("errorMonitor.triage.confirmTitle")}
         subject={
-          pendingResolve ? `${pendingResolve.exc_type} — ${formatRaiseSite(pendingResolve)}` : ""
+          pendingResolve ? `${pendingResolve.exc_type} · ${formatRaiseSite(pendingResolve)}` : ""
         }
         body={t("errorMonitor.triage.confirmBody")}
         confirmLabel={t("errorMonitor.triage.confirmLabel")}

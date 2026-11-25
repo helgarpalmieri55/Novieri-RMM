@@ -433,7 +433,7 @@ describe("BackupPointsPage", () => {
     await pickEntity(user, "Device", /WKS-042/);
     await user.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Backup queued — 1 job dispatched.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Backup queued: 1 job dispatched.");
   });
 
   // A run that dispatched no job must not read as a started backup -- the
@@ -730,7 +730,7 @@ describe("RestoreDialog", () => {
     await openDialogAndSelectPath(user);
 
     expect(
-      screen.getByText("— overwrites the files currently on this device"),
+      screen.getByText("(overwrites the files currently on this device)"),
     ).toBeInTheDocument();
   });
 
@@ -1640,7 +1640,7 @@ describe("DeviceBackupTab", () => {
     await screen.findByText("primary-vault");
     await user.click(screen.getByRole("button", { name: "Run now" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Backup queued — 1 job dispatched.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Backup queued: 1 job dispatched.");
   });
 
   it("does not round a run that dispatched no job up to a started backup", async () => {
@@ -1732,7 +1732,7 @@ describe("the backup overview reports what it knows and no more", () => {
     renderWithProviders(<BackupPointsPage />);
 
     // devices_covered 0 of devices_total 1 — the audit's exact card. Wait for
-    // the report to settle first; before it does every card reads "—".
+    // the report to settle first; before it does every card reads "n/a".
     await screen.findByText("Never run");
     const card = screen.getByText("Protected endpoints").closest("a");
     expect(card).toHaveTextContent("0 / 1");

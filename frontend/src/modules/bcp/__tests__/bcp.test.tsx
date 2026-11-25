@@ -1117,7 +1117,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
   it("carries no breakdown for a figure that was never measured", async () => {
     // THE FALSIFIER for the test above: a breakdown printed unconditionally
-    // would put "across 0 plans" under a findings tile reading "—", which is
+    // would put "across 0 plans" under a findings tile reading "n/a", which is
     // the reassuring-zero defect this module already paid for once.
     mockUseApi.mockReturnValue({
       me: vi.fn().mockResolvedValue(ME),
@@ -1128,7 +1128,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     await screen.findByText("Core datacenter failover");
     const findings = screen.getByText("Open findings").closest(".stat-card");
-    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("—"));
+    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("n/a"));
     expect(findings).not.toHaveTextContent("across");
   });
 
@@ -1168,7 +1168,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     await screen.findByText("Core datacenter failover");
     const findings = screen.getByText("Open findings").closest(".stat-card");
-    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("—"));
+    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("n/a"));
     expect(findings).not.toHaveTextContent("No finding is open");
 
     // And the overdue tile names WHICH zero it would be showing: with no
@@ -1731,8 +1731,8 @@ describe("PlanEditor scope and procedure references", () => {
   it("explains RTO and RPO on the form rather than assuming the reader knows", async () => {
     renderEditor();
 
-    expect(screen.getByText(/RTO — how long recovery may take/)).toBeInTheDocument();
-    expect(screen.getByText(/RPO — how much recent data may be lost/)).toBeInTheDocument();
+    expect(screen.getByText(/RTO: how long recovery may take/)).toBeInTheDocument();
+    expect(screen.getByText(/RPO: how much recent data may be lost/)).toBeInTheDocument();
   });
 
   it("warns when RTO is lower than RPO without refusing the save", async () => {

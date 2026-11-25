@@ -392,7 +392,7 @@ describe("unattended mode, which is access without consent", () => {
     expect(api.startRemoteSession).not.toHaveBeenCalled();
     const confirm = await screen.findByRole("dialog", { name: "Start an unattended session" });
     expect(within(confirm).getByText("workstation-1")).toBeInTheDocument();
-    expect(confirm).toHaveTextContent(/WITHOUT asking the person at that device to consent/);
+    expect(confirm).toHaveTextContent(/never asks the person at that device to consent/);
     // Named as the technician's decision, because that is what the audit log
     // will say.
     expect(confirm).toHaveTextContent(/audit log names you/i);

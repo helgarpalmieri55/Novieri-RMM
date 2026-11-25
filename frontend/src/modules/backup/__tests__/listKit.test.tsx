@@ -5,7 +5,7 @@
  * (decision D6) -- asserted on the narrowed double's own spy, with nothing
  * read un-narrowed (`recordingNarrowing`, src/test/narrowing.ts).
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +29,19 @@ function withFixtures(over: Partial<Record<keyof ApiClient, unknown>> = {}): Api
 }
 
 beforeEach(() => mockUseApi.mockReturnValue(fixtureClient()));
+
+/**
+ * Every tile on the page draws the kit's absent mark and no zero sentence:
+ * no number and no claim before the read it counts has answered
+ * (clarification 10a; `StatCard pending`).
+ */
+async function expectTilesAbsent(count: number): Promise<void> {
+  await waitFor(() => expect(document.querySelectorAll(".stat-card")).toHaveLength(count));
+  for (const tile of document.querySelectorAll(".stat-card")) {
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile.querySelector(".stat-zero")).toBeNull();
+  }
+}
 
 describe("backup points on the list kit (4.1)", () => {
   /**
@@ -114,6 +127,12 @@ describe("backup points on the list kit (4.1)", () => {
 });
 
 describe("backup repositories on the list kit (4.2)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ listBackupRepositories: () => new Promise(() => {}) }));
+    renderPage("/backup/repositories", <RepositoriesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/backup/repositories?state=retired", <RepositoriesPage />);
     const chips = await screen.findByRole("group", { name: "Filter repositories by state" });
@@ -158,6 +177,12 @@ describe("backup repositories on the list kit (4.2)", () => {
 });
 
 describe("backup coverage on the list kit (4.3)", () => {
+  it("draws no figure and no claim in its tiles before the report answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ runReport: () => new Promise(() => {}) }));
+    renderPage("/backup/coverage", <CoveragePage />);
+    await expectTilesAbsent(4);
+  });
+
   /** The checks above the list (`BackupReadiness`): the page's own, under the top bar's choice, never the report. */
   const CONSOLE = ["listBackupRepositories", "listBackupPolicies", "listDevices"];
 
@@ -220,6 +245,12 @@ describe("backup coverage on the list kit (4.3)", () => {
 });
 
 describe("backup policies on the kit (the policies page)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ listBackupPolicies: () => new Promise(() => {}) }));
+    renderPage("/backup/policies", <BackupPolicyEditor />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/backup/policies?enabled=false", <BackupPolicyEditor />);
     const chips = await screen.findByRole("group", { name: "Filter policies by state" });
@@ -249,6 +280,21 @@ describe("backup policies on the kit (the policies page)", () => {
     expect(router.state.location.search).toBe("?edit=pol-pilot");
     const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
     expect(within(dialog).getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("closes an editor its Edit opened by going Back, so Back afterwards does not reopen it (useEditParam)", async () => {
+    // Written through `useUrlFilters`, Cancel pushed a second entry and the
+    // next Back landed on `?edit=` again, reopening the editor (O4 review,
+    // item 7). The kit's `useEditParam` closes by undoing the opening.
+    const { router } = renderPage("/backup/policies", <BackupPolicyEditor />, "/backup/policies");
+    const row = (await screen.findAllByRole("row")).find((tr) => tr.textContent?.includes("Legacy NAS")) as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("dialog", { name: "Edit policy" })).toBeNull();
   });
 
   it("asks before Cancel drops a change, and closes an unchanged editor at once", async () => {

@@ -270,11 +270,11 @@ export const deploy = {
     stepWhole: "The {name} step of the window must be a whole number.",
     moreDash: "The {name} of the window has more than one \"-\" range.",
     namesNotSupported:
-      "The {name} of the window accepts numbers only — names like \"SAT\" are not supported. Sunday is 0 or 7, Saturday is 6.",
+      "The {name} of the window accepts numbers only: names like \"SAT\" are not supported. Sunday is 0 or 7, Saturday is 6.",
     numbersOnly: "The {name} of the window accepts numbers only.",
     between: "The {name} of the window must be between {lo} and {hi}.",
     fiveFields:
-      "The window must be a 5-field cron expression — minute hour day-of-month month day-of-week, {example}",
+      "The window must be a 5-field cron expression: minute hour day-of-month month day-of-week, {example}",
     sun: "Sun",
     mon: "Mon",
     tue: "Tue",

@@ -490,7 +490,8 @@ describe("the stat tiles open the search behind them", () => {
     const values = [...document.querySelectorAll("a.stat-card .stat-value")].map(
       (value) => value.textContent,
     );
-    expect(values).toEqual(["—", "—", "—"]);
+    // The kit's pending tile: the absent mark, never a 0 (clarification 10a).
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
   });
 
   it("shouts about the failures and nothing else", async () => {

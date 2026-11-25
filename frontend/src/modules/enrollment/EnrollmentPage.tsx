@@ -665,6 +665,8 @@ export function EnrollmentPage() {
   ).length;
   const connected = deviceItems.filter((device) => device.agent_status === "online").length;
   const activeTokens = tokenItems.filter((token) => tokenState(token, now) === "active").length;
+  // The device tiles have no figure without `devices.read` or the device read.
+  const noDevices = !canReadDevices || !devices.data;
 
   /** Devices whose agent certificate has been revoked. The device itself is
    *  untouched and still on `/devices`; it is the CERTIFICATE that is dead, and
@@ -754,12 +756,14 @@ export function EnrollmentPage() {
           clock on it — an expiring agent certificate is a machine about to fall
           off the fleet. The other three are facts, not tasks.
 
-          The "—" is a permission or a pending read, never a zero, so every
+          The kit's pending tile (the absent mark, clarification 10a) is a
+          permission or a read that has not answered, never a zero, so every
           `zeroLabel` below describes a zero that was actually measured. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("enrollment.tiles.enrolled")}
-          value={canReadDevices && devices.data ? String(devices.data.total) : "—"}
+          value={String(devices.data?.total ?? 0)}
+          pending={noDevices}
           icon="devices"
           to="/devices"
           tone="neutral"
@@ -767,7 +771,8 @@ export function EnrollmentPage() {
         />
         <StatCard
           label={t("enrollment.tiles.connected")}
-          value={canReadDevices && devices.data ? String(connected) : "—"}
+          value={String(connected)}
+          pending={noDevices}
           icon="activity"
           to="/devices?state=online"
           tone="green"
@@ -775,7 +780,8 @@ export function EnrollmentPage() {
         />
         <StatCard
           label={t("enrollment.tiles.certAttention")}
-          value={canReadDevices && devices.data ? String(certAttention) : "—"}
+          value={String(certAttention)}
+          pending={noDevices}
           icon="certificate"
           to="/devices?state=certs"
           tone="gold"
@@ -786,7 +792,8 @@ export function EnrollmentPage() {
         />
         <StatCard
           label={t("enrollment.tiles.activeTokens")}
-          value={canManage && tokens.data ? String(activeTokens) : "—"}
+          value={String(activeTokens)}
+          pending={!canManage || !tokens.data}
           icon="certificate"
           to="/enrollment?tab=tokens"
           tone="primary"

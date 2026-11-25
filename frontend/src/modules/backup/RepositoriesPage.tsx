@@ -85,6 +85,9 @@ export function RepositoriesPage() {
 
   const repositories = useBackupRepositories();
   const items = repositories.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !repositories.data;
   const activeCount = items.filter((repo) => repo.state === "active").length;
   const retiredCount = items.filter((repo) => repo.state === "retired").length;
   const visible =
@@ -131,6 +134,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileRepositories")}
           value={String(items.length)}
+          pending={noData}
           icon="database"
           to="/backup/repositories"
           tone="neutral"
@@ -139,6 +143,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileActive")}
           value={String(activeCount)}
+          pending={noData}
           icon="circle-check"
           to="/backup/repositories?state=active"
           tone="green"
@@ -147,6 +152,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileRetired")}
           value={String(retiredCount)}
+          pending={noData}
           icon="minus"
           to="/backup/repositories?state=retired"
           tone="gold"

@@ -417,7 +417,7 @@ describe("retry", () => {
     // this row comes back to life would be describing a replay, and a replay
     // is exactly what the server refuses to do.
     expect(describeRetry(FAILED).body).toContain("does not re-send the original job");
-    expect(describeRetry(FAILED).body).toContain("NEW job");
+    expect(describeRetry(FAILED).body).toContain("creates a separate, new job");
     expect(describeRetry(FAILED).body).toContain("left exactly as it is");
   });
 

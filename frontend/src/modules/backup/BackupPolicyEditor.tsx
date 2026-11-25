@@ -77,6 +77,7 @@ import {
   StatsGrid,
   StatCard,
   StatusPill,
+  useEditParam,
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
@@ -86,9 +87,10 @@ export function BackupPolicyEditor() {
   const t = useT();
   const api = useApi();
   // New policy is `?new=policy`, and the policy being edited `?edit=<id>`:
-  // the dialog is a link, and a reload opens the same one.
+  // the dialog is a link, and a reload opens the same one. Closing either
+  // undoes its opening (Back from the entry `start` added).
   const creating = useNewParam("policy");
-  const edit = useUrlFilters(["edit"] as const);
+  const edit = useEditParam("policy");
   // In the URL, so the "Enabled" tile above can hand over the rows it counted
   // rather than linking to the page the reader is already on.
   const filters = useUrlFilters(["enabled"] as const);
@@ -107,6 +109,9 @@ export function BackupPolicyEditor() {
   const repositories = useBackupRepositories();
   const groups = useDeviceGroups();
   const items = policies.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !policies.data;
   const enabledCount = items.filter((policy) => policy.enabled).length;
   // What the totals are made of, for the tiles' second lines: how many
   // distinct repositories these policies write into, and how many of the
@@ -126,9 +131,9 @@ export function BackupPolicyEditor() {
   // What the dialog edits: a new policy, the one `?edit=` names (once the
   // list has it), or nothing. Only for someone who may manage policies,
   // whatever the URL asks: a courtesy, the server checks (invariant 6).
-  const edited = items.find((policy) => policy.id === edit.values.edit);
+  const edited = items.find((policy) => policy.id === edit.id);
   const editing: BackupPolicy | "new" | null = !canManage ? null : creating.open ? "new" : (edited ?? null);
-  const closeEditor = creating.open ? creating.close : () => edit.set("edit", "");
+  const closeEditor = creating.open ? creating.close : edit.close;
 
   return (
     <div>
@@ -160,6 +165,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tilePolicies")}
           value={String(items.length)}
+          pending={noData}
           icon="calendar-week"
           to="/backup/policies"
           tone="neutral"
@@ -173,6 +179,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/backup/policies?enabled=true"
           tone="green"
@@ -192,6 +199,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/backup/policies?enabled=false"
           tone="neutral"
@@ -291,7 +299,7 @@ export function BackupPolicyEditor() {
                     />
                   </Td>
                   <Td>
-                    {canManage && <Btn label={t("backup.policies.edit")} icon="edit" small onClick={() => edit.set("edit", policy.id)} />}
+                    {canManage && <Btn label={t("backup.policies.edit")} icon="edit" small onClick={() => edit.start(policy.id)} />}
                   </Td>
                 </tr>
               ))}

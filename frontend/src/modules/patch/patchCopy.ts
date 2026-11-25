@@ -467,7 +467,7 @@ export function tabEmptyReason(args: {
 }
 
 export function formatPct(value: number | undefined): string {
-  return value == null ? "—" : `${value.toFixed(1)}%`;
+  return value == null ? translate("shell.viz.na") : `${value.toFixed(1)}%`;
 }
 
 /**

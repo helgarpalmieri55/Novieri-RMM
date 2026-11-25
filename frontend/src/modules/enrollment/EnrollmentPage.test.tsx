@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient, ClientSiteOut, Device, MeClient } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { ENROLLMENT_TOKENS_PAGE_SIZE } from "./api";
 import { EnrollmentPage } from "./EnrollmentPage";
 import type { EnrollmentTokenListItem, EnrollmentTokenPage } from "./types";
@@ -840,7 +841,7 @@ describe("EnrollmentPage", () => {
     expect(await screen.findByText("12 Mar 2027")).toBeInTheDocument();
   });
 
-  it("renders an absent certificate expiry as an em dash, never Invalid Date", async () => {
+  it("renders an absent certificate expiry as NO_DATE, never Invalid Date", async () => {
     renderPage({
       devices: () =>
         Promise.resolve({
@@ -850,13 +851,13 @@ describe("EnrollmentPage", () => {
     });
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
     const row = (await screen.findByText("ws-alpha")).closest("tr") as HTMLElement;
-    // THE CELLS, not the row. `row.textContent` is satisfied by the em dash in
+    // THE CELLS, not the row. `row.textContent` is satisfied by the NO_DATE in
     // any OTHER column, which is how the first version of this test passed
     // against `new Date(null)` -- an expression that is not "Invalid Date" at
     // all but the EPOCH: a certificate that reads as having expired in 1970.
     const cells = [...row.querySelectorAll("td")].map((cell) => cell.textContent?.trim());
-    expect(cells[2]).toBe("—");
-    expect(cells[3]).toBe("—");
+    expect(cells[2]).toBe(NO_DATE);
+    expect(cells[3]).toBe(NO_DATE);
     expect(row.textContent).not.toMatch(/1970|Invalid Date/);
   });
 
@@ -899,7 +900,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/unavailable right now/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
     // The row is still there to try again on, and the token still reads active.
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
@@ -934,7 +935,7 @@ describe("EnrollmentPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/do not have permission/i);
-    expect(alert).toHaveTextContent(/NOT revoked/);
+    expect(alert).toHaveTextContent(/was not revoked/);
   });
 
   it("shows no column or panel the API cannot fill", async () => {

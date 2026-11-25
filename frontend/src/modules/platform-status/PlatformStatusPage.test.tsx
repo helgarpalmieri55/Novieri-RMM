@@ -502,8 +502,9 @@ describe("PlatformStatusPage stat tiles", () => {
 
   it("does not render a zero label while the probes are still unread", async () => {
     // The other half of the same bug, and the half a zeroLabel cannot fix on
-    // its own: an unresolved query must render an em dash, not "0", or the
-    // zero label would be describing a measurement that never happened.
+    // its own: an unresolved query must render the kit's absent mark ("n/a",
+    // the pending tile), not "0", or the zero label would be describing a
+    // measurement that never happened.
     mockUseApi.mockReturnValue({
       getPlatformStatus: () => new Promise<never>(() => {}),
       me: () => new Promise<never>(() => {}),
@@ -512,7 +513,7 @@ describe("PlatformStatusPage stat tiles", () => {
 
     await screen.findByText("Loading…");
     const values = [...document.querySelectorAll(".stat-value")].map((n) => n.textContent);
-    expect(values).toEqual(["\u2014", "\u2014", "\u2014", "\u2014"]);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
     expect(screen.queryByText("Every probe answered OK")).not.toBeInTheDocument();
   });
 });

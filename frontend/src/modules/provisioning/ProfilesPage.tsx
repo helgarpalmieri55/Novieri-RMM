@@ -33,6 +33,7 @@ import {
   StatCard,
   StatsGrid,
   StatusPill,
+  useEditParam,
   useNewParam,
   useUrlFilters,
 } from "../../shell/components";
@@ -42,9 +43,10 @@ export function ProfilesPage() {
   const t = useT();
   const api = useApi();
   // The editor opens from the URL: `?new=profile` (decision D8) for a new
-  // profile, `?edit=<id>` for an existing one, so either is a link.
+  // profile, `?edit=<id>` for an existing one, so either is a link. Closing
+  // either undoes its opening (Back from the entry `start` added).
   const creating = useNewParam("profile");
-  const edit = useUrlFilters(["edit"] as const);
+  const edit = useEditParam("profile");
   // In the URL, so the "Enabled" tile opens the rows it counted.
   const filters = useUrlFilters(["enabled"] as const);
   const enabledFilter = filters.values.enabled;
@@ -63,6 +65,9 @@ export function ProfilesPage() {
   const images = useOsImages();
   const imageOptions = imagePickerOptions(images.data ?? []);
   const items = profiles.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !profiles.data;
   const enabledCount = items.filter((profile) => profile.enabled).length;
   // What the total is made of, for the first tile's second line: how many
   // distinct images these profiles lay down.
@@ -76,9 +81,9 @@ export function ProfilesPage() {
   // What the editor edits: a new profile, the one `?edit=` names once the list
   // has it, or nothing. Only for someone who may manage profiles, whatever
   // the URL asks: a courtesy, the server checks (invariant 6).
-  const edited = items.find((profile) => profile.id === edit.values.edit);
+  const edited = items.find((profile) => profile.id === edit.id);
   const editing = !canManage ? null : creating.open ? ("new" as const) : (edited ?? null);
-  const closeEditor = creating.open ? creating.close : () => edit.set("edit", "");
+  const closeEditor = creating.open ? creating.close : edit.close;
 
   return (
     <div>
@@ -106,6 +111,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileProfiles")}
           value={String(items.length)}
+          pending={noData}
           icon="file-text"
           to="/provisioning/profiles"
           tone="neutral"
@@ -119,6 +125,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/provisioning/profiles?enabled=true"
           tone="green"
@@ -132,6 +139,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/provisioning/profiles?enabled=false"
           tone="neutral"
@@ -224,7 +232,7 @@ export function ProfilesPage() {
                     />
                   </Td>
                   <Td>
-                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => edit.set("edit", profile.id)} />}
+                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => edit.start(profile.id)} />}
                   </Td>
                 </tr>
               ))}

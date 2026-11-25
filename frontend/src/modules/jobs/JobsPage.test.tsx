@@ -38,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient, Job, Me } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { JobsPage } from "./JobsPage";
 
 const mockUseApi = vi.fn();
@@ -181,7 +182,7 @@ describe("JobsPage", () => {
 
     await screen.findByText("Collect inventory");
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(NO_DATE).length).toBeGreaterThan(0);
   });
 
   // DESIGN REVIEW M8. A job issued inside the window that never started has
@@ -391,7 +392,7 @@ describe("JobsPage", () => {
     api.getJob = vi.fn().mockResolvedValue({ ...STALE, result: null, params: {} });
     renderPage(<JobsPage />, `/jobs?job=${STALE.id}`);
 
-    expect(await screen.findByText("No result yet — this job has not run.")).toBeInTheDocument();
+    expect(await screen.findByText("No result yet: this job has not run.")).toBeInTheDocument();
     expect(screen.queryByText("{}")).not.toBeInTheDocument();
   });
 

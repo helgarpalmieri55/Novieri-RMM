@@ -59,7 +59,7 @@ export const enrollment: Shape<typeof en> = {
   tokens: {
     filterLabel: "Filtrar los tokens por revocación",
     limitLabel: "Filtrar los tokens por límite de usos",
-    notRevoked: "El token NO se revocó y todavía puede inscribir un dispositivo.",
+    notRevoked: "El token no se revocó: todavía puede inscribir un dispositivo.",
     unlimited: {
       one: "{count} token de inscripción no tiene límite de usos.",
       other: "{count} tokens de inscripción no tienen límite de usos.",
@@ -97,7 +97,7 @@ export const enrollment: Shape<typeof en> = {
   },
   certs: {
     filterLabel: "Filtrar los certificados por revocación",
-    notRevoked: "El certificado del agente NO se revocó y el dispositivo todavía puede conectarse.",
+    notRevoked: "El certificado del agente no se revocó: el dispositivo todavía puede conectarse.",
     searchPlaceholder: "Buscar dispositivo, FQDN o estado del certificado",
     searchAria: "Buscar certificados",
     showRevokedNone: "Mostrar los certificados revocados (no se ha revocado ninguno)",

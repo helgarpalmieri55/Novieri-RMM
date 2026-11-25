@@ -4,7 +4,7 @@
  * create or edit dialog opened from the URL (`?new=`, `?edit=`). No Client
  * chip: imaging works in the client chosen at the top.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +51,19 @@ function api(over: FixtureMap = {}): ApiClient {
 }
 
 beforeEach(() => mockUseApi.mockReturnValue(api()));
+
+/**
+ * Every tile on the page draws the kit's absent mark and no zero sentence:
+ * no number and no claim before the read it counts has answered
+ * (clarification 10a; `StatCard pending`).
+ */
+async function expectTilesAbsent(count: number): Promise<void> {
+  await waitFor(() => expect(document.querySelectorAll(".stat-card")).toHaveLength(count));
+  for (const tile of document.querySelectorAll(".stat-card")) {
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile.querySelector(".stat-zero")).toBeNull();
+  }
+}
 
 describe("provisioning runs on the list kit (4.6)", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
@@ -104,6 +117,12 @@ describe("provisioning runs on the list kit (4.6)", () => {
 });
 
 describe("OS images on the list kit (4.7)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(api({ listOsImages: () => new Promise(() => {}) }));
+    renderPage("/provisioning/images", <ImagesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/provisioning/images?state=inactive", <ImagesPage />);
     const chips = await screen.findByRole("group", { name: "Filter images by state" });
@@ -140,6 +159,12 @@ describe("OS images on the list kit (4.7)", () => {
 });
 
 describe("provisioning profiles on the list kit (4.8)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(api({ listProvisionProfiles: () => new Promise(() => {}) }));
+    renderPage("/provisioning/profiles", <ProfilesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/provisioning/profiles?enabled=false", <ProfilesPage />);
     const chips = await screen.findByRole("group", { name: "Filter profiles by state" });
@@ -170,6 +195,21 @@ describe("provisioning profiles on the list kit (4.8)", () => {
     expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Workstation standard");
     expect(within(dialog).getByDisplayValue("corp.toeshee.example")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("svc-join")).toBeInTheDocument();
+  });
+
+  it("closes an editor its Edit opened by going Back, so Back afterwards does not reopen it (useEditParam)", async () => {
+    // Written through `useUrlFilters`, Cancel pushed a second entry and the
+    // next Back landed on `?edit=` again, reopening the editor (O4 review,
+    // item 7). The kit's `useEditParam` closes by undoing the opening.
+    const { router } = renderPage("/provisioning/profiles", <ProfilesPage />, "/provisioning/profiles");
+    const row = (await screen.findByText("Workstation standard")).closest("tr") as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit profile" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("dialog", { name: "Edit profile" })).toBeNull();
   });
 
   it("asks before Cancel drops a change in a profile's editor (general ruling 3)", async () => {

@@ -8,7 +8,6 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { WeekPainter } from "../../components/weekpainter";
 import { useT } from "../../i18n/context";
-import { NO_DATE } from "../../lib/datetime";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { humaniseEnum } from "../../lib/labels";
@@ -61,6 +60,7 @@ import {
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
+  withClient,
 } from "../../shell/components";
 
 // The design's `P['deploy']` (docs/design/itms-prototype-v3.html): the head
@@ -160,10 +160,8 @@ export function DeployPage() {
   const deployments = useDeployments(filters.values.client);
   // The client the list was read for (null without a chip, or before `/me`).
   const { client } = useNarrowedApi(filters.values.client);
-  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2,
-  // as Alerts' `withClient`): the tiles below count the chip's client.
-  const underChip = (to: string): string =>
-    client === null ? to : `${to}${to.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+  // A TILE COUNTED UNDER THE CHIP OPENS THAT CLIENT'S ROWS (general ruling 2):
+  // the tiles below count the chip's client, so each links with `withClient`.
   const execute = useExecuteDeploymentMutation();
 
   // Fetched by the PAGE, not only by the create dialog: the table rendered
@@ -252,24 +250,24 @@ export function DeployPage() {
   // operator-initiated action with no approval workflow (that is patch's
   // ring/approval gate, not deploy's). The three cards below are computed
   // from `deployments`, the same list this page renders.
-  // Until the list answers, the tiles have nothing to count (clarification 10a).
-  const unanswered = deployments.isPending;
-  const counted = (figure: string): string => (unanswered ? NO_DATE : figure);
+  // Until the list answers, or once it failed, the tiles have nothing to
+  // count (clarification 10a).
+  const noData = !deployments.data;
   const stats = useMemo(() => {
     const thisWeek = allDeployments.filter((d) => isThisWeek(d)).length;
     const terminal = allDeployments.filter((d) => d.state === "complete" || d.state === "failed");
     const complete = terminal.filter((d) => d.state === "complete").length;
     const failed = terminal.filter((d) => d.state === "failed").length;
     // "Success rate —" beside "Deployments 0" was Auditor A's [LOW]: three
-    // zeros and one dash for one underlying condition, sending the reader
-    // hunting for a distinction that does not exist. The dash is the honest
-    // half (a rate over zero completed runs is undefined, not 0%) so it
-    // stays, and what was missing is the sentence saying so. A count that is
-    // genuinely zero still prints 0: "we deployed nothing" is knowledge, and
-    // dashing it out would be the false-unknown the patch page's four zeros
-    // were the mirror image of.
+    // zeros and one absent mark for one underlying condition, sending the
+    // reader hunting for a distinction that does not exist. The absent mark
+    // is the honest half (a rate over zero completed runs is undefined, not
+    // 0%) so it stays, drawn by the kit's pending tile, and what was missing
+    // is the sentence saying so. A count that is genuinely zero still prints
+    // 0: "we deployed nothing" is knowledge, and blanking it out would be the
+    // false-unknown the patch page's four zeros were the mirror image of.
     const rateUnknown = terminal.length === 0;
-    const successRate = rateUnknown ? "—" : `${Math.round((complete / terminal.length) * 100)}%`;
+    const successRate = rateUnknown ? "" : `${Math.round((complete / terminal.length) * 100)}%`;
     // EVERY TILE IN THE ROW CARRIES A SUB-LINE, which is what the design
     // draws and what stops four tiles of the same height ending on four
     // different rhythms -- two figures with a sentence under them and two
@@ -331,21 +329,23 @@ export function DeployPage() {
           (inert total neutral, an informational count blue, healthy green,
           failure red) and only Failed is loud, because it is the only one of
           the four that needs somebody. */}
-      {/* NO NUMBER AND NO CLAIM BEFORE THE READ (clarification 10a): until the
-          deployments answer -- under the Client chip that includes the wait
-          for `/me` -- each tile reads "—" with no line under it, as Alerts'
-          tiles do. "Nothing has ever been deployed" is a finding, not a default. */}
+      {/* NO NUMBER AND NO CLAIM WITHOUT THE READ (clarification 10a): until
+          the deployments answer -- under the Client chip that includes the
+          wait for `/me` -- or once they failed, each tile is the kit's pending
+          tile (the absent mark) with no line under it, as Alerts' tiles are.
+          "Nothing has ever been deployed" is a finding, not a default. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("deploy.deployments.tileDeployments")}
-          value={counted(String(stats.total))}
+          value={String(stats.total)}
+          pending={noData}
           icon="package"
           // Every deployment: from a filtered view, the way back.
-          to={underChip("/deploy")}
+          to={withClient("/deploy", client)}
           tone="neutral"
           zeroLabel={t("deploy.deployments.tileDeploymentsZero")}
           foot={
-            unanswered || stats.total === 0
+            noData || stats.total === 0
               ? undefined
               : stats.running > 0
                 ? t("deploy.deployments.stillToRun", { count: stats.running })
@@ -354,23 +354,25 @@ export function DeployPage() {
         />
         <StatCard
           label={t("deploy.deployments.tileWeek")}
-          value={counted(String(stats.thisWeek))}
+          value={String(stats.thisWeek)}
+          pending={noData}
           icon="calendar-event"
-          to={underChip("/deploy?state=week")}
+          to={withClient("/deploy?state=week", client)}
           tone="blue"
           zeroLabel={t("deploy.deployments.tileWeekZero")}
-          foot={unanswered || stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
+          foot={noData || stats.thisWeek === 0 ? undefined : t("deploy.deployments.tileWeekFoot")}
         />
         <StatCard
           label={t("deploy.deployments.tileRate")}
-          value={counted(stats.successRate)}
+          value={stats.successRate}
+          pending={noData || stats.rateUnknown}
           icon="circle-check"
-          to={underChip("/deploy?state=complete")}
+          to={withClient("/deploy?state=complete", client)}
           tone="green"
-          // NO `zeroLabel`: this tile's "nothing measured" case is "—", not 0,
-          // and `rateFoot` already says which: "No completed runs yet".
+          // NO `zeroLabel`: this tile's "nothing measured" case is the absent
+          // mark, not 0, and `rateFoot` already says which: "No completed runs yet".
           foot={
-            unanswered
+            noData
               ? undefined
               : stats.rateUnknown
               ? t("deploy.deployments.rateNone")
@@ -383,13 +385,14 @@ export function DeployPage() {
         />
         <StatCard
           label={t("deploy.deployments.tileFailed")}
-          value={counted(String(stats.failed))}
+          value={String(stats.failed)}
+          pending={noData}
           icon="circle-x"
-          to={underChip("/deploy?state=failed")}
+          to={withClient("/deploy?state=failed", client)}
           tone="red"
           urgent={stats.failed > 0}
           zeroLabel={t("deploy.deployments.tileFailedZero")}
-          foot={unanswered || stats.failed === 0 ? undefined : t("deploy.deployments.runsFinished", { count: stats.finished })}
+          foot={noData || stats.failed === 0 ? undefined : t("deploy.deployments.runsFinished", { count: stats.finished })}
         />
       </StatsGrid>
 

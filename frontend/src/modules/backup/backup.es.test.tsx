@@ -501,7 +501,7 @@ describe("the Run backup dialog, in Spanish", () => {
     expect(api.runBackup).toHaveBeenCalledWith("dev1");
     act(() => setActiveLanguage("en"));
     expect(within(screen.getByRole("dialog", { name: "Run backup" })).getByRole("status")).toHaveTextContent(
-      "Backup queued — 1 job dispatched.",
+      "Backup queued: 1 job dispatched.",
     );
   });
 
@@ -545,7 +545,7 @@ describe("the restore dialog, in Spanish", () => {
     expect(within(dialog).getByText(/WKS-042 · tomado el/)).toBeInTheDocument();
     expect(within(dialog).getByText("Destino de la restauración")).toBeInTheDocument();
     expect(within(dialog).getByText("Ubicación original")).toBeInTheDocument();
-    expect(within(dialog).getByText("— sobrescribe los archivos que hay ahora en este dispositivo")).toBeInTheDocument();
+    expect(within(dialog).getByText("(sobrescribe los archivos que hay ahora en este dispositivo)")).toBeInTheDocument();
     expect(within(dialog).getByText("Ubicación alternativa")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Verificar" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
@@ -1080,7 +1080,7 @@ describe("a device's Backup tab, in Spanish", () => {
     await user.click(screen.getByRole("button", { name: "Ejecutar ahora" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Copia de seguridad en cola: 2 tareas enviadas.");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("status")).toHaveTextContent("Backup queued — 2 jobs dispatched.");
+    expect(screen.getByRole("status")).toHaveTextContent("Backup queued: 2 jobs dispatched.");
   });
 
   it("says no run, no repository and nothing tested", async () => {
@@ -1251,8 +1251,8 @@ describe("the sentences the module builds outside React, in Spanish", () => {
       "No se envió nada: no se creó ninguna tarea de copia de seguridad para ese dispositivo.",
     );
     setActiveLanguage("en");
-    expect(runQueuedMessage({ job_ids: ["a"] })).toBe("Backup queued — 1 job dispatched.");
-    expect(runQueuedMessage({ job_ids: ["a", "b"] })).toBe("Backup queued — 2 jobs dispatched.");
+    expect(runQueuedMessage({ job_ids: ["a"] })).toBe("Backup queued: 1 job dispatched.");
+    expect(runQueuedMessage({ job_ids: ["a", "b"] })).toBe("Backup queued: 2 jobs dispatched.");
   });
 
   it("words a window in words, a day range, a list of days and several spans", () => {
