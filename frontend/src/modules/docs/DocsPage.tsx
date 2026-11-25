@@ -25,6 +25,7 @@ import { PortalVisibility } from "./PortalVisibility";
 import {
   Btn,
   ClientFilter,
+  DetailGrid,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -695,8 +696,17 @@ export function DocsPage() {
           article, a document or the editor open, the list steps aside below
           1024 px and the pane leads back to it; on a desktop the two share the
           row, the list on the left. */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className={paneOpen ? "min-w-0 hidden lg:block" : "min-w-0 lg:col-span-3"}>
+      {/* ON THE KIT'S `DetailGrid asideFirst` (adoption pass; C's swap, on
+          D's 56188d7): the library is the aside and the reader the main.
+          BOTH ARE ALWAYS RENDERED, the main empty (`null`) with nothing open,
+          which the kit draws as the library alone across the row. That keeps
+          the library the same mounted list whether a reader is open or not,
+          so the row just chosen keeps the keyboard (C's 76650f7); drawing the
+          grid only while a reader is open would mount the list anew. */}
+      <DetailGrid
+        asideFirst
+        aside={
+        <div className={paneOpen ? "min-w-0 hidden lg:block" : "min-w-0"}>
           {/* The Articles and Linked references tiles land here: this list is
               where each of those numbers decomposes. v3 draws it as the
               toolbar (search, chips, count) over one list of rows. */}
@@ -932,9 +942,10 @@ export function DocsPage() {
             onUpload={() => setUploadOpen(true)}
           />
         </div>
-
-        {paneOpen && (
-        <div className="min-w-0 lg:col-span-2">
+        }
+        main={
+        paneOpen ? (
+        <div className="min-w-0">
           {/* The way back to the list on a phone, where the list stepped aside. */}
           <button
             type="button"
@@ -1205,8 +1216,9 @@ export function DocsPage() {
             </Panel>
           )}
         </div>
-        )}
-      </div>
+        ) : null
+        }
+      />
       <NewRecordDialog open={newRecordOpen} onClose={() => setNewRecordOpen(false)} />
       <UploadDocumentDialog
         open={uploadOpen}

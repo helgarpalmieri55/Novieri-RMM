@@ -1115,6 +1115,43 @@ describe("DocsPage on the kit", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  // THE KIT'S LIBRARY GRID (C's deferred swap, now that D's 56188d7 draws an
+  // aside with no main across the row): `DetailGrid asideFirst`, the library
+  // in the aside and the reader in the main, both always rendered. With
+  // nothing open the main is empty and the kit gives the library the whole
+  // row; the library is the SAME node open and closed, which is what keeps
+  // the focus test above green. On a phone the library steps aside while
+  // something is open, as before.
+  it("draws the library beside its reader on the kit's DetailGrid, the same library open and closed", async () => {
+    mockUseApi.mockReturnValue(kitApi());
+    const { router } = renderKitPage("/docs", <DocsPage />, "/docs");
+    const row = await screen.findByRole("button", { name: /^Finance share recovery runbook/ });
+    const grid = row.closest(".detail-grid") as HTMLElement;
+    expect(grid).not.toBeNull();
+    expect(grid).toHaveClass("aside-first");
+    const aside = grid.firstElementChild as HTMLElement;
+    const main = grid.lastElementChild as HTMLElement;
+    expect(aside).toHaveClass("detail-aside");
+    expect(main).toHaveClass("detail-main");
+    expect(aside.contains(row)).toBe(true);
+    expect(main).toBeEmptyDOMElement();
+    expect(aside.firstElementChild).not.toHaveClass("hidden");
+
+    await userEvent.click(row);
+    await waitFor(() => expect(router.state.location.search).toBe("?article=a1"));
+    const heading = await screen.findByRole("heading", { level: 2, name: "Finance share recovery runbook" });
+    expect(main.contains(heading)).toBe(true);
+    expect(aside.contains(row)).toBe(true);
+    expect(aside.firstElementChild).toHaveClass("hidden", "lg:block");
+
+    await userEvent.click(screen.getByRole("button", { name: "All articles" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(row.isConnected).toBe(true);
+    expect(aside.contains(row)).toBe(true);
+    expect(main).toBeEmptyDOMElement();
+    expect(aside.firstElementChild).not.toHaveClass("hidden");
+  });
+
   it("says why the list is empty", async () => {
     mockUseApi.mockReturnValue(kitApi());
     renderKitPage("/docs?category=Nowhere", <DocsPage />, "/docs");
