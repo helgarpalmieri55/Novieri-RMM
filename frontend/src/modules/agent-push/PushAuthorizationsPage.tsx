@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
@@ -214,14 +214,10 @@ export function PushAuthorizationsPage() {
       <p className="note mb-4">{t("agentPush.authorizations.fourBounds")}</p>
 
       {/* Only for a holder of the scope code, whatever the URL asks: the
-          server refuses the write either way (invariant 6). */}
-      <Dialog
-        open={creating.open && permissions.scopeManage}
-        onClose={creating.close}
-        title={t("agentPush.authorizations.form.title")}
-      >
-        <GrantForm onDone={creating.close} />
-      </Dialog>
+          server refuses the write either way (invariant 6). Mounted only while
+          `?new=authorization` is set, so each opening starts empty (ruling 4);
+          the form draws its own dialog, with the leave question after it. */}
+      {creating.open && permissions.scopeManage ? <GrantForm onClose={creating.close} /> : null}
     </div>
   );
 }
@@ -310,7 +306,7 @@ function GrantRow({
   );
 }
 
-function GrantForm({ onDone }: { onDone: () => void }) {
+function GrantForm({ onClose }: { onClose: () => void }) {
   const t = useT();
   const create = useCreatePushAuthorizationMutation();
   // A prefix is one client's network (MSP clients phase 2, Task 12): the
@@ -335,6 +331,18 @@ function GrantForm({ onDone }: { onDone: () => void }) {
     prefix !== "" || note !== "" || expiresAt !== "" || client.picked !== "",
     { search: ["new"] },
   );
+  /**
+   * The dialog, and the leave question AFTER it: the two share the `.modal`
+   * z-index, so DOM order decides which paints on top (coordinator ruling 3a).
+   */
+  const frame = (body: ReactNode) => (
+    <>
+      <Dialog open onClose={onClose} title={t("agentPush.authorizations.form.title")}>
+        {body}
+      </Dialog>
+      {guard}
+    </>
+  );
 
   const parsed = parsePrefix(prefix);
 
@@ -342,17 +350,16 @@ function GrantForm({ onDone }: { onDone: () => void }) {
   // one client's network, and Unassigned files nothing): the panel says so
   // instead of a form whose Authorize can only fail.
   if (client.refused === "unassigned") {
-    return (
+    return frame(
       <>
         <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
         <UnassignedRefusal />
-      </>
+      </>,
     );
   }
 
-  return (
+  return frame(
     <>
-      {guard}
       <p className="note mb-3">{t("agentPush.authorizations.form.subtitle")}</p>
       <div className="form-grid">
         {client.needsField ? <ClientField field={client} /> : null}
@@ -470,7 +477,7 @@ function GrantForm({ onDone }: { onDone: () => void }) {
                   setExpiresAt("");
                   // The grant is made: its own close is not a lost change.
                   release();
-                  onDone();
+                  onClose();
                 },
               },
             );
@@ -501,6 +508,6 @@ function GrantForm({ onDone }: { onDone: () => void }) {
           {problems.map((problem) => problem.message).join(". ")}.
         </p>
       ) : null}
-    </>
+    </>,
   );
 }

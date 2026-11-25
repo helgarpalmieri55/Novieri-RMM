@@ -166,4 +166,18 @@ describe("before /me answers (coordinator ruling 10)", () => {
     expect(screen.queryByText("No devices yet. Install the agent on the first one.")).toBeNull();
     expect(listDevices).not.toHaveBeenCalled();
   });
+
+  it("draws no tile number or claim before the read answers (coordinator ruling 10a)", async () => {
+    // A tile reading "0" with "No machine is managed yet" under it, while the
+    // count has not been asked for, is the same lie as the empty list.
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
+    renderPage(`/devices?client=${ANDES}`, <DevicesPage />);
+    await screen.findByRole("heading", { level: 1 });
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(4);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
@@ -172,10 +172,10 @@ export function PushCredentialScopesPage() {
       </Panel>
 
       {/* Only for a holder of the scope code, whatever the URL asks: the
-          server refuses the write either way (invariant 6). */}
-      <Dialog open={creating.open && permissions.scopeManage} onClose={creating.close} title={t("agentPush.scopes.form.title")}>
-        <BindForm onDone={creating.close} />
-      </Dialog>
+          server refuses the write either way (invariant 6). Mounted only while
+          `?new=scope` is set, so each opening starts empty (ruling 4); the
+          form draws its own dialog, with the leave question after it. */}
+      {creating.open && permissions.scopeManage ? <BindForm onClose={creating.close} /> : null}
     </div>
   );
 }
@@ -249,7 +249,7 @@ function ScopeRow({
   );
 }
 
-function BindForm({ onDone }: { onDone: () => void }) {
+function BindForm({ onClose }: { onClose: () => void }) {
   const t = useT();
   const bind = useBindPushCredentialScopeMutation();
   const credentials = usePushCredentials();
@@ -265,6 +265,18 @@ function BindForm({ onDone }: { onDone: () => void }) {
   const { guard, release } = useUnsavedGuard(credentialId !== "" || prefix !== "" || note !== "", {
     search: ["new"],
   });
+  /**
+   * The dialog, and the leave question AFTER it: the two share the `.modal`
+   * z-index, so DOM order decides which paints on top (coordinator ruling 3a).
+   */
+  const frame = (body: ReactNode) => (
+    <>
+      <Dialog open onClose={onClose} title={t("agentPush.scopes.form.title")}>
+        {body}
+      </Dialog>
+      {guard}
+    </>
+  );
 
   const parsed = parsePrefix(prefix);
   const available = credentials.data ?? [];
@@ -279,9 +291,8 @@ function BindForm({ onDone }: { onDone: () => void }) {
           ? t("agentPush.scopes.form.needsPrefix")
           : null;
 
-  return (
+  return frame(
     <>
-      {guard}
       <p className="note mb-3">{t("agentPush.scopes.form.subtitle")}</p>
       <div className="notice gold">
         <Icon name="warning" size={17} />
@@ -373,7 +384,7 @@ function BindForm({ onDone }: { onDone: () => void }) {
                   setNote("");
                   // The binding is made: its own close is not a lost change.
                   release();
-                  onDone();
+                  onClose();
                 },
               },
             )
@@ -394,6 +405,6 @@ function BindForm({ onDone }: { onDone: () => void }) {
           {describeSubmitError(bind.error)}
         </p>
       )}
-    </>
+    </>,
   );
 }

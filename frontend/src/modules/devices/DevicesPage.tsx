@@ -547,11 +547,15 @@ export function DevicesPage() {
           fill it would have to be invented. No endpoint serves a history of
           these four counts. An absent trend is a gap; a drawn one would be a
           lie on the tile most likely to be believed. */}
+      {/* NO NUMBER BEFORE THE READ (coordinator ruling 10a): until the list
+          answers -- including while the Client chip's client is undecided --
+          each tile draws "—" and no line under it, never a "0" with its
+          zero sentence. Every foot below already waits for `fleet`. */}
       <h2 className="sr-only">{t("devices.page.fleetSummary")}</h2>
       <StatsGrid columns={4}>
         <StatCard
           label={t("devices.tiles.managed")}
-          value={String(fleet?.managed ?? 0)}
+          value={fleet ? String(fleet.managed) : "—"}
           icon="devices"
           to={tileTo("")}
           tone="blue"
@@ -560,7 +564,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.assets")}
-          value={String(fleet?.total ?? 0)}
+          value={fleet ? String(fleet.total) : "—"}
           icon="package"
           to={tileTo("")}
           tone="neutral"
@@ -569,7 +573,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.online")}
-          value={String(fleet?.online ?? 0)}
+          value={fleet ? String(fleet.online) : "—"}
           icon="activity"
           to={tileTo("online")}
           tone="green"
@@ -578,7 +582,7 @@ export function DevicesPage() {
         />
         <StatCard
           label={t("devices.tiles.cert")}
-          value={String(fleet?.cert_attention ?? 0)}
+          value={fleet ? String(fleet.cert_attention) : "—"}
           icon="certificate"
           to={tileTo("certs")}
           tone="gold"

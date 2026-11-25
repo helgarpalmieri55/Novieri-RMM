@@ -1261,7 +1261,6 @@ export function GroupsPage() {
 
       {/* ------------------------------------------------------------ editor */}
 
-      {guard}
       <Dialog
         open={editor !== null}
         // CLOSING IS A CHANGE OF THE URL, AND ONLY THAT: the effect above
@@ -1559,6 +1558,9 @@ export function GroupsPage() {
           </Form>
         ) : null}
       </Dialog>
+      {/* AFTER THE EDITOR, so the leave question paints above it: the two share
+          the `.modal` z-index and DOM order decides (coordinator ruling 3a). */}
+      {guard}
 
       {/* ----------------------------------------------------------- archive */}
 

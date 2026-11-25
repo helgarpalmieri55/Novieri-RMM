@@ -1221,7 +1221,11 @@ describe("the group editor asks before Back drops a change", () => {
     const dialog = await screen.findByRole("dialog", { name: "New device group" });
     await userEvent.type(within(dialog).getByLabelText("Name"), "branch");
     await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=group");
     expect(within(dialog).getByLabelText("Name")).toHaveValue("branch");
   });
@@ -1235,7 +1239,11 @@ describe("the group editor asks before Back drops a change", () => {
     expect(router.state.location.search).toBe("?edit=g-1");
     await userEvent.type(within(dialog).getByLabelText("Name"), "-east");
     await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?edit=g-1");
     expect(within(dialog).getByLabelText("Name")).toHaveValue("servers-east");
   });

@@ -659,7 +659,9 @@ describe("the tiles are links", () => {
     const card = (await screen.findByText("Subnets nobody can sweep")).closest(
       ".stat-card",
     ) as HTMLElement;
-    expect(within(card).getByText("No sweep has reported a missing agent")).toBeInTheDocument();
+    // Awaited: before the candidates answer the tile draws "—" and no zero
+    // sentence (coordinator ruling 10a), so the zero is the read's.
+    expect(await within(card).findByText("No sweep has reported a missing agent")).toBeInTheDocument();
     // And only that line: the foot below is about a count that exists.
     expect(
       within(card).queryByText("Nothing there could run a sweep"),
@@ -841,7 +843,11 @@ describe("Discovered on the list kit", () => {
     await within(dialog).findByRole("option", { name: /10\.0\.4\.0\/24/ });
     await userEvent.selectOptions(within(dialog).getByRole("combobox"), "sub-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=scan");
     expect(within(dialog).getByRole("combobox")).toHaveValue("sub-1");
   });
@@ -907,6 +913,20 @@ describe("Discovered on the list kit", () => {
       `/devices?provenance=sweep&client=${ANDES.id}`,
     );
     expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("draws no tile number or claim before the reads answer (coordinator ruling 10a)", async () => {
+    // "0" and "No sweep has reported a missing agent" under it, while nothing
+    // has been read, is a claim about the network made from no answer.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    under(`/discovered?client=${ANDES.id}`, { me: () => new Promise<never>(() => {}) } as Partial<ApiClient>);
+    await screen.findByRole("heading", { level: 1 });
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(2);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
   });
 
   it("draws loading, not an empty list, while /me has not said whose the chip's client is (ruling 10)", async () => {

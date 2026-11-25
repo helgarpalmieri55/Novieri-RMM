@@ -174,6 +174,17 @@ describe("AgentReleasesPage", () => {
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
   });
 
+  it("draws no tile number or claim while the catalogue has not answered (coordinator ruling 10a)", async () => {
+    renderPage(() => new Promise<never>(() => {}));
+    await screen.findByText("Loading…");
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("—");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
   it("says the request FAILED rather than showing an empty catalogue", async () => {
     renderPage(() => Promise.reject(new Error("boom")));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -767,7 +778,11 @@ describe("Agent packages on the kit", () => {
     const dialog = await screen.findByRole("dialog", { name: "Publish a release" });
     await userEvent.type(within(dialog).getByLabelText(/^Version/), "1.6.0");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=release");
     expect(within(dialog).getByLabelText(/^Version/)).toHaveValue("1.6.0");
   });

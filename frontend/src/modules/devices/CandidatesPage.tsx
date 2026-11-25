@@ -366,7 +366,9 @@ export function CandidatesPage() {
         />
         <StatCard
           label={t("devices.candidates.unsweepable")}
-          value={String(unsweepable)}
+          // No number before the read (coordinator ruling 10a): "—", and no
+          // zero sentence, until the candidates answer.
+          value={data ? String(unsweepable) : "—"}
           icon="warning"
           to="/ipam"
           tone="gold"

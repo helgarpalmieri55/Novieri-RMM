@@ -913,7 +913,11 @@ describe("the grant and bind forms ask before Back drops them", () => {
     const { router, dialog } = await openGrant();
     await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=authorization");
     expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
   });
@@ -947,7 +951,11 @@ describe("the grant and bind forms ask before Back drops them", () => {
     const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
     await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(router.state.location.search).toBe("?new=scope");
     expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
   });
