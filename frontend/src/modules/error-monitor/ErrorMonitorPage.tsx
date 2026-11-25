@@ -515,7 +515,7 @@ export function ErrorMonitorPage() {
         open={pendingResolve != null}
         title={t("errorMonitor.triage.confirmTitle")}
         subject={
-          pendingResolve ? `${pendingResolve.exc_type} — ${formatRaiseSite(pendingResolve)}` : ""
+          pendingResolve ? `${pendingResolve.exc_type} · ${formatRaiseSite(pendingResolve)}` : ""
         }
         body={t("errorMonitor.triage.confirmBody")}
         confirmLabel={t("errorMonitor.triage.confirmLabel")}

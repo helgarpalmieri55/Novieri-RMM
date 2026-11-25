@@ -353,7 +353,7 @@ describe("ErrorMonitorPage resolve confirmation", () => {
     expect(api.resolveErrorGroup).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog");
     // The mistake a confirmation exists to catch is having the wrong row.
-    expect(dialog).toHaveTextContent("ValueError — app.jobs.dispatch:142");
+    expect(dialog).toHaveTextContent("ValueError · app.jobs.dispatch:142");
     // AND IT NO LONGER LIES ABOUT THE WAY BACK. This sentence used to read
     // "it cannot be reopened from here — the control plane serves no
     // unresolve route", which was true until `POST /platform/errors/{id}/
