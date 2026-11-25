@@ -45,15 +45,26 @@ export function FormPage({
   );
 }
 
+/**
+ * One collapsible section of a form page.
+ *
+ * `description` (kit requests batch 1, item 3; O2's K2) is the section's lead
+ * paragraph: what the section holds, said once at the top of its body, before
+ * the fields, in the page's note voice (`.note`). It folds with the body; the
+ * section is still named by its `title` alone. Every settings page leads its
+ * sections the same way, rather than each drawing a sentence of its own.
+ */
 export function FormSection({
   title,
   icon,
   defaultOpen = true,
+  description,
   children,
 }: {
   title: string;
   icon?: string;
   defaultOpen?: boolean;
+  description?: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -74,6 +85,7 @@ export function FormSection({
         </button>
       </h2>
       <div id={bodyId} className="panel-b" hidden={!open}>
+        {description ? <p className="note form-section-lead">{description}</p> : null}
         {children}
       </div>
     </section>

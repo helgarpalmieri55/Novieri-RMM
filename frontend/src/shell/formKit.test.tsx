@@ -1,4 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { useState, type FormEvent } from "react";
 import { createBrowserRouter, Link, RouterProvider, useNavigate } from "react-router-dom";
@@ -7,6 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderPage } from "../test/renderPage";
 import { FormPage, FormSection, SaveBar, UnsavedGuard, useDraft, useUnsavedGuard } from "./formKit";
 import { useNewParam } from "./listKit";
+// Kit requests batch 1 through `components.tsx`, the kit's one door.
+import { FormSection as FormSectionFromKit } from "./components";
 
 interface Org {
   name: string;
@@ -580,5 +584,46 @@ describe("FormSection", () => {
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("x")).not.toBeVisible();
+  });
+});
+
+describe("FormSection's description (kit requests batch 1, item 3)", () => {
+  const LEAD = "Queues are where tickets wait for someone to pick them up.";
+
+  it("leads the section's body with it, before the fields", () => {
+    renderPage(
+      "/service-desk/admin",
+      <FormSectionFromKit title="Queues" description={LEAD}>
+        <label>
+          Name
+          <input />
+        </label>
+      </FormSectionFromKit>,
+    );
+    const toggle = screen.getByRole("button", { name: "Queues" });
+    const body = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    const lead = screen.getByText(LEAD);
+    expect(lead.tagName).toBe("P");
+    expect(lead).toHaveClass("note", "form-section-lead");
+    expect(body?.firstElementChild).toBe(lead);
+    // It is not the button's name: the section is still called by its title.
+    expect(toggle).toHaveAccessibleName("Queues");
+  });
+
+  it("folds with the body it leads", async () => {
+    renderPage("/x", <FormSectionFromKit title="Queues" description={LEAD}>x</FormSectionFromKit>);
+    await userEvent.click(screen.getByRole("button", { name: "Queues" }));
+    expect(screen.getByText(LEAD)).not.toBeVisible();
+  });
+
+  it("draws no empty paragraph without one", () => {
+    const { container } = renderPage("/x", <FormSectionFromKit title="Mail">x</FormSectionFromKit>);
+    expect(container.querySelector(".form-section-lead")).toBeNull();
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    const at = preview.search(/<FormSection\s[^>]*\bdescription=/);
+    expect(at).toBeGreaterThan(-1);
   });
 });

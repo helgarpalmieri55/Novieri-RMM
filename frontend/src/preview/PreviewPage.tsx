@@ -1016,7 +1016,8 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
  * page the browser pass measures, each in the state that paints something the
  * others do not -- a selected chip with its count, a multi-select row with two
  * values chosen, a select chip holding a value, a selection, both empty
- * states, a status beside a record's context, a tab strip, an open section,
+ * states, a status beside a record's context, a tab strip, an open section
+ * with its lead paragraph,
  * the save bar with a change, failed, not allowed and saved. Three sections,
  * each drawn the way its pages draw it (critique answer 1): no card inside a
  * card. Fixed data, no API. `ClientFilter` is not here: it needs `/me`, and
@@ -1137,7 +1138,11 @@ function KitPreview() {
           its own, which axe's landmark-unique needs, and a block of its own,
           so a sticky bar has no room to ride over another while measured. */}
       <div style={{ marginTop: 24 }}>
-        <FormSection title="Organization" icon="settings">
+        <FormSection
+          title="Organization"
+          icon="settings"
+          description="The name your clients see on tickets, reports and the portal."
+        >
           <div className="form-grid">
             <Field label="Name">
               <input className={inputClass} defaultValue="Andes Logistics" />

@@ -26,6 +26,10 @@
 .form-section-toggle .chev { margin-left: auto; transition: transform .15s ease; }
 .form-section-toggle .chev.open { transform: rotate(180deg); }
 .form-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A section's lead paragraph (`FormSection`'s `description`, kit requests
+ * batch 1): flush at the top of the body, the fields' gap below, at the page
+ * description's measure (`.ph .sub`). */
+.form-section-lead { margin: 0 0 12px; max-width: 70ch; }
 
 .savebar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
 .savebar-what { margin-right: auto; font-weight: 500; color: var(--ink); }
