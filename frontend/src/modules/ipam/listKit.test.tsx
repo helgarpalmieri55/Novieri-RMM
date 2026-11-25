@@ -390,6 +390,25 @@ describe("a new attempt clears the last one's outcome (coordinator's ruling 7)",
     expect(within(form).queryByText("Subnet registered.")).toBeNull();
   });
 
+  // The adoption pass, O5 leftover 1: undoing the change hid Save, and the
+  // failed save's 503 stayed under a form with nothing left to retry.
+  it("Sweep settings: undoing the change clears the failed save's message with it", async () => {
+    const updateIpamSweepSettings = vi.fn(unavailable);
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSweepSettings } as never));
+    renderPage("/ipam/subnets/subnet-1?tab=sweeps", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
+    const interval = await screen.findByLabelText("Interval (hours)");
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "48");
+    await userEvent.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    expect(await screen.findByText(/service is unavailable right now/i)).toBeInTheDocument();
+    // Typed back to what is stored: nothing to save, and nothing said about a save.
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "24");
+    expect(screen.queryByRole("button", { name: "Save sweep settings" })).toBeNull();
+    expect(screen.queryByText(/service is unavailable right now/i)).toBeNull();
+    expect(updateIpamSweepSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("Edit subnet: the last 503 does not hide a malformed gateway", async () => {
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), updateIpamSubnet: unavailable } as never));
     renderPage("/ipam/subnets/subnet-1", <SubnetDetailPage />, "/ipam/subnets/:subnetId");
