@@ -1,10 +1,14 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { renderPage } from "../test/renderPage";
 import { DetailHead, SectionNav, UrlTabs, useUrlTab } from "./detailKit";
+// Kit requests batch 3 through `components.tsx`, the kit's one door.
+import { DetailGrid as DetailGridFromKit } from "./components";
 
 const TABS = ["overview", "hardware", "software"] as const;
 type Tab = (typeof TABS)[number];
@@ -99,5 +103,41 @@ describe("SectionNav", () => {
     expect(nav).not.toHaveAttribute("role", "tablist");
     expect(screen.getByRole("link", { name: "Packages" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Deployments" })).not.toHaveAttribute("aria-current");
+  });
+});
+
+/**
+ * THE NARROW COLUMN FIRST (kit requests batch 3, B3-6; O6's K1): the docs
+ * library on the left and the reader on the right, as the brief and Atera draw
+ * it. The kit's grid put `main` (2fr) on the left, so the library would have
+ * taken 2/3 and the reader 1/3.
+ */
+describe("DetailGrid asideFirst (B3-6)", () => {
+  it("keeps main first by default", () => {
+    const { container } = render(<DetailGridFromKit main={<p>reader</p>} aside={<p>library</p>} />);
+    const grid = container.querySelector(".detail-grid");
+    expect(grid).not.toHaveClass("aside-first");
+    expect([...(grid?.children ?? [])].map((child) => child.className)).toEqual(["detail-main", "detail-aside"]);
+  });
+
+  it("draws the aside first, in the DOM too, so reading and Tab order follow what is drawn", () => {
+    const { container } = render(<DetailGridFromKit main={<p>reader</p>} aside={<p>library</p>} asideFirst />);
+    const grid = container.querySelector(".detail-grid");
+    expect(grid).toHaveClass("aside-first");
+    expect([...(grid?.children ?? [])].map((child) => child.className)).toEqual(["detail-aside", "detail-main"]);
+  });
+
+  it("gives the aside the narrow track and the main the wide one, and one column on a narrow screen (kit.css)", () => {
+    const kit = readFileSync(resolve(import.meta.dirname, "./kit.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(kit).toMatch(/\.detail-grid\.aside-first\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 2fr\);?\s*\}/);
+    // `.detail-grid.aside-first` outranks the narrow rule's `.detail-grid`, so it needs one of its own.
+    expect(kit).toMatch(
+      /@media \(max-width: 1024px\) \{\s*\.detail-grid\.aside-first\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\);?\s*\}\s*\}/,
+    );
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<DetailGrid\s[^>]*\basideFirst\b/);
   });
 });

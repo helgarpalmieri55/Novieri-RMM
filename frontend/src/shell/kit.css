@@ -38,6 +38,12 @@
 .detail-main, .detail-aside { display: grid; gap: 16px; min-width: 0; }
 .tab-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 1024px) { .detail-grid { grid-template-columns: minmax(0, 1fr); } }
+/* THE NARROW COLUMN FIRST (`DetailGrid asideFirst`, kit requests batch 3,
+ * B3-6): a library beside its reader. The aside is first in the DOM, so no
+ * `order`. Its own narrow rule, since `.detail-grid.aside-first` outranks the
+ * one above. */
+.detail-grid.aside-first { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 1024px) { .detail-grid.aside-first { grid-template-columns: minmax(0, 1fr); } }
 
 /* THE LEAVE QUESTION'S OWN LAYER (kit requests batch 2, G1). The question is
  * portalled to the end of <body> inside this div, a stacking context above

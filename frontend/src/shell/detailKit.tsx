@@ -99,12 +99,35 @@ export function UrlTabs<K extends string>({
   );
 }
 
-/** Information on the left, metrics and activity on the right; one column below 1024px. */
-export function DetailGrid({ main, aside }: { main: ReactNode; aside: ReactNode }) {
-  return (
+/**
+ * Information on the left, metrics and activity on the right; one column
+ * below 1024px.
+ *
+ * `asideFirst` (kit requests batch 3, B3-6; O6's K1): the narrow column on the
+ * LEFT and the wide one on the right, as a library beside its reader (/docs).
+ * The aside comes first IN THE DOM, not by CSS `order`, so the reading and
+ * Tab order follow what is drawn; below 1024px it is above the main column.
+ */
+export function DetailGrid({
+  main,
+  aside,
+  asideFirst = false,
+}: {
+  main: ReactNode;
+  aside: ReactNode;
+  asideFirst?: boolean;
+}) {
+  const mainColumn = <div className="detail-main">{main}</div>;
+  const asideColumn = <div className="detail-aside">{aside}</div>;
+  return asideFirst ? (
+    <div className="detail-grid aside-first">
+      {asideColumn}
+      {mainColumn}
+    </div>
+  ) : (
     <div className="detail-grid">
-      <div className="detail-main">{main}</div>
-      <div className="detail-aside">{aside}</div>
+      {mainColumn}
+      {asideColumn}
     </div>
   );
 }

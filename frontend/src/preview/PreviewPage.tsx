@@ -1146,6 +1146,24 @@ function KitPreview() {
         </UrlTabs>
       </div>
 
+      {/* THE NARROW COLUMN FIRST (kit requests batch 3, B3-6): a library
+          beside its reader, as /docs draws it. */}
+      <div style={{ marginTop: 24 }}>
+        <DetailGrid
+          asideFirst
+          aside={
+            <Panel title="Library">
+              <div style={{ padding: 14 }}>Runbooks, network diagrams and vendor contracts.</div>
+            </Panel>
+          }
+          main={
+            <Panel title="Reader">
+              <div style={{ padding: 14 }}>Restoring a domain controller from the nightly backup, step by step.</div>
+            </Panel>
+          }
+        />
+      </div>
+
       {/* A FORM, on the page ground: a section, then the one save bar in each
           state that paints something the others do not (critique answer 2):
           with a change, failed, not allowed, and saved. Each bar has a name of
