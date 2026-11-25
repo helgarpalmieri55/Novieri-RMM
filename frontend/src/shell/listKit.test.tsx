@@ -21,7 +21,13 @@ import {
 } from "./listKit";
 // The pieces kit requests batch 1 added, imported through `components.tsx`,
 // the kit's one door, so a piece that is not re-exported there fails here.
-import { formatUrlList, MultiFilterChips, parseUrlList, useEditParam as useEditParamFromKit } from "./components";
+import {
+  ChipSelect,
+  formatUrlList,
+  MultiFilterChips,
+  parseUrlList,
+  useEditParam as useEditParamFromKit,
+} from "./components";
 
 const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
 const BOGOTA = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
@@ -664,5 +670,121 @@ describe("the comma list a multi-select filter keeps in the URL", () => {
     expect(formatUrlList(["critical", "important"])).toBe("critical,important");
     expect(formatUrlList([])).toBe("");
     expect(formatUrlList(["low", "low", ""])).toBe("low");
+  });
+});
+
+/**
+ * THE KIT'S SELECT CHIP (kit requests batch 1, item 5): `ClientFilter`'s
+ * `.chip-select`, for any URL key, so no page hand-draws one.
+ */
+const RESOLUTIONS = [
+  { value: "", label: "Any resolution" },
+  { value: "fixed", label: "Fixed" },
+  { value: "wontfix", label: "Won't fix" },
+] as const;
+
+function Resolutions({ ariaLabel }: { ariaLabel?: string }) {
+  const filters = useUrlFilters(["resolution"] as const);
+  return (
+    <ChipSelect
+      label="Resolution"
+      {...(ariaLabel === undefined ? {} : { ariaLabel })}
+      options={RESOLUTIONS}
+      value={filters.values.resolution}
+      onChange={(value) => filters.set("resolution", value)}
+    />
+  );
+}
+
+/** An order is a choice that narrows nothing, so it is never drawn as a filter in force. */
+function Order() {
+  const [order, setOrder] = useState("first_seen");
+  return (
+    <ChipSelect
+      label="Order"
+      ariaLabel="Order the groups by"
+      selected={false}
+      options={[
+        { value: "last_seen", label: "Last seen" },
+        { value: "first_seen", label: "First seen" },
+      ]}
+      value={order}
+      onChange={setOrder}
+    />
+  );
+}
+
+describe("ChipSelect (kit requests batch 1, item 5)", () => {
+  it("draws a chip that opens a choice, its caption shown and the select named by it", () => {
+    renderPage("/health", <Resolutions />);
+    const select = screen.getByRole("combobox", { name: "Resolution" });
+    expect([...(select as HTMLSelectElement).options].map((option) => option.textContent)).toEqual([
+      "Any resolution",
+      "Fixed",
+      "Won't fix",
+    ]);
+    const chip = select.closest(".chip");
+    expect(chip).toHaveClass("chip-select");
+    // The caption is drawn for the eye; the select carries the name, so it is not read twice.
+    expect(chip?.querySelector('[aria-hidden="true"]')).toHaveTextContent("Resolution");
+  });
+
+  it("takes a fuller name for the select where the caption alone says less", () => {
+    renderPage("/health", <Resolutions ariaLabel="Filter by resolution" />);
+    expect(screen.getByRole("combobox", { name: "Filter by resolution" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Resolution" })).toBeNull();
+  });
+
+  it("is drawn selected while it holds a value, and plain by default", () => {
+    renderPage("/health?resolution=fixed", <Resolutions />);
+    const select = screen.getByRole("combobox", { name: "Resolution" });
+    expect(select).toHaveValue("fixed");
+    expect(select.closest(".chip")).toHaveClass("on");
+  });
+
+  it("is plain while it holds every value", () => {
+    renderPage("/health", <Resolutions />);
+    expect(screen.getByRole("combobox", { name: "Resolution" }).closest(".chip")).not.toHaveClass("on");
+  });
+
+  it("writes a choice as a new entry, so Back undoes it, and every value writes no key", async () => {
+    const { router } = renderPage("/health?offset=50", <Resolutions />);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Resolution" }), "fixed");
+    expect(router.state.location.search).toBe("?resolution=fixed");
+    expect(router.state.historyAction).toBe("PUSH");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Resolution" }), "");
+    expect(router.state.location.search).toBe("");
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("?resolution=fixed");
+  });
+
+  it("never draws an order as a filter in force", async () => {
+    renderPage("/error-monitor", <Order />);
+    const select = screen.getByRole("combobox", { name: "Order the groups by" });
+    expect(select).toHaveValue("first_seen");
+    expect(select.closest(".chip")).not.toHaveClass("on");
+    await userEvent.selectOptions(select, "last_seen");
+    expect(select).toHaveValue("last_seen");
+    expect(select.closest(".chip")).not.toHaveClass("on");
+  });
+
+  it("is the Client chip's own markup: ClientFilter is drawn by it", () => {
+    renderPage("/x", <ChipPage />);
+    const client = screen.getByRole("combobox", { name: "Client" }).closest(".chip") as HTMLElement;
+    const { container } = render(
+      <ChipSelect
+        label="Client"
+        options={[{ value: "", label: "All clients" }, { value: ANDES, label: "Andes Logistics" }, { value: BOGOTA, label: "Bogotá Retail" }]}
+        value=""
+        onChange={vi.fn()}
+      />,
+    );
+    expect(container.firstElementChild?.outerHTML).toBe(client.outerHTML);
+  });
+
+  it("is on /__preview, holding a value, so the browser's a11y pass measures it", () => {
+    const element = benchElement("ChipSelect");
+    expect(element).not.toBe("");
+    expect(element).toMatch(/value=\{/);
   });
 });

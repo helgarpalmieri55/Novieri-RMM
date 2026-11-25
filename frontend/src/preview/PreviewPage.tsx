@@ -55,6 +55,7 @@ import {
   Btn,
   BulkBar,
   CellMain,
+  ChipSelect,
   DetailGrid,
   DetailHead,
   FilterBar,
@@ -1014,12 +1015,13 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
  * "Forms"): every piece a list, a record or a form is built from, on the one
  * page the browser pass measures, each in the state that paints something the
  * others do not -- a selected chip with its count, a multi-select row with two
- * values chosen, a selection, both empty
+ * values chosen, a select chip holding a value, a selection, both empty
  * states, a status beside a record's context, a tab strip, an open section,
  * the save bar with a change, failed, not allowed and saved. Three sections,
  * each drawn the way its pages draw it (critique answer 1): no card inside a
  * card. Fixed data, no API. `ClientFilter` is not here: it needs `/me`, and
- * the harmony walk measures it on the lists themselves.
+ * the harmony walk measures it on the lists themselves; `ChipSelect`, which
+ * draws it, is.
  *
  * THE TABS USE THEIR OWN PARAMETER (`?kit=`), so they never fight this page's
  * other strip for `?tab=`.
@@ -1034,6 +1036,7 @@ const KIT_TAB_LABEL: Record<(typeof KIT_TABS)[number], string> = {
 function KitPreview() {
   const [state, setState] = useState("online");
   const [severities, setSeverities] = useState<string[]>(["critical", "important"]);
+  const [site, setSite] = useState("bogota");
   const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
   return (
     <>
@@ -1065,6 +1068,17 @@ function KitPreview() {
                 ]}
                 values={severities}
                 onChange={setSeverities}
+              />
+              {/* The select chip, holding a value (kit requests batch 1, item 5). */}
+              <ChipSelect
+                label="Site"
+                options={[
+                  { value: "", label: "All sites" },
+                  { value: "bogota", label: "Bogotá office" },
+                  { value: "medellin", label: "Medellín warehouse" },
+                ]}
+                value={site}
+                onChange={setSite}
               />
             </>
           }

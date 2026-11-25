@@ -307,14 +307,72 @@ export function ClientFilter({
   }, [foreign]);
   if (selected !== null || clients.length < 2) return null;
   return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{t("shell.kit.client")}</span>
-      {/* A person's choice is a new entry, so Back undoes it, as for any chip. */}
-      <select aria-label={t("shell.kit.client")} value={value} onChange={(event) => filters.set("client", event.target.value)}>
-        <option value="">{t("shell.kit.allClients")}</option>
-        {clients.map((client) => (
-          <option key={client.id} value={client.id}>
-            {client.name}
+    <ChipSelect
+      label={t("shell.kit.client")}
+      options={[
+        { value: "", label: t("shell.kit.allClients") },
+        ...clients.map((client) => ({ value: client.id, label: client.name })),
+      ]}
+      value={value}
+      // A person's choice is a new entry, so Back undoes it, as for any chip.
+      onChange={(next) => filters.set("client", next)}
+    />
+  );
+}
+
+export interface ChipSelectOption {
+  /** `""` is "every value": the default, which writes nothing to the URL. */
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
+ * ONE FILTER AS A CHIP THAT OPENS A CHOICE (kit requests batch 1, item 5):
+ * the Client chip's `.chip-select`, for any URL key, where a row of toggles
+ * would be too many (a device, a queue, an assignee) or the choice is not a
+ * filter at all (an order). `ClientFilter` is drawn by it.
+ *
+ *   const filters = useUrlFilters(["resolution"]);
+ *   <ChipSelect label="Resolution" options={[{ value: "", label: "Any resolution" }, ...]}
+ *     value={filters.values.resolution} onChange={(value) => filters.set("resolution", value)} />
+ *
+ * - `label` is the caption drawn in the chip and the select's name. The
+ *   caption is hidden from assistive technology, so it is not read twice.
+ * - `ariaLabel` names the select instead where the caption alone says less
+ *   ("Filter by resolution" under a "Resolution" caption).
+ * - `options` are drawn in their order; a `""` option is "every value", the
+ *   default. Offer the value the chip holds: a page whose list can lose it
+ *   (a stale link) drops it from the URL, as `ClientFilter` does.
+ * - `selected`: the chip is drawn selected (`.on`, as `FilterChips` draws a
+ *   chosen chip) while it holds a value other than `""`, which is a filter in
+ *   force. An ORDER narrows nothing, so a sort chip passes `false` and is never
+ *   drawn as a filter.
+ *
+ * Written through `useUrlFilters.set`, a choice is a new history entry, so
+ * Back undoes it, and it drops `offset` like any chip.
+ */
+export function ChipSelect({
+  label,
+  options,
+  value,
+  onChange,
+  ariaLabel,
+  selected = value !== "",
+}: {
+  label: string;
+  options: readonly ChipSelectOption[];
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel?: string;
+  selected?: boolean;
+}) {
+  return (
+    <span className={selected ? "chip chip-select on" : "chip chip-select"}>
+      <span aria-hidden="true">{label}</span>
+      <select aria-label={ariaLabel ?? label} value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option.value === "" ? "(all)" : option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </select>
