@@ -132,3 +132,21 @@ describe("push install from the URL", () => {
     expect(await screen.findByRole("heading", { name: "Push install: choose the machines" })).toBeInTheDocument();
   });
 });
+
+describe("the tiles under the Client chip (fix round 1)", () => {
+  it("keep the chip's client in every tile's link, as they count that client's machines", async () => {
+    renderPage(`/devices?client=${ANDES}`, <DevicesPage />);
+    await screen.findByRole("link", { name: "por-ws-008" });
+    const tiles = [...document.querySelectorAll<HTMLAnchorElement>("a.stat-card")];
+    expect(tiles).toHaveLength(4);
+    for (const tile of tiles) expect(new URL(tile.href).searchParams.get("client")).toBe(ANDES);
+  });
+
+  it("link without a client when no chip is set", async () => {
+    renderPage("/devices", <DevicesPage />);
+    await screen.findByText("lis-ws-041");
+    for (const tile of document.querySelectorAll<HTMLAnchorElement>("a.stat-card")) {
+      expect(new URL(tile.href).searchParams.has("client")).toBe(false);
+    }
+  });
+});

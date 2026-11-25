@@ -447,6 +447,16 @@ export function DevicesPage() {
   const total = devices.data?.total ?? 0;
   const lastOffset = Math.max(0, Math.ceil(total / DEVICES_PAGE_SIZE) - 1) * DEVICES_PAGE_SIZE;
   const states = STATES.filter((item) => item.key !== "review" || stateCounts?.review !== undefined || tab === "review");
+  // THE TILES COUNT THE CHIP'S CLIENT'S MACHINES when the chip is set (the
+  // read is narrowed), so the list each one opens keeps that client: without
+  // it a tile counting Andes' offline machines opened every client's.
+  const tileTo = (state: string) => {
+    const query = new URLSearchParams();
+    if (state) query.set("state", state);
+    if (client) query.set("client", client);
+    const search = query.toString();
+    return search ? `/devices?${search}` : "/devices";
+  };
 
   // ONE "ADD A COMPUTER" ENTRY, the same page as the New menu's: the page
   // offers the one-machine install first and the network sweep below it
@@ -542,7 +552,7 @@ export function DevicesPage() {
           label={t("devices.tiles.managed")}
           value={String(fleet?.managed ?? 0)}
           icon="devices"
-          to="/devices"
+          to={tileTo("")}
           tone="blue"
           zeroLabel={t("devices.tiles.managedZero")}
           foot={fleet && fleet.managed > 0 ? t("devices.tiles.managedFoot", { count: fleet.total }) : undefined}
@@ -551,7 +561,7 @@ export function DevicesPage() {
           label={t("devices.tiles.assets")}
           value={String(fleet?.total ?? 0)}
           icon="package"
-          to="/devices"
+          to={tileTo("")}
           tone="neutral"
           zeroLabel={t("devices.tiles.assetsZero")}
           foot={fleet && fleet.total > 0 ? t("devices.tiles.assetsFoot", { count: fleet.total - fleet.managed }) : undefined}
@@ -560,7 +570,7 @@ export function DevicesPage() {
           label={t("devices.tiles.online")}
           value={String(fleet?.online ?? 0)}
           icon="activity"
-          to="/devices?state=online"
+          to={tileTo("online")}
           tone="green"
           zeroLabel={t("devices.tiles.onlineZero")}
           foot={fleet && fleet.online > 0 ? t("devices.tiles.onlineFoot", { managed: fleet.managed }) : undefined}
@@ -569,7 +579,7 @@ export function DevicesPage() {
           label={t("devices.tiles.cert")}
           value={String(fleet?.cert_attention ?? 0)}
           icon="certificate"
-          to="/devices?state=certs"
+          to={tileTo("certs")}
           tone="gold"
           urgent
           /* "0 expiring" and "no certificate state recorded" are the same
