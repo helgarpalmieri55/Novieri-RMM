@@ -2,8 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
-import { useState, type FormEvent } from "react";
-import { createBrowserRouter, Link, RouterProvider, useNavigate } from "react-router-dom";
+import { StrictMode, useState, type FormEvent } from "react";
+import { createBrowserRouter, createMemoryRouter, Link, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { Dialog } from "../components/ui";
@@ -771,6 +771,55 @@ describe("the leave question over a form's dialog (kit requests batch 2, G1)", (
     expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
     expect(router.state.location.search).toBe("");
   });
+});
+
+/**
+ * UNDER STRICTMODE, AS THE DEV SERVER RUNS THE CONSOLE (batch 2 review, H1).
+ * `main.tsx` wraps the app in `<StrictMode>`, which runs mount effects twice:
+ * a question mounted already open recorded itself as its own opener on the
+ * second run, and "stay" dropped focus on <body>. Every browser gate runs on
+ * the dev server, so it is tested the way they see it.
+ */
+async function askToLeaveStrict(guardInside: boolean) {
+  const router = createMemoryRouter(
+    [
+      { path: "/service-desk", element: <DialogForm guardInside={guardInside} /> },
+      { path: "*", element: <p>elsewhere</p> },
+    ],
+    { initialEntries: ["/service-desk"] },
+  );
+  render(
+    <StrictMode>
+      <RouterProvider router={router} />
+    </StrictMode>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+  await userEvent.type(screen.getByLabelText("Title"), "Printer");
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  return {
+    form: screen.getByRole("dialog", { name: "New ticket" }),
+    question: screen.getByRole("dialog", { name: "Leave without saving?" }),
+  };
+}
+
+describe("the leave question gives focus back to the form under StrictMode (batch 2 review, H1)", () => {
+  for (const guardInside of [false, true]) {
+    const where = guardInside ? "inside the dialog" : "before the dialog";
+    it(`after "stay", with the guard ${where}`, async () => {
+      const { form, question } = await askToLeaveStrict(guardInside);
+      await userEvent.click(within(question).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+      expect(form).toContainElement(document.activeElement as HTMLElement);
+      expect(screen.getByLabelText("Title")).toHaveValue("Printer");
+    });
+
+    it(`after Escape, with the guard ${where}`, async () => {
+      const { form } = await askToLeaveStrict(guardInside);
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+      expect(form).toContainElement(document.activeElement as HTMLElement);
+    });
+  }
 });
 
 describe("Escape on the leave question (kit requests batch 2, G2)", () => {

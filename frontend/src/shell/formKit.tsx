@@ -436,11 +436,18 @@ function LeaveQuestion({ search, pass }: { search: GuardedQuery; pass: ReleasePa
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [asking]);
-  if (!asking) return null;
+  // MOUNTED WHILE THE GUARD HOLDS CHANGES, OPENED WHILE IT ASKS (batch 2
+  // review, H1). The question lives as long as this component (which exists
+  // only while the form is dirty) and toggles `open`. Mounted only while
+  // asking, it opened during its own mount, and StrictMode's second run of
+  // `useDialogSurface`'s effect (the dev server's, `main.tsx`) found focus
+  // already in the question and recorded no opener: "stay" left focus on
+  // <body>. Toggled, the open is an update, run once, and the opener is the
+  // form's control. The empty `.leave-layer` takes no room.
   return createPortal(
     <div className="leave-layer">
       <ConfirmDialog
-        open
+        open={asking}
         title={t("shell.kit.leaveTitle")}
         subject=""
         body={t("shell.kit.leaveBody")}
