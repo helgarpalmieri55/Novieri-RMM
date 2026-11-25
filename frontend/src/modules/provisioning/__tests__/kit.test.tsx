@@ -69,12 +69,28 @@ describe("provisioning runs on the list kit (4.6)", () => {
     expect(router.state.location.search).toBe("");
     // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
     expect(await screen.findByText("No computer has been built yet.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Build a computer" })).toBeInTheDocument();
+    // The head's button and the empty state's: one act, one name (fix round 1).
+    expect(screen.getAllByRole("button", { name: "Build a computer" })).toHaveLength(2);
   });
 
-  it("opens Provision a device from ?new=run", async () => {
+  it("names one act once: the head's button and the empty state's both open the Build a computer dialog (fix round 1)", async () => {
+    mockUseApi.mockReturnValue(api({ listProvisionRuns: () => [] }));
+    const { router } = renderPage("/provisioning", <ProvisioningRunsPage />);
+    await screen.findByText("No computer has been built yet.");
+    const [head, empty] = screen.getAllByRole("button", { name: "Build a computer" });
+    for (const button of [head, empty]) {
+      await userEvent.click(button as HTMLElement);
+      expect(router.state.location.search).toBe("?new=run");
+      const dialog = await screen.findByRole("dialog", { name: "Build a computer" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(router.state.location.search).toBe(""));
+    }
+    expect(screen.queryByRole("button", { name: "Provision" })).toBeNull();
+  });
+
+  it("opens Build a computer from ?new=run", async () => {
     const { router } = renderPage("/provisioning?new=run", <ProvisioningRunsPage />);
-    const dialog = await screen.findByRole("dialog", { name: "Provision a device" });
+    const dialog = await screen.findByRole("dialog", { name: "Build a computer" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
@@ -83,7 +99,7 @@ describe("provisioning runs on the list kit (4.6)", () => {
     mockUseApi.mockReturnValue(api({ me: lacking(["provisioning.run"]) }));
     renderPage("/provisioning?new=run", <ProvisioningRunsPage />);
     expect(await screen.findByRole("table", { name: "Imaging" })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Provision a device" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Build a computer" })).toBeNull();
   });
 });
 

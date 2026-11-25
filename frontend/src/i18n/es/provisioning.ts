@@ -45,7 +45,6 @@ export const provisioning: Shape<typeof en> = {
   },
   runs: {
     description: "Equipos en construcción, desde un disco en blanco hasta un dispositivo administrado.",
-    provision: "Aprovisionar",
     successRate: "Tasa de éxito",
     neverRun: "Nunca ejecutado",
     percent: "{percent} %",
@@ -69,7 +68,6 @@ export const provisioning: Shape<typeof en> = {
     noTarget: "No se registró ningún destino",
   },
   provisionDialog: {
-    title: "Aprovisionar un dispositivo",
     profile: "Perfil",
     searchProfiles: "Buscar perfiles…",
     createProfile: "Crear un perfil de aprovisionamiento",

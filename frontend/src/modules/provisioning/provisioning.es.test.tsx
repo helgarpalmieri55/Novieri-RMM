@@ -1,6 +1,6 @@
 /**
  * Provisioning and imaging in Spanish: the runs page (tiles, filter, table and
- * the Provision dialog with its refusal and its confirmation), the images page
+ * the Build a computer dialog with its refusal and its confirmation), the images page
  * and its New image dialog, the profiles page and its editor, a device's own
  * Imaging tab, the prerequisites panel and the labels the module builds
  * outside React. Profile, image and device names, MAC addresses and the
@@ -176,7 +176,7 @@ describe("the provisioning runs page, in Spanish", () => {
     // The h1 is the rail's label (general ruling 1).
     expect(await screen.findByRole("heading", { name: "Imágenes de sistema" })).toBeInTheDocument();
     await screen.findByText("run1");
-    expect(screen.getByRole("button", { name: "Aprovisionar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
     // The section menu is a navigation of links now (redesign plan, waves'
     // common rules: `SectionNav`), the current page marked `aria-current`.
     const nav = screen.getByRole("navigation", { name: "Aprovisionamiento" });
@@ -218,7 +218,8 @@ describe("the provisioning runs page, in Spanish", () => {
     const { container } = renderPage(<ProvisioningRunsPage />);
     // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
     expect(await screen.findByText("Aún no se ha construido ningún equipo.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
+    // The head's button and the empty state's: one act, one name (fix round 1).
+    expect(screen.getAllByRole("button", { name: "Construir un equipo" })).toHaveLength(2);
     expect(screen.getByText("Nunca ejecutado")).toBeInTheDocument();
     expect(screen.getByText("Todavía no se ha aprovisionado ningún equipo")).toBeInTheDocument();
     expect(screen.getByText("Nunca se ha ejecutado ninguna construcción")).toBeInTheDocument();
@@ -268,12 +269,12 @@ describe("the provisioning runs page, in Spanish", () => {
   });
 });
 
-describe("the Provision dialog, in Spanish", () => {
+describe("the Build a computer dialog, in Spanish", () => {
   async function open(user: ReturnType<typeof userEvent.setup>) {
     renderPage(<ProvisioningRunsPage />);
     await screen.findByText("run1");
-    await user.click(screen.getByRole("button", { name: "Aprovisionar" }));
-    return screen.findByRole("dialog", { name: "Aprovisionar un dispositivo" });
+    await user.click(screen.getByRole("button", { name: "Construir un equipo" }));
+    return screen.findByRole("dialog", { name: "Construir un equipo" });
   }
 
   it("names the missing profile on submit, and re-words the refusal on a switch", async () => {
@@ -284,7 +285,7 @@ describe("the Provision dialog, in Spanish", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("El campo Perfil es obligatorio.");
     expectNoEnglish(dialog);
     act(() => setActiveLanguage("en"));
-    expect(within(screen.getByRole("dialog", { name: "Provision a device" })).getByRole("alert")).toHaveTextContent(
+    expect(within(screen.getByRole("dialog", { name: "Build a computer" })).getByRole("alert")).toHaveTextContent(
       "Profile is required",
     );
   });

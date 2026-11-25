@@ -49,7 +49,6 @@ export const provisioning = {
   },
   runs: {
     description: "Machines being built, from a blank disk to a managed device.",
-    provision: "Provision",
     successRate: "Success rate",
     neverRun: "Never run",
     percent: "{percent}%",
@@ -73,7 +72,6 @@ export const provisioning = {
     noTarget: "No target recorded",
   },
   provisionDialog: {
-    title: "Provision a device",
     profile: "Profile",
     searchProfiles: "Search profiles…",
     createProfile: "Create a provisioning profile",

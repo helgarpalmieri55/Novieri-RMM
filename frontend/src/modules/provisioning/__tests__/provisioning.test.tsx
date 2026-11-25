@@ -219,7 +219,7 @@ describe("ProvisioningRunsPage", () => {
     expect(within(row as HTMLElement).getByText("Awaiting enrollment")).toBeInTheDocument();
   });
 
-  it("hides the Provision control when the caller lacks provisioning.run", async () => {
+  it("hides the Build a computer control when the caller lacks provisioning.run", async () => {
     api.me = vi.fn().mockResolvedValue({
       ...ME,
       permissions: ME.permissions.filter((p) => p !== "provisioning.run"),
@@ -227,7 +227,7 @@ describe("ProvisioningRunsPage", () => {
     renderWithProviders(<ProvisioningRunsPage />);
 
     await screen.findByText("run1");
-    expect(screen.queryByRole("button", { name: "Provision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Build a computer" })).not.toBeInTheDocument();
   });
 
   // THE THREE STATES A MOCK NEVER HAS — mirrors DevicesPage.test.tsx.
@@ -409,10 +409,10 @@ describe("provisioning state vocabulary", () => {
 });
 
 // --------------------------------------------------------------------------
-// The "Provision a device" modal — the form kernel
+// The "Build a computer" modal (once "Provision a device") — the form kernel
 // --------------------------------------------------------------------------
 
-describe("the Provision a device modal", () => {
+describe("the Build a computer modal", () => {
   // Auditor A (MEDIUM): "'Provision a device' is the same shared modal —
   // fourth confirmation": `{"form":false,...}`, no `required` on either
   // control, and a Start disabled until a profile was picked that never said
@@ -435,7 +435,7 @@ describe("the Provision a device modal", () => {
   async function openDialog() {
     const user = userEvent.setup();
     renderWithProviders(<ProvisioningRunsPage />);
-    await user.click(await screen.findByRole("button", { name: "Provision" }));
+    await user.click(await screen.findByRole("button", { name: "Build a computer" }));
     return user;
   }
 
@@ -571,7 +571,7 @@ describe("the Provision a device modal", () => {
     await screen.findByRole("alert");
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(screen.getByRole("button", { name: "Provision" }));
+    await user.click(screen.getByRole("button", { name: "Build a computer" }));
 
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });

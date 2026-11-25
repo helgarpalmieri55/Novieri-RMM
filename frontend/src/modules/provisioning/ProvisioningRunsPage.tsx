@@ -108,7 +108,7 @@ const RUN_STATE_FILTERS: ReadonlyArray<ProvisionRunState> = [
 export function ProvisioningRunsPage() {
   const t = useT();
   const api = useApi();
-  // Provision a device opens from `?new=run` (decision D8). No Client chip:
+  // Build a computer opens from `?new=run` (decision D8). No Client chip:
   // imaging works in the client chosen at the top (redesign plan, Task 9, 4.6).
   const provision = useNewParam("run");
   // The filter lives in the URL because the tiles above link into it: "Failed
@@ -164,7 +164,9 @@ export function ProvisioningRunsPage() {
         description={t("provisioning.runs.description")}
         actions={
           canRun ? (
-            <Btn label={t("provisioning.runs.provision")} icon="plus" variant="primary" onClick={provision.start} />
+            // One act, one name (fix round 1): the head's button, the empty
+            // state's and the dialog they open all say the brief's words.
+            <Btn label={t("provisioning.runs.buildComputer")} icon="plus" variant="primary" onClick={provision.start} />
           ) : undefined
         }
       />
@@ -438,7 +440,7 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <>
     {guard}
-    <Dialog open={open} onClose={onClose} title={t("provisioning.provisionDialog.title")}>
+    <Dialog open={open} onClose={onClose} title={t("provisioning.runs.buildComputer")}>
       <Form onSubmit={requestStart}>
         <div className="form-grid">
           {/* CYCLES 6 AND 7, and this is Auditor A's BLOCKER for the module.
