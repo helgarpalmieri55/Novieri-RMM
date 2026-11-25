@@ -176,26 +176,40 @@ afterEach(() => {
 
 const userAction = () => userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
+/**
+ * A titled panel of the record, by its heading (redesign Task 6, 1.2): the
+ * alert and patch cards above the tabs and the Overview's panels, which hold
+ * what the "Device status" chip line used to say in one row.
+ */
+async function section(name: string): Promise<HTMLElement> {
+  return (await screen.findByRole("heading", { level: 2, name })).closest("section") as HTMLElement;
+}
+
 // ------------------------------------------------------- the device page
 
 describe("the device page in Spanish", () => {
   it("words the header, the facts strip, the actions and the Overview", async () => {
     const { container } = renderDevice();
     expect(await screen.findByRole("heading", { name: "ws-alpha" })).toBeInTheDocument();
-    const status = await screen.findByRole("group", { name: "Estado del dispositivo" });
-    expect(await within(status).findByText("2 alertas abiertas")).toBeInTheDocument();
-    expect(within(status).getByText("Certificado por caducar")).toBeInTheDocument();
-    expect(await within(status).findByText("Faltan 4 actualizaciones")).toBeInTheDocument();
-    expect(within(status).getByText("Inscrito por el agente")).toBeInTheDocument();
-    expect(within(status).getByText("Cifrado")).toBeInTheDocument();
-    expect(within(status).getByText("Cortafuegos desactivado")).toBeInTheDocument();
-    expect(within(status).getByText("No unido al dominio")).toBeInTheDocument();
-    expect((await within(status).findByText(/Copia hecha/)).textContent).toBe("Copia hecha hace 2 días");
-    expect(document.querySelector(".sub")).toHaveTextContent("último contacto hace 5 minutos");
+    // What the "Device status" chip line said, where the record keeps it now:
+    // the alert and patch cards, the Overview's information and its backup.
+    const alerts = await section("Estado de alertas");
+    expect(await within(alerts).findByText("2 alertas abiertas")).toBeInTheDocument();
+    const patch = await section("Estado de parches");
+    expect(await within(patch).findByText("Faltan 4 actualizaciones")).toBeInTheDocument();
+    const info = await section("Información del equipo");
+    expect(within(info).getByText("Certificado por caducar")).toBeInTheDocument();
+    expect(within(info).getByText("Inscrito por el agente")).toBeInTheDocument();
+    expect(within(info).getByText("Cifrado")).toBeInTheDocument();
+    expect(within(info).getByText("Cortafuegos desactivado")).toBeInTheDocument();
+    expect(within(info).getByText("No unido al dominio")).toBeInTheDocument();
+    expect(await within(await section("Copia de seguridad")).findByText("hace 2 días")).toBeInTheDocument();
+    expect(within(info).getByText(/Agente visto por última vez/)).toHaveTextContent("Agente visto por última vez hace 5 minutos");
     for (const label of ["Conectar en remoto", "Ejecutar un script", "Instalar actualizaciones", "Reiniciar", "Hacer copia ahora", "Abrir ticket", "Ejecutar tarea"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    expect(screen.getByRole("link", { name: "Todos los dispositivos" })).toBeInTheDocument();
+    // «Equipos», the list's word (decision D13).
+    expect(screen.getByRole("link", { name: "Todos los equipos" })).toBeInTheDocument();
     // The facts strip.
     expect(screen.getByText("Agente visto por última vez", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/Válido hasta/)).toBeInTheDocument();
@@ -205,24 +219,24 @@ describe("the device page in Spanish", () => {
     for (const tab of ["Resumen", "Salud", "Actualizaciones", "Copia de seguridad", "Software", "Despliegues", "Hardware", "Tareas", "Cambios", "Documentación"]) {
       expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
     }
+    // The two cards above the tabs: the Overview's Health and Updates panels, moved up.
+    // An alert's check reads as the health module names it (`enums.HealthCheckType`).
+    expect(within(alerts).getByText(/CPU ocupada/)).toBeInTheDocument();
+    expect(within(alerts).getByText(/Disco libre/)).toBeInTheDocument();
+    expect(within(patch).getByText("Revisar actualizaciones")).toBeInTheDocument();
+    expect(within(patch).getByText(/Reinicio programado, en su ventana de mantenimiento/)).toBeInTheDocument();
+    expect(within(patch).getByText("Última comprobación")).toBeInTheDocument();
     // The Overview's panels.
     const panel = screen.getByRole("tabpanel", { name: "Resumen" });
-    await within(panel).findByText("2 abiertas");
-    expect(within(panel).getByText("Estado de salud")).toBeInTheDocument();
     expect(within(panel).getByText("Todas las comprobaciones")).toBeInTheDocument();
-    // An alert's check reads as the health module names it (`enums.HealthCheckType`).
-    expect(within(panel).getByText(/CPU ocupada/)).toBeInTheDocument();
-    expect(within(panel).getByText(/Disco libre/)).toBeInTheDocument();
-    expect(await within(panel).findByText("Revisar actualizaciones")).toBeInTheDocument();
-    expect(within(panel).getByText(/Reinicio programado, en su ventana de mantenimiento/)).toBeInTheDocument();
-    expect(within(panel).getByText("Última comprobación")).toBeInTheDocument();
     expect(await within(panel).findByText("Detalles de la copia de seguridad")).toBeInTheDocument();
     expect(within(panel).getByText("Última copia correcta")).toBeInTheDocument();
     expect(within(panel).getByText("Guardada en")).toBeInTheDocument();
     expect(within(panel).getByText("Tareas recientes")).toBeInTheDocument();
     expect(await within(panel).findByText("Tickets abiertos")).toBeInTheDocument();
     expect(within(panel).getByText("Todos los tickets")).toBeInTheDocument();
-    expectNoEnglish(container, [...STORED, "INC-7", "Lento al iniciar", "Lisboa"]);
+    // "disk_encryption" is a recorded change's subject, shown by the Overview's Activity.
+    expectNoEnglish(container, [...STORED, "INC-7", "Lento al iniciar", "Lisboa", "disk_encryption", "disk"]);
   });
 
   it("words what the Overview says when there is nothing to show", async () => {
@@ -234,8 +248,9 @@ describe("the device page in Spanish", () => {
       listTickets: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     });
     const panel = await screen.findByRole("tabpanel", { name: "Resumen" });
-    expect(await within(panel).findByText("No hay alertas abiertas en este dispositivo.")).toBeInTheDocument();
-    expect(await within(panel).findByText("Pendiente, en su ventana de mantenimiento")).toBeInTheDocument();
+    // The alert and patch cards above the tabs.
+    expect(await within(await section("Estado de alertas")).findByText("No hay alertas abiertas en este dispositivo.")).toBeInTheDocument();
+    expect(await within(await section("Estado de parches")).findByText("Pendiente, en su ventana de mantenimiento")).toBeInTheDocument();
     expect(await within(panel).findByText("Nunca se ha copiado")).toBeInTheDocument();
     expect(within(panel).getByText("No se ha ejecutado ninguna copia")).toBeInTheDocument();
     expect(within(panel).getByText("Sin repositorio")).toBeInTheDocument();
@@ -361,7 +376,8 @@ describe("the device page in Spanish", () => {
     expect(within(table).getByText("se esperaba true")).toBeInTheDocument();
     expect(within(table).getByText("nunca")).toBeInTheDocument();
     expect(screen.getByText("Alertas abiertas")).toBeInTheDocument();
-    expect(screen.getByText("Crítica")).toBeInTheDocument();
+    // In the Health tab's panel: the alert card above the tabs counts "Crítica" too.
+    expect(within(screen.getByRole("tabpanel")).getByText("Crítica")).toBeInTheDocument();
     // "enabled" is the wire word inside the recorded check type "posture.firewall_enabled".
     expectNoEnglish(container, [...STORED, "disk.free_pct", "posture.firewall_enabled", "enabled", "C:", "true", "p1", "g1"]);
   });
@@ -470,7 +486,8 @@ describe("the device page in Spanish", () => {
     expect(screen.getByText("Introducido a mano")).toBeInTheDocument();
     expect(screen.getByText("Sin certificado: este activo no tiene agente")).toBeInTheDocument();
     expect(screen.getByText("El agente no informó del número de serie de este equipo.")).toBeInTheDocument();
-    expectNoEnglish(container, ["core-sw-01"]);
+    // "disk_encryption" is a recorded change's subject, shown by the Overview's Activity.
+    expectNoEnglish(container, ["core-sw-01", "disk_encryption", "disk"]);
     await user.click(screen.getByRole("button", { name: "Datos de la instalación remota" }));
     expect(await screen.findByRole("dialog", { name: "Datos de la instalación remota" })).toBeInTheDocument();
   });
@@ -625,14 +642,15 @@ describe("the inventory sentences built outside React, in Spanish", () => {
 describe("a live language switch on the device page", () => {
   it("re-words the header, the facts, the tab strip and the Overview", async () => {
     renderDevice();
-    const status = await screen.findByRole("group", { name: "Estado del dispositivo" });
-    expect(await within(status).findByText("2 alertas abiertas")).toBeInTheDocument();
-    expect(await within(status).findByText("Faltan 4 actualizaciones")).toBeInTheDocument();
+    // The alert and patch cards and the Overview's information (redesign Task 6, 1.2).
+    expect(await within(await section("Estado de alertas")).findByText("2 alertas abiertas")).toBeInTheDocument();
+    expect(await within(await section("Estado de parches")).findByText("Faltan 4 actualizaciones")).toBeInTheDocument();
+    await section("Información del equipo");
     expect(screen.getByRole("tab", { name: "Resumen" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    const english = screen.getByRole("group", { name: "Device status" });
-    expect(within(english).getByText("2 open alerts")).toBeInTheDocument();
-    expect(within(english).getByText("4 updates missing")).toBeInTheDocument();
+    expect(within(await section("Alert status")).getByText("2 open alerts")).toBeInTheDocument();
+    expect(within(await section("Patch status")).getByText("4 updates missing")).toBeInTheDocument();
+    const english = await section("Device information");
     expect(within(english).getByText("Certificate expiring")).toBeInTheDocument();
     expect(within(english).getByText("Enrolled by agent")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
