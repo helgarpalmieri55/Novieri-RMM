@@ -544,8 +544,20 @@ interface EditOpenedMark {
  *   `?edit=` through `useUrlFilters` instead pushed a second entry on close,
  *   and Back reopened the editor (O4 review, item 7).
  * - `kind` names what the editor edits, as `useNewParam`'s does, and is part
- *   of the mark: only this editor's `close()` goes Back from the entry its
- *   `start()` added, never another editor's of the same page.
+ *   of the mark: `close()` goes Back only from an entry that a `start()` of
+ *   the same kind added; from any other entry it closes in place.
+ *
+ * TWO LIMITS, BOTH BY DESIGN (batch 1 review, Minors 2 and 3):
+ * - ONE EDITOR PER PAGE. `kind` marks the history entry; it does not scope the
+ *   URL. `?edit=` is one key, so every `useEditParam` on a page reads the same
+ *   `id`, and two editors on one page would both open on it. A page with two
+ *   kinds of record to edit needs a key for each, which this hook does not
+ *   take.
+ * - STARTING A SECOND RECORD OVER AN OPEN EDITOR stacks it. `start("b")` while
+ *   `?edit=a` is open adds an entry of its own, so `close()` goes Back to the
+ *   first record's editor, as a second `useNewParam().start()` does. A modal
+ *   editor cannot be started from behind itself; a non-modal one (a drawer
+ *   beside its list) would show it: Close there lands on the previous record.
  *
  * A FORM IN THE EDITOR passes `search={["edit"]}` (or `["new", "edit"]` when
  * the same form creates too) to its `UnsavedGuard`, so Back or Close with a

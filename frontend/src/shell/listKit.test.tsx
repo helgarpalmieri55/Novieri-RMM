@@ -540,6 +540,34 @@ describe("useEditParam (kit requests batch 1, item 6)", () => {
     expect(router.state.historyAction).toBe("REPLACE");
   });
 
+  it("does not scope ?edit= by kind: every editor of a page reads the same record, so a page holds one (F2)", () => {
+    function Both() {
+      const policy = useEditParamFromKit("policy");
+      const schedule = useEditParamFromKit("schedule");
+      return <p>{`${policy.id}|${schedule.id}`}</p>;
+    }
+    renderPage("/backup/policies?edit=pol-1", <Both />);
+    expect(screen.getByText("pol-1|pol-1")).toBeInTheDocument();
+  });
+
+  it("goes back to the first record's editor when a second was started over it, then closed, as useNewParam does (F2)", async () => {
+    function Switching() {
+      const edit = useEditParamFromKit("policy");
+      return (
+        <>
+          <button type="button" onClick={() => edit.start("pol-1")}>Edit Pilot</button>
+          <button type="button" onClick={() => edit.start("pol-2")}>Edit Broad</button>
+          <button type="button" onClick={edit.close}>Close</button>
+        </>
+      );
+    }
+    const router = withHistory(["/start", "/backup/policies"], "/backup/policies", <Switching />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pilot" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit Broad" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("?edit=pol-1");
+  });
+
   it("is not useNewParam's mark: a ?new= dialog's entry is not one an editor goes Back from", async () => {
     function Both() {
       const created = useNewParam("policy");
