@@ -12,8 +12,12 @@ export const setup: Shape<typeof en> = {
     organizationName: "Nombre de la organización",
     settingUp: "Configurando…",
     finish: "Finalizar configuración",
-    // Finish setup pressed with a field empty (coordinator ruling 8a: the button stays on).
-    incomplete: "Rellena todos los campos para terminar.",
+    // Finish setup pressed with a field empty (coordinator ruling 8a: the button stays on);
+    // {fields} is the empty fields' labels as the language lists them (ruling 8: named).
+    incomplete: {
+      one: "Rellena este campo: {fields}.",
+      other: "Rellena estos campos: {fields}.",
+    },
     passwordHint: "El primer administrador inicia sesión con este correo y esta contraseña, y añade un segundo factor al entrar por primera vez.",
     unreachable: "No se pudo contactar con el servidor, así que no se creó nada. {reason}",
   },

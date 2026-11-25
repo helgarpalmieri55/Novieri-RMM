@@ -77,8 +77,15 @@ describe("approving an AI app", () => {
     await screen.findByRole("heading", { name: "Connect the app at claude.ai" });
     const grants = screen.getByText(/everything your role allows/);
     expect(grants).toHaveTextContent("act as you in Novieri RMM");
-    expect(grants.closest(".notice")).toHaveClass("gold");
+    const note = grants.closest(".notice");
+    expect(note).toHaveClass("gold");
     expect(grants.closest(".panel")).toContainElement(screen.getByRole("button", { name: "Approve" }));
+    // Its place, not only its card (fix round 1): the next thing after the
+    // warning is the row with Approve and Decline, and nothing comes between.
+    const approve = screen.getByRole("button", { name: "Approve" });
+    const actions = approve.parentElement as HTMLElement;
+    expect(actions).toContainElement(screen.getByRole("button", { name: "Decline" }));
+    expect(note?.nextElementSibling).toBe(actions);
   });
 
   it("names the host that publishes a client metadata document, and where it answers", async () => {

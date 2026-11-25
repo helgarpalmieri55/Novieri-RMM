@@ -31,7 +31,7 @@ import { useApi } from "../../lib/ApiContext";
 import { enterConsole, safeNext } from "../../lib/session";
 import { AuthAlert, AuthCard, AuthOr, AuthWideBtn } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { afterLogin, carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
 import { canUsePasskeys, describePasskeyError, signWithPasskey } from "./passkey";
 
@@ -65,7 +65,7 @@ export function PortalSignInPage() {
     if (inFlight.current) return;
     // On while empty; a press says what is missing (coordinator ruling 8a).
     if (!email.trim() || !password) {
-      setError(t("auth.signIn.missing"));
+      setError(t(missingKey(email, password)));
       return;
     }
     void guarded(async () => {

@@ -24,8 +24,11 @@ export const auth = {
     intro: "Use the email address and password of your account. Your second factor comes next.",
     submit: "Continue",
     rejected: "That email address and password do not match an account here.",
-    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on).
+    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on): only
+    // the field that is empty is named, and both only when both are.
     missing: "Enter your email address and your password.",
+    missingEmail: "Enter your email address.",
+    missingPassword: "Enter your password.",
     forgot: "Forgot your password?",
   },
   portalSignIn: {

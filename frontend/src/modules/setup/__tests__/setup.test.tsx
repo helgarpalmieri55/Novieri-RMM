@@ -130,17 +130,29 @@ describe("the setup screen", () => {
     expect(document.title).toBe("Set up this installation · Novieri RMM");
   });
 
-  it("keeps Finish setup on, and says what is missing when it is pressed early, claiming nothing", async () => {
+  it("keeps Finish setup on, and names every empty field when it is pressed early, claiming nothing", async () => {
     // Coordinator ruling 8a (2026-11-25): seven fields, so the button stays on
-    // and the press reports what is missing. It was disabled with no reason on
-    // screen (critique of 2026-11-25, P1).
+    // and the press reports what is missing, by name (ruling 8, fix round 1).
+    // It was disabled with no reason on screen (critique of 2026-11-25, P1).
     const user = userEvent.setup();
     render(<SetupPage />);
     const finish = screen.getByRole("button", { name: /finish setup/i });
     expect(finish).toBeEnabled();
     await user.type(screen.getByLabelText("Install code"), "install-code");
     await user.click(finish);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Fill in every field to finish.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^Fill in these fields: Your name, Your email address, New password, The same password again, and Organization name\.$/,
+    );
+    expect(claims).toHaveLength(0);
+  });
+
+  it("names the one field still empty, and only that one", async () => {
+    const user = userEvent.setup();
+    render(<SetupPage />);
+    await fillTheForm(user, "install-code");
+    await user.clear(screen.getByLabelText("Organization name"));
+    await user.click(screen.getByRole("button", { name: /finish setup/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Fill in this field: Organization name\.$/);
     expect(claims).toHaveLength(0);
   });
 

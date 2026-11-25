@@ -102,6 +102,23 @@ describe("the setup screen in Spanish", () => {
   });
 
   // RE-POINTED: was "says where to find the invitation when it was sent".
+  it("names the empty fields in Spanish, as a Spanish list", async () => {
+    // Fix round 1 (ruling 8): the press names what is missing, in the
+    // language's own list ("A, B y C"), and claims nothing.
+    const user = userEvent.setup();
+    const { container } = renderInSpanish(<SetupPage />);
+    await user.type(screen.getByLabelText("Código de instalación"), "codigo");
+    await user.type(screen.getByLabelText("Tu nombre"), "Dana Okafor");
+    await user.type(screen.getByLabelText("Tu correo electrónico"), "dana@example.com");
+    await user.type(screen.getByLabelText("Contraseña nueva"), "una frase larga que recuerdo");
+    await user.click(screen.getByRole("button", { name: "Finalizar configuración" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^Rellena estos campos: La misma contraseña otra vez y Nombre de la organización\.$/,
+    );
+    expectNoEnglish(container);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("refuses a short password in Spanish, before claiming anything", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => respond(claimReply));

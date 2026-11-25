@@ -55,6 +55,21 @@ export function carryNext(path: string, next: string | null): string {
   return back === DEFAULT_AFTER_SIGN_IN ? path : `${path}?next=${encodeURIComponent(back)}`;
 }
 
+/**
+ * What a sign-in press with a field empty says (coordinator ruling 8a; the
+ * fix round's ruling 8: only what is missing is named): the address, the
+ * password, or both when both are empty. The address is trimmed, as the
+ * request trims it; a password is never trimmed.
+ */
+export function missingKey(
+  email: string,
+  password: string,
+): "auth.signIn.missing" | "auth.signIn.missingEmail" | "auth.signIn.missingPassword" {
+  const noEmail = email.trim() === "";
+  if (noEmail && password === "") return "auth.signIn.missing";
+  return noEmail ? "auth.signIn.missingEmail" : "auth.signIn.missingPassword";
+}
+
 /** The token in a link's fragment: `#<token>`, or `#token=<token>`. Empty when there is none. */
 export function tokenFromHash(hash: string): string {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;

@@ -35,7 +35,7 @@ import { useApi } from "../../lib/ApiContext";
 import { safeNext } from "../../lib/session";
 import { AuthAlert, AuthCard, AuthOr, AuthWideBtn } from "./AuthCard";
 import { describeAuthError } from "./errors";
-import { afterLogin, carryNext, useNext } from "./flow";
+import { afterLogin, carryNext, missingKey, useNext } from "./flow";
 import { MicrosoftButton } from "./MicrosoftButton";
 
 export function SignInPage() {
@@ -56,7 +56,7 @@ export function SignInPage() {
     // ON WHILE EMPTY, AND A PRESS SAYS WHAT IS MISSING (coordinator ruling 8a):
     // it was disabled until both fields held something, with no reason given.
     if (!email.trim() || !password) {
-      setError(t("auth.signIn.missing"));
+      setError(t(missingKey(email, password)));
       return;
     }
     inFlight.current = true;

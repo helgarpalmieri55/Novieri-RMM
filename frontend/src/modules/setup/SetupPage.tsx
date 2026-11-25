@@ -39,6 +39,7 @@ import { useRef, useState } from "react";
 
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
+import { getLanguage, type MessageKey } from "../../i18n/core";
 import { Field, inputClass } from "../../components/ui";
 import { ApiError, requestHeaders } from "../../lib/api";
 import { SIGN_IN_PATH, navigation } from "../../lib/session";
@@ -101,6 +102,25 @@ type Form = { code: string; name: string; email: string; password: string; again
 
 const EMPTY: Form = { code: "", name: "", email: "", password: "", again: "", organization: "" };
 
+/**
+ * Every field the claim needs, in the order the form draws them, with the
+ * label a person reads: a press with any of them empty names exactly those
+ * (coordinator rulings 8 and 8a). The password fields are never trimmed.
+ */
+const REQUIRED: readonly { field: keyof Form; label: MessageKey; trim: boolean }[] = [
+  { field: "code", label: "setup.page.installCode", trim: true },
+  { field: "name", label: "setup.page.yourName", trim: true },
+  { field: "email", label: "setup.page.yourEmail", trim: true },
+  { field: "password", label: "auth.password.new", trim: false },
+  { field: "again", label: "auth.password.confirm", trim: false },
+  { field: "organization", label: "setup.page.organizationName", trim: true },
+];
+
+/** The labels of the fields still empty, in the form's order. */
+function emptyFields(form: Form): MessageKey[] {
+  return REQUIRED.filter(({ field, trim }) => (trim ? form[field].trim() : form[field]) === "").map(({ label }) => label);
+}
+
 
 export function SetupPage() {
   const t = useT();
@@ -120,13 +140,6 @@ export function SetupPage() {
    */
   const inFlight = useRef(false);
 
-  const complete =
-    form.code.trim() !== "" &&
-    form.name.trim() !== "" &&
-    form.email.trim() !== "" &&
-    form.password !== "" &&
-    form.again !== "" &&
-    form.organization.trim() !== "";
 
   function set(field: keyof Form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -135,11 +148,14 @@ export function SetupPage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current) return;
-    // ON WHILE INCOMPLETE, AND A PRESS SAYS WHAT IS MISSING (coordinator
-    // ruling 8a): seven fields, none marked, and a grey button was all a
-    // person who missed one saw.
-    if (!complete) {
-      setError(t("setup.page.incomplete"));
+    // ON WHILE INCOMPLETE, AND A PRESS NAMES WHAT IS MISSING (coordinator
+    // rulings 8 and 8a): seven fields, none marked, and a grey button was all
+    // a person who missed one saw. The labels are listed as the language lists
+    // them ("A, B, and C" / "A, B y C").
+    const empty = emptyFields(form);
+    if (empty.length > 0) {
+      const fields = new Intl.ListFormat(getLanguage(), { type: "conjunction" }).format(empty.map((key) => t(key)));
+      setError(t("setup.page.incomplete", { count: empty.length, fields }));
       return;
     }
     const problem = checkNewPassword(form.password, form.again);

@@ -27,8 +27,11 @@ export const auth: Shape<typeof en> = {
     intro: "Usa el correo electrónico y la contraseña de tu cuenta. Después viene tu segundo factor.",
     submit: "Continuar",
     rejected: "Ese correo electrónico y esa contraseña no corresponden a ninguna cuenta de aquí.",
-    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on).
+    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on): only
+    // the field that is empty is named, and both only when both are.
     missing: "Introduce tu correo electrónico y tu contraseña.",
+    missingEmail: "Introduce tu correo electrónico.",
+    missingPassword: "Introduce tu contraseña.",
     forgot: "¿Olvidaste tu contraseña?",
   },
   portalSignIn: {
