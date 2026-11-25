@@ -184,7 +184,9 @@ export const budget = {
     // A row's edit, in a dialog where the row used to turn into inputs.
     editCategory: "Edit category",
     editCostCenter: "Edit cost center",
-    editRate: "Edit the {from} to {to} rate",
+    // No lone word between the placeholders: "… {to} rate" left the fragment "rate", which the Spanish
+    // pages' English check (expectNoEnglish) then found in a recorded server message ("rate fuse tripped").
+    editRate: "Edit the exchange rate from {from} to {to}",
     categoryName: "Category name",
     categoryActive: "Category active",
     costCenters: "Cost centers",

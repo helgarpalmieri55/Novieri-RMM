@@ -914,7 +914,8 @@ export function DocsPage() {
           {/* The way back to the list on a phone, where the list stepped aside. */}
           <button
             type="button"
-            className="back-link lg:hidden"
+            // Not a Btn: it reads as the head's back link; so it carries the design's focus ring.
+            className="back-link lg:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
             onClick={() => {
               setEditing(false);
