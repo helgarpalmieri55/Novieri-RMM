@@ -218,15 +218,19 @@ describe("the changes list behind the Client chip (decisions D6, D17)", () => {
   it("draws no empty state while the chip's client is not yet known (general ruling 10)", async () => {
     // `/me` has not answered: the narrowed read waits, and so does the page.
     mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    const listChanges = vi.fn().mockResolvedValue([]);
     mockUseApi.mockReturnValue({
       me: vi.fn(() => new Promise<Me>(() => {})),
-      listChanges: vi.fn().mockResolvedValue([]),
+      listChanges,
       listChangeGates: vi.fn().mockResolvedValue([]),
       listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
       listRoles: vi.fn().mockResolvedValue([]),
     } as unknown as ApiClient);
     renderPage("/changes?client=5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57", <ChangesPage />);
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    // Long enough for a read that was not waiting to have answered and drawn its empty list.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(listChanges).not.toHaveBeenCalled();
     expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
     expect(screen.queryByText("No changes yet.")).toBeNull();
   });

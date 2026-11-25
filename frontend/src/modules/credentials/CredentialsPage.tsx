@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
@@ -33,13 +33,22 @@ import {
 } from "./credentialTypes";
 import {
   Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
-  Tabs,
+  useNarrowedApi,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+  writeQuery,
 } from "../../shell/components";
 
 // The design's "Credentials" screen (`P['credentials']` in
@@ -118,9 +127,14 @@ const windowsDomainRules = (): readonly FieldRule[] => [
  * way to see the rows behind it. `state` is the param name /devices and
  * /remote already filter on; the two pages read the same key so a filtered
  * list is pasteable everywhere in the console.
+ *
+ * CHIPS NOW, ON THE SAME KEY (redesign Task 11, 6.9; Receta L, 5): the tab
+ * strip that filtered the list is the kit's `FilterChips` over `?state=`, so
+ * every link that opened a tab opens the same chip. "All" is the default and
+ * writes nothing.
  */
-const TABS = [
-  { key: "all", label: "credentials.tabs.all" },
+const STATES = [
+  { key: "", label: "credentials.tabs.all" },
   { key: "never-used", label: "credentials.tabs.neverUsed" },
   { key: "used", label: "credentials.tabs.used" },
 ] as const;
@@ -134,7 +148,6 @@ export function CredentialsPage() {
   // in the last 10 minutes, and `run` asks for it and sends the checkout once
   // more. The secret still arrives only in the accepted answer.
   const stepUp = useStepUp();
-  const [createOpen, setCreateOpen] = useState(false);
   const [reveal, setReveal] = useState<{ name: string; secret: string } | null>(null);
   const [reasonFor, setReasonFor] = useState<Credential | null>(null);
   const [reason, setReason] = useState("");
@@ -153,9 +166,17 @@ export function CredentialsPage() {
   const clientName = useClientName();
   const showClient = selected === null;
 
+  // THE CLIENT CHIP NARROWS THE READ, AND ONLY THE READ (decisions D6, D17):
+  // the list reads through the narrowed API and is keyed by the client it was
+  // narrowed to; checkout, delete and create keep `useApi()` and name the
+  // row's own client, as before. A credential for every client still says so
+  // in its row.
+  const filters = useUrlFilters(["state", "client"] as const);
+  const narrowed = useNarrowedApi(filters.values.client);
   const credentials = useQuery({
-    queryKey: ["credentials"],
-    queryFn: () => api.listCredentials(),
+    queryKey: ["credentials", narrowed.client],
+    queryFn: () => narrowed.api.listCredentials(),
+    enabled: narrowed.ready,
   });
 
   const checkout = useMutation({
@@ -214,17 +235,25 @@ export function CredentialsPage() {
   const distinctTypes = new Set(items.map((credential) => credential.type)).size;
 
   const [params, setParams] = useSearchParams();
-  const tab = params.get("state") ?? "all";
+  const tab = filters.values.state;
   // `?new=<type>` opens "New credential" with that type chosen: the push
-  // install screens link here when no push install credential exists. An
-  // unknown type is ignored rather than trusted into the form.
+  // install screens link here when no push install credential exists
+  // (`/credentials?new=push_install`, decision D23). An unknown type is
+  // ignored rather than trusted into the form. The page's own button opens
+  // it from `?new=credential`, with no type chosen.
+  const created = useNewParam("credential");
   const requestedType = params.get("new");
   const newType = CREDENTIAL_TYPES.some((type) => type.value === requestedType) ? requestedType : null;
-  const setTab = (key: string) => {
+  const createOpen = canManage && (created.open || newType != null);
+  const closeCreate = () => {
+    if (created.open) {
+      created.close();
+      return;
+    }
+    // A type the link chose: the key goes in place, as before.
     const next = new URLSearchParams(params);
-    if (key === "all") next.delete("state");
-    else next.set("state", key);
-    setParams(next);
+    next.delete("new");
+    writeQuery(params, next, setParams, { replace: true });
   };
 
   const visible = useMemo(
@@ -238,45 +267,47 @@ export function CredentialsPage() {
       ),
     [items, tab],
   );
-  const tabCounts: Record<string, number> = {
-    all: items.length,
-    "never-used": neverUsed,
-    used: items.length - neverUsed,
+  // The counts of the whole answer (`GET /credentials` is not paged), never of the rows on screen.
+  const stateCounts: Record<string, number | undefined> = credentials.data
+    ? { "": undefined, "never-used": neverUsed, used: items.length - neverUsed }
+    : {};
+  // UNDER THE CLIENT CHIP A TILE COUNTS ONE CLIENT'S ROWS, AND OPENS THEM
+  // (coordinator ruling 2): its link carries the chip.
+  const chip = filters.values.client;
+  const listOf = (state: string) => {
+    const query = new URLSearchParams();
+    if (state) query.set("state", state);
+    if (chip) query.set("client", chip);
+    const text = query.toString();
+    return text ? `/credentials?${text}` : "/credentials";
   };
+  const newCredential = canManage ? (
+    <Btn label={t("credentials.page.newCredential")} icon="plus" variant="primary" onClick={created.start} />
+  ) : undefined;
 
   return (
     <>
-      <PageHead
-        title={t("credentials.page.title")}
-        description={t("credentials.page.description")}
-        actions={
-          canManage ? (
-            <Btn label={t("credentials.page.newCredential")} icon="plus" variant="primary" onClick={() => setCreateOpen(true)} />
-          ) : undefined
-        }
-      />
+      <PageHead title={t("credentials.page.title")} description={t("credentials.page.description")} actions={newCredential} />
 
       <CredentialPrerequisites credentials={credentials.data} />
 
-      {/* EVERY TILE OPENS THE ROWS IT COUNTED, via the tab strip below — the
+      {/* EVERY TILE OPENS THE ROWS IT COUNTED, via the state chips below — the
           filter is in the URL, so the tile hands over the exact view its
-          number was computed from.
+          number was computed from, the Client chip included.
 
           NOTHING HERE IS `urgent`. A vault at rest needs nobody: these are
           inventory figures, not a queue, and a saturated tile on a page with
           no work to do is the wall of numbers this row replaces. */}
-      <StatsGrid columns={3}>
-        {/* EVERY TILE CARRIES ITS SECOND LINE, as v3 draws them and as
-            "Types in use" already did: two of the three were a bare figure,
-            so one tile in a row of three said what its number was made of and
-            the other two said nothing, leaving the grid visibly uneven. Both
-            lines below are counted from the same rows as the figure above
-            them. */}
+      <StatsGrid columns={4}>
+        {/* EVERY TILE CARRIES ITS SECOND LINE, as v3 draws them: each line is
+            counted from the same rows as the figure above it. Before the list
+            answers a tile is unmeasured ("n/a"), never a zero. */}
         <StatCard
           label={t("credentials.tiles.stored")}
           value={String(items.length)}
+          pending={!credentials.data}
           icon="lock"
-          to="/credentials"
+          to={listOf("")}
           tone="neutral"
           zeroLabel={t("credentials.tiles.storedZero")}
           foot={items.length > 0 ? t("credentials.tiles.storedFoot", { count: items.length - neverUsed }) : undefined}
@@ -284,143 +315,152 @@ export function CredentialsPage() {
         <StatCard
           label={t("credentials.tiles.neverUsed")}
           value={String(neverUsed)}
+          pending={!credentials.data}
           icon="clock"
-          to="/credentials?state=never-used"
+          to={listOf("never-used")}
           tone="blue"
           /* "0 never checked out" on an empty vault and on a vault where every
              credential has been used are the same pixel otherwise. */
           zeroLabel={items.length === 0 ? t("credentials.tiles.neverUsedZeroEmpty") : t("credentials.tiles.neverUsedZeroUsed")}
           /* Not a second count: WHAT the figure means. A credential that has
-             never been checked out has never been decrypted, which is the
-             fact somebody reads this tile for. */
+             never been checked out has never been decrypted. */
           foot={neverUsed > 0 ? t("credentials.tiles.neverUsedFoot") : undefined}
         />
+        {/* The fourth tile (redesign Task 11, 6.9): the credentials someone
+            has needed, the other half of the one beside it, with its rows. */}
+        <StatCard
+          label={t("credentials.tiles.used")}
+          value={String(items.length - neverUsed)}
+          pending={!credentials.data}
+          icon="eye"
+          to={listOf("used")}
+          tone="neutral"
+          zeroLabel={t("credentials.tiles.usedZero")}
+          foot={items.length - neverUsed > 0 ? t("credentials.tiles.usedFoot") : undefined}
+        />
         {/* AUDIT [LOW]: "'Credential types 0' is misleading given the Type
-            dropdown offers three; the card appears to count *used* types while
-            reading as a capability count." It counts what is stored, so it
-            says so. The type under each name in the full list is where those
-            types are, so that is where it points. */}
+            dropdown offers three". It counts what is stored, so it says so. */}
         <StatCard
           label={t("credentials.tiles.typesInUse")}
           value={String(distinctTypes)}
+          pending={!credentials.data}
           icon="shield-lock"
-          to="/credentials"
+          to={listOf("")}
           tone="blue"
           foot={t("credentials.tiles.typesAvailable", { count: CREDENTIAL_TYPES.length })}
           zeroLabel={t("credentials.tiles.typesInUseZero")}
         />
       </StatsGrid>
 
-      <h2 className="sr-only">{t("credentials.page.listHeading")}</h2>
-      <Tabs
-        items={TABS.map((item) => ({ key: item.key, label: t(item.label), count: tabCounts[item.key] }))}
-        active={tab}
-        onSelect={setTab}
-        panelId="credentials-tabpanel"
-      />
-
-      <Panel
-        title={t("credentials.list.title")}
-        subtitle={t("credentials.list.subtitle")}
-        bare
-      >
-        <div
-          id="credentials-tabpanel"
-          role="tabpanel"
-          aria-label={t(TABS.find((item) => item.key === tab)?.label ?? "credentials.tabs.all")}
-          tabIndex={-1}
-        >
-        <QueryState
-          loading={credentials.isLoading}
-          error={credentials.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0 ? t("credentials.list.emptyNone") : t("credentials.list.emptyView")
+      <Panel title={t("credentials.list.title")} subtitle={t("credentials.list.subtitle")} bare>
+        <ListToolbar
+          chips={
+            <>
+              <FilterChips
+                label={t("credentials.list.stateLabel")}
+                options={STATES.map((item) => ({ value: item.key, label: t(item.label), count: stateCounts[item.key] }))}
+                value={tab}
+                onChange={(value) => filters.set("state", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
           }
-          emptyIcon="lock"
-        >
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("credentials.list.name")}</Th>
-                {showClient ? <Th>{t("credentials.list.client")}</Th> : null}
-                <Th>{t("credentials.list.state")}</Th>
-                <Th>{t("credentials.list.lastUsed")}</Th>
-                <Th>{t("credentials.list.actions")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((credential) => (
-                <tr key={credential.id}>
-                  {/* v3's row: the key glyph as the lead, the name over its
-                      type. AUDIT [MEDIUM]: "windows_admin", "ssh_key",
-                      "domain_join" -- unmapped database enum values with
-                      underscores, rendered straight into the console. */}
-                  <Td lead={<Icon name="key" size={18} />}>
-                    <div className="cell-title">{credential.name}</div>
-                    <div className="cell-sub">{credentialTypeLabel(credential.type)}</div>
-                  </Td>
-                  {showClient ? (
-                    <Td>
-                      {credential.client_id === null
-                        ? t("lib.clients.everyClient")
-                        : clientName(credential.client_id)}
-                    </Td>
-                  ) : null}
-                  {/* The one vault fact the API states about a stored
-                      credential: whether a secret is behind the reference. */}
-                  <Td>
-                    {credential.has_secret ? (
-                      <StatusPill value="in-vault" kind="ok" label={t("credentials.list.inVault")} />
-                    ) : (
-                      <StatusPill value="no-secret" kind="warn" label={t("credentials.list.noSecret")} />
-                    )}
-                  </Td>
-                  {/* `new Date(x).toLocaleString()` was one of the ~70 ad-hoc
-                      call sites behind "the same record reports two
-                      different times in two different formats". The zone is
-                      the operator's own (`/me`.timezone), and a credential
-                      never checked out says so rather than printing a word no
-                      other absent date in the product uses. */}
-                  <Td>
-                    {credential.last_used_at ? (
-                      <RelTime iso={credential.last_used_at} zone={zone} />
-                    ) : (
-                        <NoValue label={t("credentials.list.neverCheckedOut")} />
-                    )}
-                  </Td>
-                  <Td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn
-                        label={t("credentials.list.checkOut")}
-                        icon="eye"
-                        small
-                        onClick={() => openCheckout(credential)}
-                      />
-                      {canManage && (
-                        <RowMenu
-                          subject={credential.name}
-                          items={[
-                            {
-                              label: t("credentials.list.delete"),
-                              destructive: true,
-                              // Opens the confirmation; the vault secret is not recoverable.
-                              onSelect: () => {
-                                remove.reset();
-                                setPendingDelete(credential);
-                              },
-                            },
-                          ]}
-                        />
-                      )}
-                    </div>
-                  </Td>
+          end={credentials.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        {/* `isPending`: under the chip the read waits for `/me`, and a
+            waiting read is not an empty vault (general ruling 10). */}
+        <QueryState loading={credentials.isPending} error={credentials.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("credentials.list.emptyNone")}
+              icon="lock"
+              action={newCredential}
+            />
+          ) : (
+            <Table label={t("credentials.list.title")}>
+              <thead>
+                <tr>
+                  <Th>{t("credentials.list.name")}</Th>
+                  {showClient ? <Th>{t("credentials.list.client")}</Th> : null}
+                  <Th>{t("credentials.list.state")}</Th>
+                  <Th>{t("credentials.list.lastUsed")}</Th>
+                  <Th>{t("credentials.list.actions")}</Th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {visible.map((credential) => (
+                  <tr key={credential.id}>
+                    {/* v3's row: the key glyph as the lead, the name over its
+                        type. AUDIT [MEDIUM]: "windows_admin", "ssh_key",
+                        "domain_join" -- unmapped database enum values with
+                        underscores, rendered straight into the console. */}
+                    <Td lead={<Icon name="key" size={18} />}>
+                      <div className="cell-title">{credential.name}</div>
+                      <div className="cell-sub">{credentialTypeLabel(credential.type)}</div>
+                    </Td>
+                    {showClient ? (
+                      <Td>
+                        {credential.client_id === null
+                          ? t("lib.clients.everyClient")
+                          : clientName(credential.client_id)}
+                      </Td>
+                    ) : null}
+                    {/* The one vault fact the API states about a stored
+                        credential: whether a secret is behind the reference. */}
+                    <Td>
+                      {credential.has_secret ? (
+                        <StatusPill value="in-vault" kind="ok" label={t("credentials.list.inVault")} />
+                      ) : (
+                        <StatusPill value="no-secret" kind="warn" label={t("credentials.list.noSecret")} />
+                      )}
+                    </Td>
+                    {/* `new Date(x).toLocaleString()` was one of the ~70 ad-hoc
+                        call sites behind "the same record reports two
+                        different times in two different formats". The zone is
+                        the operator's own (`/me`.timezone), and a credential
+                        never checked out says so rather than printing a word no
+                        other absent date in the product uses. */}
+                    <Td>
+                      {credential.last_used_at ? (
+                        <RelTime iso={credential.last_used_at} zone={zone} />
+                      ) : (
+                          <NoValue label={t("credentials.list.neverCheckedOut")} />
+                      )}
+                    </Td>
+                    <Td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn
+                          label={t("credentials.list.checkOut")}
+                          icon="eye"
+                          small
+                          onClick={() => openCheckout(credential)}
+                        />
+                        {canManage && (
+                          <RowMenu
+                            subject={credential.name}
+                            items={[
+                              {
+                                label: t("credentials.list.delete"),
+                                destructive: true,
+                                // Opens the confirmation; the vault secret is not recoverable.
+                                onSelect: () => {
+                                  remove.reset();
+                                  setPendingDelete(credential);
+                                },
+                              },
+                            ]}
+                          />
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
         </QueryState>
-        </div>
       </Panel>
 
       {/* Names the credential, and the consequence -- what stops working when
@@ -475,17 +515,13 @@ export function CredentialsPage() {
         </div>
       </Panel>
 
+      {/* KEYED on what opened it, so it starts empty however it opens (the
+          button, a link with a type, Back or Forward), with that type chosen. */}
       <CreateCredentialDialog
-        open={createOpen || newType != null}
+        key={createOpen ? `open:${newType ?? ""}` : "closed"}
+        open={createOpen}
         initialType={newType ?? undefined}
-        onClose={() => {
-          setCreateOpen(false);
-          if (newType != null) {
-            const next = new URLSearchParams(params);
-            next.delete("new");
-            setParams(next, { replace: true });
-          }
-        }}
+        onClose={closeCreate}
       />
 
       <Dialog
@@ -633,23 +669,21 @@ function CreateCredentialDialog({
       // against job dispatch: the new profile appears in the table this dialog
       // sits over, so the success is visible where the operator lands. A failed
       // store keeps the dialog open, with the reason.
+      // Stored: closing goes Back from the dialog's entry, and must not ask.
+      release();
       onClose();
     },
   });
 
-  // The parent keeps this mounted and toggles `open`, so without this the last
-  // attempt's "Name is required" — or its server failure — greets whoever opens
-  // the dialog next.
-  useEffect(() => {
-    if (!open) return;
-    create.reset();
-    setAttempt(null);
-    // Every client's is never carried over from the last opening: it is a
-    // choice made for this credential, and a global one is the wider row.
-    setForEveryClient(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the
-    // dialog opening; `create` is a fresh object every render.
-  }, [open]);
+  // THE PARENT REMOUNTS THIS DIALOG EACH TIME IT OPENS (it is keyed on what
+  // opened it), so the last attempt's "Name is required", its server failure
+  // and its "For every client" never greet the next opening (coordinator
+  // ruling 4).
+  //
+  // THE PAGE'S ONE GUARD (Receta FO, 4; ruling 3): the form lives in its
+  // `?new=` dialog, so Back or Close with something typed asks first.
+  const dirty = open && (name !== "" || secret !== "" || account !== "" || kdc !== "" || caPem !== "");
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function storeCredential() {
     // AUDIT [HIGH], /credentials → New credential → Store: "Store with every
@@ -684,102 +718,141 @@ function CreateCredentialDialog({
   const realm = windowsDomainRealm(account);
 
   return (
-    <Dialog open={open} onClose={onClose} title={t("credentials.create.title")}>
-      <Form onSubmit={storeCredential}>
-        {/* AUDIT [HIGH], /credentials → New credential: "The Secret input is
-            `type="password"` with `autocomplete: null` ... they may autofill
-            the operator's *own* saved password into the vault's Secret box,
-            and -- more damaging -- offer to SAVE the privileged credential
-            into the operator's personal password store on submit. That
-            silently copies a domain-admin or SSH key out of the audited vault
-            into an unmanaged browser profile."
+    <>
+      {guard}
+      <Dialog open={open} onClose={onClose} title={t("credentials.create.title")}>
+        <Form onSubmit={storeCredential}>
+          {/* AUDIT [HIGH], /credentials → New credential: "The Secret input is
+              `type="password"` with `autocomplete: null` ... they may autofill
+              the operator's *own* saved password into the vault's Secret box,
+              and -- more damaging -- offer to SAVE the privileged credential
+              into the operator's personal password store on submit. That
+              silently copies a domain-admin or SSH key out of the audited vault
+              into an unmanaged browser profile."
 
-            Auditor A sharpened it from a third route: /email-intake's IMAP
-            password already sets `autocomplete="new-password"`, so "the team
-            knows and applied it inconsistently" -- the LEAST sensitive of the
-            three secrets was protected and the most sensitive was not.
+              Auditor A sharpened it from a third route: /email-intake's IMAP
+              password already sets `autocomplete="new-password"`, so "the team
+              knows and applied it inconsistently" -- the LEAST sensitive of the
+              three secrets was protected and the most sensitive was not.
 
-            `new-password` on the secret (the value that must never be offered
-            for saving), `off` on the name beside it (a username-shaped field
-            is half of what makes a manager treat this as a login form), and
-            the two manager-specific opt-outs, which is the rest of the fix
-            line. Invariant #3 is about logs and API responses; a password
-            manager writing the value into an unmanaged profile is the same
-            disclosure through a third door. */}
-        <div className="form-grid">
-          <Field label={t("credentials.create.name")}>
-            <input
-              className={inputClass}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-            />
-          </Field>
-          <Field label={t("credentials.create.type")}>
-            <select
-              className={inputClass}
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-            >
-              {CREDENTIAL_TYPES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {credentialTypeLabel(option.value)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {!pushable ? (
-            <ForEveryClientToggle
-              code="credentials.manage"
-              hint={t("credentials.create.forEveryClientHint")}
-              checked={forEveryClient}
-              onChange={setForEveryClient}
-            />
-          ) : null}
-          {asksClient ? <ClientField field={client} /> : null}
-          {/* The half of the enum finding the auditor called the one that
-              matters: "an operator choosing between 'ssh_key' and 'domain_join'
-              gets no explanation of what each type implies for how the secret is
-              used or where it can be checked out." */}
-          {typeDescription ? (
-            <p className="form-hint" role="status">
-              {typeDescription}
-            </p>
-          ) : null}
-          {isWindowsDomain ? (
-            <>
-              {/* THE STANDING WARNING (design §2.3 "What remains"). The site
-                  server holds this password in memory for the length of a
-                  push; nothing here can check what the account may do in the
-                  directory, so the console says it where the choice is made. */}
-              <div className="notice gold" role="note">
-                <Icon name="alert-triangle" size={17} />
-                <div>
-                  <Trans k="credentials.create.domainAdminWarning" components={{ strong: <strong /> }} />
-                </div>
-              </div>
-              <Field
-                label={t("credentials.create.accountField")}
-                full
-                help={
-                  realm
-                    ? t("credentials.create.realmHelp", { realm })
-                    : t("credentials.create.accountHelp")
-                }
+              `new-password` on the secret (the value that must never be offered
+              for saving), `off` on the name beside it (a username-shaped field
+              is half of what makes a manager treat this as a login form), and
+              the two manager-specific opt-outs, which is the rest of the fix
+              line. Invariant #3 is about logs and API responses; a password
+              manager writing the value into an unmanaged profile is the same
+              disclosure through a third door. */}
+          <div className="form-grid">
+            <Field label={t("credentials.create.name")}>
+              <input
+                className={inputClass}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+              />
+            </Field>
+            <Field label={t("credentials.create.type")}>
+              <select
+                className={inputClass}
+                value={type}
+                onChange={(event) => setType(event.target.value)}
               >
-                <input
-                  className={inputClass}
-                  value={account}
-                  onChange={(event) => setAccount(event.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  data-1p-ignore
-                  data-lpignore="true"
-                />
-              </Field>
-              <Field label={t("credentials.create.password")} full>
+                {CREDENTIAL_TYPES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {credentialTypeLabel(option.value)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!pushable ? (
+              <ForEveryClientToggle
+                code="credentials.manage"
+                hint={t("credentials.create.forEveryClientHint")}
+                checked={forEveryClient}
+                onChange={setForEveryClient}
+              />
+            ) : null}
+            {asksClient ? <ClientField field={client} /> : null}
+            {/* The half of the enum finding the auditor called the one that
+                matters: "an operator choosing between 'ssh_key' and 'domain_join'
+                gets no explanation of what each type implies for how the secret is
+                used or where it can be checked out." */}
+            {typeDescription ? (
+              <p className="form-hint" role="status">
+                {typeDescription}
+              </p>
+            ) : null}
+            {isWindowsDomain ? (
+              <>
+                {/* THE STANDING WARNING (design §2.3 "What remains"). The site
+                    server holds this password in memory for the length of a
+                    push; nothing here can check what the account may do in the
+                    directory, so the console says it where the choice is made. */}
+                <div className="notice gold" role="note">
+                  <Icon name="alert-triangle" size={17} />
+                  <div>
+                    <Trans k="credentials.create.domainAdminWarning" components={{ strong: <strong /> }} />
+                  </div>
+                </div>
+                <Field
+                  label={t("credentials.create.accountField")}
+                  full
+                  help={
+                    realm
+                      ? t("credentials.create.realmHelp", { realm })
+                      : t("credentials.create.accountHelp")
+                  }
+                >
+                  <input
+                    className={inputClass}
+                    value={account}
+                    onChange={(event) => setAccount(event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-1p-ignore
+                    data-lpignore="true"
+                  />
+                </Field>
+                <Field label={t("credentials.create.password")} full>
+                  <input
+                    className={inputClass}
+                    type="password"
+                    value={secret}
+                    onChange={(event) => setSecret(event.target.value)}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    data-1p-ignore
+                    data-lpignore="true"
+                  />
+                </Field>
+                <Field label={t("credentials.create.controller")} full>
+                  <input
+                    className={inputClass}
+                    value={kdc}
+                    onChange={(event) => setKdc(event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={t("credentials.create.controllerPlaceholder")}
+                  />
+                </Field>
+                {/* Public material, so a textarea and never a password box; it
+                    travels inside the vault blob only so it stays with the
+                    credential it belongs to (§I3/W9). */}
+                <Field label={t("credentials.create.caCertificate")} full>
+                  <textarea
+                    className={inputClass}
+                    value={caPem}
+                    onChange={(event) => setCaPem(event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    rows={4}
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field label={t("credentials.create.secret")} full>
                 <input
                   className={inputClass}
                   type="password"
@@ -791,69 +864,33 @@ function CreateCredentialDialog({
                   data-lpignore="true"
                 />
               </Field>
-              <Field label={t("credentials.create.controller")} full>
-                <input
-                  className={inputClass}
-                  value={kdc}
-                  onChange={(event) => setKdc(event.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={t("credentials.create.controllerPlaceholder")}
-                />
-              </Field>
-              {/* Public material, so a textarea and never a password box; it
-                  travels inside the vault blob only so it stays with the
-                  credential it belongs to (§I3/W9). */}
-              <Field label={t("credentials.create.caCertificate")} full>
-                <textarea
-                  className={inputClass}
-                  value={caPem}
-                  onChange={(event) => setCaPem(event.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  rows={4}
-                />
-              </Field>
-            </>
-          ) : (
-            <Field label={t("credentials.create.secret")} full>
-              <input
-                className={inputClass}
-                type="password"
-                value={secret}
-                onChange={(event) => setSecret(event.target.value)}
-                autoComplete="new-password"
-                spellCheck={false}
-                data-1p-ignore
-                data-lpignore="true"
+            )}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              {t("credentials.create.cancel")}
+            </Button>
+            {/* No `saved` — this dialog closes on the server's 201 and the row
+                appears behind it. The alert here is the failure path, which
+                `String(create.error)` rendered as an empty string for the
+                bodyless 503. */}
+            {/* With Unassigned chosen at the top, nothing can be filed for a
+                client there: the dialog says so instead of offering a Store
+                that can only fail. Every client's is no client's, so ticking
+                "For every client" (where offered) still stores one. */}
+            {client.refused === "unassigned" && !everyClient ? (
+              <UnassignedRefusal />
+            ) : (
+              <FormActions
+                label={t("credentials.create.store")}
+                pending={create.isPending}
+                error={create.error}
+                problems={attemptProblems(attempt)}
               />
-            </Field>
-          )}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            {t("credentials.create.cancel")}
-          </Button>
-          {/* No `saved` — this dialog closes on the server's 201 and the row
-              appears behind it. The alert here is the failure path, which
-              `String(create.error)` rendered as an empty string for the
-              bodyless 503. */}
-          {/* With Unassigned chosen at the top, nothing can be filed for a
-              client there: the dialog says so instead of offering a Store
-              that can only fail. Every client's is no client's, so ticking
-              "For every client" (where offered) still stores one. */}
-          {client.refused === "unassigned" && !everyClient ? (
-            <UnassignedRefusal />
-          ) : (
-            <FormActions
-              label={t("credentials.create.store")}
-              pending={create.isPending}
-              error={create.error}
-              problems={attemptProblems(attempt)}
-            />
-          )}
-        </div>
-      </Form>
-    </Dialog>
+            )}
+          </div>
+        </Form>
+      </Dialog>
+    </>
   );
 }
