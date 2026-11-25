@@ -139,7 +139,7 @@ describe("where new machines go", () => {
 });
 
 // MSP clients phase 3, design §4.4: the add-a-computer journey links here with
-// `?client=…&site=…`. Its own history entry each, so every render is an arrival
+// `?journey_client=…&journey_site=…`. Its own history entry each, so every render is an arrival
 // (`onboarding/journeyTarget.ts` decides once per entry).
 describe("opened from the add-a-computer journey", () => {
   function renderAt(path: string) {
@@ -157,7 +157,7 @@ describe("opened from the add-a-computer journey", () => {
     selectClient("c-acme");
     const api = stubApi();
     const user = userEvent.setup();
-    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    renderAt("/agent-packages?journey_client=c-acme&journey_site=site-a2");
     await waitFor(() => expect(api.getInstallLink).toHaveBeenCalledWith("site-a2"));
     await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a2"));
     await user.click(screen.getByRole("button", { name: /install command/i }));
@@ -169,14 +169,14 @@ describe("opened from the add-a-computer journey", () => {
     const select = vi.fn();
     mockClientScope.mockReturnValue({ selected: null, select, clients: [INTERNAL, ACME], ready: true });
     stubApi();
-    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    renderAt("/agent-packages?journey_client=c-acme&journey_site=site-a2");
     await waitFor(() => expect(select).toHaveBeenCalledWith("c-acme"));
     expect(select).toHaveBeenCalledTimes(1);
   });
 
   it("ignores the journey's site under another client chosen at the top", async () => {
     const api = stubApi();
-    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    renderAt("/agent-packages?journey_client=c-acme&journey_site=site-a2");
     // The internal client's only site, never Acme's.
     await waitFor(() => expect(api.getInstallLink).toHaveBeenCalledWith("site-o"));
     expect(api.getInstallLink).not.toHaveBeenCalledWith("site-a2");

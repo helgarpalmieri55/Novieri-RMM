@@ -658,7 +658,7 @@ describe("the sweeper picker asks only when it may be used", () => {
 
 describe("the subnet tree opened from the add-a-computer journey (design §4.4)", () => {
   // Closing the register dialog replaces `?register=` away and choosing a view
-  // pushes `?state=`, both keeping the journey's `client=`: the same arrival,
+  // pushes `?state=`, both keeping the journey's `journey_client=`: the same arrival,
   // so the client the person chose since is not undone.
   const ACME_SCOPE: MeClient = { id: "c-x", name: "Acme", kind: "customer", enabled_modules: [], permissions: [] };
   const select = vi.fn();
@@ -676,7 +676,7 @@ describe("the subnet tree opened from the add-a-computer journey (design §4.4)"
     const ui = (key: string) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
-          initialEntries={["/devices/onboard", "/ipam?client=c-x&site=site-x&register=1"]}
+          initialEntries={["/devices/onboard", "/ipam?journey_client=c-x&journey_site=site-x&register=1"]}
           initialIndex={1}
         >
           <SubnetTreePage key={key} />

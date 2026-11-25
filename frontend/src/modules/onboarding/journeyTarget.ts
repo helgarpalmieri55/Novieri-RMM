@@ -1,6 +1,6 @@
 /**
  * The add-a-computer journey's client and site on the pages it opens (MSP
- * clients phase 3, design §4.4), carried as `?client=…&site=…`.
+ * clients phase 3, design §4.4), carried as `?journey_client=…&journey_site=…`.
  *
  * THE CLIENT IS THE CONSOLE'S. A page opened from the journey under «Todos
  * mis clientes» switches the console to the journey's client, once, when it
@@ -20,14 +20,15 @@
  * AND THE PAGE'S OWN NAVIGATIONS ARE THE SAME ARRIVAL. A page that writes its
  * query -- Enrollment's tabs push `?tab=`, the subnet tree pushes `?state=`
  * and replaces `?register=` away -- makes a new history entry, with a new
- * key, that keeps the journey's `client=`. Deciding on it afresh would switch
- * a person who had since chosen «Todos mis clientes» back at the first tab
- * click (and every other tab through `storage`). So a new entry reached while
- * the page stays mounted, on the same path with the same journey client,
- * inherits the decision already made; the page's own navigations never
- * remount it. An arrival is a page mounting on an entry: the journey's link
- * followed, the URL opened (or reloaded, or reached after signing in), Back
- * or Forward from another page -- and an entry already decided stays decided.
+ * key, that keeps the journey's `journey_client=`. Deciding on it afresh
+ * would switch a person who had since chosen «Todos mis clientes» back at the
+ * first tab click (and every other tab through `storage`). So a new entry
+ * reached while the page stays mounted, on the same path with the same
+ * journey client, inherits the decision already made; the page's own
+ * navigations never remount it. An arrival is a page mounting on an entry:
+ * the journey's link followed, the URL opened (or reloaded, or reached after
+ * signing in), Back or Forward from another page -- and an entry already
+ * decided stays decided.
  *
  * THE SITE IS THE PAGE'S FIRST CHOICE. `useJourneySiteState` starts a page's
  * site at the journey's, once the console works on the journey's client; the

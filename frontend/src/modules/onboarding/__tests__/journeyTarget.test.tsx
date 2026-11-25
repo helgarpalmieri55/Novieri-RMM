@@ -53,7 +53,7 @@ function renderAt(path: string, probeKey = "first", Page: ComponentType = Probe)
  * A journey page that writes its own query, as two of them do: Enrollment
  * pushes `?tab=`, the subnet tree pushes `?state=` and replaces `?register=`
  * away. Each write is a new history entry -- a new `location.key` -- on the
- * same page, with the journey's `client=` still in it.
+ * same page, with the journey's `journey_client=` still in it.
  */
 function WritingPage() {
   useAdoptJourneyClient();
@@ -85,32 +85,32 @@ beforeEach(() => {
 
 describe("a page opened from the journey", () => {
   it("makes an every-client console work on the journey's client", () => {
-    renderAt("/enrollment?client=c-andes&site=s-north");
+    renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(clientScope.select).toHaveBeenCalledWith("c-andes");
     expect(clientScope.select).toHaveBeenCalledTimes(1);
   });
 
   it("never overrides a client chosen above, and ignores that client's site", () => {
     clientScope.selected = "c-other";
-    renderAt("/enrollment?client=c-andes&site=s-north");
+    renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(clientScope.select).not.toHaveBeenCalled();
     expect(screen.getByText("none")).toBeInTheDocument();
   });
 
   it("ignores a client that is not one of the person's", () => {
     clientScope.clients = [];
-    renderAt("/enrollment?client=c-andes&site=s-north");
+    renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(clientScope.select).not.toHaveBeenCalled();
   });
 
   it("starts the site at the journey's once the console works on its client", () => {
     clientScope.selected = "c-andes";
-    renderAt("/enrollment?client=c-andes&site=s-north");
+    renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(screen.getByText("s-north")).toBeInTheDocument();
   });
 
   it("adopts once per arrival: every client chosen afterwards is the person's choice", () => {
-    const view = renderAt("/enrollment?client=c-andes&site=s-north");
+    const view = renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(clientScope.select).toHaveBeenCalledTimes(1);
     // The console now works on the journey's client: the page starts again.
     clientScope.selected = "c-andes";
@@ -129,7 +129,7 @@ describe("a page opened from the journey", () => {
     // of the person's", and deciding on it would never adopt.
     clientScope.ready = false;
     clientScope.clients = [];
-    const view = renderAt("/enrollment?client=c-andes&site=s-north");
+    const view = renderAt("/enrollment?journey_client=c-andes&journey_site=s-north");
     expect(clientScope.select).not.toHaveBeenCalled();
     clientScope.ready = true;
     clientScope.clients = [ANDES];
@@ -145,7 +145,7 @@ describe("a page opened from the journey", () => {
         <Routes>
           <Route
             path="/devices/onboard"
-            element={<Link to="/enrollment?client=c-andes&site=s-north">open</Link>}
+            element={<Link to="/enrollment?journey_client=c-andes&journey_site=s-north">open</Link>}
           />
           <Route path="/enrollment" element={<WritingPage />} />
         </Routes>
@@ -160,7 +160,7 @@ describe("a page opened from the journey", () => {
 /**
  * THE PAGE'S OWN NAVIGATIONS ARE THE SAME ARRIVAL. A tab clicked, a view
  * chosen or a dialog closed writes the page's query, and so makes a new
- * history entry that keeps the journey's `client=`: it is not the journey
+ * history entry that keeps the journey's `journey_client=`: it is not the journey
  * opening the page again, and the client the person chose meanwhile stays.
  */
 describe("a journey page that writes its own query", () => {
@@ -168,7 +168,7 @@ describe("a journey page that writes its own query", () => {
     // The journey's link is followed with its client chosen above (the usual path).
     clientScope.selected = "c-andes";
     const user = userEvent.setup();
-    const view = renderAt("/enrollment?client=c-andes&site=s-north", "on-andes", WritingPage);
+    const view = renderAt("/enrollment?journey_client=c-andes&journey_site=s-north", "on-andes", WritingPage);
     expect(clientScope.select).not.toHaveBeenCalled();
     // «Todos mis clientes» above: the page starts again on the same URL.
     clientScope.selected = null;
@@ -183,7 +183,7 @@ describe("a journey page that writes its own query", () => {
 
   it("keeps «Todos mis clientes» chosen after the journey's client was adopted", async () => {
     const user = userEvent.setup();
-    const view = renderAt("/enrollment?client=c-andes&site=s-north", "first", WritingPage);
+    const view = renderAt("/enrollment?journey_client=c-andes&journey_site=s-north", "first", WritingPage);
     expect(clientScope.select).toHaveBeenCalledTimes(1);
     clientScope.selected = "c-andes";
     view.remount("on-andes");
@@ -199,7 +199,7 @@ describe("a journey page that writes its own query", () => {
   it("keeps another client chosen after the arrival, through the page's own navigations", async () => {
     clientScope.clients = [ANDES, { ...ANDES, id: "c-other", name: "Other" }];
     const user = userEvent.setup();
-    const view = renderAt("/enrollment?client=c-andes&site=s-north", "first", WritingPage);
+    const view = renderAt("/enrollment?journey_client=c-andes&journey_site=s-north", "first", WritingPage);
     expect(clientScope.select).toHaveBeenCalledTimes(1);
     // The person then picks another of their clients above...
     clientScope.selected = "c-other";

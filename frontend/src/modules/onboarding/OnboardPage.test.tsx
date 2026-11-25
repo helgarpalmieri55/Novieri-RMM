@@ -335,14 +335,14 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     expect(screen.queryByRole("combobox", { name: "Site" })).toBeNull();
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Open IP Address Management/i }).getAttribute("href")).toBe(
-        "/ipam?client=c-andes&site=s-main",
+        "/ipam?journey_client=c-andes&journey_site=s-main",
       ),
     );
     expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
-      "/agent-packages?client=c-andes&site=s-main",
+      "/agent-packages?journey_client=c-andes&journey_site=s-main",
     );
     expect(screen.getByRole("link", { name: /Enrollment tokens/i }).getAttribute("href")).toBe(
-      "/enrollment?client=c-andes&site=s-main",
+      "/enrollment?journey_client=c-andes&journey_site=s-main",
     );
   });
 
@@ -357,7 +357,7 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     await user.selectOptions(site, "s-north");
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
-        "/agent-packages?client=c-andes&site=s-north",
+        "/agent-packages?journey_client=c-andes&journey_site=s-north",
       ),
     );
   });
