@@ -1,6 +1,6 @@
-import { NavLink } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 
 // The three deploy surfaces this module contributes, routed separately
 // (App.tsx: /deploy, /deploy/packages, /deploy/scripts) — mirrors
@@ -31,19 +31,14 @@ export function DeployPageNav({ canRead }: { canRead: boolean }) {
   // (`deploy.read`, shell/nav.ts): a strip offering three pages the caller
   // cannot open is three refusals waiting to happen.
   if (!canRead) return null;
+  // THE KIT'S SECTION NAV (redesign plan, waves' common rules): a row of
+  // links, the current page marked with `aria-current="page"`. It was a
+  // `role="tablist"` of links, which promises arrow keys and panels a row of
+  // links does not have.
   return (
-    <nav aria-label={t("deploy.nav.label")} className="tabs" role="tablist">
-      {DEPLOY_NAV_ITEMS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === "/deploy"}
-          role="tab"
-          className={({ isActive }) => `tab${isActive ? " active" : ""}`}
-        >
-          {item.label}
-        </NavLink>
-      ))}
-    </nav>
+    <SectionNav
+      label={t("deploy.nav.label")}
+      items={DEPLOY_NAV_ITEMS.map((item) => ({ to: item.to, label: item.label, end: item.to === "/deploy" }))}
+    />
   );
 }

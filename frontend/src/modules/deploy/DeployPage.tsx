@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -42,7 +42,23 @@ import {
 } from "./pickerOptions";
 import { initialsOf, personIndex } from "../../lib/people";
 import type { Deployment, DeploymentAction, DeployTargetType } from "./types";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 
 // The design's `P['deploy']` (docs/design/itms-prototype-v3.html): the head
 // with New deployment as the page's primary, a tile row, and one bare panel
@@ -111,7 +127,9 @@ function actionGlyph(action: string): string {
 export function DeployPage() {
   const t = useT();
   const api = useApi();
-  const [createOpen, setCreateOpen] = useState(false);
+  // New → Deployment (decision D8): `?new=deployment` opens the dialog, so a
+  // link can.
+  const created = useNewParam("deployment");
 
   /**
    * THE LIST FILTER LIVES IN THE URL, because the stat tiles link into it.
@@ -119,25 +137,12 @@ export function DeployPage() {
    * "Failed 3" is an anchor to `/deploy?state=failed` now, and a filter held
    * in component state cannot be reached by a link: the tile would have been
    * a link to the page its reader is already on. `q` mirrors `DevicesPage`'s
-   * search param; `state` carries the backend's own state words.
+   * search param; `state` carries the backend's own state words; `client` is
+   * the Client chip's (redesign plan, Receta L).
    */
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q") ?? "";
-  const stateFilter = params.get("state") ?? "";
-
-  function update(patch: Record<string, string>, replace = false) {
-    const next = new URLSearchParams(params);
-    for (const [key, value] of Object.entries(patch)) {
-      // Absent, not `?q=`: an empty filter in the URL reads as a filter set to
-      // nothing.
-      if (value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    setParams(next, { replace });
-  }
-
-  const setSearch = (value: string) => update({ q: value }, true);
-  const setStateFilter = (value: string) => update({ state: value });
+  const filters = useUrlFilters(["q", "state", "client"] as const);
+  const search = filters.values.q;
+  const stateFilter = filters.values.state;
   // The deployment awaiting confirmation, or null. Holding the ROW rather than
   // an id keeps the confirmation's subject readable even if a refetch drops it.
   const [pendingExecute, setPendingExecute] = useState<Deployment | null>(null);
@@ -148,7 +153,8 @@ export function DeployPage() {
   const canCreate = permissions.includes("deploy.create");
   const canExecute = permissions.includes("deploy.execute");
 
-  const deployments = useDeployments();
+  // Narrowed to the Client chip's client; executing keeps `useApi()`.
+  const deployments = useDeployments(filters.values.client);
   const execute = useExecuteDeploymentMutation();
 
   // Fetched by the PAGE, not only by the create dialog: the table rendered
@@ -283,7 +289,7 @@ export function DeployPage() {
         description={t("deploy.deployments.description")}
         actions={
           canCreate ? (
-            <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" onClick={() => setCreateOpen(true)} />
+            <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" onClick={created.start} />
           ) : undefined
         }
       />
@@ -370,41 +376,50 @@ export function DeployPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <SearchField
-            placeholder={t("deploy.deployments.searchPlaceholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("deploy.deployments.searchLabel")}
-          />
-          {/* The control the tiles link into, and the one that clears what
-              they set. */}
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => setStateFilter(event.target.value)}
-            aria-label={t("deploy.deployments.filterLabel")}
-          >
-            <option value="">{t("deploy.deployments.filterAll")}</option>
-            {STATE_FILTERS.map((option) => (
-              <option key={option} value={option}>
-                {filterLabel(option)}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-
-        <QueryState
-          loading={deployments.isLoading}
-          error={deployments.error}
-          empty={deployments.data != null && filtered.length === 0}
-          emptyIcon="package"
-          emptyLabel={
-            allDeployments.length === 0 ? t("deploy.deployments.emptyNone") : t("deploy.deployments.emptyFiltered")
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("deploy.deployments.searchPlaceholder")}
+              value={search}
+              onChange={(event) => filters.set("q", event.target.value)}
+              aria-label={t("deploy.deployments.searchLabel")}
+            />
           }
-        >
-          <Table>
+          chips={
+            <>
+              {/* The control the tiles link into, and the one that clears
+                  what they set. No counts: `GET /deploy/deployments` sends
+                  none, and a number counted here would be the browser's. */}
+              <FilterChips
+                label={t("deploy.deployments.filterLabel")}
+                options={[
+                  { value: "", label: t("deploy.deployments.filterAll") },
+                  ...STATE_FILTERS.map((option) => ({ value: option, label: filterLabel(option) })),
+                ]}
+                value={stateFilter}
+                onChange={(value) => filters.set("state", value)}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          end={deployments.data ? <ShowingCount shown={filtered.length} total={allDeployments.length} /> : null}
+        />
+
+        <QueryState loading={deployments.isPending} error={deployments.error} empty={false} emptyLabel="">
+          {filtered.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="package"
+              nothingYet={t("deploy.deployments.emptyNone")}
+              action={
+                canCreate ? (
+                  <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" small onClick={created.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("deploy.deployments.title")}>
             <thead>
               <tr>
                 <Th>{t("deploy.deployments.colPackage")}</Th>
@@ -494,6 +509,7 @@ export function DeployPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -537,7 +553,7 @@ export function DeployPage() {
         }}
       />
 
-      <CreateDeploymentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreateDeploymentDialog open={created.open && canCreate} onClose={created.close} />
     </div>
   );
 }

@@ -439,13 +439,13 @@ describe("every deploy page links to the other two", () => {
   ] as const;
 
   function expectStrip(activeLabel: string) {
-    // `role="tablist"` overrides the <nav> element's implicit role, so the
-    // strip is found as the tablist it announces itself to be.
-    const nav = screen.getByRole("tablist", { name: "Software deployment" });
+    // The kit's SectionNav (redesign plan, waves' common rules): a navigation
+    // of links, the current one marked `aria-current="page"`, not a tablist.
+    const nav = screen.getByRole("navigation", { name: "Software deployment" });
     for (const [label, href] of EXPECTED) {
-      expect(within(nav).getByRole("tab", { name: label })).toHaveAttribute("href", href);
+      expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("href", href);
     }
-    expect(within(nav).getByRole("tab", { name: activeLabel }).className).toContain("active");
+    expect(within(nav).getByRole("link", { name: activeLabel })).toHaveAttribute("aria-current", "page");
   }
 
   it("draws the strip on the deployments page", async () => {
@@ -481,7 +481,7 @@ describe("every deploy page links to the other two", () => {
     renderWithProviders(<ScriptsPage />, "/deploy/scripts");
 
     await screen.findByText("cleanup-temp");
-    expect(screen.queryByRole("tablist", { name: "Software deployment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Software deployment" })).not.toBeInTheDocument();
   });
 });
 
@@ -544,14 +544,16 @@ describe("PackagesPage", () => {
     renderWithProviders(<PackagesPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("No packages registered.")).not.toBeInTheDocument();
+    // The empty sentence is the brief's now (redesign plan, O3 3.4).
+    expect(screen.queryByText("No packages yet.")).not.toBeInTheDocument();
   });
 
   it("says the catalog is genuinely empty when it is", async () => {
     mockUseApi.mockReturnValue(baseApi(vi.fn(() => Promise.resolve([]))) as ApiClient);
     renderWithProviders(<PackagesPage />);
 
-    expect(await screen.findByText("No packages registered.")).toBeInTheDocument();
+    // Redesign plan, O3 3.4: "No packages yet.", with New package beside it.
+    expect(await screen.findByText("No packages yet.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -1945,9 +1947,10 @@ describe("every deployment KPI tile is a link to the runs it counts", () => {
     renderWithProviders(<DeployPage />, "/deploy?state=failed");
     await screen.findByText("dep-bad");
 
-    const select = screen.getByRole("combobox", { name: "Filter by state" });
-    expect(select).toHaveValue("failed");
-    await user.selectOptions(select, "");
+    // The state filter is chips (redesign plan, Receta L): the tile's is pressed, "All" clears it.
+    const chips = screen.getByRole("group", { name: "Filter by state" });
+    expect(within(chips).getByRole("button", { name: "Failed" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(chips).getByRole("button", { name: "All deployments" }));
     expect(screen.getByText("dep-old")).toBeInTheDocument();
   });
 

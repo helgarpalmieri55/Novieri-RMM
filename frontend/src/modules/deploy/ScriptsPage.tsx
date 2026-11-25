@@ -31,8 +31,20 @@ import {
   nameForOption,
   osFamilyLabel,
 } from "./pickerOptions";
-import type { DeployTargetType, ScriptListItem } from "./types";
-import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import { INTERPRETERS, type DeployTargetType, type ScriptListItem } from "./types";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The design's `P['deploy/scripts']`: one bare panel of rows led by the
@@ -58,10 +70,26 @@ const runRules = (): readonly FieldRule[] => [{ name: "targetId", label: transla
 
 const editRules = (): readonly FieldRule[] => [{ name: "body", label: translate("deploy.scripts.ruleBody") }];
 
+/** The platforms of the System filter, in this order. */
+const OS_FILTERS = ["windows", "linux", "macos"] as const;
+
+/** For the search: case and accents do not count, the console's rule. */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
 export function ScriptsPage() {
   const t = useT();
   const api = useApi();
-  const [authorOpen, setAuthorOpen] = useState(false);
+  // New → Script (decision D8): `?new=script` opens the author dialog.
+  const authoring = useNewParam("script");
+  /* THE LIST KIT (redesign plan, O3 3.5): the search, the System and the
+     Interpreter chips in the URL. `GET /deploy/scripts` answers the whole
+     list, with no filter and no count, so all three apply here and the chips
+     carry no number. No Client chip: scripts are the organisation's. Editing
+     and running stay in their dialogs, as they were: running signs a job
+     (invariant 1), and nothing about it changes. */
+  const filters = useUrlFilters(["q", "os", "interpreter"] as const);
   const [editing, setEditing] = useState<ScriptListItem | null>(null);
   const [running, setRunning] = useState<ScriptListItem | null>(null);
 
@@ -74,6 +102,17 @@ export function ScriptsPage() {
   const canSchedule = permissions.includes("deploy.script.schedule");
 
   const scripts = useScripts();
+  const all = scripts.data ?? [];
+  const wanted = fold(filters.values.q);
+  const rows = all.filter(
+    (script) =>
+      (filters.values.os === "" || script.os_family.toLowerCase() === filters.values.os) &&
+      (filters.values.interpreter === "" || script.interpreter.trim().toLowerCase() === filters.values.interpreter) &&
+      (wanted === "" || fold(script.name).includes(wanted)),
+  );
+  const newScript = canManage ? (
+    <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" small onClick={authoring.start} />
+  ) : undefined;
 
   return (
     <div>
@@ -82,7 +121,7 @@ export function ScriptsPage() {
         description={t("deploy.scripts.description")}
         actions={
           canManage ? (
-            <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" onClick={() => setAuthorOpen(true)} />
+            <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" onClick={authoring.start} />
           ) : undefined
         }
       />
@@ -93,14 +132,50 @@ export function ScriptsPage() {
       <DeployPageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={scripts.isLoading}
-          error={scripts.error}
-          empty={scripts.data != null && scripts.data.length === 0}
-          emptyIcon="terminal"
-          emptyLabel={t("deploy.scripts.empty")}
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              aria-label={t("deploy.scripts.search")}
+              placeholder={t("deploy.scripts.searchPlaceholder")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          chips={
+            <>
+              <FilterChips
+                label={t("deploy.scripts.osLabel")}
+                options={[
+                  { value: "", label: t("deploy.scripts.osAll") },
+                  ...OS_FILTERS.map((os) => ({ value: os, label: osFamilyLabel(os) })),
+                ]}
+                value={filters.values.os}
+                onChange={(value) => filters.set("os", value)}
+              />
+              <FilterChips
+                label={t("deploy.scripts.interpreterLabel")}
+                options={[
+                  { value: "", label: t("deploy.scripts.interpreterAll") },
+                  ...INTERPRETERS.map((interpreter) => ({ value: interpreter, label: interpreterLabel(interpreter) })),
+                ]}
+                value={filters.values.interpreter}
+                onChange={(value) => filters.set("interpreter", value)}
+              />
+            </>
+          }
+          end={scripts.data ? <ShowingCount shown={rows.length} total={all.length} /> : null}
+        />
+        <QueryState loading={scripts.isPending} error={scripts.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="terminal-2"
+              nothingYet={t("deploy.scripts.empty")}
+              action={newScript}
+            />
+          ) : (
+          <Table label={t("deploy.scripts.title")}>
             <thead>
               <tr>
                 <Th>{t("deploy.scripts.colName")}</Th>
@@ -111,7 +186,7 @@ export function ScriptsPage() {
               </tr>
             </thead>
             <tbody>
-              {scripts.data?.map((script) => (
+              {rows.map((script) => (
                 <tr key={script.id}>
                   {/* REVIEW WAVE, round 3 (composition): this cell carried a
                       constant sub-line, "runs as SYSTEM or root" -- the same
@@ -149,12 +224,13 @@ export function ScriptsPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
       <SchedulesPanel scripts={scripts.data ?? []} canRead={canRead} canSchedule={canSchedule} />
 
-      <AuthorScriptDialog open={authorOpen} onClose={() => setAuthorOpen(false)} />
+      <AuthorScriptDialog open={authoring.open && canManage} onClose={authoring.close} />
       <EditScriptDialog script={editing} onClose={() => setEditing(null)} />
       <RunScriptDialog script={running} onClose={() => setRunning(null)} />
     </div>

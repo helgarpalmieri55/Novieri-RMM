@@ -6,6 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
+import { useNarrowedApi } from "../../shell/components";
 import type { CurrentOrg, Me } from "../../lib/api";
 import type {
   DeploymentCreateRequest,
@@ -143,9 +144,20 @@ export function useDeletePackageMutation() {
   });
 }
 
-export function useDeployments() {
-  const api = useApi();
-  return useQuery({ queryKey: ["deploy-deployments"], queryFn: () => api.listDeployments() });
+/**
+ * The deployments, NARROWED TO THE CLIENT CHIP'S CLIENT (redesign plan, Receta
+ * L point 7; O3 3.3): the same call, read through `useNarrowedApi(chip)` and
+ * kept under that client's key; without a chip, today's key exactly. The
+ * mutations below invalidate the `["deploy-deployments"]` prefix, which
+ * reaches both.
+ */
+export function useDeployments(chip = "") {
+  const { api, client, ready } = useNarrowedApi(chip);
+  return useQuery({
+    queryKey: client === null ? ["deploy-deployments"] : ["deploy-deployments", client],
+    queryFn: () => api.listDeployments(),
+    enabled: ready,
+  });
 }
 
 export function useCreateDeploymentMutation() {

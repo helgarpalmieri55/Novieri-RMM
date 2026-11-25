@@ -259,9 +259,10 @@ describe("the deployments page, in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Despliegue de software" })).toBeInTheDocument();
     await screen.findByText("dep1");
     expect(screen.getByRole("button", { name: "Nuevo despliegue" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Despliegues" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Paquetes" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Scripts" })).toBeInTheDocument();
+    // The section nav is a row of links now (redesign plan, SectionNav).
+    expect(screen.getByRole("link", { name: "Despliegues" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Paquetes" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Scripts" })).toBeInTheDocument();
     // The tiles and their sub-lines.
     expect(screen.getByText("Desplegados esta semana")).toBeInTheDocument();
     expect(screen.getByText("Tasa de éxito")).toBeInTheDocument();
@@ -270,10 +271,11 @@ describe("the deployments page, in Spanish", () => {
     expect(screen.getByText("1 de 2 completada")).toBeInTheDocument();
     expect(screen.getByText("2 ejecuciones han finalizado")).toBeInTheDocument();
     // The filter.
-    const filter = screen.getByRole("combobox", { name: "Filtrar por estado" });
-    expect(within(filter).getByRole("option", { name: "Todos los despliegues" })).toBeInTheDocument();
-    expect(within(filter).getByRole("option", { name: "Desplegados en los últimos 7 días" })).toBeInTheDocument();
-    expect(within(filter).getByRole("option", { name: "En envío" })).toBeInTheDocument();
+    // The state select is chips now (redesign plan, Receta L), one per option.
+    const filter = screen.getByRole("group", { name: "Filtrar por estado" });
+    expect(within(filter).getByRole("button", { name: "Todos los despliegues" })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: "Desplegados en los últimos 7 días" })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: "En envío" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Buscar despliegues" })).toHaveAttribute(
       "placeholder",
       "Buscar por despliegue, paquete, acción, destino o estado",
@@ -311,7 +313,9 @@ describe("the deployments page, in Spanish", () => {
     expect(screen.getByText("Aún no hay ejecuciones completadas")).toBeInTheDocument();
     expectNoEnglish(container);
     baseApi();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filtrar por estado" }), "week");
+    await user.click(within(screen.getByRole("group", { name: "Filtrar por estado" })).getByRole("button", { name: "Desplegados en los últimos 7 días" }));
+    // The kit's empty list, with filters on (Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
   });
 
   it("asks before executing, naming the package, the target and the window", async () => {
@@ -368,7 +372,7 @@ describe("the deployments page, in Spanish", () => {
     expect(within(row).getByText("Weekdays, 22:00 to 24:00")).toBeInTheDocument();
     expect(screen.getByText("2 still to run")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 completed")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Packages" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Packages" })).toBeInTheDocument();
   });
 });
 
@@ -493,7 +497,8 @@ describe("the packages page, in Spanish", () => {
   it("words the empty page", async () => {
     baseApi({ listPackages: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<PackagesPage />, "/deploy/packages");
-    expect(await screen.findByText("No hay paquetes registrados.")).toBeInTheDocument();
+    // Redesign plan, O3 3.4: «Aún no hay paquetes.», as the brief words it.
+    expect(await screen.findByText("Aún no hay paquetes.")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -527,7 +532,8 @@ describe("the scripts page, in Spanish", () => {
     for (const header of ["Nombre", "Plataforma", "Intérprete", "Versión"]) {
       expect(screen.getAllByRole("columnheader", { name: header }).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText("Bash")).toBeInTheDocument();
+    // In the row; the Interpreter chips (redesign plan, O3 3.5) carry the same word.
+    expect(within(screen.getByRole("table", { name: "Scripts" })).getByText("Bash")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Editar" }).length).toBe(2);
     expect(screen.getAllByRole("button", { name: "Ejecutar" }).length).toBe(2);
     // The schedules panel.

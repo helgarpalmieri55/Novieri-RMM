@@ -21,7 +21,19 @@ import { OsIcon } from "../../shell/viz";
 import { DeployPageNav } from "./deployNav";
 import { osFamilyLabel } from "./pickerOptions";
 import type { Package } from "./types";
-import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUrlFilters,
+} from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The design's `P['deploy/packages']`: one bare panel of rows led by the
@@ -44,10 +56,25 @@ function shortSha(sha: string): string {
   return sha.length > 12 ? `${sha.slice(0, 4)}…${sha.slice(-4)}` : sha;
 }
 
+/** The platforms a package is built for, the chips of the System filter, in this order. */
+const OS_FILTERS = ["windows", "linux", "macos"] as const;
+
+/** For the search: case and accents do not count, the console's rule. */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
 export function PackagesPage() {
   const t = useT();
   const api = useApi();
-  const [createOpen, setCreateOpen] = useState(false);
+  // New → Package (decision D8): `?new=package` opens the dialog.
+  const created = useNewParam("package");
+  /* THE LIST KIT (redesign plan, O3 3.4): the search and the System chip in
+     the URL. `GET /deploy/packages` answers the whole catalogue at once, with
+     no filter and no count, so both apply here, to name and version and to
+     `os_family`, and the chips carry no number (The Absent Zero Rule). No
+     Client chip: packages are the organisation's, not a client's. */
+  const filters = useUrlFilters(["q", "os"] as const);
   // The package awaiting a confirmed delete, or null. The ROW, not the id, so
   // the dialog can name what it is about to remove.
   const [pendingDelete, setPendingDelete] = useState<Package | null>(null);
@@ -60,6 +87,16 @@ export function PackagesPage() {
   const zone = me.data?.timezone;
 
   const packages = usePackages();
+  const all = packages.data ?? [];
+  const wanted = fold(filters.values.q);
+  const rows = all.filter(
+    (pkg) =>
+      (filters.values.os === "" || pkg.os_family.toLowerCase() === filters.values.os) &&
+      (wanted === "" || fold(`${pkg.name} ${pkg.version}`).includes(wanted)),
+  );
+  const newPackage = canManage ? (
+    <Btn label={t("deploy.packages.newPackage")} icon="plus" variant="primary" small onClick={created.start} />
+  ) : undefined;
   const upload = useUploadPackageArtifactMutation();
   const remove = useDeletePackageMutation();
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -76,7 +113,7 @@ export function PackagesPage() {
         description={t("deploy.packages.description")}
         actions={
           canManage ? (
-            <Btn label={t("deploy.packages.newPackage")} icon="plus" variant="primary" onClick={() => setCreateOpen(true)} />
+            <Btn label={t("deploy.packages.newPackage")} icon="plus" variant="primary" onClick={created.start} />
           ) : undefined
         }
       />
@@ -116,14 +153,39 @@ export function PackagesPage() {
       ) : null}
 
       <Panel bare>
-        <QueryState
-          loading={packages.isLoading}
-          error={packages.error}
-          empty={packages.data != null && packages.data.length === 0}
-          emptyIcon="package"
-          emptyLabel={t("deploy.packages.empty")}
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              aria-label={t("deploy.packages.search")}
+              placeholder={t("deploy.packages.searchPlaceholder")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          chips={
+            <FilterChips
+              label={t("deploy.packages.osLabel")}
+              options={[
+                { value: "", label: t("deploy.packages.osAll") },
+                ...OS_FILTERS.map((os) => ({ value: os, label: osFamilyLabel(os) })),
+              ]}
+              value={filters.values.os}
+              onChange={(value) => filters.set("os", value)}
+            />
+          }
+          end={packages.data ? <ShowingCount shown={rows.length} total={all.length} /> : null}
+        />
+        <QueryState loading={packages.isPending} error={packages.error} empty={false} emptyLabel="">
+          {rows.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              icon="package"
+              nothingYet={t("deploy.packages.empty")}
+              action={newPackage}
+            />
+          ) : (
+          <Table label={t("deploy.packages.title")}>
             <thead>
               <tr>
                 <Th>{t("deploy.packages.colName")}</Th>
@@ -135,7 +197,7 @@ export function PackagesPage() {
               </tr>
             </thead>
             <tbody>
-              {packages.data?.map((pkg) => (
+              {rows.map((pkg) => (
                 <tr key={pkg.id}>
                   <Td lead={<Icon name="package" size={18} />}>
                     <div className="cell-title">{pkg.name}</div>
@@ -205,6 +267,7 @@ export function PackagesPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -230,7 +293,7 @@ export function PackagesPage() {
         }}
       />
 
-      <CreatePackageDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreatePackageDialog open={created.open && canManage} onClose={created.close} />
     </div>
   );
 }
