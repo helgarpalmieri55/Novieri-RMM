@@ -222,7 +222,8 @@ function mountCatalogue(api: Record<string, unknown> = {}, at = "/reports") {
 describe("the report catalogue in Spanish", () => {
   it("names each report, says what the caller cannot run, and what is missing", async () => {
     const { container } = mountCatalogue();
-    expect(await screen.findByRole("heading", { name: "Informes y evidencias" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator ruling 1).
+    expect(await screen.findByRole("heading", { name: "Informes", level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Postura del parque" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Cumplimiento de SLA" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Cobertura de copias de seguridad" })).toBeInTheDocument();
@@ -326,7 +327,8 @@ describe("a report page in Spanish", () => {
     const { container } = mountReport({ runReport, exportReport: vi.fn() });
     expect(await screen.findByRole("heading", { name: "Postura del parque" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Descargar CSV" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Todos los informes" })).toHaveAttribute("href", "/reports");
+    // The way back is the head's back link, named as the rail names the catalogue (redesign Task 11).
+    expect(screen.getByRole("link", { name: "Informes" })).toHaveAttribute("href", "/reports");
     expect(await screen.findByText("Parámetros")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ejecutar" })).toBeInTheDocument();
     // Parameter titles come from the server; the option words are the console's.

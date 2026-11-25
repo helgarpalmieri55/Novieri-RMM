@@ -3,7 +3,8 @@ import type { reporting as en } from "../en/reporting";
 
 export const reporting: Shape<typeof en> = {
   catalogue: {
-    title: "Informes y evidencias",
+    // The rail's label (coordinator ruling 1).
+    title: "Informes",
     description: "Informes sobre tus dispositivos, la mesa de ayuda y el gasto, cada uno exportable como CSV.",
     tiles: {
       templates: "Plantillas de informe",
@@ -23,6 +24,10 @@ export const reporting: Shape<typeof en> = {
       other:
         "Mostrando solo los informes para los que te falta un permiso. Este filtro oculta {hidden} de {count} informes. <link>Mostrar todos los informes</link>.",
     },
+    // The search and the family chips (redesign Task 11): a family is a module the report reads.
+    search: "Buscar informes",
+    familyLabel: "Familia",
+    allFamilies: "Todos",
     heading: "Catálogo",
     emptyRunnable: "No puedes ejecutar ninguno de los informes que publica esta instalación.",
     emptyBlocked: "No te falta ningún permiso. Puedes ejecutar todos los informes de aquí.",
@@ -78,7 +83,8 @@ export const reporting: Shape<typeof en> = {
   },
   view: {
     download: "Descargar CSV",
-    allReports: "Todos los informes",
+    // The head's way back to the catalogue, named as the rail names it (redesign Task 11).
+    back: "Informes",
     loadingParams: "Cargando parámetros…",
     catalogueFailed:
       "No se pudo cargar el catálogo de informes, así que esta página no sabe qué parámetros admite este informe. {reason}",

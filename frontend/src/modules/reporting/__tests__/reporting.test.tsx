@@ -30,12 +30,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import { ReportCataloguePage } from "../ReportCatalogue";
 import { figureFor } from "../reportFigures";
 import { sourceLine } from "../reportText";
@@ -431,6 +432,59 @@ describe("the report catalogue", () => {
     ).toBeInTheDocument();
   });
 
+  // ---- The list kit (redesign Task 11, "ReportCatalogue"; Receta L) ----
+
+  function onKit(at: string) {
+    mockUseApi.mockReturnValue(client({ me: vi.fn().mockResolvedValue(ME), listReports: vi.fn().mockResolvedValue(CATALOGUE) }));
+    return renderPage(at, <ReportCataloguePage />, "/reports");
+  }
+
+  it("keeps its search in the URL, so a reload finds the same rows", async () => {
+    const { router } = onKit("/reports");
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Search reports" }), "sla");
+    expect(router.state.location.search).toBe("?q=sla");
+    expect(screen.queryByTestId("report-card-fleet-posture")).toBeNull();
+    expect(screen.getByTestId("report-card-sla-attainment")).toBeInTheDocument();
+    await act(() => router.navigate("/reports?q=sla"));
+    expect(screen.getByRole("searchbox", { name: "Search reports" })).toHaveValue("sla");
+  });
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    const { router } = onKit("/reports?family=sla");
+    const families = await screen.findByRole("group", { name: "Family" });
+    expect(within(families).getByRole("button", { name: /Service levels/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByTestId("report-card-sla-attainment")).toBeInTheDocument();
+    expect(screen.queryByTestId("report-card-fleet-posture")).toBeNull();
+    await userEvent.click(within(families).getByRole("button", { name: /Devices/ }));
+    expect(router.state.location.search).toBe("?family=devices");
+  });
+
+  it("counts each family over the whole catalogue: the modules each report reads", async () => {
+    onKit("/reports");
+    const families = await screen.findByRole("group", { name: "Family" });
+    await screen.findByTestId("report-card-fleet-posture");
+    expect(within(families).getByRole("button", { name: /Devices/ })).toHaveTextContent("1");
+    expect(within(families).getByRole("button", { name: /Tickets/ })).toHaveTextContent("1");
+  });
+
+  it("says why the list is empty", async () => {
+    onKit("/reports?family=sla&q=fleet");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("keeps ?access while the search narrows within it", async () => {
+    const { router } = onKit("/reports?access=runnable");
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Search reports" }), "fleet");
+    expect(router.state.location.search).toBe("?access=runnable&q=fleet");
+    expect(screen.getByTestId("report-card-fleet-posture")).toBeInTheDocument();
+  });
+
+  it("names the page after its rail entry", async () => {
+    onKit("/reports");
+    expect(await screen.findByRole("heading", { level: 1, name: "Reports" })).toBeInTheDocument();
+  });
+
   it("says there is no bulk/BI dataset export, rather than claiming one is Ready", async () => {
     renderCatalogue(client({ listReports: vi.fn().mockResolvedValue(CATALOGUE) }));
     await screen.findByTestId("report-card-fleet-posture");
@@ -440,6 +494,28 @@ describe("the report catalogue", () => {
 });
 
 describe("a report page", () => {
+  it("names the report in the browser tab", async () => {
+    mockUseApi.mockReturnValue(
+      client({
+        listReports: vi.fn().mockResolvedValue(CATALOGUE),
+        me: vi.fn().mockResolvedValue(ME),
+        runReport: vi.fn().mockResolvedValue(page()),
+      }),
+    );
+    renderPage("/reports/fleet-posture", <ReportViewPage />, "/reports/:reportKey", { page: "shell.nav.item.reports" });
+    await screen.findByRole("heading", { level: 1, name: "Fleet posture" });
+    await waitFor(() => expect(document.title).toBe("Fleet posture · Reports · Novieri RMM"));
+  });
+
+  it("leads back to the catalogue from its head", async () => {
+    renderReport(client({ runReport: vi.fn().mockResolvedValue(page()) }));
+    await screen.findByRole("heading", { level: 1, name: "Fleet posture" });
+    expect(screen.getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/reports");
+    // The parameters are a form section, still with Run.
+    expect(await screen.findByRole("button", { name: "Parameters" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+  });
+
   it("always renders 'As of <generated_at>' and NO staleness note for a reproducible report", async () => {
     renderReport(
       client({
