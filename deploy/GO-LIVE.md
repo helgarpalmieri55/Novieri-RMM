@@ -30,7 +30,7 @@ left at a default. Run it before `docker compose up`, not after.
 | `PORTAL_DB_PASSWORD` | `openssl rand -base64 24` | `portal_user` — the row-scoped end-user portal role |
 | `MINIO_ROOT_PASSWORD` | `openssl rand -base64 24` | also used as `ITS_S3_SECRET_KEY`, which signs every presigned URL the fleet is handed — see §3 |
 | `ITS_OPENBAO_TOKEN` | first boot step 3.4 | the **least-privilege `its-app`** token, never the root token |
-| `OPENBAO_TOKEN` | first boot step 3.2 | the **provisioning/root** token; blank it out again after first boot |
+| `OPENBAO_TOKEN` | first boot step 3.2 | the **provisioning/root** token; **must stay set**, every `up -d` runs `openbao-init` with it (see below) |
 
 **And one value that is not a secret but is not optional either:**
 
@@ -53,11 +53,34 @@ chmod 600 deploy/.env
 git -C /opt/it-suite status --short deploy/.env    # must print nothing
 ```
 
-**Do not put the two OpenBao tokens in the same place.** `ITS_OPENBAO_TOKEN` is
+**The two OpenBao tokens are different values with different readers.** `ITS_OPENBAO_TOKEN` is
 read by every long-running backend container (`backup-replicator` included); `OPENBAO_TOKEN` is read by one
-short-lived provisioning container and can be emptied once `openbao-init` has
-run. Leaving the root token in `.env` permanently gives every application
-process the ability to delete the job-signing key.
+short-lived provisioning container, `openbao-init`.
+
+**`OPENBAO_TOKEN` must stay set in `.env`. Do not blank it.**
+`docker-compose.yml` declares `BAO_TOKEN: ${OPENBAO_TOKEN:?set in .env}` for
+`openbao-init`, Compose interpolates the whole file for every command, and
+`openbao-init` runs on every `up -d` as a dependency of `api`. With the value
+empty, every `docker compose` command (`up`, `ps`, `logs`, `config`) fails with
+`required variable OPENBAO_TOKEN is missing a value`.
+
+Treat it as a root-equivalent secret, because it is the OpenBao root token:
+
+- `.env` is mode 0600 and owned by the deploy user (`chmod 600 deploy/.env`,
+  above), and the token is never copied anywhere else: not into a shell
+  history, a ticket, a chat or a second file.
+- Keep it with the other key material, custody as in §6 (the OpenBao unseal
+  shares and root token are backed up off this host, never beside a copy of
+  `openbao-data`).
+- It is not read by api, gateway or worker, which hold only `ITS_OPENBAO_TOKEN`
+  (the least-privilege `its-app` token). That limits which processes read it
+  from `.env` by design; it does not make the file less sensitive.
+
+*Open decision for the operator:* taking the root token off the host
+altogether. It needs `openbao-init` to skip provisioning when no token is
+given, and a later upgrade that adds provisioning would then need the token put
+back for that run. Neither exists today; until it is decided and built, the
+token stays in `.env`.
 
 ## 2. The first administrator
 
@@ -95,7 +118,9 @@ itself, so `:80` stays shut; it keeps the account and the certificate in the
 `traefik-acme` volume, and renews 30 days before expiry. It needs an `A`
 record for the host pointing at this machine, **no `AAAA` record** (this
 deployment is one IPv4 address, and nothing checks that it answers on IPv6;
-Let's Encrypt itself falls back to IPv4), and `:443` reachable from the
+Let's Encrypt retries over IPv4 only on a connection timeout, so an `AAAA`
+that points at a host that answers but is wrong fails validation, see
+<https://letsencrypt.org/docs/ipv6-support/>), and `:443` reachable from the
 Internet. `./scripts/preflight.sh` checks the records against the public DNS.
 
 Traefik **silently serves its own self-signed certificate** while it has no
@@ -233,12 +258,11 @@ the only copy, installed at first boot.
 This needs `/etc/it-suite/gateway-issuer.token` (mode 0600, root-owned) from
 first-boot step 3.4. It does **not** need `OPENBAO_TOKEN`, and that is the
 change worth noticing: the timer used to require the **root** token to stay on
-the host, which §1 asks you to blank out — so the runbook was asking you to
-choose between an unrenewed certificate and a permanently resident root
-credential. The `gateway-issuer` policy holds `update` on `pki/issue/gateway`
+the host — so the runbook was asking you to choose between an unrenewed
+certificate and a second reader of the resident root credential. The `gateway-issuer` policy holds `update` on `pki/issue/gateway`
 and nothing else, so the file this timer reads cannot re-key
 `transit/job-signing`, cannot re-mount the PKI, and cannot read any org's
-envelope key. Blank `OPENBAO_TOKEN` as §1 says.
+envelope key. `OPENBAO_TOKEN` stays in `.env` as §1 says: it is not blanked, because `openbao-init` needs it on every `up -d`.
 
 Rotate the `gateway-issuer` token on the same schedule as `ITS_OPENBAO_TOKEN`
 above; both are minted with a 10-year TTL and nothing in the stack renews

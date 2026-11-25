@@ -134,9 +134,11 @@ esac
 # runbook, host-network.md and this script reason about it, and nothing
 # checks that :443 and :8443 answer on IPv6. So an AAAA record would send
 # browsers and agents, which try IPv6 first, where nobody has checked this
-# stack answers -- or, if it is another machine's, to that machine. (Not for
-# Let's Encrypt's sake: its TLS-ALPN-01 validator falls back to IPv4 after any
-# IPv6 error, Boulder va/tlsalpn.go.) The AAAA is asked through Python's
+# stack answers -- or, if it is another machine's, to that machine. (Let's
+# Encrypt is no safety net: per https://letsencrypt.org/docs/ipv6-support/ it
+# retries over IPv4 only on a connection timeout, "not on other types of
+# error", so an AAAA at a host that answers but is wrong fails validation.)
+# The AAAA is asked through Python's
 # getaddrinfo, not `getent ahosts`: glibc's getent sets AI_ADDRCONFIG, which
 # hides every AAAA on a host with no IPv6 address of its own -- exactly the
 # VPS this runbook builds. getaddrinfo still reads /etc/hosts before DNS
