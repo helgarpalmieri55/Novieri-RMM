@@ -73,7 +73,11 @@ export function CalendarDetailPanel({
         canAdmin={canAdmin}
         onDirty={onWeekDirty}
       />
-      <HolidaysPanel calendarId={calendarId} canAdmin={canAdmin} />
+      {/* Keyed for the same reason: a half-typed holiday belongs to the
+          calendar it was typed for, and Add holiday must never send it to the
+          next one (general ruling 12). Its own key: it is the week editor's
+          sibling, and two siblings with one key are drawn twice. */}
+      <HolidaysPanel key={`holidays-${calendarId}`} calendarId={calendarId} canAdmin={canAdmin} />
     </div>
   );
 }

@@ -297,6 +297,36 @@ describe("the SLA week editor and the page's one guard", () => {
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
   });
 
+  // The same ruling for the holiday typed beside the week: it is a draft
+  // too, and Add holiday sent it to whichever calendar was open by then.
+  it("drops a half-typed holiday when another calendar opens, and never adds it to that one (general ruling 12)", async () => {
+    const addHoliday = vi.fn((id: string, body: { holiday_date: string; name: string }) => ({
+      id: `hol-${id}-new`,
+      calendar_id: id,
+      ...body,
+    }));
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), addSlaCalendarHoliday: addHoliday }));
+    renderPage("/sla", <SlaAdminPage />, "/sla");
+    const section = (await screen.findByRole("heading", { name: "Business calendars" })).closest("section") as HTMLElement;
+    const open = async (calendar: string) => {
+      const row = within(section).getByRole("row", { name: new RegExp(calendar) });
+      await userEvent.click(within(row).getByRole("button", { name: "Hours & holidays" }));
+      await screen.findByRole("heading", { level: 3, name: calendar });
+    };
+    await within(section).findByRole("row", { name: /Around the clock/ });
+
+    await open("Around the clock");
+    await open("Standard business hours");
+    await userEvent.type(screen.getByLabelText(/^Holiday date/), "2026-12-24");
+    await userEvent.type(screen.getByLabelText(/^Holiday name/), "Christmas Eve");
+
+    await open("Around the clock");
+    expect(screen.getByLabelText(/^Holiday date/)).toHaveValue("");
+    expect(screen.getByLabelText(/^Holiday name/)).toHaveValue("");
+    await userEvent.click(screen.getByRole("button", { name: "Add holiday" }));
+    expect(addHoliday).not.toHaveBeenCalled();
+  });
+
   it("is one guard with a half-written dialog over the week: Back asks for the dialog, and leaving still asks for the week", async () => {
     const { router } = await editTheWeek();
     const section = screen.getByRole("heading", { name: "Business calendars" }).closest("section") as HTMLElement;
