@@ -257,6 +257,22 @@ describe("the changes list behind the Client chip (decisions D6, D17)", () => {
     expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
   });
 
+  it("draws no number and no claim on a tile when the list fails to load (ruling 10a)", async () => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listChanges: vi.fn().mockRejectedValue(new ApiError(503, "")),
+      listChangeGates: vi.fn().mockResolvedValue([]),
+      listDeviceGroups: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as ApiClient);
+    renderPage("/changes", <ChangesPage />);
+    // The list says the error; the tiles say nothing.
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+    expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+  });
+
   const ANDES = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
   const ANDES_CLIENT: MeClient = { id: ANDES, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: [] };
 

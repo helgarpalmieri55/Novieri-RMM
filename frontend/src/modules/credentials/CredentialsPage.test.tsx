@@ -1253,6 +1253,16 @@ describe("CredentialsPage on the list kit", () => {
       expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
     });
 
+    it("draws no number and no claim on a tile when the list fails to load (ruling 10a)", async () => {
+      mockUseApi.mockReturnValue(consoleApi({ listCredentials: vi.fn().mockRejectedValue(new ApiError(503, "")) }));
+      renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");
+      // The list says the error; the tiles say nothing.
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+      expect(values).toEqual(["n/a", "n/a", "n/a", "n/a"]);
+      expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
+    });
+
     it("leads each tile to exactly the rows it counted, the chip included", async () => {
       mockUseApi.mockReturnValue(consoleApi());
       renderKitPage(`/credentials?client=${ANDES}`, <CredentialsPage />, "/credentials");

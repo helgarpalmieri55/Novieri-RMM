@@ -1196,6 +1196,18 @@ describe("DocsPage on the kit", () => {
       expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
     });
 
+    it("draws no number and no claim on the article tiles when the articles fail to load (ruling 10a)", async () => {
+      mockUseApi.mockReturnValue(kitApi({ listArticles: vi.fn().mockRejectedValue(new Error("boom")) }));
+      renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");
+      expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
+      // Articles and "linked to an object" read the articles; records and documents have reads of their own.
+      const cards = [...document.querySelectorAll(".stat-card")];
+      for (const card of [cards[0], cards[2]]) {
+        expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
+        expect(card.querySelectorAll(".stat-zero, .stat-foot")).toHaveLength(0);
+      }
+    });
+
     it("keeps the chip in a tile's link, so a tile opens the rows it counted", async () => {
       mockUseApi.mockReturnValue(kitApi());
       renderKitPage(`/docs?client=${ANDES}`, <DocsPage />, "/docs");

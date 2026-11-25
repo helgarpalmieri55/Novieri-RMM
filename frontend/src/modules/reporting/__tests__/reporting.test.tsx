@@ -365,6 +365,10 @@ describe("the report catalogue", () => {
     renderCatalogue(client({ listReports: vi.fn().mockRejectedValue(new Error("boom")) }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("This deployment publishes no reports.")).toBeNull();
+    // A failed read is no data either: the tiles say nothing, the list says the error (ruling 10a).
+    const values = [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
+    expect(document.querySelectorAll(".stat-card .stat-zero, .stat-card .stat-foot")).toHaveLength(0);
   });
 
   // Reporting-specific instruction: the design's "BI datasets" tab claims
