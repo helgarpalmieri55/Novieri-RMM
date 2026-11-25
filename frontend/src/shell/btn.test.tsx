@@ -12,6 +12,8 @@
  * capability the next caller works around again.
  */
 import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { Btn } from "./components";
@@ -54,5 +56,35 @@ describe("Btn", () => {
     expect(button).toHaveClass("btn");
     expect(button).not.toBeDisabled();
     expect(button.className.trim()).toBe("btn");
+  });
+});
+
+/** A stylesheet with comments stripped, and one rule's body by selector. */
+const css = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+function rule(text: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\>]/g, "\\$&");
+  return new RegExp(`(?:^|[},])\\s*${escaped}\\s*\\{([^}]*)\\}`, "m").exec(text)?.[1] ?? "";
+}
+
+describe("Btn wide (kit requests batch 2, K4)", () => {
+  it("takes .wide when asked, so a step's one action can run across its card", () => {
+    render(<Btn label="Sign in" variant="primary" wide />);
+    expect(screen.getByRole("button", { name: "Sign in" })).toHaveClass("btn", "primary", "wide");
+  });
+
+  it("is not wide by default", () => {
+    render(<Btn label="Sign in" variant="primary" />);
+    expect(screen.getByRole("button", { name: "Sign in" })).not.toHaveClass("wide");
+  });
+
+  it("fills its container's width with its content centred (components.css)", () => {
+    const wide = rule(css("./components.css"), ".btn.wide");
+    expect(wide).toMatch(/width:\s*100%/);
+    expect(wide).toMatch(/justify-content:\s*center/);
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<Btn\b[^>]*\bwide\b/);
   });
 });

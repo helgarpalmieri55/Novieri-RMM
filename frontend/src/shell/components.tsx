@@ -100,6 +100,7 @@ export function Btn({
   iconOnly = false,
   pressed,
   title,
+  wide = false,
 }: {
   label: string;
   icon?: string;
@@ -134,9 +135,14 @@ export function Btn({
    *  cannot be used because of what its own row is, not because of anything
    *  the operator can do about it, needs a place to say so. */
   title?: string;
+  /** ACROSS ITS CONTAINER, CONTENT CENTRED (kit requests batch 2, K4): a
+   *  step's one action in the sign-in frame, which drew the markup by hand
+   *  (`AuthWideBtn`) because `.btn` is `inline-flex` with its content at the
+   *  start. */
+  wide?: boolean;
 }) {
   const tone = variant === "secondary" || variant === "gold" ? "" : variant;
-  const cls = ["btn", tone, small ? "small" : "", iconOnly ? "icon-only" : "", pressed ? "on" : ""]
+  const cls = ["btn", tone, small ? "small" : "", iconOnly ? "icon-only" : "", pressed ? "on" : "", wide ? "wide" : ""]
     .filter(Boolean)
     .join(" ");
   return (

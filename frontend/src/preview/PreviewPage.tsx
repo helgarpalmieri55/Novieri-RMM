@@ -1184,6 +1184,11 @@ function KitPreview() {
           <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
         </div>
       </div>
+      {/* A STEP'S ONE ACTION ACROSS ITS CARD (kit requests batch 2, K4), at
+          the sign-in card's width. */}
+      <div style={{ maxWidth: 360, marginTop: 24 }}>
+        <Btn label="Continue" variant="primary" wide />
+      </div>
       <GuardedDialogBench />
     </>
   );

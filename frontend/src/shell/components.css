@@ -103,6 +103,10 @@
 }
 .btn.small { padding: 6px 10px; font-size: var(--t-sm); min-height: 30px;
 }
+/* Kit addition (batch 2, K4): `Btn wide`, a step's one action across its
+ * card, content centred. */
+.btn.wide { width: 100%; justify-content: center;
+}
 .btn.icon-only { padding: 9px;
 }
 /* Console addition: a PRESSED button, drawn as `.chip.on` is drawn, because a
